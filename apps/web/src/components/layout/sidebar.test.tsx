@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "@/components/layout/sidebar";
 import { isSidebarItemActive, type SidebarNavItem } from "@/components/layout/sidebar-nav";
@@ -102,5 +102,46 @@ describe("Sidebar", () => {
     expect(screen.queryByText("Operação")).not.toBeInTheDocument();
     expect(screen.queryByText("Análise")).not.toBeInTheDocument();
     expect(screen.queryByText("Sistema")).not.toBeInTheDocument();
+  });
+
+  it("marks a destination active immediately on sidebar navigation", () => {
+    render(
+      <I18nProvider initialLanguage="pt-BR">
+        <AppTourProvider
+          pathname="/control-plane/system"
+          mobileNavOpen={false}
+          onMobileNavOpenChange={() => {}}
+        >
+          <Sidebar mobileOpen={false} onMobileOpenChange={() => {}} collapsed={false} />
+        </AppTourProvider>
+      </I18nProvider>,
+    );
+
+    const executionsLink = screen.getByRole("link", { name: /Execuções/i });
+    executionsLink.addEventListener("click", (event) => event.preventDefault());
+    fireEvent.click(executionsLink, { button: 0 });
+
+    expect(executionsLink).toHaveClass("is-active");
+    expect(executionsLink).toHaveClass("is-pending");
+    expect(prefetchMock).toHaveBeenCalledWith("/executions");
+  });
+
+  it("prefetches navigation targets on intent", () => {
+    render(
+      <I18nProvider initialLanguage="pt-BR">
+        <AppTourProvider
+          pathname="/control-plane/system"
+          mobileNavOpen={false}
+          onMobileNavOpenChange={() => {}}
+        >
+          <Sidebar mobileOpen={false} onMobileOpenChange={() => {}} collapsed={false} />
+        </AppTourProvider>
+      </I18nProvider>,
+    );
+    prefetchMock.mockClear();
+
+    fireEvent.pointerEnter(screen.getByRole("link", { name: /Memória/i }));
+
+    expect(prefetchMock).toHaveBeenCalledWith("/memory");
   });
 });

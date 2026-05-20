@@ -1,10 +1,22 @@
 // Mirrors SQLite table schemas from database.py
+import type { ChildRunRecord, ContextGovernancePayload } from "@/lib/contracts/phase3-runtime";
+
+export type RuntimeTaskStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed"
+  | "retrying"
+  | "paused"
+  | "stalled"
+  | "degraded"
+  | "cancelled";
 
 export interface Task {
   id: number;
   user_id: number;
   chat_id: number;
-  status: "queued" | "running" | "completed" | "failed" | "retrying" | "paused" | "cancelled";
+  status: RuntimeTaskStatus;
   query_text: string | null;
   model: string | null;
   work_dir: string | null;
@@ -217,6 +229,11 @@ export interface ExecutionDetail {
   source_ref_count?: number;
   winning_source_count?: number;
   provenance_source?: "trace" | "episode" | "legacy" | "missing";
+  run_graph?: unknown;
+  run_replay?: unknown;
+  sandbox_doctor?: unknown;
+  child_runs?: ChildRunRecord[];
+  context_governance?: ContextGovernancePayload | null;
 }
 
 export interface CronJob {
@@ -298,6 +315,14 @@ export interface ScheduleEvent {
 export interface ScheduleDetail {
   job: CronJob;
   runs: ScheduleRun[];
+  run_page?: {
+    limit: number;
+    offset: number;
+    returned: number;
+    next_offset: number | null;
+    has_more: boolean;
+    total?: number | null;
+  };
   events: ScheduleEvent[];
   latest_task_runtime?: Record<string, unknown> | null;
 }

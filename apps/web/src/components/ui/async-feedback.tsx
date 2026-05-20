@@ -67,6 +67,7 @@ export function AsyncActionButton({
   ...props
 }: AsyncActionButtonProps) {
   const showLoading = useDelayedFlag(loading);
+  const busyLabel = loading && loadingLabel ? loadingLabel : props["aria-label"];
   const renderStatusIcon =
     showLoading ? (
       <InlineSpinner className="h-4 w-4" />
@@ -81,6 +82,7 @@ export function AsyncActionButton({
   return (
     <ActionButton
       {...props}
+      aria-label={busyLabel}
       disabled={disabled || loading}
       variant={variant}
       size={size}
@@ -90,7 +92,7 @@ export function AsyncActionButton({
       trailing={trailing ? renderStatusIcon : undefined}
       className={className}
     >
-      {showLoading && loadingLabel ? loadingLabel : children}
+      {children}
     </ActionButton>
   );
 }

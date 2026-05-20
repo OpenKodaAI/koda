@@ -9,12 +9,29 @@ import {
 } from "@/components/ui/select";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { McpDiscoveredTool, McpToolPolicy } from "@/lib/control-plane";
+import { McpRiskBadgeGroup, getMcpToolRisk } from "./mcp-risk-badges";
 
 const POLICY_OPTIONS: { value: McpToolPolicy; label: string; description: string }[] = [
-  { value: "auto", label: "Automatico", description: "Classificacao automatica" },
-  { value: "always_allow", label: "Sempre permitir", description: "Executar sem aprovacao" },
-  { value: "always_ask", label: "Sempre perguntar", description: "Requer aprovacao" },
-  { value: "blocked", label: "Bloqueado", description: "Nunca executar" },
+  {
+    value: "auto",
+    label: "controlPlane.mcpToolPolicy.options.auto.label",
+    description: "controlPlane.mcpToolPolicy.options.auto.description",
+  },
+  {
+    value: "always_allow",
+    label: "controlPlane.mcpToolPolicy.options.alwaysAllow.label",
+    description: "controlPlane.mcpToolPolicy.options.alwaysAllow.description",
+  },
+  {
+    value: "always_ask",
+    label: "controlPlane.mcpToolPolicy.options.alwaysAsk.label",
+    description: "controlPlane.mcpToolPolicy.options.alwaysAsk.description",
+  },
+  {
+    value: "blocked",
+    label: "controlPlane.mcpToolPolicy.options.blocked.label",
+    description: "controlPlane.mcpToolPolicy.options.blocked.description",
+  },
 ];
 
 type McpToolPolicyRowProps = {
@@ -32,7 +49,7 @@ export function McpToolPolicyRow({
   currentPolicy,
   onPolicyChange,
 }: McpToolPolicyRowProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   void _agentId;
   void _serverKey;
 
@@ -40,6 +57,7 @@ export function McpToolPolicyRow({
   const readOnly = annotations?.read_only_hint === true;
   const destructive = annotations?.destructive_hint === true;
   const idempotent = annotations?.idempotent_hint === true;
+  const risk = getMcpToolRisk(tool);
 
   return (
     <div className="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
@@ -50,19 +68,20 @@ export function McpToolPolicyRow({
           </span>
           {readOnly && (
             <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--tone-info-text)]">
-              {tl("Somente leitura")}
+              {t("generated.controlPlane.somente_leitura_0f78d76a")}
             </span>
           )}
           {destructive && (
             <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--tone-danger-text)]">
-              {tl("Destrutivo")}
+              {t("generated.controlPlane.destrutivo_9a492f91")}
             </span>
           )}
           {idempotent && (
             <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--tone-success-text)]">
-              {tl("Idempotente")}
+              {t("generated.controlPlane.idempotente_940705ab")}
             </span>
           )}
+          <McpRiskBadgeGroup risk={risk} capabilityName={tool.name} />
         </div>
         {tool.description && (
           <p className="mt-1 text-xs leading-relaxed text-[var(--text-tertiary)]">
@@ -76,7 +95,7 @@ export function McpToolPolicyRow({
           value={currentPolicy}
           onValueChange={(v) => onPolicyChange(tool.name, v as McpToolPolicy)}
         >
-          <SelectTrigger sizeVariant="sm" className="min-w-[220px]" title={tl("Politica de execucao")}>
+          <SelectTrigger sizeVariant="sm" className="min-w-[220px]" title={t("generated.controlPlane.politica_de_execucao_723767cb")}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

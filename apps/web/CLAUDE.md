@@ -2,6 +2,25 @@
 
 This file is the canonical reference for the Koda web app's design language. Apply these principles to every change under `apps/web/`.
 
+This app is inside the root Obsidian Vault named `Koda`. Before asking the user
+to repeat context, read:
+
+```bash
+obsidian vault=Koda read path="00_Index/Koda Workspace.md"
+obsidian vault=Koda read path="60_Memory/Agent Operating Memory.md"
+obsidian vault=Koda read path="60_Memory/User Preferences.md"
+obsidian vault=Koda read path="60_Memory/Project Memory.md"
+obsidian vault=Koda search query="<topic>" limit=10
+```
+
+If `obsidian read` is unavailable in this agent session, use:
+
+```bash
+../../../bin/koda-vault-read "60_Memory/User Preferences.md"
+```
+
+Persist durable preferences, project facts, and handoffs in `60_Memory/`.
+
 ## Identity
 
 - **Dark-first, canonical state.** Light mode still works but is secondary. Never treat dark as an alternative.
@@ -114,7 +133,7 @@ Rules:
 
 ## Components (canonical sizes)
 
-Primitives live under [`apps/web/src/components/ui/`](src/components/ui/) and [`apps/web/src/components/dashboard/`](src/components/dashboard/).
+Primitives live under `apps/web/src/components/ui/` and `apps/web/src/components/dashboard/`.
 
 - **Button** heights: `lg` 36 / `md` 32 / `sm` 28. Radius `--radius-panel-sm`. Variants: `primary`, `accent`, `mono`, `destructive`, `secondary`, `outline`, `ghost`, `dim`, `foreground`.
 - **Input / Select**: default `h-9` (36px), radius `--radius-input` (14px), bg `--panel-soft`, focus ring `--accent` with `box-shadow: 0 0 0 1px var(--accent-muted)`.
@@ -200,11 +219,11 @@ Every change under `apps/web/` must pass:
 
 - These routes run behind a tighter Content-Security-Policy than the rest of the app. `script-src` is `'self' 'unsafe-inline'` because Next.js App Router injects inline RSC bootstrap scripts, but external origins, framing, and `<object>` embedding are disabled. Do not introduce `dangerouslySetInnerHTML` or third-party inline scripts that would widen the policy further.
 - Every authentication error ("wrong password", "unknown user", "invalid recovery code", "rate-limited") is funneled through a single generic translation key. Never introduce a branch that renders a specific error message — the backend already makes them indistinguishable to neutralize timing and enumeration attacks.
-- The new setup flow is strictly two screens (`step-create-account` → `step-recovery-codes`) in [`src/components/setup/`](src/components/setup/). Do not re-introduce provider / GitHub / Telegram / allowed-user fields into the setup wizard; those belong to the optional post-setup checklist ([`src/components/dashboard/setup-checklist-card.tsx`](src/components/dashboard/setup-checklist-card.tsx)) and their existing drawers in `/control-plane`.
+- The new setup flow is strictly two screens (`step-create-account` → `step-recovery-codes`) in `src/components/setup/`. Do not re-introduce provider / GitHub / Telegram / allowed-user fields into the setup wizard; those belong to the optional post-setup checklist ([`src/components/dashboard/setup-checklist-card.tsx`](src/components/dashboard/setup-checklist-card.tsx)) and their existing drawers in `/control-plane`.
 - See [`../../docs/security/authentication.md`](../../docs/security/authentication.md) for the canonical contract.
 
 ## Related guidance
 
 - Root operational guide: [`../../CLAUDE.md`](../../CLAUDE.md).
 - Architecture overview: [`../../docs/architecture/overview.md`](../../docs/architecture/overview.md).
-- Design primitives live in [`src/components/ui/`](src/components/ui/) — the source of truth; never fork a primitive inline.
+- Design primitives live in `src/components/ui/` — the source of truth; never fork a primitive inline.

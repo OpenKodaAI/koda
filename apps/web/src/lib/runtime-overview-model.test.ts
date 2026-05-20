@@ -108,4 +108,26 @@ describe("buildRuntimeRoomRows", () => {
 
     expect(matchesRuntimeRoomFilter(row, "active")).toBe(true);
   });
+
+  it("keeps stalled and degraded rows visible in the active filter", () => {
+    const rows = buildRuntimeRoomRows([
+      overview({
+        queues: [
+          {
+            task_id: 9,
+            status: "stalled",
+            query_text: "Recover stale heartbeat",
+          },
+          {
+            task_id: 10,
+            status: "degraded",
+            query_text: "Continue with browser unavailable",
+          },
+        ],
+      }),
+    ]);
+
+    expect(rows.map((row) => row.status).sort()).toEqual(["degraded", "stalled"]);
+    expect(rows.every((row) => matchesRuntimeRoomFilter(row, "active"))).toBe(true);
+  });
 });

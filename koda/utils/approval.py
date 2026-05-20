@@ -132,6 +132,17 @@ async def _ensure_persistence_loaded() -> None:
                     ],
                     "grants": [],
                     "preview_text": str(entry.get("preview_text") or ""),
+                    "tool_id": entry.get("tool_id"),
+                    "original_params": (
+                        entry.get("original_params") if isinstance(entry.get("original_params"), dict) else {}
+                    ),
+                    "args_schema": entry.get("args_schema") if isinstance(entry.get("args_schema"), dict) else {},
+                    "risk_class": entry.get("risk_class"),
+                    "trace_id": entry.get("trace_id"),
+                    "run_graph_node_id": entry.get("run_graph_node_id"),
+                    "edited_params": None,
+                    "response_text": None,
+                    "rationale": None,
                     "_restored": True,
                 }
         persisted_grants = await load_approval_grants()
@@ -180,6 +191,12 @@ def _serialize_agent_approval_request(request: dict[str, Any]) -> dict[str, Any]
         serialized_scope = None
 
     payload = {
+        "tool_id": request.get("tool_id"),
+        "original_params": request.get("original_params") if isinstance(request.get("original_params"), dict) else None,
+        "args_schema": request.get("args_schema") if isinstance(request.get("args_schema"), dict) else None,
+        "risk_class": request.get("risk_class"),
+        "trace_id": request.get("trace_id"),
+        "run_graph_node_id": request.get("run_graph_node_id"),
         "envelope": serialized_envelope,
         "approval_scope": serialized_scope,
     }
@@ -207,10 +224,18 @@ def _deserialize_agent_approval_request(request: dict[str, Any]) -> dict[str, An
     else:
         resolved_scope = None
 
-    payload: dict[str, Any] = {"approval_scope": resolved_scope}
+    payload: dict[str, Any] = {
+        "approval_scope": resolved_scope,
+        "tool_id": request.get("tool_id"),
+        "original_params": request.get("original_params") if isinstance(request.get("original_params"), dict) else None,
+        "args_schema": request.get("args_schema") if isinstance(request.get("args_schema"), dict) else None,
+        "risk_class": request.get("risk_class"),
+        "trace_id": request.get("trace_id"),
+        "run_graph_node_id": request.get("run_graph_node_id"),
+    }
     if resolved_envelope is not None:
         payload["envelope"] = resolved_envelope
-    return payload
+    return {key: value for key, value in payload.items() if value not in (None, {}, [], "")}
 
 
 def _current_session_id(user_data: dict[str, Any]) -> str:
@@ -1608,6 +1633,12 @@ async def request_agent_cmd_approval(
     requests: list[dict[str, Any]] | None = None,
     preview_text: str | None = None,
     task_id: int | None = None,
+    tool_id: str | None = None,
+    original_params: dict[str, Any] | None = None,
+    args_schema: dict[str, Any] | None = None,
+    risk_class: str | None = None,
+    trace_id: str | None = None,
+    run_graph_node_id: str | None = None,
 ) -> str:
     """Show inline keyboard for agent-cmd write approval. Returns op_id."""
     await _ensure_persistence_loaded()
@@ -1629,6 +1660,15 @@ async def request_agent_cmd_approval(
         "requests": list(requests or []),
         "grants": [],
         "preview_text": preview_text or "",
+        "tool_id": tool_id,
+        "original_params": dict(original_params or {}),
+        "args_schema": dict(args_schema or {}),
+        "risk_class": risk_class,
+        "trace_id": trace_id,
+        "run_graph_node_id": run_graph_node_id,
+        "edited_params": None,
+        "response_text": None,
+        "rationale": None,
     }
 
     # Persist to disk
@@ -1643,6 +1683,12 @@ async def request_agent_cmd_approval(
             "chat_id": chat_id,
             "requests": [_serialize_agent_approval_request(item) for item in requests or []],
             "preview_text": preview_text or "",
+            "tool_id": tool_id,
+            "original_params": dict(original_params or {}),
+            "args_schema": dict(args_schema or {}),
+            "risk_class": risk_class,
+            "trace_id": trace_id,
+            "run_graph_node_id": run_graph_node_id,
         },
         APPROVAL_TIMEOUT,
     )
@@ -1683,13 +1729,27 @@ async def request_agent_cmd_approval(
     return op_id
 
 
-def resolve_agent_cmd_approval(op_id: str, decision: str, *, grants: list[dict[str, Any]] | None = None) -> None:
+def resolve_agent_cmd_approval(
+    op_id: str,
+    decision: str,
+    *,
+    grants: list[dict[str, Any]] | None = None,
+    edited_params: dict[str, Any] | None = None,
+    response_text: str | None = None,
+    rationale: str | None = None,
+) -> None:
     """Set decision and signal the waiting coroutine."""
     op = _PENDING_AGENT_CMD_OPS.get(op_id)
     if op:
         op["decision"] = decision
         if grants is not None:
             op["grants"] = list(grants)
+        if edited_params is not None:
+            op["edited_params"] = dict(edited_params)
+        if response_text is not None:
+            op["response_text"] = response_text
+        if rationale is not None:
+            op["rationale"] = rationale
         op["event"].set()
         try:
             from koda.services.approval_broker import spawn_publish_resolved
@@ -1708,10 +1768,17 @@ def get_agent_cmd_decision(op_id: str) -> dict[str, Any] | None:
     """Read the decision envelope after the event has fired."""
     op = _PENDING_AGENT_CMD_OPS.get(op_id)
     if op:
-        return {
+        result: dict[str, Any] = {
             "decision": cast(str | None, op.get("decision")),
             "grants": list(op.get("grants") or []),
         }
+        if isinstance(op.get("edited_params"), dict):
+            result["edited_params"] = op["edited_params"]
+        if str(op.get("response_text") or ""):
+            result["response_text"] = str(op.get("response_text") or "")
+        if str(op.get("rationale") or ""):
+            result["rationale"] = str(op.get("rationale") or "")
+        return result
     return None
 
 

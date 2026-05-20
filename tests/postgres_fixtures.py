@@ -58,7 +58,8 @@ def postgres_url() -> str:
     otherwise spins testcontainers; otherwise skips the test."""
     explicit = _explicit_dsn()
     if explicit:
-        return explicit
+        yield explicit
+        return
 
     if not _testcontainers_available():
         pytest.skip("postgres fixture requires POSTGRES_TEST_DSN env or testcontainers + Docker")

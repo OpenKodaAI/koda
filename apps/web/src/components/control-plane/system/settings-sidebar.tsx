@@ -38,7 +38,7 @@ export function SettingsSidebar() {
     <>
       {/* Desktop sidebar */}
       <nav
-        aria-label={t("settings.sections.navigation", { defaultValue: "Settings sections" })}
+        aria-label={t("settings.sections.navigation", undefined)}
         className="hidden md:flex w-[200px] shrink-0 flex-col gap-0.5 border-r border-[var(--divider-hair)] px-2 py-4"
       >
         {visibleSections.map((section) => {
@@ -59,12 +59,6 @@ export function SettingsSidebar() {
                   : "text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]",
               )}
             >
-              {isActive ? (
-                <span
-                  aria-hidden
-                  className="absolute inset-y-1.5 left-0 w-[2px] rounded-full bg-[var(--accent)]"
-                />
-              ) : null}
               {Icon ? (
                 <Icon
                   className={cn(

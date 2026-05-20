@@ -16,7 +16,7 @@ interface TabBarProps {
 }
 
 export function TabBar({ tabs, activeTab, onTabChange }: TabBarProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   return (
     <div
@@ -36,7 +36,7 @@ export function TabBar({ tabs, activeTab, onTabChange }: TabBarProps) {
               "segmented-control__option",
               isActive && "is-active",
             )}
-            title={tab.dirty ? tl("Alteracoes nao salvas") : undefined}
+            title={tab.dirty ? t("generated.controlPlane.alteracoes_nao_salvas_c5136366") : undefined}
           >
             <span>{tl(tab.label)}</span>
             {tab.dirty && (
@@ -44,7 +44,7 @@ export function TabBar({ tabs, activeTab, onTabChange }: TabBarProps) {
                 className="inline-block h-1.5 w-1.5 rounded-full shrink-0 animate-pulse"
                 style={{ backgroundColor: "var(--tone-warning-dot)" }}
                 role="status"
-                aria-label={tl("Alteracoes nao salvas")}
+                aria-label={t("generated.controlPlane.alteracoes_nao_salvas_c5136366")}
               />
             )}
           </button>

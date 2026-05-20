@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from typing import Any, cast
 
 from koda.config import AGENT_ID
+from koda.memory.namespaces import normalize_namespace_kind, normalize_sensitivity
 from koda.memory.quality import record_status_transition
 from koda.memory.types import (
     DEFAULT_EMBEDDING_STATUS,
@@ -78,7 +79,11 @@ _SELECT_COLS = (
     "extraction_confidence, embedding_status, content_hash, claim_kind, subject, decision_source, "
     "evidence_refs_json, applicability_scope_json, valid_until, conflict_key, supersedes_memory_id, "
     "memory_status, retention_reason, embedding_attempts, embedding_last_error, embedding_retry_at, "
-    "access_count, last_accessed, last_recalled_at, created_at, expires_at, is_active, metadata_json, vector_ref_id"
+    "access_count, last_accessed, last_recalled_at, created_at, expires_at, is_active, metadata_json, vector_ref_id, "
+    "COALESCE(namespace_kind, 'agent') AS namespace_kind, "
+    "COALESCE(namespace_key, COALESCE(agent_id, 'default')) AS namespace_key, "
+    "COALESCE(namespace_scope_json, '{}') AS namespace_scope_json, "
+    "COALESCE(sensitivity, 'normal') AS sensitivity"
 )
 
 
@@ -113,6 +118,10 @@ def _row_to_memory(row: tuple | dict[str, Any]) -> Memory:
             conflict_key=str(row.get("conflict_key") or ""),
             supersedes_memory_id=cast(int | None, row.get("supersedes_memory_id")),
             memory_status=str(row.get("memory_status") or DEFAULT_MEMORY_STATUS),
+            namespace_kind=normalize_namespace_kind(row.get("namespace_kind")),
+            namespace_key=str(row.get("namespace_key") or row.get("agent_id") or "default"),
+            namespace_scope=json.loads(str(row.get("namespace_scope_json") or "{}")),
+            sensitivity=normalize_sensitivity(row.get("sensitivity")),
             retention_reason=str(row.get("retention_reason") or ""),
             embedding_attempts=int(cast(int | str, row.get("embedding_attempts") or 0)),
             embedding_last_error=str(row.get("embedding_last_error") or ""),
@@ -158,6 +167,10 @@ def _row_to_memory(row: tuple | dict[str, Any]) -> Memory:
         conflict_key=row[24] or "",
         supersedes_memory_id=row[25],
         memory_status=row[26] or DEFAULT_MEMORY_STATUS,
+        namespace_kind=normalize_namespace_kind(row[39] if len(row) > 39 else "agent"),
+        namespace_key=(row[40] if len(row) > 40 else row[6]) or "default",
+        namespace_scope=json.loads(row[41]) if len(row) > 41 and row[41] else {},
+        sensitivity=normalize_sensitivity(row[42] if len(row) > 42 else "normal"),
         retention_reason=row[27] or "",
         embedding_attempts=row[28] or 0,
         embedding_last_error=row[29] or "",
@@ -184,10 +197,11 @@ def add_entry(memory: Memory) -> int:
             decision_source, evidence_refs_json, applicability_scope_json, valid_until, conflict_key,
             supersedes_memory_id, memory_status, retention_reason, embedding_attempts,
             embedding_last_error, embedding_retry_at, access_count, last_accessed, last_recalled_at,
-            created_at, expires_at, is_active, metadata_json, vector_ref_id)
+            created_at, expires_at, is_active, metadata_json, vector_ref_id, namespace_kind,
+            namespace_key, namespace_scope_json, sensitivity)
            VALUES (
                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
            )""",
         (
             memory.user_id,
@@ -228,6 +242,10 @@ def add_entry(memory: Memory) -> int:
             1 if memory.is_active else 0,
             json.dumps(memory.metadata, default=str),
             memory.vector_ref_id,
+            normalize_namespace_kind(memory.namespace_kind),
+            memory.namespace_key or memory.agent_id or "default",
+            json.dumps(memory.namespace_scope, default=str),
+            normalize_sensitivity(memory.sensitivity),
         ),
     )
 
@@ -303,6 +321,8 @@ def find_active_duplicate(memory: Memory) -> Memory | None:
               AND COALESCE(environment, '') = COALESCE(?, '')
               AND COALESCE(team, '') = COALESCE(?, '')
               AND COALESCE(origin_kind, '') = COALESCE(?, '')
+              AND COALESCE(namespace_kind, 'agent') = ?
+              AND COALESCE(namespace_key, COALESCE(agent_id, 'default')) = ?
               AND COALESCE(memory_status, ?) = ?
             ORDER BY id DESC LIMIT 1""",
         (
@@ -314,6 +334,8 @@ def find_active_duplicate(memory: Memory) -> Memory | None:
             memory.environment,
             memory.team,
             memory.origin_kind,
+            normalize_namespace_kind(memory.namespace_kind),
+            memory.namespace_key or scope,
             DEFAULT_MEMORY_STATUS,
             MemoryStatus.ACTIVE.value,
         ),
@@ -896,6 +918,32 @@ def set_memory_status(
     return updated > 0
 
 
+def adjust_memory_quality_scores(
+    entry_ids: list[int],
+    *,
+    delta: float,
+    agent_id: str | None = None,
+    floor: float = 0.0,
+    ceiling: float = 1.0,
+) -> int:
+    """Bounded quality update for memories tied to human utility feedback."""
+    if not entry_ids:
+        return 0
+    scope = _current_agent_scope(agent_id)
+    placeholders = ",".join("?" for _ in entry_ids)
+    params: list[object] = [delta, ceiling, ceiling, delta, floor, floor, delta, scope, *entry_ids]
+    return _write(
+        f"""UPDATE napkin_log
+              SET quality_score = CASE
+                  WHEN COALESCE(quality_score, 0.5) + ? > ? THEN ?
+                  WHEN COALESCE(quality_score, 0.5) + ? < ? THEN ?
+                  ELSE COALESCE(quality_score, 0.5) + ?
+              END
+            WHERE agent_id = ? AND id IN ({placeholders})""",
+        params,
+    )
+
+
 def find_conflicting_active_memories(memory: Memory) -> list[Memory]:
     """Find active same-scope memories that share a conflict key."""
     if not memory.conflict_key:
@@ -905,6 +953,8 @@ def find_conflicting_active_memories(memory: Memory) -> list[Memory]:
         f"SELECT {_SELECT_COLS} FROM napkin_log "
         "WHERE user_id = ? AND is_active = 1 AND agent_id = ? "
         "AND COALESCE(conflict_key, '') = ? AND id != COALESCE(?, -1) "
+        "AND COALESCE(namespace_kind, 'agent') = ? "
+        "AND COALESCE(namespace_key, COALESCE(agent_id, 'default')) = ? "
         "AND COALESCE(memory_status, ?) = ? "
         "ORDER BY importance DESC, quality_score DESC, created_at DESC",
         (
@@ -912,6 +962,8 @@ def find_conflicting_active_memories(memory: Memory) -> list[Memory]:
             scope,
             memory.conflict_key,
             memory.id,
+            normalize_namespace_kind(memory.namespace_kind),
+            memory.namespace_key or scope,
             DEFAULT_MEMORY_STATUS,
             MemoryStatus.ACTIVE.value,
         ),

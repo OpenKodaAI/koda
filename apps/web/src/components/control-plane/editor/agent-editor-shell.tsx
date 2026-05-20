@@ -80,74 +80,66 @@ type StepDefinition = {
 const STEP_DEFINITIONS: StepDefinition[] = [
   {
     key: "identidade",
-    label: "Identidade",
-    title: "Fundação do agente",
-    description:
-      "Defina nome, aparência visual e conecte canais de comunicação como Telegram.",
-    summary: "Quem é o agente e como ele se conecta.",
+    label: "controlPlane.agentEditor.steps.identidade.label",
+    title: "controlPlane.agentEditor.steps.identidade.title",
+    description: "controlPlane.agentEditor.steps.identidade.description",
+    summary: "controlPlane.agentEditor.steps.identidade.summary",
     icon: Fingerprint,
   },
   {
     key: "comportamento",
-    label: "Comportamento",
-    title: "Personalidade, instruções e limites",
-    description:
-      "Configure missão, instruções de operação, formato de resposta e guardrails de segurança em seções objetivas.",
-    summary: "Personalidade, instruções, limites e autonomia.",
+    label: "controlPlane.agentEditor.steps.comportamento.label",
+    title: "controlPlane.agentEditor.steps.comportamento.title",
+    description: "controlPlane.agentEditor.steps.comportamento.description",
+    summary: "controlPlane.agentEditor.steps.comportamento.summary",
     icon: BrainCircuit,
   },
   {
     key: "recursos",
-    label: "Recursos",
-    title: "Modelo e voz",
-    description:
-      "Escolha o provider e modelo de raciocínio, defina orçamento e configure capacidades de voz.",
-    summary: "Provider, modelo, orçamento e voz.",
+    label: "controlPlane.agentEditor.steps.recursos.label",
+    title: "controlPlane.agentEditor.steps.recursos.title",
+    description: "controlPlane.agentEditor.steps.recursos.description",
+    summary: "controlPlane.agentEditor.steps.recursos.summary",
     icon: Cpu,
   },
   {
     key: "skills",
-    label: "Skills",
-    title: "Skills especializadas",
-    description:
-      "Configure a política de skills, crie skills customizadas com controle individual de ativação.",
-    summary: "Política de skills e skills customizadas.",
+    label: "controlPlane.agentEditor.steps.skills.label",
+    title: "controlPlane.agentEditor.steps.skills.title",
+    description: "controlPlane.agentEditor.steps.skills.description",
+    summary: "controlPlane.agentEditor.steps.skills.summary",
     icon: Wand2,
   },
   {
     key: "conhecimento",
-    label: "Conhecimento",
-    title: "Memória e grounding",
-    description:
-      "Configure memória persistente, RAG e revise candidatos de conhecimento e runbooks aprovados.",
-    summary: "Memória, RAG e governança de conhecimento.",
+    label: "controlPlane.agentEditor.steps.conhecimento.label",
+    title: "controlPlane.agentEditor.steps.conhecimento.title",
+    description: "controlPlane.agentEditor.steps.conhecimento.description",
+    summary: "controlPlane.agentEditor.steps.conhecimento.summary",
     icon: Database,
   },
   {
     key: "integracoes",
-    label: "Integrações",
-    title: "Integrações do agente",
-    description:
-      "Conecte e controle quais integrações core e servidores MCP este agente pode acessar.",
-    summary: "Integrações core e MCPs.",
+    label: "controlPlane.agentEditor.steps.integracoes.label",
+    title: "controlPlane.agentEditor.steps.integracoes.title",
+    description: "controlPlane.agentEditor.steps.integracoes.description",
+    summary: "controlPlane.agentEditor.steps.integracoes.summary",
     icon: Plug,
   },
   {
     key: "segredos",
-    label: "Segredos & Variáveis",
-    title: "Segredos e variáveis",
-    description:
-      "Conceda acesso a segredos globais e variáveis compartilhadas, e gerencie variáveis locais do agente.",
-    summary: "Grants de secrets e env vars.",
+    label: "controlPlane.agentEditor.steps.segredos.label",
+    title: "controlPlane.agentEditor.steps.segredos.title",
+    description: "controlPlane.agentEditor.steps.segredos.description",
+    summary: "controlPlane.agentEditor.steps.segredos.summary",
     icon: KeyRound,
   },
   {
     key: "publicacao",
-    label: "Publicação",
-    title: "Salvar e publicar",
-    description:
-      "Revise as alterações pendentes e publique o agente com um único clique.",
-    summary: "Resumo, salvar e publicar.",
+    label: "controlPlane.agentEditor.steps.publicacao.label",
+    title: "controlPlane.agentEditor.steps.publicacao.title",
+    description: "controlPlane.agentEditor.steps.publicacao.description",
+    summary: "controlPlane.agentEditor.steps.publicacao.summary",
     icon: Rocket,
   },
 ];
@@ -204,7 +196,7 @@ function EditorHeader({
   lifecycleStatus: "idle" | "pending" | "success" | "error";
 }) {
   const { state } = useAgentEditor();
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   const agentId = state.agent.id;
   const lifecycle = getAgentLifecycleState({
@@ -213,6 +205,7 @@ function EditorHeader({
     desiredVersion: state.agent.desired_version ?? null,
     hasPendingChanges: hasUnsavedChanges,
   });
+  const lifecycleDescription = t(lifecycle.descriptionKey, lifecycle.descriptionOptions);
 
   return (
     <header className="border-b border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-4 py-2 lg:px-5 lg:py-2" {...tourAnchor("editor.header")}>
@@ -221,7 +214,7 @@ function EditorHeader({
           <Link
             href="/control-plane"
             className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)] hover:bg-[var(--surface-tint)]"
-            aria-label={tl("Voltar ao catalogo")}
+            aria-label={t("generated.controlPlane.voltar_ao_catalogo_9b2761dd")}
           >
             <ArrowLeft size={16} />
           </Link>
@@ -242,7 +235,7 @@ function EditorHeader({
                 className="shrink-0 text-[11px] uppercase tracking-[0.18em] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)]"
                 {...tourAnchor("editor.back-link")}
               >
-                {tl("Agentes")}
+                {t("generated.controlPlane.agentes_8ecacbc4")}
               </Link>
               <span className="text-[11px] text-[var(--text-quaternary)]">/</span>
               <span className="truncate text-[11px] uppercase tracking-[0.16em] text-[var(--text-quaternary)]">
@@ -268,7 +261,7 @@ function EditorHeader({
                 {...tourAnchor("editor.previous-step")}
               >
                 <ArrowLeft size={15} />
-                {tl("Voltar")}
+                {t("generated.controlPlane.voltar_b8c5183d")}
               </button>
               <button
                 type="button"
@@ -286,7 +279,7 @@ function EditorHeader({
                 }}
                 {...tourAnchor("editor.next-step")}
               >
-                {nextStep ? tl("Avançar") : tl("Salvar e Publicar")}
+                {nextStep ? t("generated.controlPlane.avancar_ebff1b86") : t("generated.controlPlane.salvar_e_publicar_70d8a389")}
                 {nextStep ? <ArrowRight size={15} /> : null}
               </button>
               {lifecycle.toggle !== "none" ? (
@@ -300,14 +293,14 @@ function EditorHeader({
                     onClick={onLifecycleToggle}
                     loading={isLifecyclePending}
                     loadingLabel={
-                      lifecycle.toggle === "activate" ? tl("Ativando") : tl("Pausando")
+                      lifecycle.toggle === "activate" ? t("generated.controlPlane.ativando_d8dad0b2") : t("generated.controlPlane.pausando_eef1e878")
                     }
                     status={lifecycleStatus}
                     className="shadow-none"
-                    title={lifecycle.description}
+                    title={lifecycleDescription}
                     {...tourAnchor("editor.lifecycle")}
                   >
-                    {lifecycle.toggle === "activate" ? tl("Ativar") : tl("Pausar")}
+                    {lifecycle.toggle === "activate" ? t("generated.controlPlane.ativar_db54d834") : t("generated.controlPlane.pausar_85f3ee9b")}
                   </AsyncActionButton>
                 </>
               ) : null}
@@ -320,7 +313,7 @@ function EditorHeader({
                     className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-transparent px-3.5 py-2 text-sm text-[var(--text-secondary)] shadow-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
                     {...tourAnchor("editor.discard")}
                   >
-                    {tl("Descartar")}
+                    {t("generated.controlPlane.descartar_8c52be0d")}
                   </button>
                   <AsyncActionButton
                     type="button"
@@ -328,12 +321,12 @@ function EditorHeader({
                     size="sm"
                     onClick={onSave}
                     loading={isSaving}
-                    loadingLabel={tl("Salvando")}
+                    loadingLabel={t("generated.controlPlane.salvando_7eeded02")}
                     status={saveStatus}
                     className="shadow-none"
                     {...tourAnchor("editor.save")}
                   >
-                    {tl("Salvar")}
+                    {t("generated.controlPlane.salvar_94c457df")}
                   </AsyncActionButton>
                 </>
               ) : null}
@@ -362,7 +355,7 @@ function ActiveStepRenderer({
 
 function InnerShell() {
   const { state, persistDraft, discardDraft, applyAgentLifecycle } = useAgentEditor();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const router = useRouter();
   const { runAction, isPending, getStatus } = useAsyncAction();
   const { activeTab, setActiveTab } = useTabNavigation([...STEP_KEYS], {
@@ -404,8 +397,8 @@ function InnerShell() {
         router.refresh();
       },
       {
-        successMessage: tl("Alterações salvas com sucesso."),
-        errorMessage: tl("Erro ao salvar alterações."),
+        successMessage: t("generated.controlPlane.alteracoes_salvas_com_sucesso_bd2115c7"),
+        errorMessage: t("generated.controlPlane.erro_ao_salvar_alteracoes_c46bb65c"),
       },
     );
   }
@@ -443,11 +436,11 @@ function InnerShell() {
       },
       {
         successMessage:
-          action === "activate" ? tl("Agente ativado.") : tl("Agente pausado."),
+          action === "activate" ? t("generated.controlPlane.agente_ativado_8208fe03") : t("generated.controlPlane.agente_pausado_1bd6570f"),
         errorMessage:
           action === "activate"
-            ? tl("Erro ao ativar agente.")
-            : tl("Erro ao pausar agente."),
+            ? t("generated.controlPlane.erro_ao_ativar_agente_dafb0faf")
+            : t("generated.controlPlane.erro_ao_pausar_agente_e64a0fa1"),
       },
     );
   }
@@ -463,8 +456,8 @@ function InnerShell() {
         router.refresh();
       },
       {
-        successMessage: tl("Agente publicado com sucesso."),
-        errorMessage: tl("Erro ao publicar."),
+        successMessage: t("generated.controlPlane.agente_publicado_com_sucesso_faf7b7d4"),
+        errorMessage: t("generated.controlPlane.erro_ao_publicar_a6c27ea7"),
       },
     );
   }
@@ -495,7 +488,7 @@ function InnerShell() {
             <div className="flex h-full flex-col px-2 py-3 lg:px-2.5 lg:py-4">
               <div className="mb-2 px-1.5">
                 <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--text-quaternary)]">
-                  {tl("Fluxo")}
+                  {t("generated.controlPlane.fluxo_16a7913a")}
                 </span>
               </div>
 
@@ -551,7 +544,7 @@ function InnerShell() {
                         <span
                           className="inline-block h-1.5 w-1.5 shrink-0 rounded-full animate-pulse"
                           style={{ backgroundColor: "var(--tone-warning-dot)" }}
-                          aria-label={tl("Alteracoes nao salvas")}
+                          aria-label={t("generated.controlPlane.alteracoes_nao_salvas_c5136366")}
                         />
                       ) : null}
                     </button>

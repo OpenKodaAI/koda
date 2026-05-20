@@ -48,10 +48,7 @@ export function StepRecoveryCodes({ codes, onConfirmed }: StepRecoveryCodesProps
     return (
       <div className="flex flex-col gap-4">
         <InlineAlert tone="danger">
-          {t("auth.setup.recovery_codes.missing_codes_error", {
-            defaultValue:
-              "Recovery codes were not issued. Please generate a new setup code and create the owner account again.",
-          })}
+          {t("auth.setup.recovery_codes.missing_codes_error", undefined)}
         </InlineAlert>
       </div>
     );

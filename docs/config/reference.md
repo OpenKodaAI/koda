@@ -87,6 +87,65 @@ Do not put these in per-agent `.env` files:
 
 Each agent still authorizes integrations through its published contract, even when a system-level connection exists.
 
+### OpenRouter
+
+OpenRouter is managed like the other OpenAI-compatible cloud providers: store
+the user's own API key in the control plane, or bootstrap with env vars when
+running headless.
+
+- `OPENROUTER_ENABLED`
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_AUTH_MODE`
+- `OPENROUTER_CONNECTION_VERIFIED`
+- `OPENROUTER_API_BASE_URL`
+- `OPENROUTER_AVAILABLE_MODELS`
+- `OPENROUTER_DEFAULT_MODEL`
+- `OPENROUTER_MODEL_SMALL`
+- `OPENROUTER_MODEL_MEDIUM`
+- `OPENROUTER_MODEL_LARGE`
+- `OPENROUTER_TIMEOUT`
+- `OPENROUTER_FIRST_CHUNK_TIMEOUT`
+- `OPENROUTER_HTTP_REFERER`
+- `OPENROUTER_APP_TITLE`
+- `OPENROUTER_APP_CATEGORIES`
+
+Defaults use `https://openrouter.ai/api/v1`, verify credentials through
+`/key`, and discover model IDs through `/models`. Attribution headers are
+optional, non-secret, and only sent when configured.
+
+### Supertonic
+
+Supertonic is a local voice provider. The initial model download uses Hugging
+Face, then synthesis runs offline from `STATE_ROOT_DIR/providers/supertonic`
+or `SUPERTONIC_ASSET_ROOT`. Preset voices `M1`-`M5` and `F1`-`F5` are bundled
+with the model snapshot; custom Voice Builder JSON files can be imported
+locally. Model assets are OpenRAIL-M; the Python package code is MIT.
+
+- `SUPERTONIC_ENABLED`
+- `SUPERTONIC_AVAILABLE_MODELS`
+- `SUPERTONIC_DEFAULT_MODEL`
+- `SUPERTONIC_DEFAULT_LANGUAGE`
+- `SUPERTONIC_DEFAULT_VOICE`
+- `SUPERTONIC_ASSET_ROOT`
+- `SUPERTONIC_TOTAL_STEPS`
+- `SUPERTONIC_SPEED`
+- `SUPERTONIC_MAX_CHUNK_LENGTH`
+- `SUPERTONIC_SILENCE_DURATION`
+- `SUPERTONIC_INTRA_OP_THREADS`
+- `SUPERTONIC_INTER_OP_THREADS`
+- `SUPERTONIC_ONNX_PROVIDERS`
+- `SUPERTONIC_COREML_EXPERIMENTAL`
+- `SUPERTONIC_MODEL_REVISION`
+
+CoreML acceleration is experimental and opt-in: set
+`SUPERTONIC_COREML_EXPERIMENTAL=true` with `METAL_ENABLED=true` on Apple
+Silicon. CPU ONNX remains the official default path.
+
+References: [Supertonic GitHub](https://github.com/supertone-inc/supertonic),
+[supertonic-py](https://supertone-inc.github.io/supertonic-py/),
+[official voices](https://supertone-inc.github.io/supertonic-py/voices/), and
+[Supertone/supertonic-3](https://huggingface.co/Supertone/supertonic-3).
+
 ## Public Management Surfaces
 
 - `/setup`
@@ -95,6 +154,8 @@ Each agent still authorizes integrations through its published contract, even wh
 - `/api/control-plane/auth/*`
 - `/api/control-plane/system-settings*`
 - `/api/control-plane/providers/{provider_id}/connection*`
+- `/api/control-plane/providers/supertonic/models*`
+- `/api/control-plane/providers/supertonic/voices*`
 - `/api/control-plane/integrations/{integration_id}/*`
 - `/api/control-plane/agents*`
 - `/api/runtime/*`

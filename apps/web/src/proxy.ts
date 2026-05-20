@@ -96,6 +96,18 @@ function pageAuthGate(request: NextRequest): NextResponse {
   }
 
   if (inAuthRoute) {
+    if (pathname === SETUP_PATH && hasOwnerHint && !hasPendingRecovery) {
+      const target = request.nextUrl.clone();
+      target.pathname = LOGIN_PATH;
+      target.search = "";
+      const setupNext = request.nextUrl.searchParams.get("next");
+      if (isSafeRedirectTarget(setupNext)) {
+        target.searchParams.set("next", setupNext);
+      }
+      const response = NextResponse.redirect(target);
+      if (sessionMalformed) clearSessionCookie(response);
+      return response;
+    }
     const response = passThrough();
     if (sessionMalformed) clearSessionCookie(response);
     return response;

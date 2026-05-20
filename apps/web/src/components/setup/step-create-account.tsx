@@ -1,15 +1,16 @@
 "use client";
 
 import { type FormEvent, useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { KodaMark } from "@/components/layout/koda-mark";
 import { BootstrapCodeInput } from "@/components/setup/bootstrap-code-input";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Input } from "@/components/ui/input";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
+import { translate } from "@/lib/i18n";
 
 // Mirror LoginScreen / ForgotPasswordScreen: 4xx auth-flow errors fold into
 // one generic message (CLAUDE.md auth contract), only 5xx / network reach
@@ -124,10 +125,7 @@ export function StepCreateAccount({
     } catch (submitError) {
       if (isUpstreamFailure(submitError)) {
         setError(
-          t("auth.setup.create_account.errors.service_unavailable", {
-            defaultValue:
-              "Setup service is temporarily unavailable. Please try again in a moment.",
-          }),
+          t("auth.setup.create_account.errors.service_unavailable", undefined),
         );
       } else {
         setError(
@@ -161,7 +159,7 @@ export function StepCreateAccount({
             autoComplete="email"
             autoFocus
             disabled={busy}
-            placeholder="owner@yourdomain.com"
+            placeholder={translate("generated.account.owner_yourdomain_com_8d7a5b9d")}
             className="auth-input"
           />
         </Field>
@@ -231,13 +229,12 @@ export function StepCreateAccount({
         variant="accent"
         size="lg"
         disabled={busy}
+        aria-label={busy ? t("auth.setup.create_account.submitting") : undefined}
+        aria-busy={busy || undefined}
         className="auth-submit"
       >
         {busy ? (
-          <>
-            <Loader2 className="h-4 w-4 animate-spin" />
-            <span>{t("auth.setup.create_account.submitting")}</span>
-          </>
+          <InlineSpinner className="h-4 w-4" />
         ) : (
           t("auth.setup.create_account.submit")
         )}

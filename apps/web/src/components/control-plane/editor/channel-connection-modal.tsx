@@ -4,11 +4,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 import { Check, X, Lock } from "lucide-react";
-import { AsyncActionButton } from "@/components/ui/async-feedback";
+import { AsyncActionButton, InlineSpinner } from "@/components/ui/async-feedback";
 import { SecretInput } from "@/components/ui/secret-controls";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { requestJson, requestJsonAllowError } from "@/lib/http-client";
+import { translate } from "@/lib/i18n";
+import {
+  parseChannelGatewayState,
+  type ChannelGatewayState,
+  type ChannelUnknownSender,
+} from "@/lib/contracts/channel-gateway";
 import {
   type ChannelDefinition,
   type ChannelStatus,
@@ -102,6 +108,180 @@ function TagsInput({
   );
 }
 
+export function ChannelGatewayMiniPanel({ agentId }: { agentId: string }) {
+  const { t, tl } = useAppI18n();
+  const [state, setState] = useState<ChannelGatewayState | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setError(null);
+    const payload = await requestJson<unknown>(
+      `/api/control-plane/agents/${encodeURIComponent(agentId)}/channels/gateway`,
+    );
+    setState(parseChannelGatewayState(payload));
+  }, [agentId]);
+
+  useEffect(() => {
+    refresh().catch((err) => {
+      setError(err instanceof Error ? err.message : t("generated.controlPlane.erro_ao_carregar_gateway_b44f49b9"));
+    });
+  }, [refresh, t, tl]);
+
+  async function runAction(action: string, identityId?: string) {
+    setBusy(`${action}:${identityId ?? "new"}`);
+    setError(null);
+    try {
+      if (action === "pairing") {
+        await requestJson(
+          `/api/control-plane/agents/${encodeURIComponent(agentId)}/channels/gateway/pairing-codes`,
+          { method: "POST", body: JSON.stringify({ channel_type: "telegram" }) },
+        );
+      } else if (identityId) {
+        await requestJson(
+          `/api/control-plane/agents/${encodeURIComponent(agentId)}/channels/gateway/identities/${encodeURIComponent(identityId)}/${action}`,
+          { method: "POST", body: JSON.stringify({}) },
+        );
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("generated.controlPlane.acao_do_gateway_falhou_1f773d05"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function revoke(identityId: string) {
+    setBusy(`revoke:${identityId}`);
+    setError(null);
+    try {
+      await requestJson(
+        `/api/control-plane/agents/${encodeURIComponent(agentId)}/channels/gateway/identities/${encodeURIComponent(identityId)}`,
+        { method: "DELETE" },
+      );
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t("generated.controlPlane.acao_do_gateway_falhou_1f773d05"));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const pending = state?.unknown_senders ?? [];
+  const allowed = (state?.identities ?? []).filter((identity) => identity.status === "allowed");
+  const activeCode = state?.pairing_codes?.[0]?.code;
+
+  return (
+    <section className="border-t border-[color:var(--divider-hair)] pt-4">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+            {t("generated.controlPlane.gateway_de_canal_aa1c5785")}
+          </div>
+          <p className="mt-0.5 text-[11px] text-[var(--text-quaternary)]">
+            {t("generated.controlPlane.unknown_senders_ficam_bloqueados_ate_aprovac_f110e376")}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => runAction("pairing")}
+          disabled={busy !== null}
+          aria-label={busy === "pairing:new" ? t("generated.controlPlane.gerando_f053245f") : undefined}
+          aria-busy={busy === "pairing:new" || undefined}
+          className="inline-flex min-w-28 items-center justify-center rounded-lg bg-[var(--surface-hover)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-elevated)] disabled:opacity-60"
+        >
+          {busy === "pairing:new" ? (
+            <InlineSpinner className="h-3.5 w-3.5" />
+          ) : (
+            t("generated.controlPlane.pairing_code_1a960f94")
+          )}
+        </button>
+      </div>
+
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <div className="rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2">
+          <div className="text-[var(--text-quaternary)]">{t("generated.controlPlane.aprovados_82126cab")}</div>
+          <div className="mt-1 font-medium text-[var(--text-primary)]">{state?.summary.allowed ?? 0}</div>
+        </div>
+        <div className="rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2">
+          <div className="text-[var(--text-quaternary)]">{t("generated.controlPlane.pendentes_f87ac295")}</div>
+          <div className="mt-1 font-medium text-[var(--text-primary)]">{state?.summary.pending ?? 0}</div>
+        </div>
+        <div className="rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2">
+          <div className="text-[var(--text-quaternary)]">{t("generated.controlPlane.pairing_95dc72bd")}</div>
+          <div className="mt-1 font-medium text-[var(--text-primary)]">{activeCode ?? "-"}</div>
+        </div>
+      </div>
+
+      {pending.length > 0 && (
+        <div className="mt-3 flex flex-col gap-1.5">
+          {pending.slice(0, 3).map((sender: ChannelUnknownSender) => (
+            <div
+              key={sender.identity_id}
+              className="flex items-center gap-2 rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2 text-xs"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium text-[var(--text-primary)]">
+                  {sender.display_name || sender.user_id}
+                </div>
+                <div className="truncate text-[var(--text-quaternary)]">
+                  {sender.user_id} · {sender.message_preview}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => runAction("approve", sender.identity_id)}
+                disabled={busy !== null}
+                className="rounded-md px-2 py-1 text-[11px] text-[var(--tone-success-text)] hover:bg-[var(--tone-success-bg)] disabled:opacity-60"
+              >
+                {t("generated.controlPlane.aprovar_eca28cca")}
+              </button>
+              <button
+                type="button"
+                onClick={() => runAction("block", sender.identity_id)}
+                disabled={busy !== null}
+                className="rounded-md px-2 py-1 text-[11px] text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)] disabled:opacity-60"
+              >
+                {t("generated.controlPlane.bloquear_ca99f1e4")}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {allowed.length > 0 && (
+        <div className="mt-3 flex flex-col gap-1.5">
+          {allowed.slice(0, 3).map((identity) => (
+            <div
+              key={identity.identity_id}
+              className="flex items-center gap-2 rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2 text-xs"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium text-[var(--text-primary)]">
+                  {identity.display_name || identity.user_id}
+                </div>
+                <div className="truncate text-[var(--text-quaternary)]">
+                  {identity.user_id} · {identity.source}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => revoke(identity.identity_id)}
+                disabled={busy !== null}
+                className="rounded-md px-2 py-1 text-[11px] text-[var(--text-quaternary)] hover:bg-[var(--surface-hover)] disabled:opacity-60"
+              >
+                {t("generated.controlPlane.revogar_5c086667")}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {error && <p className="mt-2 text-xs text-[var(--tone-danger-text)]">{error}</p>}
+    </section>
+  );
+}
+
 type ValidateResponse = {
   ok: boolean;
   display_name?: string;
@@ -131,7 +311,7 @@ export function ChannelConnectionModal({
   onClose: () => void;
   onStatusChange: (status: ChannelStatus, agentUsername?: string, agentName?: string) => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const [fieldValues, setFieldValues] = useState<Record<string, string>>(() => {
     const initial: Record<string, string> = {};
     for (const field of channel.fields) {
@@ -228,7 +408,7 @@ export function ChannelConnectionModal({
     const requiredFields = channel.fields.filter((f) => f.required);
     const emptyField = requiredFields.find((f) => !fieldValues[f.key]?.trim());
     if (emptyField) {
-      setError(tl("Preencha todos os campos obrigatórios."));
+      setError(t("generated.controlPlane.preencha_todos_os_campos_obrigatorios_c38649d8"));
       return;
     }
 
@@ -271,11 +451,11 @@ export function ChannelConnectionModal({
         setLocalStatus("connected");
         onStatusChange("connected", info.username, info.name);
       } else {
-        setError(result.error ?? validateError ?? tl("Falha na validação das credenciais."));
+        setError(result.error ?? validateError ?? t("generated.controlPlane.falha_na_validacao_das_credenciais_400bdf60"));
       }
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : tl("Erro ao conectar."),
+        err instanceof Error ? err.message : t("generated.controlPlane.erro_ao_conectar_69bb5811"),
       );
     } finally {
       setConnecting(false);
@@ -307,7 +487,7 @@ export function ChannelConnectionModal({
       onStatusChange("disconnected");
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : tl("Erro ao desconectar."),
+        err instanceof Error ? err.message : t("generated.controlPlane.erro_ao_desconectar_e99b0b0f"),
       );
     } finally {
       setDisconnecting(false);
@@ -317,6 +497,8 @@ export function ChannelConnectionModal({
   if (typeof document === "undefined") return null;
 
   const logo = renderChannelLogo(channel.logoKey, "h-7 w-7");
+  const channelLabel = t(channel.labelKey);
+  const channelTagline = t(channel.taglineKey);
 
   return createPortal(
     <>
@@ -340,7 +522,7 @@ export function ChannelConnectionModal({
             type="button"
             onClick={onClose}
             className="app-surface-close"
-            aria-label={tl("Fechar")}
+            aria-label={t("generated.controlPlane.fechar_c6eec751")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -359,10 +541,10 @@ export function ChannelConnectionModal({
                   id="channel-modal-title"
                   className="text-base font-semibold text-[var(--text-primary)]"
                 >
-                  {channel.label}
+                  {channelLabel}
                 </h3>
                 <p className="text-xs text-[var(--text-quaternary)]">
-                  {tl(channel.tagline)}
+                  {channelTagline}
                 </p>
               </div>
             </div>
@@ -390,7 +572,7 @@ export function ChannelConnectionModal({
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold text-[var(--text-primary)]">
-                      {localAgentInfo.username ? `@${localAgentInfo.username}` : tl("Conectado")}
+                      {localAgentInfo.username ? `@${localAgentInfo.username}` : t("generated.controlPlane.conectado_e04915ac")}
                     </div>
                     {localAgentInfo.name && (
                       <div className="text-xs text-[var(--text-tertiary)]">
@@ -404,7 +586,7 @@ export function ChannelConnectionModal({
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
                     <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                      {tl("Usuarios com acesso")}
+                      {t("generated.controlPlane.usuarios_com_acesso_063979e6")}
                     </div>
                     {loadedAllowedUsers && editingUserIds === null && (
                       <button
@@ -412,26 +594,29 @@ export function ChannelConnectionModal({
                         onClick={() => setEditingUserIds(allowedUsers.map((u) => u.id).join(","))}
                         className="text-[11px] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-primary)]"
                       >
-                        {tl("Editar")}
+                        {t("generated.controlPlane.editar_28e2e08e")}
                       </button>
                     )}
                   </div>
 
                   {!loadedAllowedUsers ? (
-                    <div className="flex items-center gap-2 py-2">
-                      <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-[var(--border-subtle)] border-t-[var(--text-tertiary)]" />
-                      <span className="text-xs text-[var(--text-quaternary)]">{tl("Carregando...")}</span>
+                    <div
+                      className="flex items-center gap-2 py-2"
+                      role="status"
+                      aria-label={t("generated.controlPlane.carregando_62b04e95")}
+                    >
+                      <InlineSpinner className="h-3.5 w-3.5 text-[var(--text-quaternary)]" />
                     </div>
                   ) : editingUserIds !== null ? (
                     <div className="flex flex-col gap-2">
                       <TagsInput
                         value={editingUserIds}
                         onChange={setEditingUserIds}
-                        placeholder={tl("Digite o ID e pressione Enter")}
+                        placeholder={t("generated.controlPlane.digite_o_id_e_pressione_enter_5f36b2ab")}
                         draftRef={userIdsDraftRef}
                       />
                       <p className="text-[11px] text-[var(--text-quaternary)]">
-                        {tl("Deixe vazio para permitir todos.")}
+                        {t("generated.controlPlane.deixe_vazio_para_bloquear_todos_ate_aprovar__81d20d6b")}
                       </p>
                       <div className="flex justify-end gap-2">
                         <button
@@ -439,11 +624,13 @@ export function ChannelConnectionModal({
                           onClick={() => setEditingUserIds(null)}
                           className="rounded-lg px-3 py-1.5 text-xs text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-primary)]"
                         >
-                          {tl("Cancelar")}
+                          {t("generated.controlPlane.cancelar_091200fb")}
                         </button>
                         <button
                           type="button"
                           disabled={savingUserIds}
+                          aria-label={savingUserIds ? t("generated.controlPlane.salvando_b58cece2") : undefined}
+                          aria-busy={savingUserIds || undefined}
                           onClick={async () => {
                             setSavingUserIds(true);
                             try {
@@ -470,14 +657,18 @@ export function ChannelConnectionModal({
                               setEditingUserIds(null);
                               setLoadedAllowedUsers(false);
                             } catch {
-                              setError(tl("Erro ao salvar usuarios."));
+                              setError(t("generated.controlPlane.erro_ao_salvar_usuarios_05eb6044"));
                             } finally {
                               setSavingUserIds(false);
                             }
                           }}
-                          className="rounded-lg bg-[var(--surface-hover)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-elevated)]"
+                          className="inline-flex min-w-16 items-center justify-center rounded-lg bg-[var(--surface-hover)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-elevated)]"
                         >
-                          {savingUserIds ? tl("Salvando...") : tl("Salvar")}
+                          {savingUserIds ? (
+                            <InlineSpinner className="h-3.5 w-3.5" />
+                          ) : (
+                            t("generated.controlPlane.salvar_94c457df")
+                          )}
                         </button>
                       </div>
                     </div>
@@ -493,10 +684,10 @@ export function ChannelConnectionModal({
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-xs font-medium text-[var(--text-primary)]">
-                              {user.name || tl("Usuario")}
+                              {user.name || t("generated.controlPlane.usuario_4c5adc5f")}
                             </div>
                             <div className="truncate text-[11px] text-[var(--text-quaternary)]">
-                              ID: {user.id}
+                              {translate("generated.controlPlane.id_823f6f82")}{user.id}
                             </div>
                           </div>
                         </div>
@@ -504,34 +695,44 @@ export function ChannelConnectionModal({
                     </div>
                   ) : (
                     <div className="rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2 text-xs text-[var(--text-quaternary)]">
-                      {tl("Todos os usuarios podem interagir com este bot.")}
+                      {t("generated.controlPlane.nenhum_usuario_legado_aprovado_use_o_gateway_37b8bcd9")}
                     </div>
                   )}
                 </div>
+
+                {channel.key === "telegram" && <ChannelGatewayMiniPanel agentId={agentId} />}
 
                 {/* Disconnect — subtle text link */}
                 <button
                   type="button"
                   onClick={handleDisconnect}
                   disabled={disconnecting}
-                  className="self-end text-xs text-[var(--text-quaternary)] transition-colors hover:text-[var(--tone-danger-text)]"
+                  aria-label={disconnecting ? t("generated.controlPlane.desconectando_af25b81e") : undefined}
+                  aria-busy={disconnecting || undefined}
+                  className="inline-flex min-h-5 min-w-20 items-center justify-center self-end text-xs text-[var(--text-quaternary)] transition-colors hover:text-[var(--tone-danger-text)]"
                 >
-                  {disconnecting ? tl("Desconectando...") : tl("Desconectar")}
+                  {disconnecting ? (
+                    <InlineSpinner className="h-3.5 w-3.5" />
+                  ) : (
+                    t("generated.controlPlane.desconectar_d1a164af")
+                  )}
                 </button>
               </div>
             ) : (
               /* ---- Disconnected state ---- */
               <div className="flex flex-col gap-4">
-                {channel.fields.map((field) =>
-                  field.type === "tags" ? (
+                {channel.fields.map((field) => {
+                  const fieldLabel = t(field.labelKey);
+                  const fieldHelpText = field.helpTextKey ? t(field.helpTextKey) : undefined;
+                  return field.type === "tags" ? (
                     <div key={field.key} className="flex flex-col gap-2 px-1 py-1">
                       <div className="flex min-h-[3.1rem] flex-col">
                         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                          {tl(field.label)}
+                          {fieldLabel}
                         </div>
-                        {field.helpText && (
+                        {fieldHelpText && (
                           <p className="mt-0.5 max-w-[42rem] text-[11px] leading-snug text-[var(--text-quaternary)]">
-                            {tl(field.helpText)}
+                            {fieldHelpText}
                           </p>
                         )}
                       </div>
@@ -541,14 +742,14 @@ export function ChannelConnectionModal({
                           setFieldValues((prev) => ({ ...prev, [field.key]: v }));
                           setError(null);
                         }}
-                        placeholder={tl("Digite e pressione Enter")}
+                        placeholder={t("generated.controlPlane.digite_e_pressione_enter_a2bf9a1f")}
                       />
                     </div>
                   ) : (
                     <FieldShell
                       key={field.key}
-                      label={field.label}
-                      description={field.helpText ? tl(field.helpText) : undefined}
+                      label={fieldLabel}
+                      description={fieldHelpText}
                     >
                       {field.type === "secret" ? (
                         <SecretInput
@@ -557,7 +758,7 @@ export function ChannelConnectionModal({
                             setFieldValues((prev) => ({ ...prev, [field.key]: e.target.value }));
                             setError(null);
                           }}
-                          placeholder={tl("Cole o valor aqui")}
+                          placeholder={t("generated.controlPlane.cole_o_valor_aqui_a94321b7")}
                         />
                       ) : (
                         <input
@@ -567,13 +768,15 @@ export function ChannelConnectionModal({
                             setFieldValues((prev) => ({ ...prev, [field.key]: e.target.value }));
                             setError(null);
                           }}
-                          placeholder={tl("Digite o valor aqui")}
+                          placeholder={t("generated.controlPlane.digite_o_valor_aqui_084a14a7")}
                           className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] focus:border-[var(--border-strong)] focus:outline-none"
                         />
                       )}
                     </FieldShell>
-                  ),
-                )}
+                  );
+                })}
+
+                {channel.key === "telegram" && <ChannelGatewayMiniPanel agentId={agentId} />}
 
                 {/* Error */}
                 {error && (
@@ -588,14 +791,14 @@ export function ChannelConnectionModal({
                   onClick={handleConnect}
                   loading={connecting}
                   status={connecting ? "pending" : "idle"}
-                  loadingLabel={tl("Validando")}
+                  loadingLabel={t("generated.controlPlane.validando_e1031e1a")}
                   className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-[var(--interactive-active-text)]"
                   style={{
                     background: "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
                     border: "1px solid var(--interactive-active-border)",
                   }}
                 >
-                  {tl("Validar e conectar")}
+                  {t("generated.controlPlane.validar_e_conectar_16aa616f")}
                 </AsyncActionButton>
               </div>
             )}
@@ -604,7 +807,7 @@ export function ChannelConnectionModal({
           {/* Footer */}
           <div className="flex items-center gap-1.5 border-t border-[var(--border-subtle)] px-6 py-3 text-xs text-[var(--text-quaternary)]">
             <Lock size={11} />
-            <span>{tl("Credenciais criptografadas")}</span>
+            <span>{t("generated.controlPlane.credenciais_criptografadas_657054e7")}</span>
           </div>
         </div>
       </div>

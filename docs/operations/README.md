@@ -6,6 +6,20 @@ Runbooks for self-hosting Koda after the local or VPS stack is installed.
 
 | Runbook | Use it when |
 |---|---|
+| [Top-tier release train](top-tier-release-train.md) | Before starting or closing any top-tier roadmap phase |
+| [Top-tier roadmap assurance](top-tier-roadmap-assurance.md) | Before claiming roadmap coverage, phase completeness, or release-quality maturity |
+| [Scaling and resilience](scaling-resilience-runbook.md) | Before changing queue, runtime, provider, MCP, browser, or operations UI behavior |
+| [HITL approvals](hitl-approval-runbook.md) | Before changing approval decisions, pending approval storage, or dashboard approval UX |
+| [Sandbox doctor](sandbox-doctor-runbook.md) | Before changing sandbox policy, doctor checks, MCP isolation, mounts, env, browser, or egress behavior |
+| [Skills and plugins](skills-plugin-runbook.md) | Before scanning, installing, uninstalling, rolling back, or troubleshooting local skill packages |
+| [Workspace directory import](workspace-directory-import-runbook.md) | Before importing Codex, Claude, Cursor, MCP, or skill config from a local project folder |
+| [Evals and release quality](evals-release-runbook.md) | Before creating evals from runs, exporting trajectories, or closing release-quality gates |
+| [Improvement proposals](improvement-proposal-runbook.md) | Before approving, validating, applying, or rolling back self-improvement proposals |
+| [Memory governance](memory-governance-runbook.md) | Before changing memory scanners, namespaces, recall explanations, or utility feedback |
+| [Channel gateway](channel-gateway-runbook.md) | Before connecting Telegram, approving senders, debugging identity denials, or rotating channel access |
+| [Onboarding readiness](onboarding-readiness-runbook.md) | Before claiming clean-install readiness, first-use UX completeness, or OSS setup maturity |
+| [Thread replies](thread-replies-runbook.md) | Before enabling reply obligations, agent follow-ups, coordinator synthesis, or room reply troubleshooting |
+| [Quality cockpit](quality-cockpit-runbook.md) | Before converting quality failures into proposals or claiming P4/P5 quality dashboard coverage |
 | [Backup and restore](backup-restore.md) | Before production and during recovery drills |
 | [Upgrade](upgrade.md) | Every release |
 | [Hardening](hardening.md) | Before exposing the dashboard beyond yourself |

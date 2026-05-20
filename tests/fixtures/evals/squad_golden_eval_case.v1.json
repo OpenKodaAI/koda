@@ -1,0 +1,150 @@
+{
+  "schema_version": "eval_case.v1",
+  "case_key": "KAT-002:squad-quality-golden",
+  "agent_id": "PM",
+  "source_task_id": 9002,
+  "query_text": "Produce a launch answer that needs copy, frontend implementation detail, QA risk review, and final synthesis.",
+  "task_kind": "squad_quality_golden",
+  "reference_answer": "A coordinator should delegate to specialists, collect concrete results, handle partial timeouts, and synthesize the final answer.",
+  "metadata": {
+    "thresholds": {
+      "squad_min_quality_score": 0.85,
+      "min_quality_delta": 0.25
+    },
+    "expected_quality_terms": [
+      "explicit_specialist_routing",
+      "concrete_task_result",
+      "partial_timeout_disclosed",
+      "coordinator_synthesis"
+    ],
+    "quality_variants": [
+      {
+        "id": "single_agent",
+        "kind": "single_agent",
+        "run_graph_id": "run:PM:9002:attempt:single",
+        "observed_quality_terms": [
+          "explicit_specialist_routing"
+        ],
+        "evidence_refs": {
+          "explicit_specialist_routing": ["single-model:1"]
+        },
+        "cost_usd": 0.012,
+        "duration_ms": 1200,
+        "provider_calls": 0,
+        "run_graph": {
+          "schema_version": "run_graph.v1",
+          "scenario": "single_agent",
+          "graph_id": "run:PM:9002:attempt:single",
+          "nodes": [
+            {
+              "node_id": "single-model:1",
+              "node_type": "model_call",
+              "status": "completed",
+              "summary": "Single-agent baseline produced a direct answer"
+            }
+          ],
+          "edges": []
+        }
+      },
+      {
+        "id": "squad",
+        "kind": "squad",
+        "run_graph_id": "run:PM:9002:attempt:squad",
+        "observed_quality_terms": [
+          "explicit_specialist_routing",
+          "concrete_task_result",
+          "partial_timeout_disclosed",
+          "coordinator_synthesis"
+        ],
+        "evidence_refs": {
+          "explicit_specialist_routing": ["squad-route:2"],
+          "concrete_task_result": ["squad-child:4"],
+          "partial_timeout_disclosed": ["squad-timeout:5"],
+          "coordinator_synthesis": ["squad-synthesis:6"]
+        },
+        "cost_usd": 0.019,
+        "duration_ms": 2100,
+        "provider_calls": 0,
+        "run_graph": {
+          "schema_version": "run_graph.v1",
+          "scenario": "squad",
+          "graph_id": "run:PM:9002:attempt:squad",
+          "nodes": [
+            {
+              "node_id": "squad-model:1",
+              "node_type": "model_call",
+              "status": "completed",
+              "summary": "Coordinator planned specialist routing"
+            },
+            {
+              "node_id": "squad-route:2",
+              "node_type": "agent_request",
+              "status": "completed",
+              "summary": "PM routed explicit needs to FE and QA"
+            },
+            {
+              "node_id": "squad-obligation:3",
+              "node_type": "reply_obligation",
+              "status": "completed",
+              "summary": "Specialists owed visible replies"
+            },
+            {
+              "node_id": "squad-child:4",
+              "node_type": "child_run",
+              "status": "completed",
+              "summary": "FE returned concrete launch implementation evidence"
+            },
+            {
+              "node_id": "squad-timeout:5",
+              "node_type": "dependency_call",
+              "status": "degraded",
+              "summary": "QA timed out and was disclosed",
+              "payload": {
+                "event_type": "partial_timeout",
+                "timed_out_agent_ids": ["QA"]
+              }
+            },
+            {
+              "node_id": "squad-synthesis:6",
+              "node_type": "coordinator_synthesis",
+              "status": "completed",
+              "summary": "PM synthesized FE evidence and disclosed QA timeout"
+            }
+          ],
+          "edges": [
+            {
+              "from_node_id": "squad-model:1",
+              "to_node_id": "squad-route:2",
+              "edge_type": "emits"
+            },
+            {
+              "from_node_id": "squad-route:2",
+              "to_node_id": "squad-obligation:3",
+              "edge_type": "produces"
+            },
+            {
+              "from_node_id": "squad-obligation:3",
+              "to_node_id": "squad-child:4",
+              "edge_type": "child_run"
+            },
+            {
+              "from_node_id": "squad-route:2",
+              "to_node_id": "squad-timeout:5",
+              "edge_type": "fails_to"
+            },
+            {
+              "from_node_id": "squad-child:4",
+              "to_node_id": "squad-synthesis:6",
+              "edge_type": "produces"
+            },
+            {
+              "from_node_id": "squad-timeout:5",
+              "to_node_id": "squad-synthesis:6",
+              "edge_type": "produces"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

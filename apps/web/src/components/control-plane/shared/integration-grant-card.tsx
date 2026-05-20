@@ -29,12 +29,12 @@ interface IntegrationGrantCardProps {
 /*  Connection status badge                                            */
 
 function ConnectionBadge({ status }: { status: string | undefined }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const label = status === "connected"
-    ? tl("Conectado")
+    ? t("generated.controlPlane.conectado_e04915ac")
     : status === "pending"
-      ? tl("Pendente")
-      : tl("Desconectado");
+      ? t("generated.controlPlane.pendente_e3354bca")
+      : t("generated.controlPlane.desconectado_c3597850");
 
   const bg = status === "connected"
     ? "rgba(113,219,190,0.12)"
@@ -101,7 +101,7 @@ export function IntegrationGrantCard({
   onToggle,
   onUpdate,
 }: IntegrationGrantCardProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const [expanded, setExpanded] = useState(false);
 
   const enabled = grant?.enabled === true;
@@ -221,33 +221,33 @@ export function IntegrationGrantCard({
             <div className="border-t border-[rgba(255,255,255,0.06)] px-4 pb-4 pt-3">
               <div className="grid gap-4 xl:grid-cols-3">
                 <FormSelect
-                  label={tl("Modo de aprovacao")}
-                  description={tl("Como acoes nesta integracao sao aprovadas.")}
+                  label={t("generated.controlPlane.modo_de_aprovacao_108bd735")}
+                  description={t("generated.controlPlane.como_acoes_nesta_integracao_sao_aprovadas_735b9760")}
                   value={grant?.approval_mode || ""}
                   onChange={(e) => handleApprovalModeChange(e.target.value)}
                   options={[
-                    { value: "", label: tl("Padrao") },
-                    { value: "auto", label: tl("Automatico") },
-                    { value: "manual", label: tl("Manual") },
-                    { value: "guarded", label: tl("Supervisionado") },
+                    { value: "", label: t("generated.controlPlane.padrao_ba96b961") },
+                    { value: "auto", label: t("generated.controlPlane.automatico_88b77ac4") },
+                    { value: "manual", label: t("generated.controlPlane.manual_37f328b8") },
+                    { value: "guarded", label: t("generated.controlPlane.supervisionado_98065139") },
                   ]}
                 />
               </div>
 
               <div className="mt-4 grid gap-4 xl:grid-cols-2">
                 <TagInputField
-                  label={tl("Acoes permitidas")}
-                  description={tl("Restrinja a acoes especificas (vazio = todas permitidas).")}
+                  label={t("generated.controlPlane.acoes_permitidas_1d665790")}
+                  description={t("generated.controlPlane.restrinja_a_acoes_especificas_vazio_todas_pe_2bf801f3")}
                   values={grant?.allow_actions || []}
                   onChange={handleAllowedActionsChange}
-                  placeholder={tl("Ex.: read, list, query")}
+                  placeholder={t("generated.controlPlane.ex_read_list_query_41c1877f")}
                 />
                 <TagInputField
-                  label={tl("Acoes negadas")}
-                  description={tl("Bloqueie acoes especificas (vazio = nenhuma bloqueada).")}
+                  label={t("generated.controlPlane.acoes_negadas_bbf43a33")}
+                  description={t("generated.controlPlane.bloqueie_acoes_especificas_vazio_nenhuma_blo_47c6b622")}
                   values={grant?.deny_actions || []}
                   onChange={handleDeniedActionsChange}
-                  placeholder={tl("Ex.: delete, destroy")}
+                  placeholder={t("generated.controlPlane.ex_delete_destroy_b3e0d39c")}
                 />
               </div>
             </div>

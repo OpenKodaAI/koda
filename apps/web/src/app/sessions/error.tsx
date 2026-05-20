@@ -10,11 +10,11 @@ export default function SessionsError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <RouteErrorState
-      title={tl("Sessions unavailable")}
-      description={error.message || tl("The sessions workspace could not be loaded.")}
+      title={t("generated.routes.sessions_unavailable_2def7e52")}
+      description={error.message || t("generated.routes.the_sessions_workspace_could_not_be_loaded_d61f1050")}
       onRetry={reset}
     />
   );

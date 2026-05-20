@@ -28,7 +28,7 @@ export async function GET(
 
   const response = await runtimeFetchJson<Record<string, unknown>>(
     agentId,
-    `/api/runtime/schedules/${jobId}`,
+    `/api/runtime/schedules/${jobId}${request.nextUrl.search}`,
     { method: "GET" },
     undefined,
     { capability: "read" }

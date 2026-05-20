@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -22,6 +23,22 @@ class _Request:
         self.query = _Query(query or {})
         self.headers: dict[str, str] = {}
         self.can_read_body = False
+
+
+class _JsonRequest(_Request):
+    def __init__(
+        self,
+        *,
+        match_info: dict[str, str] | None = None,
+        payload: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(match_info=match_info)
+        self.can_read_body = True
+        self._payload = payload or {}
+        self.app: dict[str, object] = {}
+
+    async def json(self) -> dict[str, object]:
+        return dict(self._payload)
 
 
 class _Query(dict[str, str]):
@@ -110,6 +127,167 @@ async def test_dashboard_agent_stats_route_strips_nested_agent_summary() -> None
     payload = json.loads(response.text)
     assert payload["agentId"] == "AGENT_A"
     assert "agent" not in payload
+
+
+@pytest.mark.asyncio
+async def test_dashboard_executions_route_supports_deep_paginated_offsets() -> None:
+    request = _Request(query={"paged": "1", "limit": "2", "offset": "1200"})
+    manager = MagicMock()
+    manager.list_agents.return_value = [{"id": "AGENT_A"}]
+    rows = [
+        {"bot_id": "AGENT_A", "task_id": 1201},
+        {"bot_id": "AGENT_A", "task_id": 1202},
+        {"bot_id": "AGENT_A", "task_id": 1203},
+    ]
+
+    with (
+        patch("koda.control_plane.api._manager", return_value=manager),
+        patch(
+            "koda.control_plane.api.list_dashboard_execution_summaries",
+            return_value=rows,
+        ) as list_executions,
+    ):
+        response = await control_plane_api.list_dashboard_executions_route(request)
+
+    payload = json.loads(response.text)
+    list_executions.assert_called_once_with(
+        agent_ids=["AGENT_A"],
+        status=None,
+        search=None,
+        session_id=None,
+        limit=3,
+        offset=1200,
+    )
+    assert payload["items"] == rows[:2]
+    assert payload["page"] == {
+        "limit": 2,
+        "offset": 1200,
+        "returned": 2,
+        "next_offset": 1202,
+        "has_more": True,
+        "total": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_dashboard_squad_message_supervisor_dispatch_uses_http_request_app() -> None:
+    thread = SimpleNamespace(
+        id="thread-1",
+        workspace_id="workspace-1",
+        squad_id="squad-1",
+        status="open",
+        coordinator_agent_id="PM",
+        owner_user_id=42,
+        telegram_chat_id=None,
+        telegram_message_thread_id=None,
+    )
+    request = _JsonRequest(
+        match_info={"thread_id": "thread-1"},
+        payload={"content": "Coordinate specialists", "from_agent": "operator"},
+    )
+    store = AsyncMock()
+    store.post_thread_message = AsyncMock(return_value=101)
+    store.notify_event = AsyncMock()
+    store.get_thread = AsyncMock(return_value=thread)
+    participants = [
+        SimpleNamespace(agent_id="PM", left_at=None, paused=False),
+        SimpleNamespace(agent_id="FE", left_at=None, paused=False),
+    ]
+
+    class _FakeEngine:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        async def coordinate_user_input(self, **kwargs: object) -> object:
+            dispatch = kwargs["dispatch"]
+            dispatched = await dispatch(
+                SimpleNamespace(
+                    agent_id="FE",
+                    content="Task request",
+                    metadata={},
+                    task_descriptor=SimpleNamespace(id="task-1"),
+                    request_id="coord-task-1",
+                )
+            )
+            assert dispatched == 123
+            return SimpleNamespace(
+                coordinated=True,
+                decision=SimpleNamespace(mode="parallel_delegation"),
+                task_ids=["task-1"],
+                dispatched_agents=["FE"],
+            )
+
+    dispatch_result = SimpleNamespace(enqueued_task_id=123, message_id=None)
+
+    with (
+        patch("koda.control_plane.api._authorize_request", return_value=None),
+        patch(
+            "koda.control_plane.api._request_auth_context",
+            return_value=control_plane_api.OperatorAuthContext(
+                auth_kind="session",
+                subject_type="operator",
+                user_id="usr_1",
+                username="owner",
+                email="owner@example.com",
+                display_name="Owner",
+            ),
+        ),
+        patch(
+            "koda.control_plane.api._dashboard_squad_thread_access",
+            AsyncMock(return_value=(SimpleNamespace(thread=thread), None)),
+        ),
+        patch("koda.squads.get_squad_thread_store", return_value=store),
+        patch("koda.squads.sync_thread_participants_from_squad", AsyncMock(return_value=participants)),
+        patch("koda.squads.build_squad_capability_summaries", AsyncMock(return_value=[])),
+        patch(
+            "koda.squads.get_squad_semantic_router",
+            return_value=SimpleNamespace(
+                rank_agents=AsyncMock(
+                    return_value=SimpleNamespace(available=False, to_dict=lambda: {"available": False})
+                )
+            ),
+        ),
+        patch(
+            "koda.squads.get_squad_mention_resolver",
+            return_value=SimpleNamespace(
+                resolve=AsyncMock(
+                    return_value=SimpleNamespace(
+                        has_resolved_mentions=False,
+                        has_mentions=False,
+                        resolved_agent_ids=[],
+                        unresolved=[],
+                        ambiguous={},
+                    )
+                )
+            ),
+        ),
+        patch(
+            "koda.squads.get_squad_triage_service",
+            return_value=SimpleNamespace(
+                triage_user_input=AsyncMock(
+                    return_value=SimpleNamespace(
+                        awareness_agent_ids=[],
+                        proposal_candidates=[],
+                        to_dict=lambda: {},
+                    )
+                )
+            ),
+        ),
+        patch("koda.squads.should_use_coordinator_engine", return_value=True),
+        patch("koda.squads.get_squad_task_store", return_value=MagicMock()),
+        patch("koda.squads.SquadCoordinatorEngine", _FakeEngine),
+        patch("koda.squads.dispatch_squad_turn", AsyncMock(return_value=dispatch_result)) as dispatch_turn,
+        patch("koda.squads.record_squad_routing_decision", AsyncMock()),
+    ):
+        response = await control_plane_api.post_dashboard_squad_thread_message_route(request)
+
+    payload = json.loads(response.text)
+    assert payload["coordination"] == {
+        "mode": "parallel_delegation",
+        "tasks": ["task-1"],
+        "agents": ["FE"],
+    }
+    dispatch_turn.assert_awaited_once()
 
 
 def test_serialize_execution_summary_exposes_feedback_and_provenance() -> None:

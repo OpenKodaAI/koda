@@ -93,6 +93,9 @@ const LANGUAGE_ALIASES: Record<string, AppLanguage> = {
   "de-de": "de-DE",
 };
 
+const PROTECTED_LITERAL_TOKEN_PATTERN =
+  /(?<![\p{L}\p{N}])(?:[\p{L}\p{N}]+[._/@:-][\p{L}\p{N}._/@:-]+|[A-Z][A-Z0-9_]{2,})(?![\p{L}\p{N}])/gu;
+
 export const LANGUAGE_OPTIONS: Array<{ value: AppLanguage; labelKey: string }> = [
   { value: "en-US", labelKey: "language.options.en-US" },
   { value: "pt-BR", labelKey: "language.options.pt-BR" },
@@ -160,14 +163,34 @@ function applyLiteralTermReplacements(language: AppLanguage, value: string) {
   const replacements = LITERAL_TERM_REPLACEMENTS[language];
   if (!replacements?.length) return value;
 
-  return replacements.reduce(
+  const protectedTokens: string[] = [];
+  const masked = value.replace(PROTECTED_LITERAL_TOKEN_PATTERN, (token) => {
+    const marker = `__KODA_I18N_TOKEN_${protectedTokens.length}__`;
+    protectedTokens.push(token);
+    return marker;
+  });
+  const replaced = replacements.reduce(
     (current, [pattern, replacement]) => current.replace(pattern, replacement),
-    value,
+    masked,
+  );
+  return protectedTokens.reduce(
+    (current, token, index) => current.replace(`__KODA_I18N_TOKEN_${index}__`, token),
+    replaced,
   );
 }
 
 export function translateLiteral(value: string, options?: TranslateOptions) {
   const language = getCurrentLanguage();
+  const keyed = getResourceValue(language, value);
+  if (typeof keyed === "string") {
+    return applyLiteralTermReplacements(language, interpolateTemplate(keyed, options));
+  }
+  if (language !== DEFAULT_LANGUAGE) {
+    const fallback = getResourceValue(DEFAULT_LANGUAGE, value);
+    if (typeof fallback === "string") {
+      return applyLiteralTermReplacements(language, interpolateTemplate(fallback, options));
+    }
+  }
   const translated = getLiteralValue(language, value);
   return applyLiteralTermReplacements(
     language,

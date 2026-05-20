@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   useAnimatedPresence,
@@ -14,6 +15,8 @@ interface ConfirmationDialogProps {
   title: string;
   message: string;
   confirmLabel?: string;
+  confirmBusy?: boolean;
+  confirmBusyLabel?: string;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -23,6 +26,8 @@ export function ConfirmationDialog({
   title,
   message,
   confirmLabel,
+  confirmBusy = false,
+  confirmBusyLabel,
   onConfirm,
   onCancel,
 }: ConfirmationDialogProps) {
@@ -30,7 +35,7 @@ export function ConfirmationDialog({
   const cancelRef = useRef<HTMLButtonElement>(null);
   const presence = useAnimatedPresence(open, null, { duration: 200 });
   const resolvedConfirmLabel =
-    confirmLabel ?? t("controlPlane.shared.confirmation.confirm", { defaultValue: "Confirm" });
+    confirmLabel ?? t("controlPlane.shared.confirmation.confirm", undefined);
 
   useEffect(() => {
     if (!presence.isVisible) return;
@@ -91,9 +96,12 @@ export function ConfirmationDialog({
             <button
               type="button"
               onClick={onConfirm}
-              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] bg-[var(--tone-danger-bg-strong)] px-3.5 text-[var(--font-size-sm)] font-medium text-[var(--tone-danger-text)] transition-colors duration-[var(--transition-fast)] hover:bg-[color:var(--tone-danger-dot)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--tone-danger-dot)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]"
+              disabled={confirmBusy}
+              aria-label={confirmBusy ? confirmBusyLabel ?? resolvedConfirmLabel : undefined}
+              aria-busy={confirmBusy || undefined}
+              className="inline-flex h-9 min-w-20 items-center justify-center rounded-[var(--radius-panel-sm)] bg-[var(--tone-danger-bg-strong)] px-3.5 text-[var(--font-size-sm)] font-medium text-[var(--tone-danger-text)] transition-colors duration-[var(--transition-fast)] hover:bg-[color:var(--tone-danger-dot)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--tone-danger-dot)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] disabled:cursor-not-allowed disabled:opacity-70"
             >
-              {resolvedConfirmLabel}
+              {confirmBusy ? <InlineSpinner className="h-4 w-4" /> : resolvedConfirmLabel}
             </button>
           </div>
         </div>

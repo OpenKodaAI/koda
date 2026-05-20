@@ -10,11 +10,11 @@ export default function MemoryError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <RouteErrorState
-      title={tl("Memory workspace unavailable")}
-      description={error.message || tl("The memory section could not be loaded.")}
+      title={t("generated.routes.memory_workspace_unavailable_55cf16d1")}
+      description={error.message || t("generated.routes.the_memory_section_could_not_be_loaded_5ee3b956")}
       onRetry={reset}
     />
   );

@@ -2,7 +2,6 @@
 
 import { Check, ChevronDown } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { AgentGlyph } from "@/components/ui/agent-glyph";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
@@ -29,7 +28,7 @@ export function ComposerToolbar({
   return (
     <div className="flex items-center justify-between gap-3 px-3 pb-2 pt-1">
       <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
-        {t("chat.composer.sendHint", { defaultValue: "⌘↵ to send" })}
+        {t("chat.composer.sendHint", undefined)}
       </span>
       <div className="flex items-center gap-2 text-[0.75rem] text-[var(--text-tertiary)]">
         {modelLabel ? (
@@ -44,10 +43,10 @@ export function ComposerToolbar({
           lockedAgent ? (
             <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] bg-[var(--panel)] px-1.5 py-0.5 text-[var(--text-secondary)]">
               {agentId ? (
-                <AgentGlyph
-                  agentId={agentId}
-                  color={activeColor}
-                  className="h-4 w-4 shrink-0"
+                <span
+                  aria-hidden
+                  className="h-4 w-1 shrink-0 rounded-full"
+                  style={{ background: activeColor }}
                 />
               ) : null}
               <span className="truncate max-w-[160px]">{agentLabel}</span>
@@ -67,10 +66,10 @@ export function ComposerToolbar({
                   )}
                 >
                   {agentId ? (
-                    <AgentGlyph
-                      agentId={agentId}
-                      color={activeColor}
-                      className="h-4 w-4 shrink-0"
+                    <span
+                      aria-hidden
+                      className="h-4 w-1 shrink-0 rounded-full"
+                      style={{ background: activeColor }}
                     />
                   ) : null}
                   <span className="truncate">{agentLabel}</span>
@@ -83,7 +82,7 @@ export function ComposerToolbar({
               </PopoverTrigger>
               <PopoverContent align="end" sideOffset={8} className="w-72 p-1">
                 <div className="px-2 pt-1.5 pb-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]">
-                  {t("chat.composer.agents", { defaultValue: "Agents" })}
+                  {t("chat.composer.agents", undefined)}
                 </div>
                 <ul role="listbox" className="flex flex-col">
                   {agents.map((agent) => {
@@ -103,10 +102,10 @@ export function ComposerToolbar({
                               : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
                           )}
                         >
-                          <AgentGlyph
-                            agentId={agent.id}
-                            color={agent.color ?? "#7A8799"}
-                            className="h-5 w-5 shrink-0"
+                          <span
+                            aria-hidden
+                            className="h-5 w-1 shrink-0 rounded-full"
+                            style={{ background: agent.color ?? "#7A8799" }}
                           />
                           <span className="min-w-0 flex-1 truncate">
                             {agent.label || agent.id}

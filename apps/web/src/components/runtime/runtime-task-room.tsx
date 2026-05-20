@@ -22,6 +22,16 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { RuntimeActionMenu } from "@/components/runtime/runtime-action-menu";
 import { RuntimeBrowserPanel } from "@/components/runtime/runtime-browser-panel";
 import { RuntimeFilesPanel } from "@/components/runtime/runtime-files-panel";
+import {
+  ChildRunsPanel,
+  ContextGovernancePanel,
+  HandoffTimelinePanel,
+  RouteExplanationPanel,
+  RunGraphSummaryPanel,
+  RunGraphViewer,
+  RunReplayPanel,
+} from "@/components/runtime/run-graph-panels";
+import { SandboxDoctorPanel } from "@/components/runtime/sandbox-doctor-panel";
 import { EventRow, type EventLevel } from "@/components/runtime/shared/event-row";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
@@ -36,6 +46,10 @@ import { useRuntimeTask } from "@/hooks/use-runtime-task";
 import { useToast } from "@/hooks/use-toast";
 import { translate } from "@/lib/i18n";
 import { getAgentLabel } from "@/lib/agent-constants";
+import { parseReleaseQuality } from "@/lib/contracts/evals";
+import { parseRunGraphSnapshot, parseRunReplayPlan } from "@/lib/contracts/run-graph";
+import { parseContextGovernancePayload } from "@/lib/contracts/phase3-runtime";
+import { parseSandboxDoctorResult } from "@/lib/contracts/sandbox-doctor";
 import type { SemanticTone } from "@/lib/theme-semantic";
 import type { RuntimeEvent } from "@/lib/runtime-types";
 import {
@@ -49,7 +63,7 @@ import { cn, formatDateTime, formatRelativeTime, truncateText } from "@/lib/util
 import { SyntaxHighlight } from "@/components/shared/syntax-highlight";
 
 type RoomTab = "activity" | "terminal" | "browser" | "files";
-type DetailTab = "details" | "logs" | "diagnostics";
+type DetailTab = "details" | "runGraph" | "logs" | "diagnostics";
 
 interface RuntimeStageStat {
   label: string;
@@ -87,10 +101,10 @@ function toneToDot(tone: SemanticTone): StatusDotTone {
 }
 
 function TerminalPanelLoading() {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <div className="flex min-h-[360px] items-center justify-center bg-[var(--terminal-background)] text-[0.8125rem] text-[var(--text-tertiary)]">
-      {tl("Preparando terminal...")}
+      {t("generated.runtime.preparando_terminal_892fc854")}
     </div>
   );
 }
@@ -166,7 +180,7 @@ function RuntimeTaskHeader({
             >
               <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
             </Link>
-            <span className="font-medium text-[var(--text-secondary)]">Task #{taskId}</span>
+            <span className="font-medium text-[var(--text-secondary)]">{translate("generated.runtime.task_10323a33")}{taskId}</span>
             <span className="text-[var(--text-quaternary)]">/</span>
             <span className="truncate">{getAgentLabel(agentId)}</span>
             <span className="text-[var(--text-quaternary)]">/</span>
@@ -370,7 +384,7 @@ function RuntimeStatFooter({ stats }: { stats: RuntimeStageStat[] }) {
 }
 
 export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { showToast } = useToast();
   const warningToastKeysRef = useRef<Set<string>>(new Set());
   const { bundle, loading, error, connected, mutate, fetchResource, refresh } =
@@ -384,6 +398,27 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
 
   const latestResource = bundle?.resources.at(-1) ?? null;
   const latestCheckpoint = bundle?.checkpoints.at(-1) ?? null;
+  const runGraph = useMemo(
+    () => parseRunGraphSnapshot(bundle?.run_graph ?? null),
+    [bundle?.run_graph],
+  );
+  const runReplay = useMemo(
+    () => parseRunReplayPlan(bundle?.run_replay ?? null) ?? runGraph?.replay ?? null,
+    [bundle?.run_replay, runGraph],
+  );
+  const releaseQuality = useMemo(
+    () => parseReleaseQuality((bundle as { release_quality?: unknown } | null | undefined)?.release_quality ?? null),
+    [bundle],
+  );
+  const sandboxDoctor = useMemo(
+    () => parseSandboxDoctorResult(bundle?.sandbox_doctor ?? null),
+    [bundle?.sandbox_doctor],
+  );
+  const childRuns = bundle?.child_runs ?? [];
+  const contextGovernance = useMemo(
+    () => parseContextGovernancePayload(bundle?.context_governance ?? null),
+    [bundle?.context_governance],
+  );
   const isPaused = bundle?.environment?.pause_state
     ? String(bundle.environment.pause_state).includes("pause")
     : String(bundle?.environment?.current_phase || "").includes("paused");
@@ -398,6 +433,7 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
 
   const detailTabs = [
     { id: "details", label: t("runtime.room.detailTabs.details") },
+    { id: "runGraph", label: "RunGraph" },
     { id: "logs", label: "Logs" },
     { id: "diagnostics", label: t("runtime.room.detailTabs.diagnostics") },
   ] satisfies Array<{ id: DetailTab; label: string }>;
@@ -412,6 +448,11 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
     bundle?.task?.current_phase || bundle?.environment?.current_phase || bundle?.task?.status,
   );
   const currentStatus = String(bundle?.task?.status || bundle?.environment?.status || "queued");
+  const sourceRootPath =
+    bundle?.environment?.source_root_path || bundle?.environment?.base_work_dir || "";
+  const sourceRootMissing =
+    Boolean(bundle?.environment?.source_root_path) &&
+    bundle?.environment?.source_root_exists === false;
   const heartbeatAt =
     bundle?.environment?.last_heartbeat_at ||
     bundle?.task?.last_heartbeat_at ||
@@ -505,6 +546,39 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
       const message =
         actionError instanceof Error ? actionError.message : `${t("common.failed")} ${label}`;
       showToast(message, "error", { id: `runtime-task:${taskId}:action` });
+    } finally {
+      setBusyAction(null);
+    }
+  };
+
+  const runChildAction = async (
+    childRun: (typeof childRuns)[number],
+    action: "cancel" | "interrupt",
+  ) => {
+    if (!childRun.child_task_id) return;
+    const actionKey = `${childRun.child_run_id}:${action}`;
+    setBusyAction(actionKey);
+    try {
+      const response = await fetch(
+        `/api/runtime/agents/${agentId}/tasks/${childRun.child_task_id}/${action}`,
+        { method: "POST" },
+      );
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          typeof payload?.error === "string"
+            ? payload.error
+            : "Action failed.",
+        );
+      }
+      await refresh();
+      showToast(t("runtime.room.completed", { label: action }), "success", {
+        id: `runtime-child:${childRun.child_run_id}:action`,
+      });
+    } catch (actionError) {
+      const message =
+        actionError instanceof Error ? actionError.message : `${t("common.failed")} ${action}`;
+      showToast(message, "error", { id: `runtime-child:${childRun.child_run_id}:action` });
     } finally {
       setBusyAction(null);
     }
@@ -690,6 +764,22 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                 />
               </SharedDetailGrid>
 
+              <SharedDetailBlock title={translate("generated.runtime.source_root_419163c0")} monospace>
+                {sourceRootPath || "—"}
+              </SharedDetailBlock>
+
+              {sourceRootMissing ? (
+                <div
+                  className="flex items-start gap-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--tone-warning-text)]"
+                  role="status"
+                >
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+                  <span>
+                    {t("runtime.room.sourceRootMissing", undefined)}
+                  </span>
+                </div>
+              ) : null}
+
               <SharedDetailBlock title={t("runtime.room.workspace")} monospace>
                 {bundle.environment?.workspace_path || "—"}
               </SharedDetailBlock>
@@ -712,6 +802,28 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                   lineNumbers
                 />
               </SharedDetailBlock>
+            </div>
+          ) : null}
+
+          {detailTab === "runGraph" ? (
+            <div className="space-y-4">
+              <RunGraphSummaryPanel
+                graph={runGraph}
+                replay={runReplay}
+                releaseQuality={releaseQuality}
+                runtimeHref={`/runtime/${agentId}/tasks/${taskId}`}
+              />
+              <RunGraphViewer graph={runGraph} />
+              <RouteExplanationPanel graph={runGraph} />
+              <HandoffTimelinePanel graph={runGraph} />
+              <ChildRunsPanel
+                agentId={agentId}
+                childRuns={childRuns}
+                onAction={(childRun, action) => void runChildAction(childRun, action)}
+                busyAction={busyAction}
+              />
+              <ContextGovernancePanel context={contextGovernance} />
+              <RunReplayPanel replay={runReplay} />
             </div>
           ) : null}
 
@@ -761,13 +873,15 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
 
           {detailTab === "diagnostics" ? (
             <div className="space-y-5">
+              <SandboxDoctorPanel result={sandboxDoctor} />
+
               <SharedDetailGrid columns={3}>
                 <SharedDetailDatum
                   label={t("runtime.room.stats.cpu")}
                   value={formatPercent(latestResource?.cpu_percent)}
                 />
                 <SharedDetailDatum
-                  label={tl("RSS")}
+                  label={t("generated.runtime.rss_d80e882b")}
                   value={formatBytes(
                     latestResource?.rss_kb != null
                       ? latestResource.rss_kb * 1024
@@ -1012,7 +1126,7 @@ function RuntimeEventLogRow({ event }: { event: RuntimeEvent }) {
           {getRuntimeLabel(event.severity || "info")}
         </span>
         <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
-          seq {event.seq}
+          {translate("generated.runtime.seq_bb6e6e40")}{event.seq}
         </span>
         {event.phase ? (
           <span className="text-[0.6875rem] text-[var(--text-quaternary)]">

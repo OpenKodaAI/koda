@@ -19,6 +19,15 @@ from koda.config import (
     KOKORO_DEFAULT_LANGUAGE,
     KOKORO_DEFAULT_VOICE,
     KOKORO_VOICES_PATH,
+    SUPERTONIC_DEFAULT_LANGUAGE,
+    SUPERTONIC_DEFAULT_MODEL,
+    SUPERTONIC_DEFAULT_VOICE,
+    SUPERTONIC_INTER_OP_THREADS,
+    SUPERTONIC_INTRA_OP_THREADS,
+    SUPERTONIC_MAX_CHUNK_LENGTH,
+    SUPERTONIC_SILENCE_DURATION,
+    SUPERTONIC_SPEED,
+    SUPERTONIC_TOTAL_STEPS,
     TTS_DEFAULT_VOICE,
     TTS_MAX_CHARS,
 )
@@ -41,6 +50,12 @@ from koda.services.resilience import (
     elevenlabs_breaker,
     record_failure,
     record_success,
+)
+from koda.services.supertonic_manager import (
+    resolve_supertonic_model_path,
+    resolve_supertonic_voice_path,
+    supertonic_acceleration_status,
+    supertonic_voice_metadata,
 )
 
 log = get_logger(__name__)
@@ -114,6 +129,9 @@ AVAILABLE_VOICES: dict[str, VoiceConfig] = {
 _kokoro_instance = None
 _kokoro_instance_signature: tuple[str, str, int] | None = None
 _kokoro_lock = threading.Lock()
+_supertonic_instance = None
+_supertonic_instance_signature: tuple[str, str, int, tuple[str, ...], int | None, int | None] | None = None
+_supertonic_lock = threading.Lock()
 
 
 def _resolve_kokoro_assets(preferred_voice: str = KOKORO_DEFAULT_VOICE) -> tuple[Path, Path]:
@@ -157,6 +175,68 @@ def _get_kokoro(preferred_voice: str = KOKORO_DEFAULT_VOICE) -> Any:
         _kokoro_instance_signature = signature
         log.info("tts_init_done")
         return _kokoro_instance
+
+
+def _supertonic_provider_list() -> list[str]:
+    status = supertonic_acceleration_status()
+    providers = [str(item).strip() for item in status.get("providers", []) if str(item).strip()]
+    return providers or ["CPUExecutionProvider"]
+
+
+def _get_supertonic(
+    model_id: str = SUPERTONIC_DEFAULT_MODEL,
+    *,
+    voice: str = SUPERTONIC_DEFAULT_VOICE,
+) -> Any:
+    """Return cached Supertonic TTS instance for an explicitly downloaded model."""
+    global _supertonic_instance, _supertonic_instance_signature
+    resolved_model = model_id or SUPERTONIC_DEFAULT_MODEL
+    model_path = resolve_supertonic_model_path(resolved_model)
+    voice_path = resolve_supertonic_voice_path(voice, resolved_model)
+    providers = tuple(_supertonic_provider_list())
+    signature = (
+        resolved_model,
+        str(model_path),
+        model_path.stat().st_mtime_ns if model_path.exists() else 0,
+        providers,
+        SUPERTONIC_INTRA_OP_THREADS,
+        SUPERTONIC_INTER_OP_THREADS,
+    )
+    if _supertonic_instance is not None and _supertonic_instance_signature == signature:
+        return _supertonic_instance
+
+    with _supertonic_lock:
+        model_path = resolve_supertonic_model_path(resolved_model)
+        voice_path = resolve_supertonic_voice_path(voice, resolved_model)
+        providers = tuple(_supertonic_provider_list())
+        signature = (
+            resolved_model,
+            str(model_path),
+            max(
+                model_path.stat().st_mtime_ns if model_path.exists() else 0,
+                voice_path.stat().st_mtime_ns if voice_path.exists() else 0,
+            ),
+            providers,
+            SUPERTONIC_INTRA_OP_THREADS,
+            SUPERTONIC_INTER_OP_THREADS,
+        )
+        if _supertonic_instance is not None and _supertonic_instance_signature == signature:
+            return _supertonic_instance
+
+        os.environ["SUPERTONIC_ONNX_PROVIDERS"] = ",".join(providers)
+        from supertonic import TTS
+
+        log.info("supertonic_tts_init_start", model_id=resolved_model, providers=list(providers))
+        _supertonic_instance = TTS(
+            model=resolved_model,
+            model_dir=model_path,
+            auto_download=False,
+            intra_op_num_threads=SUPERTONIC_INTRA_OP_THREADS,
+            inter_op_num_threads=SUPERTONIC_INTER_OP_THREADS,
+        )
+        _supertonic_instance_signature = signature
+        log.info("supertonic_tts_init_done", model_id=resolved_model)
+        return _supertonic_instance
 
 
 # --- Text cleaning ---
@@ -414,6 +494,126 @@ async def _kokoro_synthesize(
         return None
 
 
+async def _supertonic_synthesize(
+    text: str,
+    voice: str = SUPERTONIC_DEFAULT_VOICE,
+    speed: float = SUPERTONIC_SPEED,
+    *,
+    model_id: str | None = None,
+    language: str | None = None,
+) -> str | None:
+    """Synthesize text via Supertonic (local/offline). Returns OGG Opus path."""
+    resolved_model = (model_id or SUPERTONIC_DEFAULT_MODEL).strip() or "supertonic-3"
+    resolved_voice = (voice or SUPERTONIC_DEFAULT_VOICE).strip() or SUPERTONIC_DEFAULT_VOICE
+    resolved_language = (language or SUPERTONIC_DEFAULT_LANGUAGE or "pt").strip().lower()
+    try:
+        loop = asyncio.get_running_loop()
+        tts = await loop.run_in_executor(
+            None,
+            lambda: _get_supertonic(resolved_model, voice=resolved_voice),
+        )
+        voice_path = resolve_supertonic_voice_path(resolved_voice, resolved_model)
+        voice_metadata = supertonic_voice_metadata(resolved_voice)
+
+        import time
+
+        def _run_synthesis() -> tuple[Any, int]:
+            style = (
+                tts.get_voice_style(resolved_voice)
+                if voice_metadata and voice_metadata.get("kind") == "preset"
+                else tts.get_voice_style_from_path(voice_path)
+            )
+            wav, _duration = tts.synthesize(
+                text=text,
+                voice_style=style,
+                total_steps=SUPERTONIC_TOTAL_STEPS,
+                speed=speed or SUPERTONIC_SPEED,
+                max_chunk_length=SUPERTONIC_MAX_CHUNK_LENGTH,
+                silence_duration=SUPERTONIC_SILENCE_DURATION,
+                lang=resolved_language,
+                verbose=False,
+            )
+            return wav, int(getattr(tts, "sample_rate", 44_100) or 44_100)
+
+        t0 = time.monotonic()
+        samples, sample_rate = await loop.run_in_executor(None, _run_synthesis)
+        duration = time.monotonic() - t0
+        log.info(
+            "supertonic_tts_synthesized",
+            duration_s=round(duration, 2),
+            sample_rate=sample_rate,
+            chars=len(text),
+            model_id=resolved_model,
+            voice=resolved_voice,
+            language=resolved_language,
+        )
+
+        import numpy as np
+        import soundfile as sf
+
+        wav_fd, wav_path = tempfile.mkstemp(suffix=".wav")
+        os.close(wav_fd)
+        try:
+            sf.write(wav_path, np.asarray(samples).squeeze(), sample_rate)
+
+            ogg_fd, ogg_path = tempfile.mkstemp(suffix=".ogg")
+            os.close(ogg_fd)
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    wav_path,
+                    "-c:a",
+                    "libopus",
+                    "-b:a",
+                    "64k",
+                    ogg_path,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                try:
+                    _, stderr = await asyncio.wait_for(proc.communicate(), timeout=30)
+                except TimeoutError:
+                    proc.kill()
+                    log.error("supertonic_tts_ffmpeg_timeout")
+                    Path(ogg_path).unlink(missing_ok=True)
+                    return None
+
+                if proc.returncode != 0:
+                    err_msg = stderr.decode(errors="replace")[:500] if stderr else ""
+                    log.error("supertonic_tts_ffmpeg_failed", returncode=proc.returncode, stderr=err_msg)
+                    Path(ogg_path).unlink(missing_ok=True)
+                    return None
+
+                return ogg_path
+            except Exception:
+                Path(ogg_path).unlink(missing_ok=True)
+                raise
+        finally:
+            Path(wav_path).unlink(missing_ok=True)
+    except FileNotFoundError as exc:
+        log.warning("supertonic_assets_missing", model_id=resolved_model, voice=resolved_voice, error=str(exc))
+        _set_last_tts_error(
+            provider="supertonic",
+            code="assets_missing",
+            message=str(exc),
+            model_id=resolved_model,
+            voice_id=resolved_voice,
+        )
+        return None
+    except Exception as exc:
+        log.exception("supertonic_tts_synthesis_error")
+        _set_last_tts_error(
+            provider="supertonic",
+            code="synthesis_error",
+            message=str(exc)[:240],
+            model_id=resolved_model,
+            voice_id=resolved_voice,
+        )
+        return None
+
+
 # --- Orchestrator ---
 
 
@@ -431,7 +631,17 @@ async def synthesize_speech(
     voice_cfg = AVAILABLE_VOICES.get(voice)
     preferred_provider = (provider or "").strip().lower()
     explicit_elevenlabs = preferred_provider == "elevenlabs"
+    explicit_supertonic = preferred_provider == "supertonic"
     resolved_language = (language or "").strip().lower() or None
+
+    if explicit_supertonic:
+        return await _supertonic_synthesize(
+            text,
+            voice or SUPERTONIC_DEFAULT_VOICE,
+            speed,
+            model_id=model or SUPERTONIC_DEFAULT_MODEL,
+            language=resolved_language,
+        )
 
     # Unknown voice — if it looks like an ElevenLabs voice_id, try it; otherwise Kokoro
     if voice_cfg is None:

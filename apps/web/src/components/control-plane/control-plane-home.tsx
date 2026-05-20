@@ -10,6 +10,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { requestJson } from "@/lib/http-client";
 import { parseHealthPort, prettyJson } from "@/lib/control-plane-editor";
 import type { ControlPlaneAgentSummary } from "@/lib/control-plane";
+import { translate } from "@/lib/i18n";
 
 function slug(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
@@ -47,7 +48,7 @@ export function ControlPlaneHome({
   coreCapabilities: Record<string, unknown>;
 }) {
   const router = useRouter();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const [agentId, setBotId] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [color, setColor] = useState("#6E97D9");
@@ -85,12 +86,12 @@ export function ControlPlaneHome({
           },
         }),
       });
-      setMessage(tl("Agent {{id}} criado com sucesso.", { id: payload.id }));
+      setMessage(t("generated.controlPlane.agent_id_criado_com_sucesso_1224f6b9", { id: payload.id }));
       router.push(`/control-plane/agents/${payload.id}`);
       router.refresh();
     }, {
-      successMessage: tl("Bot criado com sucesso."),
-      errorMessage: tl("Falha ao criar bot."),
+      successMessage: t("generated.controlPlane.bot_criado_com_sucesso_fc2f3c1a"),
+      errorMessage: t("generated.controlPlane.falha_ao_criar_bot_0db0f895"),
       onError: async (error) => setMessage(error.message),
     });
   }
@@ -103,11 +104,11 @@ export function ControlPlaneHome({
         method: "PATCH",
         body: JSON.stringify({ sections: parsed }),
       });
-      setMessage(tl("Defaults globais atualizados."));
+      setMessage(t("generated.controlPlane.defaults_globais_atualizados_1e0a0051"));
       router.refresh();
     }, {
-      successMessage: tl("Defaults globais atualizados."),
-      errorMessage: tl("Falha ao salvar defaults globais."),
+      successMessage: t("generated.controlPlane.defaults_globais_atualizados_1e0a0051"),
+      errorMessage: t("generated.controlPlane.falha_ao_salvar_defaults_globais_3dbb9a8f"),
       onError: async (error) => setMessage(error.message),
     });
   }
@@ -118,11 +119,11 @@ export function ControlPlaneHome({
       await requestJson(`/api/control-plane/agents/${agentIdValue}/${action}`, {
         method: "POST",
       });
-      setMessage(tl("Ação {{action}} aplicada em {{agentId}}.", { action, agentId: agentIdValue }));
+      setMessage(t("generated.controlPlane.acao_action_aplicada_em_agentid_4d9ba5a1", { action, agentId: agentIdValue }));
       router.refresh();
     }, {
-      successMessage: tl("Ação {{action}} aplicada em {{agentId}}.", { action, agentId: agentIdValue }),
-      errorMessage: tl("Falha ao executar {{action}}.", { action }),
+      successMessage: t("generated.controlPlane.acao_action_aplicada_em_agentid_4d9ba5a1", { action, agentId: agentIdValue }),
+      errorMessage: t("generated.controlPlane.falha_ao_executar_action_cdf27ea6", { action }),
       onError: async (error) => setMessage(error.message),
     });
   }
@@ -130,12 +131,12 @@ export function ControlPlaneHome({
   return (
     <div className="space-y-6">
       <PageHeader
-        title={tl("Control Plane")}
-        description={tl("Catálogo dinâmico dos bots, defaults globais e atalhos de publicação.")}
+        title={t("generated.controlPlane.control_plane_744d4a20")}
+        description={t("generated.controlPlane.catalogo_dinamico_dos_bots_defaults_globais__63de7fb4")}
         meta={
           <div className="flex flex-wrap gap-2">
-            <span className="chip">{tl("Global defaults")} v{globalDefaults.version}</span>
-            <span className="chip">{tl("{{count}} core tools", { count: coreTools.items.length })}</span>
+            <span className="chip">{t("generated.controlPlane.global_defaults_e66067d9")} {translate("generated.controlPlane.v_76abe6e8")}{globalDefaults.version}</span>
+            <span className="chip">{t("generated.controlPlane.count_core_tools_3b1fc27e", { count: coreTools.items.length })}</span>
           </div>
         }
       />
@@ -150,7 +151,7 @@ export function ControlPlaneHome({
         <div className="glass-card p-5 sm:p-6">
           <div className="space-y-4">
             <div>
-              <p className="eyebrow">{tl("Bots")}</p>
+              <p className="eyebrow">{t("generated.controlPlane.bots_b2016c98")}</p>
               <h2 className="mt-2 text-2xl font-semibold tracking-[-0.05em] text-[var(--text-primary)]">
                 {formatAgentCatalogCount(tl, agents.length)}
               </h2>
@@ -182,16 +183,16 @@ export function ControlPlaneHome({
                     </div>
                     <span className="chip">
                       {agent.status === "active"
-                        ? tl("Ativo")
+                        ? t("generated.controlPlane.ativo_70b78dfa")
                         : agent.status === "paused"
-                          ? tl("Pausado")
+                          ? t("generated.controlPlane.pausado_687e9e74")
                           : agent.status}
                     </span>
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)]">
-                    <span>{tl("Applied")} v{agent.applied_version ?? "—"}</span>
-                    <span>{tl("Desired")} v{agent.desired_version ?? "—"}</span>
+                    <span>{t("generated.controlPlane.applied_ca8a9229")} {translate("generated.controlPlane.v_76abe6e8")}{agent.applied_version ?? "—"}</span>
+                    <span>{t("generated.controlPlane.desired_918bbbc1")} {translate("generated.controlPlane.v_76abe6e8")}{agent.desired_version ?? "—"}</span>
                     <span>{agent.storage_namespace}</span>
                     <span>{String(agent.runtime_endpoint?.health_port ?? "—")}</span>
                   </div>
@@ -201,7 +202,7 @@ export function ControlPlaneHome({
                       href={`/control-plane/agents/${agent.id}`}
                       className="button-shell button-shell--primary button-shell--sm"
                     >
-                      {tl("Abrir editor")}
+                      {t("generated.controlPlane.abrir_editor_2bc7a60a")}
                     </Link>
                     <AsyncActionButton
                       type="button"
@@ -210,9 +211,9 @@ export function ControlPlaneHome({
                       size="sm"
                       loading={isPending(`publish:${agent.id}`)}
                       status={getStatus(`publish:${agent.id}`)}
-                      loadingLabel={tl("Publicando")}
+                      loadingLabel={t("generated.controlPlane.publicando_101b5815")}
                     >
-                      {tl("Publicar")}
+                      {t("generated.controlPlane.publicar_eaf58f05")}
                     </AsyncActionButton>
                     <AsyncActionButton
                       type="button"
@@ -227,9 +228,9 @@ export function ControlPlaneHome({
                           ? getStatus(`activate:${agent.id}`)
                           : getStatus(`pause:${agent.id}`)
                       }
-                      loadingLabel={agent.status === "active" ? tl("Pausando") : tl("Ativando")}
+                      loadingLabel={agent.status === "active" ? t("generated.controlPlane.pausando_eef1e878") : t("generated.controlPlane.ativando_d8dad0b2")}
                     >
-                      {agent.status === "active" ? tl("Pausar") : tl("Ativar")}
+                      {agent.status === "active" ? t("generated.controlPlane.pausar_85f3ee9b") : t("generated.controlPlane.ativar_db54d834")}
                     </AsyncActionButton>
                   </div>
                 </article>
@@ -241,32 +242,32 @@ export function ControlPlaneHome({
         <div className="glass-card p-5 sm:p-6">
           <div className="space-y-4">
             <div>
-              <p className="eyebrow">{tl("Criar bot")}</p>
+              <p className="eyebrow">{t("generated.controlPlane.criar_bot_3f7c6aa1")}</p>
               <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                {tl("Novo bot self-hosted")}
+                {t("generated.controlPlane.novo_bot_self_hosted_401d4835")}
               </h2>
             </div>
 
             <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                {tl("ID")}
+                {t("generated.controlPlane.id_eb64177a")}
               </span>
               <input
                 value={agentId}
                 onChange={(event) => setBotId(event.target.value.toUpperCase())}
-                placeholder={tl("EXEMPLO_BOT")}
+                placeholder={t("generated.controlPlane.exemplo_bot_bc80ea67")}
                 className="field-shell text-[var(--text-primary)]"
               />
             </label>
 
             <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                {tl("Display name")}
+                {t("generated.controlPlane.display_name_13949286")}
               </span>
               <input
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
-                placeholder={tl("Exemplo Bot")}
+                placeholder={t("generated.controlPlane.exemplo_bot_52a4140b")}
                 className="field-shell text-[var(--text-primary)]"
               />
             </label>
@@ -274,7 +275,7 @@ export function ControlPlaneHome({
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                {tl("Cor")}
+                {t("generated.controlPlane.cor_a63c4fed")}
               </span>
                 <input
                   value={color}
@@ -297,7 +298,7 @@ export function ControlPlaneHome({
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                  {tl("Namespace")}
+                  {t("generated.controlPlane.namespace_4a91cf30")}
               </span>
                 <input
                   value={nextStorageNamespace}
@@ -307,7 +308,7 @@ export function ControlPlaneHome({
               </label>
               <label className="block">
               <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                  {tl("Health port")}
+                  {t("generated.controlPlane.health_port_75cfd237")}
               </span>
                 <input
                   value={healthPort}
@@ -322,10 +323,10 @@ export function ControlPlaneHome({
               onClick={() => void handleCreateAgent()}
               loading={isPending("create")}
               status={getStatus("create")}
-              loadingLabel={tl("Criando bot")}
+              loadingLabel={t("generated.controlPlane.criando_bot_a401c37b")}
               className="w-full"
             >
-              {tl("Criar bot")}
+              {t("generated.controlPlane.criar_bot_3f7c6aa1")}
             </AsyncActionButton>
           </div>
         </div>
@@ -333,12 +334,12 @@ export function ControlPlaneHome({
 
       <section className="grid gap-6 xl:grid-cols-3">
         <div className="glass-card p-5 sm:p-6">
-          <p className="eyebrow">{tl("Core tools")}</p>
+          <p className="eyebrow">{t("generated.controlPlane.core_tools_b3b00936")}</p>
           <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-            {tl("Catálogo governado pelo sistema")}
+            {t("generated.controlPlane.catalogo_governado_pelo_sistema_05415f6e")}
           </h2>
           <p className="mt-2 text-sm text-[var(--text-secondary)]">
-            {tl("Os bots só habilitam subsets desse catálogo.")}
+            {t("generated.controlPlane.os_bots_so_habilitam_subsets_desse_catalogo_bde5583d")}
           </p>
           <textarea
             readOnly
@@ -348,9 +349,9 @@ export function ControlPlaneHome({
         </div>
 
         <div className="glass-card p-5 sm:p-6">
-          <p className="eyebrow">{tl("Providers")}</p>
+          <p className="eyebrow">{t("generated.controlPlane.providers_371bc91d")}</p>
           <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-            {tl("Envelope global de modelos")}
+            {t("generated.controlPlane.envelope_global_de_modelos_1c5b926e")}
           </h2>
           <textarea
             readOnly
@@ -360,9 +361,9 @@ export function ControlPlaneHome({
         </div>
 
         <div className="glass-card p-5 sm:p-6">
-          <p className="eyebrow">{tl("Governança")}</p>
+          <p className="eyebrow">{t("generated.controlPlane.governanca_d4101c68")}</p>
           <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-            {tl("Policies e capabilities")}
+            {t("generated.controlPlane.policies_e_capabilities_94621b02")}
           </h2>
           <textarea
             readOnly
@@ -376,9 +377,9 @@ export function ControlPlaneHome({
         <div className="space-y-4">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <p className="eyebrow">{tl("Defaults globais")}</p>
+              <p className="eyebrow">{t("generated.controlPlane.defaults_globais_cdeeccf3")}</p>
               <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                {tl("Herança base para novos bots e overrides")}
+                {t("generated.controlPlane.heranca_base_para_novos_bots_e_overrides_1ee3212f")}
               </h2>
             </div>
             <AsyncActionButton
@@ -386,10 +387,10 @@ export function ControlPlaneHome({
               onClick={() => void handleSaveGlobalDefaults()}
               loading={isPending("defaults")}
               status={getStatus("defaults")}
-              loadingLabel={tl("Salvando defaults")}
+              loadingLabel={t("generated.controlPlane.salvando_defaults_e450f89f")}
               size="sm"
             >
-              {tl("Salvar defaults")}
+              {t("generated.controlPlane.salvar_defaults_8eecb9b1")}
             </AsyncActionButton>
           </div>
 

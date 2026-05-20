@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import copy
 import hashlib
 import json
 import os
@@ -30,7 +31,7 @@ from koda.agent_contract import (
     resolve_feature_filtered_tools,
     serialize_connection_profile,
 )
-from koda.config import SHARED_PLATFORM_PROMPT, STATE_BACKEND
+from koda.config import AGENT_ID, SHARED_PLATFORM_PROMPT, STATE_BACKEND
 from koda.internal_rpc.retrieval_engine import build_retrieval_engine_client
 from koda.knowledge.config import (
     KNOWLEDGE_V2_EMBEDDING_DIMENSION,
@@ -107,6 +108,21 @@ from koda.services.provider_auth import (
     verify_provider_local_connection,
     verify_provider_subscription_login,
 )
+from koda.services.runtime.redaction import redact_value
+from koda.services.supertonic_manager import (
+    SUPERTONIC_DEFAULT_LANGUAGE_ID,
+    SUPERTONIC_DEFAULT_MODEL_ID,
+    SUPERTONIC_DEFAULT_VOICE_ID,
+    delete_supertonic_model,
+    delete_supertonic_voice,
+    ensure_supertonic_model,
+    ensure_supertonic_voice_downloaded,
+    import_supertonic_voice_json,
+    supertonic_model_catalog_payload,
+    supertonic_model_status,
+    supertonic_voice_catalog_payload,
+    supertonic_voice_metadata,
+)
 from koda.services.tool_prompt import build_agent_tools_prompt
 from koda.services.whisper_manager import (
     KNOWN_WHISPER_VARIANTS,
@@ -178,6 +194,16 @@ from .settings import (
     ROOT_DIR,
     looks_like_secret_key,
 )
+from .workspace_import import (
+    WORKSPACE_SCAN_SCHEMA_VERSION,
+    directory_roots_payload,
+    list_directory_payload,
+    read_importable_source_content,
+    record_workspace_import_metrics,
+    scan_workspace_directory,
+    validate_workspace_root,
+    workspace_source_from_dict,
+)
 
 log = get_logger(__name__)
 
@@ -192,6 +218,27 @@ _LOWERCASE_FILE_SAFE_RE = re.compile(r"[^a-z0-9_-]+")
 _STATUS_VALUES = frozenset({"active", "paused", "archived"})
 _SCOPE_VALUES = frozenset({"agent", "global"})
 _ENV_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+_WORKSPACE_IMPORT_BLOCK_RE = re.compile(
+    r"\n?<!-- koda:workspace-import:start\b.*?<!-- koda:workspace-import:end -->\n?",
+    re.DOTALL,
+)
+_WORKSPACE_IMPORT_START = "<!-- koda:workspace-import:start"
+_WORKSPACE_IMPORT_END = "<!-- koda:workspace-import:end -->"
+
+
+def _redact_workspace_import_error(exc: BaseException) -> str:
+    try:
+        text = str(redact_value(str(exc)))
+    except Exception:  # pragma: no cover - redaction must never mask scan failure handling
+        text = str(exc)
+    text = re.sub(
+        r"(?i)((?:api[_-]?key|secret|token|password|credential|private[_-]?key)\s*[:=]\s*)[^\s,;]+",
+        r"\1[REDACTED]",
+        text,
+    )
+    return text[:500] or "workspace import scan failed"
+
+
 _AGENT_DOCUMENT_LAYOUT: tuple[tuple[str, str], ...] = (
     ("identity_md", "agent_identity"),
     ("soul_md", "agent_soul"),
@@ -234,7 +281,7 @@ _ALLOWED_AUTONOMY_TIERS: frozenset[str] = frozenset({"t0", "t1", "t2"})
 _ALLOWED_PROVENANCE_POLICIES: frozenset[str] = frozenset({"strict", "standard"})
 _ALLOWED_VARIABLE_TYPES: frozenset[str] = frozenset({"text", "secret"})
 _ALLOWED_VARIABLE_SCOPES: frozenset[str] = frozenset({"system_only", "agent_grant"})
-_PROVIDER_DOWNLOAD_PROVIDER_IDS: frozenset[str] = frozenset({"kokoro", "whispercpp", "embedding"})
+_PROVIDER_DOWNLOAD_PROVIDER_IDS: frozenset[str] = frozenset({"kokoro", "supertonic", "whispercpp", "embedding"})
 
 
 class _ProviderDownloadCancelled(RuntimeError):
@@ -540,6 +587,9 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
         "elevenlabs_default_voice": ("TTS_DEFAULT_VOICE", "string"),
         "kokoro_default_language": ("KOKORO_DEFAULT_LANGUAGE", "string"),
         "kokoro_default_voice": ("KOKORO_DEFAULT_VOICE", "string"),
+        "supertonic_default_model": ("SUPERTONIC_DEFAULT_MODEL", "string"),
+        "supertonic_default_language": ("SUPERTONIC_DEFAULT_LANGUAGE", "string"),
+        "supertonic_default_voice": ("SUPERTONIC_DEFAULT_VOICE", "string"),
         "elevenlabs_model": ("ELEVENLABS_MODEL", "string"),
         "transcript_replay_limit": ("TRANSCRIPT_REPLAY_LIMIT", "int"),
         "claude_enabled": ("CLAUDE_ENABLED", "bool"),
@@ -577,6 +627,18 @@ _SYSTEM_SETTINGS_FIELD_SPECS: dict[str, dict[str, tuple[str, str]]] = {
         "ollama_model_small": ("OLLAMA_MODEL_SMALL", "string"),
         "ollama_model_medium": ("OLLAMA_MODEL_MEDIUM", "string"),
         "ollama_model_large": ("OLLAMA_MODEL_LARGE", "string"),
+        "openrouter_enabled": ("OPENROUTER_ENABLED", "bool"),
+        "openrouter_available_models": ("OPENROUTER_AVAILABLE_MODELS", "csv"),
+        "openrouter_default_model": ("OPENROUTER_DEFAULT_MODEL", "string"),
+        "openrouter_model_small": ("OPENROUTER_MODEL_SMALL", "string"),
+        "openrouter_model_medium": ("OPENROUTER_MODEL_MEDIUM", "string"),
+        "openrouter_model_large": ("OPENROUTER_MODEL_LARGE", "string"),
+        "openrouter_timeout": ("OPENROUTER_TIMEOUT", "int"),
+        "openrouter_first_chunk_timeout": ("OPENROUTER_FIRST_CHUNK_TIMEOUT", "int"),
+        "openrouter_api_base_url": ("OPENROUTER_API_BASE_URL", "string"),
+        "openrouter_http_referer": ("OPENROUTER_HTTP_REFERER", "string"),
+        "openrouter_app_title": ("OPENROUTER_APP_TITLE", "string"),
+        "openrouter_app_categories": ("OPENROUTER_APP_CATEGORIES", "string"),
     },
     "tools": {
         "default_agent_mode": ("DEFAULT_AGENT_MODE", "string"),
@@ -705,7 +767,9 @@ _CORE_PROVIDER_ENABLED_DEFAULTS: dict[str, bool] = {
     "gemini": False,
     "ollama": False,
     "elevenlabs": False,
+    "openrouter": False,
     "kokoro": True,
+    "supertonic": True,
     "whispercpp": True,
 }
 _SHARED_ENV_RESERVED_PREFIXES: tuple[str, ...] = (
@@ -720,6 +784,8 @@ _SHARED_ENV_RESERVED_PREFIXES: tuple[str, ...] = (
     "OPENAI_",
     "ANTHROPIC_",
     "AZURE_OPENAI_",
+    "OPENROUTER_",
+    "SUPERTONIC_",
 )
 _LOCAL_ENV_RESERVED_PREFIXES: tuple[str, ...] = tuple(
     prefix for prefix in _SHARED_ENV_RESERVED_PREFIXES if prefix != "AGENT_"
@@ -794,6 +860,9 @@ _GENERAL_FIELD_SOURCE_ENV_KEYS: dict[str, str] = {
     "models.elevenlabs_default_voice": "TTS_DEFAULT_VOICE",
     "models.kokoro_default_language": "KOKORO_DEFAULT_LANGUAGE",
     "models.kokoro_default_voice": "KOKORO_DEFAULT_VOICE",
+    "models.supertonic_default_model": "SUPERTONIC_DEFAULT_MODEL",
+    "models.supertonic_default_language": "SUPERTONIC_DEFAULT_LANGUAGE",
+    "models.supertonic_default_voice": "SUPERTONIC_DEFAULT_VOICE",
     "models.elevenlabs_model": "ELEVENLABS_MODEL",
     "models.metal_enabled": "METAL_ENABLED",
     "memory.memory_enabled": "MEMORY_ENABLED",
@@ -1053,6 +1122,52 @@ def _row_json(row: Any, column: str) -> dict[str, Any]:
     return _safe_json_object(json_load(raw or "{}", {}))
 
 
+def _row_json_list(row: Any, column: str) -> list[Any]:
+    raw = row.get(column) if hasattr(row, "get") else None
+    loaded = json_load(raw or "[]", [])
+    return loaded if isinstance(loaded, list) else []
+
+
+def _row_text(row: Any, column: str, default: str = "") -> str:
+    if not _row_has_column(row, column):
+        return default
+    value = row.get(column) if hasattr(row, "get") else None
+    return str(value or default)
+
+
+def _workspace_scan_sources(scan_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    sources = scan_payload.get("sources")
+    return [item for item in sources if isinstance(item, dict)] if isinstance(sources, list) else []
+
+
+def _workspace_scan_summary(scan_payload: dict[str, Any]) -> dict[str, Any]:
+    summary = scan_payload.get("summary")
+    if isinstance(summary, dict):
+        return dict(summary)
+    sources = _workspace_scan_sources(scan_payload)
+    by_kind: dict[str, int] = {}
+    by_tool: dict[str, int] = {}
+    by_risk: dict[str, int] = {}
+    for source in sources:
+        kind = str(source.get("kind") or "unknown")
+        tool = str(source.get("tool") or "generic")
+        risk = str(source.get("risk") or "review")
+        by_kind[kind] = by_kind.get(kind, 0) + 1
+        by_tool[tool] = by_tool.get(tool, 0) + 1
+        by_risk[risk] = by_risk.get(risk, 0) + 1
+    return {
+        "total_sources": len(sources),
+        "by_kind": by_kind,
+        "by_tool": by_tool,
+        "by_risk": by_risk,
+        "review_required": sum(1 for source in sources if str(source.get("risk") or "") in {"review", "high"}),
+        "blocked": sum(1 for source in sources if str(source.get("risk") or "") == "blocked"),
+        "importable": sum(
+            1 for source in sources if str(source.get("import_action") or "") == "append_workspace_prompt"
+        ),
+    }
+
+
 def _user_selectable_provider_ids(provider_catalog: dict[str, Any]) -> list[str]:
     return [
         provider_id
@@ -1071,6 +1186,47 @@ def _downloaded_whisper_catalog_models(payload: dict[str, Any]) -> tuple[list[di
     default_variant = _nonempty_text(payload.get("default_variant"))
     default_model = default_variant if default_variant in downloaded else (downloaded[0] if downloaded else "")
     return items, downloaded, default_model
+
+
+def _provider_command_availability_issues(provider_catalog: dict[str, Any]) -> tuple[list[str], list[str]]:
+    errors: list[str] = []
+    warnings: list[str] = []
+    for provider, raw_payload in _safe_json_object(provider_catalog.get("providers")).items():
+        payload = _safe_json_object(raw_payload)
+        if not bool(payload.get("enabled")):
+            continue
+        category = str(payload.get("category") or "general")
+        if category == "infra" or bool(payload.get("command_present")):
+            continue
+        message = f"provider '{provider}' is enabled but its runtime command is not available"
+        if category == "general":
+            errors.append(message)
+        else:
+            warnings.append(message)
+    return errors, warnings
+
+
+def _runtime_endpoint_payload_for_port(port: int) -> dict[str, Any]:
+    return {
+        "health_port": port,
+        "health_url": f"http://127.0.0.1:{port}/health",
+        "runtime_base_url": f"http://127.0.0.1:{port}",
+    }
+
+
+def _runtime_health_port_from_endpoint(endpoint: dict[str, Any]) -> int:
+    raw_port = endpoint.get("health_port")
+    if raw_port not in (None, ""):
+        with contextlib.suppress(TypeError, ValueError):
+            return int(str(raw_port))
+    raw_url = str(endpoint.get("health_url") or endpoint.get("runtime_base_url") or "").strip()
+    if raw_url:
+        with contextlib.suppress(ValueError):
+            parsed = urllib.parse.urlparse(raw_url)
+            parsed_port = parsed.port
+            if parsed_port:
+                return int(parsed_port)
+    return 0
 
 
 def _stringify_env_value(value: Any) -> str:
@@ -1422,6 +1578,7 @@ class ControlPlaneManager:
         self._elevenlabs_voice_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._elevenlabs_subscription_cache: dict[str, tuple[float, dict[str, Any]]] = {}
         self._ollama_model_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+        self._global_sections_cache: tuple[float, dict[str, dict[str, Any]]] | None = None
         self._provider_login_processes: dict[str, Any] = {}
         self._claude_oauth_verifiers: dict[str, str] = {}  # session_id → PKCE code_verifier
         self._provider_download_threads: dict[str, threading.Thread] = {}
@@ -1549,12 +1706,40 @@ class ControlPlaneManager:
             _row_json(row, "spec_json"),
             _row_json(row, "documents_json"),
         )
+        root_path = _row_text(row, "root_path").strip() or None
+        root_exists = bool(root_path and Path(root_path).is_dir())
+        scan_payload = _row_json(row, "config_sources_json") if _row_has_column(row, "config_sources_json") else {}
+        root_kind = _row_text(row, "root_kind", "local_path" if root_path else "").strip()
+        scan_status = _row_text(row, "scan_status", "not_scanned").strip() or "not_scanned"
+        if root_path is None:
+            root_trust_state = "logical_only"
+        elif root_exists:
+            root_trust_state = "trusted"
+        else:
+            root_trust_state = "missing"
         return {
             "id": str(row["id"]),
             "name": str(row["name"]),
             "description": str(row["description"] or ""),
             "spec": {},
             "documents": documents,
+            "root_path": root_path,
+            "root_exists": root_exists,
+            "root_kind": root_kind or ("local_path" if root_path else ""),
+            "root_trust_state": root_trust_state,
+            "scan_status": scan_status,
+            "last_scanned_at": _row_text(row, "last_scanned_at").strip() or None,
+            "scan_hash": _row_text(row, "scan_hash"),
+            "detected_sources": _workspace_scan_sources(scan_payload),
+            "scan_summary": _workspace_scan_summary(scan_payload),
+            "runtime_defaults": {
+                "source_root_path": root_path,
+                "task_execution_mode": "runtime_worktree_or_copy" if root_path else "session_default",
+                "isolation_mode": "worktree_or_copy",
+            },
+            "import_history": _row_json_list(row, "import_history_json")
+            if _row_has_column(row, "import_history_json")
+            else [],
             "agent_count": agent_count,
             "squads": squads or [],
             "virtual_buckets": {
@@ -1746,19 +1931,33 @@ class ControlPlaneManager:
             raise ValueError("workspace name is required")
         workspace_id = self._next_workspace_entity_id("cp_workspaces", str(payload.get("id") or name))
         now = now_iso()
+        root_path = None
+        root_kind = ""
+        scan_status = "not_scanned"
+        if "root_path" in payload and str(payload.get("root_path") or "").strip():
+            root_path = str(validate_workspace_root(str(payload.get("root_path") or "")))
+            root_kind = "local_path"
+            scan_status = "stale"
         execute(
             """
-            INSERT INTO cp_workspaces (id, name, description, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO cp_workspaces (
+                id, name, description, root_path, root_kind, scan_status, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 workspace_id,
                 name,
                 str(payload.get("description") or "").strip(),
+                root_path,
+                root_kind,
+                scan_status,
                 now,
                 now,
             ),
         )
+        if root_path and bool(payload.get("scan_on_save")):
+            self.rescan_workspace(workspace_id, {})
         return next(item for item in self.list_workspaces()["items"] if item["id"] == workspace_id)
 
     def update_workspace(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -1767,20 +1966,380 @@ class ControlPlaneManager:
         name = str(payload.get("name") or row["name"]).strip()
         if not name:
             raise ValueError("workspace name is required")
+        current_root = _row_text(row, "root_path").strip() or None
+        root_path = current_root
+        root_kind = _row_text(row, "root_kind")
+        scan_status = _row_text(row, "scan_status", "not_scanned") or "not_scanned"
+        root_changed = False
+        if "root_path" in payload:
+            raw_root = str(payload.get("root_path") or "").strip()
+            root_path = str(validate_workspace_root(raw_root)) if raw_root else None
+            root_kind = "local_path" if root_path else ""
+            scan_status = "stale" if root_path else "not_scanned"
+            root_changed = root_path != current_root
         execute(
             """
             UPDATE cp_workspaces
-            SET name = ?, description = ?, updated_at = ?
+            SET name = ?, description = ?, root_path = ?, root_kind = ?, scan_status = ?, updated_at = ?
             WHERE id = ?
             """,
             (
                 name,
                 str(payload.get("description") if "description" in payload else row["description"] or "").strip(),
+                root_path,
+                root_kind,
+                scan_status,
                 now_iso(),
                 str(row["id"]),
             ),
         )
+        if root_changed and root_path and bool(payload.get("scan_on_save")):
+            self.rescan_workspace(str(row["id"]), {})
         return next(item for item in self.list_workspaces()["items"] if item["id"] == str(row["id"]))
+
+    def list_workspace_directory_roots(self) -> dict[str, Any]:
+        return directory_roots_payload()
+
+    def list_workspace_directory(self, payload: dict[str, Any]) -> dict[str, Any]:
+        path = str(payload.get("path") or "").strip()
+        if not path:
+            raise ValueError("path is required")
+        return list_directory_payload(path)
+
+    def scan_workspace_directory(self, payload: dict[str, Any]) -> dict[str, Any]:
+        path = str(payload.get("path") or "").strip()
+        if not path:
+            raise ValueError("path is required")
+        max_depth = int(payload.get("maxDepth") or payload.get("max_depth") or 8)
+        return scan_workspace_directory(path, max_depth=max_depth).to_dict()
+
+    def import_workspace_from_directory(self, payload: dict[str, Any]) -> dict[str, Any]:
+        path = str(payload.get("path") or "").strip()
+        if not path:
+            raise ValueError("path is required")
+        scan_payload = self.scan_workspace_directory(payload)
+        name = str(payload.get("name") or Path(scan_payload["root_path"]).name or "Imported workspace").strip()
+        workspace = self.create_workspace(
+            {
+                "name": name,
+                "description": str(payload.get("description") or "").strip(),
+                "root_path": scan_payload["root_path"],
+            }
+        )
+        workspace_id = str(workspace["id"])
+        self._persist_workspace_scan(workspace_id, scan_payload, status="completed")
+        selected = self._selected_source_ids(payload)
+        import_result: dict[str, Any] = {"applied": [], "skipped": [], "conflicts": []}
+        if selected:
+            import_result = self.import_workspace_config(workspace_id, {"selectedSourceIds": selected})
+        refreshed = next(item for item in self.list_workspaces()["items"] if item["id"] == workspace_id)
+        return {"workspace": refreshed, "scan": scan_payload, "import_result": import_result}
+
+    def rescan_workspace(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        row = self._workspace_row(workspace_id)
+        root_path = _row_text(row, "root_path").strip()
+        if not root_path:
+            raise ValueError("workspace has no root_path")
+        try:
+            scan_payload = self.scan_workspace_directory(
+                {
+                    "path": root_path,
+                    "maxDepth": payload.get("maxDepth") or payload.get("max_depth") or 8,
+                }
+            )
+        except Exception as exc:
+            self._persist_workspace_scan_error(str(row["id"]), root_path, exc)
+            raise
+        self._persist_workspace_scan(str(row["id"]), scan_payload, status="completed")
+        return {
+            "workspace": next(item for item in self.list_workspaces()["items"] if item["id"] == str(row["id"])),
+            "scan": scan_payload,
+        }
+
+    def import_workspace_config(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        row = self._workspace_row(workspace_id)
+        if bool(payload.get("rescan")):
+            scan_payload = self.rescan_workspace(workspace_id, payload)["scan"]
+            row = self._workspace_row(workspace_id)
+        else:
+            scan_payload = _row_json(row, "config_sources_json")
+        if not scan_payload:
+            root_path = _row_text(row, "root_path").strip()
+            if not root_path:
+                raise ValueError("workspace has no scan metadata and no root_path")
+            scan_payload = self.rescan_workspace(workspace_id, payload)["scan"]
+            row = self._workspace_row(workspace_id)
+
+        selected = self._selected_source_ids(payload)
+        if not selected:
+            return {"applied": [], "skipped": [], "conflicts": [], "message": "no selected sources"}
+
+        sources = [workspace_source_from_dict(item) for item in _workspace_scan_sources(scan_payload)]
+        selected_sources = [source for source in sources if source.source_id in selected]
+        selected_source_ids = {source.source_id for source in selected_sources}
+        missing = sorted(set(selected) - selected_source_ids)
+
+        result: dict[str, Any] = {"applied": [], "skipped": [], "conflicts": []}
+        root_path = _row_text(row, "root_path").strip() or str(scan_payload.get("root_path") or "")
+        prompt_sources = [
+            source
+            for source in selected_sources
+            if source.import_action == "append_workspace_prompt" and source.risk == "low"
+        ]
+        if prompt_sources:
+            self._apply_workspace_prompt_import(str(row["id"]), root_path, scan_payload, prompt_sources)
+            result["applied"].append({"action": "workspace_prompt", "count": len(prompt_sources)})
+
+        for source in selected_sources:
+            if source in prompt_sources:
+                continue
+            if source.import_action == "create_agent_draft" and source.risk in {"review", "low"}:
+                created = self._apply_workspace_agent_import(str(row["id"]), root_path, source)
+                result["applied" if created.get("created") else "conflicts"].append(created)
+            elif source.import_action == "mcp_review":
+                mcp_candidates = self._apply_workspace_mcp_candidates(str(row["id"]), source)
+                result["applied"].extend(mcp_candidates)
+                if not mcp_candidates:
+                    result["skipped"].append({"source_id": source.source_id, "reason": "no safe MCP server shape"})
+            else:
+                result["skipped"].append(
+                    {
+                        "source_id": source.source_id,
+                        "relative_path": source.relative_path,
+                        "reason": "review_required_or_blocked",
+                    }
+                )
+        for source_id in missing:
+            result["skipped"].append({"source_id": source_id, "reason": "source_not_found"})
+        self._append_workspace_import_history(str(row["id"]), scan_payload, result, selected)
+        record_workspace_import_metrics(result)
+        return result
+
+    def get_workspace_runtime_root_for_agent(self, agent_id: str | None) -> str | None:
+        normalized = _normalize_agent_id(agent_id or "") if str(agent_id or "").strip() else None
+        if not normalized:
+            return None
+        row = fetch_one(
+            """
+            SELECT w.root_path
+            FROM cp_agent_definitions a
+            JOIN cp_workspaces w ON w.id = a.workspace_id
+            WHERE a.id = ?
+            """,
+            (normalized,),
+        )
+        root_path = str((row or {}).get("root_path") or "").strip()
+        if not root_path:
+            return None
+        try:
+            return str(validate_workspace_root(root_path))
+        except ValueError:
+            return None
+
+    def _selected_source_ids(self, payload: dict[str, Any]) -> list[str]:
+        raw = payload.get("selectedSourceIds", payload.get("selected_source_ids", []))
+        if raw is None:
+            return []
+        if not isinstance(raw, list):
+            raise ValueError("selectedSourceIds must be a list")
+        return [str(item) for item in raw if str(item or "").strip()]
+
+    def _persist_workspace_scan(self, workspace_id: str, scan_payload: dict[str, Any], *, status: str) -> None:
+        execute(
+            """
+            UPDATE cp_workspaces
+            SET root_path = ?, root_kind = ?, scan_status = ?, last_scanned_at = ?,
+                scan_hash = ?, config_sources_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                str(scan_payload.get("root_path") or ""),
+                str(scan_payload.get("root_kind") or "local_path"),
+                status,
+                now_iso(),
+                str(scan_payload.get("scan_hash") or ""),
+                json_dump(scan_payload),
+                now_iso(),
+                workspace_id,
+            ),
+        )
+
+    def _persist_workspace_scan_error(self, workspace_id: str, root_path: str, exc: BaseException) -> None:
+        history = _row_json_list(self._workspace_row(workspace_id), "import_history_json")
+        history.append(
+            {
+                "schema_version": "workspace_import_history.v1",
+                "event": "scan_error",
+                "recorded_at": now_iso(),
+                "root_path": root_path,
+                "error": _redact_workspace_import_error(exc),
+            }
+        )
+        execute(
+            """
+            UPDATE cp_workspaces
+            SET scan_status = ?, import_history_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            ("error", json_dump(history[-25:]), now_iso(), workspace_id),
+        )
+
+    def _append_workspace_import_history(
+        self,
+        workspace_id: str,
+        scan_payload: dict[str, Any],
+        result: dict[str, Any],
+        selected_source_ids: list[str],
+    ) -> None:
+        row = self._workspace_row(workspace_id)
+        history = _row_json_list(row, "import_history_json")
+        history.append(
+            {
+                "schema_version": "workspace_import_history.v1",
+                "imported_at": now_iso(),
+                "scan_hash": scan_payload.get("scan_hash"),
+                "selected_source_ids": selected_source_ids,
+                "result": result,
+            }
+        )
+        execute(
+            "UPDATE cp_workspaces SET import_history_json = ?, updated_at = ? WHERE id = ?",
+            (json_dump(history[-25:]), now_iso(), workspace_id),
+        )
+
+    def _apply_workspace_prompt_import(
+        self,
+        workspace_id: str,
+        root_path: str,
+        scan_payload: dict[str, Any],
+        sources: list[Any],
+    ) -> None:
+        row = self._workspace_row(workspace_id)
+        documents = resolve_scope_documents(
+            "workspace",
+            _row_json(row, "spec_json"),
+            _row_json(row, "documents_json"),
+        )
+        current = str(documents.get("system_prompt_md") or "")
+        body_parts = [
+            (
+                f"{_WORKSPACE_IMPORT_START} schema={WORKSPACE_SCAN_SCHEMA_VERSION} "
+                f"scan_hash={scan_payload.get('scan_hash', '')} -->"
+            ),
+            "",
+            "## Imported Workspace Directory Context",
+            "",
+        ]
+        for source in sources:
+            content = read_importable_source_content(root_path, source)
+            if not content:
+                continue
+            body_parts.extend(
+                [
+                    f"### {source.tool}: {source.relative_path}",
+                    "",
+                    f"Source ID: `{source.source_id}`",
+                    "",
+                    content,
+                    "",
+                ]
+            )
+        body_parts.append(_WORKSPACE_IMPORT_END)
+        block = "\n".join(body_parts).strip()
+        cleaned = _WORKSPACE_IMPORT_BLOCK_RE.sub("\n", current).strip()
+        documents["system_prompt_md"] = f"{cleaned}\n\n{block}".strip() if cleaned else block
+        execute(
+            """
+            UPDATE cp_workspaces
+            SET spec_json = ?, documents_json = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (json_dump({}), json_dump(documents), now_iso(), workspace_id),
+        )
+
+    def _apply_workspace_agent_import(self, workspace_id: str, root_path: str, source: Any) -> dict[str, Any]:
+        base_name = source.name or Path(source.relative_path).stem
+        agent_id = _normalize_agent_id(f"IMPORTED_{workspace_id}_{base_name}")[:64].strip("_")
+        if fetch_one("SELECT id FROM cp_agent_definitions WHERE id = ?", (agent_id,)) is not None:
+            return {
+                "created": False,
+                "action": "agent_draft",
+                "agent_id": agent_id,
+                "source_id": source.source_id,
+                "reason": "agent_exists",
+            }
+        agent = self.create_agent(
+            {
+                "id": agent_id,
+                "display_name": base_name,
+                "status": "paused",
+                "organization": {"workspace_id": workspace_id, "squad_id": None},
+                "metadata": {
+                    "imported_from": {
+                        "schema_version": WORKSPACE_SCAN_SCHEMA_VERSION,
+                        "source_id": source.source_id,
+                        "tool": source.tool,
+                        "relative_path": source.relative_path,
+                        "risk": source.risk,
+                    }
+                },
+            }
+        )
+        prompt = read_importable_source_content(root_path, source)
+        if prompt:
+            self.upsert_document(agent_id, "system_prompt_md", {"content_md": prompt})
+        return {
+            "created": True,
+            "action": "agent_draft",
+            "agent_id": agent.get("id", agent_id),
+            "source_id": source.source_id,
+        }
+
+    def _apply_workspace_mcp_candidates(self, workspace_id: str, source: Any) -> list[dict[str, Any]]:
+        created: list[dict[str, Any]] = []
+        servers = source.metadata.get("servers") if isinstance(source.metadata, dict) else []
+        if not isinstance(servers, list):
+            return created
+        for server in servers:
+            if not isinstance(server, dict):
+                continue
+            name = str(server.get("name") or "").strip()
+            if not name:
+                continue
+            server_key = _slug(f"imported_{workspace_id}_{name}")
+            command = [str(server.get("command") or ""), *[str(item) for item in server.get("args") or []]]
+            command = [item for item in command if item]
+            payload = {
+                "display_name": name,
+                "description": f"Imported disabled MCP candidate from {source.relative_path}",
+                "transport_type": "stdio" if command else "sse" if server.get("url") else "stdio",
+                "transport_kind": "remote" if server.get("url") else "local",
+                "command": command,
+                "remote_url": str(server.get("url") or "") or None,
+                "env_schema": [
+                    {"key": str(key), "label": str(key), "required": False} for key in server.get("env_keys") or []
+                ],
+                "enabled": False,
+                "default_policy": "always_ask",
+                "metadata": {
+                    "imported_from": {
+                        "schema_version": WORKSPACE_SCAN_SCHEMA_VERSION,
+                        "workspace_id": workspace_id,
+                        "source_id": source.source_id,
+                        "relative_path": source.relative_path,
+                    },
+                    "review_required": True,
+                },
+            }
+            entry = self.upsert_mcp_catalog_entry(server_key, payload)
+            created.append(
+                {
+                    "action": "mcp_candidate",
+                    "server_key": entry["server_key"],
+                    "source_id": source.source_id,
+                }
+            )
+        return created
 
     def delete_workspace(self, workspace_id: str) -> bool:
         self.ensure_seeded()
@@ -2683,6 +3242,8 @@ class ControlPlaneManager:
                 binary = _trimmed_text(env.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_BASE_URL") or "ollama")
             elif provider == "whispercpp":
                 binary = _trimmed_text(env.get("WHISPER_BIN") or os.environ.get("WHISPER_BIN") or "whisper-cli")
+            elif provider in {"kokoro", "supertonic"}:
+                binary = ""
             else:
                 binary = "claude"
             ollama_catalog_items: list[dict[str, Any]] | None = None
@@ -2712,6 +3273,18 @@ class ControlPlaneManager:
                 available_models = downloaded_models
                 if not default_model:
                     default_model = whisper_default_model
+            elif provider == "supertonic":
+                supertonic_catalog = supertonic_model_catalog_payload()
+                available_models = []
+                for raw_item in _safe_json_list(supertonic_catalog.get("items")):
+                    item = _safe_json_object(raw_item)
+                    model_id = _trimmed_text(item.get("model_id") or item.get("id"))
+                    if model_id:
+                        available_models.append(model_id)
+                if not default_model:
+                    default_model = (
+                        _trimmed_text(supertonic_catalog.get("default_model")) or SUPERTONIC_DEFAULT_MODEL_ID
+                    )
             command_present = provider_command_present(provider, base_env=env)
             providers[provider] = {
                 **definition,
@@ -3120,6 +3693,11 @@ class ControlPlaneManager:
 
         return KnowledgeRepository(_normalize_agent_id(agent_id))
 
+    def _improvement_proposal_service(self, agent_id: str) -> Any:
+        from koda.services.improvement_proposals import ImprovementProposalService
+
+        return ImprovementProposalService(self._knowledge_repository(agent_id))
+
     def _dashboard_store(self) -> Any:
         from koda.state.dashboard_store import get_dashboard_store
 
@@ -3202,9 +3780,9 @@ class ControlPlaneManager:
             "validation": validation,
         }
 
-    def get_dashboard_agent_summary(self, agent_id: str) -> dict[str, Any]:
+    def get_dashboard_agent_summary(self, agent_id: str, *, recent_task_limit: int = 5) -> dict[str, Any]:
         normalized, row = self._require_dashboard_agent(agent_id)
-        stats = self._dashboard_store().get_agent_stats(normalized)
+        stats = self._dashboard_store().get_agent_stats(normalized, recent_task_limit=recent_task_limit)
         return {
             **stats,
             "agent": self._serialize_agent_summary(
@@ -3248,6 +3826,24 @@ class ControlPlaneManager:
         from koda.control_plane.dashboard_service import get_dashboard_execution_detail
 
         return get_dashboard_execution_detail(normalized, task_id)
+
+    def get_dashboard_execution_run_graph(self, agent_id: str, task_id: int) -> dict[str, Any] | None:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.control_plane.dashboard_service import get_dashboard_execution_run_graph
+
+        return get_dashboard_execution_run_graph(normalized, task_id)
+
+    def get_dashboard_execution_replay(self, agent_id: str, task_id: int) -> dict[str, Any] | None:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.control_plane.dashboard_service import get_dashboard_execution_replay
+
+        return get_dashboard_execution_replay(normalized, task_id)
+
+    def get_dashboard_execution_sandbox_doctor(self, agent_id: str, task_id: int) -> dict[str, Any] | None:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.control_plane.dashboard_service import get_dashboard_execution_sandbox_doctor
+
+        return get_dashboard_execution_sandbox_doctor(normalized, task_id)
 
     def list_dashboard_sessions(
         self,
@@ -3330,6 +3926,10 @@ class ControlPlaneManager:
             ),
         )
 
+    def delete_dashboard_session(self, agent_id: str, session_id: str) -> int:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        return int(self._dashboard_store().delete_session(normalized, session_id))
+
     def get_dashboard_runtime_artifact_for_download(
         self,
         agent_id: str,
@@ -3401,6 +4001,48 @@ class ControlPlaneManager:
             return str(payload["error"])
         return f"runtime request failed with status {exc.code}"
 
+    def _post_runtime_session_message(
+        self,
+        *,
+        agent_id: str,
+        runtime_base_url: str,
+        runtime_token: str,
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        def build_request() -> urllib.request.Request:
+            return urllib.request.Request(
+                f"{runtime_base_url}/api/runtime/sessions/messages",
+                data=json.dumps(request_payload).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Runtime-Token": runtime_token,
+                    "User-Agent": "koda/control-plane",
+                },
+                method="POST",
+            )
+
+        for attempt in range(2):
+            try:
+                with urllib.request.urlopen(build_request(), timeout=20) as response:
+                    return cast(dict[str, Any], json.loads(response.read().decode("utf-8")))
+            except urllib.error.HTTPError as exc:
+                message = self._runtime_http_error_message(exc)
+                if exc.code in {502, 503, 504} and attempt == 0:
+                    self._wake_dashboard_runtime(agent_id)
+                    self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token)
+                    continue
+                if 400 <= exc.code < 500:
+                    raise ValueError(f"runtime rejected dashboard message: {message}") from exc
+                raise RuntimeError(message) from exc
+            except urllib.error.URLError as exc:
+                if attempt == 0:
+                    self._wake_dashboard_runtime(agent_id)
+                    if self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token):
+                        continue
+                raise RuntimeError(f"runtime is unavailable for agent {agent_id}") from exc
+
+        raise RuntimeError(f"runtime is unavailable for agent {agent_id}")
+
     def send_dashboard_session_message(
         self,
         agent_id: str,
@@ -3432,60 +4074,132 @@ class ControlPlaneManager:
         if session_id:
             request_payload["session_id"] = str(session_id).strip()
 
-        def build_request() -> urllib.request.Request:
-            return urllib.request.Request(
-                f"{runtime_base_url}/api/runtime/sessions/messages",
-                data=json.dumps(request_payload).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "X-Runtime-Token": runtime_token,
-                    "User-Agent": "koda/control-plane",
-                },
-                method="POST",
+        return self._post_runtime_session_message(
+            agent_id=normalized,
+            runtime_base_url=runtime_base_url,
+            runtime_token=runtime_token,
+            request_payload=request_payload,
+        )
+
+    def send_dashboard_squad_message(
+        self,
+        agent_id: str,
+        *,
+        text: str,
+        squad_thread_id: str,
+        session_id: str | None = None,
+        squad_task_id: str | None = None,
+        parent_message_id: str | None = None,
+        delegation_chain: list[str] | None = None,
+        delegation_request_id: str | None = None,
+        delegation_origin_agent_id: str | None = None,
+        telegram_message_thread_id: int | None = None,
+        user_id: int | None = None,
+        chat_id: int | None = None,
+    ) -> dict[str, Any]:
+        normalized, agent_row = self._require_dashboard_agent(agent_id)
+        payload_text = str(text or "").strip()
+        if not payload_text:
+            raise ValueError("text is required")
+        thread_id = str(squad_thread_id or "").strip()
+        if not thread_id:
+            raise ValueError("squad_thread_id is required")
+        agent_status = (
+            str(agent_row["status"] or "").strip().lower()
+            if _row_has_column(agent_row, "status")
+            else str(_safe_json_object(agent_row).get("status") or "").strip().lower()
+        )
+        if agent_status and agent_status != "active":
+            raise ValueError(f"agent {normalized} is {agent_status}; activate it before sending messages")
+
+        runtime_access = self.get_runtime_access(normalized, capability="mutate")
+        runtime_base_url = str(runtime_access.get("runtime_base_url") or "").rstrip("/")
+        runtime_token = str(runtime_access.get("runtime_request_token") or "").strip()
+        if not runtime_base_url:
+            raise RuntimeError("runtime base URL is unavailable for this agent")
+        if not runtime_token:
+            raise RuntimeError("runtime token is not configured for this agent")
+
+        session_seed = f"{thread_id}:{normalized}:{squad_task_id or parent_message_id or uuid4().hex}"
+        resolved_session_id = (
+            str(session_id or "").strip() or f"squad-{hashlib.sha256(session_seed.encode()).hexdigest()[:24]}"
+        )
+        request_payload: dict[str, Any] = {
+            "text": payload_text,
+            "session_id": resolved_session_id,
+            "squad": {
+                "thread_id": thread_id,
+                "target_agent_id": normalized,
+                "squad_task_id": str(squad_task_id).strip() if squad_task_id else None,
+                "parent_message_id": str(parent_message_id).strip() if parent_message_id else None,
+                "delegation_chain": list(delegation_chain or []),
+                "delegation_request_id": str(delegation_request_id).strip() if delegation_request_id else None,
+                "delegation_origin_agent_id": str(delegation_origin_agent_id).strip()
+                if delegation_origin_agent_id
+                else None,
+                "telegram_message_thread_id": telegram_message_thread_id,
+                "user_id": user_id,
+                "chat_id": chat_id,
+            },
+        }
+
+        try:
+            return self._post_runtime_session_message(
+                agent_id=normalized,
+                runtime_base_url=runtime_base_url,
+                runtime_token=runtime_token,
+                request_payload=request_payload,
             )
-
-        for attempt in range(2):
-            try:
-                with urllib.request.urlopen(build_request(), timeout=20) as response:
-                    return cast(dict[str, Any], json.loads(response.read().decode("utf-8")))
-            except urllib.error.HTTPError as exc:
-                message = self._runtime_http_error_message(exc)
-                if exc.code in {502, 503, 504} and attempt == 0:
-                    self._wake_dashboard_runtime(normalized)
-                    self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token)
-                    continue
-                if 400 <= exc.code < 500:
-                    raise ValueError(f"runtime rejected dashboard message: {message}") from exc
-                raise RuntimeError(message) from exc
-            except urllib.error.URLError as exc:
-                if attempt == 0:
-                    self._wake_dashboard_runtime(normalized)
-                    if self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token):
-                        continue
-                raise RuntimeError(f"runtime is unavailable for agent {normalized}") from exc
-
-        raise RuntimeError(f"runtime is unavailable for agent {normalized}")
+        except ValueError as exc:
+            carrier_agent_id = str(AGENT_ID or "").strip().upper()
+            if "invalid runtime token" not in str(exc) or not carrier_agent_id or carrier_agent_id == normalized:
+                raise
+            carrier_access = self.get_runtime_access(carrier_agent_id, capability="mutate")
+            carrier_base_url = str(carrier_access.get("runtime_base_url") or "").rstrip("/")
+            carrier_token = str(carrier_access.get("runtime_request_token") or "").strip()
+            if not carrier_base_url or not carrier_token:
+                raise
+            log.warning(
+                "dashboard_squad_runtime_carrier_fallback",
+                target_agent_id=normalized,
+                carrier_agent_id=carrier_agent_id,
+            )
+            return self._post_runtime_session_message(
+                agent_id=carrier_agent_id,
+                runtime_base_url=carrier_base_url,
+                runtime_token=carrier_token,
+                request_payload=request_payload,
+            )
 
     def list_dashboard_dlq(
         self,
         agent_id: str,
         *,
         limit: int = 50,
+        offset: int = 0,
         retry_eligible: bool | None = None,
     ) -> list[dict[str, Any]]:
         normalized, _ = self._require_dashboard_agent(agent_id)
         return cast(
             list[dict[str, Any]],
-            self._dashboard_store().list_dlq(normalized, limit=limit, retry_eligible=retry_eligible),
+            self._dashboard_store().list_dlq(
+                normalized,
+                limit=limit,
+                offset=offset,
+                retry_eligible=retry_eligible,
+            ),
         )
 
     def get_dashboard_costs(self, agent_id: str, *, days: int = 30) -> dict[str, Any]:
         normalized, _ = self._require_dashboard_agent(agent_id)
         return cast(dict[str, Any], self._dashboard_store().get_costs(normalized, days=days))
 
-    def list_dashboard_schedules(self, agent_id: str) -> list[dict[str, Any]]:
+    def list_dashboard_schedules(self, agent_id: str, *, limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
         normalized, _ = self._require_dashboard_agent(agent_id)
-        return cast(list[dict[str, Any]], self._dashboard_store().list_schedules(normalized))
+        return cast(
+            list[dict[str, Any]],
+            self._dashboard_store().list_schedules(normalized, limit=limit, offset=offset),
+        )
 
     def list_dashboard_audit(
         self,
@@ -4953,6 +5667,147 @@ class ControlPlaneManager:
             "setup_url": "/setup",
         }
 
+    def get_channel_gateway_state(self, agent_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import gateway_state
+
+        allowed_raw = self.get_decrypted_secret_value(normalized, "ALLOWED_USER_IDS") or ""
+        return gateway_state(
+            normalized,
+            legacy_allowed_user_ids=[str(item) for item in _normalize_user_id_values(allowed_raw)],
+        )
+
+    def create_channel_gateway_pairing_code(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import create_pairing_code
+
+        ttl_seconds = int(payload.get("ttl_seconds") or 15 * 60)
+        return create_pairing_code(
+            normalized,
+            channel_type=str(payload.get("channel_type") or "telegram"),
+            created_by=str(payload.get("created_by") or ""),
+            ttl_seconds=ttl_seconds,
+        )
+
+    def list_channel_gateway_unknown_senders(self, agent_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import CHANNEL_GATEWAY_SCHEMA_VERSION, list_unknown_senders
+
+        return {
+            "schema_version": CHANNEL_GATEWAY_SCHEMA_VERSION,
+            "agent_id": normalized,
+            "items": list_unknown_senders(normalized),
+        }
+
+    def approve_channel_gateway_identity(
+        self,
+        agent_id: str,
+        identity_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import approve_identity
+
+        return {
+            "schema_version": "channel_gateway.v1",
+            "identity": approve_identity(
+                normalized,
+                identity_id,
+                approved_by=str(payload.get("approved_by") or ""),
+                rationale=str(payload.get("rationale") or ""),
+            ),
+        }
+
+    def block_channel_gateway_identity(
+        self,
+        agent_id: str,
+        identity_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import block_identity
+
+        return {
+            "schema_version": "channel_gateway.v1",
+            "identity": block_identity(
+                normalized,
+                identity_id,
+                blocked_by=str(payload.get("blocked_by") or ""),
+                rationale=str(payload.get("rationale") or ""),
+            ),
+        }
+
+    def revoke_channel_gateway_identity(
+        self,
+        agent_id: str,
+        identity_id: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.channels.gateway import revoke_identity
+
+        request_payload = payload or {}
+        return {
+            "schema_version": "channel_gateway.v1",
+            "identity": revoke_identity(
+                normalized,
+                identity_id,
+                revoked_by=str(request_payload.get("revoked_by") or ""),
+                rationale=str(request_payload.get("rationale") or ""),
+            ),
+        }
+
+    def get_onboarding_readiness(self) -> dict[str, Any]:
+        from koda.services.onboarding_readiness import build_onboarding_readiness
+
+        status = self.get_onboarding_status()
+        agents = [dict(item) for item in status.get("agents") or [] if isinstance(item, dict)]
+        primary_agent_id = str((agents[0] if agents else {}).get("id") or "")
+        channel_gateway = self.get_channel_gateway_state(primary_agent_id) if primary_agent_id else None
+        release_quality = None
+        if primary_agent_id:
+            try:
+                release_quality = self.get_release_quality_latest(primary_agent_id)
+            except Exception:
+                release_quality = None
+        payload = build_onboarding_readiness(
+            status=status,
+            channel_gateway=channel_gateway,
+            release_quality=release_quality,
+        )
+        self._persist_onboarding_readiness(payload)
+        return payload
+
+    def create_onboarding_first_task(self, payload: dict[str, Any]) -> dict[str, Any]:
+        status = self.get_onboarding_status()
+        agents = [dict(item) for item in status.get("agents") or [] if isinstance(item, dict)]
+        requested_agent = str(payload.get("agent_id") or "").strip()
+        agent_id = requested_agent or str((agents[0] if agents else {}).get("id") or "")
+        if not agent_id:
+            raise ValueError("no agent is available for first task")
+        text = str(payload.get("text") or "Summarize the Koda setup status and list the next safe action.").strip()
+        session_id = str(payload.get("session_id") or "onboarding:first-task").strip()
+        result = self.send_dashboard_session_message(agent_id, text=text, session_id=session_id)
+        return {
+            "schema_version": "onboarding_readiness.v1",
+            "agent_id": _normalize_agent_id(agent_id),
+            "status": "created",
+            "task_id": result.get("task_id"),
+            "session_id": result.get("session_id") or session_id,
+            "result": result,
+        }
+
+    def _persist_onboarding_readiness(self, payload: dict[str, Any]) -> None:
+        agent_id = str(payload.get("primary_agent_id") or payload.get("agent_id") or "default")
+        try:
+            from koda.state.primary import get_primary_state_backend, run_coro_sync
+
+            backend = get_primary_state_backend(agent_id=agent_id)
+            if backend is not None and hasattr(backend, "persist_onboarding_readiness_run"):
+                run_coro_sync(backend.persist_onboarding_readiness_run(agent_id, payload))
+        except Exception:
+            log.debug("onboarding_readiness_primary_persist_skipped", exc_info=True)
+
     def complete_onboarding(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.ensure_seeded()
         account = _safe_json_object(payload.get("account"))
@@ -5837,6 +6692,357 @@ class ControlPlaneManager:
         return self._provider_download_job_payload(row)
 
     # ------------------------------------------------------------------
+    # Supertonic local model and voice assets. Supertonic snapshots are
+    # multi-file Hugging Face repos, while preset voice activation copies a
+    # bundled JSON style into Koda-managed storage for explicit offline use.
+    # ------------------------------------------------------------------
+
+    def get_supertonic_model_catalog(self) -> dict[str, Any]:
+        payload = supertonic_model_catalog_payload()
+        items: list[dict[str, Any]] = []
+        for entry in _safe_json_list(payload.get("items")):
+            item = _safe_json_object(entry)
+            model_id = _nonempty_text(item.get("model_id") or item.get("id"))
+            try:
+                item["active_job"] = self._active_provider_download_job("supertonic", model_id) if model_id else None
+            except Exception as exc:  # noqa: BLE001 - catalog should survive job table issues
+                log.warning("supertonic_model_active_job_probe_failed", model_id=model_id, error=str(exc))
+                item["active_job"] = None
+            items.append(item)
+        return {**payload, "items": items}
+
+    def _run_supertonic_model_download(self, job_id: str, model_id: str) -> None:
+        try:
+            metadata = supertonic_model_status(model_id)
+        except KeyError:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="error",
+                details={"last_error": f"unknown supertonic model: {model_id}"},
+            )
+            self._clear_provider_download_tracking(job_id)
+            return
+        base_details = {
+            "model_id": _nonempty_text(metadata.get("model_id")),
+            "repo_id": _nonempty_text(metadata.get("repo_id")),
+            "title": _nonempty_text(metadata.get("title")),
+        }
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="running",
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+                details={**base_details, "message": "Baixando snapshot Supertonic do Hugging Face."},
+            )
+
+        try:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="running",
+                details={**base_details, "message": "Baixando snapshot Supertonic do Hugging Face."},
+            )
+            ensure_supertonic_model(model_id, progress_callback=_on_progress)
+            final_status = supertonic_model_status(model_id)
+            bytes_on_disk = int(final_status.get("bytes") or 0)
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    **base_details,
+                    "local_path": _nonempty_text(final_status.get("local_path")),
+                    "message": "Modelo Supertonic pronto.",
+                },
+            )
+        except _ProviderDownloadCancelled:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="cancelled",
+                details={**base_details, "message": "Download cancelado."},
+            )
+        except Exception as exc:  # noqa: BLE001 - persist any failure as job error
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=model_id,
+                status="error",
+                details={**base_details, "last_error": str(exc)},
+            )
+        finally:
+            self._clear_provider_download_tracking(job_id)
+
+    def start_supertonic_model_download(self, model_id: str = SUPERTONIC_DEFAULT_MODEL_ID) -> dict[str, Any]:
+        normalized = _nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID
+        try:
+            status = supertonic_model_status(normalized)
+        except KeyError as exc:
+            raise ValueError(f"unknown supertonic model: {model_id}") from exc
+
+        active = self._active_provider_download_job("supertonic", normalized)
+        if active is not None:
+            return active
+
+        job_id = str(uuid4())
+        if bool(status.get("downloaded")):
+            bytes_on_disk = int(status.get("bytes") or 0)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=normalized,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    "model_id": normalized,
+                    "repo_id": _nonempty_text(status.get("repo_id")),
+                    "title": _nonempty_text(status.get("title")),
+                    "local_path": _nonempty_text(status.get("local_path")),
+                    "message": "Modelo ja disponivel localmente.",
+                },
+            )
+            row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+            if row is None:
+                raise RuntimeError("failed to persist supertonic model download job")
+            return self._provider_download_job_payload(row)
+
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="supertonic",
+            asset_id=normalized,
+            status="pending",
+            details={
+                "model_id": normalized,
+                "repo_id": _nonempty_text(status.get("repo_id")),
+                "title": _nonempty_text(status.get("title")),
+                "message": "Preparando download do modelo Supertonic.",
+            },
+        )
+        thread = threading.Thread(
+            target=self._run_supertonic_model_download,
+            args=(job_id, normalized),
+            name=f"supertonic-model-download-{normalized}",
+            daemon=True,
+        )
+        self._register_provider_download_thread(job_id, thread)
+        thread.start()
+        row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+        if row is None:
+            raise RuntimeError("failed to persist supertonic model download job")
+        return self._provider_download_job_payload(row)
+
+    @staticmethod
+    def _supertonic_voice_asset_id(model_id: str, voice_id: str) -> str:
+        return f"{_nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID}:{_nonempty_text(voice_id)}"
+
+    def get_supertonic_voice_catalog(self, model_id: str = "", language: str = "") -> dict[str, Any]:
+        sections = self._system_settings_sections()
+        providers_section = _safe_json_object(sections.get("providers"))
+        selected_model = (
+            _nonempty_text(model_id)
+            or _nonempty_text(providers_section.get("supertonic_default_model"))
+            or SUPERTONIC_DEFAULT_MODEL_ID
+        )
+        requested_language = (
+            _nonempty_text(language).lower()
+            or _nonempty_text(providers_section.get("supertonic_default_language")).lower()
+            or SUPERTONIC_DEFAULT_LANGUAGE_ID
+        )
+        selected_voice = (
+            _nonempty_text(providers_section.get("supertonic_default_voice")) or SUPERTONIC_DEFAULT_VOICE_ID
+        )
+        payload = supertonic_voice_catalog_payload(model_id=selected_model, language_id=requested_language)
+        voice_metadata = supertonic_voice_metadata(selected_voice)
+        items: list[dict[str, Any]] = []
+        for raw_item in _safe_json_list(payload.get("items")):
+            item = _safe_json_object(raw_item)
+            voice_id = _nonempty_text(item.get("voice_id"))
+            asset_id = self._supertonic_voice_asset_id(selected_model, voice_id)
+            try:
+                item["active_job"] = self._active_provider_download_job("supertonic", asset_id) if voice_id else None
+            except Exception as exc:  # noqa: BLE001 - catalog should survive job table issues
+                log.warning("supertonic_voice_active_job_probe_failed", voice_id=voice_id, error=str(exc))
+                item["active_job"] = None
+            items.append(item)
+        return {
+            **payload,
+            "items": items,
+            "selected_model": selected_model,
+            "selected_language": requested_language,
+            "default_model": selected_model,
+            "default_language": SUPERTONIC_DEFAULT_LANGUAGE_ID,
+            "default_voice": selected_voice,
+            "default_voice_label": _nonempty_text(_safe_json_object(voice_metadata).get("name")),
+            "provider_connected": True,
+        }
+
+    def _run_supertonic_voice_download(self, job_id: str, voice_id: str, model_id: str) -> None:
+        asset_id = self._supertonic_voice_asset_id(model_id, voice_id)
+        metadata = supertonic_voice_metadata(voice_id)
+        if metadata is None:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="error",
+                details={"last_error": f"unknown supertonic voice: {voice_id}"},
+            )
+            self._clear_provider_download_tracking(job_id)
+            return
+        base_details = {
+            "voice_id": _nonempty_text(metadata.get("voice_id")),
+            "voice_name": _nonempty_text(metadata.get("name")),
+            "model_id": model_id,
+        }
+
+        def _on_progress(downloaded: int, total: int) -> None:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="running",
+                downloaded_bytes=downloaded,
+                total_bytes=total,
+                details={**base_details, "message": "Ativando voz Supertonic."},
+            )
+
+        try:
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="running",
+                details={**base_details, "message": "Ativando voz Supertonic."},
+            )
+            result = ensure_supertonic_voice_downloaded(voice_id, model_id, progress_callback=_on_progress)
+            downloaded_bytes = int(result.get("bytes") or 0)
+            self._raise_if_provider_download_cancelled(job_id)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="completed",
+                downloaded_bytes=downloaded_bytes,
+                total_bytes=downloaded_bytes,
+                details={
+                    **base_details,
+                    "local_path": _nonempty_text(result.get("local_path")),
+                    "message": "Voz Supertonic pronta.",
+                },
+            )
+        except _ProviderDownloadCancelled:
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="cancelled",
+                details={**base_details, "message": "Download cancelado."},
+            )
+        except Exception as exc:  # noqa: BLE001 - persist any failure as job error
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="error",
+                details={**base_details, "last_error": str(exc)},
+            )
+        finally:
+            self._clear_provider_download_tracking(job_id)
+
+    def start_supertonic_voice_download(self, voice_id: str, model_id: str = "") -> dict[str, Any]:
+        normalized_voice = _nonempty_text(voice_id)
+        selected_model = _nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID
+        metadata = supertonic_voice_metadata(normalized_voice)
+        if metadata is None:
+            raise ValueError(f"unknown supertonic voice: {voice_id}")
+        asset_id = self._supertonic_voice_asset_id(selected_model, _nonempty_text(metadata.get("voice_id")))
+
+        active = self._active_provider_download_job("supertonic", asset_id)
+        if active is not None:
+            return active
+
+        job_id = str(uuid4())
+        existing = [
+            _safe_json_object(item)
+            for item in _safe_json_list(self.get_supertonic_voice_catalog(selected_model).get("items"))
+        ]
+        current = next(
+            (
+                item
+                for item in existing
+                if _nonempty_text(item.get("voice_id")) == _nonempty_text(metadata.get("voice_id"))
+            ),
+            {},
+        )
+        if bool(current.get("downloaded")):
+            bytes_on_disk = int(current.get("bytes") or 0)
+            self._persist_provider_download_job(
+                job_id,
+                provider_id="supertonic",
+                asset_id=asset_id,
+                status="completed",
+                downloaded_bytes=bytes_on_disk,
+                total_bytes=bytes_on_disk,
+                details={
+                    "voice_id": _nonempty_text(metadata.get("voice_id")),
+                    "voice_name": _nonempty_text(metadata.get("name")),
+                    "model_id": selected_model,
+                    "local_path": _nonempty_text(current.get("local_path")),
+                    "message": "Voz ja disponivel localmente.",
+                },
+            )
+            row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+            if row is None:
+                raise RuntimeError("failed to persist supertonic voice download job")
+            return self._provider_download_job_payload(row)
+
+        self._persist_provider_download_job(
+            job_id,
+            provider_id="supertonic",
+            asset_id=asset_id,
+            status="pending",
+            details={
+                "voice_id": _nonempty_text(metadata.get("voice_id")),
+                "voice_name": _nonempty_text(metadata.get("name")),
+                "model_id": selected_model,
+                "message": "Preparando voz Supertonic.",
+            },
+        )
+        thread = threading.Thread(
+            target=self._run_supertonic_voice_download,
+            args=(job_id, _nonempty_text(metadata.get("voice_id")), selected_model),
+            name=f"supertonic-voice-download-{asset_id}",
+            daemon=True,
+        )
+        self._register_provider_download_thread(job_id, thread)
+        thread.start()
+        row = fetch_one("SELECT * FROM cp_provider_download_jobs WHERE id = ?", (job_id,))
+        if row is None:
+            raise RuntimeError("failed to persist supertonic voice download job")
+        return self._provider_download_job_payload(row)
+
+    def import_supertonic_voice_asset(self, raw_bytes: bytes, *, model_id: str = "", name: str = "") -> dict[str, Any]:
+        selected_model = _nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID
+        return import_supertonic_voice_json(raw_bytes, name=name, model_id=selected_model)
+
+    # ------------------------------------------------------------------
     # Embedding model catalog & background download. Mirrors the Kokoro
     # provider download pattern (cp_provider_download_jobs row + threading)
     # but talks to the Hugging Face Hub via ``huggingface_hub.snapshot_download``
@@ -6344,6 +7550,28 @@ class ControlPlaneManager:
         if active is not None:
             raise ValueError("voice download in progress; cancel or wait before deleting")
         return delete_kokoro_voice(normalized)
+
+    def delete_supertonic_model_asset(self, model_id: str) -> dict[str, Any]:
+        normalized = _nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID
+        active = self._active_provider_download_job("supertonic", normalized)
+        if active is not None:
+            raise ValueError("supertonic model download in progress; cancel or wait before deleting")
+        try:
+            result = delete_supertonic_model(normalized)
+            return {**result, **supertonic_model_status(normalized)}
+        except KeyError as exc:
+            raise ValueError(f"unknown supertonic model: {model_id}") from exc
+
+    def delete_supertonic_voice_asset(self, voice_id: str, model_id: str = "") -> dict[str, Any]:
+        normalized_voice = _nonempty_text(voice_id)
+        if not normalized_voice:
+            raise ValueError("voice_id is required")
+        selected_model = _nonempty_text(model_id) or SUPERTONIC_DEFAULT_MODEL_ID
+        asset_id = self._supertonic_voice_asset_id(selected_model, normalized_voice)
+        active = self._active_provider_download_job("supertonic", asset_id)
+        if active is not None:
+            raise ValueError("supertonic voice download in progress; cancel or wait before deleting")
+        return delete_supertonic_voice(normalized_voice, selected_model)
 
     def delete_whisper_model_asset(self, variant_id: str) -> dict[str, Any]:
         normalized = _nonempty_text(variant_id)
@@ -7211,13 +8439,7 @@ class ControlPlaneManager:
                 )
 
         provider_catalog = _safe_json_object(validation.get("provider_catalog"))
-        provider_errors = [
-            f"provider '{provider}' is enabled but its runtime command is not available"
-            for provider, payload in _safe_json_object(provider_catalog.get("providers")).items()
-            if bool(_safe_json_object(payload).get("enabled"))
-            and str(_safe_json_object(payload).get("category") or "general") != "infra"
-            and not bool(_safe_json_object(payload).get("command_present"))
-        ]
+        provider_errors, provider_warnings = _provider_command_availability_issues(provider_catalog)
         resource_warnings: list[str] = []
         resource_errors: list[str] = []
         shared_env = _safe_json_object(access_effective.get("shared_env"))
@@ -7274,6 +8496,7 @@ class ControlPlaneManager:
         result = {
             **validation,
             "provider_errors": provider_errors,
+            "provider_warnings": provider_warnings,
             "provenance_warnings": provenance_warnings,
             "resource_warnings": resource_warnings,
             "resource_errors": resource_errors,
@@ -7306,6 +8529,7 @@ class ControlPlaneManager:
         result["prompt_preview"] = runtime_prompt_preview
         result["warnings"] = [
             *validation["warnings"],
+            *provider_warnings,
             *provenance_warnings,
             *resource_warnings,
             *runtime_access_warnings,
@@ -7499,6 +8723,165 @@ class ControlPlaneManager:
     def reject_knowledge_candidate(self, agent_id: str, candidate_id: int, *, reviewer: str = "control-plane") -> bool:
         _normalize_agent_id(agent_id)
         return bool(self._knowledge_governance_store().reject_knowledge_candidate(candidate_id, reviewer=reviewer))
+
+    def list_improvement_proposals(
+        self,
+        agent_id: str,
+        *,
+        status: str | None = None,
+        proposal_type: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposals = self._improvement_proposal_service(normalized).list_proposals(
+            status=status,
+            proposal_type=proposal_type,
+            limit=limit,
+        )
+        return {"schema_version": "improvement_proposal.v1", "items": proposals}
+
+    def create_improvement_proposal(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).create(
+                {**payload, "agent_id": normalized},
+                requested_by=str(payload.get("reviewer") or "control-plane"),
+            ),
+        )
+        self._record_improvement_proposal_event(normalized, "created", proposal)
+        return proposal
+
+    def get_improvement_proposal(self, agent_id: str, proposal_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        return cast(dict[str, Any], self._improvement_proposal_service(normalized).get(proposal_id))
+
+    def approve_improvement_proposal(
+        self,
+        agent_id: str,
+        proposal_id: str,
+        *,
+        reviewer: str = "control-plane",
+        note: str = "",
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).approve(proposal_id, reviewer=reviewer, note=note),
+        )
+        self._record_improvement_proposal_event(normalized, "approved", proposal)
+        return proposal
+
+    def reject_improvement_proposal(
+        self,
+        agent_id: str,
+        proposal_id: str,
+        *,
+        reviewer: str = "control-plane",
+        note: str = "",
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).reject(proposal_id, reviewer=reviewer, note=note),
+        )
+        self._record_improvement_proposal_event(normalized, "rejected", proposal)
+        return proposal
+
+    def validate_improvement_proposal(
+        self,
+        agent_id: str,
+        proposal_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        reviewer = str(payload.get("reviewer") or "control-plane")
+        note = str(payload.get("note") or "")
+        validation_result = payload.get("validation_result")
+        if validation_result is None and any(key in payload for key in ("status", "passed", "ok", "details")):
+            validation_result = {key: value for key, value in payload.items() if key not in {"reviewer", "note"}}
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).validate(
+                proposal_id,
+                validation_result=validation_result,
+                reviewer=reviewer,
+                note=note,
+            ),
+        )
+        status = str(proposal.get("status") or "")
+        event = "validating" if status == "validating" else "failed" if status == "failed" else "validated"
+        self._record_improvement_proposal_event(normalized, event, proposal)
+        return proposal
+
+    def apply_improvement_proposal(
+        self,
+        agent_id: str,
+        proposal_id: str,
+        *,
+        reviewer: str = "control-plane",
+        note: str = "",
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).apply(proposal_id, reviewer=reviewer, note=note),
+        )
+        self._record_improvement_proposal_event(normalized, "applied", proposal)
+        return proposal
+
+    def rollback_improvement_proposal(
+        self,
+        agent_id: str,
+        proposal_id: str,
+        *,
+        reviewer: str = "control-plane",
+        note: str = "",
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).rollback(proposal_id, reviewer=reviewer, note=note),
+        )
+        self._record_improvement_proposal_event(normalized, "rolled_back", proposal)
+        return proposal
+
+    def _record_improvement_proposal_event(
+        self,
+        agent_id: str,
+        event: str,
+        proposal: dict[str, Any],
+    ) -> None:
+        details = {
+            "schema_version": "improvement_proposal.v1",
+            "proposal_id": proposal.get("proposal_id"),
+            "proposal_type": proposal.get("proposal_type"),
+            "status": proposal.get("status"),
+            "risk_class": proposal.get("risk_class"),
+            "source_kind": proposal.get("source_kind"),
+            "source_ref": proposal.get("source_ref"),
+            "evidence_refs": proposal.get("evidence_refs") or [],
+            "validation_status": (proposal.get("validation_result") or {}).get("status")
+            if isinstance(proposal.get("validation_result"), dict)
+            else "",
+            "run_graph_node_ids": proposal.get("run_graph_node_ids") or [],
+        }
+        self._emit_lifecycle_audit_event(
+            agent_id,
+            event_type=f"improvement_proposal.{event}",
+            details=details,
+        )
+        try:
+            from koda.services.metrics import IMPROVEMENT_PROPOSAL_EVENTS
+
+            IMPROVEMENT_PROPOSAL_EVENTS.labels(
+                agent_id=agent_id,
+                event=event,
+                status=str(proposal.get("status") or ""),
+                proposal_type=str(proposal.get("proposal_type") or ""),
+            ).inc()
+        except Exception:
+            log.debug("improvement_proposal_metric_error", exc_info=True)
 
     def list_runbooks(self, agent_id: str, *, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         normalized = _normalize_agent_id(agent_id)
@@ -7853,12 +9236,584 @@ class ControlPlaneManager:
             created += 1
         return {"ok": True, "seeded": created}
 
+    def create_eval_case_from_run(self, agent_id: str, task_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        execution = self.get_dashboard_execution(normalized, int(task_id))
+        if execution is None:
+            raise KeyError(str(task_id))
+
+        from koda.services.evals import build_eval_case_from_run
+        from koda.services.metrics import EVAL_CASE_EVENTS
+
+        repository = self._knowledge_repository(normalized)
+        run_graph = execution.get("run_graph") if isinstance(execution.get("run_graph"), dict) else None
+        replay = execution.get("run_replay") if isinstance(execution.get("run_replay"), dict) else None
+        case_payload = build_eval_case_from_run(
+            agent_id=normalized,
+            task_id=int(task_id),
+            execution=execution,
+            run_graph=run_graph,
+            replay=replay,
+            payload=payload,
+        )
+        repository.upsert_evaluation_case(**case_payload)
+        case = repository.get_evaluation_case(str(case_payload["case_key"])) or case_payload
+        self._emit_eval_audit_event(
+            normalized,
+            event_type="eval.case_created",
+            task_id=int(task_id),
+            details={
+                "schema_version": "eval_case.v1",
+                "case_key": case_payload["case_key"],
+                "source": "execution_run",
+            },
+        )
+        EVAL_CASE_EVENTS.labels(agent_id=normalized, event="created", status=str(case.get("status") or "draft")).inc()
+        return {"schema_version": "eval_case.v1", **case}
+
+    def list_eval_cases(self, agent_id: str, *, limit: int = 100) -> dict[str, Any]:
+        return {
+            "schema_version": "eval_case.v1",
+            "items": self.list_evaluation_cases(agent_id, limit=limit),
+        }
+
+    def update_eval_case(self, agent_id: str, case_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+        case = self.update_evaluation_case(agent_id, case_key, payload)
+        return {"schema_version": "eval_case.v1", **case}
+
+    def run_eval_suite(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.services.evals import OFFLINE_REPLAY_STRATEGY, build_eval_run_batch
+        from koda.services.metrics import EVAL_RUN_CASES, KNOWLEDGE_EVALUATION_RUNS, KNOWLEDGE_EVALUATION_SCORE
+
+        repository = self._knowledge_repository(normalized)
+        requested_keys = {str(item) for item in payload.get("case_keys") or [] if str(item)}
+        raw_cases = repository.list_evaluation_cases(limit=int(payload.get("limit") or 100))
+        cases = [
+            case
+            for case in raw_cases
+            if str(case.get("status") or "draft") != "archived"
+            and (not requested_keys or str(case.get("case_key") or "") in requested_keys)
+        ]
+        batch = build_eval_run_batch(
+            agent_id=normalized,
+            cases=cases,
+            suite_id=str(payload.get("suite_id") or "default"),
+            requested_by=str(payload.get("requested_by") or ""),
+        )
+        repository.upsert_eval_run_batch(batch)
+        for result in batch.get("case_results") or []:
+            if not isinstance(result, dict):
+                continue
+            status = str(result.get("status") or "failed")
+            metrics_payload = dict(result.get("metrics") or {})
+            repository.create_evaluation_run(
+                case_key=str(result.get("case_key") or ""),
+                strategy=OFFLINE_REPLAY_STRATEGY,
+                task_success_proxy=float(metrics_payload.get("task_success_proxy") or result.get("score") or 0.0),
+                metrics_payload={
+                    **metrics_payload,
+                    "status": status,
+                    "failures": list(result.get("failures") or []),
+                    "warnings": list(result.get("warnings") or []),
+                    "run_id": batch["run_id"],
+                },
+            )
+            EVAL_RUN_CASES.labels(agent_id=normalized, strategy=OFFLINE_REPLAY_STRATEGY, status=status).inc()
+            KNOWLEDGE_EVALUATION_RUNS.labels(agent_id=normalized, strategy=OFFLINE_REPLAY_STRATEGY, result=status).inc()
+            for metric, value in metrics_payload.items():
+                try:
+                    KNOWLEDGE_EVALUATION_SCORE.labels(
+                        agent_id=normalized, strategy=OFFLINE_REPLAY_STRATEGY, metric=str(metric)
+                    ).observe(float(value))
+                except (TypeError, ValueError):
+                    continue
+        if payload.get("create_improvement_proposals", True):
+            proposals = self._create_improvement_proposals_from_eval_failures(normalized, batch)
+            if proposals:
+                batch["improvement_proposals"] = proposals
+                summary = dict(batch.get("summary") or {})
+                summary["improvement_proposals_created"] = len(proposals)
+                batch["summary"] = summary
+                repository.upsert_eval_run_batch(batch)
+        self._emit_eval_audit_event(
+            normalized,
+            event_type="eval.suite_run",
+            details={
+                "schema_version": "eval_run.v1",
+                "run_id": batch["run_id"],
+                "status": batch["status"],
+                "summary": batch.get("summary") or {},
+            },
+        )
+        return batch
+
+    def _create_improvement_proposals_from_eval_failures(
+        self,
+        agent_id: str,
+        batch: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        service = self._improvement_proposal_service(agent_id)
+        proposals: list[dict[str, Any]] = []
+        run_id = str(batch.get("run_id") or "")
+        suite_id = str(batch.get("suite_id") or "default")
+        for result in batch.get("case_results") or []:
+            if not isinstance(result, dict) or str(result.get("status") or "") != "failed":
+                continue
+            case_key = str(result.get("case_key") or "")
+            failures = [item for item in result.get("failures") or [] if isinstance(item, dict)]
+            categories = {str(item.get("category") or "") for item in failures}
+            category_key = ",".join(sorted(item for item in categories if item)) or "eval_failure"
+            proposal_type = "tool_policy" if categories & {"tool_regression", "policy_regression"} else "eval_case"
+            risk_class = "high" if proposal_type == "tool_policy" else "medium"
+            raw_metadata = result.get("metadata")
+            metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+            source_task_id = metadata.get("source_task_id")
+            source_run_graph_id = str(metadata.get("source_run_graph_id") or "").strip()
+            source_run_graph_node_ids = [
+                str(item) for item in metadata.get("source_run_graph_node_ids") or [] if str(item or "").strip()
+            ]
+            source_ref = f"eval:{suite_id}:{case_key or 'unknown'}:{category_key}"
+            evidence_refs: list[dict[str, Any]] = [
+                {"kind": "eval_run", "id": run_id},
+                {"kind": "eval_case", "case_key": case_key},
+            ]
+            if source_task_id is not None:
+                evidence_refs.append({"kind": "source_task", "task_id": source_task_id})
+            if source_run_graph_id:
+                evidence_refs.append({"kind": "run_graph", "id": source_run_graph_id})
+            evidence_refs.extend(
+                {"kind": "run_graph_node", "id": node_id} for node_id in source_run_graph_node_ids[:20]
+            )
+            requested_proposal_type = str(metadata.get("proposal_type") or result.get("proposal_type") or "").strip()
+            skill_id = str(metadata.get("skill_id") or result.get("skill_id") or "").strip()
+            if requested_proposal_type == "skill" or skill_id or "skill_regression" in categories:
+                proposal = service.create_skill_proposal_from_evidence(
+                    {
+                        "source_kind": "eval",
+                        "source_ref": source_ref,
+                        "skill_id": skill_id or case_key or "skill",
+                        "summary": f"Draft skill proposal after eval failure for {case_key or 'unknown case'}.",
+                        "observed_count": metadata.get("observed_count") or 1,
+                        "evidence_refs": evidence_refs,
+                        "instruction_preview": metadata.get("instruction_preview") or "",
+                        "validation_plan": {
+                            "suite_id": suite_id,
+                            "case_key": case_key,
+                            "required": ["scanner_allow_or_review", "offline_eval_pass"],
+                        },
+                        "run_graph_node_ids": source_run_graph_node_ids,
+                    },
+                    requested_by="eval",
+                )
+                self._record_improvement_proposal_event(agent_id, "created_from_eval", proposal)
+                proposals.append(
+                    {
+                        "schema_version": "improvement_proposal.v1",
+                        "proposal_id": proposal.get("proposal_id"),
+                        "status": proposal.get("status"),
+                        "proposal_type": proposal.get("proposal_type"),
+                        "case_key": case_key,
+                    }
+                )
+                continue
+            proposal = service.create(
+                {
+                    "source_kind": "eval",
+                    "source_ref": source_ref,
+                    "proposal_type": proposal_type,
+                    "summary": f"Review {proposal_type} after eval failure for {case_key or 'unknown case'}.",
+                    "evidence_refs": evidence_refs,
+                    "diff_preview": {
+                        "proposed_change": "Create a reviewed improvement from deterministic eval failure evidence.",
+                        "failures": failures[:5],
+                        "score": result.get("score"),
+                        "metrics": result.get("metrics") or {},
+                    },
+                    "risk_class": risk_class,
+                    "validation_plan": {
+                        "strategy": "offline_replay",
+                        "suite_id": suite_id,
+                        "case_key": case_key,
+                    },
+                    "rollback_plan": {
+                        "strategy": "ledger_only",
+                        "effects": [
+                            {
+                                "effect_kind": "ledger_only",
+                                "target_ref": source_ref,
+                                "before_ref": {"status": "eval_failure_unreviewed", "case_key": case_key},
+                                "after_ref": {"status": "proposal_applied", "proposal_type": proposal_type},
+                            }
+                        ],
+                    },
+                    "status": "pending_review",
+                    "reviewer": "eval",
+                    "run_graph_node_ids": source_run_graph_node_ids,
+                },
+                requested_by="eval",
+            )
+            self._record_improvement_proposal_event(agent_id, "created_from_eval", proposal)
+            proposals.append(
+                {
+                    "schema_version": "improvement_proposal.v1",
+                    "proposal_id": proposal.get("proposal_id"),
+                    "status": proposal.get("status"),
+                    "proposal_type": proposal.get("proposal_type"),
+                    "case_key": case_key,
+                }
+            )
+        return proposals
+
+    def list_eval_runs(self, agent_id: str, *, limit: int = 50) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        repository = self._knowledge_repository(normalized)
+        return {
+            "schema_version": "eval_run.v1",
+            "items": repository.list_eval_run_batches(limit=limit),
+            "legacy_items": self.list_evaluation_runs(normalized, limit=limit),
+        }
+
+    def get_eval_run(self, agent_id: str, run_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        batch = self._knowledge_repository(normalized).get_eval_run_batch(run_id)
+        if batch is None:
+            raise KeyError(run_id)
+        return dict(batch)
+
+    def create_trajectory_export(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.services.evals import build_trajectory_export
+        from koda.services.metrics import TRAJECTORY_EXPORTS
+
+        repository = self._knowledge_repository(normalized)
+        try:
+            task_id = int(payload.get("task_id") or 0)
+        except (TypeError, ValueError):
+            task_id = 0
+        if task_id <= 0:
+            case_key = str(payload.get("case_key") or "")
+            case = repository.get_evaluation_case(case_key) if case_key else None
+            task_id = int((case or {}).get("source_task_id") or 0)
+        if task_id <= 0:
+            run_id = str(payload.get("run_id") or "").strip()
+            batch = repository.get_eval_run_batch(run_id) if run_id else None
+            for result in list((batch or {}).get("case_results") or []):
+                if not isinstance(result, dict):
+                    continue
+                case_key = str(result.get("case_key") or "")
+                case = repository.get_evaluation_case(case_key) if case_key else None
+                task_id = int((case or {}).get("source_task_id") or 0)
+                if task_id > 0:
+                    break
+        if task_id <= 0:
+            raise ValueError("trajectory export requires task_id or an eval case with source_task_id")
+        execution = self.get_dashboard_execution(normalized, task_id)
+        if execution is None:
+            raise KeyError(str(task_id))
+        export = build_trajectory_export(
+            agent_id=normalized,
+            task_id=task_id,
+            execution=execution,
+            run_graph=execution.get("run_graph") if isinstance(execution.get("run_graph"), dict) else None,
+            replay=execution.get("run_replay") if isinstance(execution.get("run_replay"), dict) else None,
+        )
+        export["status"] = "created"
+        repository.create_trajectory_export(export)
+        self._emit_eval_audit_event(
+            normalized,
+            event_type="eval.trajectory_export_created",
+            task_id=task_id,
+            details={
+                "schema_version": "trajectory_export.v1",
+                "export_id": export["export_id"],
+                "record_count": export["record_count"],
+                "package_hash": export["package_hash"],
+            },
+        )
+        TRAJECTORY_EXPORTS.labels(agent_id=normalized, status="created").inc()
+        return export
+
+    def get_release_quality_latest(self, agent_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.services.evals import build_release_quality_report
+        from koda.services.metrics import RELEASE_QUALITY_GATES
+
+        repository = self._knowledge_repository(normalized)
+        runs = repository.list_eval_run_batches(limit=20)
+        exports = repository.list_trajectory_exports(limit=20)
+        run_graphs = self._release_quality_run_graphs(normalized, repository=repository, runs=runs)
+        report = build_release_quality_report(
+            agent_id=normalized,
+            latest_run=runs[0] if runs else None,
+            recent_runs=runs,
+            trajectory_exports=exports,
+            run_graphs=run_graphs,
+            require_run_graphs=bool(runs),
+        )
+        self._emit_eval_audit_event(
+            normalized,
+            event_type="eval.release_quality_checked",
+            details={
+                "schema_version": "release_quality.v1",
+                "status": report["status"],
+                "gates": report.get("gates") or {},
+            },
+        )
+        RELEASE_QUALITY_GATES.labels(agent_id=normalized, status=str(report["status"])).inc()
+        return report
+
+    def get_quality_cockpit_overview(self) -> dict[str, Any]:
+        from koda.services.quality_cockpit import build_quality_cockpit
+
+        payload: dict[str, Any] = {"agent_quality": [], "eval_runs": []}
+        for agent in self.list_agents():
+            agent_id = str(agent.get("id") or "").strip()
+            if not agent_id:
+                continue
+            agent_payload = self._quality_cockpit_payload_for_agent(agent_id)
+            payload["agent_quality"].extend(agent_payload.get("agent_quality") or [])
+            payload["eval_runs"].extend(agent_payload.get("eval_runs") or [])
+            for key in ("tool_quality", "skill_quality", "model_quality", "squad_quality"):
+                payload.setdefault(key, []).extend(agent_payload.get(key) or [])
+        return build_quality_cockpit(payload, agent_id="ALL")
+
+    def get_quality_cockpit_agent(self, agent_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.services.quality_cockpit import build_quality_cockpit
+
+        payload = self._quality_cockpit_payload_for_agent(normalized)
+        with contextlib.suppress(Exception):
+            payload["release_quality"] = self.get_release_quality_latest(normalized)
+        return build_quality_cockpit(payload, agent_id=normalized)
+
+    def create_quality_failure_proposal(
+        self,
+        *,
+        agent_id: str,
+        failure_id: str,
+        requested_by: str = "quality_cockpit",
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.services.quality_cockpit import build_quality_proposal_payload
+
+        cockpit = self.get_quality_cockpit_agent(normalized)
+        failure = next(
+            (
+                item
+                for item in cockpit.get("top_failures") or []
+                if isinstance(item, dict) and str(item.get("failure_id") or "") == failure_id
+            ),
+            None,
+        )
+        if failure is None:
+            raise KeyError(failure_id)
+        payload = build_quality_proposal_payload(
+            failure,
+            agent_id=normalized,
+            cockpit_id=str(cockpit.get("cockpit_id") or ""),
+            status="pending_review",
+        )
+        proposal = self._improvement_proposal_service(normalized).create(payload, requested_by=requested_by)
+        self._record_improvement_proposal_event(normalized, "created_from_quality_cockpit", proposal)
+        return cast(dict[str, Any], proposal)
+
+    def _quality_cockpit_payload_for_agent(self, agent_id: str) -> dict[str, Any]:
+        repository = self._knowledge_repository(agent_id)
+        try:
+            eval_runs = repository.list_eval_run_batches(limit=20)
+        except Exception:
+            eval_runs = []
+        execution_rows: list[dict[str, Any]] = []
+        route_outcomes: list[dict[str, Any]] = []
+        try:
+            executions = self.list_dashboard_executions(agent_id, limit=50)
+        except Exception:
+            executions = []
+        for execution in executions:
+            status = str(execution.get("status") or "")
+            cost = execution.get("cost_usd") or execution.get("costUsd") or 0.0
+            execution_rows.append(
+                {
+                    "dimension": "agent",
+                    "entity_id": agent_id,
+                    "agent_id": agent_id,
+                    "status": "passed" if status in {"completed", "success"} else "failed",
+                    "quality_score": 1.0 if status in {"completed", "success"} else 0.0,
+                    "cost_usd": cost,
+                    "failures": (
+                        []
+                        if status in {"completed", "success"}
+                        else [{"category": "runtime_failure", "message": status or "execution did not complete"}]
+                    ),
+                    "run_graph_node_ids": execution.get("run_graph_node_ids") or [],
+                }
+            )
+            model = str(execution.get("model") or execution.get("model_id") or "").strip()
+            if model:
+                execution_rows.append(
+                    {
+                        "dimension": "model",
+                        "entity_id": model,
+                        "agent_id": agent_id,
+                        "status": "passed" if status in {"completed", "success"} else "failed",
+                        "quality_score": 1.0 if status in {"completed", "success"} else 0.0,
+                        "cost_usd": cost,
+                    }
+                )
+            route_outcomes.extend(self._route_outcomes_from_execution(agent_id, execution))
+        return {
+            "agent_quality": execution_rows
+            or [{"dimension": "agent", "entity_id": agent_id, "agent_id": agent_id, "quality_score": 0.0}],
+            "eval_runs": eval_runs,
+            "route_outcomes": route_outcomes,
+        }
+
+    def _route_outcomes_from_execution(self, agent_id: str, execution: dict[str, Any]) -> list[dict[str, Any]]:
+        raw_outcomes = execution.get("route_outcomes")
+        if isinstance(raw_outcomes, list):
+            return [dict(item) for item in raw_outcomes if isinstance(item, dict)]
+        run_graph = execution.get("run_graph")
+        if not isinstance(run_graph, dict):
+            return []
+        outcomes: list[dict[str, Any]] = []
+        for node in run_graph.get("nodes") or []:
+            if not isinstance(node, dict):
+                continue
+            node_type = str(node.get("node_type") or node.get("type") or "")
+            if node_type != "agent_request":
+                continue
+            raw_payload = node.get("payload")
+            payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
+            selected = payload.get("selected_agent_ids") or payload.get("targets") or []
+            if isinstance(selected, str):
+                selected = [selected]
+            for selected_agent in selected:
+                selected_id = str(selected_agent or "").strip()
+                if not selected_id:
+                    continue
+                execution_ref = execution.get("id") or execution.get("task_id")
+                outcomes.append(
+                    {
+                        "schema_version": "route_outcome.v1",
+                        "outcome_id": f"route_outcome:{agent_id}:{execution_ref}:{selected_id}",
+                        "agent_id": selected_id,
+                        "route_source": str(payload.get("source") or "run_graph"),
+                        "status": "success"
+                        if str(execution.get("status") or "") in {"completed", "success"}
+                        else "failure",
+                        "cost_usd": execution.get("cost_usd") or execution.get("costUsd") or 0.0,
+                        "latency_ms": execution.get("duration_ms"),
+                        "run_graph_node_id": str(node.get("node_id") or node.get("id") or ""),
+                    }
+                )
+        return outcomes
+
+    def _release_quality_run_graphs(
+        self,
+        agent_id: str,
+        *,
+        repository: Any,
+        runs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        task_ids: set[int] = set()
+        try:
+            cases = repository.list_evaluation_cases(limit=50)
+        except Exception:
+            cases = []
+        for case in cases:
+            raw_task_id = case.get("source_task_id") if isinstance(case, dict) else None
+            try:
+                if raw_task_id is not None:
+                    task_ids.add(int(raw_task_id))
+            except (TypeError, ValueError):
+                continue
+        for run in runs:
+            for result in run.get("case_results") or []:
+                if not isinstance(result, dict):
+                    continue
+                raw_task_id = result.get("source_task_id") or (result.get("metadata") or {}).get("source_task_id")
+                try:
+                    if raw_task_id is not None:
+                        task_ids.add(int(raw_task_id))
+                except (TypeError, ValueError):
+                    continue
+        graphs: list[dict[str, Any]] = []
+        for task_id in sorted(task_ids):
+            graph = self.get_dashboard_execution_run_graph(agent_id, task_id)
+            if isinstance(graph, dict) and graph:
+                graphs.append(graph)
+            else:
+                graphs.append(
+                    {
+                        "schema_version": "run_graph.v1",
+                        "graph_id": f"missing:{agent_id}:{task_id}",
+                        "agent_id": agent_id,
+                        "task_id": task_id,
+                        "scenario": "missing",
+                        "nodes": [],
+                        "edges": [],
+                    }
+                )
+        return graphs
+
+    def _emit_eval_audit_event(
+        self,
+        agent_id: str,
+        *,
+        event_type: str,
+        details: dict[str, Any],
+        task_id: int | None = None,
+    ) -> None:
+        from koda.services.audit import AuditEvent, emit
+
+        emit(AuditEvent(event_type=event_type, agent_id=agent_id, task_id=task_id, details=details))
+
+    def _used_runtime_health_ports(self, *, exclude_agent_id: str = "") -> set[int]:
+        excluded = _normalize_agent_id(exclude_agent_id) if exclude_agent_id else ""
+        used: set[int] = set()
+        for row in fetch_all("SELECT id, runtime_endpoint_json FROM cp_agent_definitions ORDER BY id ASC"):
+            row_agent_id = _normalize_agent_id(str(row["id"]))
+            if excluded and row_agent_id == excluded:
+                continue
+            port = _runtime_health_port_from_endpoint(
+                _safe_json_object(json_load(str(row["runtime_endpoint_json"] or "{}"), {}))
+            )
+            if port > 0:
+                used.add(port)
+        return used
+
+    def _normalize_runtime_endpoint_for_agent(
+        self,
+        agent_id: str,
+        runtime_endpoint: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized = _normalize_agent_id(agent_id)
+        primary_agent = _normalize_agent_id(os.environ.get("AGENT_ID") or AGENT_ID or "KODA")
+        endpoint = dict(_safe_json_object(runtime_endpoint))
+        requested_port = _runtime_health_port_from_endpoint(endpoint)
+        default_port = 8080 if normalized == primary_agent else 8081
+        used_ports = self._used_runtime_health_ports(exclude_agent_id=normalized)
+        resolved_port = requested_port if requested_port > 0 else default_port
+        if normalized == primary_agent:
+            endpoint.update(_runtime_endpoint_payload_for_port(resolved_port))
+            return endpoint
+        if resolved_port in used_ports:
+            resolved_port = default_port
+            while resolved_port in used_ports:
+                resolved_port += 1
+        endpoint.update(_runtime_endpoint_payload_for_port(resolved_port))
+        return endpoint
+
     def create_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
         agent_id = _normalize_agent_id(str(payload.get("id") or ""))
         display_name = str(payload.get("display_name") or agent_id.replace("_", " "))
         storage_namespace = str(payload.get("storage_namespace") or _slug(agent_id))
         appearance = _safe_json_object(payload.get("appearance"))
-        runtime_endpoint = _safe_json_object(payload.get("runtime_endpoint"))
+        runtime_endpoint = self._normalize_runtime_endpoint_for_agent(
+            agent_id,
+            _safe_json_object(payload.get("runtime_endpoint")),
+        )
         metadata = _safe_json_object(payload.get("metadata"))
         status = _normalize_status(str(payload.get("status") or "paused"))
         workspace_id, squad_id = self._resolve_agent_organization(
@@ -7897,6 +9852,7 @@ class ControlPlaneManager:
         runtime_endpoint = _safe_json_object(payload.get("runtime_endpoint")) or json_load(
             current["runtime_endpoint_json"], {}
         )
+        runtime_endpoint = self._normalize_runtime_endpoint_for_agent(normalized, runtime_endpoint)
         metadata = json_load(current["metadata_json"], {})
         metadata.update(_safe_json_object(payload.get("metadata")))
         storage_namespace = str(payload.get("storage_namespace") or current["storage_namespace"])
@@ -8178,6 +10134,7 @@ class ControlPlaneManager:
                 """,
                 (section, json_dump(_safe_json_object(value)), now_iso()),
             )
+        self._invalidate_global_sections_cache()
         # Post-write verification — read back and confirm the sections we just
         # wrote are visible. A silent failure in the DB layer (missing row,
         # no-op backend) becomes a loud 500 here instead of a 200 OK that
@@ -8327,7 +10284,7 @@ class ControlPlaneManager:
     def _general_review_warnings(self, values: dict[str, Any]) -> list[str]:
         warnings: list[str] = []
         models = _safe_json_object(values.get("models"))
-        provider_connections = {
+        provider_connections: dict[str, dict[str, Any]] = {
             str(key): _safe_json_object(value)
             for key, value in _safe_json_object(values.get("provider_connections")).items()
         }
@@ -8441,7 +10398,7 @@ class ControlPlaneManager:
         command_present = bool(provider_payload.get("command_present", False))
         enabled = bool(provider_payload.get("enabled", False))
         category = str(provider_payload.get("category") or "general")
-        if category == "voice" and normalized == "kokoro":
+        if category == "voice" and normalized in {"kokoro", "supertonic"}:
             return True
         if normalized == "whispercpp" and function_id == "transcription":
             return enabled and command_present
@@ -8904,6 +10861,24 @@ class ControlPlaneManager:
                     )
                 ).get("name")
             ),
+            "supertonic_default_model": _nonempty_text(providers_section.get("supertonic_default_model"))
+            or _nonempty_text(os.environ.get("SUPERTONIC_DEFAULT_MODEL"))
+            or SUPERTONIC_DEFAULT_MODEL_ID,
+            "supertonic_default_language": _nonempty_text(providers_section.get("supertonic_default_language"))
+            or _nonempty_text(os.environ.get("SUPERTONIC_DEFAULT_LANGUAGE"))
+            or SUPERTONIC_DEFAULT_LANGUAGE_ID,
+            "supertonic_default_voice": _nonempty_text(providers_section.get("supertonic_default_voice"))
+            or _nonempty_text(os.environ.get("SUPERTONIC_DEFAULT_VOICE"))
+            or SUPERTONIC_DEFAULT_VOICE_ID,
+            "supertonic_default_voice_label": _nonempty_text(
+                _safe_json_object(
+                    supertonic_voice_metadata(
+                        _nonempty_text(providers_section.get("supertonic_default_voice"))
+                        or _nonempty_text(os.environ.get("SUPERTONIC_DEFAULT_VOICE"))
+                        or SUPERTONIC_DEFAULT_VOICE_ID
+                    )
+                ).get("name")
+            ),
             "functional_defaults": self._resolve_general_functional_defaults(
                 providers_section=providers_section,
                 provider_catalog=provider_catalog,
@@ -8983,7 +10958,7 @@ class ControlPlaneManager:
             "knowledge_policy": knowledge_policy,
             "autonomy_policy": autonomy_policy,
         }
-        provider_connections = {
+        provider_connections: dict[str, dict[str, Any]] = {
             provider_id: self.get_provider_connection(provider_id)
             for provider_id in _safe_json_object(provider_catalog.get("providers"))
             if provider_id in MANAGED_PROVIDER_IDS
@@ -9522,7 +11497,7 @@ class ControlPlaneManager:
 
         provider_catalog = self.get_core_providers()
         enabled_providers = normalize_string_list(models.get("providers_enabled"))
-        provider_connections = {
+        provider_connections: dict[str, dict[str, Any]] = {
             provider_id: self.get_provider_connection(provider_id)
             for provider_id in _safe_json_object(provider_catalog.get("providers"))
             if provider_id in MANAGED_PROVIDER_IDS
@@ -9564,6 +11539,14 @@ class ControlPlaneManager:
                 general_ui["kokoro_default_voice_label"] = voice_label
             else:
                 general_ui.pop("kokoro_default_voice_label", None)
+        if "supertonic_default_model" in models:
+            current_providers["supertonic_default_model"] = _nonempty_text(models.get("supertonic_default_model"))
+        if "supertonic_default_language" in models:
+            current_providers["supertonic_default_language"] = _nonempty_text(
+                models.get("supertonic_default_language")
+            ).lower()
+        if "supertonic_default_voice" in models:
+            current_providers["supertonic_default_voice"] = _nonempty_text(models.get("supertonic_default_voice"))
         # Apple Silicon Metal acceleration toggle. Persisted in
         # ``providers.metal_enabled`` and projected to the ``METAL_ENABLED``
         # env var by ``_apply_system_settings_to_sections`` so the runtime
@@ -9580,6 +11563,23 @@ class ControlPlaneManager:
             current_providers["kokoro_default_language"] = _nonempty_text(voice_metadata.get("language_id")).lower()
             if not _nonempty_text(general_ui.get("kokoro_default_voice_label")):
                 general_ui["kokoro_default_voice_label"] = _nonempty_text(voice_metadata.get("name"))
+        normalized_supertonic_model = (
+            _nonempty_text(current_providers.get("supertonic_default_model")) or SUPERTONIC_DEFAULT_MODEL_ID
+        )
+        if normalized_supertonic_model:
+            try:
+                supertonic_model_status(normalized_supertonic_model)
+            except KeyError as exc:
+                raise ValueError("The default Supertonic model does not exist in the official catalog.") from exc
+            current_providers["supertonic_default_model"] = normalized_supertonic_model
+        normalized_supertonic_voice = _nonempty_text(current_providers.get("supertonic_default_voice"))
+        if normalized_supertonic_voice:
+            voice_metadata = supertonic_voice_metadata(normalized_supertonic_voice)
+            if voice_metadata is None:
+                raise ValueError("The default Supertonic voice does not exist in the official catalog.")
+            current_providers["supertonic_default_voice"] = _nonempty_text(voice_metadata.get("voice_id"))
+            if not _nonempty_text(current_providers.get("supertonic_default_language")):
+                current_providers["supertonic_default_language"] = SUPERTONIC_DEFAULT_LANGUAGE_ID
         functional_defaults_requested = _normalize_functional_model_defaults(models.get("functional_defaults"))
         if functional_defaults_requested:
             current_providers["functional_defaults"] = functional_defaults_requested
@@ -9658,6 +11658,8 @@ class ControlPlaneManager:
             audio_model = _nonempty_text(audio_default.get("model_id"))
             if audio_provider == "elevenlabs" and audio_model:
                 current_providers["elevenlabs_model"] = audio_model
+            if audio_provider == "supertonic" and audio_model:
+                current_providers["supertonic_default_model"] = audio_model
         elif "functional_defaults" in current_providers:
             current_providers.pop("functional_defaults", None)
 
@@ -10494,7 +12496,14 @@ class ControlPlaneManager:
             "health_url": f"http://127.0.0.1:{health_port}/health",
             "runtime_base_url": f"http://127.0.0.1:{health_port}",
         }
-        runtime_endpoint.update(_safe_json_object(json_load(agent_row["runtime_endpoint_json"], {})))
+        stored_runtime_endpoint = _safe_json_object(json_load(agent_row["runtime_endpoint_json"], {}))
+        runtime_endpoint.update(stored_runtime_endpoint)
+        runtime_endpoint = self._normalize_runtime_endpoint_for_agent(normalized, runtime_endpoint)
+        if runtime_endpoint != stored_runtime_endpoint:
+            execute(
+                "UPDATE cp_agent_definitions SET runtime_endpoint_json = ?, updated_at = ? WHERE id = ?",
+                (json_dump(runtime_endpoint), now_iso(), normalized),
+            )
         # Post-update: re-read health_port in case runtime_endpoint_json overrode it, then
         # propagate to process_env so the spawned worker binds the same port the supervisor
         # expects to poll for liveness/idle checks. Without this the worker falls back to
@@ -10686,6 +12695,8 @@ class ControlPlaneManager:
         audio_model = _trimmed_text(audio_default.get("model_id"))
         if audio_provider == "elevenlabs" and audio_model:
             env["ELEVENLABS_MODEL"] = audio_model
+        if audio_provider == "supertonic" and audio_model:
+            env["SUPERTONIC_DEFAULT_MODEL"] = audio_model
         if audio_provider == "elevenlabs" and not _nonempty_text(env.get("ELEVENLABS_API_KEY")):
             # Provider connection secrets are stripped from the persisted snapshot.
             # Rehydrate the selected audio provider key only in process_env so
@@ -10720,10 +12731,29 @@ class ControlPlaneManager:
             or _nonempty_text(env.get("KOKORO_DEFAULT_LANGUAGE"))
             or KOKORO_DEFAULT_LANGUAGE_ID
         )
+        supertonic_default_model = (
+            _nonempty_text(providers_section.get("supertonic_default_model"))
+            or _nonempty_text(env.get("SUPERTONIC_DEFAULT_MODEL"))
+            or SUPERTONIC_DEFAULT_MODEL_ID
+        )
+        supertonic_default_voice = (
+            _nonempty_text(providers_section.get("supertonic_default_voice"))
+            or _nonempty_text(env.get("SUPERTONIC_DEFAULT_VOICE"))
+            or SUPERTONIC_DEFAULT_VOICE_ID
+        )
+        env["SUPERTONIC_DEFAULT_MODEL"] = supertonic_default_model
+        env["SUPERTONIC_DEFAULT_VOICE"] = supertonic_default_voice
+        env["SUPERTONIC_DEFAULT_LANGUAGE"] = (
+            _nonempty_text(providers_section.get("supertonic_default_language"))
+            or _nonempty_text(env.get("SUPERTONIC_DEFAULT_LANGUAGE"))
+            or SUPERTONIC_DEFAULT_LANGUAGE_ID
+        )
         if elevenlabs_default_voice and (
             audio_provider == "elevenlabs" or (elevenlabs_ready and not elevenlabs_enabled)
         ):
             env["TTS_DEFAULT_VOICE"] = elevenlabs_default_voice
+        elif audio_provider == "supertonic":
+            env["TTS_DEFAULT_VOICE"] = supertonic_default_voice
         else:
             env["TTS_DEFAULT_VOICE"] = kokoro_default_voice
         try:
@@ -11031,6 +13061,7 @@ class ControlPlaneManager:
                     "health_url": f"http://127.0.0.1:{health_port}/health",
                     "runtime_base_url": f"http://127.0.0.1:{health_port}",
                 }
+                runtime_endpoint = self._normalize_runtime_endpoint_for_agent(agent_id, runtime_endpoint)
                 self.create_agent(
                     {
                         "id": agent_id,
@@ -11243,9 +13274,18 @@ class ControlPlaneManager:
             (json_dump({"sections": sections}), now_iso()),
         )
 
+    def _invalidate_global_sections_cache(self) -> None:
+        self._global_sections_cache = None
+
     def _load_global_sections(self) -> dict[str, dict[str, Any]]:
+        now = time.monotonic()
+        cached = getattr(self, "_global_sections_cache", None)
+        if cached is not None and (now - cached[0]) < 2.0:
+            return copy.deepcopy(cached[1])
         rows = fetch_all("SELECT section, data_json, updated_at FROM cp_global_sections ORDER BY section ASC")
-        return {str(row["section"]): json_load(row["data_json"], {}) for row in rows}
+        sections = {str(row["section"]): json_load(row["data_json"], {}) for row in rows}
+        self._global_sections_cache = (now, copy.deepcopy(sections))
+        return copy.deepcopy(sections)
 
     def _resolved_shared_env_values(
         self,
@@ -11412,6 +13452,7 @@ class ControlPlaneManager:
             or key.startswith("GEMINI_")
             or key.startswith("OPENAI_")
             or key.startswith("ANTHROPIC_")
+            or key.startswith("OPENROUTER_")
             or key.startswith("PROVIDER_")
             or key
             in {
@@ -12227,10 +14268,17 @@ class ControlPlaneManager:
         )
 
     def _tool_to_payload(self, tool: Any) -> dict[str, Any]:
+        from koda.services.mcp_risk import assess_mcp_tool_risk, evaluate_mcp_risk
+
+        assessment = assess_mcp_tool_risk(tool)
+        decision = evaluate_mcp_risk(assessment)
         payload: dict[str, Any] = {
             "name": tool.name,
             "description": tool.description,
             "input_schema": tool.input_schema,
+            "risk_class": assessment.risk_class,
+            "approval_default": decision.decision,
+            "risk_metadata": assessment.to_payload(),
         }
         if tool.annotations:
             payload["annotations"] = {
@@ -12238,6 +14286,7 @@ class ControlPlaneManager:
                 "read_only_hint": tool.annotations.read_only_hint,
                 "destructive_hint": tool.annotations.destructive_hint,
                 "idempotent_hint": tool.annotations.idempotent_hint,
+                "open_world_hint": tool.annotations.open_world_hint,
             }
         return payload
 
@@ -12256,6 +14305,9 @@ class ControlPlaneManager:
             "input_schema": json_load(str(row.get("input_schema_json") or "{}"), {}),
             "annotations": annotations,
             "risk_level": str(row.get("risk_level") or "read"),
+            "risk_class": str(row.get("risk_class") or row.get("risk_level") or "unknown"),
+            "approval_default": str(row.get("approval_default") or "require_approval"),
+            "risk_metadata": json_load(str(row.get("risk_metadata_json") or "{}"), {}),
             "signature_hash": str(row.get("schema_hash") or ""),
             "discovered_at": str(row.get("discovered_at") or ""),
             "updated_at": str(row.get("updated_at") or ""),
@@ -12276,13 +14328,29 @@ class ControlPlaneManager:
         return [self._serialize_mcp_discovered_tool_row(row) for row in rows]
 
     def _build_tool_summary(self, tools: list[dict[str, Any]]) -> dict[str, int]:
-        summary = {"total": len(tools), "read_only": 0, "write": 0, "destructive": 0}
+        summary = {
+            "total": len(tools),
+            "read_only": 0,
+            "write": 0,
+            "destructive": 0,
+            "unknown": 0,
+            "high_risk": 0,
+        }
         for tool in tools:
-            annotations = _safe_json_object(tool.get("annotations"))
-            if annotations.get("destructive_hint") is True:
-                summary["destructive"] += 1
-            if annotations.get("read_only_hint") is True:
+            risk_class = str(tool.get("risk_class") or tool.get("risk_level") or "unknown")
+            if risk_class == "read_context":
                 summary["read_only"] += 1
+            elif risk_class == "destructive_write":
+                summary["destructive"] += 1
+                summary["high_risk"] += 1
+                summary["write"] += 1
+            elif risk_class in {"network_write", "secret_access", "code_execution"}:
+                summary["high_risk"] += 1
+                summary["write"] += 1
+            elif risk_class == "unknown":
+                summary["unknown"] += 1
+                summary["high_risk"] += 1
+                summary["write"] += 1
             else:
                 summary["write"] += 1
         return summary
@@ -12342,6 +14410,7 @@ class ControlPlaneManager:
         )
         for tool in tools:
             annotations = _safe_json_object(tool.get("annotations"))
+            risk_class = str(tool.get("risk_class") or "unknown")
             execute(
                 """
                 INSERT INTO cp_connection_discovery_run_tools (
@@ -12355,7 +14424,7 @@ class ControlPlaneManager:
                     str(tool.get("description") or ""),
                     json_dump(tool.get("input_schema") or {}),
                     json_dump(annotations),
-                    str(tool.get("risk_level") or "read"),
+                    risk_class if risk_class != "read_context" else "read",
                     str(tool.get("signature_hash") or self._mcp_tool_signature_hash(tool)),
                     now,
                 ),
@@ -12462,19 +14531,25 @@ class ControlPlaneManager:
         )
         for tool in tools:
             annotations = _safe_json_object(tool.get("annotations"))
-            risk_level = "read"
-            if annotations.get("destructive_hint") is True:
+            from koda.services.mcp_risk import assess_mcp_tool_risk, evaluate_mcp_risk
+
+            assessment = assess_mcp_tool_risk(tool)
+            decision = evaluate_mcp_risk(assessment)
+            risk_class = str(tool.get("risk_class") or assessment.risk_class)
+            approval_default = str(tool.get("approval_default") or decision.decision)
+            risk_metadata = _safe_json_object(tool.get("risk_metadata") or assessment.to_payload())
+            risk_level = "read" if risk_class == "read_context" else "write"
+            if risk_class == "destructive_write":
                 risk_level = "destructive"
-            elif annotations.get("read_only_hint") is not True:
-                risk_level = "write"
             schema_json = json_dump(tool.get("input_schema") or {})
             signature_hash = self._mcp_tool_signature_hash(tool)
             execute(
                 """
                 INSERT INTO cp_mcp_discovered_tools (
                     agent_id, server_key, tool_name, description, input_schema_json,
-                    annotations_json, risk_level, schema_hash, discovered_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    annotations_json, risk_level, schema_hash, discovered_at, updated_at,
+                    risk_class, approval_default, risk_metadata_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb)
                 """,
                 (
                     agent_id,
@@ -12487,6 +14562,9 @@ class ControlPlaneManager:
                     signature_hash,
                     discovered_at,
                     discovered_at,
+                    risk_class,
+                    approval_default,
+                    json_dump(risk_metadata),
                 ),
             )
 

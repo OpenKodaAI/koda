@@ -41,7 +41,6 @@ export async function POST(request: NextRequest) {
       },
       { label: "Recovery service" },
     );
-    const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
     if (!upstream.ok) {
       // Generic message — recovery flow is also identifier-bearing and must
       // stay indistinguishable across "unknown user" / "wrong code" / "rate

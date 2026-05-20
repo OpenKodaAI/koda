@@ -4,6 +4,7 @@ import * as React from "react";
 import { motion } from "framer-motion";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
+import { translate } from "@/lib/i18n";
 
 interface AppUsage {
   icon: React.ReactNode;
@@ -85,19 +86,18 @@ export const ScreenTimeCard = ({
             <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-                  {t("screenTime.aggregate", { defaultValue: "Aggregate activity" })}
+                  {t("screenTime.aggregate", undefined)}
                 </p>
                 <div className="mt-1.5 flex items-end gap-3">
                   <span className="text-[1.9rem] font-semibold tracking-[-0.06em] text-[var(--text-primary)] sm:text-[2.15rem]">
-                    {totalHours}h {totalMinutes}m
-                  </span>
+                    {totalHours}{translate("generated.ui.h_c2b9057e")}{totalMinutes}{translate("generated.ui.m_ed141783")}</span>
                   <span className="pb-1 text-[11px] font-medium text-[var(--text-tertiary)]">
-                    {t("screenTime.last24h", { defaultValue: "in the last 24h" })}
+                    {t("screenTime.last24h", undefined)}
                   </span>
                 </div>
               </div>
               <p className="shrink-0 text-[11px] font-medium text-[var(--text-tertiary)]">
-                {t("screenTime.hourlyWindow", { defaultValue: "consolidated hourly window" })}
+                {t("screenTime.hourlyWindow", undefined)}
               </p>
             </div>
 
@@ -142,10 +142,10 @@ export const ScreenTimeCard = ({
         {topApps.length > 0 && <div className="min-w-0 border-t border-[var(--border-subtle)] pt-4 lg:flex lg:flex-col lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
           <div className="mb-3 flex items-center justify-between gap-3">
             <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-              {t("screenTime.focusAgents", { defaultValue: "Agents in focus" })}
+              {t("screenTime.focusAgents", undefined)}
             </p>
             <span className="text-[11px] text-[var(--text-quaternary)]">
-              {t("screenTime.items", { count: topApps.length, defaultValue: "{{count}} items" })}
+              {t("screenTime.items", { count: topApps.length })}
             </span>
           </div>
 

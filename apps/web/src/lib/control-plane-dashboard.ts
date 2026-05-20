@@ -17,6 +17,8 @@ type DashboardFetchOptions = {
   fallbackError: string;
 };
 
+const UPSTREAM_UNAVAILABLE_HEADER = "x-koda-upstream-unavailable";
+
 function appendParam(searchParams: URLSearchParams, key: string, value: DashboardParamValue) {
   if (Array.isArray(value)) {
     for (const item of value) {
@@ -83,6 +85,15 @@ export async function fetchControlPlaneDashboardJsonAllowError<T>(
     signal,
     cache: "no-store",
   });
+
+  if (response.headers.get(UPSTREAM_UNAVAILABLE_HEADER) === "1") {
+    return {
+      ok: false,
+      status: 503,
+      data: await response.json().catch(() => null) as T | null,
+      error: fallbackError,
+    };
+  }
 
   if (!response.ok) {
     return {

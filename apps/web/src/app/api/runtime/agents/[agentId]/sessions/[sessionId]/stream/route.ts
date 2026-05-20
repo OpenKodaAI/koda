@@ -1,8 +1,25 @@
-import { NextResponse } from "next/server";
 import { runtimeFetch, RuntimeRequestError } from "@/lib/runtime-api";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+function emptySessionStream(message: string) {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(`: ${message}\nretry: 15000\n\n`));
+      controller.close();
+    },
+  });
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
+}
 
 export async function GET(
   request: Request,
@@ -29,13 +46,8 @@ export async function GET(
     );
 
     if (!upstream.ok || !upstream.body) {
-      const text = await upstream.text().catch(() => "");
-      return NextResponse.json(
-        {
-          error: text || `Unable to open session stream (${upstream.status})`,
-        },
-        { status: upstream.status },
-      );
+      await upstream.text().catch(() => "");
+      return emptySessionStream(`session stream unavailable (${upstream.status})`);
     }
 
     return new Response(upstream.body, {
@@ -49,14 +61,6 @@ export async function GET(
     });
   } catch (error) {
     const status = error instanceof RuntimeRequestError ? error.status : 500;
-    return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Unable to proxy session stream",
-      },
-      { status },
-    );
+    return emptySessionStream(`session stream unavailable (${status})`);
   }
 }

@@ -1,3 +1,7 @@
+import type { RunGraphSnapshot, RunReplayPlan } from "@/lib/contracts/run-graph";
+import type { SandboxDoctorResult } from "@/lib/contracts/sandbox-doctor";
+import type { ChildRunRecord, ContextGovernancePayload } from "@/lib/contracts/phase3-runtime";
+
 export type RuntimeAvailabilityStatus =
   | "available"
   | "partial"
@@ -144,6 +148,8 @@ export interface RuntimeEnvironment {
   workspace_path?: string | null;
   runtime_dir?: string | null;
   base_work_dir?: string | null;
+  source_root_path?: string | null;
+  source_root_exists?: boolean | null;
   branch_name?: string | null;
   created_worktree?: number | boolean | null;
   worktree_mode?: string | null;
@@ -493,4 +499,9 @@ export interface RuntimeTaskBundle {
   loopCycles: RuntimeLoopCycle[];
   sessions: RuntimeSessions;
   errors: string[];
+  run_graph?: RunGraphSnapshot | Record<string, unknown> | null;
+  run_replay?: RunReplayPlan | Record<string, unknown> | null;
+  sandbox_doctor?: SandboxDoctorResult | Record<string, unknown> | null;
+  child_runs?: ChildRunRecord[];
+  context_governance?: ContextGovernancePayload | Record<string, unknown> | null;
 }

@@ -14,7 +14,7 @@ export function RouteErrorState({
   description: string;
   onRetry?: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <PageSection className="min-h-[420px]">
       <PageEmptyState
@@ -30,7 +30,7 @@ export function RouteErrorState({
               onClick={onRetry}
               leading={<RotateCw className="h-4 w-4" />}
             >
-              {tl("Try again")}
+              {t("generated.ui.try_again_ea521c3f")}
             </ActionButton>
           ) : null
         }

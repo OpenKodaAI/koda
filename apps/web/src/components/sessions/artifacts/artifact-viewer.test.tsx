@@ -121,6 +121,9 @@ describe("ArtifactViewer dispatch", () => {
     );
     const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:abc");
     const revoke = vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
+    const click = vi
+      .spyOn(HTMLAnchorElement.prototype, "click")
+      .mockImplementation(() => {});
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -140,6 +143,7 @@ describe("ArtifactViewer dispatch", () => {
     await waitFor(() => {
       expect(create).toHaveBeenCalled();
     });
+    expect(click).toHaveBeenCalled();
     await waitFor(() => {
       expect(revoke).toHaveBeenCalledWith("blob:abc");
     });

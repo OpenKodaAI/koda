@@ -41,14 +41,14 @@ describe("McpCustomServerModal", () => {
     onSubmitForm.mockResolvedValueOnce({ server_key: "custom_demo" });
     renderModal();
 
-    fireEvent.change(screen.getByPlaceholderText("meu-servidor"), {
+    fireEvent.change(screen.getByPlaceholderText("my-server"), {
       target: { value: "demo" },
     });
     fireEvent.change(screen.getByPlaceholderText("My MCP Server"), {
       target: { value: "Demo Server" },
     });
     // Add args (command stays as default 'npx')
-    fireEvent.change(screen.getByPlaceholderText("-y @minha-empresa/mcp"), {
+    fireEvent.change(screen.getByPlaceholderText("-y @my-company/mcp"), {
       target: { value: "-y @demo/mcp" },
     });
 

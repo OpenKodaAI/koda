@@ -137,6 +137,61 @@ def test_runtime_snapshot_propagates_health_port_to_process_env(monkeypatch):
     )
 
 
+def test_runtime_endpoint_allocates_unique_port_for_secondary_agent(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    monkeypatch.setenv("AGENT_ID", "KODA")
+    monkeypatch.setattr(
+        manager_mod,
+        "fetch_all",
+        lambda *_args, **_kwargs: [
+            {
+                "id": "KODA",
+                "runtime_endpoint_json": json.dumps({"health_port": 8080}),
+            }
+        ],
+    )
+
+    endpoint = manager._normalize_runtime_endpoint_for_agent("KODA_COPY", {"health_port": 8080})
+
+    assert endpoint["health_port"] == 8081
+    assert endpoint["health_url"] == "http://127.0.0.1:8081/health"
+
+
+def test_runtime_endpoint_keeps_primary_default_port(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    monkeypatch.setenv("AGENT_ID", "KODA")
+    monkeypatch.setattr(manager_mod, "fetch_all", lambda *_args, **_kwargs: [])
+
+    endpoint = manager._normalize_runtime_endpoint_for_agent("KODA", {})
+
+    assert endpoint["health_port"] == 8080
+
+
+def test_runtime_endpoint_primary_keeps_default_when_secondary_has_stale_collision(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    monkeypatch.setenv("AGENT_ID", "KODA")
+    monkeypatch.setattr(
+        manager_mod,
+        "fetch_all",
+        lambda *_args, **_kwargs: [
+            {
+                "id": "KODA_COPY",
+                "runtime_endpoint_json": json.dumps({"health_port": 8080}),
+            }
+        ],
+    )
+
+    endpoint = manager._normalize_runtime_endpoint_for_agent("KODA", {"health_port": 8080})
+
+    assert endpoint["health_port"] == 8080
+
+
 def test_runtime_snapshot_injects_runtime_ui_token_for_worker(monkeypatch):
     import koda.control_plane.manager as manager_mod
     import koda.control_plane.runtime_access as runtime_access_mod

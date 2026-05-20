@@ -12,6 +12,7 @@ import { PolicyCard } from "@/components/control-plane/shared/policy-card";
 import { FADE_TRANSITION } from "@/components/control-plane/shared/motion-constants";
 import { Button } from "@/components/ui/button";
 import { SecretInput } from "@/components/ui/secret-controls";
+import { translate } from "@/lib/i18n";
 import {
   removeVariable,
   sanitizeVariableDraft,
@@ -45,7 +46,7 @@ const INITIAL_DRAFT: DraftState = {
 
 export function SectionVariables() {
   const { draft, setField, sectionErrors } = useSystemSettings();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const { showToast } = useToast();
   const variables = draft.values.variables;
   const variableErrors = sectionErrors.variables;
@@ -108,19 +109,19 @@ export function SectionVariables() {
   function handleSave() {
     const key = entryDraft.key.trim().toUpperCase();
     if (!key) {
-      showToast(tl("Informe o nome da variável."), "warning");
+      showToast(t("generated.controlPlane.informe_o_nome_da_variavel_b665fcbe"), "warning");
       return;
     }
 
     const trimmedValue = entryDraft.value.trim();
 
     if (entryDraft.type === "text" && !trimmedValue) {
-      showToast(tl("Informe um valor para a variável."), "warning");
+      showToast(t("generated.controlPlane.informe_um_valor_para_a_variavel_2d9c881a"), "warning");
       return;
     }
 
     if (entryDraft.type === "secret" && !trimmedValue && !entryDraft.valuePresent && !entryDraft.clear) {
-      showToast(tl("Informe um valor inicial para o segredo."), "warning");
+      showToast(t("generated.controlPlane.informe_um_valor_inicial_para_o_segredo_a537a83e"), "warning");
       return;
     }
 
@@ -141,7 +142,7 @@ export function SectionVariables() {
         : variables;
 
     setField("variables", upsertVariable(baseVariables, sanitized));
-    showToast(tl('Variável "{{key}}" preparada no rascunho.', { key: sanitized.key }), "success");
+    showToast(t("generated.controlPlane.variavel_key_preparada_no_rascunho_0413664f", { key: sanitized.key }), "success");
     resetDraft();
   }
 
@@ -150,19 +151,19 @@ export function SectionVariables() {
     if (editingKey === variableKey) {
       resetDraft();
     }
-    showToast(tl('Variável "{{key}}" removida do rascunho.', { key: variableKey }), "success");
+    showToast(t("generated.controlPlane.variavel_key_removida_do_rascunho_808b7ee2", { key: variableKey }), "success");
   }
 
   return (
     <SettingsSectionShell
       sectionId="variables"
-      title="settings.sections.variables.label"
-      description="settings.sections.variables.description"
+      title={translate("generated.controlPlane.settings_sections_variables_label_3aca0db4")}
+      description={translate("generated.controlPlane.settings_sections_variables_description_850103a5")}
     >
-      <SettingsFieldGroup title={tl("Variáveis e segredos")}>
+      <SettingsFieldGroup title={t("generated.controlPlane.variaveis_e_segredos_7c5649cf")}>
         <PolicyCard
-          title={tl("Variáveis e segredos do sistema")}
-          description={tl("Recursos globais disponíveis para agentes mediante grant explícito.")}
+          title={t("generated.controlPlane.variaveis_e_segredos_do_sistema_94c2c439")}
+          description={t("generated.controlPlane.recursos_globais_disponiveis_para_agentes_me_2102fe19")}
           icon={KeyRound}
           variant="flat"
           defaultOpen
@@ -170,7 +171,7 @@ export function SectionVariables() {
           <div className="flex flex-col gap-3">
             <div className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
               <div className="flex flex-col gap-1.5">
-                <span className="eyebrow">{tl("Chave")}</span>
+                <span className="eyebrow">{t("generated.controlPlane.chave_aa9b585c")}</span>
                 <input
                   type="text"
                   className={cn(
@@ -198,7 +199,7 @@ export function SectionVariables() {
               </div>
               <div className="flex flex-col gap-1.5">
                 <span className="eyebrow">
-                  {entryDraft.type === "secret" ? tl("Valor do segredo") : tl("Valor")}
+                  {entryDraft.type === "secret" ? t("generated.controlPlane.valor_do_segredo_59d42e8d") : t("generated.controlPlane.valor_805659f6")}
                 </span>
                 {entryDraft.type === "secret" ? (
                   <SecretInput
@@ -212,8 +213,8 @@ export function SectionVariables() {
                     }
                     placeholder={
                       entryDraft.valuePresent
-                        ? tl("Digite apenas se quiser substituir")
-                        : tl("Cole o segredo aqui")
+                        ? t("generated.controlPlane.digite_apenas_se_quiser_substituir_486e531c")
+                        : t("generated.controlPlane.cole_o_segredo_aqui_7b17e22d")
                     }
                   />
                 ) : (
@@ -224,14 +225,14 @@ export function SectionVariables() {
                     onChange={(event) =>
                       setEntryDraft((prev) => ({ ...prev, value: event.target.value }))
                     }
-                    placeholder={tl("Ex.: squad-platform")}
+                    placeholder={t("generated.controlPlane.ex_squad_platform_f98942b9")}
                   />
                 )}
               </div>
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <span className="eyebrow">{tl("Descrição")}</span>
+              <span className="eyebrow">{t("generated.controlPlane.descricao_ff40fdea")}</span>
               <input
                 type="text"
                 className="field-shell text-[var(--text-primary)]"
@@ -239,7 +240,7 @@ export function SectionVariables() {
                 onChange={(event) =>
                   setEntryDraft((prev) => ({ ...prev, description: event.target.value }))
                 }
-                placeholder={tl("Contexto curto para o operador lembrar o propósito.")}
+                placeholder={t("generated.controlPlane.contexto_curto_para_o_operador_lembrar_o_pro_2709d0d5")}
               />
             </div>
 
@@ -247,11 +248,11 @@ export function SectionVariables() {
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
                   <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
-                    {tl("Armazenada")}
+                    {t("generated.controlPlane.armazenada_c08c504b")}
                   </span>
                   <span className="text-xs text-[var(--text-tertiary)]">
-                    {tl(
-                      "O valor atual nunca é exibido. Digite uma nova chave para substituir ou marque para remover.",
+                    {t(
+                      "generated.controlPlane.o_valor_atual_nunca_e_exibido_digite_uma_nov_df7194d3",
                     )}
                   </span>
                 </div>
@@ -269,8 +270,8 @@ export function SectionVariables() {
                 >
                   <Trash2 size={13} strokeWidth={1.75} />
                   {entryDraft.clear
-                    ? tl("Segredo será removido ao salvar")
-                    : tl("Marcar para remover")}
+                    ? t("generated.controlPlane.segredo_sera_removido_ao_salvar_38a5d4bc")
+                    : t("generated.controlPlane.marcar_para_remover_371dd69b")}
                 </button>
               </div>
             ) : null}
@@ -300,7 +301,7 @@ export function SectionVariables() {
                   )}
                 >
                   <KeyRound size={12} strokeWidth={1.75} />
-                  {entryDraft.type === "secret" ? tl("Segredo") : tl("Texto público")}
+                  {entryDraft.type === "secret" ? t("generated.controlPlane.segredo_4e0c54a8") : t("generated.controlPlane.texto_publico_e7ca87e6")}
                 </button>
 
                 <button
@@ -325,19 +326,19 @@ export function SectionVariables() {
                     <Lock size={12} strokeWidth={1.75} />
                   )}
                   {entryDraft.scope === "agent_grant"
-                    ? tl("Disponível por grant")
-                    : tl("Somente sistema")}
+                    ? t("generated.controlPlane.disponivel_por_grant_2133c406")
+                    : t("generated.controlPlane.somente_sistema_49d36183")}
                 </button>
               </div>
 
               <div className="flex items-center gap-2">
                 {isEditing ? (
                   <Button type="button" variant="ghost" size="sm" onClick={resetDraft}>
-                    {tl("Cancelar")}
+                    {t("generated.controlPlane.cancelar_091200fb")}
                   </Button>
                 ) : null}
                 <Button type="button" variant="accent" size="sm" onClick={handleSave}>
-                  {isEditing ? tl("Salvar") : tl("Adicionar")}
+                  {isEditing ? t("generated.controlPlane.salvar_94c457df") : t("generated.controlPlane.adicionar_07558363")}
                 </Button>
               </div>
             </div>
@@ -345,7 +346,7 @@ export function SectionVariables() {
 
           {sortedVariables.length === 0 ? (
             <div className="rounded-[var(--radius-panel-sm)] border border-dashed border-[var(--border-subtle)] px-4 py-6 text-center text-sm text-[var(--text-quaternary)]">
-              {tl("Nenhuma variável global customizada foi adicionada ainda.")}
+              {t("generated.controlPlane.nenhuma_variavel_global_customizada_foi_adic_71e7f5d7")}
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">
@@ -384,7 +385,7 @@ export function SectionVariables() {
                                   : "bg-[var(--hover-tint)] text-[var(--text-quaternary)]",
                               )}
                             >
-                              {variable.type === "secret" ? tl("secret") : tl("public")}
+                              {variable.type === "secret" ? t("generated.controlPlane.secret_21981078") : t("generated.controlPlane.public_388f0dbf")}
                             </span>
                             <span
                               className={cn(
@@ -394,13 +395,13 @@ export function SectionVariables() {
                                   : "bg-[var(--hover-tint)] text-[var(--text-quaternary)]",
                               )}
                             >
-                              {variable.scope === "agent_grant" ? tl("grant") : tl("system")}
+                              {variable.scope === "agent_grant" ? t("generated.controlPlane.grant_359fdf66") : t("generated.controlPlane.system_c5d2946b")}
                             </span>
                           </div>
 
                           <span className="hidden max-w-[220px] truncate font-mono text-xs text-[var(--text-quaternary)] md:inline">
                             {variable.type === "secret"
-                              ? tl("(segredo armazenado)")
+                              ? t("generated.controlPlane.segredo_armazenado_bb36dd53")
                               : variable.value}
                           </span>
 
@@ -410,7 +411,7 @@ export function SectionVariables() {
                               variant="ghost"
                               size="sm"
                               onClick={() => beginEdit(variable)}
-                              aria-label={tl("Editar")}
+                              aria-label={t("generated.controlPlane.editar_28e2e08e")}
                               className="px-2"
                             >
                               <Pencil size={13} strokeWidth={1.75} />
@@ -420,7 +421,7 @@ export function SectionVariables() {
                               variant="ghost"
                               size="sm"
                               onClick={() => handleDelete(variable.key)}
-                              aria-label={tl("Remover")}
+                              aria-label={t("generated.controlPlane.remover_5465770e")}
                               className="px-2 text-[var(--text-quaternary)] hover:text-[var(--tone-danger-text)]"
                             >
                               <Trash2 size={13} strokeWidth={1.75} />

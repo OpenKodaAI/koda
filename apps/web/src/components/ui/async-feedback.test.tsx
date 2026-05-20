@@ -5,12 +5,15 @@ import { AsyncActionButton, BackgroundRefreshIndicator } from "@/components/ui/a
 describe("async feedback primitives", () => {
   it("marks action buttons as busy when loading", () => {
     render(
-      <AsyncActionButton loading loadingLabel="Salvando">
-        Salvar
+      <AsyncActionButton loading loadingLabel="Saving">
+        Save
       </AsyncActionButton>,
     );
 
     expect(screen.getByRole("button")).toHaveAttribute("aria-busy", "true");
+    expect(screen.getByRole("button", { name: "Saving" })).toBeInTheDocument();
+    expect(screen.getByText("Save")).toBeInTheDocument();
+    expect(screen.queryByText("Saving")).not.toBeInTheDocument();
   });
 
   it("shows a subtle refresh state for background updates", () => {

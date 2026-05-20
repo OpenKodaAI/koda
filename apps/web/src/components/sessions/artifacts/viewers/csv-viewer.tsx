@@ -5,6 +5,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { Button } from "@/components/ui/button";
 import { CSV_PAGE_SIZE, MAX_CSV_ROWS } from "@/lib/contracts/artifacts";
 import { cn } from "@/lib/utils";
+import { translate } from "@/lib/i18n";
 
 export interface CsvViewerProps {
   content: string;
@@ -85,8 +86,7 @@ export function CsvViewer({
       <div className="flex items-center justify-between border-b border-[color:var(--divider-hair)] px-4 py-2">
         <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
           {filename ? `${filename} · ` : ""}
-          {parsed.rows.length.toLocaleString()} rows
-          {parsed.truncated
+          {parsed.rows.length.toLocaleString()} {translate("generated.sessions.rows_bc4a72ac")}{parsed.truncated
             ? ` · truncated at ${MAX_CSV_ROWS.toLocaleString()}`
             : ""}
           {parsed.malformedLines > 0

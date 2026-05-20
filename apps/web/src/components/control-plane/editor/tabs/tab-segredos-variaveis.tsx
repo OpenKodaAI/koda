@@ -44,7 +44,7 @@ export function TabSegredosVariaveis() {
     updateField,
   } = useAgentEditor();
   const { showToast } = useToast();
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const router = useRouter();
   const { runAction, isPending } = useAsyncAction();
 
@@ -75,14 +75,14 @@ export function TabSegredosVariaveis() {
     ...systemSettings.shared_variables.map((item) => ({
       value: item.key,
       label: item.key,
-      status: tl("Disponivel globalmente"),
+      status: t("generated.controlPlane.disponivel_globalmente_da91c50c"),
     })),
     ...grantedSharedKeys
       .filter((key) => !systemSettings.shared_variables.some((item) => item.key === key))
       .map((key) => ({
         value: key,
         label: key,
-        status: tl("Indisponivel"),
+        status: t("generated.controlPlane.indisponivel_54e299bf"),
       })),
   ];
 
@@ -90,7 +90,7 @@ export function TabSegredosVariaveis() {
     ...grantableGlobalSecrets.map((item) => ({
       value: item.secret_key,
       label: item.secret_key,
-      status: tl("Grantavel"),
+      status: t("generated.controlPlane.grantavel_2d9b1b4a"),
     })),
     ...grantedSecretKeys
       .filter((key) => !grantableGlobalSecrets.some((item) => item.secret_key === key))
@@ -103,8 +103,8 @@ export function TabSegredosVariaveis() {
           label: key,
           status:
             protectedSecret && isGrantableSecret(protectedSecret) === false
-              ? tl("Somente sistema")
-              : tl("Indisponivel"),
+              ? t("generated.controlPlane.somente_sistema_49d36183")
+              : t("generated.controlPlane.indisponivel_54e299bf"),
         };
       }),
   ];
@@ -125,11 +125,11 @@ export function TabSegredosVariaveis() {
     for (const secret of localSecrets) {
       const secretKey = String(secret.secret_key || "");
       if (secretKey) {
-        items.push({ kind: "secret", key: secretKey, preview: String(secret.preview || tl("mascarado")) });
+        items.push({ kind: "secret", key: secretKey, preview: String(secret.preview || t("generated.controlPlane.mascarado_18baf8a7")) });
       }
     }
     return items.sort((a, b) => a.key.localeCompare(b.key));
-  }, [localEnvEntries, localSecrets, tl]);
+  }, [localEnvEntries, localSecrets, t]);
 
   function updateResourcePolicy(
     patch: Partial<typeof resourcePolicy>,
@@ -194,14 +194,14 @@ export function TabSegredosVariaveis() {
   async function handleSaveEntry() {
     const key = draftKey.trim().toUpperCase();
     if (!key) {
-      showToast(tl("Informe o nome da chave."), "warning");
+      showToast(t("generated.controlPlane.informe_o_nome_da_chave_c14f70d3"), "warning");
       return;
     }
 
     if (draftIsSecret) {
       const value = draftValue.trim();
       if (!value) {
-        showToast(tl("Informe o valor do segredo."), "warning");
+        showToast(t("generated.controlPlane.informe_o_valor_do_segredo_90374602"), "warning");
         return;
       }
       await runAction("save-secret", async () => {
@@ -216,13 +216,13 @@ export function TabSegredosVariaveis() {
         resetEntryForm();
         router.refresh();
       }, {
-        successMessage: tl('Segredo "{{key}}" salvo.', { key }),
-        errorMessage: tl("Erro ao salvar segredo."),
+        successMessage: t("generated.controlPlane.segredo_key_salvo_c55c1208", { key }),
+        errorMessage: t("generated.controlPlane.erro_ao_salvar_segredo_5e593bca"),
       });
     } else {
       const value = draftValue.trim();
       if (!value) {
-        showToast(tl("Informe o valor da variavel."), "warning");
+        showToast(t("generated.controlPlane.informe_o_valor_da_variavel_c861c48c"), "warning");
         return;
       }
       const nextLocalEnv = { ...resourcePolicy.local_env };
@@ -232,7 +232,7 @@ export function TabSegredosVariaveis() {
       nextLocalEnv[key] = value;
       updateResourcePolicy({ local_env: nextLocalEnv });
       resetEntryForm();
-      showToast(tl('Variavel "{{key}}" preparada no rascunho.', { key }), "success");
+      showToast(t("generated.controlPlane.variavel_key_preparada_no_rascunho_3a26ed53", { key }), "success");
     }
   }
 
@@ -243,7 +243,7 @@ export function TabSegredosVariaveis() {
     if (editingKey === key) {
       resetEntryForm();
     }
-    showToast(tl('Variavel "{{key}}" removida do rascunho.', { key }), "success");
+    showToast(t("generated.controlPlane.variavel_key_removida_do_rascunho_60d373cd", { key }), "success");
   }
 
   async function handleDeleteSecret(key: string) {
@@ -258,8 +258,8 @@ export function TabSegredosVariaveis() {
       }
       router.refresh();
     }, {
-      successMessage: tl('Segredo "{{key}}" removido.', { key }),
-      errorMessage: tl("Erro ao remover segredo."),
+      successMessage: t("generated.controlPlane.segredo_key_removido_88588438", { key }),
+      errorMessage: t("generated.controlPlane.erro_ao_remover_segredo_0265953a"),
     });
   }
 
@@ -267,7 +267,7 @@ export function TabSegredosVariaveis() {
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-6">
         <PolicyCard
-          title={tl("Escopo de acesso do agente")}
+          title={t("generated.controlPlane.escopo_de_acesso_do_agente_3c3b0e67")}
           icon={ShieldCheck}
           dirty={state.dirty.agentSpec}
           variant="flat"
@@ -275,13 +275,13 @@ export function TabSegredosVariaveis() {
         >
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <CompactGrantToggle
-              title={tl("Variaveis compartilhadas")}
+              title={t("generated.controlPlane.variaveis_compartilhadas_9a4766e6")}
               options={sharedVarOptions}
               selected={grantedSharedKeys}
               onToggle={handleSharedVarToggle}
             />
             <CompactGrantToggle
-              title={tl("Segredos globais")}
+              title={t("generated.controlPlane.segredos_globais_eda4a8a0")}
               options={globalSecretOptions}
               selected={grantedSecretKeys}
               onToggle={handleGlobalSecretToggle}
@@ -292,8 +292,8 @@ export function TabSegredosVariaveis() {
 
       <section className="flex flex-col gap-6 border-t border-[color:var(--divider-hair)] pt-6">
         <PolicyCard
-          title={tl("Variaveis e segredos")}
-          description={tl("Variaveis e credenciais locais do agente.")}
+          title={t("generated.controlPlane.variaveis_e_segredos_7ebfcfc2")}
+          description={t("generated.controlPlane.variaveis_e_credenciais_locais_do_agente_802ae8e1")}
           icon={KeyRound}
           variant="flat"
           defaultOpen
@@ -301,7 +301,7 @@ export function TabSegredosVariaveis() {
           <div className="flex flex-col gap-3">
             <div className="grid grid-cols-[1fr_1fr] gap-3">
               <div className="flex flex-col gap-1.5">
-                <span className="eyebrow">{tl("Chave")}</span>
+                <span className="eyebrow">{t("generated.controlPlane.chave_aa9b585c")}</span>
                 <input
                   type="text"
                   className="field-shell font-mono text-[var(--text-primary)]"
@@ -312,12 +312,12 @@ export function TabSegredosVariaveis() {
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <span className="eyebrow">{tl("Valor")}</span>
+                <span className="eyebrow">{t("generated.controlPlane.valor_805659f6")}</span>
                 {draftIsSecret ? (
                   <SecretInput
                     value={draftValue}
                     onChange={(event) => setDraftValue(event.target.value)}
-                    placeholder={editingKey ? tl("Novo valor") : tl("Cole o segredo aqui")}
+                    placeholder={editingKey ? t("generated.controlPlane.novo_valor_ed960fa6") : t("generated.controlPlane.cole_o_segredo_aqui_7b17e22d")}
                   />
                 ) : (
                   <input
@@ -325,7 +325,7 @@ export function TabSegredosVariaveis() {
                     className="field-shell text-[var(--text-primary)]"
                     value={draftValue}
                     onChange={(event) => setDraftValue(event.target.value)}
-                    placeholder={tl("Ex.: squad-platform")}
+                    placeholder={t("generated.controlPlane.ex_squad_platform_f98942b9")}
                   />
                 )}
               </div>
@@ -345,7 +345,7 @@ export function TabSegredosVariaveis() {
                 )}
               >
                 <KeyRound size={12} />
-                {draftIsSecret ? tl("Segredo") : tl("Variavel publica")}
+                {draftIsSecret ? t("generated.controlPlane.segredo_4e0c54a8") : t("generated.controlPlane.variavel_publica_8a6fb37e")}
               </button>
 
               <div className="flex items-center gap-2">
@@ -355,34 +355,34 @@ export function TabSegredosVariaveis() {
                     onClick={resetEntryForm}
                     className="rounded-lg px-3 py-2 text-xs font-medium text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)]"
                   >
-                    {tl("Cancelar")}
+                    {t("generated.controlPlane.cancelar_091200fb")}
                   </button>
                 )}
                 <AsyncActionButton
                   type="button"
                   size="sm"
                   loading={draftIsSecret ? isPending("save-secret") : false}
-                  loadingLabel={tl("Salvando")}
+                  loadingLabel={t("generated.controlPlane.salvando_7eeded02")}
                   onClick={handleSaveEntry}
                 >
-                  {editingKey ? tl("Salvar") : tl("Adicionar")}
+                  {editingKey ? t("generated.controlPlane.salvar_94c457df") : t("generated.controlPlane.adicionar_07558363")}
                 </AsyncActionButton>
               </div>
             </div>
 
             {editingKind === "secret" && editingKey && (
               <p className="text-xs text-[var(--text-quaternary)]">
-                {tl("Substituindo o valor de")}{" "}
+                {t("generated.controlPlane.substituindo_o_valor_de_0077dbea")}{" "}
                 <span className="font-mono text-[var(--text-secondary)]">{editingKey}</span>
                 {". "}
-                {tl("O valor atual continua mascarado.")}
+                {t("generated.controlPlane.o_valor_atual_continua_mascarado_61b7766e")}
               </p>
             )}
           </div>
 
           {unifiedEntries.length === 0 ? (
             <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-4 py-6 text-center text-sm text-[var(--text-quaternary)]">
-              {tl("Nenhuma variavel ou segredo cadastrado.")}
+              {t("generated.controlPlane.nenhuma_variavel_ou_segredo_cadastrado_e92517f5")}
             </div>
           ) : (
             <div className="flex flex-col gap-1.5">
@@ -406,7 +406,7 @@ export function TabSegredosVariaveis() {
                               : "bg-[rgba(255,255,255,0.05)] text-[var(--text-quaternary)]",
                           )}
                         >
-                          {entry.kind === "secret" ? tl("secret") : tl("public")}
+                          {entry.kind === "secret" ? t("generated.controlPlane.secret_21981078") : t("generated.controlPlane.public_388f0dbf")}
                         </span>
                       </div>
 
@@ -423,7 +423,7 @@ export function TabSegredosVariaveis() {
                               : beginEditSecret(entry.key)
                           }
                           className="rounded-md p-1.5 text-[var(--text-quaternary)] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--text-secondary)]"
-                          aria-label={tl("Editar")}
+                          aria-label={t("generated.controlPlane.editar_28e2e08e")}
                         >
                           <Pencil size={13} />
                         </button>
@@ -432,7 +432,7 @@ export function TabSegredosVariaveis() {
                             type="button"
                             onClick={() => handleDeleteVariable(entry.key)}
                             className="rounded-md p-1.5 text-[var(--text-quaternary)] transition-colors hover:bg-[rgba(255,110,110,0.08)] hover:text-[var(--tone-danger-text)]"
-                            aria-label={tl("Remover")}
+                            aria-label={t("generated.controlPlane.remover_5465770e")}
                           >
                             <Trash2 size={13} />
                           </button>
@@ -445,7 +445,7 @@ export function TabSegredosVariaveis() {
                             loading={isPending(`delete-secret:${entry.key}`)}
                             loadingLabel=""
                             onClick={() => handleDeleteSecret(entry.key)}
-                            aria-label={tl("Remover")}
+                            aria-label={t("generated.controlPlane.remover_5465770e")}
                           >
                             <Trash2 size={13} />
                           </AsyncActionButton>

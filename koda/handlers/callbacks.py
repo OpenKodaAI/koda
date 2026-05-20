@@ -49,7 +49,7 @@ from koda.handlers.commands import (
     _voice_voices_markup,
 )
 from koda.logging_config import get_logger
-from koda.memory.quality import record_utility_event
+from koda.memory.quality import apply_memory_utility_feedback, record_utility_event
 from koda.provider_models import MODEL_FUNCTION_IDS, resolve_model_function_catalog
 from koda.services.agent_settings import (
     get_agent_runtime_settings,
@@ -1101,6 +1101,7 @@ async def callback_feedback(update: Update, context: BotContext) -> None:
     }.get(feedback_type)
     if utility_outcome:
         record_utility_event(agent_id, utility_outcome)
+        apply_memory_utility_feedback(agent_id=agent_id, user_id=user_id, task_id=task_id, outcome=utility_outcome)
     if feedback_type == "approved" and not created_candidate:
         await query.answer(
             "Feedback recorded as approved, but minimum gates are missing to promote into a reusable routine.",

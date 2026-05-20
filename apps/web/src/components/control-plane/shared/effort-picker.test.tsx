@@ -3,12 +3,21 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { EffortPicker, type EffortCapability } from "./effort-picker";
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    tl: (s: string) => s,
-    t: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 describe("EffortPicker", () => {
   it("renders nothing when capability is undefined (model has no effort support)", () => {
@@ -39,7 +48,7 @@ describe("EffortPicker", () => {
         context="global"
       />,
     );
-    const highButton = screen.getByRole("tab", { name: /modelEffort\.enumHigh|high/i });
+    const highButton = screen.getByRole("tab", { name: /modelEffort\.enumHigh|high|alto/i });
     await user.click(highButton);
     expect(onChange).toHaveBeenCalledWith("high");
   });

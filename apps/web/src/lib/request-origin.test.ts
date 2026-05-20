@@ -59,4 +59,26 @@ describe("isTrustedDashboardRequest", () => {
     });
     expect(isTrustedDashboardRequest(request)).toBe(false);
   });
+
+  it("allows same-origin browser mutations when no-referrer policy omits Origin and Referer", () => {
+    const request = makeRequest("http://127.0.0.1:3000/api/thing", {
+      method: "POST",
+      headers: {
+        Host: "127.0.0.1:3000",
+        "Sec-Fetch-Site": "same-origin",
+      },
+    });
+    expect(isTrustedDashboardRequest(request)).toBe(true);
+  });
+
+  it("does not let cross-site fetch metadata bypass origin checks", () => {
+    const request = makeRequest("http://127.0.0.1:3000/api/thing", {
+      method: "POST",
+      headers: {
+        Host: "127.0.0.1:3000",
+        "Sec-Fetch-Site": "cross-site",
+      },
+    });
+    expect(isTrustedDashboardRequest(request)).toBe(false);
+  });
 });

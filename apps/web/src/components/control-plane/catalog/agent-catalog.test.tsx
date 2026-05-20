@@ -3,7 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { ToastProvider } from "@/hooks/use-toast";
-import { AgentCatalog } from "@/components/control-plane/catalog/agent-catalog";
+import {
+  AgentCatalog,
+  getAgentBoardLaneWidth,
+} from "@/components/control-plane/catalog/agent-catalog";
 import type {
   ControlPlaneAgentSummary,
   ControlPlaneCoreProviders,
@@ -74,6 +77,7 @@ const workspaceTree: ControlPlaneWorkspaceTree = {
       name: "Produto",
       description: "Workspace de produto",
       color: "#4F7CFF",
+      root_path: "/workspace/product",
       agent_count: 2,
       squads: [
         {
@@ -151,14 +155,24 @@ const agents: ControlPlaneAgentSummary[] = [
   }),
 ];
 
-function renderCatalog() {
+function setLocation(path: string) {
+  window.history.replaceState(null, "", path);
+}
+
+function renderCatalog({
+  catalogAgents = agents,
+  workspaces = workspaceTree,
+}: {
+  catalogAgents?: ControlPlaneAgentSummary[];
+  workspaces?: ControlPlaneWorkspaceTree;
+} = {}) {
   return render(
     <I18nProvider initialLanguage="pt-BR">
       <ToastProvider>
         <AgentCatalog
-          agents={agents}
+          agents={catalogAgents}
           coreProviders={coreProviders}
-          workspaces={workspaceTree}
+          workspaces={workspaces}
         />
       </ToastProvider>
     </I18nProvider>,
@@ -180,6 +194,7 @@ describe("AgentCatalog organization board", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
+    setLocation("/control-plane/catalog");
     refreshMock.mockReset();
     pushMock.mockReset();
     globalThis.fetch = vi.fn().mockImplementation((input, init) => {
@@ -215,6 +230,160 @@ describe("AgentCatalog organization board", () => {
               },
               created_at: "2026-03-23T00:00:00Z",
               updated_at: "2026-03-23T00:00:00Z",
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+
+      if (url === "/api/control-plane/workspaces/directory-roots" && method === "GET") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              items: [{ path: "/tmp", label: "tmp" }],
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+
+      if (url === "/api/control-plane/workspaces/list-directory" && method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              path: "/tmp",
+              parent: "/",
+              items: [
+                { path: "/tmp/sample-repo", name: "sample-repo", kind: "directory" },
+                { path: "/tmp/AGENTS.md", name: "AGENTS.md", kind: "file" },
+              ],
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+
+      if (url === "/api/control-plane/workspaces/scan-directory" && method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              schema_version: "workspace_config_scan.v1",
+              root_path: "/tmp/sample-repo",
+              root_kind: "local_path",
+              scan_hash: "scan123",
+              status: "completed",
+              summary: {
+                total_sources: 4,
+                by_kind: { instructions: 2, mcp: 1, hook: 1 },
+                by_tool: { codex: 1, claude: 2, cursor: 1 },
+                by_risk: { low: 2, review: 1, blocked: 1 },
+                importable: 2,
+                review_required: 1,
+                blocked: 1,
+                truncated: false,
+              },
+              sources: [
+                {
+                  source_id: "src_agents",
+                  tool: "codex",
+                  kind: "instructions",
+                  relative_path: "AGENTS.md",
+                  scope: "workspace",
+                  name: "AGENTS.md",
+                  description: "Codex instructions",
+                  confidence: "high",
+                  risk: "low",
+                  status: "detected",
+                  import_action: "append_workspace_prompt",
+                  warnings: [],
+                  metadata: {},
+                  content_excerpt: "Use tests.",
+                },
+                {
+                  source_id: "src_claude",
+                  tool: "claude",
+                  kind: "instructions",
+                  relative_path: "CLAUDE.md",
+                  scope: "workspace",
+                  name: "CLAUDE.md",
+                  description: "Claude memory",
+                  confidence: "high",
+                  risk: "low",
+                  status: "detected",
+                  import_action: "append_workspace_prompt",
+                  warnings: [],
+                  metadata: {},
+                  content_excerpt: "Prefer safe imports.",
+                },
+                {
+                  source_id: "src_mcp",
+                  tool: "cursor",
+                  kind: "mcp",
+                  relative_path: ".cursor/mcp.json",
+                  scope: "workspace",
+                  name: "mcp",
+                  description: "MCP candidate",
+                  confidence: "high",
+                  risk: "review",
+                  status: "detected",
+                  import_action: "mcp_review",
+                  warnings: [],
+                  metadata: {},
+                  content_excerpt: "",
+                },
+                {
+                  source_id: "src_hook",
+                  tool: "claude",
+                  kind: "hook",
+                  relative_path: ".claude/settings.json",
+                  scope: "workspace",
+                  name: "PostToolUse hook",
+                  description: "Blocked hook",
+                  confidence: "high",
+                  risk: "blocked",
+                  status: "blocked",
+                  import_action: "blocked_hook",
+                  warnings: [],
+                  metadata: {},
+                  content_excerpt: "echo [REDACTED]",
+                },
+              ],
+              warnings: [],
+              limits: {
+                max_depth: 8,
+                max_entries: 2500,
+                max_file_bytes: 262144,
+                max_total_bytes: 3145728,
+              },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
+        );
+      }
+
+      if (url === "/api/control-plane/workspaces/import" && method === "POST") {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              workspace: {
+                id: "sample-repo",
+                name: "sample-repo",
+                description: "",
+                root_path: "/tmp/sample-repo",
+              },
+              import_result: { applied: [], skipped: [], conflicts: [] },
             }),
             {
               status: 200,
@@ -304,7 +473,7 @@ describe("AgentCatalog organization board", () => {
     renderCatalog();
 
     // Workspace selector trigger is rendered with the active workspace name
-    const selectorTrigger = screen.getByRole("button", { name: /Selecionar espa/i });
+    const selectorTrigger = screen.getByRole("button", { name: /Selecione o espa/i });
     expect(selectorTrigger).toBeInTheDocument();
     expect(selectorTrigger).toHaveTextContent(/Produto/i);
 
@@ -322,7 +491,7 @@ describe("AgentCatalog organization board", () => {
     await user.click(document.body);
 
     await user.type(
-      screen.getByLabelText(/Buscar agentes por nome, ID/i),
+      screen.getByLabelText(/Pesquise agentes por nome, ID|Buscar agentes por nome, ID/i),
       "solo",
     );
 
@@ -366,6 +535,96 @@ describe("AgentCatalog organization board", () => {
     });
   });
 
+  it("scans a folder import and keeps review-only sources disabled", async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await user.click(screen.getByRole("button", { name: /^Criar$/i }));
+    await waitFor(() => {
+      expect(screen.getByRole("menuitem", { name: /Import from folder|Importar/i })).toBeInTheDocument();
+    });
+    await user.click(screen.getByRole("menuitem", { name: /Import from folder|Importar/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: /Importar da pasta|Import from folder/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/control-plane/workspaces/directory-roots",
+        expect.objectContaining({ headers: expect.any(Object) }),
+      );
+    });
+    expect(await within(dialog).findByText("tmp")).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText(/Caminho da pasta|Folder path/i), "/tmp/sample-repo");
+    await user.click(within(dialog).getByRole("button", { name: /Digitalizar|Scan/i }));
+
+    await waitFor(() => {
+      expect(within(dialog).getByText("AGENTS.md")).toBeInTheDocument();
+      expect(within(dialog).getByText("CLAUDE.md")).toBeInTheDocument();
+      expect(within(dialog).getByText(".cursor/mcp.json")).toBeInTheDocument();
+      expect(within(dialog).getByText(".claude/settings.json")).toBeInTheDocument();
+    });
+
+    const blockedSection = within(dialog).getByText(".claude/settings.json").closest("section");
+    expect(blockedSection).not.toBeNull();
+    expect(within(blockedSection as HTMLElement).queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(within(dialog).getByText(/koda:workspace-import:start/i)).toBeInTheDocument();
+    expect(within(dialog).getByText(/src_agents/i)).toBeInTheDocument();
+    expect(within(dialog).getAllByText(/Use tests/i).length).toBeGreaterThan(0);
+
+    await user.click(within(dialog).getByRole("button", { name: /^Importar$|^Import$/i }));
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith(
+        "/api/control-plane/workspaces/import",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({
+            path: "/tmp/sample-repo",
+            selectedSourceIds: ["src_agents", "src_claude"],
+          }),
+        }),
+      );
+    });
+  });
+
+  it("opens folder import when directory root quick-picks are unavailable", async () => {
+    globalThis.fetch = vi.fn().mockImplementation((input, init) => {
+      const url =
+        typeof input === "string"
+          ? input
+          : input instanceof URL
+            ? input.toString()
+            : String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+
+      if (url === "/api/control-plane/workspaces/directory-roots" && method === "GET") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "405: Method Not Allowed" }), {
+            status: 405,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+
+      return Promise.resolve(
+        new Response(JSON.stringify({ error: "Unexpected request" }), {
+          status: 500,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    });
+
+    const user = userEvent.setup();
+    renderCatalog();
+
+    await user.click(screen.getByRole("button", { name: /^Criar$/i }));
+    await user.click(await screen.findByRole("menuitem", { name: /Import from folder|Importar/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByRole("heading", { name: /Importar da pasta|Import from folder/i })).toBeInTheDocument();
+    expect(await within(dialog).findByText("Produto")).toBeInTheDocument();
+  });
+
   it("moves a agent between lanes using drag and drop", async () => {
     const user = userEvent.setup();
     renderCatalog();
@@ -374,7 +633,7 @@ describe("AgentCatalog organization board", () => {
     fireEvent.dragStart(screen.getByTestId("agent-card-ATLAS"), { dataTransfer });
 
     // Switch to Operacoes workspace via the selector dropdown
-    await user.click(screen.getByRole("button", { name: /Selecionar espa/i }));
+    await user.click(screen.getByRole("button", { name: /Selecione o espa/i }));
     await waitFor(() => {
       expect(screen.getByRole("option", { name: /Operacoes/i })).toBeInTheDocument();
     });
@@ -422,6 +681,79 @@ describe("AgentCatalog organization board", () => {
       "data-testid",
       "lane-workspace-product-no-squad",
     );
+  });
+
+  it("uses compact squad lane widths instead of stretching lanes across the board", () => {
+    expect(getAgentBoardLaneWidth(1)).toBe("min(100%, 22rem)");
+    expect(getAgentBoardLaneWidth(2)).toBe("clamp(17rem, calc((100% - 1rem) / 2), 22rem)");
+    expect(getAgentBoardLaneWidth(3)).toBe("clamp(17rem, calc((100% - 2rem) / 3), 22rem)");
+    expect(getAgentBoardLaneWidth(4)).toBe("clamp(16rem, 72vw, 22rem)");
+  });
+
+  it("renders centered carousel controls with chevron icons for wide squad rails", () => {
+    const manySquadTree: ControlPlaneWorkspaceTree = {
+      ...workspaceTree,
+      items: workspaceTree.items.map((workspace) =>
+        workspace.id === "workspace-product"
+          ? {
+              ...workspace,
+              agent_count: 5,
+              squads: [
+                workspace.squads[0],
+                {
+                  id: "squad-growth",
+                  workspace_id: workspace.id,
+                  name: "Growth",
+                  description: "Squad de crescimento",
+                  agent_count: 0,
+                  created_at: "2026-03-23T00:00:00Z",
+                  updated_at: "2026-03-23T00:00:00Z",
+                },
+                {
+                  id: "squad-reliability",
+                  workspace_id: workspace.id,
+                  name: "Reliability",
+                  description: "Squad de confiabilidade",
+                  agent_count: 0,
+                  created_at: "2026-03-23T00:00:00Z",
+                  updated_at: "2026-03-23T00:00:00Z",
+                },
+                {
+                  id: "squad-ops",
+                  workspace_id: workspace.id,
+                  name: "Ops",
+                  description: "Squad de operacoes",
+                  agent_count: 0,
+                  created_at: "2026-03-23T00:00:00Z",
+                  updated_at: "2026-03-23T00:00:00Z",
+                },
+              ],
+              virtual_buckets: {
+                no_squad: {
+                  id: null,
+                  label: "Sem squad",
+                  agent_count: 1,
+                },
+              },
+            }
+          : workspace,
+      ),
+      total_agent_count: 7,
+    };
+
+    renderCatalog({ workspaces: manySquadTree });
+
+    const previous = screen.getByRole("button", {
+      name: /Mostrar times anteriores de Produto/i,
+    });
+    const next = screen.getByRole("button", {
+      name: /Mostrar mais times de Produto/i,
+    });
+
+    expect(previous).toHaveClass("agent-board-lane-nav", "agent-board-lane-nav--prev");
+    expect(next).toHaveClass("agent-board-lane-nav", "agent-board-lane-nav--next");
+    expect(previous.querySelector("svg")).toBeInTheDocument();
+    expect(next.querySelector("svg")).toBeInTheDocument();
   });
 
   it("allows dragging the squad rail horizontally with the mouse", () => {

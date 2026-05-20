@@ -17,7 +17,7 @@ import {
   useReducedMotion,
   type Variants,
 } from "framer-motion";
-import { translateLiteral } from "@/lib/i18n";
+import { translate } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 export type AgentPlanStatus =
@@ -271,17 +271,17 @@ function getMetadataText(item: AgentPlanMetadataItem) {
     case "status":
       return item.value;
     case "session":
-      return translateLiteral("sessão {{value}}", { value: item.value });
+      return translate("generated.ui.sessao_value_9aeb53cf", { value: item.value });
     case "model":
       return item.value;
     case "attempt":
-      return translateLiteral("tentativa {{value}}", { value: item.value });
+      return translate("generated.ui.tentativa_value_9044ef1d", { value: item.value });
     case "cost":
       return item.value;
     case "base":
-      return translateLiteral("base {{value}}", { value: item.value.toLowerCase() });
+      return translate("generated.ui.base_value_f15c5de7", { value: item.value.toLowerCase() });
     case "queries":
-      return translateLiteral("{{value}} consultas", { value: item.value });
+      return translate("generated.ui.value_consultas_d7649c26", { value: item.value });
     default:
       return `${item.label} ${item.value}`;
   }
@@ -514,10 +514,10 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
             <Activity className="h-5 w-5" />
           </div>
           <p className="mt-4 text-sm font-medium text-[var(--text-primary)]">
-            {translateLiteral("No live plan yet")}
+            {translate("generated.ui.no_live_plan_yet_23fb1184")}
           </p>
           <p className="mt-1 max-w-[38rem] text-sm leading-6 text-[var(--text-tertiary)]">
-            {translateLiteral("Waiting for the first published execution to start the live plan.")}
+            {translate("generated.ui.waiting_for_the_first_published_execution_to_c4823d7e")}
           </p>
         </div>
       </motion.div>

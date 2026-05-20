@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useToast } from "@/hooks/use-toast";
 
 export type ProviderDownloadJobStatus =
@@ -24,7 +25,7 @@ export type ProviderDownloadJob = {
   completed_at?: string;
 };
 
-export type ProviderId = "kokoro" | "whispercpp" | "embedding";
+export type ProviderId = "kokoro" | "supertonic" | "whispercpp" | "embedding";
 
 type StartParams = {
   providerId: ProviderId;
@@ -109,6 +110,7 @@ async function responseErrorText(res: Response, fallback: string): Promise<strin
  * exponential backoff.
  */
 export function useDownloadJob() {
+  const { t } = useAppI18n();
   const { showToast, updateToast } = useToast();
   // Active asset keys (download:<provider>:<asset>) so the UI can disable
   // duplicate buttons while a download is running.
@@ -134,11 +136,11 @@ export function useDownloadJob() {
     async (providerId: ProviderId, jobId: string, toastId: string) => {
       updateToast(toastId, {
         type: "loading",
-        message: "Cancelando download…",
+        message: t("downloads.canceling"),
         persistent: true,
         action: {
-          label: "Cancelando",
-          ariaLabel: "Cancelando download",
+          label: t("downloads.cancelingAction"),
+          ariaLabel: t("downloads.cancelingAria"),
           onClick: () => undefined,
           disabled: true,
         },
@@ -164,7 +166,7 @@ export function useDownloadJob() {
         if (job.status === "completed") {
           updateToast(toastId, {
             type: "success",
-            message: "Download concluído antes do cancelamento.",
+            message: t("downloads.completedBeforeCancel"),
             persistent: false,
             durationMs: 4000,
             progress: undefined,
@@ -177,8 +179,8 @@ export function useDownloadJob() {
           type: job.status === "error" ? "error" : "info",
           message:
             job.status === "error"
-              ? jobText(job, "last_error") || "Falha no download"
-              : "Download cancelado.",
+              ? jobText(job, "last_error") || t("downloads.failed")
+              : t("downloads.canceled"),
           persistent: false,
           durationMs: job.status === "error" ? 8000 : 4000,
           progress: undefined,
@@ -188,14 +190,14 @@ export function useDownloadJob() {
         const message =
           err instanceof Error && err.message.trim()
             ? err.message
-            : "Falha ao cancelar o download";
+            : t("downloads.cancelFailed");
         updateToast(toastId, {
           type: "error",
           message,
           persistent: true,
           action: {
-            label: "Cancelar",
-            ariaLabel: "Cancelar download",
+            label: t("downloads.cancelAction"),
+            ariaLabel: t("downloads.cancelAria"),
             onClick: () => {
               void cancelDownload(providerId, jobId, toastId);
             },
@@ -203,18 +205,18 @@ export function useDownloadJob() {
         });
       }
     },
-    [stopPoll, updateToast],
+    [stopPoll, t, updateToast],
   );
 
   const cancelAction = useCallback(
     (providerId: ProviderId, jobId: string, toastId: string) => ({
-      label: "Cancelar",
-      ariaLabel: "Cancelar download",
+      label: t("downloads.cancelAction"),
+      ariaLabel: t("downloads.cancelAria"),
       onClick: () => {
         void cancelDownload(providerId, jobId, toastId);
       },
     }),
-    [cancelDownload],
+    [cancelDownload, t],
   );
 
   const beginPolling = useCallback(
@@ -280,7 +282,7 @@ export function useDownloadJob() {
           if (job.status === "cancelled") {
             updateToast(toastId, {
               type: "info",
-              message: jobText(job, "message") || "Download cancelado.",
+              message: jobText(job, "message") || t("downloads.canceled"),
               persistent: false,
               durationMs: 4000,
               progress: undefined,
@@ -289,7 +291,7 @@ export function useDownloadJob() {
             return;
           }
 
-          const lastError = jobText(job, "last_error") || "Falha no download";
+          const lastError = jobText(job, "last_error") || t("downloads.failed");
           updateToast(toastId, {
             type: "error",
             message: lastError,
@@ -307,8 +309,8 @@ export function useDownloadJob() {
           const elapsed = Date.now() - (firstFailureAt ?? Date.now());
           const message =
             elapsed >= SOFT_FAILURE_WINDOW_MS
-              ? "Sem resposta do servidor — verifique a conexão"
-              : "Conexão instável — tentando reconectar";
+              ? t("downloads.serverUnresponsive")
+              : t("downloads.reconnecting");
           if (failureStreak >= 3) {
             updateToast(toastId, { message, persistent: true });
           }
@@ -321,7 +323,7 @@ export function useDownloadJob() {
       // Initial tick scheduled normally so we don't double-fire on attach.
       reschedule(POLL_INTERVAL_MS);
     },
-    [cancelAction, stopPoll, updateToast],
+    [cancelAction, stopPoll, t, updateToast],
   );
 
   const start = useCallback(
@@ -355,7 +357,7 @@ export function useDownloadJob() {
         activeKeysRef.current.delete(toastId);
         updateToast(toastId, {
           type: "error",
-          message: err instanceof Error ? err.message : "Falha ao iniciar o download",
+          message: err instanceof Error ? err.message : t("downloads.startFailed"),
           persistent: false,
           durationMs: 8000,
           progress: undefined,
@@ -384,14 +386,14 @@ export function useDownloadJob() {
       });
       beginPolling(params.providerId, job.id, toastId, params.successMessage, params.onComplete);
     },
-    [beginPolling, cancelAction, showToast, updateToast],
+    [beginPolling, cancelAction, showToast, t, updateToast],
   );
 
   const attach = useCallback(
     (params: AttachParams) => {
       const toastId = toastIdFor(params.providerId, params.assetKey);
       if (activeKeysRef.current.has(toastId)) return;
-      showToast("Retomando download…", "loading", {
+      showToast(t("downloads.resuming"), "loading", {
         id: toastId,
         title: params.toastTitle,
         persistent: true,
@@ -401,7 +403,7 @@ export function useDownloadJob() {
       activeKeysRef.current.add(toastId);
       beginPolling(params.providerId, params.jobId, toastId, params.successMessage);
     },
-    [beginPolling, cancelAction, showToast],
+    [beginPolling, cancelAction, showToast, t],
   );
 
   const isActive = useCallback(

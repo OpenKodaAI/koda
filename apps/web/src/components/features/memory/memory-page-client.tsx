@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import { translate } from "@/lib/i18n";
 import {
   Suspense,
   startTransition,
@@ -93,10 +94,8 @@ function MemoryEmptyStateCard() {
     <div className="flex min-h-[460px] w-full items-center justify-center rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)]">
       <PageEmptyState
         icon={BrainCircuit}
-        title={t("memory.empty.title", { defaultValue: "Sem memórias ainda" })}
-        description={t("memory.empty.description", {
-          defaultValue: "As memórias aparecerão aqui como uma rede de pontos conectados.",
-        })}
+        title={t("memory.empty.title", undefined)}
+        description={t("memory.empty.description", undefined)}
       />
     </div>
   );
@@ -143,29 +142,29 @@ function MemoryFiltersPanel({
 }: MemoryFiltersPanelProps) {
   const { t } = useAppI18n();
   const edgeControls: Array<{ key: keyof EdgeVisibility; label: string }> = [
-    { key: "semantic", label: t("memory.filters.edges.semantic", { defaultValue: "Semânticas" }) },
-    { key: "session", label: t("memory.filters.edges.session", { defaultValue: "Sessão" }) },
-    { key: "source", label: t("memory.filters.edges.source", { defaultValue: "Origem" }) },
+    { key: "semantic", label: t("memory.filters.edges.semantic", undefined) },
+    { key: "session", label: t("memory.filters.edges.session", undefined) },
+    { key: "source", label: t("memory.filters.edges.source", undefined) },
   ];
 
   return (
     <div className="flex w-[320px] max-w-[86vw] flex-col gap-4 p-3">
       <header className="flex items-center justify-between">
         <p className="font-mono text-[10.5px] uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
-          {t("memory.filters.title", { defaultValue: "Filtros" })}
+          {t("memory.filters.title", undefined)}
         </p>
         <button
           type="button"
           onClick={onReset}
           className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)] transition-colors hover:text-[color:var(--text-primary)]"
         >
-          {t("common.clear", { defaultValue: "Limpar" })}
+          {t("common.clear", undefined)}
         </button>
       </header>
 
       <label className="block">
         <span className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
-          {t("memory.filters.search", { defaultValue: "Buscar" })}
+          {t("memory.filters.search", undefined)}
         </span>
         <div className="relative">
           <Search className="icon-xs absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-quaternary)]" />
@@ -173,14 +172,14 @@ function MemoryFiltersPanel({
             ref={searchInputRef}
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder={t("memory.filters.searchPlaceholder", { defaultValue: "palavras-chave" })}
+            placeholder={t("memory.filters.searchPlaceholder", undefined)}
             className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] pl-8 pr-3 text-[0.8125rem] text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)] focus:outline-none focus:ring-1 focus:ring-[color:var(--accent)]"
           />
           {search ? (
             <button
               type="button"
               onClick={() => onSearchChange("")}
-              aria-label={t("common.clear", { defaultValue: "Limpar" })}
+              aria-label={t("common.clear", undefined)}
               className="absolute right-2 top-1/2 -translate-y-1/2 rounded-[var(--radius-chip)] p-1 text-[color:var(--text-quaternary)] transition-colors hover:bg-[color:var(--hover-tint)] hover:text-[color:var(--text-primary)]"
             >
               <X className="icon-xs" />
@@ -192,7 +191,7 @@ function MemoryFiltersPanel({
       <div className="grid grid-cols-2 gap-2">
         <label className="block">
           <span className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
-            {t("common.user", { defaultValue: "Usuário" })}
+            {t("common.user", undefined)}
           </span>
           <Select
             value={userId != null ? String(userId) : SELECT_ALL_VALUE}
@@ -205,7 +204,7 @@ function MemoryFiltersPanel({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={SELECT_ALL_VALUE}>
-                {t("common.allUsers", { defaultValue: "Todos" })}
+                {t("common.allUsers", undefined)}
               </SelectItem>
               {data.filters.users.map((user) => (
                 <SelectItem key={user.user_id} value={String(user.user_id)}>
@@ -218,7 +217,7 @@ function MemoryFiltersPanel({
 
         <label className="block">
           <span className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
-            {t("common.session", { defaultValue: "Sessão" })}
+            {t("common.session", undefined)}
           </span>
           <Select
             value={sessionId ?? SELECT_ALL_VALUE}
@@ -231,7 +230,7 @@ function MemoryFiltersPanel({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={SELECT_ALL_VALUE}>
-                {t("common.allSessions", { defaultValue: "Todas" })}
+                {t("common.allSessions", undefined)}
               </SelectItem>
               {data.filters.sessions.map((session) => (
                 <SelectItem key={session.session_id} value={session.session_id}>
@@ -245,7 +244,7 @@ function MemoryFiltersPanel({
 
       <div>
         <span className="mb-1.5 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
-          {t("memory.filters.timeWindow", { defaultValue: "Janela" })}
+          {t("memory.filters.timeWindow", undefined)}
         </span>
         <div className="grid grid-cols-3 gap-1 rounded-[var(--radius-pill)] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] p-0.5">
           {DAY_OPTIONS.map((value) => (
@@ -261,8 +260,7 @@ function MemoryFiltersPanel({
               )}
               aria-pressed={days === value}
             >
-              {value}d
-            </button>
+              {value}{translate("generated.memory.d_a70b1f71")}</button>
           ))}
         </div>
       </div>
@@ -277,17 +275,17 @@ function MemoryFiltersPanel({
             : "border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]",
         )}
       >
-        <span>{t("memory.filters.includeInactive", { defaultValue: "Incluir inativas" })}</span>
+        <span>{t("memory.filters.includeInactive", undefined)}</span>
         <span className="font-mono text-[10.5px] uppercase tracking-[0.12em]">
           {includeInactive
-            ? t("common.on", { defaultValue: "on" })
-            : t("common.off", { defaultValue: "off" })}
+            ? t("common.on", undefined)
+            : t("common.off", undefined)}
         </span>
       </button>
 
       <div>
         <span className="mb-2 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
-          {t("memory.map.filterTitle", { defaultValue: "Tipos" })}
+          {t("memory.map.filterTitle", undefined)}
         </span>
         <div className="flex flex-wrap gap-1.5">
           {data.filters.types.map((type) => {
@@ -323,7 +321,7 @@ function MemoryFiltersPanel({
 
       <div>
         <span className="mb-2 block font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
-          {t("memory.map.visibleConnections", { defaultValue: "Conexões" })}
+          {t("memory.map.visibleConnections", undefined)}
         </span>
         <div className="grid grid-cols-3 gap-1">
           {edgeControls.map((item) => (
@@ -426,7 +424,7 @@ function MemoryPageContent() {
         const message =
           err instanceof Error
             ? err.message
-            : t("memory.map.fallbackLoadError", { defaultValue: "Falha ao carregar memórias" });
+            : t("memory.map.fallbackLoadError", undefined);
         if (!dataRef.current) {
           setError(message);
           setData(null);
@@ -636,22 +634,22 @@ function MemoryPageContent() {
     ).size;
     return [
       {
-        label: t("memory.health.active", { defaultValue: "Ativas" }),
+        label: t("memory.health.active", undefined),
         value: memoryCount,
         tone: "neutral",
       },
       {
-        label: t("memory.health.semanticEdges", { defaultValue: "Sinapses" }),
+        label: t("memory.health.semanticEdges", undefined),
         value: visibleGraph.edges.filter((edge) => edge.type === "semantic").length,
         tone: "neutral",
       },
       {
-        label: t("memory.map.clusters", { defaultValue: "Clusters" }),
+        label: t("memory.map.clusters", undefined),
         value: clusterCount,
         tone: "neutral",
       },
       {
-        label: t("memory.health.expiring", { defaultValue: "Expirando" }),
+        label: t("memory.health.expiring", undefined),
         value: data.stats.expiring_soon,
         tone: data.stats.expiring_soon > 0 ? "warning" : "neutral",
       },
@@ -663,6 +661,7 @@ function MemoryPageContent() {
   const showError = showMap && !!error && !data;
   const showInitialLoading = showMap && loading && !data;
   const showCanvas = showMap && data && data.stats.total_memories > 0;
+  const showMapBusy = refreshing || (loading && Boolean(data));
 
   const controlsRow = (
     <div className="flex flex-wrap items-center gap-2">
@@ -683,12 +682,12 @@ function MemoryPageContent() {
       />
       <SoftTabs
         items={[
-          { id: "map", label: t("memory.views.map", { defaultValue: "Mapa" }) },
-          { id: "curation", label: t("memory.views.curation", { defaultValue: "Curadoria" }) },
+          { id: "map", label: t("memory.views.map", undefined) },
+          { id: "curation", label: t("memory.views.curation", undefined) },
         ]}
         value={activeView}
         onChange={(id) => setActiveView(id as "map" | "curation")}
-        ariaLabel={t("memory.map.toggleViewAria", { defaultValue: "Alternar visão" })}
+        ariaLabel={t("memory.map.toggleViewAria", undefined)}
       />
       {showMap && data ? (
         <div className="ml-auto flex items-center gap-2">
@@ -715,7 +714,7 @@ function MemoryPageContent() {
             <PopoverTrigger asChild>
               <Button variant="secondary" size="sm">
                 <SlidersHorizontal className="icon-xs" strokeWidth={1.75} />
-                {t("common.filters", { defaultValue: "Filtros" })}
+                {t("common.filters", undefined)}
                 {activeFilterCount > 0 ? (
                   <span className="ml-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-[color:var(--accent-muted)] px-1 font-mono text-[10.5px] text-[color:var(--accent)]">
                     {activeFilterCount}
@@ -749,10 +748,11 @@ function MemoryPageContent() {
             variant="ghost"
             size="sm"
             onClick={() => void fetchData()}
-            aria-label={t("memory.map.refreshAria", { defaultValue: "Atualizar" })}
+            aria-label={t("memory.map.refreshAria", undefined)}
+            aria-busy={showMapBusy || undefined}
           >
             <RefreshCcw
-              className={cn("icon-xs", refreshing && "animate-spin")}
+              className={cn("icon-xs", showMapBusy && "animate-spin")}
               strokeWidth={1.75}
             />
           </Button>
@@ -773,7 +773,7 @@ function MemoryPageContent() {
         <div className="flex flex-1 items-center justify-center rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] p-8 text-center">
           <div>
             <p className="text-[0.9375rem] font-medium text-[color:var(--text-primary)]">
-              {t("memory.map.unavailableTitle", { defaultValue: "Mapa indisponível" })}
+              {t("memory.map.unavailableTitle", undefined)}
             </p>
             <p className="mt-2 text-[0.8125rem] leading-6 text-[color:var(--text-tertiary)]">
               {error}
@@ -786,10 +786,8 @@ function MemoryPageContent() {
         <div className="flex flex-1 items-center justify-center rounded-[14px] border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)]">
           <PageEmptyState
             icon={BrainCircuit}
-            title={t("memory.page.noAgentsTitle", { defaultValue: "Sem agentes disponíveis" })}
-            description={t("memory.page.noAgentsDescription", {
-              defaultValue: "Crie ou publique ao menos um agente antes de abrir o mapa.",
-            })}
+            title={t("memory.page.noAgentsTitle", undefined)}
+            description={t("memory.page.noAgentsDescription", undefined)}
           />
         </div>
       ) : showEmpty ? (

@@ -1,5 +1,5 @@
-import { OverviewRouteLoading } from "@/components/layout/route-loading";
+import { RootRouteTransitionLoading } from "@/components/layout/root-route-loading";
 
 export default function Loading() {
-  return <OverviewRouteLoading />;
+  return <RootRouteTransitionLoading />;
 }

@@ -56,7 +56,7 @@ export function useRuntimeTask(
   agentId: string,
   taskId: number,
 ): UseRuntimeTaskResult {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const queryClient = useQueryClient();
   const [connected, setConnected] = useState(false);
   const lastSeqRef = useRef(0);
@@ -74,7 +74,7 @@ export function useRuntimeTask(
         throw new Error(
           await parseResponseError(
             response,
-            tl("Não foi possível carregar a task de runtime."),
+            t("generated.runtime.nao_foi_possivel_carregar_a_task_de_runtime_d8abe510"),
           ),
         );
       }
@@ -84,7 +84,7 @@ export function useRuntimeTask(
         payload.events.at(-1)?.seq ?? lastSeqRef.current;
       return payload;
     },
-    [agentId, taskId, tl],
+    [agentId, taskId, t],
   );
 
   const taskQuery = useRuntimeQuery<RuntimeTaskBundle>({
@@ -124,14 +124,14 @@ export function useRuntimeTask(
         throw new Error(
           await parseResponseError(
             response,
-            tl("Falha ao carregar {{resourcePath}}", { resourcePath }),
+            t("generated.runtime.falha_ao_carregar_resourcepath_d14f961f", { resourcePath }),
           ),
         );
       }
 
       return readJson<T>(response);
     },
-    [agentId, taskId, tl],
+    [agentId, taskId, t],
   );
 
   const mutate = useCallback(
@@ -160,14 +160,14 @@ export function useRuntimeTask(
       if (!response.ok) {
         throw new Error(
           payload?.error ||
-            tl("Falha ao executar {{resourcePath}}", { resourcePath }),
+            t("generated.runtime.falha_ao_executar_resourcepath_82d4b5c8", { resourcePath }),
         );
       }
 
       void queryClient.invalidateQueries({ queryKey: taskQueryKey });
       return (payload ?? {}) as RuntimeMutationResult | Record<string, unknown>;
     },
-    [agentId, queryClient, taskId, taskQueryKey, tl],
+    [agentId, queryClient, taskId, taskQueryKey, t],
   );
 
   useEffect(() => {

@@ -10,11 +10,11 @@ export default function ControlPlaneError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <RouteErrorState
-      title={tl("Control plane unavailable")}
-      description={error.message || tl("The control plane section could not be loaded.")}
+      title={t("generated.routes.control_plane_unavailable_ebef0c95")}
+      description={error.message || t("generated.routes.the_control_plane_section_could_not_be_loade_8b86eed7")}
       onRetry={reset}
     />
   );

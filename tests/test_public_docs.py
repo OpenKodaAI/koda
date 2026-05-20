@@ -88,10 +88,10 @@ def test_readme_covers_public_entrypoints() -> None:
     assert "docs/assets/brand/koda-banner.png" in readme
     assert "docs/assets/brand/koda_hero" not in readme
     assert "Core Capabilities" in readme
-    assert "Installation Paths" in readme
+    assert "Quick Install" in readme
     assert "apps/web" in readme
     assert "127.0.0.1:3000" in readme
     assert "/control-plane" in readme
     assert "/setup" in readme
-    assert "/api/control-plane/agents/*" in readme
+    assert "runtime API" in readme
     assert "SeaweedFS" in readme

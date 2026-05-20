@@ -134,7 +134,7 @@ function ModalShell({
   error,
   saveLabel,
 }: ShellProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const logo = renderIntegrationLogo(entry.logoKey, "h-7 w-7");
 
   useEffect(() => {
@@ -177,7 +177,7 @@ function ModalShell({
             type="button"
             onClick={onClose}
             className="app-surface-close"
-            aria-label={tl("Fechar modal")}
+            aria-label={t("generated.controlPlane.fechar_modal_1b5b2901")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -195,10 +195,10 @@ function ModalShell({
                   id="connection-modal-title"
                   className="text-lg font-semibold tracking-[-0.03em] text-[var(--text-primary)]"
                 >
-                  {tl("Conectar")} {entry.label}
+                  {t("generated.controlPlane.conectar_a587e076")} {entry.label}
                 </h3>
                 <p className="mt-0.5 text-sm text-[var(--text-quaternary)]">
-                  {entry.tagline || entry.description || tl("Configuração desta integração")}
+                  {entry.tagline || entry.description || t("generated.controlPlane.configuracao_desta_integracao_cabdc5cd")}
                 </p>
               </div>
             </div>
@@ -234,7 +234,7 @@ function ModalShell({
           <div className="flex items-center justify-between border-t border-[var(--border-subtle)] px-6 py-4">
             <div className="flex items-center gap-1.5 text-xs text-[var(--text-quaternary)]">
               <Lock size={11} />
-              <span>{tl("Credenciais criptografadas")}</span>
+              <span>{t("generated.controlPlane.credenciais_criptografadas_657054e7")}</span>
             </div>
 
             <div className="flex items-center gap-3">
@@ -243,7 +243,7 @@ function ModalShell({
                 onClick={onClose}
                 className="rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
               >
-                {tl("Cancelar")}
+                {t("generated.controlPlane.cancelar_091200fb")}
               </button>
               {onTest ? (
                 <button
@@ -253,7 +253,7 @@ function ModalShell({
                   className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-50"
                 >
                   {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                  {tl("Testar")}
+                  {t("generated.controlPlane.testar_53b5c98a")}
                 </button>
               ) : null}
               <AsyncActionButton
@@ -261,7 +261,7 @@ function ModalShell({
                 onClick={onSave}
                 loading={saving}
                 disabled={!canSave}
-                loadingLabel={tl("Salvando")}
+                loadingLabel={t("generated.controlPlane.salvando_7eeded02")}
                 className="rounded-lg px-4 py-2 text-sm font-semibold text-[var(--interactive-active-text)] transition-all"
                 style={{
                   background:
@@ -269,7 +269,7 @@ function ModalShell({
                   border: "1px solid var(--interactive-active-border)",
                 }}
               >
-                {saveLabel ?? tl("Salvar conexão")}
+                {saveLabel ?? t("generated.controlPlane.salvar_conexao_53e83802")}
               </AsyncActionButton>
             </div>
           </div>
@@ -303,7 +303,7 @@ function FieldRow({
   valuePresent,
   isSecret,
 }: FieldRowProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const help = field.help;
   const isPassword = (isSecret ?? field.input_type === "password");
   const isSwitch = field.input_type === "switch";
@@ -317,10 +317,10 @@ function FieldRow({
         </span>
         <span className="text-[11px] text-[var(--text-quaternary)]">
           {valuePresent
-            ? tl("Já configurado; preencha para substituir.")
+            ? t("generated.controlPlane.ja_configurado_preencha_para_substituir_1ec111f0")
             : field.required === false
-              ? tl("Opcional")
-              : tl("Obrigatório")}
+              ? t("generated.controlPlane.opcional_f6c7765c")
+              : t("generated.controlPlane.obrigatorio_ea9fd1bf")}
         </span>
       </div>
       {help ? (
@@ -328,7 +328,7 @@ function FieldRow({
       ) : null}
       {valuePresent ? (
         <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
-          {tl("Configurada")}
+          {t("generated.controlPlane.configurada_df5188a8")}
         </span>
       ) : null}
       {isSwitch ? (
@@ -338,7 +338,7 @@ function FieldRow({
             checked={state.value === "true"}
             onChange={(event) => onChange(event.target.checked ? "true" : "false")}
           />
-          <span className="text-xs">{tl("Ativado")}</span>
+          <span className="text-xs">{t("generated.controlPlane.ativado_20975d23")}</span>
         </label>
       ) : isPassword ? (
         <SecretInput
@@ -346,8 +346,8 @@ function FieldRow({
           onChange={(event) => onChange(event.target.value, false)}
           placeholder={
             valuePresent
-              ? tl("Mantido da conexão atual")
-              : tl("Digite o valor")
+              ? t("generated.controlPlane.mantido_da_conexao_atual_f7ac42c6")
+              : t("generated.controlPlane.digite_o_valor_4b50163e")
           }
         />
       ) : isTextarea ? (
@@ -356,14 +356,14 @@ function FieldRow({
           className="min-h-[6rem]"
           value={state.value}
           onChange={(event) => onChange(event.target.value, false)}
-          placeholder={tl("Preencha o valor")}
+          placeholder={t("generated.controlPlane.preencha_o_valor_b94f6d3d")}
         />
       ) : (
         <Input
           type="text"
           value={state.value}
           onChange={(event) => onChange(event.target.value, false)}
-          placeholder={tl("Preencha o valor")}
+          placeholder={t("generated.controlPlane.preencha_o_valor_b94f6d3d")}
         />
       )}
       {valuePresent && !state.value ? (
@@ -378,7 +378,7 @@ function FieldRow({
           )}
         >
           <Trash2 size={12} />
-          {state.clear ? tl("Será removido ao salvar") : tl("Remover segredo")}
+          {state.clear ? t("generated.controlPlane.sera_removido_ao_salvar_8111eef5") : t("generated.controlPlane.remover_segredo_a2cb1ebd")}
         </button>
       ) : null}
     </label>
@@ -440,9 +440,9 @@ async function testMcp(params: {
   agentId: string;
   connectionKey: string;
   envValues: Record<string, string>;
-  tl: (text: string, vars?: Record<string, string | number>) => string;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }): Promise<TestResult> {
-  const { agentId, connectionKey, envValues, tl } = params;
+  const { agentId, connectionKey, envValues, t } = params;
   try {
     await saveMcp({ agentId, connectionKey, envValues });
     const result = await requestJson<{
@@ -457,17 +457,17 @@ async function testMcp(params: {
       return {
         success: true,
         message:
-          tl("Conexão válida") +
+          t("generated.controlPlane.conexao_valida_2242b505") +
           (result.tool_count ? ` (${result.tool_count} tools)` : ""),
       };
     }
-    return { success: false, message: result.error || tl("Falha na conexão") };
+    return { success: false, message: result.error || t("generated.controlPlane.falha_na_conexao_7c486615") };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "";
     if (msg.includes("501") || msg.includes("Not Implemented")) {
-      return { success: false, message: tl("Teste não disponível") };
+      return { success: false, message: t("generated.controlPlane.teste_nao_disponivel_9d4c7172") };
     }
-    return { success: false, message: msg || tl("Erro ao testar conexão") };
+    return { success: false, message: msg || t("generated.controlPlane.erro_ao_testar_conexao_474933d2") };
   }
 }
 
@@ -506,7 +506,7 @@ export function ConnectionModalRouter({
   isOAuthLoading,
   oauthStatus,
 }: ConnectionModalRouterProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const profile = useMemo<ConnectionProfile>(
     () => entry.connectionProfile ?? { strategy: "none" },
     [entry.connectionProfile],
@@ -570,9 +570,9 @@ export function ConnectionModalRouter({
   const validate = useCallback(() => {
     if (missing.length === 0) return true;
     const labels = missing.map((f) => f.label || f.key).join(", ");
-    setError(tl("Preencha os campos obrigatórios: {{fields}}.", { fields: labels }));
+    setError(t("generated.controlPlane.preencha_os_campos_obrigatorios_fields_146fe3c6", { fields: labels }));
     return false;
-  }, [missing, tl]);
+  }, [missing, t]);
 
   const handleSave = useCallback(async () => {
     setError(null);
@@ -600,11 +600,11 @@ export function ConnectionModalRouter({
       onSaved();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : tl("Erro ao salvar conexão"));
+      setError(err instanceof Error ? err.message : t("generated.controlPlane.erro_ao_salvar_conexao_08c5d25a"));
     } finally {
       setSaving(false);
     }
-  }, [agentId, entry, onSaved, onClose, profile.strategy, validate, values, tl]);
+  }, [agentId, entry, onSaved, onClose, profile.strategy, validate, values, t]);
 
   const handleTest = useCallback(async () => {
     if (entry.kind !== "mcp") return;
@@ -615,18 +615,18 @@ export function ConnectionModalRouter({
       agentId,
       connectionKey: entry.connectionKey,
       envValues: filterNonEmpty(values),
-      tl,
+      t,
     });
     setTestResult(result);
     setTesting(false);
-  }, [agentId, entry, validate, values, tl]);
+  }, [agentId, entry, validate, values, t]);
 
   const shellOnTest = entry.kind === "mcp" ? handleTest : undefined;
   const saveLabel =
     profile.strategy === "none"
-      ? tl("Ativar para este agente")
+      ? t("generated.controlPlane.ativar_para_este_agente_d7c33654")
       : profile.strategy === "local_app"
-        ? tl("Confirmar configuração")
+        ? t("generated.controlPlane.confirmar_configuracao_6b154d82")
         : undefined;
 
   // --- Sub-form renderers (inline) ---
@@ -638,7 +638,7 @@ export function ConnectionModalRouter({
     case "custom_http": {
       body = (
         <p className="text-sm text-[var(--text-tertiary)]">
-          {tl("Sem credenciais. Ative para o Koda iniciar e descobrir as capacidades.")}
+          {t("generated.controlPlane.sem_credenciais_ative_para_o_koda_iniciar_e__065b2761")}
         </p>
       );
       break;
@@ -652,7 +652,7 @@ export function ConnectionModalRouter({
               <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[var(--text-tertiary)]" />
               <div className="flex flex-col gap-1">
                 <span className="font-medium text-[var(--text-secondary)]">
-                  {tl("Depende do app local: {{app}}", {
+                  {t("generated.controlPlane.depende_do_app_local_app_a491f9a3", {
                     app: profile.local_app_name ?? entry.label,
                   })}
                 </span>
@@ -668,7 +668,7 @@ export function ConnectionModalRouter({
             <>
               <details className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 text-sm">
                 <summary className="cursor-pointer text-xs text-[var(--text-tertiary)]">
-                  {tl("Fallback manual (não recomendado)")}
+                  {t("generated.controlPlane.fallback_manual_nao_recomendado_fc4431e3")}
                 </summary>
                 <div className="mt-3 flex flex-col gap-3">
                   {primary.map((f) => (
@@ -703,7 +703,7 @@ export function ConnectionModalRouter({
             />
           ) : (
             <p className="text-sm text-[var(--text-tertiary)]">
-              {tl("Nenhum caminho configurado para este servidor.")}
+              {t("generated.controlPlane.nenhum_caminho_configurado_para_este_servido_9c7cf657")}
             </p>
           )}
           {primary.length > 0
@@ -739,7 +739,7 @@ export function ConnectionModalRouter({
           {scope.length > 0 ? (
             <div className="flex flex-col gap-3 rounded-xl border border-[var(--border-subtle)] px-4 py-3">
               <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
-                {tl("Escopo (opcional)")}
+                {t("generated.controlPlane.escopo_opcional_00429ae8")}
               </span>
               {scope.map((f) => (
                 <FieldRow
@@ -806,14 +806,14 @@ export function ConnectionModalRouter({
             <div className="flex flex-col gap-3">
               <span className="text-xs text-[var(--text-tertiary)]">
                 {profile.strategy === "oauth_only"
-                  ? tl("Este provedor só aceita OAuth.")
-                  : tl("Recomendado usar OAuth; o fallback manual fica disponível abaixo.")}
+                  ? t("generated.controlPlane.este_provedor_so_aceita_oauth_c36493da")
+                  : t("generated.controlPlane.recomendado_usar_oauth_o_fallback_manual_fic_d9f002ba")}
               </span>
               {oauthStatus?.connected ? (
                 <div className="flex items-center gap-2 rounded-lg border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-3 py-2 text-xs text-[var(--tone-success-text)]">
                   <CheckCircle2 size={13} />
                   <span>
-                    {tl("Conectado como {{account}}", {
+                    {t("generated.controlPlane.conectado_como_account_c6676c13", {
                       account: oauthStatus.account_label ?? providerLabel,
                     })}
                   </span>
@@ -833,8 +833,8 @@ export function ConnectionModalRouter({
               >
                 {isOAuthLoading ? <Loader2 size={14} className="animate-spin" /> : null}
                 {oauthStatus?.connected
-                  ? tl("Reconectar via {{provider}}", { provider: providerLabel })
-                  : tl("Conectar com {{provider}}", { provider: providerLabel })}
+                  ? t("generated.controlPlane.reconectar_via_provider_67a875fd", { provider: providerLabel })
+                  : t("generated.controlPlane.conectar_com_provider_2e410383", { provider: providerLabel })}
               </button>
             </div>
           </div>
@@ -848,8 +848,8 @@ export function ConnectionModalRouter({
               >
                 <Settings2 size={12} />
                 {showManual
-                  ? tl("Ocultar fallback manual")
-                  : tl("Configurar manualmente")}
+                  ? t("generated.controlPlane.ocultar_fallback_manual_1a198f66")
+                  : t("generated.controlPlane.configurar_manualmente_61c97701")}
               </button>
               {showManual ? (
                 <div className="flex flex-col gap-3 rounded-xl border border-[var(--border-subtle)] px-4 py-3">
@@ -871,7 +871,7 @@ export function ConnectionModalRouter({
           {profile.strategy === "oauth_only" && primary.length > 0 ? (
             <details className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 text-sm">
               <summary className="cursor-pointer text-xs text-[var(--text-tertiary)]">
-                {tl("Fallback manual (legado)")}
+                {t("generated.controlPlane.fallback_manual_legado_6fb82fe5")}
               </summary>
               <div className="mt-3 flex flex-col gap-3">
                 {primary.map((f) => (
@@ -895,7 +895,7 @@ export function ConnectionModalRouter({
     default:
       body = (
         <p className="text-sm text-[var(--text-tertiary)]">
-          {tl("Strategy \"{{s}}\" não implementada.", { s: profile.strategy })}
+          {t("generated.controlPlane.strategy_s_nao_implementada_e2df5ef4", { s: profile.strategy })}
         </p>
       );
   }

@@ -74,7 +74,7 @@ export function matchesRuntimeRoomFilter(
 ) {
   if (filter === "all") return true;
   if (filter === "active") {
-    return ["active", "running", "queued", "cleaning", "retrying"].includes(row.status);
+    return ["active", "running", "queued", "cleaning", "retrying", "stalled", "degraded"].includes(row.status);
   }
   if (filter === "retained") {
     return row.status === "retained";

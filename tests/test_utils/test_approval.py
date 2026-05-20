@@ -746,6 +746,44 @@ class TestAgentCmdApproval:
         assert get_agent_cmd_decision(op_id) == {"decision": "denied", "grants": []}
 
     @pytest.mark.asyncio
+    async def test_get_decision_preserves_edit_and_response_fields(self):
+        telegram_bot = AsyncMock()
+        telegram_bot.send_message = AsyncMock()
+        op_id = await request_agent_cmd_approval(
+            telegram_bot,
+            chat_id=111,
+            user_id=222,
+            description="test",
+            tool_id="file_write",
+            original_params={"path": "a.txt", "content": "old"},
+            args_schema={
+                "type": "object",
+                "properties": {"path": {"type": "string"}, "content": {"type": "string"}},
+                "required": ["path", "content"],
+                "additionalProperties": False,
+            },
+            risk_class="write",
+        )
+
+        resolve_agent_cmd_approval(
+            op_id,
+            "edited",
+            edited_params={"path": "a.txt", "content": "new"},
+            response_text="not used",
+            rationale="operator edited params",
+        )
+
+        assert get_agent_cmd_decision(op_id) == {
+            "decision": "edited",
+            "grants": [],
+            "edited_params": {"path": "a.txt", "content": "new"},
+            "response_text": "not used",
+            "rationale": "operator edited params",
+        }
+        assert _PENDING_AGENT_CMD_OPS[op_id]["tool_id"] == "file_write"
+        assert _PENDING_AGENT_CMD_OPS[op_id]["original_params"] == {"path": "a.txt", "content": "old"}
+
+    @pytest.mark.asyncio
     async def test_get_decision_nonexistent(self):
         assert get_agent_cmd_decision("nonexistent") is None
 

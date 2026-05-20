@@ -4,6 +4,7 @@ import * as React from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { Check, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { translate } from "@/lib/i18n";
 
 /**
  * Sentinel value for "no selection" / "all" items. Radix Select rejects
@@ -178,8 +179,8 @@ const SelectContent = React.forwardRef<
               onKeyDownCapture={(event) => {
                 if (event.key !== "Escape") event.stopPropagation();
               }}
-              placeholder="Search..."
-              aria-label="Search options"
+              placeholder={translate("generated.ui.search_4ad1f049")}
+              aria-label={translate("generated.ui.search_options_d887d97b")}
               className="h-full w-full min-w-0 bg-transparent text-[0.8125rem] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
               style={{ outline: "none", border: "none", boxShadow: "none" }}
             />
@@ -187,7 +188,7 @@ const SelectContent = React.forwardRef<
               <button
                 type="button"
                 onClick={() => setQuery("")}
-                aria-label="Clear search"
+                aria-label={translate("generated.ui.clear_search_10bcbac4")}
                 className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)] focus-visible:outline-none"
               >
                 <X size={12} />
@@ -206,8 +207,7 @@ const SelectContent = React.forwardRef<
           {children}
           {!hasMatches ? (
             <div className="px-3 py-4 text-center text-xs text-[var(--text-quaternary)]">
-              No options found.
-            </div>
+              {translate("generated.ui.no_options_found_42e1b04f")}</div>
           ) : null}
         </SelectPrimitive.Viewport>
         <SelectScrollDownButton />

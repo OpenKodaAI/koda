@@ -43,8 +43,8 @@ function skillAllowedByPolicy(skillId: string, policy: AgentSpecSkillPolicy | un
   if (policy?.enabled === false) return false;
   const enabled = Array.isArray(policy?.enabled_skills)
     ? new Set(policy.enabled_skills.map(String).filter(Boolean))
-    : null;
-  if (enabled && enabled.size > 0 && !enabled.has(skillId)) return false;
+    : new Set<string>();
+  if (enabled.size === 0 || !enabled.has(skillId)) return false;
   const disabled = Array.isArray(policy?.disabled_skills)
     ? new Set(policy.disabled_skills.map(String).filter(Boolean))
     : null;

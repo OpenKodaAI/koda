@@ -1,8 +1,9 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { AnimatePresence, motion } from "framer-motion";
+import { translate } from "@/lib/i18n";
 import {
   ArrowDown,
   ArrowUp,
@@ -17,6 +18,7 @@ import {
   Server,
   Trash2,
   Unplug,
+  Upload,
 } from "lucide-react";
 
 /**
@@ -42,7 +44,7 @@ function AppleLogo({ size = 18 }: { size?: number }) {
     </svg>
   );
 }
-import { AsyncActionButton } from "@/components/ui/async-feedback";
+import { AsyncActionButton, InlineSpinner } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { SecretInput } from "@/components/ui/secret-controls";
@@ -92,6 +94,8 @@ export function providerLabel(providerId: string) {
   if (providerId === "groq") return "Groq";
   if (providerId === "deepseek") return "DeepSeek";
   if (providerId === "xai") return "xAI Grok";
+  if (providerId === "openrouter") return "OpenRouter";
+  if (providerId === "supertonic") return "Supertonic";
   return providerId;
 }
 
@@ -126,98 +130,54 @@ export function providerOrder(category: string) {
   return 4;
 }
 
+function SelectLoadingSpinner({ loading }: { loading: boolean }) {
+  if (!loading) return null;
+  return <InlineSpinner className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />;
+}
+
 export type ProviderOption = ReturnType<typeof useSystemSettings>["providerOptions"][number];
+type ProviderCopyTranslator = (key: string, options?: Record<string, unknown>) => string;
+const defaultProviderCopyTranslator: ProviderCopyTranslator = (key, options) => translate(key, options);
 
-export function providerDescription(providerId: string, category: string) {
-  if (providerId === "claude") return "Anthropic via API Key, assinatura do Claude Code ou CLI local já autenticado.";
-  if (providerId === "codex") return "OpenAI via API Key ou login oficial do Codex.";
-  if (providerId === "gemini") return "Google via GEMINI_API_KEY ou login oficial do Gemini CLI.";
-  if (providerId === "elevenlabs") return "Voz premium com API Key, idioma padrão e seleção de vozes.";
-  if (providerId === "ollama") return "Servidor Ollama local ou cloud com API Key, usando o catálogo real de modelos.";
-  if (providerId === "whispercpp") {
-    return "Transcrição local via whisper.cpp, com modelos baixados sob demanda.";
-  }
-  if (providerId === "perplexity") {
-    return "Modelos Sonar com pesquisa em tempo real e citações de fontes via API Key. Acesso programático via console.";
-  }
-  if (providerId === "mistral") {
-    return "Família Mistral (Large, Medium, Small, Codestral, Pixtral) via La Plateforme. Visão via Pixtral, código via Codestral.";
-  }
-  if (providerId === "qwen") {
-    return "Família Qwen via Alibaba DashScope International. Inclui Qwen3-Coder, Qwen-VL e contexto longo de até 1M tokens.";
-  }
-  if (providerId === "kimi") {
-    return "Modelos Kimi K2 e Moonshot v1 com janela de contexto até 128K tokens. Visão via kimi-vision.";
-  }
-  if (providerId === "groq") {
-    return "Inferência ultra-rápida via LPU para Llama 3.3, Mixtral, Gemma2, DeepSeek-R1 distill e Qwen 2.5.";
-  }
-  if (providerId === "deepseek") {
-    return "DeepSeek V3 (chat) e R1 (reasoner) com prompt caching automático e custo significativamente menor.";
-  }
-  if (providerId === "xai") {
-    return "Grok 4, Grok 3 e variantes mini/fast da xAI. Visão via grok-2-vision.";
-  }
-  if (category === "voice") return "Provider multimodal focado em voz e áudio.";
-  if (category === "media") return "Provider multimídia disponível para fluxos especializados.";
-  return "Provider disponível no catálogo global do sistema.";
+export function providerDescription(
+  providerId: string,
+  category: string,
+  t: ProviderCopyTranslator = defaultProviderCopyTranslator,
+) {
+  const knownProviderKey = `controlPlane.providerCopy.descriptions.${providerId}`;
+  const knownProviderCopy = t(knownProviderKey);
+  if (knownProviderCopy !== knownProviderKey) return knownProviderCopy;
+  if (category === "voice") return t("controlPlane.providerCopy.descriptions.voiceFallback");
+  if (category === "media") return t("controlPlane.providerCopy.descriptions.mediaFallback");
+  return t("controlPlane.providerCopy.descriptions.fallback");
 }
 
-export function providerLoginCopy(providerId: string) {
-  if (providerId === "claude") {
-    return "Abra o link gerado pelo Claude Code, autorize no navegador e cole o código aqui para conectar sua assinatura Anthropic.";
-  }
-  if (providerId === "codex") {
-    return "Use o login oficial do Codex com sua conta OpenAI/ChatGPT. A cobrança da API continua separada da assinatura.";
-  }
-  if (providerId === "perplexity") {
-    return "Cole sua API key obtida em perplexity.ai/settings/api. Acesso pago via créditos ou assinatura Pro.";
-  }
-  if (providerId === "mistral") {
-    return "Cole sua API key obtida em console.mistral.ai/api-keys.";
-  }
-  if (providerId === "qwen") {
-    return "Cole sua API key obtida em dashscope.console.aliyun.com (versão internacional).";
-  }
-  if (providerId === "kimi") {
-    return "Cole sua API key obtida em platform.moonshot.ai/console/api-keys.";
-  }
-  if (providerId === "groq") {
-    return "Cole sua API key obtida em console.groq.com/keys.";
-  }
-  if (providerId === "deepseek") {
-    return "Cole sua API key obtida em platform.deepseek.com/api_keys.";
-  }
-  if (providerId === "xai") {
-    return "Cole sua API key obtida em console.x.ai.";
-  }
-  return "Use o login oficial do Gemini CLI com sua conta Google.";
+export function providerLoginCopy(providerId: string, t: ProviderCopyTranslator = defaultProviderCopyTranslator) {
+  const knownProviderKey = `controlPlane.providerCopy.login.${providerId}`;
+  const knownProviderCopy = t(knownProviderKey);
+  if (knownProviderCopy !== knownProviderKey) return knownProviderCopy;
+  return t("controlPlane.providerCopy.login.gemini");
 }
 
-export function providerLocalTitle(providerId: string) {
-  if (providerId === "claude") return "Claude Code CLI";
-  if (providerId === "ollama") return "Servidor Ollama";
-  return "Servidor local";
+export function providerLocalTitle(providerId: string, t: ProviderCopyTranslator = defaultProviderCopyTranslator) {
+  const knownProviderKey = `controlPlane.providerCopy.localTitle.${providerId}`;
+  const knownProviderCopy = t(knownProviderKey);
+  if (knownProviderCopy !== knownProviderKey) return knownProviderCopy;
+  return t("controlPlane.providerCopy.localTitle.fallback");
 }
 
-export function providerLocalDescription(providerId: string) {
-  if (providerId === "claude") {
-    return (
-      "Opcional: se você já autenticou o Claude Code em outra máquina e montou o CLAUDE_CONFIG_DIR no container, " +
-      "basta clicar em Verificar para detectar a sessão. Caso contrário use a opção de assinatura acima."
-    );
-  }
-  if (providerId === "ollama") {
-    return "Use um endpoint local ou remoto compatível com a API do Ollama para listar e executar modelos.";
-  }
-  return "Configure a conexão local para este provider.";
+export function providerLocalDescription(providerId: string, t: ProviderCopyTranslator = defaultProviderCopyTranslator) {
+  const knownProviderKey = `controlPlane.providerCopy.localDescription.${providerId}`;
+  const knownProviderCopy = t(knownProviderKey);
+  if (knownProviderCopy !== knownProviderKey) return knownProviderCopy;
+  return t("controlPlane.providerCopy.localDescription.fallback");
 }
 
-export function providerActionCopy(providerId: string) {
-  if (providerId === "claude") return "Claude Code";
-  if (providerId === "codex") return "Codex";
-  if (providerId === "gemini") return "Gemini CLI";
-  return "runtime oficial";
+export function providerActionCopy(providerId: string, t: ProviderCopyTranslator = defaultProviderCopyTranslator) {
+  if (providerId === "claude") return t("controlPlane.providerCopy.action.claudeCode");
+  if (providerId === "codex") return t("controlPlane.providerCopy.action.codex");
+  if (providerId === "gemini") return t("controlPlane.providerCopy.action.geminiCli");
+  return t("controlPlane.providerCopy.action.officialRuntime");
 }
 
 export function elevenlabsVoiceOptionLabel(voice: {
@@ -226,12 +186,12 @@ export function elevenlabsVoiceOptionLabel(voice: {
   gender: string;
   category: string;
   api_available?: boolean;
-}) {
+}, t: ProviderCopyTranslator = defaultProviderCopyTranslator) {
   const metadata = [
     voice.accent,
     voice.gender,
     voice.category,
-    voice.api_available === false ? "requer plano pago/API" : "",
+    voice.api_available === false ? t("controlPlane.providerCopy.voices.requiresPaidApi") : "",
   ]
     .filter(Boolean)
     .join(" · ");
@@ -357,6 +317,7 @@ export function ProviderLogo({
 }
 
 export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolean) {
+  const { t } = useAppI18n();
   const {
     draft,
     providerConnections,
@@ -374,17 +335,29 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
     kokoroVoiceCatalog,
     kokoroVoicesLoading,
     kokoroModelStatus,
+    supertonicVoiceCatalog,
+    supertonicVoicesLoading,
+    supertonicModelCatalog,
+    supertonicModelsLoading,
     whisperCatalog,
     isDownloadingKokoroAsset,
+    isDownloadingSupertonicAsset,
     isDownloadingWhisperVariant,
     loadKokoroVoices,
     loadKokoroModelStatus,
+    loadSupertonicModels,
+    loadSupertonicVoices,
     loadWhisperCatalog,
     downloadKokoroVoice,
     downloadKokoroModel,
+    downloadSupertonicModel,
+    downloadSupertonicVoice,
+    importSupertonicVoice,
     downloadWhisperModel,
     deleteKokoroModelAsset,
     deleteKokoroVoiceAsset,
+    deleteSupertonicModelAsset,
+    deleteSupertonicVoiceAsset,
     deleteWhisperVariantAsset,
     ollamaModelCatalog,
     ollamaModelsLoading,
@@ -441,6 +414,18 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
   const kokoroSelectedVoice = kokoroVoiceCatalog.items.find(
     (voice) => voice.voice_id === kokoroDefaultVoice,
   );
+  const supertonicModel = draft.values.models.supertonic_default_model || "supertonic-3";
+  const supertonicLanguage = draft.values.models.supertonic_default_language || "pt";
+  const supertonicDefaultVoice = draft.values.models.supertonic_default_voice || "F1";
+  const supertonicAssetKey = `${supertonicModel}:${supertonicDefaultVoice}`;
+  const supertonicVoiceDownloading = isDownloadingSupertonicAsset(supertonicAssetKey);
+  const supertonicModelDownloading = isDownloadingSupertonicAsset(supertonicModel);
+  const supertonicSelectedModel = supertonicModelCatalog?.items.find(
+    (item) => item.model_id === supertonicModel,
+  );
+  const supertonicSelectedVoice = supertonicVoiceCatalog.items.find(
+    (voice) => voice.voice_id === supertonicDefaultVoice,
+  );
   const loginPending = Boolean(
     loginSession && ["pending", "awaiting_browser"].includes(loginSession.status),
   );
@@ -455,7 +440,9 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
   const canConnectApiKey =
     activeMode === "api_key" &&
     (hasApiKeyDraft || (!configuredForActiveMode && Boolean(connection?.api_key_present)));
-  const actionLabel = shouldShowDisconnect ? "Desconectar" : "Conectar";
+  const actionLabel = shouldShowDisconnect
+    ? t("controlPlane.providerCopy.action.disconnect")
+    : t("controlPlane.providerCopy.action.connect");
   const actionIcon = shouldShowDisconnect
     ? Unplug
     : activeMode === "api_key"
@@ -472,10 +459,10 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
     ? providerActionStatus(provider.id, "disconnect")
     : providerActionStatus(provider.id, "connect");
   const actionLoadingLabel = shouldShowDisconnect
-    ? "Desconectando"
+    ? t("controlPlane.providerCopy.action.disconnecting")
     : activeMode === "subscription_login" && loginPending
-      ? "Aguardando"
-      : "Conectando";
+      ? t("controlPlane.providerCopy.action.waiting")
+      : t("controlPlane.providerCopy.action.connecting");
   const actionDisabled =
     !supportsAnyAuth ||
     (shouldShowDisconnect
@@ -508,6 +495,14 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
     void loadKokoroVoices(kokoroLanguage);
     void loadKokoroModelStatus();
   }, [isOpen, kokoroLanguage, loadKokoroVoices, loadKokoroModelStatus, provider.id]);
+
+  useEffect(() => {
+    if (provider.id !== "supertonic" || !isOpen) {
+      return;
+    }
+    void loadSupertonicModels();
+    void loadSupertonicVoices(supertonicModel, supertonicLanguage);
+  }, [isOpen, loadSupertonicModels, loadSupertonicVoices, provider.id, supertonicLanguage, supertonicModel]);
 
   useEffect(() => {
     if (provider.id !== "whispercpp" || !isOpen) {
@@ -585,6 +580,23 @@ export function useProviderConnectionUi(provider: ProviderOption, isOpen: boolea
     downloadKokoroModel,
     deleteKokoroModelAsset,
     deleteKokoroVoiceAsset,
+    supertonicModel,
+    supertonicLanguage,
+    supertonicDefaultVoice,
+    supertonicVoiceCatalog,
+    supertonicVoicesLoading,
+    supertonicModelCatalog,
+    supertonicModelsLoading,
+    supertonicVoiceDownloading,
+    supertonicModelDownloading,
+    supertonicSelectedModel,
+    supertonicSelectedVoice,
+    loadSupertonicVoices,
+    downloadSupertonicModel,
+    downloadSupertonicVoice,
+    importSupertonicVoice,
+    deleteSupertonicModelAsset,
+    deleteSupertonicVoiceAsset,
     deleteWhisperVariantAsset,
     whisperCatalog,
     isDownloadingWhisperVariant,
@@ -619,6 +631,7 @@ function ClaudeCodeEntry({
   onSubmit: (code: string) => Promise<ProviderLoginSession>;
   tl: (value: string, options?: Record<string, string | number>) => string;
 }) {
+  const { t } = useAppI18n();
   const [code, setCode] = useState("");
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [submitting, setSubmitting] = useState(false);
@@ -635,22 +648,22 @@ function ClaudeCodeEntry({
       if (result.status === "completed") {
         setCode("");
         setStatus("success");
-        setFeedback(tl("Código confirmado. Validando a conexão com a Anthropic..."));
+        setFeedback(t("generated.controlPlane.codigo_confirmado_validando_a_conexao_com_a__b4dc964c"));
       } else if (result.status === "error" || result.last_error) {
         // Claude CLI reports invalid codes via ``last_error`` while keeping the
         // session in ``awaiting_browser`` so the operator can retry in the same
         // PTY. Surface that as a red error state so the rejection is obvious.
         setStatus("error");
-        setFeedback(result.last_error || tl("Não foi possível validar o código enviado."));
+        setFeedback(result.last_error || t("generated.controlPlane.nao_foi_possivel_validar_o_codigo_enviado_64508fb6"));
       } else {
         setStatus("idle");
         setFeedback(
-          result.message || tl("Código enviado. Aguardando a confirmação final do Claude Code."),
+          result.message || t("generated.controlPlane.codigo_enviado_aguardando_a_confirmacao_fina_12b05453"),
         );
       }
     } catch {
       setStatus("error");
-      setFeedback(tl("Não foi possível enviar o código agora. Tente novamente."));
+      setFeedback(t("generated.controlPlane.nao_foi_possivel_enviar_o_codigo_agora_tente_21ffd76a"));
     } finally {
       setSubmitting(false);
     }
@@ -659,7 +672,7 @@ function ClaudeCodeEntry({
   return (
     <div key={sessionId} className="space-y-2.5 px-1">
       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-        {tl("Authentication Code")}
+        {t("generated.controlPlane.authentication_code_28780d65")}
       </div>
       <div className="flex items-center gap-2.5">
         <input
@@ -669,7 +682,7 @@ function ClaudeCodeEntry({
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
-          placeholder={tl("Cole o código de autenticação")}
+          placeholder={t("generated.controlPlane.cole_o_codigo_de_autenticacao_787a08f7")}
           value={code}
           onChange={(event) => {
             setCode(event.target.value);
@@ -682,7 +695,7 @@ function ClaudeCodeEntry({
           size="sm"
           loading={submitting}
           status={status}
-          loadingLabel={tl("Enviando")}
+          loadingLabel={t("generated.controlPlane.enviando_0a595e85")}
           icon={Link2}
           disabled={!code.trim()}
           onClick={() => {
@@ -690,7 +703,7 @@ function ClaudeCodeEntry({
           }}
           className="shrink-0 rounded-full px-3.5"
         >
-          {tl("Enviar código")}
+          {t("generated.controlPlane.enviar_codigo_fa36fc41")}
         </AsyncActionButton>
       </div>
       {feedback ? (
@@ -718,12 +731,12 @@ function WhisperCppModelList({
   downloadWhisperModel: ProviderConnectionUi["downloadWhisperModel"];
   deleteWhisperVariantAsset: ProviderConnectionUi["deleteWhisperVariantAsset"];
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   if (!whisperCatalog) {
     return (
       <div className="px-1 text-sm text-[var(--text-tertiary)]">
-        {tl("Carregando modelos Whisper.cpp...")}
+        {t("generated.controlPlane.carregando_modelos_whisper_cpp_3bde8b2d")}
       </div>
     );
   }
@@ -732,10 +745,10 @@ function WhisperCppModelList({
     <div className="space-y-3 px-1">
       <div>
         <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-          {tl("Modelos Whisper.cpp")}
+          {t("generated.controlPlane.modelos_whisper_cpp_c793774d")}
         </div>
         <p className="mt-1 text-sm text-[var(--text-secondary)]">
-          {tl("Modelos locais para transcrição offline. Baixe apenas os que deseja usar.")}
+          {t("generated.controlPlane.modelos_locais_para_transcricao_offline_baix_6f80d015")}
         </p>
       </div>
 
@@ -753,7 +766,7 @@ function WhisperCppModelList({
                   {variant.label}
                   {isDefault ? (
                     <span className="ml-2 rounded-full border border-[var(--border-subtle)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
-                      {tl("Padrão")}
+                      {t("generated.controlPlane.padrao_ecc075df")}
                     </span>
                   ) : null}
                 </span>
@@ -769,7 +782,7 @@ function WhisperCppModelList({
               {variant.downloaded ? (
                 <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
                   <Check className="h-3 w-3" strokeWidth={1.75} />
-                  {tl("Baixado")}
+                  {t("generated.controlPlane.baixado_fdf556f7")}
                 </span>
               ) : null}
               <AsyncActionButton
@@ -777,7 +790,7 @@ function WhisperCppModelList({
                 variant={variant.downloaded ? "secondary" : "quiet"}
                 size="sm"
                 loading={downloading}
-                loadingLabel={tl("Baixando")}
+                loadingLabel={t("generated.controlPlane.baixando_741a1547")}
                 icon={ArrowDown}
                 disabled={Boolean(variant.downloaded) || downloading}
                 onClick={() => {
@@ -785,7 +798,7 @@ function WhisperCppModelList({
                 }}
                 className="rounded-full px-3.5"
               >
-                {variant.downloaded ? tl("Disponível") : tl("Baixar")}
+                {variant.downloaded ? t("generated.controlPlane.disponivel_099498ec") : t("generated.controlPlane.baixar_1ab3957c")}
               </AsyncActionButton>
               {variant.downloaded ? (
                 <AsyncActionButton
@@ -797,10 +810,10 @@ function WhisperCppModelList({
                   onClick={() => {
                     void deleteWhisperVariantAsset(variant.variant_id);
                   }}
-                  loadingLabel={tl("Removendo")}
+                  loadingLabel={t("generated.controlPlane.removendo_2b311926")}
                   className="rounded-full px-3.5"
                 >
-                  {tl("Remover")}
+                  {t("generated.controlPlane.remover_5465770e")}
                 </AsyncActionButton>
               ) : null}
             </div>
@@ -830,7 +843,7 @@ export function ProviderAuthPanel({
   ui: ProviderConnectionUi;
   className?: string;
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const {
     draft,
@@ -864,6 +877,23 @@ export function ProviderAuthPanel({
     downloadKokoroModel,
     deleteKokoroModelAsset,
     deleteKokoroVoiceAsset,
+    supertonicModel,
+    supertonicLanguage,
+    supertonicDefaultVoice,
+    supertonicVoiceCatalog,
+    supertonicVoicesLoading,
+    supertonicModelCatalog,
+    supertonicModelsLoading,
+    supertonicVoiceDownloading,
+    supertonicModelDownloading,
+    supertonicSelectedModel,
+    supertonicSelectedVoice,
+    loadSupertonicVoices,
+    downloadSupertonicModel,
+    downloadSupertonicVoice,
+    importSupertonicVoice,
+    deleteSupertonicModelAsset,
+    deleteSupertonicVoiceAsset,
     deleteWhisperVariantAsset,
     whisperCatalog,
     isDownloadingWhisperVariant,
@@ -877,6 +907,27 @@ export function ProviderAuthPanel({
   } = ui;
   const loginCode = loginSession?.user_code?.trim() || "";
   const codeCopied = Boolean(loginCode) && copiedCode === loginCode;
+  const supertonicImportInputRef = useRef<HTMLInputElement | null>(null);
+  const supertonicAccelerationLabel =
+    supertonicVoiceCatalog.acceleration?.label || supertonicModelCatalog?.acceleration?.label || "CPU ONNX oficial";
+  const kokoroLanguageOptions =
+    kokoroVoiceCatalog.available_languages.length > 0
+      ? kokoroVoiceCatalog.available_languages
+      : [{ id: kokoroLanguage || "pt-br", label: kokoroLanguage || "pt-br" }];
+  const kokoroHasSelectedVoice = kokoroVoiceCatalog.items.some(
+    (voice) => voice.voice_id === kokoroDefaultVoice,
+  );
+  const supertonicModelOptions = supertonicModelCatalog?.items || [];
+  const supertonicHasSelectedModel = supertonicModelOptions.some(
+    (model) => model.model_id === supertonicModel,
+  );
+  const supertonicLanguageOptions =
+    supertonicVoiceCatalog.available_languages.length > 0
+      ? supertonicVoiceCatalog.available_languages
+      : [{ id: supertonicLanguage || "pt", label: supertonicLanguage || "pt" }];
+  const supertonicHasSelectedVoice = supertonicVoiceCatalog.items.some(
+    (voice) => voice.voice_id === supertonicDefaultVoice,
+  );
   const shouldShowClaudeCodeInput =
     provider.id === "claude" &&
     Boolean(loginSession?.session_id) &&
@@ -901,8 +952,8 @@ export function ProviderAuthPanel({
     <div className={cn("space-y-3", className)}>
       {supportsSubscriptionLogin && !provider.commandPresent ? (
         <InlineAlert tone="warning">
-          {tl(
-            "O runtime oficial deste provider não está disponível neste ambiente. Instale o CLI correspondente antes de concluir a conexão.",
+          {t(
+            "generated.controlPlane.o_runtime_oficial_deste_provider_nao_esta_di_941ff905",
           )}
         </InlineAlert>
       ) : null}
@@ -921,13 +972,13 @@ export function ProviderAuthPanel({
               em disco quando presente e oferece botão de remoção. */}
           <div className="flex flex-wrap items-center gap-3 px-1 pb-2 text-sm">
             <span className="text-[var(--text-secondary)]">
-              {tl("Modelo base do Kokoro")}
+              {t("generated.controlPlane.modelo_base_do_kokoro_6a93f08f")}
             </span>
             {kokoroModelStatus?.downloaded ? (
               <>
                 <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
                   <Check className="h-3 w-3" strokeWidth={1.75} />
-                  {tl("Disponível")}
+                  {t("generated.controlPlane.disponivel_099498ec")}
                 </span>
                 <span className="font-mono text-[11px] text-[var(--text-tertiary)]">
                   {formatAssetBytes(kokoroModelStatus.bytes)}
@@ -935,7 +986,7 @@ export function ProviderAuthPanel({
               </>
             ) : (
               <span className="text-xs text-[var(--text-tertiary)]">
-                {tl("Necessário antes de baixar qualquer voz.")}
+                {t("generated.controlPlane.necessario_antes_de_baixar_qualquer_voz_4b78c793")}
               </span>
             )}
             <div className="ml-auto flex items-center gap-2">
@@ -944,7 +995,7 @@ export function ProviderAuthPanel({
                 variant={kokoroModelStatus?.downloaded ? "secondary" : "quiet"}
                 size="sm"
                 loading={kokoroModelDownloading}
-                loadingLabel={tl("Baixando")}
+                loadingLabel={t("generated.controlPlane.baixando_741a1547")}
                 icon={ArrowDown}
                 disabled={Boolean(kokoroModelStatus?.downloaded) || kokoroModelDownloading}
                 onClick={() => {
@@ -953,8 +1004,8 @@ export function ProviderAuthPanel({
                 className="rounded-full px-3.5"
               >
                 {kokoroModelStatus?.downloaded
-                  ? tl("Modelo baixado")
-                  : tl("Baixar modelo Kokoro")}
+                  ? t("generated.controlPlane.modelo_baixado_c7fe0e67")
+                  : t("generated.controlPlane.baixar_modelo_kokoro_7c23b6a5")}
               </AsyncActionButton>
               {kokoroModelStatus?.downloaded ? (
                 <AsyncActionButton
@@ -967,54 +1018,53 @@ export function ProviderAuthPanel({
                     void deleteKokoroModelAsset();
                   }}
                   className="rounded-full px-3.5"
-                  loadingLabel={tl("Removendo")}
+                  loadingLabel={t("generated.controlPlane.removendo_2b311926")}
                 >
-                  {tl("Remover")}
+                  {t("generated.controlPlane.remover_5465770e")}
                 </AsyncActionButton>
               ) : null}
             </div>
           </div>
 
-        <div className="grid gap-3 md:grid-cols-2">
-          <FieldShell
-            label={tl("Idioma")}
-            description={tl("Define o idioma padrão e filtra a lista de vozes.")}
-          >
-            <Select
-              value={kokoroLanguage}
-              onValueChange={(nextLanguage) => {
-                setField("models", {
-                  ...draft.values.models,
-                  kokoro_default_language: nextLanguage,
-                  kokoro_default_voice: "",
-                  kokoro_default_voice_label: "",
-                });
-                void loadKokoroVoices(nextLanguage, { force: true });
-              }}
+          <div className="grid gap-3 md:grid-cols-2">
+            <FieldShell
+              label={t("generated.controlPlane.idioma_1bc8a0e5")}
+              description={t("generated.controlPlane.define_o_idioma_padrao_e_filtra_a_lista_de_v_e6a4d526")}
             >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {kokoroVoiceCatalog.available_languages.map((language) => (
-                  <SelectItem key={language.id} value={language.id}>
-                    {tl(language.label)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </FieldShell>
+              <Select
+                value={kokoroLanguage}
+                onValueChange={(nextLanguage) => {
+                  setField("models", {
+                    ...draft.values.models,
+                    kokoro_default_language: nextLanguage,
+                  });
+                  void loadKokoroVoices(nextLanguage, { force: true });
+                }}
+              >
+                <SelectTrigger aria-busy={kokoroVoicesLoading || undefined}>
+                  <SelectValue />
+                  <SelectLoadingSpinner loading={kokoroVoicesLoading} />
+                </SelectTrigger>
+                <SelectContent>
+                  {kokoroLanguageOptions.map((language) => (
+                    <SelectItem key={language.id} value={language.id}>
+                      {tl(language.label)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldShell>
 
           <FieldShell
-            label="Voz"
+            label={translate("generated.controlPlane.voz_4f8c6efc")}
             description={
               kokoroVoicesLoading
-                ? "Carregando vozes oficiais..."
-                : "Escolha a voz padrão local usada pelos agents."
+                ? t("controlPlane.providerCopy.voices.loadingOfficial")
+                : t("controlPlane.providerCopy.voices.defaultLocalDescription")
             }
           >
             <Select
-              value={kokoroDefaultVoice === "" ? SELECT_ALL_VALUE : kokoroDefaultVoice}
+              value={kokoroDefaultVoice || "pf_dora"}
               disabled={kokoroVoicesLoading}
               onValueChange={(value) => {
                 const nextVoiceId = value === SELECT_ALL_VALUE ? "" : value;
@@ -1028,26 +1078,25 @@ export function ProviderAuthPanel({
                 });
               }}
             >
-              <SelectTrigger>
-                <SelectValue
+              <SelectTrigger aria-busy={kokoroVoicesLoading || undefined}>
+                  <SelectValue
                   placeholder={
-                    kokoroVoicesLoading ? "Carregando vozes..." : "Selecione a voz padrão"
+                    kokoroVoicesLoading
+                      ? t("controlPlane.providerCopy.voices.loading")
+                      : t("controlPlane.providerCopy.voices.selectDefault")
                   }
                 />
+                <SelectLoadingSpinner loading={kokoroVoicesLoading} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={SELECT_ALL_VALUE}>
-                  {kokoroVoicesLoading ? "Carregando vozes..." : "Selecione a voz padrão"}
-                </SelectItem>
-                {kokoroDefaultVoice &&
-                !kokoroVoiceCatalog.items.some((voice) => voice.voice_id === kokoroDefaultVoice) ? (
+                {kokoroDefaultVoice && !kokoroHasSelectedVoice ? (
                   <SelectItem value={kokoroDefaultVoice}>
                     {kokoroDefaultVoiceLabel || kokoroDefaultVoice}
                   </SelectItem>
                 ) : null}
                 {kokoroVoiceCatalog.items.map((voice) => (
                   <SelectItem key={voice.voice_id} value={voice.voice_id}>
-                    {`${voice.name} — ${tl(voice.language_label)}${voice.downloaded ? ` · ${tl("baixada")}` : ""}`}
+                    {`${voice.name} — ${tl(voice.language_label)}${voice.downloaded ? ` · ${t("generated.controlPlane.baixada_97a64703")}` : ""}`}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1060,7 +1109,7 @@ export function ProviderAuthPanel({
               variant={kokoroSelectedVoice?.downloaded ? "secondary" : "quiet"}
               size="sm"
               loading={kokoroDownloadActive}
-              loadingLabel={tl("Baixando")}
+              loadingLabel={t("generated.controlPlane.baixando_741a1547")}
               status={kokoroDownloadActive ? "pending" : "idle"}
               icon={ArrowDown}
               disabled={!kokoroDefaultVoice || Boolean(kokoroSelectedVoice?.downloaded)}
@@ -1070,7 +1119,7 @@ export function ProviderAuthPanel({
               }}
               className="rounded-full px-3.5"
             >
-              {kokoroSelectedVoice?.downloaded ? tl("Voz baixada") : tl("Baixar voz")}
+              {kokoroSelectedVoice?.downloaded ? t("generated.controlPlane.voz_baixada_2f40c57e") : t("generated.controlPlane.baixar_voz_dcfca6de")}
             </AsyncActionButton>
             {kokoroSelectedVoice?.downloaded ? (
               <AsyncActionButton
@@ -1083,35 +1132,269 @@ export function ProviderAuthPanel({
                   if (!kokoroDefaultVoice) return;
                   void deleteKokoroVoiceAsset(kokoroDefaultVoice);
                 }}
-                loadingLabel={tl("Removendo")}
+                loadingLabel={t("generated.controlPlane.removendo_2b311926")}
                 className="rounded-full px-3.5"
               >
-                {tl("Remover")}
+                {t("generated.controlPlane.remover_5465770e")}
               </AsyncActionButton>
             ) : null}
             <span className="text-sm text-[var(--text-secondary)]">
               {kokoroSelectedVoice
-                ? `${tl(kokoroSelectedVoice.language_label)} · ${kokoroSelectedVoice.gender === "female" ? tl("Feminina") : tl("Masculina")}${
+                ? `${tl(kokoroSelectedVoice.language_label)} · ${kokoroSelectedVoice.gender === "female" ? t("generated.controlPlane.feminina_06649a23") : t("generated.controlPlane.masculina_6a75350b")}${
                     kokoroSelectedVoice.downloaded && Number(kokoroSelectedVoice.bytes ?? 0) > 0
                       ? ` · ${formatAssetBytes(kokoroSelectedVoice.bytes)}`
                       : ""
                   }`
-                : tl("Selecione uma voz para baixar sob demanda.")}
+                : t("generated.controlPlane.selecione_uma_voz_para_baixar_sob_demanda_e0ff8d20")}
             </span>
           </div>
 
-        </div>
+          </div>
+        </>
+      ) : provider.id === "supertonic" ? (
+        <>
+          <div className="flex flex-wrap items-center gap-3 px-1 pb-2 text-sm">
+            <span className="text-[var(--text-secondary)]">
+              {t("generated.controlPlane.modelo_supertonic_1d003ea1")}
+            </span>
+            {supertonicSelectedModel?.downloaded ? (
+              <>
+                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                  <Check className="h-3 w-3" strokeWidth={1.75} />
+                  {t("generated.controlPlane.disponivel_099498ec")}
+                </span>
+                <span className="font-mono text-[11px] text-[var(--text-tertiary)]">
+                  {formatAssetBytes(supertonicSelectedModel.bytes)}
+                </span>
+              </>
+            ) : (
+              <span className="text-xs text-[var(--text-tertiary)]">
+                {t("generated.controlPlane.download_inicial_via_hugging_face_f6a44a0a")}
+              </span>
+            )}
+            <span className="rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] text-[var(--text-tertiary)]">
+              {tl(supertonicAccelerationLabel)}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <AsyncActionButton
+                type="button"
+                variant={supertonicSelectedModel?.downloaded ? "secondary" : "quiet"}
+                size="sm"
+                loading={supertonicModelDownloading}
+                loadingLabel={t("generated.controlPlane.baixando_741a1547")}
+                icon={ArrowDown}
+                disabled={Boolean(supertonicSelectedModel?.downloaded) || supertonicModelDownloading}
+                onClick={() => {
+                  void downloadSupertonicModel(supertonicModel);
+                }}
+                className="rounded-full px-3.5"
+              >
+                {supertonicSelectedModel?.downloaded ? t("generated.controlPlane.modelo_baixado_c7fe0e67") : t("generated.controlPlane.baixar_modelo_6fe6bec5")}
+              </AsyncActionButton>
+              {supertonicSelectedModel?.downloaded ? (
+                <AsyncActionButton
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  icon={Trash2}
+                  disabled={supertonicModelDownloading}
+                  onClick={() => {
+                    void deleteSupertonicModelAsset(supertonicModel);
+                  }}
+                  className="rounded-full px-3.5"
+                  loadingLabel={t("generated.controlPlane.removendo_2b311926")}
+                >
+                  {t("generated.controlPlane.remover_5465770e")}
+                </AsyncActionButton>
+              ) : null}
+            </div>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <FieldShell label={t("generated.controlPlane.modelo_57cfd288")} description={t("generated.controlPlane.seleciona_o_snapshot_local_usado_na_sintese_41119e15")}>
+              <Select
+                value={supertonicModel}
+                disabled={supertonicModelsLoading}
+                onValueChange={(nextModel) => {
+                  setField("models", {
+                    ...draft.values.models,
+                    supertonic_default_model: nextModel,
+                    supertonic_default_voice: "F1",
+                  });
+                  void loadSupertonicVoices(nextModel, supertonicLanguage, { force: true });
+                }}
+              >
+                <SelectTrigger aria-busy={supertonicModelsLoading || undefined}>
+                  <SelectValue />
+                  <SelectLoadingSpinner loading={supertonicModelsLoading} />
+                </SelectTrigger>
+                <SelectContent>
+                  {!supertonicHasSelectedModel ? (
+                    <SelectItem value={supertonicModel}>{supertonicModel}</SelectItem>
+                  ) : null}
+                  {supertonicModelOptions.map((model) => (
+                    <SelectItem key={model.model_id} value={model.model_id}>
+                      {`${model.title}${model.downloaded ? ` · ${t("generated.controlPlane.baixado_34cb559b")}` : ""}`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldShell>
+
+            <FieldShell label={t("generated.controlPlane.idioma_1bc8a0e5")} description={t("generated.controlPlane.define_o_idioma_padrao_para_a_fala_local_f4fb3e12")}>
+              <Select
+                value={supertonicLanguage}
+                onValueChange={(nextLanguage) => {
+                  setField("models", {
+                    ...draft.values.models,
+                    supertonic_default_language: nextLanguage,
+                  });
+                  void loadSupertonicVoices(supertonicModel, nextLanguage, { force: true });
+                }}
+              >
+                <SelectTrigger aria-busy={supertonicVoicesLoading || undefined}>
+                  <SelectValue />
+                  <SelectLoadingSpinner loading={supertonicVoicesLoading} />
+                </SelectTrigger>
+                <SelectContent>
+                  {supertonicLanguageOptions.map((language) => (
+                    <SelectItem key={language.id} value={language.id}>
+                      {tl(language.label)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldShell>
+
+            <FieldShell
+              label={translate("generated.controlPlane.voz_4f8c6efc")}
+              description={
+                supertonicVoicesLoading
+                  ? "Carregando vozes Supertonic..."
+                  : "Escolha presets oficiais ou vozes importadas do Voice Builder."
+              }
+            >
+              <Select
+                value={supertonicDefaultVoice || "F1"}
+                disabled={supertonicVoicesLoading}
+                onValueChange={(nextVoiceId) => {
+                  const selectedVoice = supertonicVoiceCatalog.items.find(
+                    (voice) => voice.voice_id === nextVoiceId,
+                  );
+                  setField("models", {
+                    ...draft.values.models,
+                    supertonic_default_voice: nextVoiceId,
+                    supertonic_default_voice_label: selectedVoice?.name || nextVoiceId,
+                  });
+                }}
+              >
+                <SelectTrigger aria-busy={supertonicVoicesLoading || undefined}>
+                  <SelectValue placeholder={t("generated.controlPlane.selecione_a_voz_padrao_e59b227c")} />
+                  <SelectLoadingSpinner loading={supertonicVoicesLoading} />
+                </SelectTrigger>
+                <SelectContent>
+                  {supertonicDefaultVoice && !supertonicHasSelectedVoice ? (
+                    <SelectItem value={supertonicDefaultVoice}>{supertonicDefaultVoice}</SelectItem>
+                  ) : null}
+                  {supertonicVoiceCatalog.items.map((voice) => (
+                    <SelectItem key={voice.voice_id} value={voice.voice_id}>
+                      {`${voice.name} · ${voice.kind === "custom" ? t("generated.controlPlane.custom_d632c043") : t("generated.controlPlane.preset_52adebe8")}${
+                        voice.downloaded ? ` · ${t("generated.controlPlane.baixada_97a64703")}` : ""
+                      }`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </FieldShell>
+
+            <FieldShell label={t("generated.controlPlane.voz_custom_0d3f178d")} description={t("generated.controlPlane.importa_json_local_do_voice_builder_97970553")}>
+              <input
+                ref={supertonicImportInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  event.currentTarget.value = "";
+                  if (!file) return;
+                  void importSupertonicVoice(file, { modelId: supertonicModel });
+                }}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                onClick={() => supertonicImportInputRef.current?.click()}
+                className="gap-2 rounded-full px-3.5"
+              >
+                <Upload className="h-3.5 w-3.5" strokeWidth={1.75} />
+                {t("generated.controlPlane.importar_json_283a7ae7")}
+              </Button>
+            </FieldShell>
+
+            <div className="md:col-span-2 flex flex-wrap items-center gap-3 px-1">
+              <AsyncActionButton
+                type="button"
+                variant={supertonicSelectedVoice?.downloaded ? "secondary" : "quiet"}
+                size="sm"
+                loading={supertonicVoiceDownloading}
+                loadingLabel={t("generated.controlPlane.baixando_741a1547")}
+                status={supertonicVoiceDownloading ? "pending" : "idle"}
+                icon={ArrowDown}
+                disabled={!supertonicDefaultVoice || Boolean(supertonicSelectedVoice?.downloaded)}
+                onClick={() => {
+                  if (!supertonicDefaultVoice) return;
+                  void downloadSupertonicVoice(supertonicDefaultVoice, supertonicModel);
+                }}
+                className="rounded-full px-3.5"
+              >
+                {supertonicSelectedVoice?.downloaded ? t("generated.controlPlane.voz_baixada_2f40c57e") : t("generated.controlPlane.baixar_voz_dcfca6de")}
+              </AsyncActionButton>
+              {supertonicSelectedVoice?.downloaded ? (
+                <AsyncActionButton
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  icon={Trash2}
+                  disabled={!supertonicDefaultVoice || supertonicVoiceDownloading}
+                  onClick={() => {
+                    if (!supertonicDefaultVoice) return;
+                    void deleteSupertonicVoiceAsset(supertonicDefaultVoice, supertonicModel);
+                  }}
+                  loadingLabel={t("generated.controlPlane.removendo_2b311926")}
+                  className="rounded-full px-3.5"
+                >
+                  {t("generated.controlPlane.remover_5465770e")}
+                </AsyncActionButton>
+              ) : null}
+              <span className="text-sm text-[var(--text-secondary)]">
+                {supertonicSelectedVoice
+                  ? `${tl(supertonicSelectedVoice.language_label)} · ${
+                      supertonicSelectedVoice.gender === "female"
+                        ? t("generated.controlPlane.feminina_06649a23")
+                        : supertonicSelectedVoice.gender === "male"
+                          ? t("generated.controlPlane.masculina_6a75350b")
+                          : t("generated.controlPlane.custom_1995fb7d")
+                    }${
+                      supertonicSelectedVoice.downloaded && Number(supertonicSelectedVoice.bytes ?? 0) > 0
+                        ? ` · ${formatAssetBytes(supertonicSelectedVoice.bytes)}`
+                        : ""
+                    }`
+                  : t("generated.controlPlane.selecione_uma_voz_para_ativar_localmente_7efcd4f9")}
+              </span>
+            </div>
+          </div>
         </>
       ) : supportsAnyAuth ? (
         <>
           <div className="space-y-2 px-1">
             <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-              {tl("Autenticação")}
+              {t("generated.controlPlane.autenticacao_023abe86")}
             </div>
             <div
               className="flex items-center gap-5 border-b border-[var(--border-subtle)]"
               role="tablist"
-              aria-label={tl("Formas de autenticação de {{provider}}", { provider: provider.title })}
+              aria-label={t("generated.controlPlane.formas_de_autenticacao_de_provider_40e86ee8", { provider: provider.title })}
             >
               {supportsApiKey ? (
                 <button
@@ -1126,8 +1409,7 @@ export function ProviderAuthPanel({
                       : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
                   )}
                 >
-                  API Key
-                </button>
+                  {translate("generated.controlPlane.api_key_9245266a")}</button>
               ) : null}
               {supportsLocalConnection ? (
                 <button
@@ -1142,7 +1424,7 @@ export function ProviderAuthPanel({
                       : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
                   )}
                 >
-                  {provider.id === "claude" ? tl("Claude Code CLI") : tl("Servidor local")}
+                  {provider.id === "claude" ? t("generated.controlPlane.claude_code_cli_b86bb2cc") : t("generated.controlPlane.servidor_local_79e4f89a")}
                 </button>
               ) : null}
               {supportsSubscriptionLogin ? (
@@ -1162,7 +1444,7 @@ export function ProviderAuthPanel({
                       : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
                   )}
                 >
-                  {tl("Assinatura / login")}
+                  {t("generated.controlPlane.assinatura_login_c48f1746")}
                 </button>
               ) : null}
             </div>
@@ -1173,12 +1455,12 @@ export function ProviderAuthPanel({
               <div className="space-y-2 px-1">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                    {tl("Chave da API")}
+                    {t("generated.controlPlane.chave_da_api_7c8c1447")}
                   </div>
                   {connection?.api_key_present ? (
                     <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
                       <CheckCircle2 className="h-3 w-3" strokeWidth={1.75} />
-                      {tl("Configurada")}
+                      {t("generated.controlPlane.configurada_df5188a8")}
                     </span>
                   ) : null}
                 </div>
@@ -1187,8 +1469,8 @@ export function ProviderAuthPanel({
                 !replacingApiKey ? (
                   <div className="space-y-2">
                     <p className="text-xs text-[var(--text-tertiary)]">
-                      {tl(
-                        "A chave está armazenada e criptografada. Para trocar, clique em Substituir; o valor atual nunca é exibido.",
+                      {t(
+                        "generated.controlPlane.a_chave_esta_armazenada_e_criptografada_para_9bd55941",
                       )}
                     </p>
                     <button
@@ -1197,7 +1479,7 @@ export function ProviderAuthPanel({
                       className="inline-flex items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-transparent px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
                     >
                       <RefreshCcw className="h-3 w-3" strokeWidth={1.75} />
-                      {tl("Substituir chave")}
+                      {t("generated.controlPlane.substituir_chave_0f8828aa")}
                     </button>
                   </div>
                 ) : (
@@ -1206,7 +1488,7 @@ export function ProviderAuthPanel({
                       placeholder={
                         provider.id === "gemini"
                           ? "AIza..."
-                          : tl("Cole a chave da API")
+                          : t("generated.controlPlane.cole_a_chave_da_api_074b64f7")
                       }
                       value={connectionDraft?.api_key || ""}
                       onChange={(event) =>
@@ -1222,7 +1504,7 @@ export function ProviderAuthPanel({
                         }}
                         className="text-[11px] text-[var(--text-tertiary)] underline-offset-2 transition-colors hover:text-[var(--text-primary)] hover:underline"
                       >
-                        {tl("Cancelar substituição")}
+                        {t("generated.controlPlane.cancelar_substituicao_77e2d650")}
                       </button>
                     ) : null}
                   </div>
@@ -1232,8 +1514,8 @@ export function ProviderAuthPanel({
               {provider.id === "elevenlabs" ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <FieldShell
-                    label={tl("Idioma padrão")}
-                    description={tl("Filtra a biblioteca de vozes e define o idioma padrão dos agentes.")}
+                    label={t("generated.controlPlane.idioma_padrao_3bdf98fe")}
+                    description={t("generated.controlPlane.filtra_a_biblioteca_de_vozes_e_define_o_idio_ab2e4134")}
                   >
                     <Select
                       value={elevenlabsLanguage === "" ? SELECT_ALL_VALUE : elevenlabsLanguage}
@@ -1252,7 +1534,7 @@ export function ProviderAuthPanel({
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value={SELECT_ALL_VALUE}>{tl("Todos os idiomas")}</SelectItem>
+                        <SelectItem value={SELECT_ALL_VALUE}>{t("generated.controlPlane.todos_os_idiomas_8b2a5222")}</SelectItem>
                         {elevenlabsVoiceCatalog.available_languages.map((language) => (
                           <SelectItem key={language.code} value={language.code}>
                             {language.label}
@@ -1263,11 +1545,11 @@ export function ProviderAuthPanel({
                   </FieldShell>
 
                   <FieldShell
-                    label={tl("Voz padrão")}
+                    label={t("generated.controlPlane.voz_padrao_2a5f9d79")}
                     description={
                       elevenlabsVoicesLoading
-                        ? tl("Carregando vozes disponíveis…")
-                        : tl("Usada como voz default dos agentes quando TTS estiver ativo.")
+                        ? t("generated.controlPlane.carregando_vozes_disponiveis_9bc787ce")
+                        : t("generated.controlPlane.usada_como_voz_default_dos_agentes_quando_tt_e3eecd86")
                     }
                   >
                     <Select
@@ -1294,8 +1576,8 @@ export function ProviderAuthPanel({
                       <SelectContent>
                         <SelectItem value={SELECT_ALL_VALUE}>
                           {elevenlabsVoicesLoading
-                            ? tl("Carregando vozes...")
-                            : tl("Selecione a voz padrão")}
+                            ? t("generated.controlPlane.carregando_vozes_a31605ea")
+                            : t("generated.controlPlane.selecione_a_voz_padrao_e59b227c")}
                         </SelectItem>
                         {elevenlabsDefaultVoice &&
                         !elevenlabsVoiceCatalog.items.some((voice) => voice.voice_id === elevenlabsDefaultVoice) ? (
@@ -1309,7 +1591,7 @@ export function ProviderAuthPanel({
                             value={voice.voice_id}
                             disabled={voice.api_available === false}
                           >
-                            {elevenlabsVoiceOptionLabel(voice)}
+                            {elevenlabsVoiceOptionLabel(voice, t)}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1322,17 +1604,16 @@ export function ProviderAuthPanel({
             <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,240px)]">
               <div className="space-y-2 px-1">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                  {tl(providerLocalTitle(provider.id))}
+                  {providerLocalTitle(provider.id, t)}
                 </div>
                 <div className="text-sm leading-6 text-[var(--text-secondary)]">
-                  {tl(providerLocalDescription(provider.id))}
+                  {providerLocalDescription(provider.id, t)}
                 </div>
               </div>
               {provider.id === "ollama" ? (
                 <div className="space-y-2 px-1">
                   <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                    Base URL
-                  </div>
+                    {translate("generated.controlPlane.base_url_91eabd63")}</div>
                   <input
                     className="field-shell text-[var(--text-primary)]"
                     type="text"
@@ -1343,8 +1624,8 @@ export function ProviderAuthPanel({
                     }
                   />
                   <p className="text-[11px] leading-5 text-[var(--text-tertiary)]">
-                    {tl(
-                      "Ollama no desktop (host): http://host.docker.internal:11434. Em outro container da mesma rede: http://<serviço>:11434. Executando o Koda fora do Docker: http://localhost:11434.",
+                    {t(
+                      "generated.controlPlane.ollama_no_desktop_host_http_host_docker_inte_3968b4fb",
                     )}
                   </p>
                 </div>
@@ -1353,10 +1634,10 @@ export function ProviderAuthPanel({
           ) : (
             <div className="space-y-2 px-1">
               <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                {tl("Login oficial")}
+                {t("generated.controlPlane.login_oficial_09256a9c")}
               </div>
               <div className="text-sm leading-6 text-[var(--text-secondary)]">
-                {tl(providerLoginCopy(provider.id))}
+                {providerLoginCopy(provider.id, t)}
               </div>
             </div>
           )}
@@ -1365,14 +1646,20 @@ export function ProviderAuthPanel({
             <div className="space-y-2 px-1">
               <div className="flex items-center justify-between gap-3">
                 <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                  {tl("Modelos detectados")}
+                  {t("generated.controlPlane.modelos_detectados_3f86289b")}
                 </div>
-                <div className="text-xs text-[var(--text-quaternary)]">
-                  {ollamaModelsLoading
-                    ? tl("Carregando...")
-                    : ollamaModelCatalog.items.length
-                      ? tl("{{count}} modelos", { count: ollamaModelCatalog.items.length })
-                      : tl("Nenhum modelo")}
+                <div
+                  className="inline-flex min-h-4 min-w-16 items-center justify-end text-xs text-[var(--text-quaternary)]"
+                  role={ollamaModelsLoading ? "status" : undefined}
+                  aria-label={ollamaModelsLoading ? t("generated.controlPlane.carregando_62b04e95") : undefined}
+                >
+                  {ollamaModelsLoading ? (
+                    <InlineSpinner className="h-3.5 w-3.5" />
+                  ) : ollamaModelCatalog.items.length ? (
+                    t("generated.controlPlane.count_modelos_affe71e2", { count: ollamaModelCatalog.items.length })
+                  ) : (
+                    t("generated.controlPlane.nenhum_modelo_30d8523b")
+                  )}
                 </div>
               </div>
               {ollamaModelCatalog.items.length ? (
@@ -1400,8 +1687,8 @@ export function ProviderAuthPanel({
               ) : (
                 <div className="text-sm text-[var(--text-secondary)]">
                   {connection?.configured || connection?.verified || connection?.api_key_present
-                    ? tl("Nenhum modelo foi retornado pelo endpoint configurado.")
-                    : tl("Conecte o Ollama para carregar a lista real de modelos.")}
+                    ? t("generated.controlPlane.nenhum_modelo_foi_retornado_pelo_endpoint_co_0a0f60f9")
+                    : t("generated.controlPlane.conecte_o_ollama_para_carregar_a_lista_real__fa609232")}
                 </div>
               )}
             </div>
@@ -1410,12 +1697,12 @@ export function ProviderAuthPanel({
       ) : (
         <div className="space-y-2 px-1">
           <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-            {tl("Operação")}
+            {t("generated.controlPlane.operacao_e27e6db2")}
           </div>
           <div className="text-sm leading-6 text-[var(--text-secondary)]">
             {provider.id === "ollama"
-              ? tl("O Ollama depende apenas do runtime local configurado na máquina.")
-              : tl("Este provider não exige autenticação manual nesta tela.")}
+              ? t("generated.controlPlane.o_ollama_depende_apenas_do_runtime_local_con_c2e28849")
+              : t("generated.controlPlane.este_provider_nao_exige_autenticacao_manual__826b2975")}
           </div>
         </div>
       )}
@@ -1428,17 +1715,17 @@ export function ProviderAuthPanel({
         <div className="space-y-5 px-1 text-sm text-[var(--text-secondary)]">
           <span>
             {loginSession.status === "pending"
-              ? loginSession.message || tl("Iniciando autenticação...")
+              ? loginSession.message || t("generated.controlPlane.iniciando_autenticacao_e684996c")
               : loginSession.status === "awaiting_browser"
                 ? loginSession.last_error ||
                   loginSession.message ||
-                  tl("Abra o link abaixo, autorize no navegador e volte para esta página. A conexão será verificada automaticamente.")
+                  t("generated.controlPlane.abra_o_link_abaixo_autorize_no_navegador_e_v_11550f56")
                 : loginSession.status === "completed"
-                  ? loginSession.message || tl("Autenticação concluída. Verificando conexão...")
+                  ? loginSession.message || t("generated.controlPlane.autenticacao_concluida_verificando_conexao_b4284672")
                   : loginSession.last_error ||
                     loginSession.message ||
-                    tl("Conclua a autenticação no {{provider}}.", {
-                      provider: tl(providerActionCopy(provider.id)),
+                    t("generated.controlPlane.conclua_a_autenticacao_no_provider_2b47e2d5", {
+                      provider: providerActionCopy(provider.id, t),
                     })}
           </span>
           {loginSession.status === "awaiting_browser" || loginSession.status === "pending" ? (
@@ -1448,13 +1735,13 @@ export function ProviderAuthPanel({
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                        {tl("Código de autorização")}
+                        {t("generated.controlPlane.codigo_de_autorizacao_54b1b8f9")}
                       </div>
                       <div className="mt-2 font-mono text-lg tracking-[0.28em] text-[var(--text-primary)] sm:text-[1.35rem]">
                         {loginSession.user_code}
                       </div>
                       <div className="mt-2 text-xs leading-5 text-[var(--text-quaternary)]">
-                        {tl("Use este código na página de autorização aberta pelo login oficial.")}
+                        {t("generated.controlPlane.use_este_codigo_na_pagina_de_autorizacao_abe_98218908")}
                       </div>
                     </div>
                     <button
@@ -1463,8 +1750,8 @@ export function ProviderAuthPanel({
                         void handleCopyLoginCode();
                       }}
                       className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--panel-soft)] hover:text-[var(--text-secondary)]"
-                      aria-label={codeCopied ? tl("Código copiado") : tl("Copiar código de autenticação")}
-                      title={codeCopied ? tl("Código copiado") : tl("Copiar código de autenticação")}
+                      aria-label={codeCopied ? t("generated.controlPlane.codigo_copiado_cd656998") : t("generated.controlPlane.copiar_codigo_de_autenticacao_6ecb37b0")}
+                      title={codeCopied ? t("generated.controlPlane.codigo_copiado_cd656998") : t("generated.controlPlane.copiar_codigo_de_autenticacao_6ecb37b0")}
                     >
                       {codeCopied ? (
                         <Check className="h-3.5 w-3.5" />
@@ -1495,7 +1782,7 @@ export function ProviderAuthPanel({
                     rel="noopener noreferrer"
                     className="inline-flex items-center gap-2 text-emerald-300 transition-opacity hover:opacity-85"
                   >
-                    {tl("Abrir página de autorização")}
+                    {t("generated.controlPlane.abrir_pagina_de_autorizacao_b9be17a8")}
                     <ExternalLink className="h-4 w-4" />
                   </a>
                 ) : null}
@@ -1521,7 +1808,7 @@ export function ProviderAccordionItem({
   isOpen: boolean;
   onToggle: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const ui = useProviderConnectionUi(provider, isOpen);
 
   return (
@@ -1547,7 +1834,7 @@ export function ProviderAccordionItem({
           <div className="min-w-0 flex-1">
             <div className="text-base font-semibold text-[var(--text-primary)]">{provider.title}</div>
             <p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">
-              {tl(providerDescription(provider.id, provider.category))}
+              {providerDescription(provider.id, provider.category, t)}
             </p>
           </div>
         </button>
@@ -1577,8 +1864,8 @@ export function ProviderAccordionItem({
             )}
             aria-label={
               isOpen
-                ? tl("Recolher {{provider}}", { provider: provider.title })
-                : tl("Expandir {{provider}}", { provider: provider.title })
+                ? t("generated.controlPlane.recolher_provider_1fb14d79", { provider: provider.title })
+                : t("generated.controlPlane.expandir_provider_d219b1b9", { provider: provider.title })
             }
           >
             <ChevronDown
@@ -1618,7 +1905,7 @@ export function ProviderAccordionItem({
 // ---------------------------------------------------------------------------
 
 export function SectionModels() {
-  const { tl, t } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const { draft, setField, providerOptions, enabledProviders, moveFallback, providerConnections, sectionErrors } =
     useSystemSettings();
   const modelsErrors = sectionErrors.models;
@@ -1762,15 +2049,15 @@ export function SectionModels() {
   return (
     <SettingsSectionShell
       sectionId="models"
-      title="settings.sections.models.label"
-      description="settings.sections.models.description"
+      title={translate("generated.controlPlane.settings_sections_models_label_80ad4bfc")}
+      description={translate("generated.controlPlane.settings_sections_models_description_1224742f")}
     >
       {/* ---- Routing ---- */}
-      <SettingsFieldGroup title={tl("Routing")}>
+      <SettingsFieldGroup title={t("generated.controlPlane.routing_a8c41b5d")}>
         <div className="grid gap-4 xl:grid-cols-2">
           <FieldShell
-            label={tl("Provider padrão")}
-            description={tl("Primeira escolha global entre os providers já verificados.")}
+            label={t("generated.controlPlane.provider_padrao_31f40d65")}
+            description={t("generated.controlPlane.primeira_escolha_global_entre_os_providers_j_b8e656ce")}
             error={findFieldError(modelsErrors, "models.default_provider")?.message}
           >
             <Select
@@ -1798,7 +2085,7 @@ export function SectionModels() {
                 <SelectValue
                   placeholder={
                     enabledGeneralProviders.length === 0
-                      ? tl("Nenhum provider verificado")
+                      ? t("generated.controlPlane.nenhum_provider_verificado_c65d5168")
                       : undefined
                   }
                 />
@@ -1806,7 +2093,7 @@ export function SectionModels() {
               <SelectContent>
                 {enabledGeneralProviders.length === 0 ? (
                   <SelectItem value={SELECT_ALL_VALUE} disabled>
-                    {tl("Nenhum provider verificado")}
+                    {t("generated.controlPlane.nenhum_provider_verificado_c65d5168")}
                   </SelectItem>
                 ) : null}
                 {enabledGeneralProviders.map((id) => (
@@ -1819,8 +2106,8 @@ export function SectionModels() {
           </FieldShell>
 
           <FieldShell
-            label={tl("Perfil de uso")}
-            description={tl("Controla a preferência global entre custo e qualidade.")}
+            label={t("generated.controlPlane.perfil_de_uso_a9c9af3d")}
+            description={t("generated.controlPlane.controla_a_preferencia_global_entre_custo_e__7ca08d04")}
           >
             <Select
               value={draft.values.models.usage_profile}
@@ -1847,8 +2134,8 @@ export function SectionModels() {
 
         {enabledGeneralProviders.length > 1 ? (
           <FieldShell
-            label={tl("Ordem de fallback")}
-            description={tl("Só entram aqui providers já verificados e prontos para uso.")}
+            label={t("generated.controlPlane.ordem_de_fallback_a3ab2eaf")}
+            description={t("generated.controlPlane.so_entram_aqui_providers_ja_verificados_e_pr_77c492a9")}
           >
             <div className="space-y-2">
               {draft.values.models.fallback_order
@@ -1868,7 +2155,7 @@ export function SectionModels() {
                           {providerLabel(providerId)}
                         </div>
                         <div className="mt-0.5 text-xs text-[var(--text-quaternary)]">
-                          {connection?.verified ? tl("Verificado") : tl("Ainda não verificado")}
+                          {connection?.verified ? t("generated.controlPlane.verificado_2e7257fc") : t("generated.controlPlane.ainda_nao_verificado_3848ed3a")}
                         </div>
                       </div>
                       <div className="flex items-center gap-1">
@@ -1878,7 +2165,7 @@ export function SectionModels() {
                           size="sm"
                           onClick={() => moveFallback(providerId, "up")}
                           disabled={index === 0}
-                          aria-label={tl("Subir")}
+                          aria-label={t("generated.controlPlane.subir_cb17d495")}
                           className="px-2"
                         >
                           <ArrowUp className="h-4 w-4" strokeWidth={1.75} />
@@ -1889,7 +2176,7 @@ export function SectionModels() {
                           size="sm"
                           onClick={() => moveFallback(providerId, "down")}
                           disabled={index === enabledGeneralProviders.length - 1}
-                          aria-label={tl("Descer")}
+                          aria-label={t("generated.controlPlane.descer_0e0b8bbe")}
                           className="px-2"
                         >
                           <ArrowDown className="h-4 w-4" strokeWidth={1.75} />
@@ -1904,11 +2191,11 @@ export function SectionModels() {
       </SettingsFieldGroup>
 
       {/* ---- Budgets ---- */}
-      <SettingsFieldGroup title={tl("Budgets")}>
+      <SettingsFieldGroup title={t("generated.controlPlane.budgets_73005ecc")}>
         <div className="grid gap-4 xl:grid-cols-2">
           <FieldShell
-            label={tl("Budget por tarefa")}
-            description={tl("Limite global por execução individual.")}
+            label={t("generated.controlPlane.budget_por_tarefa_891c0d6a")}
+            description={t("generated.controlPlane.limite_global_por_execucao_individual_1d5d62fc")}
             error={findFieldError(modelsErrors, "models.max_budget_usd")?.message}
           >
             <input
@@ -1928,8 +2215,8 @@ export function SectionModels() {
           </FieldShell>
 
           <FieldShell
-            label={tl("Budget acumulado")}
-            description={tl("Teto global para o uso consolidado.")}
+            label={t("generated.controlPlane.budget_acumulado_2aeb1647")}
+            description={t("generated.controlPlane.teto_global_para_o_uso_consolidado_fafca014")}
             error={findFieldError(modelsErrors, "models.max_total_budget_usd")?.message}
           >
             <input
@@ -1951,7 +2238,7 @@ export function SectionModels() {
       </SettingsFieldGroup>
 
       {/* ---- Functional Defaults ---- */}
-      <SettingsFieldGroup title={tl("Functional Defaults")}>
+      <SettingsFieldGroup title={t("generated.controlPlane.functional_defaults_c0c3361a")}>
         <div className="grid gap-4 xl:grid-cols-2">
           {modelFunctions.map((functionItem) => {
             const selected = draft.values.models.functional_defaults?.[functionItem.id];
@@ -1981,7 +2268,7 @@ export function SectionModels() {
                 enabledProviders={functionalProviderIds}
                 functionalCatalog={functionalCatalog}
                 functionId={functionItem.id}
-                emptyLabel={tl("Selecione um modelo padrão")}
+                emptyLabel={t("generated.controlPlane.selecione_um_modelo_padrao_b60e4c30")}
                 isOptionDisabled={({ providerId }) => {
                   const provider = providerOptionById.get(providerId);
                   return (
@@ -1993,7 +2280,7 @@ export function SectionModels() {
                     )
                   );
                 }}
-                disabledOptionLabel={tl("indisponível no momento")}
+                disabledOptionLabel={t("generated.controlPlane.indisponivel_no_momento_268dcf13")}
               />
             );
           })}
@@ -2036,7 +2323,7 @@ export function SectionModels() {
       )}
 
       {/* ---- Aceleração de hardware ---- */}
-      <SettingsFieldGroup title={tl("Aceleração de hardware")}>
+      <SettingsFieldGroup title={t("generated.controlPlane.aceleracao_de_hardware_b6a4173a")}>
         <div className="flex items-center justify-between gap-4 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <span
@@ -2047,13 +2334,10 @@ export function SectionModels() {
             </span>
             <div className="flex min-w-0 flex-col">
               <span className="text-sm font-medium text-[var(--text-primary)]">
-                {tl("Aceleração Metal (Apple Silicon)")}
+                {t("generated.controlPlane.aceleracao_metal_apple_silicon_7591b382")}
               </span>
               <span className="text-xs text-[var(--text-tertiary)]">
-                {tl(
-                  "Habilita o caminho Metal/MPS em runtimes locais (llama.cpp, MLX) quando o host é Apple Silicon. " +
-                    "Em hosts Intel ou Linux a configuração não tem efeito.",
-                )}
+                {t("controlPlane.providerCopy.acceleration.metalDescription")}
               </span>
             </div>
           </div>
@@ -2065,7 +2349,7 @@ export function SectionModels() {
                 metal_enabled: !draft.values.models.metal_enabled,
               })
             }
-            ariaLabel={tl("Aceleração Metal")}
+            ariaLabel={t("generated.controlPlane.aceleracao_metal_ca77f591")}
           />
         </div>
       </SettingsFieldGroup>

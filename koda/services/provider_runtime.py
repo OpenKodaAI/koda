@@ -18,6 +18,11 @@ class ProviderCapabilities:
     status: ProviderStatus
     can_execute: bool
     supports_native_resume: bool
+    supports_native_tool_calls: bool = False
+    supports_streaming_tool_calls: bool = False
+    supports_structured_output: bool = True
+    supports_json_schema_subset: bool = True
+    supports_xml_fallback: bool = True
     warnings: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     checked_via: str = "static"
@@ -62,6 +67,11 @@ def summarize_provider_health(
                 "status": new_turn.status,
                 "can_execute": new_turn.can_execute,
                 "supports_native_resume": new_turn.supports_native_resume,
+                "supports_native_tool_calls": new_turn.supports_native_tool_calls,
+                "supports_streaming_tool_calls": new_turn.supports_streaming_tool_calls,
+                "supports_structured_output": new_turn.supports_structured_output,
+                "supports_json_schema_subset": new_turn.supports_json_schema_subset,
+                "supports_xml_fallback": new_turn.supports_xml_fallback,
                 "warnings": list(new_turn.warnings),
                 "errors": list(new_turn.errors),
                 "checked_via": new_turn.checked_via,
@@ -70,6 +80,11 @@ def summarize_provider_health(
                 "status": resume_turn.status,
                 "can_execute": resume_turn.can_execute,
                 "supports_native_resume": resume_turn.supports_native_resume,
+                "supports_native_tool_calls": resume_turn.supports_native_tool_calls,
+                "supports_streaming_tool_calls": resume_turn.supports_streaming_tool_calls,
+                "supports_structured_output": resume_turn.supports_structured_output,
+                "supports_json_schema_subset": resume_turn.supports_json_schema_subset,
+                "supports_xml_fallback": resume_turn.supports_xml_fallback,
                 "warnings": list(resume_turn.warnings),
                 "errors": list(resume_turn.errors),
                 "checked_via": resume_turn.checked_via,

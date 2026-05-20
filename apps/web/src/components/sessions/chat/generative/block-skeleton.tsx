@@ -25,7 +25,7 @@ export function BlockSkeleton({ kind }: BlockSkeletonProps) {
   return (
     <div
       role="status"
-      aria-label={t("chat.blocks.streamingLabel", { defaultValue: "Loading…" })}
+      aria-label={t("chat.blocks.streamingLabel", undefined)}
       className={cn(
         "rounded-[var(--radius-panel-sm)] border border-[color:var(--divider-hair)] bg-[var(--panel-soft)] p-4",
         "animate-pulse",

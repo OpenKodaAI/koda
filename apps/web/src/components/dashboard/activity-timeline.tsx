@@ -56,15 +56,15 @@ export function ActivityTimeline({
     queued: t("runtime.labels.queued"),
     failed: t("runtime.labels.failed"),
     retrying: t("runtime.labels.retrying"),
-    task_completed: t("overview.activity.taskCompleted", { defaultValue: "Task completed" }),
-    task_failed: t("overview.activity.taskFailed", { defaultValue: "Task failed" }),
-    task_started: t("overview.activity.taskStarted", { defaultValue: "Task started" }),
-    task_queued: t("overview.activity.taskQueued", { defaultValue: "Task queued" }),
+    task_completed: t("overview.activity.taskCompleted", undefined),
+    task_failed: t("overview.activity.taskFailed", undefined),
+    task_started: t("overview.activity.taskStarted", undefined),
+    task_queued: t("overview.activity.taskQueued", undefined),
     query: t("common.query"),
     error: t("sessions.detail.error"),
     cron: t("routeMeta.schedules.title"),
-    deploy: t("overview.activity.deploy", { defaultValue: "Deploy" }),
-    retry: t("overview.activity.retry", { defaultValue: "Retry" }),
+    deploy: t("overview.activity.deploy", undefined),
+    retry: t("overview.activity.retry", undefined),
   };
 
   return (
@@ -73,17 +73,17 @@ export function ActivityTimeline({
         <div>
           <p className="eyebrow">{t("overview.sections.recentActivityTitle")}</p>
           <h3 className="mt-1.5 text-[1.08rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)] sm:text-[1.16rem]">
-            {t("overview.activity.latestExecutions", { defaultValue: "Latest executions" })}
+            {t("overview.activity.latestExecutions", undefined)}
           </h3>
         </div>
         <span className="chip shrink-0">
-          {t("overview.activity.events", { count: activities.length, defaultValue: "{{count}} events" })}
+          {t("overview.activity.events", { count: activities.length })}
         </span>
       </div>
 
       {activities.length === 0 ? (
         <p className="py-8 text-center text-sm text-[var(--text-tertiary)]">
-          {t("overview.activity.noRecent", { defaultValue: "No recent activity" })}
+          {t("overview.activity.noRecent", undefined)}
         </p>
       ) : (
         <>
@@ -146,7 +146,7 @@ export function ActivityTimeline({
           </ul>
           {hasMore && (
             <p className="mt-4 text-center text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-              {t("overview.activity.showingRecent", { defaultValue: "Showing the most recent events" })}
+              {t("overview.activity.showingRecent", undefined)}
             </p>
           )}
         </>

@@ -57,11 +57,11 @@ export function FallbackViewer({ artifact, banner }: FallbackViewerProps) {
           aria-busy={isDownloading}
         >
           <Download className="icon-xs" strokeWidth={1.75} aria-hidden />
-          {t("sessions.artifacts.download", { defaultValue: "Download" })}
+          {t("sessions.artifacts.download", undefined)}
         </Button>
         <Button type="button" variant="ghost" size="sm" onClick={handleCopyUrl}>
           <LinkIcon className="icon-xs" strokeWidth={1.75} aria-hidden />
-          {t("sessions.artifacts.copyUrl", { defaultValue: "Copy URL" })}
+          {t("sessions.artifacts.copyUrl", undefined)}
         </Button>
       </div>
     </div>

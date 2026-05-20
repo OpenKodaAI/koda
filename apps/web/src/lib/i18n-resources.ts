@@ -1,4 +1,6 @@
 import { generatedLiteralResources } from "@/lib/i18n-generated-literals";
+import { generatedUiResources } from "@/lib/i18n-generated-ui";
+import { staticCopyResources } from "@/lib/i18n-static-copy";
 
 export const resources = {
   "en-US": {
@@ -1454,6 +1456,26 @@ export const resources = {
         resolved: "Resuelta",
         failed: "Falló",
       },
+      modelEffort: {
+        title: "Esfuerzo del modelo",
+        descriptionEnum: "Un esfuerzo mayor implica razonamiento más profundo y respuestas más lentas y costosas.",
+        descriptionTokens: "Presupuesto de pensamiento en tokens. Valores mayores permiten razonar durante más tiempo.",
+        inheritGlobal: "Heredar valor global",
+        customValue: "Sobrescribir",
+        tokensUnit: "tokens",
+        notSupported: "Este modelo no expone ajustes de esfuerzo.",
+        sectionTitle: "Valores predeterminados de esfuerzo",
+        sectionDescription:
+          "Elige el nivel de esfuerzo para el modelo predeterminado seleccionado. Cada agente puede sobrescribirlo.",
+        enumNone: "Ninguno",
+        enumDefault: "Predeterminado",
+        enumMinimal: "Mínimo",
+        enumLow: "Bajo",
+        enumMedium: "Medio",
+        enumHigh: "Alto",
+        enumXHigh: "Muy alto",
+        enumMax: "Máximo",
+      },
       routeMeta: {
         system: {
           eyebrow: "Koda",
@@ -2130,6 +2152,28 @@ export const resources = {
         paused: "En pause",
         resolved: "Résolu",
         failed: "Échoué",
+      },
+      modelEffort: {
+        title: "Effort du modèle",
+        descriptionEnum:
+          "Un effort plus élevé signifie un raisonnement plus profond et des réponses plus lentes et plus coûteuses.",
+        descriptionTokens:
+          "Budget de réflexion en tokens. Des valeurs plus élevées permettent au modèle de raisonner plus longtemps.",
+        inheritGlobal: "Hériter du défaut global",
+        customValue: "Remplacer",
+        tokensUnit: "tokens",
+        notSupported: "Ce modèle n'expose pas de réglage d'effort.",
+        sectionTitle: "Défauts d'effort",
+        sectionDescription:
+          "Choisissez le niveau d'effort pour le modèle par défaut sélectionné. Chaque agent peut le remplacer.",
+        enumNone: "Aucun",
+        enumDefault: "Par défaut",
+        enumMinimal: "Minimal",
+        enumLow: "Faible",
+        enumMedium: "Moyen",
+        enumHigh: "Élevé",
+        enumXHigh: "Très élevé",
+        enumMax: "Maximal",
       },
       routeMeta: {
         system: {
@@ -2810,6 +2854,28 @@ export const resources = {
         resolved: "Gelöst",
         failed: "Fehlgeschlagen",
       },
+      modelEffort: {
+        title: "Modellaufwand",
+        descriptionEnum:
+          "Höherer Aufwand bedeutet tieferes Reasoning sowie langsamere und kostspieligere Antworten.",
+        descriptionTokens:
+          "Denkbudget in Tokens. Höhere Werte lassen das Modell länger reasoning durchführen.",
+        inheritGlobal: "Globalen Standard übernehmen",
+        customValue: "Überschreiben",
+        tokensUnit: "Tokens",
+        notSupported: "Dieses Modell bietet keine Aufwandseinstellung.",
+        sectionTitle: "Aufwandsstandards",
+        sectionDescription:
+          "Wähle den Aufwand für das ausgewählte Standardmodell. Jeder Agent kann ihn überschreiben.",
+        enumNone: "Keiner",
+        enumDefault: "Standard",
+        enumMinimal: "Minimal",
+        enumLow: "Niedrig",
+        enumMedium: "Mittel",
+        enumHigh: "Hoch",
+        enumXHigh: "Sehr hoch",
+        enumMax: "Maximal",
+      },
       routeMeta: {
         system: {
           eyebrow: "Koda",
@@ -3431,6 +3497,40 @@ export const resources = {
     },
   },
 } as const;
+
+function mergeGeneratedResources(target: Record<string, unknown>, source: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(source)) {
+    const current = target[key];
+    if (
+      current &&
+      typeof current === "object" &&
+      !Array.isArray(current) &&
+      value &&
+      typeof value === "object" &&
+      !Array.isArray(value)
+    ) {
+      mergeGeneratedResources(current as Record<string, unknown>, value as Record<string, unknown>);
+      continue;
+    }
+    if (current === undefined) {
+      target[key] = value;
+    }
+  }
+}
+
+for (const language of Object.keys(generatedUiResources) as Array<keyof typeof generatedUiResources>) {
+  mergeGeneratedResources(
+    resources[language].translation as unknown as Record<string, unknown>,
+    generatedUiResources[language] as unknown as Record<string, unknown>,
+  );
+}
+
+for (const language of Object.keys(staticCopyResources) as Array<keyof typeof staticCopyResources>) {
+  mergeGeneratedResources(
+    resources[language].translation as unknown as Record<string, unknown>,
+    staticCopyResources[language] as unknown as Record<string, unknown>,
+  );
+}
 
 export const literalResources = {
   "en-US": {
@@ -6293,6 +6393,7 @@ mutableResources["de-DE"].translation.sessions.thread = {
 };
 
 mutableResources["en-US"].translation.sessions.context = {
+  ...(mutableResources["en-US"].translation.sessions.context ?? {}),
   emptyTitle: "Conversation details",
   emptyDescription:
     "Choose a conversation to inspect status, activity, linked executions and identifiers.",
@@ -6309,6 +6410,7 @@ mutableResources["en-US"].translation.sessions.context = {
 };
 
 mutableResources["pt-BR"].translation.sessions.context = {
+  ...(mutableResources["pt-BR"].translation.sessions.context ?? {}),
   emptyTitle: "Detalhes da conversa",
   emptyDescription:
     "Escolha uma conversa para inspecionar status, atividade, execuções vinculadas e identificadores.",
@@ -6325,6 +6427,7 @@ mutableResources["pt-BR"].translation.sessions.context = {
 };
 
 mutableResources["es-ES"].translation.sessions.context = {
+  ...(mutableResources["es-ES"].translation.sessions.context ?? {}),
   emptyTitle: "Detalles de la conversación",
   emptyDescription:
     "Elige una conversación para revisar estado, actividad, ejecuciones vinculadas e identificadores.",
@@ -6341,6 +6444,7 @@ mutableResources["es-ES"].translation.sessions.context = {
 };
 
 mutableResources["fr-FR"].translation.sessions.context = {
+  ...(mutableResources["fr-FR"].translation.sessions.context ?? {}),
   emptyTitle: "Détails de la conversation",
   emptyDescription:
     "Choisissez une conversation pour examiner le statut, l'activité, les exécutions liées et les identifiants.",
@@ -6357,6 +6461,7 @@ mutableResources["fr-FR"].translation.sessions.context = {
 };
 
 mutableResources["de-DE"].translation.sessions.context = {
+  ...(mutableResources["de-DE"].translation.sessions.context ?? {}),
   emptyTitle: "Unterhaltungsdetails",
   emptyDescription:
     "Wählen Sie eine Unterhaltung, um Status, Aktivität, verknüpfte Ausführungen und Kennungen zu prüfen.",
@@ -8558,6 +8663,18 @@ mutableResources["es-ES"].translation.overview.activity = {
   activeTasksCount_other: "{{count}} activas",
 };
 
+mutableResources["fr-FR"].translation.overview.activity = {
+  ...mutableResources["fr-FR"].translation.overview.activity,
+  activeTasksCount_one: "{{count}} active",
+  activeTasksCount_other: "{{count}} actives",
+};
+
+mutableResources["de-DE"].translation.overview.activity = {
+  ...mutableResources["de-DE"].translation.overview.activity,
+  activeTasksCount_one: "{{count}} aktiv",
+  activeTasksCount_other: "{{count}} aktiv",
+};
+
 mutableResources["en-US"].translation.common = {
   ...mutableResources["en-US"].translation.common,
   task: "Task",
@@ -8694,6 +8811,98 @@ mutableResources["es-ES"].translation.common = {
   state: "Estado",
   phase: "Fase",
   lines: "líneas",
+};
+
+mutableResources["fr-FR"].translation.common = {
+  ...mutableResources["fr-FR"].translation.common,
+  task: "Tâche",
+  tasks: "Tâches",
+  attempts: "Tentatives",
+  model: "Modèle",
+  message: "Message",
+  details: "Détails",
+  timing: "Temps",
+  startedAt: "Démarrée à",
+  completedAt: "Terminée à",
+  totalTime: "Temps total",
+  close: "Fermer",
+  copy: "Copier",
+  event: "Événement",
+  context: "Contexte",
+  noBot: "Aucun bot",
+  payload: "Payload",
+  pod: "Pod",
+  tools: "Outils",
+  warnings: "Avertissements",
+  lastActivity: "Dernière activité",
+  schedules: "Planifications",
+  sessions: "Sessions",
+  executions: "Exécutions",
+  noHistory: "Aucun historique",
+  workspaceDirectory: "Répertoire de travail",
+  save: "Enregistrer",
+  cancel: "Annuler",
+  edit: "Modifier",
+  create: "Créer",
+  delete: "Supprimer",
+  refresh: "Actualiser",
+  reconnect: "Reconnecter",
+  preview: "Aperçu",
+  code: "Code",
+  back: "Retour",
+  open: "Ouvrir",
+  mode: "Mode",
+  display: "Affichage",
+  visual: "Visuel",
+  state: "État",
+  phase: "Phase",
+  lines: "lignes",
+};
+
+mutableResources["de-DE"].translation.common = {
+  ...mutableResources["de-DE"].translation.common,
+  task: "Aufgabe",
+  tasks: "Aufgaben",
+  attempts: "Versuche",
+  model: "Modell",
+  message: "Nachricht",
+  details: "Details",
+  timing: "Zeit",
+  startedAt: "Gestartet um",
+  completedAt: "Abgeschlossen um",
+  totalTime: "Gesamtzeit",
+  close: "Schließen",
+  copy: "Kopieren",
+  event: "Ereignis",
+  context: "Kontext",
+  noBot: "Kein Bot",
+  payload: "Payload",
+  pod: "Pod",
+  tools: "Tools",
+  warnings: "Warnungen",
+  lastActivity: "Letzte Aktivität",
+  schedules: "Zeitpläne",
+  sessions: "Sitzungen",
+  executions: "Ausführungen",
+  noHistory: "Keine Historie",
+  workspaceDirectory: "Arbeitsverzeichnis",
+  save: "Speichern",
+  cancel: "Abbrechen",
+  edit: "Bearbeiten",
+  create: "Erstellen",
+  delete: "Löschen",
+  refresh: "Aktualisieren",
+  reconnect: "Neu verbinden",
+  preview: "Vorschau",
+  code: "Code",
+  back: "Zurück",
+  open: "Öffnen",
+  mode: "Modus",
+  display: "Anzeige",
+  visual: "Visuell",
+  state: "Status",
+  phase: "Phase",
+  lines: "Zeilen",
 };
 
 mutableResources["en-US"].translation.runtime.overview = {
@@ -9897,6 +10106,7 @@ mutableResources["de-DE"].translation.toast = {
 };
 
 mutableResources["en-US"].translation.controlPlane = {
+  ...(mutableResources["en-US"].translation.controlPlane ?? {}),
   unavailable: {
     title: "Control Plane unavailable",
     pageTitle: "Could not load Control Plane",
@@ -9926,6 +10136,7 @@ mutableResources["en-US"].translation.controlPlane = {
 };
 
 mutableResources["pt-BR"].translation.controlPlane = {
+  ...(mutableResources["pt-BR"].translation.controlPlane ?? {}),
   unavailable: {
     title: "Control Plane indisponível",
     pageTitle: "Não foi possível carregar o Control Plane",
@@ -9955,6 +10166,7 @@ mutableResources["pt-BR"].translation.controlPlane = {
 };
 
 mutableResources["es-ES"].translation.controlPlane = {
+  ...(mutableResources["es-ES"].translation.controlPlane ?? {}),
   unavailable: {
     title: "Control Plane no disponible",
     pageTitle: "No fue posible cargar el Control Plane",
@@ -9984,6 +10196,7 @@ mutableResources["es-ES"].translation.controlPlane = {
 };
 
 mutableResources["fr-FR"].translation.controlPlane = {
+  ...(mutableResources["fr-FR"].translation.controlPlane ?? {}),
   unavailable: {
     title: "Plan de contrôle indisponible",
     pageTitle: "Impossible de charger le plan de contrôle",
@@ -10013,6 +10226,7 @@ mutableResources["fr-FR"].translation.controlPlane = {
 };
 
 mutableResources["de-DE"].translation.controlPlane = {
+  ...(mutableResources["de-DE"].translation.controlPlane ?? {}),
   unavailable: {
     title: "Steuerungsebene nicht verfügbar",
     pageTitle: "Steuerungsebene konnte nicht geladen werden",
@@ -10865,6 +11079,42 @@ mutableResources["es-ES"].translation.memory.map = {
   strong: "Fuerte",
 };
 
+mutableResources["fr-FR"].translation.memory.map = {
+  ...mutableResources["fr-FR"].translation.memory.map,
+  zoomIn: "Agrandir la carte",
+  zoomOut: "Réduire la carte",
+  reset: "Réinitialiser la carte",
+  newMemory: "Nouvelle mémoire",
+  connectionsTitle: "Connexions",
+  docToMemory: "Doc -> Mémoire",
+  docSimilarity: "Similarité des documents",
+  relationsTitle: "Relations",
+  relationUpdates: "Met à jour",
+  relationExtends: "Étend",
+  relationDerives: "Dérive",
+  similarityTitle: "Similarité",
+  weak: "Faible",
+  strong: "Forte",
+};
+
+mutableResources["de-DE"].translation.memory.map = {
+  ...mutableResources["de-DE"].translation.memory.map,
+  zoomIn: "Karte vergrößern",
+  zoomOut: "Karte verkleinern",
+  reset: "Karte zurücksetzen",
+  newMemory: "Neue Erinnerung",
+  connectionsTitle: "Verbindungen",
+  docToMemory: "Dokument -> Erinnerung",
+  docSimilarity: "Dokumentenähnlichkeit",
+  relationsTitle: "Beziehungen",
+  relationUpdates: "Aktualisiert",
+  relationExtends: "Erweitert",
+  relationDerives: "Leitet ab",
+  similarityTitle: "Ähnlichkeit",
+  weak: "Schwach",
+  strong: "Stark",
+};
+
 mutableResources["en-US"].translation.sessions.detail = {
   ...(mutableResources["en-US"].translation.sessions.detail ?? {}),
   dialogTitle: "Session details",
@@ -10899,6 +11149,441 @@ mutableResources["de-DE"].translation.sessions.detail = {
 };
 mutableResources["de-DE"].translation.sessions.generatedStepFailure =
   "Für diesen Schritt konnte keine Antwort generiert werden.";
+
+mutableResources["en-US"].translation.controlPlane.providerCopy = {
+  descriptions: {
+    claude: "Anthropic via API Key, Claude Code subscription, or an already authenticated local CLI.",
+    codex: "OpenAI via API Key or official Codex login.",
+    gemini: "Google via GEMINI_API_KEY or official Gemini CLI login.",
+    elevenlabs: "Premium voice with API Key, default language, and voice selection.",
+    ollama: "Local or cloud Ollama server with API Key, using the real model catalog.",
+    whispercpp: "Local transcription via whisper.cpp, with models downloaded on demand.",
+    supertonic: "Local/offline voice via Supertonic, with ONNX models and voices imported on demand.",
+    perplexity: "Sonar models with real-time search and source citations via API Key. Programmatic access through the console.",
+    mistral: "Mistral family (Large, Medium, Small, Codestral, Pixtral) via La Plateforme. Vision via Pixtral, code via Codestral.",
+    qwen: "Qwen family via Alibaba DashScope International. Includes Qwen3-Coder, Qwen-VL, and long context up to 1M tokens.",
+    kimi: "Kimi K2 and Moonshot v1 models with context windows up to 128K tokens. Vision via kimi-vision.",
+    groq: "Ultra-fast LPU inference for Llama 3.3, Mixtral, Gemma2, DeepSeek-R1 distill, and Qwen 2.5.",
+    deepseek: "DeepSeek V3 (chat) and R1 (reasoner) with automatic prompt caching and significantly lower cost.",
+    xai: "Grok 4, Grok 3, and xAI mini/fast variants. Vision via grok-2-vision.",
+    openrouter: "OpenRouter routing for hundreds of models via API Key, with a dynamic catalog and curated aliases.",
+    voiceFallback: "Multimodal provider focused on voice and audio.",
+    mediaFallback: "Multimedia provider available for specialized flows.",
+    fallback: "Provider available in the global system catalog.",
+  },
+  login: {
+    claude: "Open the link generated by Claude Code, authorize in the browser, and paste the code here to connect your Anthropic subscription.",
+    codex: "Use the official Codex login with your OpenAI/ChatGPT account. API billing remains separate from the subscription.",
+    perplexity: "Paste your API key from perplexity.ai/settings/api. Paid access uses credits or a Pro subscription.",
+    mistral: "Paste your API key from console.mistral.ai/api-keys.",
+    qwen: "Paste your API key from dashscope.console.aliyun.com (international version).",
+    kimi: "Paste your API key from platform.moonshot.ai/console/api-keys.",
+    groq: "Paste your API key from console.groq.com/keys.",
+    deepseek: "Paste your API key from platform.deepseek.com/api_keys.",
+    xai: "Paste your API key from console.x.ai.",
+    openrouter: "Paste your API key from openrouter.ai/settings/keys.",
+    gemini: "Use the official Gemini CLI login with your Google account.",
+  },
+  localTitle: {
+    claude: "Claude Code CLI",
+    ollama: "Ollama server",
+    fallback: "Local server",
+  },
+  localDescription: {
+    claude:
+      "Optional: if you already authenticated Claude Code on another machine and mounted CLAUDE_CONFIG_DIR in the container, click Verify to detect the session. Otherwise, use the subscription option above.",
+    ollama: "Use a local or remote endpoint compatible with the Ollama API to list and run models.",
+    fallback: "Configure the local connection for this provider.",
+  },
+  action: {
+    connect: "Connect",
+    disconnect: "Disconnect",
+    connecting: "Connecting",
+    disconnecting: "Disconnecting",
+    waiting: "Waiting",
+    claudeCode: "Claude Code",
+    codex: "Codex",
+    geminiCli: "Gemini CLI",
+    officialRuntime: "official runtime",
+  },
+  voices: {
+    requiresPaidApi: "requires paid plan/API",
+    loadingOfficial: "Loading official voices...",
+    defaultLocalDescription: "Choose the default local voice used by agents.",
+    loading: "Loading voices...",
+    selectDefault: "Select the default voice",
+  },
+  acceleration: {
+    metalDescription:
+      "Enables the Metal/MPS path in local runtimes (llama.cpp, MLX) when the host is Apple Silicon. On Intel or Linux hosts, this setting has no effect.",
+  },
+};
+
+mutableResources["pt-BR"].translation.controlPlane.providerCopy = {
+  descriptions: {
+    claude: "Anthropic via API Key, assinatura do Claude Code ou CLI local já autenticado.",
+    codex: "OpenAI via API Key ou login oficial do Codex.",
+    gemini: "Google via GEMINI_API_KEY ou login oficial do Gemini CLI.",
+    elevenlabs: "Voz premium com API Key, idioma padrão e seleção de vozes.",
+    ollama: "Servidor Ollama local ou cloud com API Key, usando o catálogo real de modelos.",
+    whispercpp: "Transcrição local via whisper.cpp, com modelos baixados sob demanda.",
+    supertonic: "Voz local/offline via Supertonic, com modelos ONNX e vozes importadas sob demanda.",
+    perplexity: "Modelos Sonar com pesquisa em tempo real e citações de fontes via API Key. Acesso programático via console.",
+    mistral: "Família Mistral (Large, Medium, Small, Codestral, Pixtral) via La Plateforme. Visão via Pixtral, código via Codestral.",
+    qwen: "Família Qwen via Alibaba DashScope International. Inclui Qwen3-Coder, Qwen-VL e contexto longo de até 1M tokens.",
+    kimi: "Modelos Kimi K2 e Moonshot v1 com janela de contexto até 128K tokens. Visão via kimi-vision.",
+    groq: "Inferência ultra-rápida via LPU para Llama 3.3, Mixtral, Gemma2, DeepSeek-R1 distill e Qwen 2.5.",
+    deepseek: "DeepSeek V3 (chat) e R1 (reasoner) com prompt caching automático e custo significativamente menor.",
+    xai: "Grok 4, Grok 3 e variantes mini/fast da xAI. Visão via grok-2-vision.",
+    openrouter: "Roteamento OpenRouter para centenas de modelos via API Key, com catálogo dinâmico e aliases curados.",
+    voiceFallback: "Provider multimodal focado em voz e áudio.",
+    mediaFallback: "Provider multimídia disponível para fluxos especializados.",
+    fallback: "Provider disponível no catálogo global do sistema.",
+  },
+  login: {
+    claude: "Abra o link gerado pelo Claude Code, autorize no navegador e cole o código aqui para conectar sua assinatura Anthropic.",
+    codex: "Use o login oficial do Codex com sua conta OpenAI/ChatGPT. A cobrança da API continua separada da assinatura.",
+    perplexity: "Cole sua API key obtida em perplexity.ai/settings/api. Acesso pago via créditos ou assinatura Pro.",
+    mistral: "Cole sua API key obtida em console.mistral.ai/api-keys.",
+    qwen: "Cole sua API key obtida em dashscope.console.aliyun.com (versão internacional).",
+    kimi: "Cole sua API key obtida em platform.moonshot.ai/console/api-keys.",
+    groq: "Cole sua API key obtida em console.groq.com/keys.",
+    deepseek: "Cole sua API key obtida em platform.deepseek.com/api_keys.",
+    xai: "Cole sua API key obtida em console.x.ai.",
+    openrouter: "Cole sua API key obtida em openrouter.ai/settings/keys.",
+    gemini: "Use o login oficial do Gemini CLI com sua conta Google.",
+  },
+  localTitle: {
+    claude: "Claude Code CLI",
+    ollama: "Servidor Ollama",
+    fallback: "Servidor local",
+  },
+  localDescription: {
+    claude:
+      "Opcional: se você já autenticou o Claude Code em outra máquina e montou o CLAUDE_CONFIG_DIR no container, basta clicar em Verificar para detectar a sessão. Caso contrário use a opção de assinatura acima.",
+    ollama: "Use um endpoint local ou remoto compatível com a API do Ollama para listar e executar modelos.",
+    fallback: "Configure a conexão local para este provider.",
+  },
+  action: {
+    connect: "Conectar",
+    disconnect: "Desconectar",
+    connecting: "Conectando",
+    disconnecting: "Desconectando",
+    waiting: "Aguardando",
+    claudeCode: "Claude Code",
+    codex: "Codex",
+    geminiCli: "Gemini CLI",
+    officialRuntime: "runtime oficial",
+  },
+  voices: {
+    requiresPaidApi: "requer plano pago/API",
+    loadingOfficial: "Carregando vozes oficiais...",
+    defaultLocalDescription: "Escolha a voz padrão local usada pelos agentes.",
+    loading: "Carregando vozes...",
+    selectDefault: "Selecione a voz padrão",
+  },
+  acceleration: {
+    metalDescription:
+      "Habilita o caminho Metal/MPS em runtimes locais (llama.cpp, MLX) quando o host é Apple Silicon. Em hosts Intel ou Linux a configuração não tem efeito.",
+  },
+};
+
+mutableResources["es-ES"].translation.controlPlane.providerCopy = {
+  descriptions: {
+    claude: "Anthropic mediante API Key, suscripción de Claude Code o CLI local ya autenticado.",
+    codex: "OpenAI mediante API Key o inicio de sesión oficial de Codex.",
+    gemini: "Google mediante GEMINI_API_KEY o inicio de sesión oficial de Gemini CLI.",
+    elevenlabs: "Voz premium con API Key, idioma predeterminado y selección de voces.",
+    ollama: "Servidor Ollama local o cloud con API Key, usando el catálogo real de modelos.",
+    whispercpp: "Transcripción local mediante whisper.cpp, con modelos descargados bajo demanda.",
+    supertonic: "Voz local/offline mediante Supertonic, con modelos ONNX y voces importadas bajo demanda.",
+    perplexity: "Modelos Sonar con búsqueda en tiempo real y citas de fuentes mediante API Key. Acceso programático desde la consola.",
+    mistral: "Familia Mistral (Large, Medium, Small, Codestral, Pixtral) mediante La Plateforme. Visión con Pixtral, código con Codestral.",
+    qwen: "Familia Qwen mediante Alibaba DashScope International. Incluye Qwen3-Coder, Qwen-VL y contexto largo de hasta 1M tokens.",
+    kimi: "Modelos Kimi K2 y Moonshot v1 con ventanas de contexto de hasta 128K tokens. Visión mediante kimi-vision.",
+    groq: "Inferencia LPU ultrarrápida para Llama 3.3, Mixtral, Gemma2, DeepSeek-R1 distill y Qwen 2.5.",
+    deepseek: "DeepSeek V3 (chat) y R1 (reasoner) con prompt caching automático y coste significativamente menor.",
+    xai: "Grok 4, Grok 3 y variantes mini/fast de xAI. Visión mediante grok-2-vision.",
+    openrouter: "Enrutamiento OpenRouter para cientos de modelos mediante API Key, con catálogo dinámico y aliases curados.",
+    voiceFallback: "Provider multimodal centrado en voz y audio.",
+    mediaFallback: "Provider multimedia disponible para flujos especializados.",
+    fallback: "Provider disponible en el catálogo global del sistema.",
+  },
+  login: {
+    claude: "Abre el enlace generado por Claude Code, autoriza en el navegador y pega el código aquí para conectar tu suscripción de Anthropic.",
+    codex: "Usa el inicio de sesión oficial de Codex con tu cuenta de OpenAI/ChatGPT. La facturación de API sigue separada de la suscripción.",
+    perplexity: "Pega tu API key obtenida en perplexity.ai/settings/api. El acceso de pago usa créditos o una suscripción Pro.",
+    mistral: "Pega tu API key obtenida en console.mistral.ai/api-keys.",
+    qwen: "Pega tu API key obtenida en dashscope.console.aliyun.com (versión internacional).",
+    kimi: "Pega tu API key obtenida en platform.moonshot.ai/console/api-keys.",
+    groq: "Pega tu API key obtenida en console.groq.com/keys.",
+    deepseek: "Pega tu API key obtenida en platform.deepseek.com/api_keys.",
+    xai: "Pega tu API key obtenida en console.x.ai.",
+    openrouter: "Pega tu API key obtenida en openrouter.ai/settings/keys.",
+    gemini: "Usa el inicio de sesión oficial de Gemini CLI con tu cuenta de Google.",
+  },
+  localTitle: {
+    claude: "Claude Code CLI",
+    ollama: "Servidor Ollama",
+    fallback: "Servidor local",
+  },
+  localDescription: {
+    claude:
+      "Opcional: si ya autenticaste Claude Code en otra máquina y montaste CLAUDE_CONFIG_DIR en el contenedor, haz clic en Verificar para detectar la sesión. Si no, usa la opción de suscripción anterior.",
+    ollama: "Usa un endpoint local o remoto compatible con la API de Ollama para listar y ejecutar modelos.",
+    fallback: "Configura la conexión local de este provider.",
+  },
+  action: {
+    connect: "Conectar",
+    disconnect: "Desconectar",
+    connecting: "Conectando",
+    disconnecting: "Desconectando",
+    waiting: "Esperando",
+    claudeCode: "Claude Code",
+    codex: "Codex",
+    geminiCli: "Gemini CLI",
+    officialRuntime: "runtime oficial",
+  },
+  voices: {
+    requiresPaidApi: "requiere plan de pago/API",
+    loadingOfficial: "Cargando voces oficiales...",
+    defaultLocalDescription: "Elige la voz local predeterminada usada por los agentes.",
+    loading: "Cargando voces...",
+    selectDefault: "Selecciona la voz predeterminada",
+  },
+  acceleration: {
+    metalDescription:
+      "Habilita la ruta Metal/MPS en runtimes locales (llama.cpp, MLX) cuando el host es Apple Silicon. En hosts Intel o Linux, esta configuración no tiene efecto.",
+  },
+};
+
+mutableResources["fr-FR"].translation.controlPlane.providerCopy = {
+  descriptions: {
+    claude: "Anthropic via API Key, abonnement Claude Code ou CLI local déjà authentifié.",
+    codex: "OpenAI via API Key ou connexion officielle Codex.",
+    gemini: "Google via GEMINI_API_KEY ou connexion officielle Gemini CLI.",
+    elevenlabs: "Voix premium avec API Key, langue par défaut et sélection de voix.",
+    ollama: "Serveur Ollama local ou cloud avec API Key, utilisant le catalogue réel des modèles.",
+    whispercpp: "Transcription locale via whisper.cpp, avec modèles téléchargés à la demande.",
+    supertonic: "Voix locale/offline via Supertonic, avec modèles ONNX et voix importées à la demande.",
+    perplexity: "Modèles Sonar avec recherche en temps réel et citations de sources via API Key. Accès programmatique via la console.",
+    mistral: "Famille Mistral (Large, Medium, Small, Codestral, Pixtral) via La Plateforme. Vision via Pixtral, code via Codestral.",
+    qwen: "Famille Qwen via Alibaba DashScope International. Inclut Qwen3-Coder, Qwen-VL et contexte long jusqu'à 1M tokens.",
+    kimi: "Modèles Kimi K2 et Moonshot v1 avec fenêtres de contexte jusqu'à 128K tokens. Vision via kimi-vision.",
+    groq: "Inférence LPU ultrarapide pour Llama 3.3, Mixtral, Gemma2, DeepSeek-R1 distill et Qwen 2.5.",
+    deepseek: "DeepSeek V3 (chat) et R1 (reasoner) avec prompt caching automatique et coût nettement inférieur.",
+    xai: "Grok 4, Grok 3 et variantes mini/fast de xAI. Vision via grok-2-vision.",
+    openrouter: "Routage OpenRouter pour des centaines de modèles via API Key, avec catalogue dynamique et aliases sélectionnés.",
+    voiceFallback: "Provider multimodal centré sur la voix et l'audio.",
+    mediaFallback: "Provider multimédia disponible pour les flux spécialisés.",
+    fallback: "Provider disponible dans le catalogue global du système.",
+  },
+  login: {
+    claude: "Ouvrez le lien généré par Claude Code, autorisez dans le navigateur puis collez le code ici pour connecter votre abonnement Anthropic.",
+    codex: "Utilisez la connexion officielle Codex avec votre compte OpenAI/ChatGPT. La facturation API reste séparée de l'abonnement.",
+    perplexity: "Collez votre API key obtenue sur perplexity.ai/settings/api. L'accès payant utilise des crédits ou un abonnement Pro.",
+    mistral: "Collez votre API key obtenue sur console.mistral.ai/api-keys.",
+    qwen: "Collez votre API key obtenue sur dashscope.console.aliyun.com (version internationale).",
+    kimi: "Collez votre API key obtenue sur platform.moonshot.ai/console/api-keys.",
+    groq: "Collez votre API key obtenue sur console.groq.com/keys.",
+    deepseek: "Collez votre API key obtenue sur platform.deepseek.com/api_keys.",
+    xai: "Collez votre API key obtenue sur console.x.ai.",
+    openrouter: "Collez votre API key obtenue sur openrouter.ai/settings/keys.",
+    gemini: "Utilisez la connexion officielle Gemini CLI avec votre compte Google.",
+  },
+  localTitle: {
+    claude: "Claude Code CLI",
+    ollama: "Serveur Ollama",
+    fallback: "Serveur local",
+  },
+  localDescription: {
+    claude:
+      "Facultatif : si vous avez déjà authentifié Claude Code sur une autre machine et monté CLAUDE_CONFIG_DIR dans le conteneur, cliquez sur Vérifier pour détecter la session. Sinon, utilisez l'option d'abonnement ci-dessus.",
+    ollama: "Utilisez un endpoint local ou distant compatible avec l'API Ollama pour lister et exécuter des modèles.",
+    fallback: "Configurez la connexion locale de ce provider.",
+  },
+  action: {
+    connect: "Connecter",
+    disconnect: "Déconnecter",
+    connecting: "Connexion",
+    disconnecting: "Déconnexion",
+    waiting: "En attente",
+    claudeCode: "Claude Code",
+    codex: "Codex",
+    geminiCli: "Gemini CLI",
+    officialRuntime: "runtime officiel",
+  },
+  voices: {
+    requiresPaidApi: "nécessite un forfait payant/API",
+    loadingOfficial: "Chargement des voix officielles...",
+    defaultLocalDescription: "Choisissez la voix locale par défaut utilisée par les agents.",
+    loading: "Chargement des voix...",
+    selectDefault: "Sélectionner la voix par défaut",
+  },
+  acceleration: {
+    metalDescription:
+      "Active le chemin Metal/MPS dans les runtimes locaux (llama.cpp, MLX) lorsque l'hôte est Apple Silicon. Sur les hôtes Intel ou Linux, ce réglage n'a aucun effet.",
+  },
+};
+
+mutableResources["de-DE"].translation.controlPlane.providerCopy = {
+  descriptions: {
+    claude: "Anthropic über API Key, Claude-Code-Abonnement oder bereits authentifizierte lokale CLI.",
+    codex: "OpenAI über API Key oder offiziellen Codex-Login.",
+    gemini: "Google über GEMINI_API_KEY oder offiziellen Gemini-CLI-Login.",
+    elevenlabs: "Premium-Stimme mit API Key, Standardsprache und Stimmenauswahl.",
+    ollama: "Lokaler oder Cloud-Ollama-Server mit API Key und echtem Modellkatalog.",
+    whispercpp: "Lokale Transkription über whisper.cpp, mit bei Bedarf heruntergeladenen Modellen.",
+    supertonic: "Lokale/offline Stimme über Supertonic, mit ONNX-Modellen und bei Bedarf importierten Stimmen.",
+    perplexity: "Sonar-Modelle mit Echtzeitsuche und Quellenzitaten über API Key. Programmatischer Zugriff über die Konsole.",
+    mistral: "Mistral-Familie (Large, Medium, Small, Codestral, Pixtral) über La Plateforme. Vision über Pixtral, Code über Codestral.",
+    qwen: "Qwen-Familie über Alibaba DashScope International. Enthält Qwen3-Coder, Qwen-VL und langen Kontext bis 1M Token.",
+    kimi: "Kimi K2 und Moonshot v1 mit Kontextfenstern bis 128K Token. Vision über kimi-vision.",
+    groq: "Ultraschnelle LPU-Inferenz für Llama 3.3, Mixtral, Gemma2, DeepSeek-R1 distill und Qwen 2.5.",
+    deepseek: "DeepSeek V3 (Chat) und R1 (Reasoner) mit automatischem Prompt-Caching und deutlich geringeren Kosten.",
+    xai: "Grok 4, Grok 3 und mini/fast Varianten von xAI. Vision über grok-2-vision.",
+    openrouter: "OpenRouter-Routing für hunderte Modelle über API Key, mit dynamischem Katalog und kuratierten Aliasen.",
+    voiceFallback: "Multimodaler Provider mit Fokus auf Stimme und Audio.",
+    mediaFallback: "Multimedia-Provider für spezialisierte Abläufe.",
+    fallback: "Provider im globalen Systemkatalog verfügbar.",
+  },
+  login: {
+    claude: "Öffnen Sie den von Claude Code erzeugten Link, autorisieren Sie im Browser und fügen Sie den Code hier ein, um Ihr Anthropic-Abonnement zu verbinden.",
+    codex: "Verwenden Sie den offiziellen Codex-Login mit Ihrem OpenAI/ChatGPT-Konto. API-Abrechnung bleibt vom Abonnement getrennt.",
+    perplexity: "Fügen Sie Ihren API Key von perplexity.ai/settings/api ein. Bezahlter Zugriff erfolgt über Credits oder ein Pro-Abonnement.",
+    mistral: "Fügen Sie Ihren API Key von console.mistral.ai/api-keys ein.",
+    qwen: "Fügen Sie Ihren API Key von dashscope.console.aliyun.com (internationale Version) ein.",
+    kimi: "Fügen Sie Ihren API Key von platform.moonshot.ai/console/api-keys ein.",
+    groq: "Fügen Sie Ihren API Key von console.groq.com/keys ein.",
+    deepseek: "Fügen Sie Ihren API Key von platform.deepseek.com/api_keys ein.",
+    xai: "Fügen Sie Ihren API Key von console.x.ai ein.",
+    openrouter: "Fügen Sie Ihren API Key von openrouter.ai/settings/keys ein.",
+    gemini: "Verwenden Sie den offiziellen Gemini-CLI-Login mit Ihrem Google-Konto.",
+  },
+  localTitle: {
+    claude: "Claude Code CLI",
+    ollama: "Ollama-Server",
+    fallback: "Lokaler Server",
+  },
+  localDescription: {
+    claude:
+      "Optional: Wenn Sie Claude Code bereits auf einem anderen Rechner authentifiziert und CLAUDE_CONFIG_DIR im Container eingebunden haben, klicken Sie auf Prüfen, um die Sitzung zu erkennen. Andernfalls verwenden Sie die Abonnementoption oben.",
+    ollama: "Verwenden Sie einen lokalen oder entfernten Endpoint, der mit der Ollama-API kompatibel ist, um Modelle aufzulisten und auszuführen.",
+    fallback: "Konfigurieren Sie die lokale Verbindung für diesen Provider.",
+  },
+  action: {
+    connect: "Verbinden",
+    disconnect: "Trennen",
+    connecting: "Verbinden",
+    disconnecting: "Trennen",
+    waiting: "Warten",
+    claudeCode: "Claude Code",
+    codex: "Codex",
+    geminiCli: "Gemini CLI",
+    officialRuntime: "offizieller Runtime",
+  },
+  voices: {
+    requiresPaidApi: "erfordert kostenpflichtigen Plan/API",
+    loadingOfficial: "Offizielle Stimmen werden geladen...",
+    defaultLocalDescription: "Wählen Sie die lokale Standardstimme für Agenten.",
+    loading: "Stimmen werden geladen...",
+    selectDefault: "Standardstimme auswählen",
+  },
+  acceleration: {
+    metalDescription:
+      "Aktiviert den Metal/MPS-Pfad in lokalen Runtimes (llama.cpp, MLX), wenn der Host Apple Silicon nutzt. Auf Intel- oder Linux-Hosts hat diese Einstellung keine Wirkung.",
+  },
+};
+
+mutableResources["en-US"].translation.controlPlane.providerGrid = {
+  categories: {
+    general: "LLM",
+    voice: "Voice",
+    transcription: "Transcription",
+    media: "Media",
+  },
+  highlights: {
+    claude: "Anthropic for deep reasoning, code review, and official Claude Code flows.",
+    codex: "OpenAI for agentic tasks, assisted execution, and GPT models with API key or official login.",
+    gemini: "Google Gemini for multimodal generation, AI Studio, and official authentication via Gemini CLI.",
+    elevenlabs: "ElevenLabs for premium speech synthesis with managed catalog and per-agent default language.",
+    ollama: "Ollama for local or remote models with real catalog discovery on the configured endpoint.",
+    kokoro: "Kokoro delivers local TTS with on-demand voices and optimized self-hosted operation.",
+    whispercpp: "Whisper.cpp keeps transcription local with a lightweight runtime for controlled environments.",
+  },
+};
+
+mutableResources["pt-BR"].translation.controlPlane.providerGrid = {
+  categories: {
+    general: "LLM",
+    voice: "Voz",
+    transcription: "Transcrições",
+    media: "Mídia",
+  },
+  highlights: {
+    claude: "Anthropic para raciocínio profundo, revisão de código e fluxos oficiais do Claude Code.",
+    codex: "OpenAI para tarefas agentic, execução assistida e modelos GPT com API key ou login oficial.",
+    gemini: "Google Gemini para geração multimodal, AI Studio e autenticação oficial via Gemini CLI.",
+    elevenlabs: "ElevenLabs para síntese de voz premium com catálogo gerenciado e idioma padrão por agente.",
+    ollama: "Ollama para modelos locais ou remotos com descoberta real do catálogo no endpoint configurado.",
+    kokoro: "Kokoro entrega TTS local com vozes sob demanda e operação otimizada para ambientes self-hosted.",
+    whispercpp: "Whisper.cpp mantém transcrição local com runtime leve para ambientes controlados.",
+  },
+};
+
+mutableResources["es-ES"].translation.controlPlane.providerGrid = {
+  categories: {
+    general: "LLM",
+    voice: "Voz",
+    transcription: "Transcripciones",
+    media: "Medios",
+  },
+  highlights: {
+    claude: "Anthropic para razonamiento profundo, revisión de código y flujos oficiales de Claude Code.",
+    codex: "OpenAI para tareas agentic, ejecución asistida y modelos GPT con API key o inicio de sesión oficial.",
+    gemini: "Google Gemini para generación multimodal, AI Studio y autenticación oficial mediante Gemini CLI.",
+    elevenlabs: "ElevenLabs para síntesis de voz premium con catálogo gestionado e idioma predeterminado por agente.",
+    ollama: "Ollama para modelos locales o remotos con descubrimiento real del catálogo en el endpoint configurado.",
+    kokoro: "Kokoro ofrece TTS local con voces bajo demanda y operación optimizada para entornos self-hosted.",
+    whispercpp: "Whisper.cpp mantiene la transcripción local con un runtime ligero para entornos controlados.",
+  },
+};
+
+mutableResources["fr-FR"].translation.controlPlane.providerGrid = {
+  categories: {
+    general: "LLM",
+    voice: "Voix",
+    transcription: "Transcriptions",
+    media: "Média",
+  },
+  highlights: {
+    claude: "Anthropic pour le raisonnement approfondi, la revue de code et les flux officiels Claude Code.",
+    codex: "OpenAI pour les tâches agentic, l'exécution assistée et les modèles GPT avec API key ou connexion officielle.",
+    gemini: "Google Gemini pour la génération multimodale, AI Studio et l'authentification officielle via Gemini CLI.",
+    elevenlabs: "ElevenLabs pour la synthèse vocale premium avec catalogue géré et langue par défaut par agent.",
+    ollama: "Ollama pour des modèles locaux ou distants avec découverte réelle du catalogue sur l'endpoint configuré.",
+    kokoro: "Kokoro fournit un TTS local avec voix à la demande et fonctionnement optimisé pour les environnements self-hosted.",
+    whispercpp: "Whisper.cpp garde la transcription locale avec un runtime léger pour les environnements contrôlés.",
+  },
+};
+
+mutableResources["de-DE"].translation.controlPlane.providerGrid = {
+  categories: {
+    general: "LLM",
+    voice: "Stimme",
+    transcription: "Transkriptionen",
+    media: "Medien",
+  },
+  highlights: {
+    claude: "Anthropic für tiefes Reasoning, Code-Review und offizielle Claude-Code-Abläufe.",
+    codex: "OpenAI für agentic Aufgaben, unterstützte Ausführung und GPT-Modelle mit API Key oder offiziellem Login.",
+    gemini: "Google Gemini für multimodale Generierung, AI Studio und offizielle Authentifizierung über Gemini CLI.",
+    elevenlabs: "ElevenLabs für Premium-Sprachsynthese mit verwaltetem Katalog und Standardsprache pro Agent.",
+    ollama: "Ollama für lokale oder entfernte Modelle mit echter Katalogerkennung am konfigurierten Endpoint.",
+    kokoro: "Kokoro liefert lokales TTS mit Stimmen auf Abruf und optimiertem Betrieb für self-hosted Umgebungen.",
+    whispercpp: "Whisper.cpp hält Transkription lokal mit einer schlanken Runtime für kontrollierte Umgebungen.",
+  },
+};
 
 Object.assign(literalResources["en-US"], {
   "Nao definidas": "Not set",
@@ -13687,15 +14372,23 @@ mutableResources["es-ES"].translation.chat.timestamp = {
 
 mutableResources["es-ES"].translation.chat.toolCall = {
   ...(mutableResources["es-ES"].translation.chat.toolCall ?? {}),
-  completed: "Completed",
-  cost: "cost",
-  failed: "Failed",
-  queued: "Queued",
-  retrying: "Retrying",
-  running: "Running",
-  tools: "tools",
-  viewArgs: "Arguments",
-  viewExecution: "View execution",
+  attempt: "intento",
+  cancelled: "Cancelado",
+  completed: "Completado",
+  cost: "costo",
+  duration: "duración",
+  failed: "Falló",
+  metadata: "Metadatos",
+  model: "modelo",
+  paused: "Pausado",
+  queued: "En cola",
+  retrying: "Reintentando",
+  running: "Ejecutando",
+  status: "estado",
+  task: "tarea",
+  tools: "herramientas",
+  viewArgs: "Argumentos",
+  viewExecution: "Ver ejecución",
 };
 
 mutableResources["es-ES"].translation.commandBar = {
@@ -13997,12 +14690,18 @@ mutableResources["es-ES"].translation.screenTime = {
 
 mutableResources["es-ES"].translation.sessions.composer = {
   ...(mutableResources["es-ES"].translation.sessions.composer ?? {}),
-  selectAgentToStart: "Select a specific agent here to start a chat.",
+  selectAgentToStart: "Selecciona un agente específico aquí para iniciar un chat.",
+};
+
+mutableResources["es-ES"].translation.sessions.artifacts = {
+  ...(mutableResources["es-ES"].translation.sessions.artifacts ?? {}),
+  imagePreviewUnavailable: "Vista previa de imagen no disponible",
+  imagePreviewUnavailableHint: "El archivo generado puede faltar o estar temporalmente no disponible.",
 };
 
 mutableResources["es-ES"].translation.sessions.context = {
   ...(mutableResources["es-ES"].translation.sessions.context ?? {}),
-  summaryLabel: "Summary",
+  summaryLabel: "Resumen",
 };
 
 mutableResources["es-ES"].translation.sessions.context.artifacts = {
@@ -14125,15 +14824,23 @@ mutableResources["fr-FR"].translation.chat.timestamp = {
 
 mutableResources["fr-FR"].translation.chat.toolCall = {
   ...(mutableResources["fr-FR"].translation.chat.toolCall ?? {}),
-  completed: "Completed",
-  cost: "cost",
-  failed: "Failed",
-  queued: "Queued",
-  retrying: "Retrying",
-  running: "Running",
-  tools: "tools",
+  attempt: "tentative",
+  cancelled: "Annulé",
+  completed: "Terminé",
+  cost: "coût",
+  duration: "durée",
+  failed: "Échec",
+  metadata: "Métadonnées",
+  model: "modèle",
+  paused: "En pause",
+  queued: "En file",
+  retrying: "Nouvelle tentative",
+  running: "En cours",
+  status: "statut",
+  task: "tâche",
+  tools: "outils",
   viewArgs: "Arguments",
-  viewExecution: "View execution",
+  viewExecution: "Voir l'exécution",
 };
 
 mutableResources["fr-FR"].translation.commandBar = {
@@ -14435,12 +15142,18 @@ mutableResources["fr-FR"].translation.screenTime = {
 
 mutableResources["fr-FR"].translation.sessions.composer = {
   ...(mutableResources["fr-FR"].translation.sessions.composer ?? {}),
-  selectAgentToStart: "Select a specific agent here to start a chat.",
+  selectAgentToStart: "Sélectionnez un agent spécifique ici pour démarrer une conversation.",
+};
+
+mutableResources["fr-FR"].translation.sessions.artifacts = {
+  ...(mutableResources["fr-FR"].translation.sessions.artifacts ?? {}),
+  imagePreviewUnavailable: "Aperçu de l'image indisponible",
+  imagePreviewUnavailableHint: "Le fichier généré peut être manquant ou temporairement indisponible.",
 };
 
 mutableResources["fr-FR"].translation.sessions.context = {
   ...(mutableResources["fr-FR"].translation.sessions.context ?? {}),
-  summaryLabel: "Summary",
+  summaryLabel: "Résumé",
 };
 
 mutableResources["fr-FR"].translation.sessions.context.artifacts = {
@@ -14563,15 +15276,23 @@ mutableResources["de-DE"].translation.chat.timestamp = {
 
 mutableResources["de-DE"].translation.chat.toolCall = {
   ...(mutableResources["de-DE"].translation.chat.toolCall ?? {}),
-  completed: "Completed",
-  cost: "cost",
-  failed: "Failed",
-  queued: "Queued",
-  retrying: "Retrying",
-  running: "Running",
-  tools: "tools",
-  viewArgs: "Arguments",
-  viewExecution: "View execution",
+  attempt: "Versuch",
+  cancelled: "Abgebrochen",
+  completed: "Abgeschlossen",
+  cost: "Kosten",
+  duration: "Dauer",
+  failed: "Fehlgeschlagen",
+  metadata: "Metadaten",
+  model: "Modell",
+  paused: "Pausiert",
+  queued: "In Warteschlange",
+  retrying: "Wird erneut versucht",
+  running: "Läuft",
+  status: "Status",
+  task: "Aufgabe",
+  tools: "Tools",
+  viewArgs: "Argumente",
+  viewExecution: "Ausführung anzeigen",
 };
 
 mutableResources["de-DE"].translation.commandBar = {
@@ -14873,12 +15594,18 @@ mutableResources["de-DE"].translation.screenTime = {
 
 mutableResources["de-DE"].translation.sessions.composer = {
   ...(mutableResources["de-DE"].translation.sessions.composer ?? {}),
-  selectAgentToStart: "Select a specific agent here to start a chat.",
+  selectAgentToStart: "Wählen Sie hier einen bestimmten Agenten aus, um einen Chat zu starten.",
+};
+
+mutableResources["de-DE"].translation.sessions.artifacts = {
+  ...(mutableResources["de-DE"].translation.sessions.artifacts ?? {}),
+  imagePreviewUnavailable: "Bildvorschau nicht verfügbar",
+  imagePreviewUnavailableHint: "Die generierte Datei fehlt möglicherweise oder ist vorübergehend nicht verfügbar.",
 };
 
 mutableResources["de-DE"].translation.sessions.context = {
   ...(mutableResources["de-DE"].translation.sessions.context ?? {}),
-  summaryLabel: "Summary",
+  summaryLabel: "Zusammenfassung",
 };
 
 mutableResources["de-DE"].translation.sessions.context.artifacts = {
@@ -16202,5 +16929,628 @@ Object.assign(literalResources["de-DE"] as Record<string, string>, {
   "Baixando {{label}}": "{{label}} wird heruntergeladen",
   "{{label}} pronto.": "{{label}} bereit.",
 });
+
+const scheduleTableUiLabels = {
+  "en-US": {
+    lifecycle: {
+      pause: "Pause",
+      resume: "Resume",
+      activate: "Activate",
+      validationPending: "Validation pending",
+    },
+    statuses: {
+      validating: "Validating",
+      validated: "Validated",
+      failedOpen: "Failed open",
+    },
+  },
+  "pt-BR": {
+    lifecycle: {
+      pause: "Pausar",
+      resume: "Retomar",
+      activate: "Ativar",
+      validationPending: "Validação pendente",
+    },
+    statuses: {
+      validating: "Validando",
+      validated: "Validado",
+      failedOpen: "Falha aberta",
+    },
+  },
+  "es-ES": {
+    lifecycle: {
+      pause: "Pausar",
+      resume: "Reanudar",
+      activate: "Activar",
+      validationPending: "Validación pendiente",
+    },
+    statuses: {
+      validating: "Validando",
+      validated: "Validado",
+      failedOpen: "Fallo abierto",
+    },
+  },
+  "fr-FR": {
+    lifecycle: {
+      pause: "Mettre en pause",
+      resume: "Reprendre",
+      activate: "Activer",
+      validationPending: "Validation en attente",
+    },
+    statuses: {
+      validating: "Validation",
+      validated: "Validé",
+      failedOpen: "Échec ouvert",
+    },
+  },
+  "de-DE": {
+    lifecycle: {
+      pause: "Pausieren",
+      resume: "Fortsetzen",
+      activate: "Aktivieren",
+      validationPending: "Validierung ausstehend",
+    },
+    statuses: {
+      validating: "Validierung läuft",
+      validated: "Validiert",
+      failedOpen: "Offener Fehler",
+    },
+  },
+};
+
+for (const [language, labels] of Object.entries(scheduleTableUiLabels)) {
+  const table = mutableResources[language]?.translation.schedules?.table;
+  if (!table) continue;
+  Object.assign(table, labels);
+}
+
+const avatarPickerLabels = {
+  "en-US": {
+    me: "Me",
+    subtitle: "Select your avatar",
+    selectOption: "Select {{label}}",
+    options: {
+      ember: { label: "Ember", alt: "Warm animated avatar" },
+      harbor: { label: "Harbor", alt: "Teal animated avatar" },
+      graphite: { label: "Graphite", alt: "Graphite animated avatar" },
+      sage: { label: "Sage", alt: "Sage animated avatar" },
+      cobalt: { label: "Cobalt", alt: "Cobalt animated avatar" },
+      rosewood: { label: "Rosewood", alt: "Rosewood animated avatar" },
+      ochre: { label: "Ochre", alt: "Ochre animated avatar" },
+      violet: { label: "Violet", alt: "Violet animated avatar" },
+      slate: { label: "Slate", alt: "Slate animated avatar" },
+      mint: { label: "Mint", alt: "Mint animated avatar" },
+    },
+  },
+  "pt-BR": {
+    me: "Eu",
+    subtitle: "Selecione seu avatar",
+    selectOption: "Selecionar {{label}}",
+    options: {
+      ember: { label: "Ember", alt: "Avatar animado quente" },
+      harbor: { label: "Harbor", alt: "Avatar animado verde-azulado" },
+      graphite: { label: "Graphite", alt: "Avatar animado grafite" },
+      sage: { label: "Sage", alt: "Avatar animado sálvia" },
+      cobalt: { label: "Cobalt", alt: "Avatar animado cobalto" },
+      rosewood: { label: "Rosewood", alt: "Avatar animado rosewood" },
+      ochre: { label: "Ochre", alt: "Avatar animado ocre" },
+      violet: { label: "Violet", alt: "Avatar animado violeta" },
+      slate: { label: "Slate", alt: "Avatar animado ardósia" },
+      mint: { label: "Mint", alt: "Avatar animado menta" },
+    },
+  },
+  "es-ES": {
+    me: "Yo",
+    subtitle: "Selecciona tu avatar",
+    selectOption: "Seleccionar {{label}}",
+    options: {
+      ember: { label: "Ember", alt: "Avatar animado cálido" },
+      harbor: { label: "Harbor", alt: "Avatar animado verde azulado" },
+      graphite: { label: "Graphite", alt: "Avatar animado grafito" },
+      sage: { label: "Sage", alt: "Avatar animado salvia" },
+      cobalt: { label: "Cobalt", alt: "Avatar animado cobalto" },
+      rosewood: { label: "Rosewood", alt: "Avatar animado rosewood" },
+      ochre: { label: "Ochre", alt: "Avatar animado ocre" },
+      violet: { label: "Violet", alt: "Avatar animado violeta" },
+      slate: { label: "Slate", alt: "Avatar animado pizarra" },
+      mint: { label: "Mint", alt: "Avatar animado menta" },
+    },
+  },
+  "fr-FR": {
+    me: "Moi",
+    subtitle: "Sélectionner votre avatar",
+    selectOption: "Sélectionner {{label}}",
+    options: {
+      ember: { label: "Ember", alt: "Avatar animé chaleureux" },
+      harbor: { label: "Harbor", alt: "Avatar animé turquoise" },
+      graphite: { label: "Graphite", alt: "Avatar animé graphite" },
+      sage: { label: "Sage", alt: "Avatar animé sauge" },
+      cobalt: { label: "Cobalt", alt: "Avatar animé cobalt" },
+      rosewood: { label: "Rosewood", alt: "Avatar animé rosewood" },
+      ochre: { label: "Ochre", alt: "Avatar animé ocre" },
+      violet: { label: "Violet", alt: "Avatar animé violet" },
+      slate: { label: "Slate", alt: "Avatar animé ardoise" },
+      mint: { label: "Mint", alt: "Avatar animé menthe" },
+    },
+  },
+  "de-DE": {
+    me: "Ich",
+    subtitle: "Avatar auswählen",
+    selectOption: "{{label}} auswählen",
+    options: {
+      ember: { label: "Ember", alt: "Warmer animierter Avatar" },
+      harbor: { label: "Harbor", alt: "Türkisfarbener animierter Avatar" },
+      graphite: { label: "Graphite", alt: "Graphitfarbener animierter Avatar" },
+      sage: { label: "Sage", alt: "Salbeifarbener animierter Avatar" },
+      cobalt: { label: "Cobalt", alt: "Kobaltblauer animierter Avatar" },
+      rosewood: { label: "Rosewood", alt: "Rosewood animierter Avatar" },
+      ochre: { label: "Ochre", alt: "Ockerfarbener animierter Avatar" },
+      violet: { label: "Violet", alt: "Violetter animierter Avatar" },
+      slate: { label: "Slate", alt: "Schieferfarbener animierter Avatar" },
+      mint: { label: "Mint", alt: "Mintfarbener animierter Avatar" },
+    },
+  },
+};
+
+for (const [language, labels] of Object.entries(avatarPickerLabels)) {
+  const translation = mutableResources[language]?.translation;
+  if (!translation) continue;
+  translation.ui = {
+    ...(translation.ui ?? {}),
+    avatarPicker: labels,
+  };
+}
+
+const channelCatalogLabels = {
+  "en-US": {
+    entries: {
+      telegram: {
+        label: "Telegram",
+        tagline: "Agent API",
+        fields: {
+          AGENT_TOKEN: {
+            label: "Agent Token",
+            helpText: "Token generated by @AgentFather in Telegram.",
+          },
+          ALLOWED_USER_IDS: {
+            label: "Allowed user IDs",
+            helpText: "Numeric Telegram IDs. Leave empty to block everyone until approval in Gateway.",
+          },
+        },
+      },
+      whatsapp: {
+        label: "WhatsApp Business",
+        tagline: "Meta Cloud API",
+        fields: {
+          WHATSAPP_ACCESS_TOKEN: { label: "Access Token", helpText: "Cloud API access token." },
+          WHATSAPP_PHONE_NUMBER_ID: { label: "Phone Number ID", helpText: "Phone number ID." },
+          WHATSAPP_VERIFY_TOKEN: { label: "Verify Token", helpText: "Webhook verification token." },
+          WHATSAPP_APP_SECRET: { label: "App Secret", helpText: "App secret for webhook HMAC verification." },
+        },
+      },
+      discord: {
+        label: "Discord",
+        tagline: "Agent API",
+        fields: {
+          DISCORD_BOT_TOKEN: { label: "Agent Token", helpText: "Agent token from the Developer Portal." },
+        },
+      },
+      slack: {
+        label: "Slack",
+        tagline: "Bolt API",
+        fields: {
+          SLACK_BOT_TOKEN: { label: "Agent Token", helpText: "Agent token (xoxb-)." },
+          SLACK_APP_TOKEN: { label: "App Token", helpText: "App token (xapp-)." },
+          SLACK_SIGNING_SECRET: { label: "Signing Secret", helpText: "App signing secret." },
+        },
+      },
+      teams: {
+        label: "Microsoft Teams",
+        tagline: "Agent Framework",
+        fields: {
+          TEAMS_APP_ID: { label: "App ID", helpText: "Azure application ID." },
+          TEAMS_APP_PASSWORD: { label: "App Password", helpText: "Azure client secret." },
+        },
+      },
+      line: {
+        label: "LINE",
+        tagline: "Messaging API",
+        fields: {
+          LINE_CHANNEL_SECRET: { label: "Channel Secret", helpText: "Console channel secret." },
+          LINE_CHANNEL_ACCESS_TOKEN: { label: "Channel Access Token", helpText: "Channel access token." },
+        },
+      },
+      messenger: {
+        label: "Messenger",
+        tagline: "Graph API",
+        fields: {
+          MESSENGER_PAGE_ACCESS_TOKEN: { label: "Page Access Token", helpText: "Page access token." },
+          MESSENGER_VERIFY_TOKEN: { label: "Verify Token", helpText: "Webhook verification token." },
+          MESSENGER_APP_SECRET: { label: "App Secret", helpText: "App secret." },
+        },
+      },
+      signal: {
+        label: "Signal",
+        tagline: "signal-cli",
+        fields: {
+          SIGNAL_PHONE_NUMBER: { label: "Phone Number", helpText: "Registered phone number." },
+          SIGNAL_CLI_URL: { label: "CLI URL", helpText: "signal-cli API URL." },
+        },
+      },
+      instagram: {
+        label: "Instagram",
+        tagline: "Graph API",
+        fields: {
+          INSTAGRAM_PAGE_ACCESS_TOKEN: { label: "Page Access Token", helpText: "Page access token." },
+          INSTAGRAM_APP_SECRET: { label: "App Secret", helpText: "App secret." },
+        },
+      },
+    },
+  },
+  "pt-BR": {
+    entries: {
+      telegram: {
+        label: "Telegram",
+        tagline: "Agent API",
+        fields: {
+          AGENT_TOKEN: {
+            label: "Agent Token",
+            helpText: "Token gerado pelo @AgentFather no Telegram.",
+          },
+          ALLOWED_USER_IDS: {
+            label: "User IDs permitidos",
+            helpText: "IDs numéricos do Telegram. Deixe vazio para bloquear todos até aprovar no Gateway.",
+          },
+        },
+      },
+      whatsapp: {
+        label: "WhatsApp Business",
+        tagline: "Meta Cloud API",
+        fields: {
+          WHATSAPP_ACCESS_TOKEN: { label: "Access Token", helpText: "Token de acesso da API Cloud." },
+          WHATSAPP_PHONE_NUMBER_ID: { label: "Phone Number ID", helpText: "ID do número de telefone." },
+          WHATSAPP_VERIFY_TOKEN: { label: "Verify Token", helpText: "Token de verificação do webhook." },
+          WHATSAPP_APP_SECRET: { label: "App Secret", helpText: "App secret para verificação HMAC do webhook." },
+        },
+      },
+      discord: {
+        label: "Discord",
+        tagline: "Agent API",
+        fields: {
+          DISCORD_BOT_TOKEN: { label: "Agent Token", helpText: "Token do agent no Developer Portal." },
+        },
+      },
+      slack: {
+        label: "Slack",
+        tagline: "Bolt API",
+        fields: {
+          SLACK_BOT_TOKEN: { label: "Agent Token", helpText: "Token do agent (xoxb-)." },
+          SLACK_APP_TOKEN: { label: "App Token", helpText: "Token do app (xapp-)." },
+          SLACK_SIGNING_SECRET: { label: "Signing Secret", helpText: "Signing secret do app." },
+        },
+      },
+      teams: {
+        label: "Microsoft Teams",
+        tagline: "Agent Framework",
+        fields: {
+          TEAMS_APP_ID: { label: "App ID", helpText: "Application ID do Azure." },
+          TEAMS_APP_PASSWORD: { label: "App Password", helpText: "Client secret do Azure." },
+        },
+      },
+      line: {
+        label: "LINE",
+        tagline: "Messaging API",
+        fields: {
+          LINE_CHANNEL_SECRET: { label: "Channel Secret", helpText: "Channel secret do console." },
+          LINE_CHANNEL_ACCESS_TOKEN: { label: "Channel Access Token", helpText: "Channel access token." },
+        },
+      },
+      messenger: {
+        label: "Messenger",
+        tagline: "Graph API",
+        fields: {
+          MESSENGER_PAGE_ACCESS_TOKEN: { label: "Page Access Token", helpText: "Page access token." },
+          MESSENGER_VERIFY_TOKEN: { label: "Verify Token", helpText: "Token de verificação do webhook." },
+          MESSENGER_APP_SECRET: { label: "App Secret", helpText: "App secret." },
+        },
+      },
+      signal: {
+        label: "Signal",
+        tagline: "signal-cli",
+        fields: {
+          SIGNAL_PHONE_NUMBER: { label: "Phone Number", helpText: "Número de telefone registrado." },
+          SIGNAL_CLI_URL: { label: "CLI URL", helpText: "URL da API signal-cli." },
+        },
+      },
+      instagram: {
+        label: "Instagram",
+        tagline: "Graph API",
+        fields: {
+          INSTAGRAM_PAGE_ACCESS_TOKEN: { label: "Page Access Token", helpText: "Page access token." },
+          INSTAGRAM_APP_SECRET: { label: "App Secret", helpText: "App secret." },
+        },
+      },
+    },
+  },
+  "es-ES": {
+    entries: {
+      telegram: {
+        label: "Telegram",
+        tagline: "Agent API",
+        fields: {
+          AGENT_TOKEN: { label: "Agent Token", helpText: "Token generado por @AgentFather en Telegram." },
+          ALLOWED_USER_IDS: {
+            label: "IDs de usuario permitidos",
+            helpText: "IDs numéricos de Telegram. Déjalo vacío para bloquear a todos hasta la aprobación en Gateway.",
+          },
+        },
+      },
+      whatsapp: {
+        label: "WhatsApp Business",
+        tagline: "Meta Cloud API",
+        fields: {
+          WHATSAPP_ACCESS_TOKEN: { label: "Access Token", helpText: "Token de acceso de la API Cloud." },
+          WHATSAPP_PHONE_NUMBER_ID: { label: "Phone Number ID", helpText: "ID del número de teléfono." },
+          WHATSAPP_VERIFY_TOKEN: { label: "Verify Token", helpText: "Token de verificación del webhook." },
+          WHATSAPP_APP_SECRET: { label: "App Secret", helpText: "App secret para verificación HMAC del webhook." },
+        },
+      },
+      discord: {
+        label: "Discord",
+        tagline: "Agent API",
+        fields: {
+          DISCORD_BOT_TOKEN: { label: "Agent Token", helpText: "Token del agente en el Developer Portal." },
+        },
+      },
+      slack: {
+        label: "Slack",
+        tagline: "Bolt API",
+        fields: {
+          SLACK_BOT_TOKEN: { label: "Agent Token", helpText: "Token del agente (xoxb-)." },
+          SLACK_APP_TOKEN: { label: "App Token", helpText: "Token de la app (xapp-)." },
+          SLACK_SIGNING_SECRET: { label: "Signing Secret", helpText: "Signing secret de la app." },
+        },
+      },
+      teams: {
+        label: "Microsoft Teams",
+        tagline: "Agent Framework",
+        fields: {
+          TEAMS_APP_ID: { label: "App ID", helpText: "Application ID de Azure." },
+          TEAMS_APP_PASSWORD: { label: "App Password", helpText: "Client secret de Azure." },
+        },
+      },
+      line: {
+        label: "LINE",
+        tagline: "Messaging API",
+        fields: {
+          LINE_CHANNEL_SECRET: { label: "Channel Secret", helpText: "Channel secret de la consola." },
+          LINE_CHANNEL_ACCESS_TOKEN: { label: "Channel Access Token", helpText: "Channel access token." },
+        },
+      },
+      messenger: {
+        label: "Messenger",
+        tagline: "Graph API",
+        fields: {
+          MESSENGER_PAGE_ACCESS_TOKEN: { label: "Page Access Token", helpText: "Page access token." },
+          MESSENGER_VERIFY_TOKEN: { label: "Verify Token", helpText: "Token de verificación del webhook." },
+          MESSENGER_APP_SECRET: { label: "App Secret", helpText: "App secret." },
+        },
+      },
+      signal: {
+        label: "Signal",
+        tagline: "signal-cli",
+        fields: {
+          SIGNAL_PHONE_NUMBER: { label: "Phone Number", helpText: "Número de teléfono registrado." },
+          SIGNAL_CLI_URL: { label: "CLI URL", helpText: "URL de la API signal-cli." },
+        },
+      },
+      instagram: {
+        label: "Instagram",
+        tagline: "Graph API",
+        fields: {
+          INSTAGRAM_PAGE_ACCESS_TOKEN: { label: "Page Access Token", helpText: "Page access token." },
+          INSTAGRAM_APP_SECRET: { label: "App Secret", helpText: "App secret." },
+        },
+      },
+    },
+  },
+  "fr-FR": {
+    entries: {
+      telegram: {
+        label: "Telegram",
+        tagline: "Agent API",
+        fields: {
+          AGENT_TOKEN: { label: "Agent Token", helpText: "Token généré par @AgentFather dans Telegram." },
+          ALLOWED_USER_IDS: {
+            label: "IDs utilisateur autorisés",
+            helpText: "IDs Telegram numériques. Laissez vide pour bloquer tout le monde jusqu'à l'approbation dans Gateway.",
+          },
+        },
+      },
+      whatsapp: {
+        label: "WhatsApp Business",
+        tagline: "Meta Cloud API",
+        fields: {
+          WHATSAPP_ACCESS_TOKEN: { label: "Access Token", helpText: "Token d'accès à l'API Cloud." },
+          WHATSAPP_PHONE_NUMBER_ID: { label: "Phone Number ID", helpText: "ID du numéro de téléphone." },
+          WHATSAPP_VERIFY_TOKEN: { label: "Verify Token", helpText: "Token de vérification du webhook." },
+          WHATSAPP_APP_SECRET: { label: "App Secret", helpText: "App secret pour la vérification HMAC du webhook." },
+        },
+      },
+      discord: {
+        label: "Discord",
+        tagline: "Agent API",
+        fields: {
+          DISCORD_BOT_TOKEN: { label: "Agent Token", helpText: "Token de l'agent dans le Developer Portal." },
+        },
+      },
+      slack: {
+        label: "Slack",
+        tagline: "Bolt API",
+        fields: {
+          SLACK_BOT_TOKEN: { label: "Agent Token", helpText: "Token de l'agent (xoxb-)." },
+          SLACK_APP_TOKEN: { label: "App Token", helpText: "Token de l'app (xapp-)." },
+          SLACK_SIGNING_SECRET: { label: "Signing Secret", helpText: "Signing secret de l'app." },
+        },
+      },
+      teams: {
+        label: "Microsoft Teams",
+        tagline: "Agent Framework",
+        fields: {
+          TEAMS_APP_ID: { label: "App ID", helpText: "Application ID Azure." },
+          TEAMS_APP_PASSWORD: { label: "App Password", helpText: "Client secret Azure." },
+        },
+      },
+      line: {
+        label: "LINE",
+        tagline: "Messaging API",
+        fields: {
+          LINE_CHANNEL_SECRET: { label: "Channel Secret", helpText: "Channel secret de la console." },
+          LINE_CHANNEL_ACCESS_TOKEN: { label: "Channel Access Token", helpText: "Channel access token." },
+        },
+      },
+      messenger: {
+        label: "Messenger",
+        tagline: "Graph API",
+        fields: {
+          MESSENGER_PAGE_ACCESS_TOKEN: { label: "Page Access Token", helpText: "Page access token." },
+          MESSENGER_VERIFY_TOKEN: { label: "Verify Token", helpText: "Token de vérification du webhook." },
+          MESSENGER_APP_SECRET: { label: "App Secret", helpText: "App secret." },
+        },
+      },
+      signal: {
+        label: "Signal",
+        tagline: "signal-cli",
+        fields: {
+          SIGNAL_PHONE_NUMBER: { label: "Phone Number", helpText: "Numéro de téléphone enregistré." },
+          SIGNAL_CLI_URL: { label: "CLI URL", helpText: "URL de l'API signal-cli." },
+        },
+      },
+      instagram: {
+        label: "Instagram",
+        tagline: "Graph API",
+        fields: {
+          INSTAGRAM_PAGE_ACCESS_TOKEN: { label: "Page Access Token", helpText: "Page access token." },
+          INSTAGRAM_APP_SECRET: { label: "App Secret", helpText: "App secret." },
+        },
+      },
+    },
+  },
+  "de-DE": {
+    entries: {
+      telegram: {
+        label: "Telegram",
+        tagline: "Agent API",
+        fields: {
+          AGENT_TOKEN: { label: "Agent Token", helpText: "Von @AgentFather in Telegram erzeugtes Token." },
+          ALLOWED_USER_IDS: {
+            label: "Erlaubte User IDs",
+            helpText: "Numerische Telegram IDs. Leer lassen, um alle bis zur Freigabe im Gateway zu blockieren.",
+          },
+        },
+      },
+      whatsapp: {
+        label: "WhatsApp Business",
+        tagline: "Meta Cloud API",
+        fields: {
+          WHATSAPP_ACCESS_TOKEN: { label: "Access Token", helpText: "Zugriffstoken der Cloud API." },
+          WHATSAPP_PHONE_NUMBER_ID: { label: "Phone Number ID", helpText: "ID der Telefonnummer." },
+          WHATSAPP_VERIFY_TOKEN: { label: "Verify Token", helpText: "Verifizierungstoken des Webhooks." },
+          WHATSAPP_APP_SECRET: { label: "App Secret", helpText: "App Secret für die HMAC-Prüfung des Webhooks." },
+        },
+      },
+      discord: {
+        label: "Discord",
+        tagline: "Agent API",
+        fields: {
+          DISCORD_BOT_TOKEN: { label: "Agent Token", helpText: "Agent Token aus dem Developer Portal." },
+        },
+      },
+      slack: {
+        label: "Slack",
+        tagline: "Bolt API",
+        fields: {
+          SLACK_BOT_TOKEN: { label: "Agent Token", helpText: "Agent Token (xoxb-)." },
+          SLACK_APP_TOKEN: { label: "App Token", helpText: "App Token (xapp-)." },
+          SLACK_SIGNING_SECRET: { label: "Signing Secret", helpText: "Signing Secret der App." },
+        },
+      },
+      teams: {
+        label: "Microsoft Teams",
+        tagline: "Agent Framework",
+        fields: {
+          TEAMS_APP_ID: { label: "App ID", helpText: "Azure Application ID." },
+          TEAMS_APP_PASSWORD: { label: "App Password", helpText: "Azure Client Secret." },
+        },
+      },
+      line: {
+        label: "LINE",
+        tagline: "Messaging API",
+        fields: {
+          LINE_CHANNEL_SECRET: { label: "Channel Secret", helpText: "Channel Secret aus der Konsole." },
+          LINE_CHANNEL_ACCESS_TOKEN: { label: "Channel Access Token", helpText: "Channel Access Token." },
+        },
+      },
+      messenger: {
+        label: "Messenger",
+        tagline: "Graph API",
+        fields: {
+          MESSENGER_PAGE_ACCESS_TOKEN: { label: "Page Access Token", helpText: "Page Access Token." },
+          MESSENGER_VERIFY_TOKEN: { label: "Verify Token", helpText: "Verifizierungstoken des Webhooks." },
+          MESSENGER_APP_SECRET: { label: "App Secret", helpText: "App Secret." },
+        },
+      },
+      signal: {
+        label: "Signal",
+        tagline: "signal-cli",
+        fields: {
+          SIGNAL_PHONE_NUMBER: { label: "Phone Number", helpText: "Registrierte Telefonnummer." },
+          SIGNAL_CLI_URL: { label: "CLI URL", helpText: "URL der signal-cli API." },
+        },
+      },
+      instagram: {
+        label: "Instagram",
+        tagline: "Graph API",
+        fields: {
+          INSTAGRAM_PAGE_ACCESS_TOKEN: { label: "Page Access Token", helpText: "Page Access Token." },
+          INSTAGRAM_APP_SECRET: { label: "App Secret", helpText: "App Secret." },
+        },
+      },
+    },
+  },
+};
+
+for (const [language, labels] of Object.entries(channelCatalogLabels)) {
+  const translation = mutableResources[language]?.translation;
+  if (!translation) continue;
+  translation.controlPlane = {
+    ...(translation.controlPlane ?? {}),
+    channelCatalog: labels,
+  };
+}
+
+const sidebarEvaluationLabels: Record<
+  string,
+  { label: string; loading: string }
+> = {
+  "en-US": { label: "Evals", loading: "Opening evals" },
+  "pt-BR": { label: "Evals", loading: "Abrindo evals" },
+  "es-ES": { label: "Evals", loading: "Abriendo evals" },
+  "fr-FR": { label: "Evals", loading: "Ouverture des evals" },
+  "de-DE": { label: "Evals", loading: "Evals werden geoffnet" },
+};
+
+for (const [language, labels] of Object.entries(sidebarEvaluationLabels)) {
+  const sidebar = mutableResources[language]?.translation.sidebar;
+  if (!sidebar) continue;
+  sidebar.items = {
+    ...(sidebar.items ?? {}),
+    evaluations: labels.label,
+  };
+  sidebar.loading = {
+    ...(sidebar.loading ?? {}),
+    evaluations: labels.loading,
+  };
+}
 
 export type ResourceLanguages = keyof typeof resources;

@@ -2,8 +2,8 @@ export type ChannelStatus = "disconnected" | "pending" | "connected";
 
 export type ChannelDefinition = {
   key: string;
-  label: string;
-  tagline: string;
+  labelKey: string;
+  taglineKey: string;
   logoKey: string;
   gradientFrom: string;
   gradientTo: string;
@@ -11,18 +11,18 @@ export type ChannelDefinition = {
   helpUrl?: string;
   fields: {
     key: string;
-    label: string;
+    labelKey: string;
     type: "secret" | "text" | "tags";
     required: boolean;
-    helpText?: string;
+    helpTextKey?: string;
   }[];
 };
 
 export const CHANNEL_CATALOG: ChannelDefinition[] = [
   {
     key: "telegram",
-    label: "Telegram",
-    tagline: "Agent API",
+    labelKey: "controlPlane.channelCatalog.entries.telegram.label",
+    taglineKey: "controlPlane.channelCatalog.entries.telegram.tagline",
     logoKey: "telegram",
     gradientFrom: "#0088cc",
     gradientTo: "#0077b5",
@@ -30,24 +30,24 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "AGENT_TOKEN",
-        label: "Agent Token",
+        labelKey: "controlPlane.channelCatalog.entries.telegram.fields.AGENT_TOKEN.label",
         type: "secret",
         required: true,
-        helpText: "Token gerado pelo @AgentFather no Telegram.",
+        helpTextKey: "controlPlane.channelCatalog.entries.telegram.fields.AGENT_TOKEN.helpText",
       },
       {
         key: "ALLOWED_USER_IDS",
-        label: "User IDs permitidos",
+        labelKey: "controlPlane.channelCatalog.entries.telegram.fields.ALLOWED_USER_IDS.label",
         type: "tags",
         required: false,
-        helpText: "IDs numericos do Telegram. Deixe vazio para permitir todos.",
+        helpTextKey: "controlPlane.channelCatalog.entries.telegram.fields.ALLOWED_USER_IDS.helpText",
       },
     ],
   },
   {
     key: "whatsapp",
-    label: "WhatsApp Business",
-    tagline: "Meta Cloud API",
+    labelKey: "controlPlane.channelCatalog.entries.whatsapp.label",
+    taglineKey: "controlPlane.channelCatalog.entries.whatsapp.tagline",
     logoKey: "whatsapp",
     gradientFrom: "#25D366",
     gradientTo: "#128C7E",
@@ -55,38 +55,38 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "WHATSAPP_ACCESS_TOKEN",
-        label: "Access Token",
+        labelKey: "controlPlane.channelCatalog.entries.whatsapp.fields.WHATSAPP_ACCESS_TOKEN.label",
         type: "secret",
         required: true,
-        helpText: "Token de acesso da API Cloud",
+        helpTextKey: "controlPlane.channelCatalog.entries.whatsapp.fields.WHATSAPP_ACCESS_TOKEN.helpText",
       },
       {
         key: "WHATSAPP_PHONE_NUMBER_ID",
-        label: "Phone Number ID",
+        labelKey: "controlPlane.channelCatalog.entries.whatsapp.fields.WHATSAPP_PHONE_NUMBER_ID.label",
         type: "text",
         required: true,
-        helpText: "ID do número de telefone",
+        helpTextKey: "controlPlane.channelCatalog.entries.whatsapp.fields.WHATSAPP_PHONE_NUMBER_ID.helpText",
       },
       {
         key: "WHATSAPP_VERIFY_TOKEN",
-        label: "Verify Token",
+        labelKey: "controlPlane.channelCatalog.entries.whatsapp.fields.WHATSAPP_VERIFY_TOKEN.label",
         type: "secret",
         required: true,
-        helpText: "Token de verificação do webhook",
+        helpTextKey: "controlPlane.channelCatalog.entries.whatsapp.fields.WHATSAPP_VERIFY_TOKEN.helpText",
       },
       {
         key: "WHATSAPP_APP_SECRET",
-        label: "App Secret",
+        labelKey: "controlPlane.channelCatalog.entries.whatsapp.fields.WHATSAPP_APP_SECRET.label",
         type: "secret",
         required: true,
-        helpText: "App secret para verificação HMAC do webhook",
+        helpTextKey: "controlPlane.channelCatalog.entries.whatsapp.fields.WHATSAPP_APP_SECRET.helpText",
       },
     ],
   },
   {
     key: "discord",
-    label: "Discord",
-    tagline: "Agent API",
+    labelKey: "controlPlane.channelCatalog.entries.discord.label",
+    taglineKey: "controlPlane.channelCatalog.entries.discord.tagline",
     logoKey: "discord",
     gradientFrom: "#5865F2",
     gradientTo: "#4752C4",
@@ -94,17 +94,17 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "DISCORD_BOT_TOKEN",
-        label: "Agent Token",
+        labelKey: "controlPlane.channelCatalog.entries.discord.fields.DISCORD_BOT_TOKEN.label",
         type: "secret",
         required: true,
-        helpText: "Token do agent no Developer Portal",
+        helpTextKey: "controlPlane.channelCatalog.entries.discord.fields.DISCORD_BOT_TOKEN.helpText",
       },
     ],
   },
   {
     key: "slack",
-    label: "Slack",
-    tagline: "Bolt API",
+    labelKey: "controlPlane.channelCatalog.entries.slack.label",
+    taglineKey: "controlPlane.channelCatalog.entries.slack.tagline",
     logoKey: "slack",
     gradientFrom: "#4A154B",
     gradientTo: "#611F69",
@@ -112,31 +112,31 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "SLACK_BOT_TOKEN",
-        label: "Agent Token",
+        labelKey: "controlPlane.channelCatalog.entries.slack.fields.SLACK_BOT_TOKEN.label",
         type: "secret",
         required: true,
-        helpText: "Token do agent (xoxb-)",
+        helpTextKey: "controlPlane.channelCatalog.entries.slack.fields.SLACK_BOT_TOKEN.helpText",
       },
       {
         key: "SLACK_APP_TOKEN",
-        label: "App Token",
+        labelKey: "controlPlane.channelCatalog.entries.slack.fields.SLACK_APP_TOKEN.label",
         type: "secret",
         required: true,
-        helpText: "Token do app (xapp-)",
+        helpTextKey: "controlPlane.channelCatalog.entries.slack.fields.SLACK_APP_TOKEN.helpText",
       },
       {
         key: "SLACK_SIGNING_SECRET",
-        label: "Signing Secret",
+        labelKey: "controlPlane.channelCatalog.entries.slack.fields.SLACK_SIGNING_SECRET.label",
         type: "secret",
         required: true,
-        helpText: "Signing secret do app",
+        helpTextKey: "controlPlane.channelCatalog.entries.slack.fields.SLACK_SIGNING_SECRET.helpText",
       },
     ],
   },
   {
     key: "teams",
-    label: "Microsoft Teams",
-    tagline: "Agent Framework",
+    labelKey: "controlPlane.channelCatalog.entries.teams.label",
+    taglineKey: "controlPlane.channelCatalog.entries.teams.tagline",
     logoKey: "teams",
     gradientFrom: "#6264A7",
     gradientTo: "#464EB8",
@@ -144,24 +144,24 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "TEAMS_APP_ID",
-        label: "App ID",
+        labelKey: "controlPlane.channelCatalog.entries.teams.fields.TEAMS_APP_ID.label",
         type: "text",
         required: true,
-        helpText: "Application ID do Azure",
+        helpTextKey: "controlPlane.channelCatalog.entries.teams.fields.TEAMS_APP_ID.helpText",
       },
       {
         key: "TEAMS_APP_PASSWORD",
-        label: "App Password",
+        labelKey: "controlPlane.channelCatalog.entries.teams.fields.TEAMS_APP_PASSWORD.label",
         type: "secret",
         required: true,
-        helpText: "Client secret do Azure",
+        helpTextKey: "controlPlane.channelCatalog.entries.teams.fields.TEAMS_APP_PASSWORD.helpText",
       },
     ],
   },
   {
     key: "line",
-    label: "LINE",
-    tagline: "Messaging API",
+    labelKey: "controlPlane.channelCatalog.entries.line.label",
+    taglineKey: "controlPlane.channelCatalog.entries.line.tagline",
     logoKey: "line",
     gradientFrom: "#06C755",
     gradientTo: "#00B900",
@@ -169,24 +169,24 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "LINE_CHANNEL_SECRET",
-        label: "Channel Secret",
+        labelKey: "controlPlane.channelCatalog.entries.line.fields.LINE_CHANNEL_SECRET.label",
         type: "secret",
         required: true,
-        helpText: "Channel secret do console",
+        helpTextKey: "controlPlane.channelCatalog.entries.line.fields.LINE_CHANNEL_SECRET.helpText",
       },
       {
         key: "LINE_CHANNEL_ACCESS_TOKEN",
-        label: "Channel Access Token",
+        labelKey: "controlPlane.channelCatalog.entries.line.fields.LINE_CHANNEL_ACCESS_TOKEN.label",
         type: "secret",
         required: true,
-        helpText: "Channel access token",
+        helpTextKey: "controlPlane.channelCatalog.entries.line.fields.LINE_CHANNEL_ACCESS_TOKEN.helpText",
       },
     ],
   },
   {
     key: "messenger",
-    label: "Messenger",
-    tagline: "Graph API",
+    labelKey: "controlPlane.channelCatalog.entries.messenger.label",
+    taglineKey: "controlPlane.channelCatalog.entries.messenger.tagline",
     logoKey: "messenger",
     gradientFrom: "#0099FF",
     gradientTo: "#0077CC",
@@ -194,31 +194,31 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "MESSENGER_PAGE_ACCESS_TOKEN",
-        label: "Page Access Token",
+        labelKey: "controlPlane.channelCatalog.entries.messenger.fields.MESSENGER_PAGE_ACCESS_TOKEN.label",
         type: "secret",
         required: true,
-        helpText: "Page access token",
+        helpTextKey: "controlPlane.channelCatalog.entries.messenger.fields.MESSENGER_PAGE_ACCESS_TOKEN.helpText",
       },
       {
         key: "MESSENGER_VERIFY_TOKEN",
-        label: "Verify Token",
+        labelKey: "controlPlane.channelCatalog.entries.messenger.fields.MESSENGER_VERIFY_TOKEN.label",
         type: "secret",
         required: true,
-        helpText: "Token de verificação do webhook",
+        helpTextKey: "controlPlane.channelCatalog.entries.messenger.fields.MESSENGER_VERIFY_TOKEN.helpText",
       },
       {
         key: "MESSENGER_APP_SECRET",
-        label: "App Secret",
+        labelKey: "controlPlane.channelCatalog.entries.messenger.fields.MESSENGER_APP_SECRET.label",
         type: "secret",
         required: true,
-        helpText: "App secret",
+        helpTextKey: "controlPlane.channelCatalog.entries.messenger.fields.MESSENGER_APP_SECRET.helpText",
       },
     ],
   },
   {
     key: "signal",
-    label: "Signal",
-    tagline: "signal-cli",
+    labelKey: "controlPlane.channelCatalog.entries.signal.label",
+    taglineKey: "controlPlane.channelCatalog.entries.signal.tagline",
     logoKey: "signal",
     gradientFrom: "#3A76F0",
     gradientTo: "#2E5FBF",
@@ -226,24 +226,24 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "SIGNAL_PHONE_NUMBER",
-        label: "Phone Number",
+        labelKey: "controlPlane.channelCatalog.entries.signal.fields.SIGNAL_PHONE_NUMBER.label",
         type: "text",
         required: true,
-        helpText: "Número de telefone registrado",
+        helpTextKey: "controlPlane.channelCatalog.entries.signal.fields.SIGNAL_PHONE_NUMBER.helpText",
       },
       {
         key: "SIGNAL_CLI_URL",
-        label: "CLI URL",
+        labelKey: "controlPlane.channelCatalog.entries.signal.fields.SIGNAL_CLI_URL.label",
         type: "text",
         required: true,
-        helpText: "URL da API signal-cli",
+        helpTextKey: "controlPlane.channelCatalog.entries.signal.fields.SIGNAL_CLI_URL.helpText",
       },
     ],
   },
   {
     key: "instagram",
-    label: "Instagram",
-    tagline: "Graph API",
+    labelKey: "controlPlane.channelCatalog.entries.instagram.label",
+    taglineKey: "controlPlane.channelCatalog.entries.instagram.tagline",
     logoKey: "instagram",
     gradientFrom: "#E4405F",
     gradientTo: "#C13584",
@@ -251,17 +251,17 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     fields: [
       {
         key: "INSTAGRAM_PAGE_ACCESS_TOKEN",
-        label: "Page Access Token",
+        labelKey: "controlPlane.channelCatalog.entries.instagram.fields.INSTAGRAM_PAGE_ACCESS_TOKEN.label",
         type: "secret",
         required: true,
-        helpText: "Page access token",
+        helpTextKey: "controlPlane.channelCatalog.entries.instagram.fields.INSTAGRAM_PAGE_ACCESS_TOKEN.helpText",
       },
       {
         key: "INSTAGRAM_APP_SECRET",
-        label: "App Secret",
+        labelKey: "controlPlane.channelCatalog.entries.instagram.fields.INSTAGRAM_APP_SECRET.label",
         type: "secret",
         required: true,
-        helpText: "App secret",
+        helpTextKey: "controlPlane.channelCatalog.entries.instagram.fields.INSTAGRAM_APP_SECRET.helpText",
       },
     ],
   },

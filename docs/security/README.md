@@ -17,6 +17,8 @@ Use this set when you need:
 - [Threat model](threat-model.md)
 - [OWASP ASVS remediation matrix](asvs-remediation-matrix.md)
 - [Operational baseline](operations-baseline.md)
+- [MCP risk taxonomy](mcp-risk-taxonomy.md)
+- [Skill supply-chain scanner](skill-supply-chain-scanner.md)
 
 ## Scope Notes
 

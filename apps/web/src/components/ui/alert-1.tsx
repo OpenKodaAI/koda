@@ -5,6 +5,7 @@ import { X } from "lucide-react";
 import { cva, type VariantProps } from "class-variance-authority";
 import { Button } from "@/components/ui/button-1";
 import { cn } from "@/lib/utils";
+import { translate } from "@/lib/i18n";
 
 const alertVariants = cva(
   "flex w-full items-start gap-2.5 border transition-[transform,opacity,border-color,background-color,color] group-[.toaster]:w-full",
@@ -230,7 +231,7 @@ function Alert({
           mode="icon"
           type="button"
           onClick={onClose}
-          aria-label="Dismiss"
+          aria-label={translate("generated.ui.dismiss_c6ea6d98")}
           data-slot="alert-close"
           className="group size-6 shrink-0 self-start rounded-full text-[var(--icon-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--icon-primary)]"
         >

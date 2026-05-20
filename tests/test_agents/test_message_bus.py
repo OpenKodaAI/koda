@@ -6,17 +6,17 @@ import asyncio
 
 import pytest
 
-from koda.agents.message_bus import AgentMessageBus, get_message_bus
+from koda.agents.message_bus import InMemoryMessageBus, get_message_bus
 from koda.agents.models import DelegationRequest, DelegationResult
 
 
 @pytest.fixture
-def bus() -> AgentMessageBus:
-    return AgentMessageBus()
+def bus() -> InMemoryMessageBus:
+    return InMemoryMessageBus()
 
 
 @pytest.mark.asyncio
-async def test_send_and_receive(bus: AgentMessageBus) -> None:
+async def test_send_and_receive(bus: InMemoryMessageBus) -> None:
     msg_id = await bus.send("agent-1", "agent-2", "hello")
     assert msg_id.startswith("msg-")
     msg = await bus.receive("agent-2", timeout=1)
@@ -27,13 +27,13 @@ async def test_send_and_receive(bus: AgentMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_receive_timeout(bus: AgentMessageBus) -> None:
+async def test_receive_timeout(bus: InMemoryMessageBus) -> None:
     msg = await bus.receive("agent-1", timeout=0.05)
     assert msg is None
 
 
 @pytest.mark.asyncio
-async def test_inbox_full(bus: AgentMessageBus) -> None:
+async def test_inbox_full(bus: InMemoryMessageBus) -> None:
     bus._max_inbox_size = 2
     bus._inboxes["agent-x"] = asyncio.Queue(maxsize=2)
     await bus.send("a", "agent-x", "m1")
@@ -43,7 +43,7 @@ async def test_inbox_full(bus: AgentMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_broadcast(bus: AgentMessageBus) -> None:
+async def test_broadcast(bus: InMemoryMessageBus) -> None:
     bus._ensure_inbox("agent-1")
     bus._ensure_inbox("agent-2")
     bus._ensure_inbox("agent-3")
@@ -57,7 +57,7 @@ async def test_broadcast(bus: AgentMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_broadcast_with_exclude(bus: AgentMessageBus) -> None:
+async def test_broadcast_with_exclude(bus: InMemoryMessageBus) -> None:
     bus._ensure_inbox("agent-1")
     bus._ensure_inbox("agent-2")
     bus._ensure_inbox("agent-3")
@@ -66,7 +66,7 @@ async def test_broadcast_with_exclude(bus: AgentMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_list_agents(bus: AgentMessageBus) -> None:
+async def test_list_agents(bus: InMemoryMessageBus) -> None:
     bus._ensure_inbox("a1")
     bus._ensure_inbox("a2")
     agents = bus.list_agents()
@@ -76,7 +76,7 @@ async def test_list_agents(bus: AgentMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_message_log(bus: AgentMessageBus) -> None:
+async def test_message_log(bus: InMemoryMessageBus) -> None:
     await bus.send("a1", "a2", "msg1")
     await bus.send("a2", "a1", "msg2")
     log = bus.get_message_log()
@@ -89,7 +89,7 @@ async def test_message_log(bus: AgentMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_message_log_limit(bus: AgentMessageBus) -> None:
+async def test_message_log_limit(bus: InMemoryMessageBus) -> None:
     for i in range(10):
         await bus.send("a", "b", f"msg-{i}")
     log = bus.get_message_log(limit=3)
@@ -97,7 +97,7 @@ async def test_message_log_limit(bus: AgentMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_message_log_truncation(bus: AgentMessageBus) -> None:
+async def test_message_log_truncation(bus: InMemoryMessageBus) -> None:
     bus._max_log = 5
     for i in range(10):
         await bus.send("a", "b", f"msg-{i}")
@@ -105,7 +105,7 @@ async def test_message_log_truncation(bus: AgentMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delegation_timeout(bus: AgentMessageBus) -> None:
+async def test_delegation_timeout(bus: InMemoryMessageBus) -> None:
     req = DelegationRequest(from_agent="a1", to_agent="a2", task="do stuff", timeout=0.05)
     result = await bus.delegate(req)
     assert not result.success
@@ -113,7 +113,7 @@ async def test_delegation_timeout(bus: AgentMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delegation_success(bus: AgentMessageBus) -> None:
+async def test_delegation_success(bus: InMemoryMessageBus) -> None:
     async def resolver() -> None:
         msg = await bus.receive("a2", timeout=2)
         assert msg is not None
@@ -139,7 +139,7 @@ async def test_delegation_success(bus: AgentMessageBus) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delegation_depth_limit(bus: AgentMessageBus, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_delegation_depth_limit(bus: InMemoryMessageBus, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.config.INTER_AGENT_MAX_DELEGATION_DEPTH", 2)
     req = DelegationRequest(from_agent="a1", to_agent="a2", task="chain", delegation_depth=2)
     result = await bus.delegate(req)
@@ -148,7 +148,7 @@ async def test_delegation_depth_limit(bus: AgentMessageBus, monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
-async def test_delegation_inbox_full(bus: AgentMessageBus) -> None:
+async def test_delegation_inbox_full(bus: InMemoryMessageBus) -> None:
     bus._max_inbox_size = 1
     bus._inboxes["a2"] = asyncio.Queue(maxsize=1)
     await bus.send("x", "a2", "fill")
@@ -165,4 +165,40 @@ def test_get_message_bus_singleton(monkeypatch: pytest.MonkeyPatch) -> None:
     b1 = get_message_bus()
     b2 = get_message_bus()
     assert b1 is b2
+    monkeypatch.setattr(mb, "_bus", None)
+
+
+def test_inmemory_satisfies_messagebus_protocol() -> None:
+    from koda.agents.message_bus_iface import MessageBus
+
+    assert isinstance(InMemoryMessageBus(), MessageBus)
+
+
+def test_factory_default_returns_inmemory(monkeypatch: pytest.MonkeyPatch) -> None:
+    import koda.agents.message_bus as mb
+
+    monkeypatch.setattr(mb, "_bus", None)
+    monkeypatch.setattr("koda.config.INTER_AGENT_BUS_BACKEND", "memory")
+    assert isinstance(get_message_bus(), InMemoryMessageBus)
+    monkeypatch.setattr(mb, "_bus", None)
+
+
+def test_factory_postgres_without_dsn_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    import koda.agents.message_bus as mb
+
+    monkeypatch.setattr(mb, "_bus", None)
+    monkeypatch.setattr("koda.config.INTER_AGENT_BUS_BACKEND", "postgres")
+    monkeypatch.setattr("koda.config.POSTGRES_URL", "")
+    assert isinstance(get_message_bus(), InMemoryMessageBus)
+    monkeypatch.setattr(mb, "_bus", None)
+
+
+def test_factory_postgres_with_dsn_selects_postgres(monkeypatch: pytest.MonkeyPatch) -> None:
+    import koda.agents.message_bus as mb
+    from koda.agents.postgres_message_bus import PostgresMessageBus
+
+    monkeypatch.setattr(mb, "_bus", None)
+    monkeypatch.setattr("koda.config.INTER_AGENT_BUS_BACKEND", "postgres")
+    monkeypatch.setattr("koda.config.POSTGRES_URL", "postgresql://stub/db")
+    assert isinstance(get_message_bus(), PostgresMessageBus)
     monkeypatch.setattr(mb, "_bus", None)

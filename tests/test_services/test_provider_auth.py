@@ -142,7 +142,7 @@ def test_start_login_process_raises_file_not_found_when_cli_missing(monkeypatch)
         )
 
 
-# 7-provider HTTP runtime sentinels
+# OpenAI-compatible HTTP runtime sentinels
 
 _HTTP_OPENAI_COMPATIBLE_PROVIDERS = (
     "perplexity",
@@ -152,6 +152,7 @@ _HTTP_OPENAI_COMPATIBLE_PROVIDERS = (
     "groq",
     "deepseek",
     "xai",
+    "openrouter",
 )
 
 
@@ -168,13 +169,13 @@ def test_provider_api_key_env_key_registered(provider_id):
 
 @pytest.mark.parametrize("provider_id", _HTTP_OPENAI_COMPATIBLE_PROVIDERS)
 def test_provider_base_url_env_key_registered(provider_id):
-    """All 7 new HTTP providers support env override of their base URL."""
+    """All HTTP providers support env override of their base URL."""
     assert provider_id in provider_auth.PROVIDER_BASE_URL_ENV_KEYS
 
 
 @pytest.mark.parametrize("provider_id", _HTTP_OPENAI_COMPATIBLE_PROVIDERS)
 def test_new_providers_do_not_advertise_subscription_login(provider_id):
-    """None of the 7 new providers expose OAuth subscription login for API access."""
+    """None of the HTTP providers expose OAuth subscription login for API access."""
     assert not provider_auth.provider_supports_subscription_login(provider_id)
 
 
@@ -400,6 +401,8 @@ def test_claude_oauth_token_verify_uses_bearer_authorization(monkeypatch):
         ("deepseek", "https://api.deepseek.com"),
         # xAI docs: https://docs.x.ai/api
         ("xai", "https://api.x.ai"),
+        # OpenRouter docs: https://openrouter.ai/docs/api-keys
+        ("openrouter", "https://openrouter.ai/api/v1"),
     ],
 )
 def test_openai_compatible_default_base_url_matches_docs(provider_id, expected_default_base_url):
@@ -445,6 +448,68 @@ def test_openai_compatible_verify_exposes_detected_model_ids(monkeypatch):
     assert result.verified is True
     assert captured["url"] == "https://api.mistral.ai/v1/models"
     assert result.details["model_ids"] == ["mistral-large-latest", "codestral-latest"]
+
+
+def test_openrouter_verify_uses_key_endpoint_before_model_discovery(monkeypatch):
+    from urllib import request as urllib_request
+
+    calls: list[dict[str, object]] = []
+
+    def _fake(request, timeout=10):  # noqa: ARG001
+        url = str(request.full_url)
+        calls.append(
+            {
+                "url": url,
+                "headers": {key.lower(): value for key, value in request.header_items()},
+                "method": request.get_method(),
+            }
+        )
+        if url.endswith("/key"):
+            return _CapturedResponse(b'{"data": {"label": "Koda test"}}')
+        if url.endswith("/models"):
+            return _CapturedResponse(b'{"data": [{"id": "openrouter/auto"}, {"id": "~openai/gpt-mini-latest"}]}')
+        raise AssertionError(f"unexpected URL: {url}")
+
+    monkeypatch.setattr(urllib_request, "urlopen", _fake)
+
+    result = provider_auth.verify_provider_api_key("openrouter", "sk-or-v1-test")
+
+    assert result.verified is True
+    assert [call["url"] for call in calls] == [
+        "https://openrouter.ai/api/v1/key",
+        "https://openrouter.ai/api/v1/models",
+    ]
+    for call in calls:
+        headers = cast(dict, call["headers"])
+        assert headers.get("authorization") == "Bearer sk-or-v1-test"
+    assert result.details["key_label"] == "Koda test"
+    assert result.details["model_ids"] == ["openrouter/auto", "~openai/gpt-mini-latest"]
+
+
+def test_openrouter_verify_rejects_invalid_key_before_models(monkeypatch):
+    import io
+    from urllib import error as urllib_error
+    from urllib import request as urllib_request
+
+    calls: list[str] = []
+
+    def _fake(request, timeout=10):  # noqa: ARG001
+        calls.append(str(request.full_url))
+        raise urllib_error.HTTPError(
+            str(request.full_url),
+            401,
+            "Unauthorized",
+            hdrs=None,
+            fp=io.BytesIO(b'{"error":"invalid key"}'),
+        )
+
+    monkeypatch.setattr(urllib_request, "urlopen", _fake)
+
+    result = provider_auth.verify_provider_api_key("openrouter", "sk-or-v1-bad")
+
+    assert result.verified is False
+    assert result.auth_expired is True
+    assert calls == ["https://openrouter.ai/api/v1/key"]
 
 
 def test_ollama_api_key_verify_ignores_localhost_caller_base_url(monkeypatch):

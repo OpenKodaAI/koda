@@ -11,6 +11,7 @@ from typing import Any
 
 from koda.config import AGENT_ID, RUNBOOK_REVALIDATION_STALE_DAYS
 from koda.logging_config import get_logger
+from koda.memory.safety import assert_memory_text_safe
 from koda.state.memory_store import increment_memory_quality_counter
 from koda.state.primary import (
     get_primary_state_backend,
@@ -1079,6 +1080,16 @@ def upsert_knowledge_candidate(
 ) -> dict[str, Any]:
     now = _now_iso()
     scope = _primary_agent_id(agent_id)
+    assert_memory_text_safe(
+        {
+            "summary": summary,
+            "evidence": evidence,
+            "source_refs": source_refs,
+            "proposed_runbook": proposed_runbook,
+            "diff_summary": diff_summary,
+        },
+        surface="knowledge_candidate",
+    )
     if _primary_enabled(agent_id):
         row = run_coro_sync(
             primary_fetch_one(

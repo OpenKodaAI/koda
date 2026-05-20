@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Large static translation table; TypeScript/build still validate imports.
+    "src/lib/i18n-resources.ts",
+    "src/lib/i18n-generated-ui.ts",
     // Keep project config/entrypoint files out of the React rule set.
     "*.config.{js,cjs,mjs,ts}",
     "server.mjs",

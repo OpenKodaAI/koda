@@ -92,6 +92,19 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // Room photo URLs are content-addressed (`?v=<hash>`), so the asset is
+      // genuinely immutable for a given URL — cache hard. This rule comes
+      // after the catch-all `/api/:path*` block so its Cache-Control wins
+      // for matching paths.
+      {
+        source: "/api/control-plane/dashboard/squads/threads/:threadId/photo",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=31536000, immutable",
+          },
+        ],
+      },
     ];
   },
   async redirects() {

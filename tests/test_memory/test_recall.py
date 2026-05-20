@@ -16,7 +16,7 @@ from koda.memory.recall import (
     build_memory_resolution,
     clear_recall_cache,
 )
-from koda.memory.types import Memory, MemoryType, RecallResult
+from koda.memory.types import Memory, MemoryStatus, MemoryType, RecallResult
 
 
 @pytest.fixture(autouse=True)
@@ -359,6 +359,83 @@ async def test_build_memory_resolution_audits_full_considered_and_discarded_sets
     assert len(audit_kwargs["discarded"]) == 48
     assert audit_kwargs["total_considered"] == 50
     assert audit_kwargs["total_discarded"] == 48
+
+
+@pytest.mark.asyncio
+async def test_build_memory_resolution_drops_stale_and_sensitive_with_reasons() -> None:
+    stale = RecallResult(
+        memory=Memory(
+            user_id=111,
+            memory_type=MemoryType.FACT,
+            content="Old operational instruction",
+            importance=0.9,
+            created_at=datetime.now(),
+            id=31,
+            memory_status=MemoryStatus.STALE.value,
+        ),
+        relevance_score=0.05,
+    )
+    sensitive = RecallResult(
+        memory=Memory(
+            user_id=111,
+            memory_type=MemoryType.FACT,
+            content="Sensitive deployment key detail",
+            importance=0.9,
+            created_at=datetime.now(),
+            id=32,
+            sensitivity="sensitive",
+        ),
+        relevance_score=0.05,
+    )
+    mock_store = MagicMock()
+    mock_store.agent_id = "test"
+    mock_store.search = AsyncMock(return_value=[stale, sensitive])
+    mock_store.batch_update_access = MagicMock()
+
+    resolution = await build_memory_resolution(mock_store, "deployment", user_id=111)
+
+    assert resolution.selected == []
+    assert {item.reason for item in resolution.discarded} == {
+        "memory_status_stale",
+        "sensitive_memory_not_allowed",
+    }
+
+
+@pytest.mark.asyncio
+async def test_build_memory_resolution_serializes_namespace_and_redacted_audit() -> None:
+    memory = Memory(
+        user_id=111,
+        memory_type=MemoryType.FACT,
+        content="API key value should not appear in audit",
+        importance=0.9,
+        created_at=datetime.now(),
+        id=41,
+        namespace_kind="squad",
+        namespace_key="squad:alpha",
+        sensitivity="normal",
+    )
+    mock_store = MagicMock()
+    mock_store.agent_id = "test"
+    mock_store.search = AsyncMock(return_value=[RecallResult(memory=memory, relevance_score=0.05)])
+    mock_store.batch_update_access = MagicMock()
+
+    with patch("koda.memory.recall.log_memory_recall_audit") as mock_audit:
+        resolution = await build_memory_resolution(
+            mock_store,
+            "api",
+            user_id=111,
+            namespace_kind="squad",
+            namespace_key="squad:alpha",
+        )
+
+    assert resolution.explanations[0].namespace_kind == "squad"
+    assert resolution.explanations[0].namespace_key == "squad:alpha"
+    mock_store.search.assert_awaited_once()
+    assert mock_store.search.call_args.kwargs["namespace_kind"] == "squad"
+    audit_kwargs = mock_audit.call_args.kwargs
+    assert audit_kwargs["selected"][0]["namespace_kind"] == "squad"
+    assert "content_preview" in audit_kwargs["selected"][0]
+    assert "content" not in audit_kwargs["selected"][0]
 
 
 # Recall cache tests

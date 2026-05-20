@@ -54,8 +54,9 @@ class TeamsAdapter(ChannelAdapter):
     async def initialize(self, agent_id: str, secrets: dict[str, str]) -> None:
         if BotFrameworkAdapter is None:
             raise RuntimeError(
-                "botbuilder-core is not installed. "
-                "Install it with: pip install botbuilder-core botbuilder-integration-aiohttp"
+                "Microsoft Teams Bot Framework SDK is not bundled because current "
+                "botbuilder releases pin a vulnerable jsonpickle line. Install a "
+                "security-reviewed Bot Framework SDK before enabling Teams."
             )
         self._agent_id = agent_id
         self._app_id = secrets["TEAMS_APP_ID"]

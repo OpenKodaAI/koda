@@ -190,7 +190,7 @@ function ArtifactDownloadButton({
       type="button"
       onClick={() => void downloader.download(artifactDetail)}
       disabled={downloader.isDownloading}
-      aria-label={t("sessions.artifacts.download", { defaultValue: "Download" })}
+      aria-label={t("sessions.artifacts.download", undefined)}
       className={cn(
         "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60",
         className,
@@ -244,9 +244,7 @@ function LinkArtifactCard({
           href={href}
           target="_blank"
           rel="noreferrer"
-          aria-label={t("sessions.context.artifacts.openExternal", {
-            defaultValue: "Open external link",
-          })}
+          aria-label={t("sessions.context.artifacts.openExternal", undefined)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left"
         >
           {content}
@@ -256,9 +254,7 @@ function LinkArtifactCard({
           type="button"
           onClick={onOpen}
           disabled={!onOpen}
-          aria-label={t("sessions.context.artifacts.openPreview", {
-            defaultValue: "Open preview",
-          })}
+          aria-label={t("sessions.context.artifacts.openPreview", undefined)}
           className="flex min-w-0 flex-1 items-center gap-2 text-left disabled:cursor-default"
         >
           {content}
@@ -301,9 +297,7 @@ function TextArtifactCard({
         onClick={onOpen}
         disabled={!onOpen}
         className="flex min-w-0 flex-1 items-start gap-2.5 text-left disabled:cursor-default"
-        aria-label={t("sessions.context.artifacts.openPreview", {
-          defaultValue: "Open preview",
-        })}
+        aria-label={t("sessions.context.artifacts.openPreview", undefined)}
       >
         <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] bg-[var(--panel)] text-[var(--text-tertiary)]">
           <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
@@ -355,9 +349,7 @@ function FileArtifactCard({
         onClick={onOpen}
         disabled={!onOpen}
         className="flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:cursor-default"
-        aria-label={t("sessions.context.artifacts.openPreview", {
-          defaultValue: "Open preview",
-        })}
+        aria-label={t("sessions.context.artifacts.openPreview", undefined)}
       >
         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-chip)] bg-[var(--panel)] text-[var(--text-tertiary)]">
           <Icon className="h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -406,9 +398,7 @@ function ImageFallbackCard({
           {filename}
         </p>
         <p className="truncate text-[0.75rem] text-[var(--text-tertiary)]">
-          {t("sessions.artifacts.imagePreviewUnavailable", {
-            defaultValue: "Image preview unavailable",
-          })}
+          {t("sessions.artifacts.imagePreviewUnavailable", undefined)}
         </p>
         {meta ? (
           <p className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
@@ -421,7 +411,7 @@ function ImageFallbackCard({
           type="button"
           onClick={() => void downloader.download(artifactDetail)}
           disabled={downloader.isDownloading}
-          aria-label={t("sessions.artifacts.download", { defaultValue: "Download" })}
+          aria-label={t("sessions.artifacts.download", undefined)}
           className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60"
         >
           <Download className="icon-xs" strokeWidth={1.75} aria-hidden />
@@ -460,9 +450,7 @@ function ImageArtifactCard({
   }
 
   const label = artifactLabel(artifact, t);
-  const loadingLabel = t("sessions.artifacts.loadingImagePreview", {
-    defaultValue: "Loading image preview",
-  });
+  const loadingLabel = t("sessions.artifacts.loadingImagePreview", undefined);
 
   return (
     <div
@@ -479,9 +467,7 @@ function ImageArtifactCard({
         type="button"
         onClick={onOpen}
         disabled={!onOpen}
-        aria-label={t("sessions.context.artifacts.openPreview", {
-          defaultValue: "Open preview",
-        })}
+        aria-label={t("sessions.context.artifacts.openPreview", undefined)}
         className={
           imageLoaded
             ? "relative inline-flex max-w-full overflow-hidden leading-none disabled:cursor-default"
@@ -515,7 +501,7 @@ function ImageArtifactCard({
           type="button"
           onClick={() => void inlineDownloader.download(artifactDetail)}
           disabled={inlineDownloader.isDownloading}
-          aria-label={t("sessions.artifacts.download", { defaultValue: "Download" })}
+          aria-label={t("sessions.artifacts.download", undefined)}
           className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-chip)] bg-black/[0.28] text-white/70 opacity-100 transition-colors hover:bg-white/[0.14] hover:text-white disabled:opacity-50 sm:opacity-0 sm:group-hover:opacity-100"
         >
           <Download className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
@@ -563,9 +549,7 @@ function VideoArtifactCard({
         onClick={onOpen}
         disabled={!onOpen}
         className="relative inline-flex max-w-full overflow-hidden leading-none disabled:cursor-default"
-        aria-label={t("sessions.context.artifacts.openPreview", {
-          defaultValue: "Open preview",
-        })}
+        aria-label={t("sessions.context.artifacts.openPreview", undefined)}
       >
         <video
           preload="metadata"

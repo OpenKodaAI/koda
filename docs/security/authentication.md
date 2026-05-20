@@ -5,7 +5,7 @@ agent and integration through the web dashboard. This document describes how tha
 created, how sessions work, and how password recovery is designed to be safe on a public
 deployment without a mail relay.
 
-_Last reviewed: 2026-05-03._
+_Last reviewed: 2026-05-18._
 
 ## Account creation (first boot)
 
@@ -83,6 +83,27 @@ normal dashboard flow is unaffected.
   session for the same user and keeps the initiating session alive. Password _reset_ via
   recovery code revokes **all** sessions for the user.
 
+## Profile data
+
+The account page lets the authenticated operator update a display name and profile photo
+without changing credentials:
+
+- `PATCH /api/control-plane/auth/profile` updates `cp_operator_users.display_name`.
+  The value is trimmed, whitespace-collapsed, required, capped at 80 characters, and
+  rejected if it contains control characters.
+- `POST /api/control-plane/auth/profile/photo` accepts multipart field `photo`. The
+  backend caps input at 12 MiB, decodes the image with Pillow, applies EXIF orientation,
+  center-crops to a square, resizes to at most 512 px, strips metadata, and stores a
+  re-encoded JPEG under `${STATE_ROOT_DIR}/operator_profile_photos/{user_id}.jpg`.
+- `GET /api/control-plane/auth/profile/photo?v=<hash>` returns the processed JPEG with
+  immutable cache headers and an `ETag`.
+- `DELETE /api/control-plane/auth/profile/photo` removes the stored file and clears the
+  hash fields on the operator row.
+
+Profile changes require a valid operator session but do not require the current password.
+They are treated as low-risk profile preferences; credential and recovery-code changes keep
+their stronger password checks.
+
 ## Recovery code lifecycle
 
 - Codes are 12 uppercase characters (`XXXX-XXXX-XXXX`) from the `BOOTSTRAP_ALPHABET`
@@ -111,6 +132,7 @@ Per-IP, enforced in `koda/control_plane/rate_limit.py`:
 | `POST /auth/login`                                  | 5 requests / 5 min  |
 | `POST /auth/password/recover`                       | 5 requests / hour   |
 | `POST /auth/password/change`                        | 10 requests / hour  |
+| `PATCH /auth/profile`                               | 60 requests / hour  |
 | `POST /auth/register-owner`                         | 3 requests / hour   |
 | `POST /auth/recovery-codes/regenerate`              | 3 requests / hour   |
 | `POST /auth/bootstrap/exchange`                     | 10 requests / hour  |
@@ -178,6 +200,9 @@ embedding, form submissions pinned to the same origin. Auth pages also set
 | `security.operator_login_failed`                   | Login failure (with reason, never the attempted credentials) |
 | `security.operator_logout`                         | User-initiated logout                                        |
 | `security.operator_password_changed`               | Password change (authenticated)                              |
+| `security.operator_profile_updated`                 | Display name changed                                         |
+| `security.operator_profile_photo_updated`           | Profile photo uploaded/replaced                              |
+| `security.operator_profile_photo_deleted`           | Profile photo removed                                        |
 | `security.operator_password_reset`                 | Password reset via recovery code                             |
 | `security.operator_password_reset_failed`          | Identifier lookup or code-mismatch during reset              |
 | `security.operator_recovery_codes_regenerated`     | Fresh recovery batch issued                                  |

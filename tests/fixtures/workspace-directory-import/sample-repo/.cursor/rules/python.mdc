@@ -1,0 +1,7 @@
+---
+description: Python safety rules
+globs: ["*.py"]
+---
+
+Keep filesystem imports deterministic and covered by tests.
+

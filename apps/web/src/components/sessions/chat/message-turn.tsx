@@ -41,7 +41,7 @@ export function MessageTurn({
             {failed ? (
               <>
                 <span className="text-[var(--tone-danger-dot)]">
-                  {t("chat.thread.failed", { defaultValue: "Failed to send" })}
+                  {t("chat.thread.failed", undefined)}
                 </span>
                 {onRetry ? (
                   <button
@@ -49,7 +49,7 @@ export function MessageTurn({
                     onClick={onRetry}
                     className="rounded-[var(--radius-panel-sm)] px-1.5 py-0.5 text-[var(--accent)] transition-colors hover:bg-[var(--hover-tint)]"
                   >
-                    {t("chat.thread.retry", { defaultValue: "Retry" })}
+                    {t("chat.thread.retry", undefined)}
                   </button>
                 ) : null}
               </>

@@ -5,6 +5,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { SettingsSectionShell } from "@/components/control-plane/system/settings-section-shell";
 import { SettingsFieldGroup } from "@/components/control-plane/system/settings-field-group";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
+import { translate } from "@/lib/i18n";
 import {
   Select,
   SelectContent,
@@ -51,7 +52,7 @@ function FieldWithBadge({
 
 export function SectionGeneral() {
   const { draft, setField, sectionErrors } = useSystemSettings();
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const account = draft.values.account;
   const sourceBadges = draft.source_badges ?? {};
   const errors = sectionErrors.general;
@@ -67,15 +68,15 @@ export function SectionGeneral() {
   return (
     <SettingsSectionShell
       sectionId="general"
-      title="settings.sections.general.label"
-      description="settings.sections.general.description"
+      title={translate("generated.controlPlane.settings_sections_general_label_4c4121cf")}
+      description={translate("generated.controlPlane.settings_sections_general_description_168fdd40")}
     >
-      <SettingsFieldGroup title={tl("Regional")}>
+      <SettingsFieldGroup title={t("generated.controlPlane.regional_3e018351")}>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           <FieldWithBadge badgeKey="account.scheduler_default_timezone" sourceBadges={sourceBadges}>
             <FieldShell
-              label={tl("Timezone")}
-              description={tl("Fuso horário aplicado aos agendamentos e à operação global do sistema.")}
+              label={t("generated.controlPlane.timezone_e4728822")}
+              description={t("generated.controlPlane.fuso_horario_aplicado_aos_agendamentos_e_a_o_df9ad515")}
               error={findFieldError(errors, "account.scheduler_default_timezone")?.message}
             >
               <TimezonePicker
@@ -83,19 +84,19 @@ export function SectionGeneral() {
                 onValueChange={(v) => update({ scheduler_default_timezone: v })}
                 disabled={isEnvSourced("account.scheduler_default_timezone")}
                 title={
-                  isEnvSourced("account.scheduler_default_timezone") ? tl("Set via environment variable") : undefined
+                  isEnvSourced("account.scheduler_default_timezone") ? t("generated.controlPlane.set_via_environment_variable_b237c5c6") : undefined
                 }
-                placeholder={tl("Selecionar fuso horário…")}
-                searchPlaceholder={tl("Buscar fuso horário")}
-                emptyLabel={tl("Nenhum fuso encontrado")}
+                placeholder={t("generated.controlPlane.selecionar_fuso_horario_00c644d8")}
+                searchPlaceholder={t("generated.controlPlane.buscar_fuso_horario_be06fef7")}
+                emptyLabel={t("generated.controlPlane.nenhum_fuso_encontrado_14c89616")}
               />
             </FieldShell>
           </FieldWithBadge>
 
           <FieldWithBadge badgeKey="account.time_format" sourceBadges={sourceBadges}>
             <FieldShell
-              label={tl("Formato de hora")}
-              description={tl("Define como os horários são exibidos na interface e nos relatórios.")}
+              label={t("generated.controlPlane.formato_de_hora_253b138b")}
+              description={t("generated.controlPlane.define_como_os_horarios_sao_exibidos_na_inte_31ef59dd")}
               error={findFieldError(errors, "account.time_format")?.message}
             >
               <Select
@@ -104,13 +105,13 @@ export function SectionGeneral() {
                 disabled={isEnvSourced("account.time_format")}
               >
                 <SelectTrigger
-                  title={isEnvSourced("account.time_format") ? tl("Set via environment variable") : undefined}
+                  title={isEnvSourced("account.time_format") ? t("generated.controlPlane.set_via_environment_variable_b237c5c6") : undefined}
                 >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="24h">{tl("24 horas (14:30)")}</SelectItem>
-                  <SelectItem value="12h">{tl("12 horas (2:30 PM)")}</SelectItem>
+                  <SelectItem value="24h">{t("generated.controlPlane.24_horas_14_30_1fa48379")}</SelectItem>
+                  <SelectItem value="12h">{t("generated.controlPlane.12_horas_2_30_pm_420c549f")}</SelectItem>
                 </SelectContent>
               </Select>
             </FieldShell>

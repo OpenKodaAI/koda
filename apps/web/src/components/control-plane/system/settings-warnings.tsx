@@ -7,7 +7,7 @@ import { useSystemSettings } from "@/hooks/use-system-settings";
 
 export function SettingsWarnings() {
   const { localWarnings } = useSystemSettings();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   if (!localWarnings || localWarnings.length === 0) return null;
 
@@ -19,7 +19,7 @@ export function SettingsWarnings() {
       <AlertTitle>
         <p className="font-medium">
           {localWarnings.length === 1
-            ? tl("1 aviso de configuração")
+            ? t("generated.controlPlane.1_aviso_de_configuracao_af6f7c61")
             : tl(`${localWarnings.length} avisos de configuração`)}
         </p>
         <ul className="mt-1.5 flex flex-col gap-1">

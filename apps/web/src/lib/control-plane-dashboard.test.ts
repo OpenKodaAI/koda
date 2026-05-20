@@ -64,4 +64,30 @@ describe("control-plane-dashboard", () => {
       error: "dashboard offline",
     });
   });
+
+  it("treats softened upstream-unavailable responses as structured failures", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ items: [] }), {
+          status: 200,
+          headers: {
+            "Content-Type": "application/json",
+            "X-Koda-Upstream-Unavailable": "1",
+          },
+        }),
+    );
+
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      fetchControlPlaneDashboardJsonAllowError<{ items: unknown[] }>("/executions", {
+        fallbackError: "dashboard unavailable",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      status: 503,
+      data: { items: [] },
+      error: "dashboard unavailable",
+    });
+  });
 });

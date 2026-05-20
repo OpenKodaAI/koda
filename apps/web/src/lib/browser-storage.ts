@@ -86,8 +86,15 @@ export function readDocumentCookie(name: string) {
     return null;
   }
 
+  let cookie = "";
+  try {
+    cookie = document.cookie;
+  } catch {
+    return null;
+  }
+
   const key = `${encodeURIComponent(name)}=`;
-  const item = document.cookie
+  const item = cookie
     .split("; ")
     .find((entry) => entry.startsWith(key));
 
@@ -96,4 +103,16 @@ export function readDocumentCookie(name: string) {
   }
 
   return decodeURIComponent(item.slice(key.length));
+}
+
+export function writeDocumentCookie(value: string): void {
+  if (typeof document === "undefined") {
+    return;
+  }
+
+  try {
+    document.cookie = value;
+  } catch {
+    // Best effort. Some embedded/browser-extension contexts block storage APIs.
+  }
 }

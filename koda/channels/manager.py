@@ -12,7 +12,9 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from koda.channels.base import ChannelAdapter
+from koda.channels.gateway import evaluate_incoming_message
 from koda.channels.types import IncomingMessage
+from koda.config import ALLOWED_USER_IDS
 from koda.logging_config import get_logger
 
 log = get_logger(__name__)
@@ -85,8 +87,11 @@ def detect_configured_channels(secrets: dict[str, str]) -> list[str]:
 class ChannelManager:
     """Manages all active channel adapters for a single agent process."""
 
-    def __init__(self, agent_id: str) -> None:
+    def __init__(self, agent_id: str, *, legacy_allowed_user_ids: set[int] | None = None) -> None:
         self._agent_id = agent_id
+        self._legacy_allowed_user_ids = set(
+            ALLOWED_USER_IDS if legacy_allowed_user_ids is None else legacy_allowed_user_ids
+        )
         self._adapters: dict[str, ChannelAdapter] = {}
         self._message_callback: Callable[[IncomingMessage], Awaitable[None]] | None = None
         self._running = False
@@ -99,7 +104,36 @@ class ChannelManager:
         """Set the function that routes inbound messages into enqueue()."""
         self._message_callback = callback
         for adapter in self._adapters.values():
-            adapter.set_message_callback(callback)
+            adapter.set_message_callback(self._dispatch_allowed_message)
+
+    async def _dispatch_allowed_message(self, message: IncomingMessage) -> None:
+        """Run inbound messages through channel_gateway.v1 before enqueue."""
+        try:
+            decision = evaluate_incoming_message(
+                self._agent_id,
+                message,
+                legacy_allowed_user_ids=self._legacy_allowed_user_ids,
+            )
+        except Exception:
+            log.exception(
+                "channel_manager.gateway_failed_closed: agent=%s channel=%s",
+                self._agent_id,
+                message.channel.channel_type,
+            )
+            return
+        if not decision.allowed:
+            log.info(
+                "channel_manager.inbound_denied: agent=%s channel=%s identity=%s reason=%s",
+                self._agent_id,
+                message.channel.channel_type,
+                decision.identity_id,
+                decision.reason_code,
+            )
+            return
+        if self._message_callback is None:
+            log.warning("channel_manager.inbound_allowed_without_callback: agent=%s", self._agent_id)
+            return
+        await self._message_callback(message)
 
     async def initialize(self, secrets: dict[str, str]) -> None:
         """Discover configured channels and initialize their adapters."""
@@ -124,7 +158,7 @@ class ChannelManager:
             try:
                 await adapter.initialize(self._agent_id, secrets)
                 if self._message_callback:
-                    adapter.set_message_callback(self._message_callback)
+                    adapter.set_message_callback(self._dispatch_allowed_message)
                 self._adapters[channel_type] = adapter
                 log.info("channel_manager.adapter_ready: %s", channel_type)
             except Exception:

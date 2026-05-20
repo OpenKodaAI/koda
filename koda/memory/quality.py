@@ -144,6 +144,51 @@ def record_utility_event(agent_id: str | None, outcome: str, delta: int = 1) -> 
         return
 
 
+def apply_memory_utility_feedback(
+    *,
+    agent_id: str | None,
+    user_id: int,
+    task_id: int,
+    outcome: str,
+) -> int:
+    """Apply bounded quality feedback to memories selected for a task."""
+
+    normalized = str(outcome or "").strip().lower()
+    deltas = {
+        "useful": 0.03,
+        "noise": -0.03,
+        "misleading": -0.06,
+    }
+    if normalized not in deltas:
+        return 0
+    try:
+        from koda.memory.napkin import adjust_memory_quality_scores, get_memory_recall_audits
+
+        audits = get_memory_recall_audits(user_id, agent_id=_scope(agent_id), task_id=task_id, limit=3)
+        memory_ids: list[int] = []
+        for audit in audits:
+            selected = audit.get("selected")
+            if not isinstance(selected, list):
+                continue
+            for item in selected:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    memory_id = int(item.get("memory_id") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if memory_id > 0 and memory_id not in memory_ids:
+                    memory_ids.append(memory_id)
+        updated = adjust_memory_quality_scores(memory_ids, delta=deltas[normalized], agent_id=_scope(agent_id))
+        if updated:
+            record_memory_quality_counter(agent_id, "utility_quality_update", normalized, delta=updated)
+        if normalized in {"noise", "misleading"} and updated:
+            record_memory_quality_counter(agent_id, "utility_review_signal", normalized, delta=updated)
+        return updated
+    except Exception:
+        return 0
+
+
 def record_runbook_governance_action(
     agent_id: str | None, action: str, *, latency_seconds: float | None = None
 ) -> None:
@@ -169,6 +214,16 @@ def get_memory_quality_snapshot(agent_id: str | None) -> dict[str, Any]:
 
     def counter(*parts: str) -> int:
         return int(counters.get(_counter_key(*parts), 0))
+
+    safety_categories = [
+        "prompt_injection",
+        "exfiltration",
+        "secret_path",
+        "credential_leakage",
+        "invisible_unicode",
+    ]
+    safety = {category: counter("memory_safety", "blocked", category) for category in safety_categories}
+    safety["blocked_total"] = sum(safety.values())
 
     return {
         "agent_id": scope,
@@ -201,6 +256,7 @@ def get_memory_quality_snapshot(agent_id: str | None) -> dict[str, Any]:
             "noise": counter("utility", "noise"),
             "misleading": counter("utility", "misleading"),
         },
+        "safety": safety,
         "embedding_jobs": {
             "pending": int(embedding_jobs.get("pending", 0)),
             "processing": int(embedding_jobs.get("processing", 0)),

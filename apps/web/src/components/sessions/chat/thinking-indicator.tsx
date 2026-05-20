@@ -10,7 +10,7 @@ interface ThinkingIndicatorProps {
 
 export function ThinkingIndicator({ label, className }: ThinkingIndicatorProps) {
   const { t } = useAppI18n();
-  const resolvedLabel = label ?? t("chat.thread.thinking", { defaultValue: "Thinking…" });
+  const resolvedLabel = label ?? t("chat.thread.thinking", undefined);
 
   return (
     <div

@@ -32,6 +32,7 @@ type AuthContextValue = {
   operator: AuthOperator | null;
   isAuthenticated: boolean;
   signOut: () => Promise<void>;
+  updateOperator: (operator: AuthOperator) => void;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -51,10 +52,16 @@ export function AuthProvider({ initialAuth, children }: AuthProviderProps) {
   // which unmounts the AuthProvider (login lives outside AppShell's dashboard
   // tree). On the next sign-in, the provider remounts with override = null.
   const [override, setOverride] = useState<ClientOverride>(null);
-  const operator = override === "signed-out" ? null : (initialAuth?.operator ?? null);
+  const [clientAuth, setClientAuth] = useState<ControlPlaneAuthStatus | null>(null);
+  const [operatorOverride, setOperatorOverride] = useState<AuthOperator | null>(null);
+  const operator =
+    override === "signed-out"
+      ? null
+      : (operatorOverride ?? initialAuth?.operator ?? clientAuth?.operator ?? null);
 
   const signOut = useCallback(async () => {
     setOverride("signed-out");
+    setOperatorOverride(null);
     router.replace("/login");
     router.refresh();
     try {
@@ -67,6 +74,26 @@ export function AuthProvider({ initialAuth, children }: AuthProviderProps) {
       // the next request whether or not the upstream POST succeeded.
     }
   }, [router]);
+
+  const updateOperator = useCallback(
+    (nextOperator: AuthOperator) => {
+      setOperatorOverride(nextOperator);
+      setClientAuth((current) => ({
+        ...(current ?? initialAuth ?? {
+          authenticated: true,
+          has_owner: true,
+          bootstrap_required: false,
+          auth_mode: "local_account",
+          session_required: true,
+          recovery_available: false,
+        }),
+        authenticated: true,
+        operator: nextOperator,
+      }));
+      router.refresh();
+    },
+    [initialAuth, router],
+  );
 
   useEffect(() => {
     function handleForceSignOut(event: Event) {
@@ -95,13 +122,40 @@ export function AuthProvider({ initialAuth, children }: AuthProviderProps) {
     };
   }, [router, showToast, t]);
 
+  useEffect(() => {
+    if (override === "signed-out" || initialAuth?.operator || clientAuth?.operator) {
+      return;
+    }
+
+    let cancelled = false;
+    void fetch("/api/control-plane/auth/status", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json()) as ControlPlaneAuthStatus;
+      })
+      .then((status) => {
+        if (!cancelled && status?.authenticated) {
+          setClientAuth(status);
+        }
+      })
+      .catch(() => {
+        // A transient auth-status miss should not interrupt an otherwise valid
+        // dashboard render; the next navigation/focus can try again.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [clientAuth?.operator, initialAuth?.operator, override]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       operator,
       isAuthenticated: Boolean(operator),
       signOut,
+      updateOperator,
     }),
-    [operator, signOut],
+    [operator, signOut, updateOperator],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -86,6 +86,7 @@ def test_normalize_skill_policy() -> None:
             "max_skills": "3",
             "skill_budget_pct": "0.25",
             "enabled_skills": ["review", "", 123],
+            "enabled_skill_packages": ["safe_pack", ""],
             "disabled_skills": ["legacy"],
         }
     )
@@ -95,6 +96,7 @@ def test_normalize_skill_policy() -> None:
         "max_skills": 3,
         "skill_budget_pct": 0.25,
         "enabled_skills": ["review", "123"],
+        "enabled_skill_packages": ["safe_pack"],
         "disabled_skills": ["legacy"],
     }
 
@@ -167,7 +169,8 @@ def test_build_registry_filters_disabled_custom_skills() -> None:
         [
             {"id": "active", "name": "Active", "content": "body"},
             {"id": "inactive", "name": "Inactive", "content": "body", "enabled": False},
-        ]
+        ],
+        {"enabled_skills": ["active", "inactive"]},
     )
 
     assert sorted(registry.get_all()) == ["active"]
@@ -183,3 +186,12 @@ def test_build_registry_filters_by_policy() -> None:
     )
 
     assert sorted(registry.get_all()) == ["review"]
+
+
+def test_build_registry_requires_explicit_skill_allowlist() -> None:
+    registry = build_skill_registry_from_custom_skills(
+        [{"id": "review", "name": "Review", "content": "body"}],
+        {},
+    )
+
+    assert registry.get_all() == {}

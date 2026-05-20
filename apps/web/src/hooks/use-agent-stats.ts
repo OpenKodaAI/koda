@@ -8,12 +8,17 @@ import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { fetchControlPlaneDashboardJson } from "@/lib/control-plane-dashboard";
 import { queryKeys } from "@/lib/query/keys";
 
-export function useAgentStats(agentId?: string) {
+type UseAgentStatsOptions = {
+  recentTaskLimit?: number;
+};
+
+export function useAgentStats(agentId?: string, options?: UseAgentStatsOptions) {
+  const recentTaskLimit = options?.recentTaskLimit ?? 5;
   const query = useControlPlaneQuery<AgentStats[]>({
     tier: "live",
     queryKey: agentId
-      ? queryKeys.dashboard.agentStatsDetail(agentId)
-      : queryKeys.dashboard.agentStatsSummary(),
+      ? queryKeys.dashboard.agentStatsDetail(agentId, recentTaskLimit)
+      : queryKeys.dashboard.agentStatsSummary(recentTaskLimit),
     // Silent background refetches: only re-render subscribers when `data` or `error`
     // actually changes. Combined with `useContentStable` below this makes polling
     // invisible to the render tree when payload content hasn't moved.
@@ -32,6 +37,7 @@ export function useAgentStats(agentId?: string) {
           `/agents/${agentId}/stats`,
           {
             signal,
+            params: { recentTaskLimit },
             fallbackError: `Erro ao buscar stats: ${agentId}`,
           },
         );
@@ -40,6 +46,7 @@ export function useAgentStats(agentId?: string) {
 
       return fetchControlPlaneDashboardJson<AgentStats[]>("/agents/summary", {
         signal,
+        params: { recentTaskLimit },
         fallbackError: "Erro ao buscar stats dos agents",
       });
     },
@@ -49,7 +56,7 @@ export function useAgentStats(agentId?: string) {
   // even if the underlying query object churns identity on refetch.
   const stableQuery = useStableQueryData({
     data: query.data,
-    resetKey: agentId ?? "summary",
+    resetKey: `${agentId ?? "summary"}:${recentTaskLimit}`,
     isPending: query.isPending,
     isFetching: query.isFetching,
     error: query.error,

@@ -60,15 +60,15 @@ function NeighborRow({
   );
   const subtitle = isMemoryNode(node)
     ? `${getMemoryTypeLabel(node.memory_type, t)} · ${Math.round(node.importance * 100)}%`
-    : `${t("memory.inspector.syntheticLearning", { defaultValue: "Aprendizado" })} · ${node.member_count}`;
+    : `${t("memory.inspector.syntheticLearning", undefined)} · ${node.member_count}`;
   const relationLabel = relation
     ? relation.type === "semantic"
-      ? t("memory.inspector.semantic", { defaultValue: "Semântico" })
+      ? t("memory.inspector.semantic", undefined)
       : relation.type === "session"
-        ? t("common.session", { defaultValue: "Sessão" })
+        ? t("common.session", undefined)
         : relation.type === "source"
-          ? t("memory.inspector.source", { defaultValue: "Origem" })
-          : t("memory.inspector.learning", { defaultValue: "Aprendizado" })
+          ? t("memory.inspector.source", undefined)
+          : t("memory.inspector.learning", undefined)
     : null;
 
   return (
@@ -143,15 +143,11 @@ export function MemoryInspector({
         open={open}
         onOpenChange={onOpenChange}
         width="min(380px, 92vw)"
-        title={t("memory.inspector.selectPoint", { defaultValue: "Selecione uma memória" })}
-        description={t("memory.inspector.selectPointHint", {
-          defaultValue: "Clique em um ponto do grafo para ver seus detalhes aqui.",
-        })}
+        title={t("memory.inspector.selectPoint", undefined)}
+        description={t("memory.inspector.selectPointHint", undefined)}
       >
         <div className="px-5 py-6 text-[0.8125rem] leading-6 text-[color:var(--text-tertiary)]">
-          {t("memory.inspector.empty", {
-            defaultValue: "Nenhum nó selecionado. Explore o mapa para começar.",
-          })}
+          {t("memory.inspector.empty", undefined)}
         </div>
       </Drawer>
     );
@@ -161,7 +157,7 @@ export function MemoryInspector({
   const meta = getMemoryTypeMeta(isMemory ? node.memory_type : node.dominant_type);
   const typeLabel = isMemory
     ? getMemoryTypeLabel(node.memory_type, t)
-    : t("memory.inspector.learningBadge", { defaultValue: "Aprendizado" });
+    : t("memory.inspector.learningBadge", undefined);
 
   const statusTone = isMemory
     ? node.is_active
@@ -170,11 +166,11 @@ export function MemoryInspector({
     : "info";
   const statusLabel = isMemory
     ? node.is_active
-      ? t("memory.inspector.active", { defaultValue: "Ativa" })
-      : t("memory.inspector.inactive", { defaultValue: "Inativa" })
+      ? t("memory.inspector.active", undefined)
+      : t("memory.inspector.inactive", undefined)
     : semanticStatus === "available"
-      ? t("memory.health.semanticAvailable", { defaultValue: "Semântico ativo" })
-      : t("memory.health.semanticFallback", { defaultValue: "Fallback contextual" });
+      ? t("memory.health.semanticAvailable", undefined)
+      : t("memory.health.semanticFallback", undefined);
 
   const headerMeta = (
     <div className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
@@ -200,18 +196,18 @@ export function MemoryInspector({
       footer={
         <div className="flex items-center justify-between gap-2">
           <Button variant="ghost" size="sm" onClick={handleClose}>
-            {t("common.close", { defaultValue: "Fechar" })}
+            {t("common.close", undefined)}
           </Button>
           {onRecenter ? (
             <Button variant="secondary" size="sm" onClick={onRecenter}>
               <Focus className="icon-xs" strokeWidth={1.75} />
-              {t("memory.inspector.recenter", { defaultValue: "Centralizar" })}
+              {t("memory.inspector.recenter", undefined)}
             </Button>
           ) : null}
         </div>
       }
     >
-      <DrawerSection title={t("memory.inspector.content", { defaultValue: "Conteúdo" })}>
+      <DrawerSection title={t("memory.inspector.content", undefined)}>
         <p className="text-[0.8125rem] leading-6 text-[color:var(--text-primary)]">
           {isMemory ? node.content : node.summary}
         </p>
@@ -219,70 +215,70 @@ export function MemoryInspector({
 
       <div className="border-t border-[color:var(--divider-hair)]" />
 
-      <DrawerSection title={t("memory.inspector.details", { defaultValue: "Detalhes" })}>
+      <DrawerSection title={t("memory.inspector.details", undefined)}>
         {isMemory ? (
           <DetailGrid columns={2}>
             <DetailDatum
-              label={t("memory.inspector.importance", { defaultValue: "Importância" })}
+              label={t("memory.inspector.importance", undefined)}
               value={`${Math.round(node.importance * 100)}%`}
             />
             <DetailDatum
-              label={t("memory.inspector.accesses", { defaultValue: "Acessos" })}
+              label={t("memory.inspector.accesses", undefined)}
               value={`${node.access_count}`}
             />
             <DetailDatum
-              label={t("memory.inspector.lastUsed", { defaultValue: "Último uso" })}
+              label={t("memory.inspector.lastUsed", undefined)}
               value={
                 node.last_accessed
                   ? formatRelativeTime(node.last_accessed)
-                  : t("memory.inspector.notAccessedYet", { defaultValue: "—" })
+                  : t("memory.inspector.notAccessedYet", undefined)
               }
             />
             <DetailDatum
-              label={t("memory.inspector.createdAt", { defaultValue: "Criada" })}
+              label={t("memory.inspector.createdAt", undefined)}
               value={
                 node.created_at
                   ? formatDateTime(node.created_at)
-                  : t("memory.inspector.noDate", { defaultValue: "—" })
+                  : t("memory.inspector.noDate", undefined)
               }
             />
             <DetailDatum
-              label={t("memory.inspector.expiresAt", { defaultValue: "Expira" })}
+              label={t("memory.inspector.expiresAt", undefined)}
               value={
                 node.expires_at
                   ? formatRelativeTime(node.expires_at)
-                  : t("memory.inspector.never", { defaultValue: "Sem prazo" })
+                  : t("memory.inspector.never", undefined)
               }
             />
             <DetailDatum
-              label={t("common.session", { defaultValue: "Sessão" })}
+              label={t("common.session", undefined)}
               value={node.session_id ? truncateText(node.session_id, 18) : "—"}
             />
           </DetailGrid>
         ) : (
           <DetailGrid columns={2}>
             <DetailDatum
-              label={t("memory.inspector.dominantType", { defaultValue: "Tipo dominante" })}
+              label={t("memory.inspector.dominantType", undefined)}
               value={typeLabel}
             />
             <DetailDatum
-              label={t("memory.inspector.intensity", { defaultValue: "Intensidade" })}
+              label={t("memory.inspector.intensity", undefined)}
               value={`${Math.round(node.importance * 100)}%`}
             />
             <DetailDatum
-              label={t("memory.inspector.semanticStrength", { defaultValue: "Força semântica" })}
+              label={t("memory.inspector.semanticStrength", undefined)}
               value={
                 node.semantic_strength != null
                   ? `${Math.round(node.semantic_strength * 100)}%`
-                  : t("memory.inspector.contextualFallback", { defaultValue: "Contextual" })
+                  : t("memory.inspector.contextualFallback", undefined)
               }
             />
             <DetailDatum
-              label={t("memory.inspector.members", { defaultValue: "Membros" })}
+              label={t("memory.inspector.members", undefined)}
               value={`${node.member_count}`}
             />
             <DetailDatum
-              label={t("memory.inspector.sessions", { defaultValue: "Sessões" })}
+              label={t("memory.inspector.sessions", undefined)}
               value={`${node.session_ids.length}`}
             />
           </DetailGrid>
@@ -292,7 +288,7 @@ export function MemoryInspector({
       {isMemory && node.source_query_text ? (
         <>
           <div className="border-t border-[color:var(--divider-hair)]" />
-          <DrawerSection title={t("memory.inspector.origin", { defaultValue: "Origem" })}>
+          <DrawerSection title={t("memory.inspector.origin", undefined)}>
             <DetailBlock monospace>{node.source_query_text}</DetailBlock>
           </DrawerSection>
         </>
@@ -301,13 +297,11 @@ export function MemoryInspector({
       <div className="border-t border-[color:var(--divider-hair)]" />
 
       <DrawerSection
-        title={t("memory.inspector.relatedConnections", { defaultValue: "Conexões" })}
+        title={t("memory.inspector.relatedConnections", undefined)}
       >
         {relatedNodes.length === 0 ? (
           <p className="text-[0.8125rem] leading-6 text-[color:var(--text-tertiary)]">
-            {t("memory.inspector.noVisibleConnections", {
-              defaultValue: "Nenhuma conexão visível nos filtros atuais.",
-            })}
+            {t("memory.inspector.noVisibleConnections", undefined)}
           </p>
         ) : (
           <div className="-mx-1 flex flex-col">

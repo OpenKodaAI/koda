@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from koda.agent_contract import resolve_feature_filtered_tools, summarize_integration_grants
+from koda.agent_contract import normalize_string_list, resolve_feature_filtered_tools, summarize_integration_grants
 from koda.config import (
     AGENT_ALLOWED_TOOLS,
     AGENT_EXECUTION_POLICY,
@@ -28,6 +28,7 @@ from koda.config import (
 )
 from koda.services.cache_config import CACHE_ENABLED, SCRIPT_LIBRARY_ENABLED
 from koda.services.execution_policy import resolve_execution_policy_allowed_tool_ids
+from koda.services.tool_registry import TOOL_SCHEMA_VERSION, get_default_tool_registry
 
 # Compatibility export kept for older tests and monkeypatch-based callers.
 POSTGRES_ENABLED = _POSTGRES_ENABLED
@@ -138,9 +139,33 @@ def _filter_prompt_to_allowed_tools(prompt: str, allowed_tool_ids: set[str]) -> 
             "workflow_delete",
             "agent_send",
             "agent_receive",
+            "task",
             "agent_delegate",
             "agent_list_agents",
             "agent_broadcast",
+            "squad_thread_create",
+            "squad_post",
+            "squad_thread_history",
+            "squad_task_create",
+            "squad_task_claim",
+            "squad_task_update",
+            "squad_task_complete",
+            "squad_task_escalate",
+            "squad_task_list",
+            "squad_capabilities",
+            "squad_context",
+            "squad_coordinator_elect",
+            "squad_coordinator_demote",
+            "squad_coordinator_get",
+            "squad_router_tick",
+            "squad_telegram_bind",
+            "squad_telegram_unbind",
+            "squad_telegram_binding_get",
+            "squad_telegram_post",
+            "squad_inbox_drain",
+            "squad_dashboard_overview",
+            "squad_thread_overview",
+            "squad_artifact_list",
         }
         if tool_id not in allowed_tool_ids
     }
@@ -278,12 +303,15 @@ def build_agent_tools_prompt(
     tool_policy: dict[str, Any] | None = None,
     execution_policy: dict[str, Any] | None = None,
     resource_access_policy: dict[str, Any] | None = None,
+    skill_policy: dict[str, Any] | None = None,
     feature_flags: dict[str, bool] | None = None,
 ) -> str:
     """Generate the <agent_tools> section of the system prompt based on feature flags."""
     sections: list[str] = []
     resolved_feature_flags = {
         "browser": BROWSER_FEATURES_ENABLED,
+        "browser_network": BROWSER_NETWORK_INTERCEPTION_ENABLED,
+        "browser_session": BROWSER_SESSION_PERSISTENCE_ENABLED,
         "fileops": FILEOPS_ENABLED,
         "shell": SHELL_ENABLED,
         "git": GIT_ENABLED,
@@ -291,6 +319,7 @@ def build_agent_tools_prompt(
         "workflows": WORKFLOW_ENABLED,
         "inter_agent": INTER_AGENT_ENABLED,
         "snapshots": SNAPSHOT_ENABLED,
+        "webhooks": WEBHOOK_ENABLED,
         **dict(feature_flags or {}),
     }
     tool_policy = _configured_tool_policy(tool_policy)
@@ -381,6 +410,30 @@ The runtime can block low-confidence writes if the plan or sources are missing.
                         "instead of forcing the call."
                     ),
                     *[f"- {line}" for line in integration_grant_summaries],
+                    "",
+                ]
+            )
+        )
+
+    raw_allowed_tool_ids = normalize_string_list(tool_policy.get("allowed_tool_ids")) if tool_policy else []
+    registry_allowed_ids = sorted(
+        {*(allowed_tool_ids if has_tool_subset else available_tool_ids), *raw_allowed_tool_ids}
+    )
+    registry_entries = get_default_tool_registry(
+        feature_flags=resolved_feature_flags,
+        allowed_tool_ids=registry_allowed_ids,
+        skill_policy=skill_policy,
+    ).export_xml_prompt_entries()
+    if registry_entries:
+        sections.append(
+            "\n".join(
+                [
+                    "",
+                    "## Versioned Tool Registry",
+                    "This registry is the contract source for XML and native tool-call schemas.",
+                    f'<tool_registry schema_version="{TOOL_SCHEMA_VERSION}">',
+                    registry_entries,
+                    "</tool_registry>",
                     "",
                 ]
             )
@@ -613,10 +666,99 @@ Communicate with other agents, delegate tasks, and coordinate work.
 
 - `agent_send` — Send a message to another agent. Params: `{"to": "agent-2", "message": "Hello"}`
 - `agent_receive` — Receive the next message from inbox. Params: `{"timeout": 30}`
+- `task` — Delegate one ephemeral child run, or a bounded fan-out of child runs.
+  It waits for structured results.
+  Single params: `{"goal": "Inspect X", "prompt": "Summarize risk", "toolset": "read_only"}`
+  Fan-out params: `{"tasks": [{"goal": "A", "prompt": "..."}, {"goal": "B", "prompt": "..."}], "toolset": "read_only"}`
+  Use this for temporary subagent work. Do not use it for persistent Squad Room coordination.
 - `agent_delegate` — Delegate a task and wait for result.
   Params: `{"to": "agent-2", "task": "Analyze report", "timeout": 60}`
 - `agent_list_agents` — List known agents and inbox status. Params: `{}`
-- `agent_broadcast` — Send a message to all known agents. Params: `{"message": "Status update"}`""")
+- `agent_broadcast` — Send a message to all known agents. Params: `{"message": "Status update"}`
+
+### Squad Threads
+Persistent multi-agent conversations scoped to a (workspace_id, squad_id).
+
+- `squad_thread_create` — Open a new thread.
+  Params: `{"workspace_id": "...", "squad_id": "...", "title": "...",
+            "participants": [{"agent_id": "FRONTEND", "role": "worker"}],
+            "coordinator_agent_id": "PM"}`
+- `squad_post` — Post a message in a thread. Params: `{"thread_id": "<uuid>", "content": "..."}`
+- `squad_reply` — Reply to a thread message and optionally require agents to respond.
+  Params: `{"content": "...", "reply_to_message_id": "msg-42", "target_agent_ids": ["BACKEND"]}`
+- `squad_request_input` — Ask one or more active room agents for a bounded contribution.
+  Params: `{"target_agent_ids": ["QA"], "question": "Please verify the failure path."}`
+- `squad_follow_up` — Send a limited follow-up for an open reply obligation.
+  Params: `{"obligation_id": 12, "note": "Need your answer before synthesis."}`
+- `squad_synthesize` — Coordinator-only final synthesis for a reply cycle.
+  Params: `{"content": "Final answer...", "reply_to_message_id": "msg-42"}`
+- `squad_thread_history` — Read recent messages. Params: `{"thread_id": "<uuid>", "limit": 30}`
+
+### Squad Tasks
+Decompose squad work into tracked tasks. Single-owner-per-task via optimistic locking on `version`.
+
+- `squad_task_create` — Create a task in a thread.
+  Params: `{"thread_id": "<uuid>", "title": "...", "description": "...",
+            "kind": "research|design|backend|frontend|copy|review",
+            "assigned_agent_id": "BACKEND", "depends_on": ["<uuid>"],
+            "acceptance_criteria": ["..."], "idempotency_key": "..."}`
+- `squad_task_claim` — Atomically claim a pending task. Params: `{"task_id": "<uuid>", "ttl_seconds": 300}`
+- `squad_task_update` — Transition status (e.g., to `in_progress`, `blocked`).
+  Params: `{"task_id": "<uuid>", "new_status": "in_progress", "expected_version": 2}`
+- `squad_task_complete` — Mark done with deliverables.
+  Params: `{"task_id": "<uuid>", "result_summary": "...", "deliverables": ["<artifact_id>"]}`
+- `squad_task_escalate` — Escalate to coordinator. Params: `{"task_id": "<uuid>", "reason": "..."}`
+- `squad_task_list` — List tasks. Params: `{"thread_id": "<uuid>"}` or `{"assigned_agent_id": "..."}`
+- `squad_capabilities` — Read squad members' capability summaries for routing.
+  Params: `{"squad_id": "<id>", "exclude_agent_id": "<self>"}`
+- `squad_context` — Snapshot of a thread (members, recent transcript, active tasks).
+  Params: `{"thread_id": "<uuid>", "transcript_limit": 8}`
+- `squad_artifact_list` — List visible artifacts pinned/associated with a thread.
+  Params: `{"thread_id": "<uuid>"}`
+
+### Squad Coordinator
+A squad MAY have an elected coordinator that orchestrates the team. Without one,
+routing falls back to @mention + capability scoring.
+
+- `squad_coordinator_elect` — Promote an agent to coordinator.
+  Params: `{"squad_id": "<id>", "agent_id": "PM", "force_replace": false, "reason": "..."}`
+  Validation reads the real AgentSpec from the control plane; caller-provided
+  tool lists are ignored.
+- `squad_coordinator_demote` — Demote the current coordinator. Params: `{"squad_id": "<id>", "reason": "..."}`
+- `squad_coordinator_get` — Show current coordinator + recent history.
+  Params: `{"squad_id": "<id>", "history_limit": 5}`
+- `squad_router_tick` — Run one synchronous sweep that reverts expired claims to `pending`.
+  Admin tool — the router daemon does this periodically once started. Params: `{}`
+
+### Squad ↔ Telegram Binding
+Bind a squad to a Telegram supergroup so inbound messages (and forum-topic
+posts) route to the right squad thread.
+
+- `squad_telegram_bind` — Bind a squad to a chat.
+  Params: `{"squad_id": "<id>", "telegram_chat_id": -100123, "chat_title": "...",
+            "is_forum": true, "force": false}`
+- `squad_telegram_unbind` — Remove the binding. Params: `{"squad_id": "<id>"}`
+- `squad_telegram_binding_get` — Look up by squad or by chat.
+  Params: `{"squad_id": "<id>"}` or `{"telegram_chat_id": -100123}`
+- `squad_telegram_post` — Post your agent reply into the bound forum topic AND
+  persist it as ``agent_text`` in the thread audit log. Audit always succeeds;
+  Telegram failures are reported with the audit msg id.
+  Params: `{"thread_id": "<uuid>", "content": "...", "agent_label": "Frontend Dev"}`
+- `squad_inbox_drain` — Drain pending bus messages addressed to you. Squad-routed
+  user inputs arrive here as ``kind=squad_thread_input`` with ``thread_id`` /
+  ``telegram_chat_id`` in metadata. Decide per message whether to respond via
+  ``squad_telegram_post`` or ignore. Params: `{"limit": 20}`
+
+### Squad Dashboard
+Aggregated read views for operators and dashboard renderers.
+
+- `squad_dashboard_overview` — Per-squad summary (thread counts, task counts,
+  coordinator, member count, total cost). Optional ``workspace_id`` filter.
+  Params: `{"workspace_id": "<id>"}` or `{}`
+- `squad_thread_overview` — Single thread bundle (thread + participants +
+  recent messages + active tasks + coordinator). Reuses ``ctx.squad_thread_id``
+  when no explicit ``thread_id`` is given.
+  Params: `{"thread_id": "<uuid>", "message_limit": 30, "task_limit": 30}`""")
 
     if FILEOPS_ENABLED:
         sections.append("""

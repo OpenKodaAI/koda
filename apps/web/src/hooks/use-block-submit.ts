@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useToast } from "@/hooks/use-toast";
 import { mutateControlPlaneDashboardJson } from "@/lib/control-plane-dashboard";
 import { queryKeys } from "@/lib/query/keys";
 import {
@@ -34,6 +35,7 @@ export function useBlockSubmit({
   blockId,
 }: UseBlockSubmitArgs): UseBlockSubmitResult {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [isPending, setIsPending] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,14 +78,14 @@ export function useBlockSubmit({
         return response;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unable to submit";
-        setError(message);
+        showToast(message, "error");
         return null;
       } finally {
         inflightRef.current = false;
         setIsPending(false);
       }
     },
-    [agentId, blockId, isSubmitted, queryClient, sessionId],
+    [agentId, blockId, isSubmitted, queryClient, sessionId, showToast],
   );
 
   return { submit, isPending, isSubmitted, error };

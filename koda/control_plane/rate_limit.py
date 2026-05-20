@@ -43,6 +43,7 @@ _SENSITIVE_ENDPOINT_BUDGETS: dict[str, tuple[int, int]] = {
     "/api/control-plane/auth/login": (10, 300),
     "/api/control-plane/auth/password/recover": (10, 3600),
     "/api/control-plane/auth/password/change": (20, 3600),
+    "/api/control-plane/auth/profile": (60, 3600),
     "/api/control-plane/auth/register-owner": (30, 3600),
     "/api/control-plane/auth/recovery-codes/regenerate": (10, 3600),
     "/api/control-plane/auth/bootstrap/exchange": (30, 3600),

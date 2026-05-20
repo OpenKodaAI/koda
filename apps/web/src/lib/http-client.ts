@@ -46,7 +46,13 @@ export async function parseResponseError(
 ) {
   const payload = await response.json().catch(() => null);
   if (payload && typeof payload === "object" && "error" in payload) {
-    return String(payload.error);
+    const error = payload.error;
+    if (error && typeof error === "object" && "message" in error) {
+      const message = String((error as { message?: unknown }).message ?? "").trim();
+      const userAction = String((error as { user_action?: unknown }).user_action ?? "").trim();
+      return [message, userAction].filter(Boolean).join(" ");
+    }
+    return String(error);
   }
   return fallback;
 }

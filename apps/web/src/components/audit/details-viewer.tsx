@@ -1,4 +1,6 @@
- "use client";
+"use client";
+
+import { translate } from "@/lib/i18n";
 
 import type { ReactNode } from "react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
@@ -9,7 +11,7 @@ interface DetailsViewerProps {
 
 function renderValue(value: unknown, indent: number): ReactNode {
   if (value === null || value === undefined) {
-    return <span className="syn-null">null</span>;
+    return <span className="syn-null">{translate("generated.executions.null_62da6872")}</span>;
   }
 
   if (typeof value === "boolean") {
@@ -25,8 +27,7 @@ function renderValue(value: unknown, indent: number): ReactNode {
   if (typeof value === "string") {
     return (
       <span className="syn-string">
-        &quot;{value}&quot;
-      </span>
+        {translate("generated.executions.quot_93fed035")}{value}{translate("generated.executions.quot_93fed035")}</span>
     );
   }
 
@@ -60,7 +61,7 @@ function renderValue(value: unknown, indent: number): ReactNode {
         <span className="syn-bracket">{"{"}</span>
         {entries.map(([key, val], i) => (
           <div key={key} style={{ paddingLeft: `${(indent + 1) * 16}px` }}>
-            <span className="syn-key">&quot;{key}&quot;</span>
+            <span className="syn-key">{translate("generated.executions.quot_93fed035")}{key}{translate("generated.executions.quot_93fed035")}</span>
             <span className="syn-bracket">: </span>
             {renderValue(val, indent + 1)}
             {i < entries.length - 1 && (
@@ -79,26 +80,26 @@ function renderValue(value: unknown, indent: number): ReactNode {
 }
 
 export function DetailsViewer({ data }: DetailsViewerProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const entries = Object.entries(data);
 
   return (
     <div className="overflow-x-auto rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]">
       <div className="flex items-center justify-between border-b border-[var(--border-subtle)] px-4 py-2.5">
         <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
-          {tl("JSON")}
+          {t("generated.executions.json_58606a23")}
         </span>
       </div>
       <div className="p-4">
         <pre className="font-mono text-[12px] leading-6">
           {entries.length === 0 ? (
-            <span className="syn-null italic">{tl("Vazio")}</span>
+            <span className="syn-null italic">{t("generated.executions.vazio_08de85cc")}</span>
           ) : (
             <span>
               <span className="syn-bracket">{"{"}</span>
               {entries.map(([key, val], i) => (
                 <div key={key} style={{ paddingLeft: "16px" }}>
-                  <span className="syn-key">&quot;{key}&quot;</span>
+                  <span className="syn-key">{translate("generated.executions.quot_93fed035")}{key}{translate("generated.executions.quot_93fed035")}</span>
                   <span className="syn-bracket">: </span>
                   {renderValue(val, 1)}
                   {i < entries.length - 1 && (

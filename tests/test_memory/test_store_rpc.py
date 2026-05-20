@@ -86,3 +86,81 @@ async def test_memory_store_search_sources_with_memory_engine(monkeypatch: pytes
 
     assert [item.memory.id for item in results] == [2, 1]
     assert results[0].selection_reasons[-1] == "rust_grpc_recall"
+
+
+@pytest.mark.asyncio
+async def test_memory_store_search_filters_namespace_and_sensitive(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = MemoryStore("AGENT_A")
+
+    class _FakeEngine:
+        async def start(self) -> None:
+            return None
+
+        async def recall(self, **_kwargs: object) -> list[dict[str, object]]:
+            return [
+                {
+                    "score": 0.1,
+                    "retrieval_source": "lexical",
+                    "layer": "conversational",
+                    "memory": {
+                        "id": 1,
+                        "user_id": 1,
+                        "memory_type": "fact",
+                        "content": "agent scoped",
+                        "agent_id": "agent_a",
+                        "namespace_kind": "agent",
+                        "namespace_key": "agent_a",
+                        "sensitivity": "normal",
+                    },
+                },
+                {
+                    "score": 0.1,
+                    "retrieval_source": "lexical",
+                    "layer": "conversational",
+                    "memory": {
+                        "id": 2,
+                        "user_id": 1,
+                        "memory_type": "fact",
+                        "content": "squad scoped",
+                        "agent_id": "agent_a",
+                        "namespace_kind": "squad",
+                        "namespace_key": "squad:alpha",
+                        "sensitivity": "normal",
+                    },
+                },
+                {
+                    "score": 0.1,
+                    "retrieval_source": "lexical",
+                    "layer": "conversational",
+                    "memory": {
+                        "id": 3,
+                        "user_id": 1,
+                        "memory_type": "fact",
+                        "content": "sensitive scoped",
+                        "agent_id": "agent_a",
+                        "namespace_kind": "agent",
+                        "namespace_key": "agent_a",
+                        "sensitivity": "sensitive",
+                    },
+                },
+            ]
+
+        def health(self) -> dict[str, object]:
+            return {
+                "ready": True,
+                "cutover_allowed": True,
+                "details": {"capabilities": "recall"},
+            }
+
+    monkeypatch.setattr(store, "_memory_engine", _FakeEngine())
+    monkeypatch.setattr(store, "_memory_engine_started", False)
+
+    results = await store.search(
+        "scoped",
+        user_id=1,
+        namespace_kind="agent",
+        namespace_key="agent_a",
+        include_sensitive=False,
+    )
+
+    assert [item.memory.id for item in results] == [1]

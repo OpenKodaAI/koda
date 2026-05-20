@@ -39,6 +39,7 @@ ProviderId = Literal[
     "groq",
     "deepseek",
     "xai",
+    "openrouter",
 ]
 ProviderAuthMode = Literal["api_key", "subscription_login", "local"]
 
@@ -55,6 +56,7 @@ MANAGED_PROVIDER_IDS: tuple[ProviderId, ...] = (
     "groq",
     "deepseek",
     "xai",
+    "openrouter",
 )
 PROVIDER_API_KEY_ENV_KEYS: dict[ProviderId, str] = {
     "claude": "ANTHROPIC_API_KEY",
@@ -69,6 +71,7 @@ PROVIDER_API_KEY_ENV_KEYS: dict[ProviderId, str] = {
     "groq": "GROQ_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "xai": "XAI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
 }
 PROVIDER_AUTH_TOKEN_ENV_KEYS: dict[str, str] = {
     "claude": "ANTHROPIC_AUTH_TOKEN",
@@ -86,6 +89,7 @@ PROVIDER_AUTH_MODE_ENV_KEYS: dict[ProviderId, str] = {
     "groq": "GROQ_AUTH_MODE",
     "deepseek": "DEEPSEEK_AUTH_MODE",
     "xai": "XAI_AUTH_MODE",
+    "openrouter": "OPENROUTER_AUTH_MODE",
 }
 PROVIDER_VERIFIED_ENV_KEYS: dict[ProviderId, str] = {
     "claude": "CLAUDE_CONNECTION_VERIFIED",
@@ -100,6 +104,7 @@ PROVIDER_VERIFIED_ENV_KEYS: dict[ProviderId, str] = {
     "groq": "GROQ_CONNECTION_VERIFIED",
     "deepseek": "DEEPSEEK_CONNECTION_VERIFIED",
     "xai": "XAI_CONNECTION_VERIFIED",
+    "openrouter": "OPENROUTER_CONNECTION_VERIFIED",
 }
 PROVIDER_PROJECT_ENV_KEYS: dict[ProviderId, str] = {
     "gemini": "GOOGLE_CLOUD_PROJECT",
@@ -113,6 +118,7 @@ PROVIDER_BASE_URL_ENV_KEYS: dict[ProviderId, str] = {
     "groq": "GROQ_API_BASE_URL",
     "deepseek": "DEEPSEEK_API_BASE_URL",
     "xai": "XAI_API_BASE_URL",
+    "openrouter": "OPENROUTER_API_BASE_URL",
 }
 PROVIDER_TITLES: dict[ProviderId, str] = {
     "claude": "Anthropic",
@@ -127,6 +133,7 @@ PROVIDER_TITLES: dict[ProviderId, str] = {
     "groq": "Groq",
     "deepseek": "DeepSeek",
     "xai": "xAI Grok",
+    "openrouter": "OpenRouter",
 }
 
 _ANSI_ESCAPE_RE = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
@@ -366,11 +373,16 @@ def ollama_api_url(base_url: str, path: str, *, auth_mode: str = "local") -> str
 
 
 def provider_command_present(provider_id: str, base_env: dict[str, str] | None = None) -> bool:
-    if provider_id.strip().lower() == "elevenlabs":
+    normalized = provider_id.strip().lower()
+    if normalized == "elevenlabs":
         return True
-    if provider_id.strip().lower() == "kokoro":
+    if normalized == "kokoro":
         return True
-    if provider_id.strip().lower() == "whispercpp":
+    if normalized == "supertonic":
+        return True
+    if normalized in _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES:
+        return True
+    if normalized == "whispercpp":
         env = {**os.environ, **dict(base_env or {})}
         whisper_enabled = str(env.get("WHISPER_ENABLED") or "true").strip().lower()
         if whisper_enabled in {"false", "0", "no"}:
@@ -389,7 +401,7 @@ def provider_command_present(provider_id: str, base_env: dict[str, str] | None =
             and bool(whisper_model)
             and (Path(whisper_model).expanduser().exists() or managed_model_present)
         )
-    if provider_id.strip().lower() == "ollama":
+    if normalized == "ollama":
         env = _provider_command_env(base_env)
         base_url_key = PROVIDER_BASE_URL_ENV_KEYS["ollama"]
         return bool(str(env.get(base_url_key) or provider_default_base_url("ollama", "local")).strip())
@@ -844,6 +856,14 @@ _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES: dict[str, dict[str, Any]] = {
         "account_label": "xAI Console",
         "plan_label": "API key",
     },
+    "openrouter": {
+        "default_base_url": "https://openrouter.ai/api/v1",
+        "probe": "key_then_models",
+        "key_path": "/key",
+        "models_path": "/models",
+        "account_label": "OpenRouter",
+        "plan_label": "API key",
+    },
 }
 
 
@@ -899,31 +919,74 @@ def _verify_openai_compatible_api_key(
             checked_via="api_key",
             details={},
         )
-    if profile.get("probe") == "models" and profile.get("models_path"):
-        verify_url = effective_base.rstrip("/") + str(profile["models_path"])
-        method = "GET"
-    else:
-        verify_url = effective_base.rstrip("/") + str(profile.get("health_path", "/"))
-        method = "GET"
     headers: dict[str, str] = {
         "Accept": "application/json",
         "User-Agent": "koda/control-plane",
     }
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    request = urllib_request.Request(verify_url, headers=headers, method=method)
-    with urllib_request.urlopen(request, timeout=10) as response:
-        status = response.status
-        body = response.read().decode("utf-8", "replace")
+
+    def _get_json(path: str) -> tuple[int, Any]:
+        verify_url = effective_base.rstrip("/") + path
+        request = urllib_request.Request(verify_url, headers=headers, method="GET")
+        with urllib_request.urlopen(request, timeout=10) as response:
+            status = response.status
+            body = response.read().decode("utf-8", "replace")
+        if not body:
+            return status, {}
+        with suppress(json.JSONDecodeError):
+            return status, json.loads(body)
+        return status, {}
+
+    if profile.get("probe") == "key_then_models" and profile.get("key_path"):
+        status, key_payload = _get_json(str(profile["key_path"]))
+        model_ids: list[str] = []
+        models_payload = False
+        details: dict[str, Any] = {
+            "http_status": status,
+            "key_payload": bool(key_payload),
+            "models_payload": False,
+            "model_ids": model_ids,
+        }
+        if profile.get("models_path"):
+            try:
+                models_status, models = _get_json(str(profile["models_path"]))
+            except Exception as exc:  # noqa: BLE001 - a valid key must not fail because model discovery is flaky
+                details["models_error"] = str(exc)
+            else:
+                models_payload = bool(models)
+                model_ids = _extract_model_ids_from_payload(provider_id, models)
+                details.update(
+                    {
+                        "models_http_status": models_status,
+                        "models_payload": models_payload,
+                        "model_ids": model_ids,
+                    }
+                )
+        account_label = str(profile.get("account_label") or provider_id.capitalize())
+        if isinstance(key_payload, dict):
+            key_data = key_payload.get("data")
+            if isinstance(key_data, dict):
+                label = str(key_data.get("label") or "").strip()
+                if label:
+                    details["key_label"] = label
+        return ProviderVerificationResult(
+            provider_id=cast(ProviderId, provider_id),
+            auth_mode="api_key",
+            verified=status < 400,
+            account_label=account_label,
+            plan_label=str(profile.get("plan_label") or "API key"),
+            checked_via="api_key",
+            details=details,
+        )
+
+    if profile.get("probe") == "models" and profile.get("models_path"):
+        status, payload = _get_json(str(profile["models_path"]))
+    else:
+        status, payload = _get_json(str(profile.get("health_path", "/")))
     verified = status < 400
     if profile.get("probe") == "health":
         verified = status < 500
-    payload: dict[str, Any] = {}
-    if body:
-        with suppress(json.JSONDecodeError):
-            decoded = json.loads(body)
-            if isinstance(decoded, dict):
-                payload = decoded
     return ProviderVerificationResult(
         provider_id=cast(ProviderId, provider_id),
         auth_mode="api_key",

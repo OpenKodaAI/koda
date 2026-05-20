@@ -1,12 +1,20 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   detectTrigger,
   type TriggerMatch,
 } from "@/components/sessions/chat/composer/trigger-detection";
 
 export type ComposerMenuKind = "slash" | "mention";
+
+export interface ComposerTriggerSource {
+  /** Returns the caret index in plain text, or null when unavailable. */
+  getCaretIndex: () => number | null;
+  /** Returns the focus-target DOM node so the hook can ignore selection
+   * changes happening outside the composer. */
+  getDomNode: () => Element | null;
+}
 
 export interface ComposerTriggersState {
   caretPos: number | null;
@@ -18,7 +26,7 @@ export interface ComposerTriggersState {
   dismissActive: () => void;
   /** Programmatic close (e.g. after selection). Same semantics as dismiss. */
   closeActive: () => void;
-  /** Sync caret from a textarea event handler. */
+  /** Sync caret from an event handler. */
   syncFromTextarea: () => void;
 }
 
@@ -28,35 +36,31 @@ function rangeEqual(a: TriggerMatch | null, b: TriggerMatch | null) {
 }
 
 /**
- * Tracks caret position inside `textareaRef` and derives whether the slash
- * or mention menu should be open based on the value and the current caret.
- *
- * Dismissals (Esc) are remembered until the caret leaves the dismissed range,
- * so retyping after dismiss does not re-open the same menu instantly.
+ * Tracks caret position inside the composer's input and derives whether the
+ * slash or mention menu should be open based on the value and the current
+ * caret. Dismissals (Esc) are remembered until the caret leaves the dismissed
+ * range, so retyping after dismiss does not re-open the same menu instantly.
  */
 export function useComposerTriggers(
   value: string,
-  textareaRef: RefObject<HTMLTextAreaElement | null>,
+  source: ComposerTriggerSource,
 ): ComposerTriggersState {
   const [caretPos, setCaretPos] = useState<number | null>(null);
   const [dismissed, setDismissed] = useState<TriggerMatch | null>(null);
 
   const syncFromTextarea = useCallback(() => {
-    const node = textareaRef.current;
-    if (!node) {
+    const next = source.getCaretIndex();
+    if (next === null) {
       setCaretPos(null);
       return;
     }
-    const next = node.selectionStart ?? node.value.length;
     setCaretPos((prev) => (prev === next ? prev : next));
-  }, [textareaRef]);
+  }, [source]);
 
-  // Listen to selectionchange so caret updates from arrow keys / mouse clicks
-  // without depending on synthetic React events.
   useEffect(() => {
-    const node = textareaRef.current;
-    if (!node) return;
     const handleSelectionChange = () => {
+      const node = source.getDomNode();
+      if (!node) return;
       if (document.activeElement === node) {
         syncFromTextarea();
       }
@@ -65,13 +69,8 @@ export function useComposerTriggers(
     return () => {
       document.removeEventListener("selectionchange", handleSelectionChange);
     };
-  }, [syncFromTextarea, textareaRef]);
+  }, [syncFromTextarea, source]);
 
-  // Re-sync caret on every value change in case React's batching kept the
-  // selectionStart unchanged but the trigger boundary moved. The hook
-  // intentionally mirrors textarea state into React state inside an effect,
-  // which is the canonical valid case for the rule (synchronizing with an
-  // external system that does not emit events for every state we care about).
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     syncFromTextarea();

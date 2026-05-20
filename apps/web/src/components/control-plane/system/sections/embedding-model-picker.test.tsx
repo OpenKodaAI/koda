@@ -5,9 +5,21 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ToastProvider } from "@/hooks/use-toast";
 import { EmbeddingModelPicker } from "./embedding-model-picker";
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({ tl: (s: string) => s }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 const baseModel = {
   id: "paraphrase-multilingual-minilm",

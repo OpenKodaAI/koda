@@ -84,6 +84,29 @@ describe("ChatThread", () => {
     expect(log).toHaveAttribute("aria-live", "polite");
   });
 
+  it("loads older messages when the viewport is near the top", async () => {
+    const onLoadOlder = vi.fn().mockResolvedValue(undefined);
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <ChatThread
+          messages={[userMessage(), assistantMessage()]}
+          hasOlder
+          onLoadOlder={onLoadOlder}
+        />
+      </I18nProvider>,
+    );
+
+    const log = screen.getByRole("log");
+    Object.defineProperties(log, {
+      scrollHeight: { configurable: true, value: 1600 },
+      clientHeight: { configurable: true, value: 520 },
+      scrollTop: { configurable: true, value: 260, writable: true },
+    });
+    fireEvent.scroll(log);
+
+    await waitFor(() => expect(onLoadOlder).toHaveBeenCalledTimes(1));
+  });
+
   it("keeps the new-message affordance compact above the composer", () => {
     render(
       <I18nProvider initialLanguage="en-US">

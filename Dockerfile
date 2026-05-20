@@ -1,5 +1,5 @@
 # Multi-stage build: Python + Node (for provider CLIs)
-FROM node:22-slim AS node-base
+FROM node:26-slim AS node-base
 
 # Install provider CLIs globally
 RUN npm install -g \
@@ -7,6 +7,8 @@ RUN npm install -g \
     @openai/codex \
     @google/gemini-cli
 
+# Keep the runtime image on Python 3.12: kokoro-onnx 0.5.x supports <3.14,
+# while rapidocr-onnxruntime 1.4.x still requires <3.13.
 FROM python:3.12-slim
 
 ENV HEALTHCHECK_URL=http://127.0.0.1:8090/health
@@ -26,7 +28,9 @@ RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack 
     && ln -sf /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js /usr/local/bin/gemini
 
 # Install system dependencies and local runtime tools
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && apt-get install -y --no-install-recommends \
     git \
     curl \
     unzip \

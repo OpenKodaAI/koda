@@ -2,7 +2,9 @@
 
 from unittest.mock import patch
 
+from koda.services import tool_registry
 from koda.services.tool_prompt import build_agent_tools_prompt
+from koda.services.tool_registry import ToolDefinition
 
 
 class TestBuildBotToolsPrompt:
@@ -67,6 +69,46 @@ class TestBuildBotToolsPrompt:
         assert "## Enabled Tool Subset" in prompt
         assert "`web_search`" in prompt
         assert "`fetch_url`" in prompt
+
+    def test_package_tool_requires_tool_and_skill_package_allowlists(self, monkeypatch):
+        from koda.skills import _package
+
+        definition = ToolDefinition(
+            id="safe_notes",
+            title="Safe Notes",
+            category="skill_package",
+            description="Read local package notes.",
+            access_level="read",
+            risk_class="read_context",
+            approval_default="allow",
+            idempotency="read_only",
+            ui_metadata={"source_package_id": "safe_pack"},
+            source="skill_package",
+        )
+        monkeypatch.setattr(
+            _package,
+            "list_skill_package_locks",
+            lambda _agent_id: [  # noqa: ARG005
+                {"package_id": "safe_pack", "package_hash": "hash"}
+            ],
+        )
+        monkeypatch.setattr(_package, "get_installed_package_tool_definitions", lambda _agent_id: [definition])
+        tool_registry._DEFAULT_REGISTRY_CACHE.clear()
+        try:
+            prompt = build_agent_tools_prompt(
+                feature_flags={"plugins": True},
+                tool_policy={"allowed_tool_ids": ["safe_notes"]},
+            )
+            assert "safe_notes" not in prompt
+
+            prompt = build_agent_tools_prompt(
+                feature_flags={"plugins": True},
+                tool_policy={"allowed_tool_ids": ["safe_notes"]},
+                skill_policy={"enabled_skill_packages": ["safe_pack"]},
+            )
+            assert "safe_notes" in prompt
+        finally:
+            tool_registry._DEFAULT_REGISTRY_CACHE.clear()
 
     def test_fileops_section_when_enabled(self):
         with patch("koda.services.tool_prompt.FILEOPS_ENABLED", True):

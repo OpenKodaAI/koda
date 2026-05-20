@@ -6,12 +6,17 @@ import pytest
 
 import koda.auth as auth_module
 from koda.auth import auth_check, is_admin, reject_unauthorized
+from koda.channels import gateway
 
 
 @pytest.fixture(autouse=True)
-def _allowed_user_ids() -> None:
+def _allowed_user_ids(monkeypatch, tmp_path) -> None:
     auth_module.ALLOWED_USER_IDS = {111}
     auth_module.ADMIN_USER_IDS = {111}
+    auth_module.AGENT_ID = "AUTH"
+    monkeypatch.setattr(gateway, "STATE_ROOT_DIR", tmp_path)
+    monkeypatch.setattr(gateway, "_primary_backend", lambda _agent_id: None)
+    monkeypatch.setattr(gateway, "_emit_observability", lambda *_args, **_kwargs: None)
 
 
 class TestAuthCheck:
@@ -46,6 +51,20 @@ class TestAuthCheck:
         update.effective_user.id = 111
         assert auth_check(update) is False
 
+    def test_non_normalizable_update_falls_back_to_legacy_allowlist(self):
+        update = MagicMock()
+        update.effective_user = MagicMock()
+        update.effective_user.id = 111
+        with patch("koda.channels.gateway.evaluate_telegram_update", return_value=None):
+            assert auth_check(update) is True
+
+    def test_gateway_exception_fails_closed(self):
+        update = MagicMock()
+        update.effective_user = MagicMock()
+        update.effective_user.id = 111
+        with patch("koda.channels.gateway.evaluate_telegram_update", side_effect=RuntimeError("boom")):
+            assert auth_check(update) is False
+
 
 class TestRejectUnauthorized:
     @pytest.mark.asyncio
@@ -67,6 +86,25 @@ class TestRejectUnauthorized:
 
         await reject_unauthorized(update)
         update.callback_query.answer.assert_called_with("Access denied.", show_alert=True)
+
+    @pytest.mark.asyncio
+    async def test_gateway_decision_reply_is_actionable(self):
+        update = MagicMock()
+        update.effective_user = MagicMock()
+        update.effective_user.id = 999999
+        update.message = AsyncMock()
+        update.message.reply_text = AsyncMock()
+        update.callback_query = None
+
+        with patch(
+            "koda.channels.gateway.last_decision_for_update",
+            return_value={"reason_code": "channel.identity_unknown"},
+        ):
+            await reject_unauthorized(update)
+
+        update.message.reply_text.assert_called_with(
+            "Access denied. This sender is pending operator approval in the Koda channel gateway."
+        )
 
     @pytest.mark.asyncio
     async def test_no_message_no_callback(self):

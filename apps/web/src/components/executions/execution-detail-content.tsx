@@ -1,10 +1,11 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   AlertTriangle,
   Copy,
+  FileCheck2,
 } from "lucide-react";
 import type {
   ExecutionArtifact,
@@ -21,7 +22,6 @@ import {
   formatRelativeTime,
 } from "@/lib/utils";
 import {
-  getSemanticDotStyle,
   getSemanticIconStyle,
   getSemanticStrongStyle,
   getSemanticStyle,
@@ -31,7 +31,25 @@ import {
 import { DetailRow } from "../shared/detail-row";
 import { DetailsViewer } from "../audit/details-viewer";
 import { SyntaxHighlight, type SyntaxLang } from "../shared/syntax-highlight";
-import { getCurrentLanguage, translate, translateLiteral } from "@/lib/i18n";
+import {
+  ChildRunsPanel,
+  ContextGovernancePanel,
+  RunGraphSummaryPanel,
+  RunGraphViewer,
+  RunReplayPanel,
+} from "@/components/runtime/run-graph-panels";
+import { parseContextGovernancePayload } from "@/lib/contracts/phase3-runtime";
+import { parseRunGraphSnapshot, parseRunReplayPlan } from "@/lib/contracts/run-graph";
+import { evalErrorMessage } from "@/lib/contracts/evals";
+import { requestJson } from "@/lib/http-client";
+import { getCurrentLanguage, translate } from "@/lib/i18n";
+import {
+  getArtifactVisual,
+  getExecutionMetadataVisual,
+  getTimelineVisual,
+  getToolVisual,
+  type RuntimeVisualDescriptor,
+} from "@/lib/runtime-visual-taxonomy";
 
 export const EXECUTION_TRACE_SOURCE_META: Record<
   ExecutionDetail["trace_source"],
@@ -220,7 +238,7 @@ export function ExecutionSourceBadge({
 }) {
   return (
     <span
-      className="inline-flex rounded-lg border px-2.5 py-1 text-[10px] font-semibold tracking-[0.04em]"
+      className="inline-flex max-w-full whitespace-normal break-words rounded-lg border px-2.5 py-1 text-left text-[10px] font-semibold leading-4 tracking-[0.04em]"
       style={getSemanticStyle(meta.tone)}
     >
       {translate(meta.labelKey)}
@@ -246,53 +264,78 @@ interface ExecutionDataStripItem {
   title?: string;
   mono?: boolean;
   wrap?: boolean;
+  visual?: RuntimeVisualDescriptor;
 }
 
 function ExecutionDataStrip({
   items,
   cols,
+  variant = "drawer",
+  minItemWidth,
 }: {
   items: ExecutionDataStripItem[];
   cols: 2 | 3 | 4 | 5;
+  variant?: ExecutionDetailVariant;
+  minItemWidth?: number;
 }) {
-  const colsClass =
-    cols === 5
-      ? "sm:grid-cols-5"
-      : cols === 4
-        ? "sm:grid-cols-4"
-        : cols === 3
-          ? "sm:grid-cols-3"
-          : "sm:grid-cols-2";
-  const fitsSingleRow = items.length <= cols;
+  const defaultMinWidth =
+    minItemWidth ??
+    (variant === "expanded"
+      ? cols >= 4
+        ? 156
+        : 180
+      : variant === "panel"
+        ? cols >= 4
+          ? 168
+          : 176
+      : cols >= 4
+        ? 214
+        : 176);
   return (
-    <div className="overflow-hidden rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)]">
+    <div className="overflow-hidden rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--divider-hair)]">
       <div
-        className={cn(
-          "grid grid-cols-2 divide-x divide-y divide-[var(--divider-hair)]",
-          fitsSingleRow && "sm:divide-y-0",
-          colsClass,
-        )}
+        className="grid gap-px"
+        style={{
+          gridTemplateColumns: `repeat(auto-fit, minmax(${defaultMinWidth}px, 1fr))`,
+        }}
       >
-        {items.map((item) => (
-          <div
-            key={item.label}
-            className="flex min-w-0 flex-col gap-1 px-3.5 py-3"
-          >
-            <span className="font-mono text-[10px] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-              {item.label}
-            </span>
-            <span
-              title={item.title}
-              className={cn(
-                "block text-[0.8125rem] leading-tight text-[var(--text-primary)]",
-                item.wrap ? "break-words" : "truncate",
-                item.mono && "font-mono tabular-nums",
-              )}
+        {items.map((item) => {
+          const visual = item.visual;
+          const Icon = visual?.icon;
+          const shouldWrap = item.wrap || typeof item.value !== "string";
+          return (
+            <div
+              key={item.label}
+              className="flex min-w-0 items-start gap-2.5 bg-[var(--panel-soft)] px-3.5 py-3"
+              data-metadata-visual={visual?.key}
             >
-              {item.value}
-            </span>
-          </div>
-        ))}
+              {Icon ? (
+                <span
+                  className="mt-0.5 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border"
+                  style={getSemanticIconStyle(visual.tone)}
+                  title={visual.label}
+                >
+                  <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+                </span>
+              ) : null}
+              <span className="flex min-w-0 flex-1 flex-col gap-1">
+                <span className="break-words font-mono text-[10px] font-medium uppercase leading-4 tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                  {item.label}
+                </span>
+                <span
+                  title={item.title}
+                  className={cn(
+                    "block min-w-0 max-w-full text-[0.8125rem] leading-5 text-[var(--text-primary)]",
+                    shouldWrap ? "whitespace-normal break-words [&>*]:max-w-full" : "truncate",
+                    item.mono && "font-mono tabular-nums",
+                  )}
+                >
+                  {item.value}
+                </span>
+              </span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -310,6 +353,47 @@ export function ExecutionDetailContent({
   const traceSource = EXECUTION_TRACE_SOURCE_META[data.trace_source];
   const responseSource = EXECUTION_RESPONSE_SOURCE_META[data.response_source];
   const toolsSource = EXECUTION_TOOLS_SOURCE_META[data.tools_source];
+  const runGraph = parseRunGraphSnapshot(data.run_graph ?? null);
+  const runReplay = parseRunReplayPlan(data.run_replay ?? null) ?? runGraph?.replay ?? null;
+  const contextGovernance = parseContextGovernancePayload(data.context_governance ?? null);
+  const [evalCreateState, setEvalCreateState] = useState<{
+    status: "idle" | "pending" | "success" | "error";
+    message: string | null;
+  }>({ status: "idle", message: null });
+
+  async function createEvalFromRun() {
+    setEvalCreateState({ status: "pending", message: null });
+    try {
+      await requestJson<unknown>(
+        `/api/control-plane/agents/${encodeURIComponent(data.bot_id)}/evals/cases/from-run`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            task_id: data.task_id,
+            source_task_id: data.task_id,
+            run_id: `task:${data.task_id}`,
+            title: `Execution #${data.task_id}`,
+            input_preview: data.query_text ?? "",
+            expected_output_preview: data.response_text ?? "",
+            reference_answer: data.response_text ?? "",
+            status: "draft",
+          }),
+        },
+      );
+      setEvalCreateState({
+        status: "success",
+        message: translate("generated.executions.eval_case_created_4e159649"),
+      });
+    } catch (caught) {
+      setEvalCreateState({
+        status: "error",
+        message:
+          caught instanceof Error && caught.message.trim()
+            ? caught.message
+            : evalErrorMessage(caught, translate("generated.executions.could_not_create_eval_case_7d94f6ec")),
+      });
+    }
+  }
 
   if (loading && !detailLoaded) {
     return (
@@ -340,12 +424,14 @@ export function ExecutionDetailContent({
   const metrics = (
     <ExecutionDataStrip
       cols={5}
+      variant={variant}
+      minItemWidth={variant === "drawer" ? 154 : undefined}
       items={[
-        { label: translate("common.cost"), value: formatCost(data.cost_usd), mono: true },
-        { label: translate("common.duration"), value: formatDuration(data.duration_ms), mono: true },
-        { label: translate("common.attempts"), value: `${data.attempt}/${data.max_attempts}`, mono: true },
-        { label: translate("common.tools"), value: String(data.tool_count), mono: true },
-        { label: translate("common.warnings"), value: String(data.warnings.length), mono: true },
+        { label: translate("common.cost"), value: formatCost(data.cost_usd), mono: true, visual: getExecutionMetadataVisual("cost") },
+        { label: translate("common.duration"), value: formatDuration(data.duration_ms), mono: true, visual: getExecutionMetadataVisual("duration") },
+        { label: translate("common.attempts"), value: `${data.attempt}/${data.max_attempts}`, mono: true, visual: getExecutionMetadataVisual("attempts") },
+        { label: translate("common.tools"), value: String(data.tool_count), mono: true, visual: getExecutionMetadataVisual("tools") },
+        { label: translate("common.warnings"), value: String(data.warnings.length), mono: true, visual: getExecutionMetadataVisual("warnings") },
       ]}
     />
   );
@@ -373,6 +459,15 @@ export function ExecutionDetailContent({
       {data.warnings.length > 0 && (
         <WarningsPanel warnings={data.warnings} variant={variant} />
       )}
+      {evalCreateState.status === "error" && evalCreateState.message ? (
+        <NoticeCard
+          icon={AlertTriangle}
+          tone="error"
+          title={translate("generated.executions.eval_case_creation_failed_3abed341")}
+          description={evalCreateState.message}
+          variant={variant}
+        />
+      ) : null}
     </>
   );
 
@@ -382,26 +477,31 @@ export function ExecutionDetailContent({
   const timelineStrip = (
     <ExecutionDataStrip
       cols={3}
+      variant={variant}
+      minItemWidth={variant === "drawer" ? 184 : undefined}
       items={[
         {
           label: translate("common.createdAt", {
-            defaultValue: translateLiteral("Criada em"),
+            defaultValue: translate("generated.executions.criada_em_90f4965a"),
           }),
           value: formatCompactDateTime(data.created_at),
           title: formatDateTime(data.created_at),
           mono: true,
+          visual: getExecutionMetadataVisual("created_at"),
         },
         {
           label: translate("common.startedAt"),
           value: formatCompactDateTime(data.started_at),
           title: formatDateTime(data.started_at),
           mono: true,
+          visual: getExecutionMetadataVisual("started_at"),
         },
         {
           label: translate("common.completedAt"),
           value: formatCompactDateTime(data.completed_at),
           title: formatDateTime(data.completed_at),
           mono: true,
+          visual: getExecutionMetadataVisual("completed_at"),
         },
       ]}
     />
@@ -412,28 +512,58 @@ export function ExecutionDetailContent({
       title={translate("executions.detail.signals")}
       variant={variant}
       action={
-        <Link
-          href={`/runtime/${data.bot_id}/tasks/${data.task_id}`}
-          className="button-pill is-active inline-flex"
-        >
-          {translate("executions.detail.openRuntimeRoom")}
-        </Link>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {evalCreateState.status === "success" ? (
+            <Link
+              href={`/evaluations?agent=${encodeURIComponent(data.bot_id)}`}
+              className="button-shell button-shell--secondary button-shell--sm inline-flex px-3"
+            >
+              {translate("generated.executions.open_evals_3abc3a4a")}
+            </Link>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => {
+              void createEvalFromRun();
+            }}
+            disabled={evalCreateState.status === "pending"}
+            className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
+          >
+            <FileCheck2 className="h-3.5 w-3.5" />
+            {evalCreateState.status === "pending"
+              ? translate("generated.executions.creating_eval_8f0b4632")
+              : evalCreateState.status === "success"
+                ? translate("generated.executions.eval_created_75820127")
+                : translate("generated.executions.create_eval_c5f9d9d9")}
+          </button>
+          <Link
+            href={`/runtime/${data.bot_id}/tasks/${data.task_id}`}
+            className="button-shell button-shell--primary button-shell--sm inline-flex px-3"
+          >
+            {translate("executions.detail.openRuntimeRoom")}
+          </Link>
+        </div>
       }
     >
       <ExecutionDataStrip
         cols={4}
+        variant={variant}
+        minItemWidth={variant === "drawer" ? 220 : undefined}
         items={[
           {
             label: translate("executions.detail.traceSource"),
             value: <ExecutionSourceBadge meta={traceSource} />,
+            visual: getExecutionMetadataVisual("trace_source"),
           },
           {
             label: translate("executions.detail.responseSource"),
             value: <ExecutionSourceBadge meta={responseSource} />,
+            visual: getExecutionMetadataVisual("response_source"),
           },
           {
             label: translate("executions.detail.toolsSource"),
             value: <ExecutionSourceBadge meta={toolsSource} />,
+            visual: getExecutionMetadataVisual("tools_source"),
           },
           {
             label: translate("executions.detail.stopReason"),
@@ -441,9 +571,31 @@ export function ExecutionDetailContent({
             title: stopReasonLabel,
             mono: true,
             wrap: true,
+            visual: getExecutionMetadataVisual("stop_reason"),
           },
         ]}
       />
+    </DetailSection>
+  );
+
+  const runGraphSection = (
+    <DetailSection title={translate("generated.executions.rungraph_1d9c778c")} variant={variant}>
+      <div className="space-y-4">
+        <RunGraphSummaryPanel
+          graph={runGraph}
+          replay={runReplay}
+          runtimeHref={`/runtime/${data.bot_id}/tasks/${data.task_id}`}
+          variant="inline"
+        />
+        <RunGraphViewer graph={runGraph} variant="inline" />
+        <ChildRunsPanel
+          agentId={data.bot_id}
+          childRuns={data.child_runs ?? []}
+          variant="inline"
+        />
+        <ContextGovernancePanel context={contextGovernance} variant="inline" />
+        <RunReplayPanel replay={runReplay} variant="inline" />
+      </div>
     </DetailSection>
   );
 
@@ -461,6 +613,8 @@ export function ExecutionDetailContent({
       <div className="mt-4">
         <ExecutionDataStrip
           cols={2}
+          variant={variant}
+          minItemWidth={variant === "drawer" ? 260 : undefined}
           items={[
             {
               label: translate("common.model"),
@@ -468,6 +622,7 @@ export function ExecutionDetailContent({
               title: data.model ?? undefined,
               mono: true,
               wrap: true,
+              visual: getExecutionMetadataVisual("model"),
             },
             {
               label: translate("common.session"),
@@ -475,6 +630,7 @@ export function ExecutionDetailContent({
               title: data.session_id ?? undefined,
               mono: true,
               wrap: true,
+              visual: getExecutionMetadataVisual("session"),
             },
             {
               label: translate("common.workspaceDirectory"),
@@ -482,12 +638,14 @@ export function ExecutionDetailContent({
               title: data.work_dir ?? undefined,
               mono: true,
               wrap: true,
+              visual: getExecutionMetadataVisual("workspace"),
             },
             {
-              label: translateLiteral("User / chat"),
+              label: translate("generated.executions.user_chat_30653443"),
               value: `${data.user_id} / ${data.chat_id}`,
               mono: true,
               wrap: true,
+              visual: getExecutionMetadataVisual("actor"),
             },
           ]}
         />
@@ -566,6 +724,7 @@ export function ExecutionDetailContent({
         {timelineStrip}
         {notices}
         {summarySection}
+        {runGraphSection}
         {entrySection}
         {timelineSection}
         {toolsSection}
@@ -583,6 +742,7 @@ export function ExecutionDetailContent({
       {summarySection}
       <div className="grid gap-7 xl:grid-cols-[minmax(0,1fr)_320px]">
         <div className="space-y-7">
+          {runGraphSection}
           {entrySection}
           {responseSection}
           {toolsSection}
@@ -612,11 +772,22 @@ function DetailSection({
   const isExpanded = variant === "expanded";
   return (
     <section className={cn("space-y-3.5", isExpanded && "space-y-4")}>
-      <div className="flex items-center justify-between gap-3">
-        <div className="section-label flex-1">
+      <div
+        className={cn(
+          "flex gap-3",
+          variant === "drawer"
+            ? "flex-col items-stretch sm:flex-row sm:items-center sm:justify-between"
+            : "items-center justify-between",
+        )}
+      >
+        <div className="section-label min-w-0 flex-1">
           <span>{title}</span>
         </div>
-        {action}
+        {action ? (
+          <div className="flex shrink-0 justify-start sm:justify-end">
+            {action}
+          </div>
+        ) : null}
       </div>
       {children}
     </section>
@@ -704,34 +875,40 @@ function WarningsPanel({
     <div
       className={cn(
         "border shadow-none",
-        isExpanded ? "rounded-lg p-5" : isPanel ? "rounded-lg p-4" : "rounded-lg p-4"
+        isExpanded ? "rounded-lg p-5" : isPanel ? "rounded-lg p-4" : "rounded-lg p-3.5"
       )}
       style={getSemanticStyle("warning")}
     >
-      <div className="mb-3 flex items-start justify-between gap-4">
-        <div>
-          <span className="text-[10px] font-semibold uppercase tracking-[0.14em]" style={getSemanticTextStyle("warning")}>
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border"
+            style={getSemanticIconStyle("warning")}
+          >
+            <AlertTriangle className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+          </span>
+          <span className="break-words text-[10px] font-semibold uppercase leading-4 tracking-[0.14em]" style={getSemanticTextStyle("warning")}>
             {translate("common.warnings")}
           </span>
         </div>
-        <span className="rounded-lg border px-3 py-1 text-[11px] font-semibold" style={getSemanticStrongStyle("warning")}>
+        <span className="shrink-0 rounded-lg border px-3 py-1 text-[11px] font-semibold" style={getSemanticStrongStyle("warning")}>
           {warnings.length}
         </span>
       </div>
-      <div className="space-y-2">
+      <ul className="mt-3 space-y-2">
         {warnings.map((warning, index) => (
-          <div
+          <li
             key={`${warning}-${index}`}
             className={cn(
-              "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-sm leading-6",
-              isExpanded ? "rounded-lg px-4 py-3.5" : isPanel ? "rounded-lg px-4 py-3" : "rounded-lg px-4 py-3"
+              "list-none break-words border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[13px] leading-6",
+              isExpanded ? "rounded-lg px-4 py-3.5" : isPanel ? "rounded-lg px-4 py-3" : "rounded-lg px-3 py-2.5"
             )}
             style={getSemanticStyle("warning")}
           >
             {warning}
-          </div>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }
@@ -743,7 +920,9 @@ function TimelineCard({
   item: ExecutionTimelineItem;
   variant: ExecutionDetailVariant;
 }) {
-  const tone = TIMELINE_TONE[item.status];
+  const visual = getTimelineVisual(item);
+  const Icon = visual.icon;
+  const tone = TIMELINE_TONE[item.status] ?? visual.tone;
   const isExpanded = variant === "expanded";
   const isPanel = variant === "panel";
 
@@ -754,17 +933,30 @@ function TimelineCard({
         isExpanded ? "rounded-lg p-5" : isPanel ? "rounded-lg p-4" : "rounded-lg p-4"
       )}
       style={getSemanticStyle(tone)}
+      data-timeline-visual={visual.key}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-2">
           <div className="flex items-center gap-3">
-            <span className="h-2.5 w-2.5 rounded-full" style={getSemanticDotStyle(tone)} />
+            <span
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md border"
+              style={getSemanticIconStyle(visual.tone)}
+              title={visual.label}
+            >
+              <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+            </span>
             <p className="text-sm font-semibold text-[var(--text-primary)]">{item.title}</p>
           </div>
           {item.summary && (
             <p className="text-[13px] leading-6 text-[var(--text-secondary)]">{item.summary}</p>
           )}
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+            <span
+              className="rounded-lg border px-2.5 py-1 font-mono text-[10px]"
+              style={getSemanticStyle(visual.tone)}
+            >
+              {visual.label}
+            </span>
             <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
               {item.type}
             </span>
@@ -791,6 +983,13 @@ function ToolCard({
   tool: ExecutionToolTrace;
   variant: ExecutionDetailVariant;
 }) {
+  const visual = getToolVisual({
+    tool: tool.tool,
+    category: tool.category,
+    success: tool.success,
+    metadata: tool.metadata,
+  });
+  const Icon = visual.icon;
   const sql = readString(tool.metadata.sql);
   const env = readString(tool.metadata.env);
   const binary = readString(tool.metadata.binary);
@@ -812,35 +1011,50 @@ function ToolCard({
         "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] shadow-none",
         isExpanded ? "rounded-lg p-5" : isPanel ? "rounded-lg p-4" : "rounded-lg p-4"
       )}
+      data-tool-visual={visual.key}
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-2">
-          <div className="min-w-0">
-            <p className="text-sm font-semibold text-[var(--text-primary)]">{tool.tool}</p>
-            <p className="text-[13px] leading-6 text-[var(--text-secondary)]">{tool.summary}</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
-            <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
-              {tool.category}
-            </span>
-            <span
-              className="rounded-lg border px-2.5 py-1 text-[10px] font-semibold"
-              style={getSemanticStyle(tool.success === false ? "danger" : "success")}
-            >
-              {tool.success === false
-                ? translate("common.failed", { defaultValue: "Failed" })
-                : translate("toast.success", { defaultValue: "Success" })}
-            </span>
-            <span className="font-mono">{formatDuration(tool.duration_ms)}</span>
-            <span>{formatDateTime(tool.completed_at ?? tool.started_at)}</span>
-            {tool.redactions && (
-              <span className="rounded-lg border px-2.5 py-1 text-[10px] font-semibold" style={getSemanticStyle("warning")}>
-                {translate("executions.detail.redactions", {
-                  defaultValue: "{{count}} redactions",
-                  count: tool.redactions.count,
-                })}
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border"
+            style={getSemanticIconStyle(visual.tone)}
+            title={visual.label}
+          >
+            <Icon className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
+          </span>
+          <div className="min-w-0 space-y-2">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-[var(--text-primary)]">{tool.tool}</p>
+              <p className="text-[13px] leading-6 text-[var(--text-secondary)]">{tool.summary}</p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+              <span
+                className="rounded-lg border px-2.5 py-1 font-mono text-[10px]"
+                style={getSemanticStyle(visual.tone)}
+              >
+                {visual.label}
               </span>
-            )}
+              <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
+                {tool.category}
+              </span>
+              <span
+                className="rounded-lg border px-2.5 py-1 text-[10px] font-semibold"
+                style={getSemanticStyle(tool.success === false ? "danger" : "success")}
+              >
+                {tool.success === false
+                  ? translate("common.failed")
+                  : translate("toast.success")}
+              </span>
+              <span className="font-mono">{formatDuration(tool.duration_ms)}</span>
+              <span>{formatDateTime(tool.completed_at ?? tool.started_at)}</span>
+              {tool.redactions && (
+                <span className="rounded-lg border px-2.5 py-1 text-[10px] font-semibold" style={getSemanticStyle("warning")}>
+                  {translate("executions.detail.redactions", {
+                    count: tool.redactions.count,
+                  })}
+                </span>
+              )}
+            </div>
           </div>
         </div>
         {tool.output && (
@@ -850,7 +1064,7 @@ function ToolCard({
             className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
           >
             <Copy className="h-3.5 w-3.5" />
-            {translateLiteral("Copiar saída")}
+            {translate("generated.executions.copiar_saida_eedddac0")}
           </button>
         )}
       </div>
@@ -861,12 +1075,12 @@ function ToolCard({
           isExpanded ? "lg:grid-cols-4" : isPanel ? "xl:grid-cols-2" : isDrawer && "md:grid-cols-2"
         )}
       >
-        <DetailRow label={translateLiteral("Início")}>{formatDateTime(tool.started_at)}</DetailRow>
-        <DetailRow label={translateLiteral("Fim")}>{formatDateTime(tool.completed_at)}</DetailRow>
+        <DetailRow label={translate("generated.executions.inicio_560f0f5f")}>{formatDateTime(tool.started_at)}</DetailRow>
+        <DetailRow label={translate("generated.executions.fim_785edcaa")}>{formatDateTime(tool.completed_at)}</DetailRow>
         <DetailRow label={translate("common.duration")}>
           <span className="font-mono">{formatDuration(tool.duration_ms)}</span>
         </DetailRow>
-        <DetailRow label={translateLiteral("Categoria")}>
+        <DetailRow label={translate("generated.executions.categoria_18707383")}>
           <span className="font-mono">{tool.category}</span>
         </DetailRow>
       </div>
@@ -874,7 +1088,7 @@ function ToolCard({
       {command && (
         <div className="mt-4">
           <CodePanel
-            title={binary || args ? translateLiteral("Comando CLI") : translate("common.command", { defaultValue: "Command" })}
+            title={binary || args ? translate("generated.executions.comando_cli_61912471") : translate("common.command")}
             content={command}
             onCopy={() => copyExecutionValue(command)}
             lang="shell"
@@ -886,7 +1100,7 @@ function ToolCard({
       {sql && (
         <div className="mt-4">
           <CodePanel
-            title={translateLiteral("Consulta SQL")}
+            title={translate("generated.executions.consulta_sql_ec3df875")}
             content={sql}
             onCopy={() => copyExecutionValue(sql)}
             lang="sql"
@@ -901,23 +1115,24 @@ function ToolCard({
           isExpanded ? "lg:grid-cols-4" : isPanel ? "xl:grid-cols-2" : isDrawer && "md:grid-cols-2"
         )}
       >
-        {env && <DetailRow label={translateLiteral("Ambiente")}>{env}</DetailRow>}
-        {maxRows != null && <DetailRow label={translateLiteral("Limite de linhas")}>{String(maxRows)}</DetailRow>}
-        {analyze != null && <DetailRow label={translateLiteral("Analyze")}>{analyze ? translateLiteral("Sim") : translateLiteral("Não")}</DetailRow>}
+        {env && <DetailRow label={translate("generated.executions.ambiente_60bc9f4d")}>{env}</DetailRow>}
+        {maxRows != null && <DetailRow label={translate("generated.executions.limite_de_linhas_44567317")}>{String(maxRows)}</DetailRow>}
+        {analyze != null && <DetailRow label={translate("generated.executions.analyze_6c305051")}>{analyze ? translate("generated.executions.sim_4b2e05ee") : translate("generated.executions.nao_41b30e44")}</DetailRow>}
         {exitCode != null && (
-          <DetailRow label={translateLiteral("Código de saída")}>
+          <DetailRow label={translate("generated.executions.codigo_de_saida_84c7b4d4")}>
             <span className="font-mono">{String(exitCode)}</span>
           </DetailRow>
         )}
-        {timedOut != null && <DetailRow label={translateLiteral("Timeout")}>{timedOut ? translateLiteral("Sim") : translateLiteral("Não")}</DetailRow>}
-        {truncated != null && <DetailRow label={translateLiteral("Saída truncada")}>{truncated ? translateLiteral("Sim") : translateLiteral("Não")}</DetailRow>}
+        {timedOut != null && <DetailRow label={translate("generated.executions.timeout_8e7843bd")}>{timedOut ? translate("generated.executions.sim_4b2e05ee") : translate("generated.executions.nao_41b30e44")}</DetailRow>}
+        {truncated != null && <DetailRow label={translate("generated.executions.saida_truncada_d954f55d")}>{truncated ? translate("generated.executions.sim_4b2e05ee") : translate("generated.executions.nao_41b30e44")}</DetailRow>}
       </div>
 
       {hasEntries(tool.params) && (
         <div className="mt-4">
           <ArtifactShell
-            title={translateLiteral("Parâmetros enviados")}
+            title={translate("generated.executions.parametros_enviados_06cb0ec8")}
             onCopy={() => copyExecutionValue(tool.params)}
+            visual={getExecutionMetadataVisual("tools")}
             variant={variant}
           >
             <DetailsViewer data={tool.params} />
@@ -928,7 +1143,7 @@ function ToolCard({
       {tool.output && (
         <div className="mt-4">
           <CodePanel
-            title={translateLiteral("Saída da ferramenta")}
+            title={translate("generated.executions.saida_da_ferramenta_c234aa09")}
             content={tool.output}
             onCopy={() => copyExecutionValue(tool.output)}
             variant={variant}
@@ -939,8 +1154,9 @@ function ToolCard({
       {hasEntries(extraMetadata) && (
         <div className="mt-4">
           <ArtifactShell
-            title={translateLiteral("Metadados adicionais")}
+            title={translate("generated.executions.metadados_adicionais_a5016a1c")}
             onCopy={() => copyExecutionValue(extraMetadata)}
+            visual={getExecutionMetadataVisual("metadata")}
             variant={variant}
           >
             <DetailsViewer data={extraMetadata} />
@@ -959,12 +1175,14 @@ function ArtifactCard({
   variant: ExecutionDetailVariant;
 }) {
   const content = typeof artifact.content === "string" ? artifact.content : null;
+  const visual = getArtifactVisual(artifact.kind);
 
   return (
     <ArtifactShell
       title={artifact.label}
       onCopy={() => copyExecutionValue(artifact.content)}
       unavailable={artifact.unavailable}
+      visual={visual}
       variant={variant}
     >
       {content != null ? (
@@ -992,16 +1210,19 @@ function ArtifactShell({
   children,
   onCopy,
   unavailable = false,
+  visual,
   variant,
 }: {
   title: string;
   children: ReactNode;
   onCopy?: () => void;
   unavailable?: boolean;
+  visual?: RuntimeVisualDescriptor;
   variant: ExecutionDetailVariant;
 }) {
   const isExpanded = variant === "expanded";
   const isPanel = variant === "panel";
+  const Icon = visual?.icon;
 
   return (
     <div
@@ -1011,15 +1232,32 @@ function ArtifactShell({
       )}
     >
       <div className="mb-3 flex items-start justify-between gap-4">
-        <div>
+        <div className="flex min-w-0 items-center gap-2">
+          {Icon ? (
+            <span
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-md border"
+              style={getSemanticIconStyle(visual.tone)}
+              title={visual.label}
+            >
+              <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
+            </span>
+          ) : null}
           <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
             {title}
           </span>
+          {visual ? (
+            <span
+              className="rounded-md border px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[0.08em]"
+              style={getSemanticStyle(visual.tone)}
+            >
+              {visual.label}
+            </span>
+          ) : null}
         </div>
         <div className="flex items-center gap-2">
           {unavailable && (
             <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1 text-[10px] font-semibold text-[var(--text-tertiary)]">
-              {translateLiteral("Indisponível")}
+              {translate("generated.executions.indisponivel_16d4946c")}
             </span>
           )}
           {onCopy && (
@@ -1029,8 +1267,7 @@ function ArtifactShell({
               className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
             >
               <Copy className="h-3.5 w-3.5" />
-              Copiar
-            </button>
+              {translate("generated.executions.copiar_469807dc")}</button>
           )}
         </div>
       </div>

@@ -130,6 +130,87 @@ def test_send_dashboard_session_message_wakes_and_retries_active_runtime(monkeyp
     assert wake_reasons == ["dashboard-chat:ATLAS"]
 
 
+def test_send_dashboard_squad_message_posts_squad_payload(monkeypatch):
+    manager = object.__new__(ControlPlaneManager)
+    monkeypatch.setattr(manager, "_require_dashboard_agent", lambda _agent_id: ("ATLAS", {"status": "active"}))
+    monkeypatch.setattr(
+        manager,
+        "get_runtime_access",
+        lambda *_args, **_kwargs: {
+            "runtime_base_url": "http://runtime.local",
+            "runtime_request_token": "runtime-token",
+        },
+    )
+    sent_payload: dict[str, Any] = {}
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float):
+        assert request.full_url.endswith("/api/runtime/sessions/messages")
+        assert request.headers["X-runtime-token"] == "runtime-token"
+        sent_payload.update(json.loads((request.data or b"{}").decode("utf-8")))
+        return _RuntimeResponse({"accepted": True, "session_id": "squad-session", "task_id": 9})
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    result = manager.send_dashboard_squad_message(
+        "ATLAS",
+        text="task request",
+        session_id="squad-session",
+        squad_thread_id="thread-1",
+        squad_task_id="task-1",
+        parent_message_id="msg-1",
+        delegation_chain=["PM"],
+        delegation_request_id="coord-task-1",
+        delegation_origin_agent_id="PM",
+    )
+
+    assert result == {"accepted": True, "session_id": "squad-session", "task_id": 9}
+    assert sent_payload["text"] == "task request"
+    assert sent_payload["session_id"] == "squad-session"
+    assert sent_payload["squad"]["thread_id"] == "thread-1"
+    assert sent_payload["squad"]["target_agent_id"] == "ATLAS"
+    assert sent_payload["squad"]["squad_task_id"] == "task-1"
+    assert sent_payload["squad"]["delegation_chain"] == ["PM"]
+
+
+def test_send_dashboard_squad_message_falls_back_to_carrier_runtime(monkeypatch):
+    manager = object.__new__(ControlPlaneManager)
+    monkeypatch.setattr("koda.control_plane.manager.AGENT_ID", "KODA")
+    monkeypatch.setattr(
+        manager,
+        "_require_dashboard_agent",
+        lambda agent_id: (str(agent_id).upper(), {"status": "active"}),
+    )
+    monkeypatch.setattr(
+        manager,
+        "get_runtime_access",
+        lambda agent_id, *_args, **_kwargs: {
+            "runtime_base_url": f"http://{str(agent_id).lower()}.runtime",
+            "runtime_request_token": f"{str(agent_id).lower()}-token",
+        },
+    )
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_post_runtime_session_message(**kwargs: Any) -> dict[str, Any]:
+        calls.append((str(kwargs["agent_id"]), kwargs["request_payload"]))
+        if kwargs["agent_id"] == "ATLAS":
+            raise ValueError("runtime rejected dashboard message: invalid runtime token")
+        return {"accepted": True, "session_id": "squad-session", "task_id": 10}
+
+    monkeypatch.setattr(manager, "_post_runtime_session_message", fake_post_runtime_session_message)
+
+    result = manager.send_dashboard_squad_message(
+        "ATLAS",
+        text="task request",
+        session_id="squad-session",
+        squad_thread_id="thread-1",
+        squad_task_id="task-1",
+    )
+
+    assert result["task_id"] == 10
+    assert [agent_id for agent_id, _payload in calls] == ["ATLAS", "KODA"]
+    assert calls[-1][1]["squad"]["target_agent_id"] == "ATLAS"
+
+
 def test_send_dashboard_session_message_rejects_paused_agent_without_runtime_call(monkeypatch):
     manager = object.__new__(ControlPlaneManager)
     monkeypatch.setattr(manager, "_require_dashboard_agent", lambda _agent_id: ("ATLAS", {"status": "paused"}))

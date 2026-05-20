@@ -2,7 +2,6 @@
 
 import { useMemo } from "react";
 import { Workflow } from "lucide-react";
-import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import type { StatusDotTone } from "@/components/ui/status-dot";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { ExecutionSummary } from "@/lib/types";
@@ -13,7 +12,6 @@ import {
   formatDuration,
   formatRelativeTime,
 } from "@/lib/utils";
-import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
 import { ExecutionStatusPill } from "./execution-status-pill";
 import {
   EXECUTION_TONE_BG,
@@ -23,7 +21,6 @@ import {
 
 interface ExecutionTableProps {
   executions: ExecutionSummary[];
-  showAgent?: boolean;
   loading?: boolean;
   onExecutionClick?: (execution: ExecutionSummary) => void;
   selectedExecutionId?: number | null;
@@ -72,13 +69,7 @@ function StatusOverlay({ tone }: { tone: StatusDotTone }) {
   );
 }
 
-function SkeletonDesktopRow({
-  cols,
-  showAgent,
-}: {
-  cols: string;
-  showAgent: boolean;
-}) {
+function SkeletonDesktopRow({ cols }: { cols: string }) {
   return (
     <div
       className={cn(
@@ -87,33 +78,23 @@ function SkeletonDesktopRow({
       )}
     >
       <div className="h-3 w-6 rounded bg-[var(--panel-soft)] animate-pulse" />
-      {showAgent ? (
-        <div className="flex items-center gap-2.5">
-          <div className="h-7 w-7 rounded-full bg-[var(--panel-soft)] animate-pulse" />
-          <div className="flex flex-col gap-1">
-            <div className="h-3 w-20 rounded bg-[var(--panel-soft)] animate-pulse" />
-            <div className="h-2 w-12 rounded bg-[var(--panel-soft)] animate-pulse" />
-          </div>
-        </div>
-      ) : null}
       <div className="h-3 w-[70%] rounded bg-[var(--panel-soft)] animate-pulse" />
       <div className="h-3 w-16 rounded bg-[var(--panel-soft)] animate-pulse" />
       <div className="ml-auto h-3 w-12 rounded bg-[var(--panel-soft)] animate-pulse" />
       <div className="ml-auto h-3 w-12 rounded bg-[var(--panel-soft)] animate-pulse" />
       <div className="ml-auto h-3 w-16 rounded bg-[var(--panel-soft)] animate-pulse" />
-      <div className="ml-auto h-5 w-20 rounded-[var(--radius-chip)] bg-[var(--panel-soft)] animate-pulse" />
+      <div className="flex self-stretch items-center justify-end py-1 pl-4 pr-4">
+        <div className="h-5 w-20 rounded-[var(--radius-chip)] bg-[var(--panel-soft)] animate-pulse" />
+      </div>
     </div>
   );
 }
 
-function MobileSkeletonCard({ showAgent }: { showAgent: boolean }) {
+function MobileSkeletonCard() {
   return (
     <div className="flex animate-pulse flex-col gap-2 border-b border-[color:var(--divider-hair)] px-4 py-3 last:border-b-0">
       <div className="flex items-center gap-3">
         <div className="h-3 w-6 rounded bg-[var(--panel-soft)]" />
-        {showAgent ? (
-          <div className="h-7 w-7 rounded-full bg-[var(--panel-soft)]" />
-        ) : null}
         <div className="h-3 w-24 rounded bg-[var(--panel-soft)]" />
         <div className="ml-auto h-5 w-16 rounded-[var(--radius-chip)] bg-[var(--panel-soft)]" />
       </div>
@@ -125,7 +106,6 @@ function MobileSkeletonCard({ showAgent }: { showAgent: boolean }) {
 
 export function ExecutionTable({
   executions,
-  showAgent = false,
   loading = false,
   onExecutionClick,
   selectedExecutionId,
@@ -141,9 +121,7 @@ export function ExecutionTable({
     [executions],
   );
 
-  const cols = showAgent
-    ? "grid-cols-[40px_minmax(180px,200px)_minmax(0,1fr)_104px_84px_84px_92px_124px]"
-    : "grid-cols-[40px_minmax(0,1fr)_104px_84px_84px_92px_124px]";
+  const cols = "grid-cols-[40px_minmax(360px,1fr)_104px_84px_84px_92px_148px]";
 
   const getStatusLabel = (status: string) =>
     t(`runtime.labels.${status}`, { defaultValue: status });
@@ -154,97 +132,73 @@ export function ExecutionTable({
   return (
     <div className="overflow-hidden rounded-[var(--radius-shell)] border border-[color:var(--border-subtle)] bg-[var(--panel)]">
       {/* Desktop */}
-      <div className="hidden md:block">
-        {/* Column header */}
-        <div
-          className={cn(
-            "grid items-center gap-4 border-b border-[color:var(--divider-hair)] px-4 py-2.5",
-            cols,
-          )}
-          role="row"
-        >
-          <span className={headerClass}>#</span>
-          {showAgent ? (
-            <span className={headerClass}>{t("common.agent")}</span>
-          ) : null}
-          <span className={headerClass}>
-            {t("executions.table.queryColumn")}
-          </span>
-          <span className={headerClass}>{t("executions.table.tools")}</span>
-          <span className={cn(headerClass, "text-right")}>
-            {t("common.cost")}
-          </span>
-          <span className={cn(headerClass, "text-right")}>
-            {t("common.duration")}
-          </span>
-          <span className={cn(headerClass, "text-right")}>
-            {t("common.created")}
-          </span>
-          <span className={cn(headerClass, "text-right")}>
-            {t("common.status")}
-          </span>
-        </div>
+      <div className="hidden overflow-x-auto overscroll-x-contain md:block">
+        <div className="min-w-[960px]">
+          {/* Column header */}
+          <div
+            className={cn(
+              "grid items-center gap-4 border-b border-[color:var(--divider-hair)] px-4 py-2.5",
+              cols,
+            )}
+            role="row"
+          >
+            <span className={headerClass}>#</span>
+            <span className={headerClass}>
+              {t("executions.table.queryColumn")}
+            </span>
+            <span className={headerClass}>{t("executions.table.tools")}</span>
+            <span className={cn(headerClass, "text-right")}>
+              {t("common.cost")}
+            </span>
+            <span className={cn(headerClass, "text-right")}>
+              {t("common.duration")}
+            </span>
+            <span className={cn(headerClass, "text-right")}>
+              {t("common.created")}
+            </span>
+            <span className={cn(
+              headerClass,
+              "flex self-stretch items-center justify-end py-1.5 pl-4 pr-4 text-right",
+            )}>
+              {t("common.status")}
+            </span>
+          </div>
 
-        {/* Rows */}
-        <div className="flex flex-col">
-          {loading &&
-            Array.from({ length: 5 }).map((_, i) => (
-              <SkeletonDesktopRow
-                key={i}
-                cols={cols}
-                showAgent={showAgent}
-              />
-            ))}
+          {/* Rows */}
+          <div className="flex max-h-[620px] min-h-[280px] flex-col overflow-y-auto overscroll-contain lg:max-h-[calc(100vh-25rem)]">
+            {loading &&
+              Array.from({ length: 5 }).map((_, i) => (
+                <SkeletonDesktopRow key={i} cols={cols} />
+              ))}
 
-          {!loading &&
-            executions.map((execution, index) => {
-              const tone = executionStatusTone(execution.status);
-              const isSelected =
-                selectedExecutionId === execution.task_id;
-              return (
-                <button
-                  key={`${execution.bot_id}-${execution.task_id}`}
-                  type="button"
-                  onClick={() => onExecutionClick?.(execution)}
-                  className={cn(
-                    "group relative grid w-full items-center gap-4 px-4 py-3 text-left",
-                    "border-b border-[color:var(--divider-hair)] last:border-b-0",
-                    "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] focus-visible:ring-inset",
-                    onExecutionClick && "cursor-pointer",
-                    isSelected
-                      ? "bg-[var(--hover-tint)]"
-                      : onExecutionClick && "hover:bg-[var(--hover-tint)]",
-                    cols,
-                  )}
-                >
-                  <StatusOverlay tone={tone} />
+            {!loading &&
+              executions.map((execution, index) => {
+                const tone = executionStatusTone(execution.status);
+                const isSelected =
+                  selectedExecutionId === execution.task_id;
+                return (
+                  <button
+                    key={`${execution.bot_id}-${execution.task_id}`}
+                    type="button"
+                    onClick={() => onExecutionClick?.(execution)}
+                    className={cn(
+                      "group relative grid w-full items-center gap-4 px-4 py-3 text-left",
+                      "border-b border-[color:var(--divider-hair)] last:border-b-0",
+                      "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                      "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] focus-visible:ring-inset",
+                      onExecutionClick && "cursor-pointer",
+                      isSelected
+                        ? "bg-[var(--table-row-selected)]"
+                        : onExecutionClick && "hover:bg-[var(--table-row-hover)]",
+                      cols,
+                    )}
+                  >
+                    <StatusOverlay tone={tone} />
 
                   {/* # index */}
                   <span className="relative font-mono text-[0.875rem] tabular-nums text-[var(--text-quaternary)]">
                     {String(index + 1).padStart(2, "0")}
                   </span>
-
-                  {/* Agent (orb + name + #task_id) */}
-                  {showAgent ? (
-                    <span className="relative flex min-w-0 items-center gap-2.5">
-                      <AgentSigil
-                        agentId={execution.bot_id}
-                        label={getAgentLabel(execution.bot_id)}
-                        color={getAgentColor(execution.bot_id)}
-                        status={execution.status}
-                        size="xs"
-                      />
-                      <span className="flex min-w-0 flex-col leading-tight">
-                        <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
-                          {getAgentLabel(execution.bot_id)}
-                        </span>
-                        <span className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
-                          #{execution.task_id}
-                        </span>
-                      </span>
-                    </span>
-                  ) : null}
 
                   {/* Action / query */}
                   <p
@@ -288,36 +242,37 @@ export function ExecutionTable({
                   </span>
 
                   {/* Status badge */}
-                  <span className="relative flex justify-end">
+                  <span className="relative flex self-stretch items-center justify-end py-1 pl-4 pr-4">
                     <ExecutionStatusPill
                       status={execution.status}
                       label={getStatusLabel(execution.status)}
                     />
                   </span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
 
-          {executions.length === 0 && !loading && (
-            <div className="flex flex-col items-center gap-2 py-16 text-center">
-              <Workflow
-                className="icon-lg text-[var(--text-quaternary)]"
-                strokeWidth={1.5}
-                aria-hidden
-              />
-              <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
-                {t("executions.table.noResults")}
-              </p>
-            </div>
-          )}
+            {executions.length === 0 && !loading && (
+              <div className="flex flex-col items-center gap-2 py-16 text-center">
+                <Workflow
+                  className="icon-lg text-[var(--text-quaternary)]"
+                  strokeWidth={1.5}
+                  aria-hidden
+                />
+                <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+                  {t("executions.table.noResults")}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
       {/* Mobile */}
-      <div className="flex flex-col md:hidden">
+      <div className="flex max-h-[calc(100vh-21rem)] min-h-[320px] flex-col overflow-y-auto overscroll-contain md:hidden">
         {loading &&
           Array.from({ length: 4 }).map((_, i) => (
-            <MobileSkeletonCard key={i} showAgent={showAgent} />
+            <MobileSkeletonCard key={i} />
           ))}
 
         {!loading &&
@@ -344,26 +299,10 @@ export function ExecutionTable({
                   <span className="font-mono text-[0.75rem] tabular-nums text-[var(--text-quaternary)]">
                     {String(index + 1).padStart(2, "0")}
                   </span>
-                  {showAgent ? (
-                    <AgentSigil
-                      agentId={execution.bot_id}
-                      label={getAgentLabel(execution.bot_id)}
-                      color={getAgentColor(execution.bot_id)}
-                      status={execution.status}
-                      size="xs"
-                    />
-                  ) : null}
                   <div className="flex min-w-0 flex-1 flex-col leading-tight">
                     <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
-                      {showAgent
-                        ? getAgentLabel(execution.bot_id)
-                        : `#${execution.task_id}`}
+                      #{execution.task_id}
                     </span>
-                    {showAgent ? (
-                      <span className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
-                        #{execution.task_id}
-                      </span>
-                    ) : null}
                   </div>
                   <ExecutionStatusPill
                     status={execution.status}

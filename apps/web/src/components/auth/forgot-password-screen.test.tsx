@@ -73,4 +73,26 @@ describe("ForgotPasswordScreen", () => {
     await user.click(screen.getByRole("button", { name: /reset|resetar|restablecer/i }));
     expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
   });
+
+  it("uses a spinner-only visual state while resetting", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise(() => {}),
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|username/i), "owner");
+    await user.type(screen.getByLabelText(/recovery/i), "aaaa-bbbb-cccc");
+    const passwordFields = screen.getAllByLabelText(/password/i);
+    await user.type(passwordFields[0], "BrandNewPassw0rd!Now");
+    await user.type(passwordFields[1], "BrandNewPassw0rd!Now");
+    await user.click(screen.getByRole("button", { name: /reset/i }));
+
+    const busyButton = screen.getByRole("button", { name: /resetting/i });
+    expect(busyButton).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByText(/resetting/i)).not.toBeInTheDocument();
+  });
 });

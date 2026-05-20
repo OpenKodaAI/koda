@@ -5,15 +5,32 @@ traces. None of those are useful without a place to send them. This
 runbook documents the minimum stack a self-hoster should run
 alongside koda.
 
-## What koda emits today
+## What Koda Emits Today
 
 | Signal | Source | How to consume |
 |---|---|---|
-| Prometheus metrics | `koda/services/metrics.py` — agent labels, tool execution, queue depth | Scrape `:8090/metrics` |
+| Prometheus metrics | `koda/services/metrics.py` — runtime, queue, cost, tools, memory, RunGraph, proposals, skills, channels, quality cockpit, ops benchmark | Scrape `:8090/metrics` |
 | Structured logs | `structlog` → stdout / `~/.koda-local/var/log/` | Tail with `docker compose logs -f` or ship to Loki |
 | Audit events | `audit_events` table | Query via `koda` UI or directly in Postgres |
 | OpenTelemetry traces | Workers/supervisor when `OTEL_EXPORTER_OTLP_ENDPOINT` is set | Send to Tempo, Jaeger, Honeycomb, Datadog |
 | Health probes | `:8090/health` (granular: per-worker + per-sidecar) | Liveness/readiness for any monitoring tool |
+
+Prometheus labels must stay low-cardinality. Do not add raw prompt text, user
+ids, chat ids, task ids, run ids, proposal ids, file paths, or message content
+as labels. Use bounded labels such as `agent_id`, `status`, `reason`,
+`category`, `provider`, `model`, `scenario`, `gate_id`, and `severity`.
+
+## Top-Tier Metric Families
+
+| Family | Example metrics | Purpose |
+|---|---|---|
+| Runtime and queue | `koda_active_tasks`, `koda_queue_depth`, `koda_runtime_phase_total`, `koda_runtime_cleanup_blocked_total` | Detect backpressure, stuck work, recovery, cleanup and websocket/session pressure. |
+| Provider and cost | `koda_request_duration_seconds`, `koda_cost_total_usd`, `koda_provider_compatibility_state`, `koda_provider_adapter_contract_errors_total` | Track latency, spend, resume degradation and provider contract drift. |
+| Memory and knowledge | `koda_memory_recall_seconds`, `koda_memory_safety_blocks_total`, `koda_memory_embedding_repairs_total`, `koda_knowledge_grounding_score` | Prove recall quality, safety blocks, embedding repair and grounded-answer quality. |
+| Squads and RunGraph | `koda_squad_handoff_events_total`, `koda_squad_synthesis_gate_total`, `koda_route_outcomes_total`, `koda_run_graph_completeness_gates_total` | Prove routing, handoffs, synthesis gates and causal graph completeness. |
+| Self-improvement and skills | `koda_improvement_proposal_events_total`, `koda_skill_package_events_total` | Track proposal lifecycle and local-first skill scanner/eval/install/rollback state. |
+| Channels and release quality | `koda_channel_gateway_events_total`, `koda_release_quality_gates_total`, `koda_release_blockers`, `koda_trajectory_exports_total` | Prove fail-closed channel policy, release gates, blockers and redacted exports. |
+| Ops benchmark | `koda_ops_benchmark_runs_total`, `koda_ops_benchmark_duration_seconds` | Track deterministic queue/runtime/channel fault benchmark runs. |
 
 ## Minimum stack for self-hosters
 
@@ -73,9 +90,12 @@ Bring it up alongside the main stack:
 docker compose -f docker-compose.yml -f docker-compose-observability.yml up -d
 ```
 
-## Prometheus scrape config
+## Prometheus Scrape Config
 
-A minimal `prometheus.yml`:
+The repository ships `docs/operations/prometheus.yml`. It scrapes the Koda
+control plane at `app:8090` and Postgres exporter. Rust sidecars do not expose
+Prometheus endpoints yet; watch their container health and Koda `/health`
+instead.
 
 ```yaml
 global:
@@ -85,15 +105,6 @@ scrape_configs:
   - job_name: koda-control-plane
     static_configs:
       - targets: ["app:8090"]
-
-  - job_name: koda-sidecars
-    static_configs:
-      - targets:
-          - "security:9100"
-          - "memory:9100"
-          - "artifact:9100"
-          - "retrieval:9100"
-          - "runtime-kernel:9100"
 
   - job_name: postgres
     static_configs:
@@ -107,13 +118,24 @@ Eight alerts that catch most incidents:
 | Alert | Condition | Severity |
 |---|---|---|
 | `worker_crash_loop` | `audit_events.event_type='control_plane.worker_crash_loop'` in last 5m | high |
-| `provider_circuit_open` | `koda_circuit_breaker_state{name=~".*"} == 1` (open) for 60s | high |
+| `provider_circuit_open` | `koda_circuit_breaker_state == 2` for 60s | high |
 | `queue_depth_high` | `koda_queue_depth > 50` for 5m | medium |
 | `postgres_pool_exhausted` | `pg_stat_activity{state="active"} >= max_connections * 0.9` | high |
-| `supervisor_heartbeat_stale` | `time() - koda_supervisor_heartbeat_age > 60` (cluster mode) | high |
-| `policy_engine_hard_stop` | `audit_events.event_type='policy.hard_stop_crossed'` | medium |
-| `sidecar_unhealthy` | `koda_sidecar_up == 0` for 60s | high |
-| `disk_space_low` | `node_filesystem_avail_bytes / node_filesystem_size_bytes < 0.1` | high |
+| `run_graph_completeness_failed` | `increase(koda_run_graph_completeness_gates_total{status="failed"}[10m]) > 0` | high |
+| `critical_release_blockers` | `sum(koda_release_blockers{severity=~"critical\\|high"}) > 0` | high |
+| `channel_gateway_deny_spike` | `increase(koda_channel_gateway_events_total{event="policy_denied"}[15m]) > 10` | medium |
+| `ops_benchmark_failed` | `increase(koda_ops_benchmark_runs_total{status!="passed"}[30m]) > 0` | medium |
+
+## Top-Tier Roadmap Gate
+
+The top-tier roadmap treats observability as a release gate, not an optional
+afterthought. See [Scaling and Resilience](scaling-resilience-runbook.md) for
+the KG-14 budgets and [Top-Tier Release Train](top-tier-release-train.md) for
+the KG-15 phase closeout checklist.
+
+Every roadmap phase must declare audit, metric, and future RunGraph coverage
+for queue wait, lease acquire/loss/reap, dependency calls, breaker open, retry,
+DLQ, cancellation, cleanup, and user-facing errors before the phase closes.
 
 ## Tracing (Phase 2D)
 

@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { KodaMark } from "@/components/layout/koda-mark";
 import { SetupFrame } from "@/components/setup/setup-frame";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
+import { translate } from "@/lib/i18n";
 
 /**
  * The auth contract (see `apps/web/CLAUDE.md`) folds every 4xx auth failure —
@@ -62,10 +63,7 @@ export function LoginScreen() {
     } catch (error) {
       if (isUpstreamFailure(error)) {
         setError(
-          t("auth.login.service_unavailable", {
-            defaultValue:
-              "Sign-in service is temporarily unavailable. Please try again in a moment.",
-          }),
+          t("auth.login.service_unavailable", undefined),
         );
       } else {
         // Generic message — never reveal whether the account exists.
@@ -98,7 +96,7 @@ export function LoginScreen() {
               autoComplete="username"
               autoFocus
               disabled={busy}
-              placeholder="owner@yourdomain.com"
+              placeholder={translate("generated.account.owner_yourdomain_com_8d7a5b9d")}
               className="auth-input"
             />
           </label>
@@ -124,13 +122,12 @@ export function LoginScreen() {
           variant="accent"
           size="lg"
           disabled={busy}
+          aria-label={busy ? t("auth.login.submitting") : undefined}
+          aria-busy={busy || undefined}
           className="auth-submit"
         >
           {busy ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t("auth.login.submitting")}</span>
-            </>
+            <InlineSpinner className="h-4 w-4" />
           ) : (
             t("auth.login.submit")
           )}

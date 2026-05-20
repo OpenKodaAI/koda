@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Plus, Search } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useSystemSettings } from "@/hooks/use-system-settings";
 import type { McpServerCatalogEntry } from "@/lib/control-plane";
@@ -93,7 +94,7 @@ function MarketplaceGrid({
   onSelect: (entryId: string) => void;
   onAddCustomMcp: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const [search, setSearch] = useState("");
   const [activeCategory, setActiveCategory] = useState<
     UnifiedIntegrationCategory | "all"
@@ -129,11 +130,11 @@ function MarketplaceGrid({
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h1 className="text-xl font-bold tracking-[-0.04em] text-[var(--text-primary)] sm:text-2xl">
-              {tl("Conecte suas ferramentas")}
+              {t("generated.controlPlane.conecte_suas_ferramentas_de7a7271")}
             </h1>
             <p className="mt-1.5 max-w-2xl text-sm text-[var(--text-tertiary)]">
-              {tl(
-                "Integre com plataformas nativas e organize também os servidores MCP do catálogo global no mesmo espaço.",
+              {t(
+                "generated.controlPlane.integre_com_plataformas_nativas_e_organize_t_dad92b64",
               )}
             </p>
           </div>
@@ -149,7 +150,7 @@ function MarketplaceGrid({
             }}
           >
             <Plus size={14} />
-            {tl("Adicionar servidor MCP")}
+            {t("generated.controlPlane.adicionar_servidor_mcp_ea88d544")}
           </button>
         </div>
 
@@ -164,19 +165,19 @@ function MarketplaceGrid({
                 type="text"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder={tl("Buscar integrações e servidores...")}
+                placeholder={t("generated.controlPlane.buscar_integracoes_e_servidores_2376bd3c")}
                 className="field-shell pl-9 pr-3 text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
-                aria-label={tl("Buscar integrações e servidores MCP")}
+                aria-label={t("generated.controlPlane.buscar_integracoes_e_servidores_mcp_442e52fb")}
               />
             </div>
 
             <div
               className="flex flex-wrap items-center gap-1"
               role="tablist"
-              aria-label={tl("Filtrar por categoria")}
+              aria-label={t("generated.controlPlane.filtrar_por_categoria_282524cb")}
             >
               <CategoryChip
-                label={tl("Todos")}
+                label={t("generated.controlPlane.todos_d6337c41")}
                 active={activeCategory === "all"}
                 onClick={() => setActiveCategory("all")}
               />
@@ -192,8 +193,12 @@ function MarketplaceGrid({
           </div>
 
           {mcpCatalogLoading ? (
-            <div className="text-xs text-[var(--text-quaternary)]">
-              {tl("Atualizando estado do catálogo MCP...")}
+            <div
+              className="flex items-center py-1 text-[var(--text-quaternary)]"
+              role="status"
+              aria-label={t("generated.controlPlane.atualizando_estado_do_catalogo_mcp_51927d11")}
+            >
+              <InlineSpinner className="h-3.5 w-3.5" />
             </div>
           ) : null}
 
@@ -208,7 +213,7 @@ function MarketplaceGrid({
                 onClick={onRetryMcpCatalog}
                 className="inline-flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
               >
-                {tl("Tentar novamente")}
+                {t("generated.controlPlane.tentar_novamente_14dc7f3f")}
               </button>
             </div>
           ) : null}
@@ -226,7 +231,7 @@ function MarketplaceGrid({
         </div>
       ) : grouped.length === 0 ? (
         <div className="py-12 text-center text-sm text-[var(--text-quaternary)]">
-          {tl("Nenhuma integração ou servidor MCP encontrado.")}
+          {t("generated.controlPlane.nenhuma_integracao_ou_servidor_mcp_encontrad_eb198904")}
         </div>
       ) : (
         <div className="mt-4 space-y-4">
@@ -272,11 +277,11 @@ function TabBar({
   activeTab: MarketplaceTab;
   onChange: (tab: MarketplaceTab) => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   const tabs: { id: MarketplaceTab; label: string }[] = [
-    { id: "tools", label: tl("Ferramentas") },
-    { id: "providers", label: tl("Provedores AI") },
+    { id: "tools", label: t("generated.controlPlane.ferramentas_c76ec58e") },
+    { id: "providers", label: t("generated.controlPlane.provedores_ai_cd03be96") },
   ];
 
   return (
@@ -310,7 +315,7 @@ function TabBar({
 }
 
 export function IntegrationMarketplace() {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const {
     draft,
     integrationConnections,
@@ -336,12 +341,12 @@ export function IntegrationMarketplace() {
       setMcpCatalog(items);
     } catch (error) {
       setMcpCatalogError(
-        toErrorMessage(error, tl("Erro ao carregar catálogo MCP")),
+        toErrorMessage(error, t("generated.controlPlane.erro_ao_carregar_catalogo_mcp_1527c12c")),
       );
     } finally {
       setMcpCatalogLoading(false);
     }
-  }, [tl]);
+  }, [t, tl]);
 
   useEffect(() => {
     void fetchMcpCatalog();
@@ -447,8 +452,8 @@ export function IntegrationMarketplace() {
 
       if (
         !window.confirm(
-          tl(
-            "Tem certeza que deseja remover este servidor? Todas as conexões de agentes serão removidas.",
+          t(
+            "generated.controlPlane.tem_certeza_que_deseja_remover_este_servidor_ba06126c",
           ),
         )
       ) {
@@ -470,7 +475,7 @@ export function IntegrationMarketplace() {
         setMcpRemovingServerKey(null);
       }
     },
-    [fetchMcpCatalog, selectedEntryId, tl],
+    [fetchMcpCatalog, selectedEntryId, t, tl],
   );
 
   return (

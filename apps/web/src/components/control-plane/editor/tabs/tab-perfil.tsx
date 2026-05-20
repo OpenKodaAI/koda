@@ -14,7 +14,7 @@ import {
 
 export function TabPerfil() {
   const { state, updateField, updateAgentSpecField } = useAgentEditor();
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   const agentId = state.agent.id;
 
@@ -48,21 +48,21 @@ export function TabPerfil() {
 
         <div className="flex flex-col gap-3 flex-1 min-w-0">
           <FormInput
-            label={tl("Nome do Agente")}
+            label={t("generated.controlPlane.nome_do_agente_04e75caf")}
             required
             value={state.displayName}
             onChange={(event) => updateField("displayName", event.target.value)}
-            placeholder={tl("Ex: Assistente de Vendas")}
+            placeholder={t("generated.controlPlane.ex_assistente_de_vendas_c23de2f4")}
           />
           <FormInput
-            label={tl("Missao")}
-            description={tl("Uma frase curta sobre o que o agente faz. Aparece no prompt e no catalogo.")}
+            label={t("generated.controlPlane.missao_38786ee2")}
+            description={t("generated.controlPlane.uma_frase_curta_sobre_o_que_o_agente_faz_apa_888d69c2")}
             value={missionProfile.mission}
             onChange={(event) => updateMission(event.target.value)}
-            placeholder={tl("Ex: Resolver tickets com grounding")}
+            placeholder={t("generated.controlPlane.ex_resolver_tickets_com_grounding_816f3a4e")}
           />
           <ColorPickerField
-            label={tl("Cor")}
+            label={t("generated.controlPlane.cor_a63c4fed")}
             hex={state.color}
             rgb={state.colorRgb}
             onHexChange={(hex) => updateField("color", hex)}
@@ -74,10 +74,10 @@ export function TabPerfil() {
       <section className="flex flex-col gap-4 border-t border-[var(--border-subtle)] pt-6">
         <div className="flex flex-col gap-1">
           <h2 className="text-lg font-semibold text-[var(--text-primary)]">
-            {tl("Canais de comunicacao")}
+            {t("generated.controlPlane.canais_de_comunicacao_9f375cf8")}
           </h2>
           <p className="text-sm text-[var(--text-tertiary)]">
-            {tl("Conecte canais de entrada para que usuarios possam interagir com este agente.")}
+            {t("generated.controlPlane.conecte_canais_de_entrada_para_que_usuarios__7ab51769")}
           </p>
         </div>
         <ChannelConnectionArea />

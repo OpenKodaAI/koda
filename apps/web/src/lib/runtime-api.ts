@@ -8,7 +8,8 @@ import {
 } from "@/lib/control-plane";
 import { resolveRuntimeAvailability } from "@/lib/runtime-availability";
 import { normalizeRuntimeRequestError } from "@/lib/runtime-errors";
-import { translateLiteralForLanguage } from "@/lib/i18n";
+import { translateForLanguage } from "@/lib/i18n";
+import { parseChildRuns, parseContextGovernancePayload } from "@/lib/contracts/phase3-runtime";
 import type {
   RuntimeAgentHealth,
   RuntimeBrowserSession,
@@ -379,7 +380,7 @@ export async function getRuntimeOverview(
       [
         ...queueItems
           .filter((item) =>
-            ["queued", "running", "retrying"].includes(
+            ["queued", "running", "retrying", "stalled", "degraded"].includes(
               String(item.status || ""),
             ),
           )
@@ -402,17 +403,17 @@ export async function getRuntimeOverview(
   const incidents = [
     readiness.data?.startup?.phase &&
     readiness.data.startup.phase !== "ready"
-      ? translateLiteralForLanguage(
+      ? translateForLanguage(
           language,
-          "Bootstrap do runtime em fase {{phase}}",
+          "generated.runtime.bootstrap_do_runtime_em_fase_phase_6e01c3f5",
           { phase: readiness.data.startup.phase },
         )
       : null,
     readiness.data?.background_loops &&
     !readiness.data.background_loops.critical_ready
-      ? translateLiteralForLanguage(
+      ? translateForLanguage(
           language,
-          "{{count}} loop(s) críticos degradados",
+          "generated.runtime.count_loop_s_criticos_degradados_d8466c67",
           {
             count:
               readiness.data.background_loops.degraded_loops?.length ??
@@ -422,33 +423,33 @@ export async function getRuntimeOverview(
       : null,
     readiness.data?.knowledge_v2 &&
     readiness.data.knowledge_v2.ready === false
-      ? translateLiteralForLanguage(
+      ? translateForLanguage(
           language,
-          "Knowledge runtime degradado",
+          "generated.runtime.knowledge_runtime_degradado_89fbbab0",
         )
       : null,
     snapshot?.stale_environments
-      ? translateLiteralForLanguage(language, "{{count}} ambiente(s) sem heartbeat recente", {
+      ? translateForLanguage(language, "generated.runtime.count_ambiente_s_sem_heartbeat_recente_ae37a784", {
           count: snapshot.stale_environments,
         })
       : null,
     snapshot?.recovery_backlog
-      ? translateLiteralForLanguage(language, "{{count}} ambiente(s) aguardando recovery", {
+      ? translateForLanguage(language, "generated.runtime.count_ambiente_s_aguardando_recovery_7e9dc2d3", {
           count: snapshot.recovery_backlog,
         })
       : null,
     snapshot?.cleanup_backlog
-      ? translateLiteralForLanguage(language, "{{count}} ambiente(s) aguardando cleanup", {
+      ? translateForLanguage(language, "generated.runtime.count_ambiente_s_aguardando_cleanup_1565fcdf", {
           count: snapshot.cleanup_backlog,
         })
       : null,
     availabilityState.runtime === "disabled"
-      ? translateLiteralForLanguage(language, "Runtime frontend desabilitado")
+      ? translateForLanguage(language, "generated.runtime.runtime_frontend_desabilitado_15ec325e")
       : availabilityState.runtime === "partial"
-        ? translateLiteralForLanguage(language, "Runtime frontend degradado")
+        ? translateForLanguage(language, "generated.runtime.runtime_frontend_degradado_5554ea12")
         : availabilityState.runtime === "offline" ||
             availabilityState.runtime === "unavailable"
-          ? translateLiteralForLanguage(language, "Runtime indisponível")
+          ? translateForLanguage(language, "generated.runtime.runtime_indisponivel_2a707897")
           : null,
   ].filter((value): value is string => Boolean(value));
 
@@ -557,6 +558,11 @@ export async function getRuntimeTaskBundle(
       environment?: RuntimeEnvironment | null;
       warnings?: RuntimeTaskBundle["warnings"];
       guardrails?: RuntimeTaskBundle["guardrails"];
+      run_graph?: RuntimeTaskBundle["run_graph"];
+      run_replay?: RuntimeTaskBundle["run_replay"];
+      sandbox_doctor?: RuntimeTaskBundle["sandbox_doctor"];
+      child_runs?: RuntimeTaskBundle["child_runs"];
+      context_governance?: RuntimeTaskBundle["context_governance"];
     }>(agent, `/api/runtime/tasks/${taskId}`),
     runtimeFetchJsonForAgent<{ items?: RuntimeEvent[] }>(
       agent,
@@ -670,6 +676,11 @@ export async function getRuntimeTaskBundle(
       browser_sessions: [],
       terminals: [],
     },
+    run_graph: detail.data.run_graph ?? null,
+    run_replay: detail.data.run_replay ?? null,
+    sandbox_doctor: detail.data.sandbox_doctor ?? null,
+    child_runs: parseChildRuns(detail.data.child_runs ?? []),
+    context_governance: parseContextGovernancePayload(detail.data.context_governance ?? null),
     errors,
   };
 }

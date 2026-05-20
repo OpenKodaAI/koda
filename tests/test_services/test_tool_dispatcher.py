@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -1469,12 +1470,20 @@ class TestRequestSkill:
         }
 
     def _set_agent_skills(self, monkeypatch, skills, skill_policy=None):
+        if skill_policy is None:
+            skill_policy = {
+                "enabled_skills": [
+                    str(skill.get("id") or "")
+                    for skill in skills
+                    if isinstance(skill, dict) and str(skill.get("id") or "")
+                ]
+            }
         monkeypatch.setenv(
             "AGENT_SPEC_JSON",
             json.dumps(
                 {
                     "custom_skills": skills,
-                    "skill_policy": skill_policy or {},
+                    "skill_policy": skill_policy,
                 }
             ),
         )
@@ -1575,6 +1584,20 @@ class TestRequestSkill:
         assert "No expert skills configured for this agent" in result.output
 
     @pytest.mark.asyncio
+    async def test_request_skill_requires_explicit_allowlist(self, monkeypatch):
+        """Configured skills are invisible unless the agent explicitly allowlists them."""
+        self._set_agent_skills(monkeypatch, [self._make_skill()], {})
+
+        ctx = _make_ctx()
+
+        from koda.services.tool_dispatcher import _handle_request_skill
+
+        result = await _handle_request_skill({"query": "tdd"}, ctx)
+
+        assert result.success is False
+        assert "No expert skills configured for this agent" in result.output
+
+    @pytest.mark.asyncio
     async def test_request_skill_respects_skill_policy(self, monkeypatch):
         """Policy filtering limits request_skill to the current agent's allowed skills."""
         self._set_agent_skills(
@@ -1636,3 +1659,122 @@ class TestRequestSkill:
     async def test_request_skill_is_read_only(self):
         """request_skill must be classified as a read-only tool."""
         assert not _is_write_tool("request_skill", {})
+
+
+def _write_dispatcher_skill_package(root: Path) -> Path:
+    package_dir = root / "safe_pack"
+    (package_dir / "skills").mkdir(parents=True, exist_ok=True)
+    (package_dir / "skills" / "review.md").write_text("Use local notes.", encoding="utf-8")
+    (package_dir / "handlers.py").write_text(
+        """
+async def read_notes(params, ctx):
+    from koda.services.tool_dispatcher import AgentToolResult
+
+    return AgentToolResult(tool="safe_notes", success=True, output="safe")
+""".strip(),
+        encoding="utf-8",
+    )
+    (package_dir / "koda-skill.yaml").write_text(
+        """
+schema_version: koda_skill.v1
+id: safe_pack
+name: Safe Pack
+version: 1.0.0
+description: Safe local package for dispatcher tests.
+author: Koda Tests
+permissions:
+  filesystem:
+    read:
+      - skills
+skills:
+  - id: safe_review
+    name: Safe Review
+    instruction: Use the safe review checklist.
+    content_path: skills/review.md
+tools:
+  - id: safe_notes
+    title: Safe Notes
+    category: skill_package
+    description: Read local test notes.
+    handler: handlers.read_notes
+    access_level: read
+    risk_class: read_context
+    idempotency: read_only
+    approval_default: allow
+    timeout_seconds: 10
+    args_schema:
+      type: object
+      properties: {}
+      required: []
+      additionalProperties: false
+""".strip(),
+        encoding="utf-8",
+    )
+    return package_dir
+
+
+class TestSkillPackageToolExecutionPolicy:
+    @pytest.fixture(autouse=True)
+    def _isolated_package_runtime(self, tmp_path, monkeypatch):
+        import koda.plugins as plugins
+        from koda.plugins.registry import PluginRegistry
+        from koda.skills import _package
+
+        monkeypatch.setattr(plugins, "_registry", PluginRegistry())
+        monkeypatch.setattr(_package, "STATE_ROOT_DIR", tmp_path / "state")
+        monkeypatch.setattr(_package, "_primary_backend", lambda _agent_id: None)
+        monkeypatch.setattr(_package, "PLUGIN_SYSTEM_ENABLED", True)
+        monkeypatch.setattr(tool_dispatcher_module, "PLUGIN_SYSTEM_ENABLED", True)
+        monkeypatch.setattr("koda.config.AGENT_ID", "ATLAS")
+        monkeypatch.setattr(_package, "AGENT_ID", "ATLAS")
+        yield
+
+    @pytest.mark.asyncio
+    async def test_direct_package_tool_call_requires_package_and_tool_allowlists(self, tmp_path, monkeypatch):
+        from koda.skills._package import install_skill_package
+
+        install_skill_package(_write_dispatcher_skill_package(tmp_path), agent_id="ATLAS")
+        monkeypatch.setenv(
+            "AGENT_SPEC_JSON",
+            json.dumps(
+                {
+                    "skill_policy": {"enabled_skills": ["safe_review"]},
+                    "tool_policy": {"allowed_tool_ids": ["safe_notes"]},
+                }
+            ),
+        )
+
+        result = await execute_tool(
+            AgentToolCall(tool="safe_notes", params={}, raw_match=""),
+            _make_ctx(executing_agent_id="ATLAS"),
+        )
+
+        assert result.success is False
+        assert result.metadata["policy_reason_code"] == "skill_package_allowlist_missing"
+        assert result.metadata["missing_policy_fields"] == ["skill_policy.enabled_skill_packages"]
+
+    @pytest.mark.asyncio
+    async def test_direct_package_tool_call_runs_when_both_allowlists_match(self, tmp_path, monkeypatch):
+        from koda.skills._package import install_skill_package
+
+        install_skill_package(_write_dispatcher_skill_package(tmp_path), agent_id="ATLAS")
+        monkeypatch.setenv(
+            "AGENT_SPEC_JSON",
+            json.dumps(
+                {
+                    "skill_policy": {
+                        "enabled_skills": ["safe_review"],
+                        "enabled_skill_packages": ["safe_pack"],
+                    },
+                    "tool_policy": {"allowed_tool_ids": ["safe_notes"]},
+                }
+            ),
+        )
+
+        result = await execute_tool(
+            AgentToolCall(tool="safe_notes", params={}, raw_match=""),
+            _make_ctx(executing_agent_id="ATLAS"),
+        )
+
+        assert result.success is True
+        assert result.output == "safe"

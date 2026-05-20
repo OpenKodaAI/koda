@@ -60,7 +60,7 @@ class TestAliasMatch:
         index = _mock_index()
 
         selector = SkillSelector(registry, index)
-        matches = selector.select("use tdd for this")
+        matches = selector.select("use tdd for this", agent_skill_policy={"enabled_skills": ["tdd"]})
 
         assert len(matches) >= 1
         m = next(m for m in matches if m.skill.id == "tdd")
@@ -82,7 +82,7 @@ class TestTriggerRegex:
         index = _mock_index(results=[("sql", 0.5)])
 
         selector = SkillSelector(registry, index)
-        matches = selector.select("run this query")
+        matches = selector.select("run this query", agent_skill_policy={"enabled_skills": ["sql"]})
 
         assert len(matches) == 1
         m = matches[0]
@@ -100,7 +100,7 @@ class TestSemanticFallback:
         index = _mock_index(results=[("design", 0.8)])
 
         selector = SkillSelector(registry, index)
-        matches = selector.select("create a beautiful interface")
+        matches = selector.select("create a beautiful interface", agent_skill_policy={"enabled_skills": ["design"]})
 
         assert len(matches) == 1
         m = matches[0]
@@ -120,7 +120,10 @@ class TestConflictResolution:
         index = _mock_index(results=[("skill-a", 0.9), ("skill-b", 0.5)])
 
         selector = SkillSelector(registry, index)
-        matches = selector.select("something relevant")
+        matches = selector.select(
+            "something relevant",
+            agent_skill_policy={"enabled_skills": ["skill-a", "skill-b"]},
+        )
 
         ids = [m.skill.id for m in matches]
         assert "skill-a" in ids
@@ -137,7 +140,10 @@ class TestDependencyExpansion:
         index = _mock_index(results=[("skill-a", 0.8)])
 
         selector = SkillSelector(registry, index)
-        matches = selector.select("use skill A")
+        matches = selector.select(
+            "use skill A",
+            agent_skill_policy={"enabled_skills": ["skill-a", "skill-b"]},
+        )
 
         ids = [m.skill.id for m in matches]
         assert "skill-a" in ids
@@ -157,7 +163,7 @@ class TestAgentPolicy:
         selector = SkillSelector(registry, index)
         matches = selector.select(
             "anything",
-            agent_skill_policy={"disabled_skills": ["blocked"]},
+            agent_skill_policy={"enabled_skills": ["blocked"], "disabled_skills": ["blocked"]},
         )
         assert len(matches) == 0
 
@@ -170,7 +176,7 @@ class TestAgentPolicy:
         selector = SkillSelector(registry, index)
         matches = selector.select(
             "anything",
-            agent_skill_policy={"max_skills": 2},
+            agent_skill_policy={"enabled_skills": list(skills), "max_skills": 2},
         )
         assert len(matches) <= 2
 
@@ -212,7 +218,7 @@ class TestEdgeCases:
         index = _mock_index(results=[("tdd", 0.95)])
 
         selector = SkillSelector(registry, index)
-        matches = selector.select("use tdd here")
+        matches = selector.select("use tdd here", agent_skill_policy={"enabled_skills": ["tdd"]})
 
         assert len(matches) >= 1
         m = next(m for m in matches if m.skill.id == "tdd")

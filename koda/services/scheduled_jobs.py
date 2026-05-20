@@ -973,7 +973,13 @@ def get_run_details(run_id: int) -> dict[str, Any] | None:
     return _get_run_with_job(run_id)
 
 
-def list_job_runs(job_id: int, user_id: int | None = None, *, limit: int = 20) -> list[dict[str, Any]]:
+def list_job_runs(
+    job_id: int,
+    user_id: int | None = None,
+    *,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
     params: list[Any] = [job_id]
     query = (
         "SELECT r.* FROM scheduled_job_runs r "
@@ -983,8 +989,8 @@ def list_job_runs(job_id: int, user_id: int | None = None, *, limit: int = 20) -
     if user_id is not None:
         query += " AND j.user_id = ?"
         params.append(user_id)
-    query += " ORDER BY r.id DESC LIMIT ?"
-    params.append(limit)
+    query += " ORDER BY r.id DESC LIMIT ? OFFSET ?"
+    params.extend([limit, max(0, int(offset))])
     runs: list[dict[str, Any]] = []
     for row in _fetchall(query, tuple(params)):
         normalized = _normalize_run(row)
@@ -1027,6 +1033,7 @@ def get_job_detail(
     user_id: int | None = None,
     *,
     run_limit: int = 20,
+    run_offset: int = 0,
     event_limit: int = 50,
 ) -> dict[str, Any] | None:
     job = get_job(job_id, user_id)
@@ -1034,7 +1041,7 @@ def get_job_detail(
         return None
     return {
         "job": job,
-        "runs": list_job_runs(job_id, user_id, limit=run_limit),
+        "runs": list_job_runs(job_id, user_id, limit=run_limit, offset=run_offset),
         "events": list_job_events(job_id, user_id, limit=event_limit),
     }
 

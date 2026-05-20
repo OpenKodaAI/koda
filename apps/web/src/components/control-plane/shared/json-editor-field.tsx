@@ -21,7 +21,7 @@ export function JsonEditorField({
   minHeight,
   compact = true,
 }: JsonEditorFieldProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const [error, setError] = useState<string | null>(null);
 
   const isValid = (() => {
@@ -45,9 +45,9 @@ export function JsonEditorField({
       onChange(formatted);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : tl("Invalid JSON"));
+      setError(e instanceof Error ? e.message : t("generated.controlPlane.invalid_json_9abee6af"));
     }
-  }, [value, onChange, tl]);
+  }, [value, onChange, t]);
 
   const handleChange = useCallback(
     (newValue: string) => {
@@ -90,9 +90,9 @@ export function JsonEditorField({
             <span className="text-xs text-[var(--text-quaternary)]">
               {value.trim()
                 ? isValid
-                  ? tl("Valid JSON")
-                  : tl("Invalid JSON")
-                : tl("Empty")}
+                  ? t("generated.controlPlane.valid_json_61f28858")
+                  : t("generated.controlPlane.invalid_json_9abee6af")
+                : t("generated.controlPlane.empty_57b741d0")}
             </span>
           </div>
 
@@ -104,14 +104,14 @@ export function JsonEditorField({
             onClick={handleFormat}
             className="button-shell button-shell--secondary button-shell--sm"
           >
-            <span>{tl("Format")}</span>
+            <span>{t("generated.controlPlane.format_a520b569")}</span>
           </button>
         </div>
 
         {/* Error detail */}
         {!isValid && value.trim() && !error && (
           <p className="mt-1 text-xs text-[var(--tone-danger-text)]">
-            {tl("JSON syntax error detected")}
+            {t("generated.controlPlane.json_syntax_error_detected_112edb55")}
           </p>
         )}
       </div>

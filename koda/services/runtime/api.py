@@ -247,23 +247,57 @@ async def _runtime_environments(request: web.Request) -> web.Response:
     return web.json_response({"items": get_runtime_controller().store.list_environments()})
 
 
-def _schedule_detail_payload(job_id: int) -> dict[str, object] | None:
+def _page_payload(items: list[object], *, limit: int, offset: int) -> dict[str, object]:
+    page_items = items[:limit]
+    has_more = len(items) > limit
+    return {
+        "items": page_items,
+        "page": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(page_items),
+            "next_offset": offset + len(page_items) if has_more else None,
+            "has_more": has_more,
+            "total": None,
+        },
+    }
+
+
+def _schedule_detail_payload(
+    job_id: int,
+    *,
+    run_limit: int = 25,
+    run_offset: int = 0,
+    event_limit: int = 50,
+) -> dict[str, object] | None:
     from koda.services import scheduled_jobs
 
-    detail = scheduled_jobs.get_job_detail(job_id, None, run_limit=25, event_limit=100)
+    detail = scheduled_jobs.get_job_detail(
+        job_id,
+        None,
+        run_limit=run_limit + 1,
+        run_offset=run_offset,
+        event_limit=event_limit,
+    )
     if not detail:
         return None
-    runs = [scheduled_jobs.serialize_run(run) for run in detail["runs"]]
+    run_page = _page_payload(
+        [scheduled_jobs.serialize_run(run) for run in detail["runs"]],
+        limit=run_limit,
+        offset=run_offset,
+    )
+    runs = cast(list[dict[str, object]], run_page["items"])
     latest_task_runtime = None
     for run in runs:
         task_id = run.get("task_id")
-        if task_id:
+        if isinstance(task_id, str | int) and task_id:
             latest_task_runtime = get_runtime_controller().store.get_task_runtime(int(task_id))
             if latest_task_runtime:
                 break
     return {
         "job": scheduled_jobs.serialize_job(detail["job"]),
         "runs": runs,
+        "run_page": run_page["page"],
         "events": detail["events"],
         "latest_task_runtime": latest_task_runtime,
     }
@@ -289,7 +323,21 @@ async def _runtime_schedule_detail(request: web.Request) -> web.Response:
     if auth:
         return auth
     job_id = int(request.match_info["job_id"])
-    payload = _schedule_detail_payload(job_id)
+    run_limit = _parse_positive_int(request.query.get("run_limit"), name="run_limit", default=25, maximum=100)
+    run_offset = _parse_positive_int(
+        request.query.get("run_offset") or request.query.get("offset"),
+        name="run_offset",
+        default=0,
+        minimum=0,
+        maximum=100_000,
+    )
+    event_limit = _parse_positive_int(request.query.get("event_limit"), name="event_limit", default=50, maximum=100)
+    payload = _schedule_detail_payload(
+        job_id,
+        run_limit=run_limit,
+        run_offset=run_offset,
+        event_limit=event_limit,
+    )
     if payload is None:
         return web.json_response({"error": "schedule job not found"}, status=404)
     return web.json_response(payload)
@@ -667,10 +715,80 @@ async def _runtime_task_detail(request: web.Request) -> web.Response:
         log.exception("runtime_task_detail_asset_registry_failed", task_id=task_id)
     from koda.knowledge.presentation import redact_runtime_knowledge_payload
 
+    environment = controller.store.get_environment_by_task(task_id)
+    list_events = getattr(controller.store, "list_events", None)
+    runtime_events = list_events(task_id=task_id, after_seq=0) if callable(list_events) else []
+    run_graph_payload: dict[str, object] | None = None
+    run_replay_payload: dict[str, object] | None = None
+    sandbox_doctor_payload: dict[str, object] | None = None
+    try:
+        from koda.services.run_graph_store import graph_payload_for_execution, replay_payload_for_execution
+
+        run_graph_payload = graph_payload_for_execution(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            trace={},
+            runtime_events=runtime_events,
+        )
+        run_replay_payload = replay_payload_for_execution(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            trace={},
+            runtime_events=runtime_events,
+        )
+    except Exception:
+        log.exception("runtime_task_detail_run_graph_failed", task_id=task_id)
+    try:
+        from koda.services.sandbox_doctor import build_sandbox_doctor_payload
+
+        sandbox_doctor_payload = build_sandbox_doctor_payload(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            task=task,
+            environment=environment,
+            runtime_kernel=runtime_kernel_snapshot,
+        )
+    except Exception:
+        log.exception("runtime_task_detail_sandbox_doctor_failed", task_id=task_id)
+    child_runs_payload: list[dict[str, object]] = []
+    try:
+        from koda.services.child_runs import list_child_runs_for_parent
+
+        child_runs_payload = cast(
+            list[dict[str, object]],
+            await list_child_runs_for_parent(str(task.get("agent_id") or AGENT_ID or "").strip().upper(), task_id),
+        )
+    except Exception:
+        log.exception("runtime_task_detail_child_runs_failed", task_id=task_id)
+    context_governance_payload: dict[str, object] | None = None
+    if isinstance(run_graph_payload, dict):
+        raw_nodes = run_graph_payload.get("nodes", [])
+        graph_nodes = raw_nodes if isinstance(raw_nodes, list) else []
+        context_nodes = [
+            node
+            for node in graph_nodes
+            if isinstance(node, dict)
+            and node.get("node_type") == "context_block"
+            and str(node.get("source") or "").startswith("execution_trace.grounding.context_governance")
+        ]
+        if context_nodes:
+            context_governance_payload = {
+                "schema_version": "context_governance.v1",
+                "summary": {
+                    "block_count": len(context_nodes),
+                    "included_count": sum(1 for node in context_nodes if node.get("status") == "included"),
+                    "dropped_count": sum(1 for node in context_nodes if node.get("status") == "dropped"),
+                    "review_required_count": sum(
+                        1 for node in context_nodes if node.get("status") == "review_required"
+                    ),
+                },
+                "blocks": [node.get("payload") for node in context_nodes if isinstance(node.get("payload"), dict)],
+            }
+
     return web.json_response(
         {
             "task": task,
-            "environment": controller.store.get_environment_by_task(task_id),
+            "environment": environment,
             "runtime_kernel": runtime_kernel_snapshot,
             "warnings": controller.store.list_warnings(task_id),
             "guardrails": controller.list_guardrail_hits(task_id),
@@ -682,6 +800,11 @@ async def _runtime_task_detail(request: web.Request) -> web.Response:
                 include_sensitive=_include_sensitive(request),
             ),
             "asset_refs": asset_refs,
+            "run_graph": run_graph_payload,
+            "run_replay": run_replay_payload,
+            "sandbox_doctor": sandbox_doctor_payload,
+            "child_runs": child_runs_payload,
+            "context_governance": context_governance_payload,
         }
     )
 
@@ -694,6 +817,77 @@ async def _runtime_task_events(request: web.Request) -> web.Response:
     after_seq = _parse_positive_int(request.query.get("after_seq"), name="after_seq", default=0, minimum=0)
     items = get_runtime_controller().store.list_events(task_id=task_id, after_seq=after_seq)
     return web.json_response({"items": items})
+
+
+async def _runtime_task_run_graph(request: web.Request) -> web.Response:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    controller = get_runtime_controller()
+    task = controller.store.get_task_runtime(task_id)
+    if task is None:
+        return web.json_response({"error": "task not found"}, status=404)
+    events = controller.store.list_events(task_id=task_id, after_seq=0)
+    from koda.services.run_graph_store import graph_payload_for_execution
+
+    return web.json_response(
+        graph_payload_for_execution(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            trace={},
+            runtime_events=events,
+        )
+    )
+
+
+async def _runtime_task_replay(request: web.Request) -> web.Response:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    controller = get_runtime_controller()
+    task = controller.store.get_task_runtime(task_id)
+    if task is None:
+        return web.json_response({"error": "task not found"}, status=404)
+    events = controller.store.list_events(task_id=task_id, after_seq=0)
+    from koda.services.run_graph_store import replay_payload_for_execution
+
+    return web.json_response(
+        replay_payload_for_execution(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            trace={},
+            runtime_events=events,
+        )
+    )
+
+
+async def _runtime_task_sandbox_doctor(request: web.Request) -> web.Response:
+    auth = _authorize_runtime_access(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    controller = get_runtime_controller()
+    task = controller.store.get_task_runtime(task_id)
+    if task is None:
+        return web.json_response({"error": "task not found"}, status=404)
+    runtime_kernel_snapshot = None
+    try:
+        runtime_kernel_snapshot = await controller.get_runtime_kernel_snapshot(task_id=task_id)
+    except Exception:
+        log.exception("runtime_task_sandbox_doctor_kernel_snapshot_failed", task_id=task_id)
+    from koda.services.sandbox_doctor import build_sandbox_doctor_payload
+
+    return web.json_response(
+        build_sandbox_doctor_payload(
+            agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
+            task_id=task_id,
+            task=task,
+            environment=controller.store.get_environment_by_task(task_id),
+            runtime_kernel=runtime_kernel_snapshot,
+        )
+    )
 
 
 async def _runtime_task_artifacts(request: web.Request) -> web.Response:
@@ -1233,6 +1427,25 @@ async def _runtime_cancel(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+async def _runtime_interrupt(request: web.Request) -> web.Response:
+    auth = _authorize_mutation(request)
+    if auth:
+        return auth
+    task_id = int(request.match_info["task_id"])
+    allowed, phase = _is_mutation_allowed(task_id)
+    if not allowed:
+        return web.json_response({"error": f"mutations blocked during {phase}"}, status=409)
+    result = await get_runtime_controller().cancel_task(
+        task_id=task_id,
+        actor="runtime_api",
+        reason="Interrupted by operator.",
+    )
+    if result is None:
+        return web.json_response({"error": "task not found"}, status=404)
+    result["action"] = "interrupted"
+    return web.json_response(result)
+
+
 async def _runtime_retry(request: web.Request) -> web.Response:
     auth = _authorize_mutation(request)
     if auth:
@@ -1273,7 +1486,63 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
     if not text:
         return web.json_response({"error": "text is required"}, status=400)
 
-    session_id = str(payload.get("session_id") or "").strip() or f"session-{uuid4().hex}"
+    squad_payload_raw = payload.get("squad")
+    squad_payload = squad_payload_raw if isinstance(squad_payload_raw, dict) else None
+    session_id = str(payload.get("session_id") or "").strip()
+    if not session_id and squad_payload is not None:
+        squad_thread_id = str(squad_payload.get("thread_id") or squad_payload.get("squad_thread_id") or "").strip()
+        target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"
+        squad_task_id = str(squad_payload.get("squad_task_id") or "").strip()
+        seed = f"{squad_thread_id}:{target_agent_id}:{squad_task_id or uuid4().hex}".encode()
+        session_id = f"squad-{hashlib.sha256(seed).hexdigest()[:24]}"
+    session_id = session_id or f"session-{uuid4().hex}"
+
+    if squad_payload is not None:
+        squad_thread_id = str(squad_payload.get("thread_id") or squad_payload.get("squad_thread_id") or "").strip()
+        if not squad_thread_id:
+            return web.json_response({"error": "squad.thread_id is required"}, status=400)
+
+        def optional_int(value: Any) -> int | None:
+            try:
+                return int(value) if value is not None and str(value).strip() else None
+            except (TypeError, ValueError):
+                return None
+
+        explicit_user_id = optional_int(squad_payload.get("user_id"))
+        explicit_chat_id = optional_int(squad_payload.get("chat_id") or squad_payload.get("telegram_chat_id"))
+        user_id = explicit_user_id or _dashboard_actor_id(namespace="squad-user", session_id=session_id)
+        chat_id = explicit_chat_id or -_dashboard_actor_id(namespace="squad-chat", session_id=session_id)
+        chain_raw = squad_payload.get("delegation_chain")
+        delegation_chain = [str(item) for item in chain_raw] if isinstance(chain_raw, list) else []
+        target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"
+
+        from koda.services.queue_manager import enqueue_squad_agent_task
+
+        task_id = await enqueue_squad_agent_task(
+            application=application,
+            user_id=user_id,
+            chat_id=chat_id,
+            query_text=text,
+            executing_agent_id=target_agent_id,
+            squad_thread_id=squad_thread_id,
+            squad_task_id=str(squad_payload.get("squad_task_id") or "").strip() or None,
+            parent_message_id=str(squad_payload.get("parent_message_id") or "").strip() or None,
+            delegation_chain=delegation_chain,
+            delegation_request_id=str(squad_payload.get("delegation_request_id") or "").strip() or None,
+            delegation_origin_agent_id=str(squad_payload.get("delegation_origin_agent_id") or "").strip() or None,
+            telegram_message_thread_id=optional_int(squad_payload.get("telegram_message_thread_id")),
+            bot_override=_SilentRuntimeBot(),
+        )
+        return web.json_response(
+            {
+                "accepted": True,
+                "session_id": session_id,
+                "task_id": task_id,
+                "squad_thread_id": squad_thread_id,
+            },
+            status=202,
+        )
+
     user_id = _dashboard_actor_id(namespace="dashboard-user", session_id=session_id)
     chat_id = -_dashboard_actor_id(namespace="dashboard-chat", session_id=session_id)
 
@@ -1540,6 +1809,9 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_get("/api/runtime/schedules/{job_id:\\d+}", _runtime_schedule_detail)
     app.router.add_get("/api/runtime/environments/{env_id:\\d+}", _runtime_environment_detail)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}", _runtime_task_detail)
+    app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/run-graph", _runtime_task_run_graph)
+    app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/replay", _runtime_task_replay)
+    app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/sandbox-doctor", _runtime_task_sandbox_doctor)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/events", _runtime_task_events)
     app.router.add_get("/api/runtime/tasks/{task_id:\\d+}/artifacts", _runtime_task_artifacts)
     app.router.add_get("/api/runtime/artifacts/{artifact_id}/download", _runtime_artifact_download)
@@ -1566,6 +1838,7 @@ def setup_runtime_routes(app: web.Application) -> None:
     app.router.add_get("/ws/runtime/tasks/{task_id:\\d+}/terminals/{terminal_id:\\d+}", _runtime_terminal_ws)
     app.router.add_get("/ws/runtime/tasks/{task_id:\\d+}/browser", _runtime_browser_ws)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/cancel", _runtime_cancel)
+    app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/interrupt", _runtime_interrupt)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/retry", _runtime_retry)
     app.router.add_post("/api/runtime/tasks/{task_id:\\d+}/recover", _runtime_recover)
     app.router.add_patch("/api/runtime/schedules/{job_id:\\d+}", _runtime_schedule_update)

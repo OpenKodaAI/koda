@@ -185,12 +185,12 @@ export function CostTimeChart({
     return (
       <div
         className={cn(
-          "flex min-h-[360px] items-center justify-center gap-2 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]",
+          "flex min-h-[300px] items-center justify-center gap-2 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]",
           className
         )}
       >
         <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--text-quaternary)]" />
-        <span>{t("costs.page.timeChart.emptyShort", { defaultValue: "No data" })}</span>
+        <span>{t("costs.page.timeChart.emptyShort", undefined)}</span>
       </div>
     );
   }
@@ -198,12 +198,12 @@ export function CostTimeChart({
   return (
     <section
       className={cn(
-        "overflow-hidden rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)]",
+        "overflow-hidden rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel)]",
         className
       )}
     >
-      <div className="border-b border-[var(--border-subtle)] px-4 py-3 sm:px-5">
-        <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+      <div className="border-b border-[var(--divider-hair)] px-3 py-3">
+        <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <p className="eyebrow truncate">{t("costs.chart.eyebrow")}</p>
             <h3 className="mt-1 truncate text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
@@ -212,20 +212,17 @@ export function CostTimeChart({
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
-            <div className="inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1.5 text-[0.75rem]">
+            <div className="inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2.5 py-1 text-[0.75rem]">
               <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                {activeDatum?.label ?? t("costs.page.timeChart.noBucket", { defaultValue: "No bucket" })}
+                {activeDatum?.label ?? t("costs.page.timeChart.noBucket", undefined)}
               </span>
               <span className="shrink-0 font-mono text-[var(--text-primary)]">
                 {activeDatum ? formatCost(activeDatum.total) : "—"}
               </span>
               <span className="hidden min-w-0 truncate text-[var(--text-tertiary)] sm:inline">
                 {activeDatum?.driverLabel
-                  ? t("costs.page.timeChart.driver", {
-                      defaultValue: "Driver · {{value}}",
-                      value: activeDatum.driverLabel,
-                    })
-                  : t("costs.page.timeChart.noDriver", { defaultValue: "No dominant driver" })}
+                  ? t("costs.page.timeChart.driver", { value: activeDatum.driverLabel })
+                  : t("costs.page.timeChart.noDriver", undefined)}
               </span>
             </div>
 
@@ -236,13 +233,13 @@ export function CostTimeChart({
               ]}
               value={mode}
               onChange={(id) => onModeChange?.(id as CostTimelineMode)}
-              ariaLabel={t("costs.page.timeChart.modeLabel", { defaultValue: "Group by" })}
+              ariaLabel={t("costs.page.timeChart.modeLabel", undefined)}
               className="self-start"
             />
           </div>
         </div>
 
-        <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
+        <div className="mt-2 flex gap-3 overflow-x-auto pb-1">
           {series.map((item) => {
             const isDimmed = hoveredSeriesKey != null && hoveredSeriesKey !== item.key;
 
@@ -254,18 +251,12 @@ export function CostTimeChart({
                 onMouseLeave={() => setHoveredSeriesKey(null)}
                 onFocus={() => setHoveredSeriesKey(item.key)}
                 onBlur={() => setHoveredSeriesKey(null)}
-                className="inline-flex max-w-[180px] shrink-0 items-center gap-2 rounded-[var(--radius-chip)] border px-2.5 py-1 text-[11px] font-medium transition-colors"
+                className="inline-flex max-w-[180px] shrink-0 items-center gap-1.5 rounded-[var(--radius-chip)] px-0 py-1 text-[0.6875rem] transition-colors"
                 style={{
-                  borderColor: isDimmed
-                    ? "var(--border-subtle)"
-                    : `color-mix(in srgb, ${item.color} 34%, var(--border-subtle) 66%)`,
-                  background: isDimmed
-                    ? "transparent"
-                    : `color-mix(in srgb, ${item.color} 8%, var(--surface-panel-soft) 92%)`,
                   color: isDimmed ? "var(--text-secondary)" : "var(--text-primary)",
                 }}
               >
-                <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
                 <span className="truncate">{item.label}</span>
               </button>
             );
@@ -273,8 +264,8 @@ export function CostTimeChart({
         </div>
       </div>
 
-      <div className="p-4 sm:p-5">
-        <div ref={chartHostRef} className="h-[300px] w-full min-w-0">
+      <div className="p-3">
+        <div ref={chartHostRef} className="h-[232px] w-full min-w-0">
           {chartSize.width > 0 && chartSize.height > 0 ? (
             <div
               data-slot="chart"
@@ -286,7 +277,7 @@ export function CostTimeChart({
                 width={chartSize.width}
                 height={chartSize.height}
                 data={data}
-                margin={{ top: 10, right: 12, left: 4, bottom: 8 }}
+                margin={{ top: 8, right: 10, left: 0, bottom: 4 }}
                 onMouseMove={(state) => {
                   const payload = (
                     state as { activePayload?: Array<{ payload?: CostChartDatum }> } | undefined
@@ -320,7 +311,7 @@ export function CostTimeChart({
               axisLine={false}
               tickLine={false}
               width={48}
-              tick={{ fontSize: 12, fill: "var(--text-tertiary)" }}
+              tick={{ fontSize: 11, fill: "var(--text-tertiary)" }}
               tickMargin={12}
               tickFormatter={formatAxisValue}
             />

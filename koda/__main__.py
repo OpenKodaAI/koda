@@ -181,6 +181,14 @@ def main() -> None:
         handle_voice,
     )
     from koda.handlers.packages import cmd_npm, cmd_pip
+    from koda.handlers.squad_handlers import (
+        cmd_squad_bind,
+        cmd_squad_status,
+        cmd_squad_thread_close,
+        cmd_squad_thread_new,
+        cmd_squad_unbind,
+        route_squad_supergroup_message,
+    )
     from koda.services.health import start_health_server, stop_health_server
     from koda.services.queue_manager import active_processes
 
@@ -357,6 +365,23 @@ def main() -> None:
     app.add_handler(CommandHandler("screenshot", _as_handler(cmd_screenshot)))
     app.add_handler(CommandHandler("js", _as_handler(cmd_js)))
 
+    # Squad commands (gated at runtime by INTER_AGENT_ENABLED in each handler)
+    app.add_handler(CommandHandler("squad_bind", _as_handler(cmd_squad_bind)))
+    app.add_handler(CommandHandler("squad_unbind", _as_handler(cmd_squad_unbind)))
+    app.add_handler(CommandHandler("squad_status", _as_handler(cmd_squad_status)))
+    app.add_handler(CommandHandler("squad_thread_new", _as_handler(cmd_squad_thread_new)))
+    app.add_handler(CommandHandler("squad_thread_close", _as_handler(cmd_squad_thread_close)))
+    # Inbound: forum-topic posts in bound supergroups -> persisted as user_input
+    # in the matching SquadThread. Filter narrows to text-only non-command
+    # messages in supergroups; the handler itself further requires the message
+    # to be a topic post and the chat to be bound.
+    app.add_handler(
+        MessageHandler(
+            filters.ChatType.SUPERGROUP & filters.TEXT & ~filters.COMMAND,
+            _as_handler(route_squad_supergroup_message),
+        )
+    )
+
     # Callback queries
     app.add_handler(CallbackQueryHandler(_as_handler(callback_approval), pattern=r"^approve:"))
     app.add_handler(CallbackQueryHandler(_as_handler(callback_agent_cmd_approval), pattern=r"^acmd:"))
@@ -512,7 +537,7 @@ def main() -> None:
     async def _post_init(app: Application) -> None:
         from telegram import BotCommand
 
-        from koda.config import RUNBOOK_GOVERNANCE_ENABLED
+        from koda.config import RUNBOOK_GOVERNANCE_ENABLED, SQUADS_ENABLED
         from koda.knowledge.config import KNOWLEDGE_ENABLED
         from koda.memory.config import (
             MEMORY_DIGEST_ENABLED,
@@ -535,6 +560,9 @@ def main() -> None:
             expected_background_loops.add("runbook_governance")
         if CACHE_ENABLED or SCRIPT_LIBRARY_ENABLED:
             expected_background_loops.add("cache_maintenance")
+        if SQUADS_ENABLED:
+            expected_background_loops.add("squad_inbox_dispatcher")
+            expected_background_loops.add("squad_router")
         set_runtime_startup_state(
             "bootstrapping",
             expected_background_loops=expected_background_loops,
@@ -561,6 +589,7 @@ def main() -> None:
             from koda.services.queue_manager import (
                 _stale_task_lease_janitor,
                 recover_pending_tasks,
+                start_squad_inbox_dispatcher,
             )
             from koda.services.runtime import get_runtime_controller
             from koda.state.history_store import reap_expired_task_leases
@@ -599,6 +628,18 @@ def main() -> None:
                 _stale_task_lease_janitor,
                 critical=True,
             )
+            if SQUADS_ENABLED:
+                await loop_supervisor.start_loop(
+                    "squad_inbox_dispatcher",
+                    lambda: start_squad_inbox_dispatcher(app),
+                )
+                from koda.config import SQUAD_ROUTER_SWEEP_INTERVAL_S
+                from koda.squads import get_squad_router
+
+                router = get_squad_router()
+                if router is not None:
+                    router._sweep_interval_s = max(0.1, float(SQUAD_ROUTER_SWEEP_INTERVAL_S))  # noqa: SLF001
+                    await loop_supervisor.start_loop("squad_router", router.run_forever)
         except Exception:
             critical_startup_issues.append("runtime_start_error")
             log.exception("runtime_start_error")

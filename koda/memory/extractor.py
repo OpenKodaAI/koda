@@ -10,6 +10,7 @@ from koda.logging_config import get_logger
 from koda.memory.config import MEMORY_EXTRACTION_MODEL, MEMORY_EXTRACTION_PROVIDER, MEMORY_MAX_EXTRACTION_ITEMS
 from koda.memory.profile import MemoryProfile
 from koda.memory.prompts import get_extraction_prompt
+from koda.memory.safety import MemorySafetyError, assert_memory_text_safe
 from koda.memory.types import Memory, MemoryStatus, MemoryType, build_conflict_key
 from koda.services.llm_runner import get_provider_fallback_chain, resolve_provider_model, run_llm
 
@@ -280,6 +281,20 @@ def _parse_extraction_result(
             continue
         if resolved_profile.should_ignore(content):
             continue
+        try:
+            assert_memory_text_safe(
+                {
+                    "content": content,
+                    "subject": item.get("subject"),
+                    "claim_kind": item.get("claim_kind"),
+                    "retention_reason": item.get("retention_reason"),
+                    "evidence_refs": item.get("evidence_refs"),
+                },
+                surface="memory.extraction",
+            )
+        except MemorySafetyError:
+            log.warning("memory_extraction_safety_blocked")
+            return []
 
         type_str = str(item.get("type", "fact")).lower()
         try:

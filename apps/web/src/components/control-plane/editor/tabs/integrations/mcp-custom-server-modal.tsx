@@ -1,5 +1,6 @@
 "use client";
 
+import { translate } from "@/lib/i18n";
 /**
  * McpCustomServerModal — register a custom MCP server (system-wide or
  * per-agent), either via form fields or by pasting a Claude Desktop /
@@ -95,7 +96,7 @@ export function McpCustomServerModal({
   hideScopePicker = false,
   agentLabel,
 }: McpCustomServerModalProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   const [mode, setMode] = useState<Mode>(defaultMode);
   const [scope, setScope] = useState<ScopeChoice>(defaultScope);
@@ -165,15 +166,15 @@ export function McpCustomServerModal({
   const handleSubmitForm = useCallback(async () => {
     setError(null);
     if (!serverKey.trim() || !displayName.trim()) {
-      setError(tl("Identificador e nome de exibição são obrigatórios."));
+      setError(t("generated.controlPlane.identificador_e_nome_de_exibicao_sao_obrigat_1c539111"));
       return;
     }
     if (transport === "stdio" && !command.trim()) {
-      setError(tl("Comando é obrigatório para transport stdio."));
+      setError(t("generated.controlPlane.comando_e_obrigatorio_para_transport_stdio_c37c6033"));
       return;
     }
     if (transport === "http_sse" && !url.trim()) {
-      setError(tl("URL é obrigatória para transport http_sse."));
+      setError(t("generated.controlPlane.url_e_obrigatoria_para_transport_http_sse_d3290c4e"));
       return;
     }
     setSubmitting(true);
@@ -218,7 +219,7 @@ export function McpCustomServerModal({
       reset();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : tl("Falha ao registrar servidor."));
+      setError(err instanceof Error ? err.message : t("generated.controlPlane.falha_ao_registrar_servidor_c73de07f"));
     } finally {
       setSubmitting(false);
     }
@@ -237,7 +238,7 @@ export function McpCustomServerModal({
     reset,
     scope,
     serverKey,
-    tl,
+    t,
     transport,
     url,
   ]);
@@ -246,11 +247,11 @@ export function McpCustomServerModal({
     setError(null);
     setImportResult(null);
     if (!jsonParsed) {
-      setError(tl("JSON inválido. Verifique a sintaxe."));
+      setError(t("generated.controlPlane.json_invalido_verifique_a_sintaxe_63ba115e"));
       return;
     }
     if (detectedServers.length === 0) {
-      setError(tl("Nenhum servidor encontrado em mcpServers."));
+      setError(t("generated.controlPlane.nenhum_servidor_encontrado_em_mcpservers_e38cb2b8"));
       return;
     }
     setSubmitting(true);
@@ -264,11 +265,11 @@ export function McpCustomServerModal({
         }, 1200);
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : tl("Falha ao importar JSON."));
+      setError(err instanceof Error ? err.message : t("generated.controlPlane.falha_ao_importar_json_b1f012b0"));
     } finally {
       setSubmitting(false);
     }
-  }, [detectedServers.length, jsonParsed, onClose, onSubmitImport, reset, scope, tl]);
+  }, [detectedServers.length, jsonParsed, onClose, onSubmitImport, reset, scope, t]);
 
   if (!presence.shouldRender || typeof document === "undefined") return null;
 
@@ -276,12 +277,12 @@ export function McpCustomServerModal({
   const submitDisabled =
     submitting || (mode === "json" && (!jsonParsed || detectedServers.length === 0));
   const submitLabel = submitting
-    ? tl("Salvando")
+    ? t("generated.controlPlane.salvando_7eeded02")
     : mode === "form"
-      ? tl("Adicionar")
+      ? t("generated.controlPlane.adicionar_07558363")
       : detectedServers.length > 0
-        ? `${tl("Importar")} (${detectedServers.length})`
-        : tl("Importar");
+        ? `${t("generated.controlPlane.importar_31652d9a")} (${detectedServers.length})`
+        : t("generated.controlPlane.importar_31652d9a");
 
   return createPortal(
     <>
@@ -302,7 +303,7 @@ export function McpCustomServerModal({
           aria-labelledby="mcp-custom-modal-title"
           onClick={(e) => e.stopPropagation()}
         >
-          <button type="button" onClick={onClose} className="app-surface-close" aria-label={tl("Fechar modal")}>
+          <button type="button" onClick={onClose} className="app-surface-close" aria-label={t("generated.controlPlane.fechar_modal_1b5b2901")}>
             <X className="h-4 w-4" />
           </button>
 
@@ -312,15 +313,15 @@ export function McpCustomServerModal({
               {renderIntegrationLogo("mcp", "h-5 w-5") || <Plus size={16} />}
             </div>
             <h3 id="mcp-custom-modal-title" className="text-base font-semibold text-[var(--text-primary)]">
-              {tl("Adicionar servidor MCP")}
+              {t("generated.controlPlane.adicionar_servidor_mcp_ea88d544")}
             </h3>
             <div className="ml-auto flex items-center gap-2">
               <SoftTabs
                 value={mode}
                 onChange={(id) => setMode(id as Mode)}
-                ariaLabel={tl("Modo")}
+                ariaLabel={t("generated.controlPlane.modo_49a7c7ce")}
                 items={[
-                  { id: "form", label: tl("Formulário") },
+                  { id: "form", label: t("generated.controlPlane.formulario_a8928c88") },
                   { id: "json", label: "JSON" },
                 ]}
               />
@@ -330,9 +331,9 @@ export function McpCustomServerModal({
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="system">{tl("Todos os agentes")}</SelectItem>
+                    <SelectItem value="system">{t("generated.controlPlane.todos_os_agentes_ab31c2fa")}</SelectItem>
                     <SelectItem value="agent">
-                      {agentLabel ? tl("Apenas {{label}}", { label: agentLabel }) : tl("Apenas este agente")}
+                      {agentLabel ? t("generated.controlPlane.apenas_label_5e81bc92", { label: agentLabel }) : t("generated.controlPlane.apenas_este_agente_99214fa9")}
                     </SelectItem>
                   </SelectContent>
                 </Select>
@@ -389,7 +390,7 @@ export function McpCustomServerModal({
               onClick={onClose}
               className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
             >
-              {tl("Cancelar")}
+              {t("generated.controlPlane.cancelar_091200fb")}
             </button>
             <button
               type="button"
@@ -443,49 +444,49 @@ type FormBodyProps = {
 };
 
 function FormBody(props: FormBodyProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   return (
     <div className="flex flex-col gap-3">
       {/* Row 1: slug + display name */}
       <div className="grid grid-cols-2 gap-3">
-        <Field label={tl("Identificador")}>
+        <Field label={t("generated.controlPlane.identificador_91c92cf4")}>
           <Input
             sizeVariant="sm"
             value={props.serverKey}
             onChange={(e) => props.setServerKey(e.target.value.toLowerCase().replace(/[^a-z0-9_-]/g, "-"))}
-            placeholder="meu-servidor"
+            placeholder={translate("generated.controlPlane.meu_servidor_429b287a")}
           />
         </Field>
-        <Field label={tl("Nome")}>
+        <Field label={t("generated.controlPlane.nome_fb4c2d32")}>
           <Input
             sizeVariant="sm"
             value={props.displayName}
             onChange={(e) => props.setDisplayName(e.target.value)}
-            placeholder={tl("Meu Servidor MCP")}
+            placeholder={t("generated.controlPlane.meu_servidor_mcp_701fba25")}
           />
         </Field>
       </div>
 
       {/* Row 2: description */}
-      <Field label={tl("Descrição")}>
+      <Field label={t("generated.controlPlane.descricao_ff40fdea")}>
         <Input
           sizeVariant="sm"
           value={props.description}
           onChange={(e) => props.setDescription(e.target.value)}
-          placeholder={tl("Opcional")}
+          placeholder={t("generated.controlPlane.opcional_f6c7765c")}
         />
       </Field>
 
       {/* Row 3: transport */}
-      <Field label={tl("Transport")}>
+      <Field label={t("generated.controlPlane.transport_90314978")}>
         <Select value={props.transport} onValueChange={(v) => props.setTransport(v as "stdio" | "http_sse")}>
           <SelectTrigger sizeVariant="sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="stdio">{tl("stdio")}</SelectItem>
-            <SelectItem value="http_sse">{tl("HTTP / SSE")}</SelectItem>
+            <SelectItem value="stdio">{t("generated.controlPlane.stdio_0fdf75ed")}</SelectItem>
+            <SelectItem value="http_sse">{t("generated.controlPlane.http_sse_66f69e6a")}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
@@ -493,7 +494,7 @@ function FormBody(props: FormBodyProps) {
       {/* Row 4: command + args (stdio) OR URL (http_sse) */}
       {props.isStdio ? (
         <div className="grid grid-cols-[8rem_1fr] gap-3">
-          <Field label={tl("Comando")}>
+          <Field label={t("generated.controlPlane.comando_b21ea3ed")}>
             <Select value={props.command} onValueChange={props.setCommand}>
               <SelectTrigger sizeVariant="sm" title={SAFE_COMMANDS.join(", ")}>
                 <SelectValue />
@@ -507,13 +508,13 @@ function FormBody(props: FormBodyProps) {
               </SelectContent>
             </Select>
           </Field>
-          <Field label={tl("Argumentos")}>
+          <Field label={t("generated.controlPlane.argumentos_8bbda937")}>
             <Input
               sizeVariant="sm"
               className="font-mono"
               value={props.args}
               onChange={(e) => props.setArgs(e.target.value)}
-              placeholder="-y @minha-empresa/mcp"
+              placeholder={translate("generated.controlPlane.y_minha_empresa_mcp_29187fa4")}
             />
           </Field>
         </div>
@@ -535,15 +536,15 @@ function FormBody(props: FormBodyProps) {
       {!props.isStdio ? <HeadersBuilder headers={props.headers} setHeaders={props.setHeaders} /> : null}
 
       {/* Row: auth */}
-      <Field label={tl("Autenticação")}>
+      <Field label={t("generated.controlPlane.autenticacao_023abe86")}>
         <Select value={props.authStrategy} onValueChange={(v) => props.setAuthStrategy(v as "no_auth" | "api_key" | "oauth")}>
           <SelectTrigger sizeVariant="sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="no_auth">{tl("Sem autenticação")}</SelectItem>
-            <SelectItem value="api_key">API key</SelectItem>
-            <SelectItem value="oauth">OAuth 2.1</SelectItem>
+            <SelectItem value="no_auth">{t("generated.controlPlane.sem_autenticacao_e1817db6")}</SelectItem>
+            <SelectItem value="api_key">{translate("generated.controlPlane.api_key_372f7809")}</SelectItem>
+            <SelectItem value="oauth">{translate("generated.controlPlane.oauth_2_1_c7c2ea30")}</SelectItem>
           </SelectContent>
         </Select>
       </Field>
@@ -551,7 +552,7 @@ function FormBody(props: FormBodyProps) {
       {/* OAuth fields */}
       {props.authStrategy === "oauth" ? (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-[2fr_1fr]">
-          <Field label={tl("Metadata URL")}>
+          <Field label={t("generated.controlPlane.metadata_url_94f81263")}>
             <Input
               sizeVariant="sm"
               value={props.oauthMetadataUrl}
@@ -559,12 +560,12 @@ function FormBody(props: FormBodyProps) {
               placeholder="https://.../.well-known/oauth-authorization-server"
             />
           </Field>
-          <Field label="Scopes">
+          <Field label={translate("generated.controlPlane.scopes_dd3d996a")}>
             <Input
               sizeVariant="sm"
               value={props.oauthScopes}
               onChange={(e) => props.setOauthScopes(e.target.value)}
-              placeholder="read write"
+              placeholder={translate("generated.controlPlane.read_write_ff1164d8")}
             />
           </Field>
         </div>
@@ -595,18 +596,18 @@ function EnvSchemaBuilder({
   fields: EnvFieldDraft[];
   setFields: (fields: EnvFieldDraft[]) => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-quaternary)]">
-          {tl("Variáveis de ambiente")}
+          {t("generated.controlPlane.variaveis_de_ambiente_fc3cabe2")}
         </span>
         <button
           type="button"
           onClick={() => setFields([...fields, emptyEnv()])}
-          aria-label={tl("Nova variável")}
-          title={tl("Nova variável")}
+          aria-label={t("generated.controlPlane.nova_variavel_17e0a7c8")}
+          title={t("generated.controlPlane.nova_variavel_17e0a7c8")}
           className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
         >
           <Plus size={11} />
@@ -634,7 +635,7 @@ function EnvSchemaBuilder({
                 onChange={(e) =>
                   setFields(fields.map((f) => (f._id === field._id ? { ...f, label: e.target.value } : f)))
                 }
-                placeholder={tl("Rótulo")}
+                placeholder={t("generated.controlPlane.rotulo_18b7d611")}
               />
               <label className="flex items-center gap-1 whitespace-nowrap text-[10px] text-[var(--text-quaternary)]">
                 <input
@@ -644,13 +645,13 @@ function EnvSchemaBuilder({
                     setFields(fields.map((f) => (f._id === field._id ? { ...f, required: !f.required } : f)))
                   }
                 />
-                {tl("Obrigatório")}
+                {t("generated.controlPlane.obrigatorio_ea9fd1bf")}
               </label>
               <button
                 type="button"
                 onClick={() => setFields(fields.filter((f) => f._id !== field._id))}
                 className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
-                aria-label={tl("Remover")}
+                aria-label={t("generated.controlPlane.remover_5465770e")}
               >
                 <Trash2 size={11} />
               </button>
@@ -669,18 +670,18 @@ function HeadersBuilder({
   headers: HeaderDraft[];
   setHeaders: (h: HeaderDraft[]) => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-quaternary)]">
-          {tl("Headers HTTP")}
+          {t("generated.controlPlane.headers_http_71f40bc9")}
         </span>
         <button
           type="button"
           onClick={() => setHeaders([...headers, emptyHeader()])}
-          aria-label={tl("Novo header")}
-          title={tl("Novo header")}
+          aria-label={t("generated.controlPlane.novo_header_959c3951")}
+          title={t("generated.controlPlane.novo_header_959c3951")}
           className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
         >
           <Plus size={11} />
@@ -696,13 +697,13 @@ function HeadersBuilder({
                 onChange={(e) =>
                   setHeaders(headers.map((it) => (it._id === h._id ? { ...it, key: e.target.value } : it)))
                 }
-                placeholder="X-API-Key"
+                placeholder={translate("generated.controlPlane.x_api_key_0da7d9b1")}
               />
               <button
                 type="button"
                 onClick={() => setHeaders(headers.filter((it) => it._id !== h._id))}
                 className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
-                aria-label={tl("Remover")}
+                aria-label={t("generated.controlPlane.remover_5465770e")}
               >
                 <Trash2 size={11} />
               </button>
@@ -725,7 +726,7 @@ function JsonBody({
   onChange: (v: string) => void;
   importResult: McpClaudeDesktopImportResult | null;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <div className="flex flex-col gap-2">
       <JsonEditor value={value} onChange={onChange} rows={14} ariaLabel="JSON" />
@@ -733,12 +734,12 @@ function JsonBody({
         <div className="flex flex-col gap-1 text-xs">
           {importResult.created.length > 0 ? (
             <p className="text-[var(--tone-success-text)]">
-              {tl("Criados: {{names}}", { names: importResult.created.join(", ") })}
+              {t("generated.controlPlane.criados_names_db1d0de6", { names: importResult.created.join(", ") })}
             </p>
           ) : null}
           {importResult.updated.length > 0 ? (
             <p className="text-[var(--text-secondary)]">
-              {tl("Atualizados: {{names}}", { names: importResult.updated.join(", ") })}
+              {t("generated.controlPlane.atualizados_names_45415321", { names: importResult.updated.join(", ") })}
             </p>
           ) : null}
           {importResult.errors.length > 0 ? (

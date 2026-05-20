@@ -17,6 +17,731 @@
         "type": "http",
         "scheme": "bearer"
       }
+    },
+    "schemas": {
+      "WorkspaceDirectoryRoot": {
+        "type": "object",
+        "required": [
+          "path",
+          "label"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkspaceDirectoryEntry": {
+        "type": "object",
+        "required": [
+          "path",
+          "name",
+          "kind"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "directory",
+              "file"
+            ]
+          }
+        }
+      },
+      "WorkspaceDirectoryRoots": {
+        "type": "object",
+        "required": [
+          "items"
+        ],
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceDirectoryRoot"
+            }
+          }
+        }
+      },
+      "WorkspaceDirectoryListing": {
+        "type": "object",
+        "required": [
+          "path",
+          "items"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "parent": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceDirectoryEntry"
+            }
+          }
+        }
+      },
+      "WorkspaceScanSource": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "tool",
+          "kind",
+          "relative_path",
+          "scope",
+          "name",
+          "description",
+          "confidence",
+          "risk",
+          "status",
+          "import_action",
+          "warnings",
+          "metadata",
+          "content_excerpt"
+        ],
+        "properties": {
+          "source_id": {
+            "type": "string"
+          },
+          "tool": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "absolute_path": {
+            "type": "string"
+          },
+          "scope": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "confidence": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "risk": {
+            "type": "string",
+            "enum": [
+              "low",
+              "review",
+              "high",
+              "blocked"
+            ]
+          },
+          "status": {
+            "type": "string"
+          },
+          "import_action": {
+            "type": "string"
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "content_excerpt": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkspaceScanSummary": {
+        "type": "object",
+        "required": [
+          "total_sources",
+          "by_kind",
+          "by_tool",
+          "by_risk",
+          "review_required",
+          "blocked",
+          "importable",
+          "truncated"
+        ],
+        "properties": {
+          "total_sources": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "by_kind": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "by_tool": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "by_risk": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "integer"
+            }
+          },
+          "review_required": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "blocked": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "importable": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "truncated": {
+            "type": "boolean"
+          }
+        }
+      },
+      "WorkspaceScanResult": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "root_path",
+          "root_kind",
+          "scan_hash",
+          "status",
+          "summary",
+          "sources",
+          "warnings",
+          "limits"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "workspace_config_scan.v1"
+          },
+          "root_path": {
+            "type": "string"
+          },
+          "root_kind": {
+            "type": "string"
+          },
+          "scan_hash": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "completed",
+              "error"
+            ]
+          },
+          "summary": {
+            "$ref": "#/components/schemas/WorkspaceScanSummary"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceScanSource"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "limits": {
+            "type": "object",
+            "properties": {
+              "max_depth": {
+                "type": "integer"
+              },
+              "max_entries": {
+                "type": "integer"
+              },
+              "max_file_bytes": {
+                "type": "integer"
+              },
+              "max_total_bytes": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "WorkspaceImportRequest": {
+        "type": "object",
+        "required": [
+          "path"
+        ],
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "selectedSourceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "selected_source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "maxDepth": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 24
+          }
+        }
+      },
+      "WorkspaceImportResult": {
+        "type": "object",
+        "required": [
+          "applied",
+          "skipped",
+          "conflicts"
+        ],
+        "properties": {
+          "applied": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkspaceImportHistoryItem": {
+        "type": "object",
+        "properties": {
+          "schema_version": {
+            "type": "string"
+          },
+          "imported_at": {
+            "type": "string"
+          },
+          "recorded_at": {
+            "type": "string"
+          },
+          "event": {
+            "type": "string"
+          },
+          "scan_hash": {
+            "type": "string"
+          },
+          "selected_source_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "result": {
+            "$ref": "#/components/schemas/WorkspaceImportResult"
+          },
+          "error": {
+            "type": "string"
+          }
+        }
+      },
+      "WorkspaceRuntimeDefaults": {
+        "type": "object",
+        "properties": {
+          "source_root_path": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "task_execution_mode": {
+            "type": "string"
+          },
+          "isolation_mode": {
+            "type": "string"
+          }
+        }
+      },
+      "ImprovementProposal": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "proposal_id",
+          "source_kind",
+          "source_ref",
+          "proposal_type",
+          "summary",
+          "evidence_refs",
+          "diff_preview",
+          "risk_class",
+          "validation_plan",
+          "rollback_plan",
+          "run_graph_node_ids",
+          "status"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "improvement_proposal.v1"
+          },
+          "proposal_id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "source_kind": {
+            "type": "string",
+            "enum": [
+              "run",
+              "eval",
+              "user_correction",
+              "timeout",
+              "dead_letter",
+              "tool_failure",
+              "manual"
+            ]
+          },
+          "source_ref": {
+            "type": "string"
+          },
+          "proposal_type": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "skill",
+              "prompt",
+              "routing_profile",
+              "tool_policy",
+              "eval_case",
+              "docs"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "diff_preview": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "risk_class": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "validation_plan": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "validation_result": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "rollback_plan": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "pending_review",
+              "approved",
+              "rejected",
+              "validating",
+              "applied",
+              "rolled_back",
+              "failed"
+            ]
+          },
+          "status_history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "idempotency_hash": {
+            "type": "string"
+          },
+          "run_graph_node_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "reviewed_at": {
+            "type": "string"
+          },
+          "validated_at": {
+            "type": "string"
+          },
+          "applied_at": {
+            "type": "string"
+          },
+          "rolled_back_at": {
+            "type": "string"
+          }
+        }
+      },
+      "ImprovementProposalList": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "items"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "improvement_proposal.v1"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImprovementProposal"
+            }
+          }
+        }
+      },
+      "ImprovementProposalActionBody": {
+        "type": "object",
+        "properties": {
+          "reviewer": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "validation_result": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "QualityCockpit": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "cockpit_id",
+          "summary",
+          "top_failures",
+          "cost_vs_quality",
+          "eval_trends"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "quality_cockpit.v1"
+          },
+          "cockpit_id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "generated_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded",
+              "blocked"
+            ]
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "top_failures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "failure_id",
+                "status",
+                "title",
+                "summary"
+              ],
+              "properties": {
+                "failure_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "risk_class": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "proposal_action_available": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "cost_vs_quality": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "eval_trends": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "proposal_payloads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "QualityFailureProposalBody": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          }
+        }
+      },
+      "OperationalErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "code",
+          "category",
+          "message",
+          "retryable",
+          "user_action"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "user_action": {
+            "type": "string"
+          }
+        }
+      },
+      "OperationalErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/OperationalErrorEnvelope"
+          }
+        }
+      }
     }
   },
   "security": [
@@ -64,6 +789,37 @@
         "responses": {
           "200": {
             "description": "Current quickstart, provider, agent, and storage status"
+          }
+        }
+      }
+    },
+    "/api/control-plane/onboarding/readiness": {
+      "get": {
+        "summary": "Onboarding readiness checklist",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Versioned onboarding_readiness.v1 checks for provider, runtime, sandbox, MCP, memory, channel, first task, first trace, docs, and release quality."
+          }
+        }
+      }
+    },
+    "/api/control-plane/onboarding/first-task": {
+      "post": {
+        "summary": "Create a safe first task for onboarding",
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A dashboard first-task request was queued through the normal runtime path."
           }
         }
       }
@@ -502,6 +1258,193 @@
         }
       }
     },
+    "/api/control-plane/providers/supertonic/models": {
+      "get": {
+        "summary": "List Supertonic local models",
+        "responses": {
+          "200": {
+            "description": "Supertonic model catalog with local download status, bytes on disk, active download jobs, and acceleration metadata."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/models/{model_id}/download": {
+      "post": {
+        "summary": "Download a Supertonic model snapshot",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Provider download job for the requested Supertonic model."
+          },
+          "400": {
+            "description": "Unknown model id or invalid request."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/models/{model_id}": {
+      "delete": {
+        "summary": "Delete a downloaded Supertonic model",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Updated Supertonic model status after deleting local assets."
+          },
+          "400": {
+            "description": "Model download is active or the model id is invalid."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/voices": {
+      "get": {
+        "summary": "List Supertonic preset and custom voices",
+        "parameters": [
+          {
+            "name": "model_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "language",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Supertonic voice catalog with preset/custom metadata, selected model/language, local download status, and active jobs."
+          },
+          "400": {
+            "description": "Invalid model id or language."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/voices/{voice_id}/download": {
+      "post": {
+        "summary": "Activate a Supertonic voice locally",
+        "parameters": [
+          {
+            "name": "voice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Provider download job for copying the selected Supertonic voice style into Koda-managed storage."
+          },
+          "400": {
+            "description": "Unknown voice, missing model snapshot, or invalid request."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/voices/{voice_id}": {
+      "delete": {
+        "summary": "Delete a managed Supertonic voice",
+        "parameters": [
+          {
+            "name": "voice_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "model_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Delete result for a preset voice copy or imported custom voice JSON."
+          },
+          "400": {
+            "description": "Voice download is active or the request is invalid."
+          }
+        }
+      }
+    },
+    "/api/control-plane/providers/supertonic/voices/import": {
+      "post": {
+        "summary": "Import a Supertonic Voice Builder JSON file",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "file"
+                ],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary"
+                  },
+                  "model_id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Imported custom voice metadata."
+          },
+          "400": {
+            "description": "Missing file, oversized upload, invalid JSON, or invalid voice style payload."
+          }
+        }
+      }
+    },
     "/api/control-plane/connections/defaults/{connection_key}/verify": {
       "post": {
         "summary": "Verify a canonical default connection",
@@ -542,6 +1485,247 @@
         }
       }
     },
+    "/api/control-plane/workspaces/directory-roots": {
+      "get": {
+        "summary": "List safe workspace directory roots",
+        "responses": {
+          "200": {
+            "description": "Candidate local roots the operator can browse from the workspace import flow.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceDirectoryRoots"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/workspaces/list-directory": {
+      "post": {
+        "summary": "List a safe local directory",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Directory entries after root validation, symlink escape checks, and ignored-folder filtering.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceDirectoryListing"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/workspaces/scan-directory": {
+      "post": {
+        "summary": "Scan a workspace directory for importable config",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "maxDepth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 24
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "workspace_config_scan.v1 preview with detected sources, redacted excerpts, risk labels, blocked execution findings, and scan hash. The operation is non-mutating.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceScanResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/workspaces/import": {
+      "post": {
+        "summary": "Create a workspace from a scanned folder",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceImportRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created workspace, scan preview, and import result. Only explicitly selected safe sources are applied.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "workspace",
+                    "scan",
+                    "import_result"
+                  ],
+                  "properties": {
+                    "workspace": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "scan": {
+                      "$ref": "#/components/schemas/WorkspaceScanResult"
+                    },
+                    "import_result": {
+                      "$ref": "#/components/schemas/WorkspaceImportResult"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/workspaces/{workspace_id}/rescan": {
+      "post": {
+        "summary": "Rescan an existing workspace root",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "maxDepth": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 24
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated workspace scan metadata and workspace_config_scan.v1 payload.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "workspace",
+                    "scan"
+                  ],
+                  "properties": {
+                    "workspace": {
+                      "type": "object",
+                      "additionalProperties": true
+                    },
+                    "scan": {
+                      "$ref": "#/components/schemas/WorkspaceScanResult"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/workspaces/{workspace_id}/import-config": {
+      "post": {
+        "summary": "Apply selected workspace config sources",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "selectedSourceIds": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "rescan": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Import result with applied prompt blocks, paused agent drafts, disabled MCP candidates, skipped review-only sources, and conflicts.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceImportResult"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/control-plane/agents": {
       "get": {
         "summary": "List agents",
@@ -566,6 +1750,689 @@
         "responses": {
           "201": {
             "description": "Agent created"
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway": {
+      "get": {
+        "summary": "Channel gateway state",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "channel_gateway.v1 identity, unknown sender, pairing code, and summary payload."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway/pairing-codes": {
+      "post": {
+        "summary": "Create a channel pairing code",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A short-lived Telegram pairing code was created."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway/unknown-senders": {
+      "get": {
+        "summary": "List queued unknown channel senders",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Pending unknown senders that were denied before task enqueue."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway/identities/{identity_id}/approve": {
+      "post": {
+        "summary": "Approve a channel identity",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "identity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel identity was allowed for future messages."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway/identities/{identity_id}/block": {
+      "post": {
+        "summary": "Block a channel identity",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "identity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel identity was blocked and will fail closed before enqueue."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/channels/gateway/identities/{identity_id}": {
+      "delete": {
+        "summary": "Revoke a channel identity",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "identity_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The channel identity was revoked and can no longer enqueue messages."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/skills/registry": {
+      "get": {
+        "summary": "List local skill registry entries",
+        "description": "Returns the local-first skill_registry.v1 view derived from installed skill package locks, scanner evidence, eval evidence, trust summary, install state, and rollback availability.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "skill_registry.v1 payload"
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/skills/packages/{package_id}/evals/run": {
+      "post": {
+        "summary": "Run offline skill package evals",
+        "description": "Runs deterministic skill_eval.v1 checks from package eval_case.v1 metadata and updates recommendation/trust fields on the skill_lock.v1 payload.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "package_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "skill_eval.v1 result"
+          },
+          "409": {
+            "description": "Operational error envelope"
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals": {
+      "get": {
+        "summary": "List improvement proposals",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Improvement proposal list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposalList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposal"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Improvement proposal created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid proposal payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}": {
+      "get": {
+        "summary": "Get improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Improvement proposal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Improvement proposal not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/approve": {
+      "post": {
+        "summary": "Approve improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposalActionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Invalid lifecycle transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/reject": {
+      "post": {
+        "summary": "Reject improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposalActionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/validate": {
+      "post": {
+        "summary": "Validate improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposalActionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal validation updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/apply": {
+      "post": {
+        "summary": "Apply improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposalActionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Validation or rollback gate not satisfied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/rollback": {
+      "post": {
+        "summary": "Roll back improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposalActionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal rolled back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/dashboard/quality/overview": {
+      "get": {
+        "summary": "Get quality cockpit overview",
+        "description": "Returns quality_cockpit.v1 aggregated from existing eval, execution, metric, RunGraph, and proposal evidence.",
+        "responses": {
+          "200": {
+            "description": "quality_cockpit.v1 overview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityCockpit"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/dashboard/quality/agents/{agent_id}": {
+      "get": {
+        "summary": "Get agent quality cockpit",
+        "description": "Returns quality_cockpit.v1 scoped to one agent.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "quality_cockpit.v1 agent payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityCockpit"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Operational error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/dashboard/quality/failures/{failure_id}/proposal": {
+      "post": {
+        "summary": "Create improvement proposal from quality failure",
+        "description": "Creates an improvement_proposal.v1 from a quality_cockpit.v1 failure. This action does not validate, apply, or mutate runtime state.",
+        "parameters": [
+          {
+            "name": "failure_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualityFailureProposalBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Improvement proposal created from failure evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operational error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Operational error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
           }
         }
       }

@@ -17,14 +17,14 @@ const ASSET_LABEL_RESOLVERS: Record<
   ProviderId,
   (
     job: ProviderDownloadJob,
-    tl: (value: string, options?: Record<string, unknown>) => string,
+    t: (value: string, options?: Record<string, unknown>) => string,
   ) => { toastTitle: string; successMessage: string }
 > = {
-  kokoro: (job, tl) => {
+  kokoro: (job, t) => {
     if (job.asset_id === "model") {
       return {
-        toastTitle: tl("Baixando modelo Kokoro"),
-        successMessage: tl("Modelo Kokoro pronto."),
+        toastTitle: t("generated.hooks.baixando_modelo_kokoro_59c3009b"),
+        successMessage: t("generated.hooks.modelo_kokoro_pronto_e0158eb3"),
       };
     }
     const details = {
@@ -33,30 +33,49 @@ const ASSET_LABEL_RESOLVERS: Record<
     };
     const voiceName = String(details.voice_name ?? job.asset_id);
     return {
-      toastTitle: tl("Baixando voz Kokoro · {{voice}}", { voice: voiceName }),
-      successMessage: tl('Voz "{{voice}}" disponível.', { voice: voiceName }),
+      toastTitle: t("generated.hooks.baixando_voz_kokoro_voice_078d9f78", { voice: voiceName }),
+      successMessage: t("generated.hooks.voz_voice_disponivel_1bb7f786", { voice: voiceName }),
     };
   },
-  whispercpp: (job, tl) => {
+  supertonic: (job, t) => {
+    const details = {
+      ...((job.details as Record<string, unknown> | null | undefined) ?? {}),
+      ...(job as ProviderDownloadJob & Record<string, unknown>),
+    };
+    const modelId = String(details.model_id ?? job.asset_id);
+    const voiceName = String(details.voice_name ?? "");
+    if (voiceName) {
+      return {
+        toastTitle: t("generated.hooks.baixando_voz_supertonic_voice_0282dcec", { voice: voiceName }),
+        successMessage: t("generated.hooks.voz_voice_disponivel_1bb7f786", { voice: voiceName }),
+      };
+    }
+    const label = String(details.title ?? `Supertonic ${modelId}`);
+    return {
+      toastTitle: t("generated.hooks.baixando_label_d389a088", { label }),
+      successMessage: t("generated.hooks.label_pronto_5d02926b", { label }),
+    };
+  },
+  whispercpp: (job, t) => {
     const details = {
       ...((job.details as Record<string, unknown> | null | undefined) ?? {}),
       ...(job as ProviderDownloadJob & Record<string, unknown>),
     };
     const label = String(details.label ?? `Whisper ${job.asset_id}`);
     return {
-      toastTitle: tl("Baixando {{label}}", { label }),
-      successMessage: tl("{{label}} pronto.", { label }),
+      toastTitle: t("generated.hooks.baixando_label_d389a088", { label }),
+      successMessage: t("generated.hooks.label_pronto_5d02926b", { label }),
     };
   },
-  embedding: (job, tl) => {
+  embedding: (job, t) => {
     const details = {
       ...((job.details as Record<string, unknown> | null | undefined) ?? {}),
       ...(job as ProviderDownloadJob & Record<string, unknown>),
     };
     const label = String(details.title ?? details.label ?? `Embedding ${job.asset_id}`);
     return {
-      toastTitle: tl("Baixando {{label}}", { label }),
-      successMessage: tl("{{label}} pronto.", { label }),
+      toastTitle: t("generated.hooks.baixando_label_d389a088", { label }),
+      successMessage: t("generated.hooks.label_pronto_5d02926b", { label }),
     };
   },
 };
@@ -67,7 +86,7 @@ const ASSET_LABEL_RESOLVERS: Record<
  * (e.g. after a hard refresh of the page during a long Whisper download).
  */
 export function useActiveDownloads() {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { attach, isActive } = useDownloadJob();
   // Track which jobs we've already attached this session to avoid double
   // toasts when a poll returns the same job twice.
@@ -90,7 +109,7 @@ export function useActiveDownloads() {
           if (!resolver) continue;
           if (attachedRef.current.has(job.id)) continue;
           if (isActive(providerId, job.asset_id)) continue;
-          const labels = resolver(job, tl);
+          const labels = resolver(job, t);
           attach({
             providerId,
             jobId: job.id,
@@ -111,5 +130,5 @@ export function useActiveDownloads() {
       cancelled = true;
       window.clearInterval(handle);
     };
-  }, [attach, isActive, tl]);
+  }, [attach, isActive, t]);
 }

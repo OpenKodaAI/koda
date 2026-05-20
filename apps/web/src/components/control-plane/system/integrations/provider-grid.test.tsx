@@ -9,11 +9,21 @@ vi.mock("next/image", () => ({
   default: (props: ImgHTMLAttributes<HTMLImageElement>) => <img {...props} alt={props.alt || ""} />,
 }));
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    tl: (value: string) => value,
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 const useSystemSettingsMock = vi.fn();
 
@@ -32,6 +42,10 @@ function makeBaseSystemSettingsMock() {
           kokoro_default_language: "pt-br",
           kokoro_default_voice: "pf_dora",
           kokoro_default_voice_label: "",
+          supertonic_default_model: "supertonic-3",
+          supertonic_default_language: "pt",
+          supertonic_default_voice: "F1",
+          supertonic_default_voice_label: "F1",
           metal_enabled: true,
         },
       },
@@ -115,15 +129,38 @@ function makeBaseSystemSettingsMock() {
     },
     kokoroVoicesLoading: false,
     kokoroModelStatus: null,
+    supertonicVoiceCatalog: {
+      items: [],
+      available_languages: [],
+      selected_model: "supertonic-3",
+      selected_language: "pt",
+      default_model: "supertonic-3",
+      default_language: "pt",
+      default_voice: "F1",
+      default_voice_label: "F1",
+      downloaded_voice_ids: [],
+      provider_connected: true,
+    },
+    supertonicVoicesLoading: false,
+    supertonicModelCatalog: null,
+    supertonicModelsLoading: false,
     whisperCatalog: null,
     isDownloadingKokoroAsset: vi.fn(() => false),
+    isDownloadingSupertonicAsset: vi.fn(() => false),
     isDownloadingWhisperVariant: vi.fn(() => false),
     loadKokoroVoices: vi.fn(),
     loadKokoroModelStatus: vi.fn(),
+    loadSupertonicModels: vi.fn(),
+    loadSupertonicVoices: vi.fn(),
     loadWhisperCatalog: vi.fn(),
     downloadKokoroVoice: vi.fn(),
     downloadKokoroModel: vi.fn(),
+    downloadSupertonicModel: vi.fn(),
+    downloadSupertonicVoice: vi.fn(),
+    importSupertonicVoice: vi.fn(),
     downloadWhisperModel: vi.fn(),
+    deleteSupertonicModelAsset: vi.fn(),
+    deleteSupertonicVoiceAsset: vi.fn(),
     ollamaModelCatalog: {
       items: [],
       cached: false,

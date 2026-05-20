@@ -62,7 +62,7 @@ describe("scope system prompt editors", () => {
     });
     await user.clear(textarea);
     await user.type(textarea, "# Novo contexto");
-    await user.click(screen.getByRole("button", { name: /Salvar system prompt/i }));
+    await user.click(screen.getByRole("button", { name: /Salvar prompt do sistema|Salvar system prompt/i }));
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
@@ -114,7 +114,7 @@ describe("scope system prompt editors", () => {
     });
     await user.clear(textarea);
     await user.type(textarea, "# Nova squad");
-    await user.click(screen.getByRole("button", { name: /Salvar system prompt/i }));
+    await user.click(screen.getByRole("button", { name: /Salvar prompt do sistema|Salvar system prompt/i }));
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,

@@ -22,13 +22,10 @@ export function ReasoningBlock({
   const [open, setOpen] = useState(defaultOpen);
 
   const header = streaming
-    ? t("chat.reasoning.expandLabelStreaming", { defaultValue: "Thinking…" })
+    ? t("chat.reasoning.expandLabelStreaming", undefined)
     : durationLabel
-      ? t("chat.reasoning.expandLabelDone", {
-          defaultValue: "Thought for {{duration}}",
-          duration: durationLabel,
-        })
-      : t("chat.reasoning.expandLabelDoneNoDuration", { defaultValue: "Reasoning" });
+      ? t("chat.reasoning.expandLabelDone", { duration: durationLabel })
+      : t("chat.reasoning.expandLabelDoneNoDuration", undefined);
 
   return (
     <div className="flex flex-col gap-1">

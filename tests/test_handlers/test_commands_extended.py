@@ -165,9 +165,17 @@ class TestCmdTemplate:
 
 class TestCmdSkill:
     def _set_agent_skills(self, monkeypatch, skills, skill_policy=None):
+        if skill_policy is None:
+            skill_policy = {
+                "enabled_skills": [
+                    str(skill.get("id") or "")
+                    for skill in skills
+                    if isinstance(skill, dict) and str(skill.get("id") or "")
+                ]
+            }
         monkeypatch.setenv(
             "AGENT_SPEC_JSON",
-            json.dumps({"custom_skills": skills, "skill_policy": skill_policy or {}}),
+            json.dumps({"custom_skills": skills, "skill_policy": skill_policy}),
         )
 
     @pytest.mark.asyncio
@@ -252,6 +260,21 @@ class TestCmdSkill:
 
         call_text = mock_update.message.reply_text.call_args[0][0]
         assert "Skill 'security' not found" in call_text
+
+    @pytest.mark.asyncio
+    async def test_skill_requires_explicit_allowlist(self, mock_update, mock_context, monkeypatch):
+        mock_context.args = []
+        init_user_data(mock_context.user_data)
+        self._set_agent_skills(
+            monkeypatch,
+            [{"id": "review", "name": "Review", "content": "# Review"}],
+            {},
+        )
+
+        await cmd_skill(mock_update, mock_context)
+
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "No expert skills configured for this agent" in call_text
 
     @pytest.mark.asyncio
     async def test_skill_policy_filters_list(self, mock_update, mock_context, monkeypatch):
@@ -620,6 +643,7 @@ class TestCmdMemory:
                 "embedding_jobs": {"pending": 2, "failed": 1, "repaired": 5},
                 "promotions": {"pending": 2, "approved": 3, "rejected": 1},
                 "utility": {"useful": 4, "noise": 1, "misleading": 2},
+                "safety": {"blocked_total": 3, "prompt_injection": 2, "credential_leakage": 1},
                 "runbooks": {"approved": 3, "needs_review": 1, "expired": 0, "deprecated": 1},
                 "governance": {"approved": 2, "needs_review": 1, "expired": 0, "deprecated": 1},
             },
@@ -627,6 +651,7 @@ class TestCmdMemory:
             await cmd_memory(mock_update, mock_context)
         text = mock_update.message.reply_text.call_args[0][0]
         assert "total 12" in text
+        assert "Safety: blocked 3" in text
         assert "Governance" in text
         assert "review 1" in text
 

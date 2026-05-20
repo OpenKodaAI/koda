@@ -30,6 +30,7 @@ import {
   PROVIDER_ICON_COMPONENTS,
   PROVIDER_DISPLAY_NAMES as PROVIDER_DISPLAY,
   COLORED_BRAND_LOGO_PROVIDERS,
+  providerGlyphColor,
 } from "./provider-brand";
 
 /*  Inline provider logo                                               */
@@ -80,7 +81,7 @@ function ProviderIcon({
       style={{
         width: size,
         height: size,
-        backgroundColor: "rgb(255 255 255 / 0.85)",
+        backgroundColor: providerGlyphColor(providerId),
         WebkitMaskImage: `url(${logo})`,
         maskImage: `url(${logo})`,
         WebkitMaskRepeat: "no-repeat",
@@ -152,7 +153,7 @@ function ModelDetailCard({
     size_bytes?: number;
   };
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const isOllama = providerLabel === "Ollama";
   const hasCost = meta?.inputCostPer1M != null && meta.inputCostPer1M > 0;
 
@@ -171,66 +172,66 @@ function ModelDetailCard({
 
       {meta && (
         <div className="flex flex-col gap-2">
-          <MetricBar label={tl("Velocidade")} value={meta.speed} icon={Zap} />
-          <MetricBar label={tl("Inteligência")} value={meta.intelligence} icon={Brain} />
+          <MetricBar label={t("generated.controlPlane.velocidade_27f727af")} value={meta.speed} icon={Zap} />
+          <MetricBar label={t("generated.controlPlane.inteligencia_56d3ac6e")} value={meta.intelligence} icon={Brain} />
         </div>
       )}
 
       <div className="flex flex-col gap-1.5 border-t border-[rgba(255,255,255,0.06)] pt-3">
         <div className="flex justify-between text-[11px]">
-          <span className="text-[var(--text-quaternary)]">{tl("Provider")}</span>
+          <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.provider_c2d1091b")}</span>
           <span className="text-[var(--text-secondary)]">{providerLabel}</span>
         </div>
         {ollamaMeta?.family && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{tl("Família")}</span>
+            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.familia_f26e5199")}</span>
             <span className="text-[var(--text-secondary)]">{ollamaMeta.family}</span>
           </div>
         )}
         {ollamaMeta?.parameter_size && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{tl("Parâmetros")}</span>
+            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.parametros_a223a8f5")}</span>
             <span className="text-[var(--text-secondary)]">{ollamaMeta.parameter_size}</span>
           </div>
         )}
         {ollamaMeta?.quantization_level && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{tl("Quantização")}</span>
+            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.quantizacao_4265fef5")}</span>
             <span className="font-mono text-[var(--text-secondary)]">{ollamaMeta.quantization_level}</span>
           </div>
         )}
         {ollamaMeta?.size_bytes != null && ollamaMeta.size_bytes > 0 && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{tl("Disco")}</span>
+            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.disco_27affb4b")}</span>
             <span className="text-[var(--text-secondary)]">{formatSizeBytes(ollamaMeta.size_bytes)}</span>
           </div>
         )}
         {meta?.contextWindow != null && meta.contextWindow > 0 && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{tl("Contexto")}</span>
+            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.contexto_e462fa88")}</span>
             <span className="text-[var(--text-secondary)]">{formatContextWindow(meta.contextWindow)}</span>
           </div>
         )}
         {hasCost && (
           <>
             <div className="flex justify-between text-[11px]">
-              <span className="text-[var(--text-quaternary)]">{tl("Custo input")}</span>
+              <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.custo_input_628ae9af")}</span>
               <span className="text-[var(--text-secondary)]">{formatCost(meta!.inputCostPer1M!)} / 1M</span>
             </div>
             <div className="flex justify-between text-[11px]">
-              <span className="text-[var(--text-quaternary)]">{tl("Custo output")}</span>
+              <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.custo_output_470790a9")}</span>
               <span className="text-[var(--text-secondary)]">{formatCost(meta!.outputCostPer1M!)} / 1M</span>
             </div>
           </>
         )}
         {isOllama && !hasCost && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{tl("Custo")}</span>
-            <span className="text-[var(--text-secondary)]">{tl("Gratuito (local)")}</span>
+            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.custo_e31838b4")}</span>
+            <span className="text-[var(--text-secondary)]">{t("generated.controlPlane.gratuito_local_5d539621")}</span>
           </div>
         )}
         <div className="flex justify-between text-[11px]">
-          <span className="text-[var(--text-quaternary)]">{tl("Model ID")}</span>
+          <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.model_id_79808c3c")}</span>
           <span className="font-mono text-[var(--text-quaternary)]">{modelId}</span>
         </div>
       </div>
@@ -405,7 +406,7 @@ export function ModelSelector({
   isOptionDisabled,
   disabledOptionLabel,
 }: ModelSelectorProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -498,7 +499,7 @@ export function ModelSelector({
     functionId,
     isOptionDisabled,
     disabledOptionLabel,
-    tl,
+    t, tl,
   ]);
 
   /* ---- Derived display for trigger ---- */
@@ -507,7 +508,7 @@ export function ModelSelector({
     ? selectedOption.displayName
     : emptyLabel
       ? tl(emptyLabel)
-      : tl("Selecione um modelo");
+      : t("generated.controlPlane.selecione_um_modelo_38cc28d1");
 
   /* ---- Filtered by search ---- */
   const filteredGroups = useMemo(() => {
@@ -627,7 +628,7 @@ export function ModelSelector({
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    placeholder={tl("Buscar modelo...")}
+                    placeholder={t("generated.controlPlane.buscar_modelo_50f4a238")}
                     className="h-full w-full min-w-0 bg-transparent text-[0.8125rem] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
                     style={{ outline: "none", border: "none", boxShadow: "none" }}
                     autoFocus
@@ -636,7 +637,7 @@ export function ModelSelector({
                     <button
                       type="button"
                       onClick={() => setSearch("")}
-                      aria-label={tl("Limpar busca")}
+                      aria-label={t("generated.controlPlane.limpar_busca_0bb288dc")}
                       className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)] focus-visible:outline-none"
                     >
                       <X size={12} />
@@ -667,7 +668,7 @@ export function ModelSelector({
 
                   {filteredGroups.length === 0 && (
                     <div className="px-3 py-4 text-center text-xs text-[var(--text-quaternary)]">
-                      {tl("Nenhum modelo encontrado.")}
+                      {t("generated.controlPlane.nenhum_modelo_encontrado_a79c6a50")}
                     </div>
                   )}
 

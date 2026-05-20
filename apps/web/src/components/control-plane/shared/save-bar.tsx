@@ -63,12 +63,12 @@ export function SaveBar({ dirty, saving, onSave, onDiscard }: SaveBarProps) {
             {showSuccess ? (
               <span className="flex items-center gap-2 text-sm text-[var(--tone-success-text)]">
                 <Check size={16} />
-                {t("controlPlane.shared.saveBar.saved", { defaultValue: "Saved successfully" })}
+                {t("controlPlane.shared.saveBar.saved", undefined)}
               </span>
             ) : (
               <>
                 <span className="text-sm text-[var(--tone-warning-text)]">
-                  {t("controlPlane.shared.saveBar.unsaved", { defaultValue: "Unsaved changes" })}
+                  {t("controlPlane.shared.saveBar.unsaved", undefined)}
                 </span>
 
                 <div className="flex items-center gap-2">
@@ -80,7 +80,7 @@ export function SaveBar({ dirty, saving, onSave, onDiscard }: SaveBarProps) {
                       onClick={onDiscard}
                       disabled={saving}
                     >
-                      {t("controlPlane.shared.saveBar.discard", { defaultValue: "Discard" })}
+                      {t("controlPlane.shared.saveBar.discard", undefined)}
                     </AsyncActionButton>
                   )}
 
@@ -90,7 +90,7 @@ export function SaveBar({ dirty, saving, onSave, onDiscard }: SaveBarProps) {
                     size="sm"
                     onClick={onSave}
                     loading={saving}
-                    loadingLabel={t("controlPlane.shared.saveBar.saving", { defaultValue: "Saving" })}
+                    loadingLabel={t("controlPlane.shared.saveBar.saving", undefined)}
                   >
                     {t("common.save")}
                   </AsyncActionButton>

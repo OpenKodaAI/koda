@@ -8,13 +8,14 @@ import os
 import uuid
 from typing import Any
 
+from koda.agents.message_bus_iface import MessageBus
 from koda.agents.models import AgentMessage, DelegationRequest, DelegationResult
 from koda.logging_config import get_logger
 
 log = get_logger(__name__)
 
 
-class AgentMessageBus:
+class InMemoryMessageBus:
     """In-memory message bus with per-agent inbox queues."""
 
     def __init__(self) -> None:
@@ -46,6 +47,14 @@ class AgentMessageBus:
                     message_id=msg_data.get("message_id", self._next_id()),
                     message_type=msg_data.get("message_type", "text"),
                     timestamp=msg_data.get("timestamp"),
+                    thread_id=msg_data.get("thread_id"),
+                    to_agent_ids=msg_data.get("to_agent_ids") or [],
+                    kind=msg_data.get("kind", ""),
+                    payload=msg_data.get("payload") or {},
+                    causation_id=msg_data.get("causation_id"),
+                    correlation_id=msg_data.get("correlation_id"),
+                    in_reply_to=msg_data.get("in_reply_to"),
+                    idempotency_key=msg_data.get("idempotency_key"),
                 )
                 self._message_log.append(msg)
             self._counter = data.get("counter", 0)
@@ -68,6 +77,14 @@ class AgentMessageBus:
                         "message_id": m.message_id,
                         "message_type": m.message_type,
                         "timestamp": m.timestamp,
+                        "thread_id": m.thread_id,
+                        "to_agent_ids": m.to_agent_ids,
+                        "kind": m.kind,
+                        "payload": m.payload,
+                        "causation_id": m.causation_id,
+                        "correlation_id": m.correlation_id,
+                        "in_reply_to": m.in_reply_to,
+                        "idempotency_key": m.idempotency_key,
                     }
                     for m in self._message_log[-self._max_log :]
                 ],
@@ -121,6 +138,48 @@ class AgentMessageBus:
             return await asyncio.wait_for(inbox.get(), timeout=min(timeout, 300))
         except TimeoutError:
             return None
+
+    async def receive_batch(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 50,
+        timeout: float = 30.0,
+    ) -> list[AgentMessage]:
+        first = await self.receive(agent_id, timeout=timeout)
+        if first is None:
+            return []
+        inbox = self._ensure_inbox(agent_id)
+        messages = [first]
+        for _ in range(max(0, min(int(limit), 50) - 1)):
+            try:
+                messages.append(inbox.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return messages
+
+    async def ack(self, agent_id: str, message_id: str, *, enqueued_task_id: int | None = None) -> None:
+        """Acknowledge a message.
+
+        The in-process queue removes messages on receive, so ack is a no-op
+        kept for the durable bus interface.
+        """
+        return None
+
+    async def nack(
+        self,
+        agent_id: str,
+        message_id: str,
+        *,
+        error: str,
+        retry_after: float | None = None,
+    ) -> None:
+        """Negative-ack a message.
+
+        The memory bus has no durable lease table, so this is intentionally a
+        no-op. Postgres is the production bus for at-least-once delivery.
+        """
+        return None
 
     async def delegate(self, request: DelegationRequest) -> DelegationResult:
         """Delegate a task to another agent and wait for result."""
@@ -244,12 +303,39 @@ class AgentMessageBus:
         ]
 
 
-_bus: AgentMessageBus | None = None
+_bus: MessageBus | None = None
 
 
-def get_message_bus() -> AgentMessageBus:
+def _build_bus() -> MessageBus:
+    from koda.config import (
+        INTER_AGENT_BUS_BACKEND,
+        POSTGRES_URL,
+        SQUAD_BUS_LISTEN_ENABLED,
+        SQUAD_INBOX_MAX_DELIVERY_ATTEMPTS,
+        SQUAD_INBOX_MAX_DEPTH,
+        SQUAD_POLL_INTERVAL_S,
+    )
+
+    if INTER_AGENT_BUS_BACKEND == "postgres" and POSTGRES_URL:
+        from koda.agents.postgres_message_bus import PostgresMessageBus
+        from koda.knowledge.config import KNOWLEDGE_V2_POSTGRES_SCHEMA
+
+        return PostgresMessageBus(
+            dsn=POSTGRES_URL,
+            schema=(KNOWLEDGE_V2_POSTGRES_SCHEMA or "knowledge_v2").strip() or "knowledge_v2",
+            max_inbox_size=SQUAD_INBOX_MAX_DEPTH,
+            max_delivery_attempts=SQUAD_INBOX_MAX_DELIVERY_ATTEMPTS,
+            listen_enabled=SQUAD_BUS_LISTEN_ENABLED,
+            poll_interval=SQUAD_POLL_INTERVAL_S,
+        )
+    if INTER_AGENT_BUS_BACKEND == "postgres":
+        log.warning("inter_agent_bus_postgres_no_dsn", backend="postgres", fallback="memory")
+    return InMemoryMessageBus()
+
+
+def get_message_bus() -> MessageBus:
     """Return the singleton message bus instance."""
     global _bus  # noqa: PLW0603
     if _bus is None:
-        _bus = AgentMessageBus()
+        _bus = _build_bus()
     return _bus

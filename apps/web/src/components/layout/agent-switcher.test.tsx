@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
@@ -68,7 +69,10 @@ function installAgentFetch(agents: AgentDisplay[]) {
   return fetchMock;
 }
 
-function renderSwitcher(agents: AgentDisplay[]) {
+function renderSwitcher(
+  agents: AgentDisplay[],
+  props: Partial<ComponentProps<typeof AgentSwitcher>> = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {
@@ -86,6 +90,7 @@ function renderSwitcher(agents: AgentDisplay[]) {
             selectedBotIds={[]}
             onSelectionChange={vi.fn()}
             showCreate={false}
+            {...props}
           />
         </AgentCatalogProvider>
       </I18nProvider>
@@ -98,6 +103,19 @@ afterEach(() => {
 });
 
 describe("AgentSwitcher", () => {
+  it("keeps the field shell when the field variant hides create action", () => {
+    renderSwitcher([makeAgent(0)], {
+      activeBotId: "AGENT_00",
+      multiple: false,
+      showAll: false,
+      variant: "field",
+    });
+
+    const trigger = screen.getByRole("button", { name: /select agent/i });
+    expect(trigger.parentElement).toHaveClass("field-shell");
+    expect(screen.queryByRole("button", { name: /create agent/i })).not.toBeInTheDocument();
+  });
+
   it("renders agents in five-item pages and fetches the next page on dropdown scroll", async () => {
     const agents = Array.from({ length: 12 }, (_, index) => makeAgent(index));
     const fetchMock = installAgentFetch(agents);

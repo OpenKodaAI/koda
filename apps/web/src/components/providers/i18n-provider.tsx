@@ -23,6 +23,7 @@ import {
   readDocumentCookie,
   safeLocalStorageGet,
   safeLocalStorageSetValue,
+  writeDocumentCookie,
 } from "@/lib/browser-storage";
 import { localeStorageCodec } from "@/lib/storage-codecs";
 
@@ -78,7 +79,7 @@ export function I18nProvider({
     safeLocalStorageSetValue(localeStorageCodec, language);
 
     document.documentElement.lang = language;
-    document.cookie = `${LOCALE_COOKIE_KEY}=${language}; path=/; max-age=31536000; samesite=lax`;
+    writeDocumentCookie(`${LOCALE_COOKIE_KEY}=${language}; path=/; max-age=31536000; samesite=lax`);
   }, [i18n, language]);
 
   const setLanguage = useCallback((nextLanguage: AppLanguage) => {
@@ -86,7 +87,7 @@ export function I18nProvider({
     safeLocalStorageSetValue(localeStorageCodec, nextLanguage);
 
     document.documentElement.lang = nextLanguage;
-    document.cookie = `${LOCALE_COOKIE_KEY}=${nextLanguage}; path=/; max-age=31536000; samesite=lax`;
+    writeDocumentCookie(`${LOCALE_COOKIE_KEY}=${nextLanguage}; path=/; max-age=31536000; samesite=lax`);
     setLanguageState(nextLanguage);
   }, [setLanguageState]);
 

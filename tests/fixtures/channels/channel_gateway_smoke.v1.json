@@ -1,0 +1,82 @@
+{
+  "schema_version": "channel_gateway_smoke.v1",
+  "scenario": {
+    "agent_id": "WORKER",
+    "channel_type": "telegram",
+    "channel_id": "release-smoke",
+    "group_unmentioned": {
+      "text": "please check the build when free"
+    },
+    "group_mention": {
+      "text": "@FE please check the build",
+      "target_agent_id": "FE"
+    },
+    "room": {
+      "workspace_id": "acme",
+      "squad_id": "build",
+      "binding_squad_id": "build",
+      "thread_id": "00000000-0000-0000-0000-000000000001",
+      "telegram_chat_id": "-100",
+      "telegram_message_thread_id": 7,
+      "participants": ["PM", "FE", "QA"]
+    }
+  },
+  "expectations": [
+    {
+      "step": "unknown_sender",
+      "decision": "queue_for_pairing",
+      "allowed": false,
+      "reason_code": "channel.identity_unknown"
+    },
+    {
+      "step": "pairing",
+      "decision": "paired",
+      "allowed": false,
+      "next_allowed": true,
+      "reason_code": "channel.pairing_complete"
+    },
+    {
+      "step": "approve",
+      "decision": "allow",
+      "allowed": true,
+      "reason_code": "channel.identity_allowed"
+    },
+    {
+      "step": "block",
+      "decision": "deny",
+      "allowed": false,
+      "reason_code": "channel.policy_denied"
+    },
+    {
+      "step": "revoke",
+      "decision": "deny",
+      "allowed": false,
+      "status": "revoked",
+      "reason_code": "channel.policy_denied"
+    },
+    {
+      "step": "group_unmentioned",
+      "contains_mention": false,
+      "is_group": true,
+      "delivered": false
+    },
+    {
+      "step": "group_mention",
+      "contains_mention": true,
+      "is_group": true,
+      "delivered": true
+    },
+    {
+      "step": "room_squad_routing",
+      "workspace_id": "acme",
+      "squad_id": "build",
+      "binding_matches_room": true,
+      "target_is_participant": true
+    },
+    {
+      "step": "reply_obligation_channel",
+      "delivered": true,
+      "reply_to_id": "agent-msg-1"
+    }
+  ]
+}

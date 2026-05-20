@@ -1,5 +1,6 @@
 "use client";
 
+import { translate } from "@/lib/i18n";
 import {
   AnimatePresence,
   motion,
@@ -173,7 +174,7 @@ export function TourCoachmark({
                 state="thinking"
                 className="tour-coachmark__complete-orb !h-9 !w-9"
               />
-              <span className="tour-coachmark__complete-ready">Ready?</span>
+              <span className="tour-coachmark__complete-ready">{translate("generated.shell.ready_2918853a")}</span>
             </motion.div>
           ) : null}
           <motion.div className="tour-coachmark__header" variants={childVariants}>

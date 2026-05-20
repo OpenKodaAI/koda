@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { type FormEvent, useState } from "react";
-import { Loader2 } from "lucide-react";
 import { KodaMark } from "@/components/layout/koda-mark";
 import { SetupFrame } from "@/components/setup/setup-frame";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Input } from "@/components/ui/input";
@@ -13,6 +13,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
 import { isSafeRedirectTarget } from "@/lib/safe-redirect";
+import { translate } from "@/lib/i18n";
 
 const MIN_LENGTH = 12;
 
@@ -74,10 +75,7 @@ export function ForgotPasswordScreen() {
     } catch (error) {
       if (isUpstreamFailure(error)) {
         setError(
-          t("auth.forgot.service_unavailable", {
-            defaultValue:
-              "Recovery service is temporarily unavailable. Please try again in a moment.",
-          }),
+          t("auth.forgot.service_unavailable", undefined),
         );
       } else {
         setError(t("auth.forgot.generic_error"));
@@ -123,7 +121,7 @@ export function ForgotPasswordScreen() {
               autoComplete="username"
               autoFocus
               disabled={busy}
-              placeholder="owner@yourdomain.com"
+              placeholder={translate("generated.account.owner_yourdomain_com_8d7a5b9d")}
               className="auth-input"
             />
           </label>
@@ -137,7 +135,7 @@ export function ForgotPasswordScreen() {
               autoCorrect="off"
               spellCheck={false}
               disabled={busy}
-              placeholder="xxxx-xxxx-xxxx"
+              placeholder={translate("generated.account.xxxx_xxxx_xxxx_d457e3cb")}
               className="auth-input auth-input--mono"
             />
           </label>
@@ -171,12 +169,17 @@ export function ForgotPasswordScreen() {
 
         {error ? <InlineAlert tone="danger">{error}</InlineAlert> : null}
 
-        <Button type="submit" variant="accent" size="lg" disabled={busy} className="auth-submit">
+        <Button
+          type="submit"
+          variant="accent"
+          size="lg"
+          disabled={busy}
+          aria-label={busy ? t("auth.forgot.submitting") : undefined}
+          aria-busy={busy || undefined}
+          className="auth-submit"
+        >
           {busy ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              <span>{t("auth.forgot.submitting")}</span>
-            </>
+            <InlineSpinner className="h-4 w-4" />
           ) : (
             t("auth.forgot.submit")
           )}

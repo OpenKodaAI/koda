@@ -216,9 +216,7 @@ export function CreateEntityDrawer({
       setError(
         submitError instanceof Error
           ? submitError.message
-          : t("controlPlane.create.genericError", {
-              defaultValue: "Could not save. Please try again.",
-            }),
+          : t("controlPlane.create.genericError", undefined),
       );
     } finally {
       setSubmitting(false);
@@ -227,30 +225,28 @@ export function CreateEntityDrawer({
 
   const namePlaceholder =
     type === "workspace"
-      ? t("controlPlane.create.name.workspace", { defaultValue: "Acme Product" })
+      ? t("controlPlane.create.name.workspace", undefined)
       : type === "squad"
-        ? t("controlPlane.create.name.squad", { defaultValue: "Platform" })
-        : t("controlPlane.create.name.agent", { defaultValue: "Pixie" });
+        ? t("controlPlane.create.name.squad", undefined)
+        : t("controlPlane.create.name.agent", undefined);
 
   return (
     <Drawer
       open={open}
       onOpenChange={onOpenChange}
       title={title}
-      description={t("controlPlane.create.subtitle", {
-        defaultValue: "Choose what you want to add and fill in the basics.",
-      })}
+      description={t("controlPlane.create.subtitle", undefined)}
       width="min(460px, 96vw)"
     >
       <form onSubmit={handleSubmit} className="flex h-full flex-col">
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-6 py-6">
           <fieldset className="flex flex-col gap-2">
             <legend className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-              {t("controlPlane.create.typeLabel", { defaultValue: "Type" })}
+              {t("controlPlane.create.typeLabel", undefined)}
             </legend>
             <div
               role="radiogroup"
-              aria-label={t("controlPlane.create.typeLabel", { defaultValue: "Type" })}
+              aria-label={t("controlPlane.create.typeLabel", undefined)}
               className="grid grid-cols-3 gap-1 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-1"
             >
               {(["workspace", "squad", "agent"] as const).map((option) => {
@@ -286,7 +282,7 @@ export function CreateEntityDrawer({
 
           <label className="flex flex-col gap-2">
             <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-              {t("controlPlane.create.nameLabel", { defaultValue: "Name" })}
+              {t("controlPlane.create.nameLabel", undefined)}
             </span>
             <Input
               sizeVariant="md"
@@ -301,7 +297,7 @@ export function CreateEntityDrawer({
           {type === "agent" ? (
             <label className="flex flex-col gap-2">
               <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                {t("controlPlane.create.agentIdLabel", { defaultValue: "Agent ID" })}
+                {t("controlPlane.create.agentIdLabel", undefined)}
               </span>
               <Input
                 sizeVariant="md"
@@ -310,29 +306,23 @@ export function CreateEntityDrawer({
                   setAgentIdTouched(true);
                   setAgentIdDraft(event.target.value.toUpperCase());
                 }}
-                placeholder={t("controlPlane.create.agentIdPlaceholder", {
-                  defaultValue: "PIXIE",
-                })}
+                placeholder={t("controlPlane.create.agentIdPlaceholder", undefined)}
                 disabled={submitting}
               />
               <span className="text-[0.75rem] text-[var(--text-quaternary)]">
-                {t("controlPlane.create.agentIdHint", {
-                  defaultValue: "Uppercase letters, numbers and underscores only.",
-                })}
+                {t("controlPlane.create.agentIdHint", undefined)}
               </span>
             </label>
           ) : null}
 
           <label className="flex flex-col gap-2">
             <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-              {t("controlPlane.create.descriptionLabel", { defaultValue: "Description" })}
+              {t("controlPlane.create.descriptionLabel", undefined)}
             </span>
             <textarea
               value={description}
               onChange={(event) => setDescription(event.target.value)}
-              placeholder={t("controlPlane.create.descriptionPlaceholder", {
-                defaultValue: "Short summary (optional)",
-              })}
+              placeholder={t("controlPlane.create.descriptionPlaceholder", undefined)}
               disabled={submitting}
               rows={3}
               className="min-h-[96px] w-full resize-none rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3.5 py-2.5 text-[0.875rem] leading-[1.5] text-[var(--text-primary)] outline-none transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] placeholder:text-[var(--text-quaternary)] focus-visible:border-[var(--accent)] focus-visible:bg-[var(--panel)]"
@@ -342,7 +332,7 @@ export function CreateEntityDrawer({
           {type === "agent" ? (
             <fieldset className="flex flex-col gap-2">
               <legend className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                {t("controlPlane.create.colorLabel", { defaultValue: "Color" })}
+                {t("controlPlane.create.colorLabel", undefined)}
               </legend>
               <div className="flex flex-wrap items-center gap-2.5">
                 {PRESET_COLORS.map((option) => {
@@ -372,12 +362,8 @@ export function CreateEntityDrawer({
             <label className="flex flex-col gap-2">
               <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
                 {type === "squad"
-                  ? t("controlPlane.create.parentWorkspace", {
-                      defaultValue: "Parent workspace",
-                    })
-                  : t("controlPlane.create.workspaceOptional", {
-                      defaultValue: "Workspace (optional)",
-                    })}
+                  ? t("controlPlane.create.parentWorkspace", undefined)
+                  : t("controlPlane.create.workspaceOptional", undefined)}
               </span>
               <Select
                 value={workspaceId ?? SELECT_ALL_VALUE}
@@ -390,12 +376,8 @@ export function CreateEntityDrawer({
                 <SelectContent>
                   <SelectItem value={SELECT_ALL_VALUE}>
                     {type === "agent"
-                      ? t("controlPlane.create.workspaceNone", {
-                          defaultValue: "No workspace (unassigned)",
-                        })
-                      : t("controlPlane.create.workspaceChoose", {
-                          defaultValue: "Choose a workspace",
-                        })}
+                      ? t("controlPlane.create.workspaceNone", undefined)
+                      : t("controlPlane.create.workspaceChoose", undefined)}
                   </SelectItem>
                   {workspaces.map((workspace) => (
                     <SelectItem key={workspace.id} value={workspace.id}>
@@ -410,9 +392,7 @@ export function CreateEntityDrawer({
           {type === "agent" && workspaceId ? (
             <label className="flex flex-col gap-2">
               <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                {t("controlPlane.create.squadOptional", {
-                  defaultValue: "Squad (optional)",
-                })}
+                {t("controlPlane.create.squadOptional", undefined)}
               </span>
               <Select
                 value={squadId ?? SELECT_ALL_VALUE}
@@ -424,9 +404,7 @@ export function CreateEntityDrawer({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={SELECT_ALL_VALUE}>
-                    {t("controlPlane.create.squadNone", {
-                      defaultValue: "No squad",
-                    })}
+                    {t("controlPlane.create.squadNone", undefined)}
                   </SelectItem>
                   {availableSquads.map((squad) => (
                     <SelectItem key={squad.id} value={squad.id}>
@@ -449,13 +427,13 @@ export function CreateEntityDrawer({
             onClick={() => onOpenChange(false)}
             disabled={submitting}
           >
-            {t("controlPlane.create.cancel", { defaultValue: "Cancel" })}
+            {t("controlPlane.create.cancel", undefined)}
           </Button>
           <Button variant="accent" size="md" type="submit" disabled={!canSubmit}>
             {submitting ? (
               <Loader2 className="icon-sm animate-spin" strokeWidth={1.75} aria-hidden />
             ) : null}
-            {t("controlPlane.create.submit", { defaultValue: "Create" })}
+            {t("controlPlane.create.submit", undefined)}
           </Button>
         </div>
       </form>

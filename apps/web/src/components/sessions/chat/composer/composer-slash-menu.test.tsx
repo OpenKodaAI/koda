@@ -62,8 +62,8 @@ describe("ChatComposer slash menu", () => {
     const user = userEvent.setup();
     renderHarness();
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i);
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    await user.click(editable);
     await user.keyboard("/");
 
     const listbox = await screen.findByRole("listbox");
@@ -76,8 +76,8 @@ describe("ChatComposer slash menu", () => {
     const user = userEvent.setup();
     renderHarness();
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i);
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    await user.click(editable);
     await user.keyboard("/sum");
 
     await waitFor(() => {
@@ -91,8 +91,8 @@ describe("ChatComposer slash menu", () => {
     const onCommandExecute = vi.fn();
     renderHarness({ onCommandExecute });
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i) as HTMLTextAreaElement;
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    await user.click(editable);
     await user.keyboard("/");
 
     await screen.findByRole("listbox");
@@ -105,16 +105,16 @@ describe("ChatComposer slash menu", () => {
     expect(onCommandExecute).toHaveBeenCalledWith(
       expect.objectContaining({ id: "new-session" }),
     );
-    // The trigger token has been cleared from the textarea.
-    expect(textarea.value).toBe("");
+    // The trigger token has been cleared from the editable.
+    expect(editable.textContent ?? "").toBe("");
   });
 
   it("closes the menu on Escape and re-opens on next slash", async () => {
     const user = userEvent.setup();
     renderHarness();
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i) as HTMLTextAreaElement;
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    await user.click(editable);
     await user.keyboard("/");
 
     await screen.findByRole("listbox");
@@ -139,8 +139,8 @@ describe("ChatComposer slash menu", () => {
     const user = userEvent.setup();
     renderHarness();
 
-    const textarea = screen.getByPlaceholderText(/Send a message/i);
-    await user.click(textarea);
+    const editable = screen.getByRole("textbox", { name: /Send a message/i });
+    await user.click(editable);
     await user.keyboard("https://");
 
     await new Promise((r) => setTimeout(r, 50));

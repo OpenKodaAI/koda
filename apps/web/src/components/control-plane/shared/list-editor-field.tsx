@@ -28,7 +28,7 @@ export function ListEditorField({
   placeholder = "Novo item...",
   maxItems,
 }: ListEditorFieldProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const [newItem, setNewItem] = useState("");
   const wrappedItems = useMemo(() => {
     return items.map((text, index) => ({
@@ -102,7 +102,7 @@ export function ListEditorField({
       <div className="rounded-[24px] border border-[var(--border-subtle)] bg-[var(--surface-canvas)] p-4 shadow-[0_12px_40px_rgba(0,0,0,0.08)]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
-            {tl("Uma politica por linha")}
+            {t("generated.controlPlane.uma_politica_por_linha_feb6d064")}
           </span>
           <div className="flex items-center gap-2">
             <button
@@ -111,7 +111,7 @@ export function ListEditorField({
               className="button-pill text-xs"
             >
               <ClipboardPaste size={13} />
-              {tl("Colar lista")}
+              {t("generated.controlPlane.colar_lista_3daae85b")}
             </button>
             <span className="text-[11px] text-[var(--text-quaternary)]">
               {items.length} {tl(items.length === 1 ? "item" : "itens")}
@@ -157,7 +157,7 @@ export function ListEditorField({
                       type="button"
                       onClick={() => removeItem(item.id)}
                       className="mt-1 p-2 text-[var(--text-quaternary)] opacity-0 transition-colors group-hover:opacity-100 hover:text-[var(--tone-danger-text)]"
-                      aria-label={tl("Remover item {{index}}", { index: index + 1 })}
+                      aria-label={t("generated.controlPlane.remover_item_index_2c84f589", { index: index + 1 })}
                     >
                       <Trash2 size={14} />
                     </button>
@@ -171,10 +171,10 @@ export function ListEditorField({
         <div className="mt-4 rounded-2xl border border-dashed border-[var(--border-subtle)] bg-[var(--surface-tint)] p-4">
           <div className="mb-2 flex items-center justify-between gap-3">
             <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
-              {tl("Adicionar novas entradas")}
+              {t("generated.controlPlane.adicionar_novas_entradas_0039a37e")}
             </span>
             <span className="text-[11px] text-[var(--text-quaternary)]">
-              {tl("Cole varias linhas ou escreva uma por vez")}
+              {t("generated.controlPlane.cole_varias_linhas_ou_escreva_uma_por_vez_f2ef284a")}
             </span>
           </div>
 
@@ -191,8 +191,8 @@ export function ListEditorField({
             className="field-shell w-full resize-y rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-4 py-4 text-sm leading-6 text-[var(--text-primary)]"
             placeholder={
               maxItems && items.length >= maxItems
-                ? tl("Maximo de {{maxItems}} itens", { maxItems })
-                : `${tl(placeholder)}\n${tl("Dica: use uma linha por item para adicionar varios de uma vez.")}`
+                ? t("generated.controlPlane.maximo_de_maxitems_itens_70694d18", { maxItems })
+                : `${tl(placeholder)}\n${t("generated.controlPlane.dica_use_uma_linha_por_item_para_adicionar_v_881f2903")}`
             }
             disabled={maxItems !== undefined && items.length >= maxItems}
             spellCheck
@@ -200,7 +200,7 @@ export function ListEditorField({
 
           <div className="mt-3 flex items-center justify-between gap-3">
             <span className="text-[11px] text-[var(--text-quaternary)]">
-              {tl("Use Ctrl/Cmd + Enter para adicionar rapidamente")}
+              {t("generated.controlPlane.use_ctrl_cmd_enter_para_adicionar_rapidament_1020229a")}
             </span>
             <button
               type="button"
@@ -210,10 +210,10 @@ export function ListEditorField({
                 (maxItems !== undefined && items.length >= maxItems)
               }
               className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-30"
-              aria-label={tl("Adicionar item")}
+              aria-label={t("generated.controlPlane.adicionar_item_36d10784")}
             >
               <Plus size={14} />
-              {tl("Adicionar")}
+              {t("generated.controlPlane.adicionar_07558363")}
             </button>
           </div>
         </div>

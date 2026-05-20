@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -24,6 +25,11 @@ from .bootstrap_file import (
     read_bootstrap_file,
 )
 from .database import execute, fetch_all, fetch_one, json_dump, json_load, now_iso
+from .operator_profile_photos import (
+    delete_operator_profile_photo,
+    read_operator_profile_photo,
+    save_operator_profile_photo,
+)
 from .password_policy import validate_password
 from .settings import (
     ALLOW_LOOPBACK_BOOTSTRAP,
@@ -41,6 +47,8 @@ from .settings import (
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _BOOTSTRAP_INSERT_ATTEMPTS = 5
 _FAILURE_TIMING_FLOOR_SECONDS = 0.0
+_DISPLAY_NAME_MAX_LENGTH = 80
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 
 
 @dataclass(slots=True)
@@ -51,6 +59,8 @@ class OperatorAuthContext:
     username: str | None
     email: str | None
     display_name: str | None
+    profile_photo_hash: str | None = None
+    profile_photo_updated_at: str | None = None
     session_id: str | None = None
     token_id: str | None = None
     scopes: tuple[str, ...] = ()
@@ -116,6 +126,25 @@ def _safe_text(value: Any, *, limit: int = 240) -> str:
     return str(value or "").strip()[:limit]
 
 
+def _normalize_display_name(value: Any) -> str:
+    raw = str(value or "")
+    if _CONTROL_CHAR_RE.search(raw):
+        raise ValueError("Display name cannot contain control characters.")
+    normalized = " ".join(raw.strip().split())
+    if not normalized:
+        raise ValueError("Display name is required.")
+    if len(normalized) > _DISPLAY_NAME_MAX_LENGTH:
+        raise ValueError(f"Display name must be {_DISPLAY_NAME_MAX_LENGTH} characters or fewer.")
+    return normalized
+
+
+def _profile_photo_url(photo_hash: Any) -> str | None:
+    normalized_hash = str(photo_hash or "").strip()
+    if not normalized_hash:
+        return None
+    return f"/api/control-plane/auth/profile/photo?v={normalized_hash}"
+
+
 def _optional_audit_user_id(value: Any) -> int | None:
     if value is None or value == "":
         return None
@@ -137,11 +166,14 @@ class OperatorAuthService:
     def _row_to_operator(self, row: Any | None) -> dict[str, Any] | None:
         if row is None:
             return None
+        profile_photo_hash = str(row.get("profile_photo_hash") or "")
         return {
             "id": str(row["id"]),
             "username": str(row["username"]),
             "email": str(row["email"]),
             "display_name": str(row.get("display_name") or row["username"]),
+            "profile_photo_url": _profile_photo_url(profile_photo_hash),
+            "profile_photo_hash": profile_photo_hash or None,
             "role": str(row.get("role") or "owner"),
             "last_login_at": str(row.get("last_login_at") or "") or None,
         }
@@ -172,6 +204,8 @@ class OperatorAuthService:
                         "username": context.username,
                         "email": context.email,
                         "display_name": context.display_name or context.username or "Operator",
+                        "profile_photo_url": _profile_photo_url(context.profile_photo_hash),
+                        "profile_photo_hash": context.profile_photo_hash or None,
                     }
                     if context and context.user_id
                     else None
@@ -436,6 +470,8 @@ class OperatorAuthService:
             username=str(row["username"]) if row else None,
             email=str(row["email"]) if row else None,
             display_name=str(row.get("display_name") or row["username"]) if row else "Break Glass",
+            profile_photo_hash=str(row.get("profile_photo_hash") or "") if row else None,
+            profile_photo_updated_at=str(row.get("profile_photo_updated_at") or "") if row else None,
             session_id=session_id,
         )
 
@@ -670,6 +706,93 @@ class OperatorAuthService:
         )
         return {"ok": True}
 
+    def update_profile(self, context: OperatorAuthContext, *, display_name: str) -> dict[str, Any]:
+        if not context.user_id:
+            raise ValueError("Operator session is required.")
+        normalized_display_name = _normalize_display_name(display_name)
+        row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        if not row:
+            raise ValueError("User not found.")
+
+        execute(
+            "UPDATE cp_operator_users SET display_name = ?, updated_at = ? WHERE id = ?",
+            (normalized_display_name, now_iso(), context.user_id),
+        )
+        updated = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        emit_security(
+            "security.operator_profile_updated",
+            user_id=_optional_audit_user_id(context.user_id),
+        )
+        return {"ok": True, "operator": self._row_to_operator(updated)}
+
+    def set_profile_photo(self, context: OperatorAuthContext, *, raw: bytes) -> dict[str, Any]:
+        if not context.user_id:
+            raise ValueError("Operator session is required.")
+        row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        if not row:
+            raise ValueError("User not found.")
+
+        stored = save_operator_profile_photo(context.user_id, raw)
+        updated_at = now_iso()
+        execute(
+            """
+            UPDATE cp_operator_users
+            SET profile_photo_hash = ?, profile_photo_updated_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (stored.content_hash, updated_at, updated_at, context.user_id),
+        )
+        updated = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        emit_security(
+            "security.operator_profile_photo_updated",
+            user_id=_optional_audit_user_id(context.user_id),
+        )
+        return {
+            "ok": True,
+            "operator": self._row_to_operator(updated),
+            "photoUrl": _profile_photo_url(stored.content_hash),
+            "photoHash": stored.content_hash,
+            "byteSize": stored.byte_size,
+        }
+
+    def get_profile_photo(self, context: OperatorAuthContext, *, requested_hash: str = "") -> tuple[bytes, str]:
+        if not context.user_id:
+            raise ValueError("Operator session is required.")
+        row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        if not row:
+            raise ValueError("User not found.")
+        profile_photo_hash = str(row.get("profile_photo_hash") or "")
+        if not profile_photo_hash:
+            raise FileNotFoundError("profile photo not found")
+        if requested_hash and requested_hash != profile_photo_hash:
+            raise FileNotFoundError("profile photo not found")
+        data = read_operator_profile_photo(context.user_id)
+        if data is None:
+            raise FileNotFoundError("profile photo not found")
+        return data, profile_photo_hash
+
+    def delete_profile_photo(self, context: OperatorAuthContext) -> dict[str, Any]:
+        if not context.user_id:
+            raise ValueError("Operator session is required.")
+        row = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        if not row:
+            raise ValueError("User not found.")
+        removed = delete_operator_profile_photo(context.user_id)
+        execute(
+            """
+            UPDATE cp_operator_users
+            SET profile_photo_hash = '', profile_photo_updated_at = '', updated_at = ?
+            WHERE id = ?
+            """,
+            (now_iso(), context.user_id),
+        )
+        updated = fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (context.user_id,))
+        emit_security(
+            "security.operator_profile_photo_deleted",
+            user_id=_optional_audit_user_id(context.user_id),
+        )
+        return {"ok": True, "operator": self._row_to_operator(updated), "removed": removed}
+
     def recovery_codes_summary(self, context: OperatorAuthContext) -> dict[str, Any]:
         if not context.user_id:
             raise ValueError("Operator session is required.")
@@ -837,6 +960,8 @@ class OperatorAuthService:
             username=str(row["username"]),
             email=str(row["email"]),
             display_name=str(row.get("display_name") or row["username"]),
+            profile_photo_hash=str(row.get("profile_photo_hash") or ""),
+            profile_photo_updated_at=str(row.get("profile_photo_updated_at") or ""),
             session_id=session_id,
             token_id=token_id,
         )

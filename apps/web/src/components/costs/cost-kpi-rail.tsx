@@ -5,7 +5,7 @@ import { PageMetricStrip, PageMetricStripItem } from "@/components/ui/page-primi
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { getAgentLabel } from "@/lib/agent-constants";
 import type { CostComparison, CostOverview, CostPeakBucket } from "@/lib/types";
-import { cn, formatCost } from "@/lib/utils";
+import { formatCost } from "@/lib/utils";
 
 interface CostKpiRailProps {
   overview: CostOverview;
@@ -51,19 +51,15 @@ function oneLine(value: string) {
 export function CostKpiRail({ overview, comparison, peakBucket, className }: CostKpiRailProps) {
   const { t } = useAppI18n();
   const peakContext = peakBucket
-    ? `${peakBucket.label} · ${getAgentLabel(peakBucket.top_agent ?? "—")} · ${peakBucket.top_model ?? t("costs.page.noDominantModel", { defaultValue: "No dominant model" })}`
-    : t("costs.page.noPeak", { defaultValue: "No highlighted peak in the period" });
+    ? `${peakBucket.label} · ${getAgentLabel(peakBucket.top_agent ?? "—")} · ${peakBucket.top_model ?? t("costs.page.noDominantModel", undefined)}`
+    : t("costs.page.noPeak", undefined);
 
   return (
-    <PageMetricStrip className={cn(className)}>
+    <PageMetricStrip className={className}>
       <PageMetricStripItem
         label={t("costs.kpis.totalPeriod")}
         value={formatCost(overview.total_cost_usd)}
-        hint={oneLine(t("costs.page.kpiContexts.totalPeriod", {
-          defaultValue: "{{queries}} queries · {{executions}} executions",
-          queries: overview.total_queries,
-          executions: overview.total_executions,
-        }))}
+        hint={oneLine(t("costs.page.kpiContexts.totalPeriod", { queries: overview.total_queries, executions: overview.total_executions }))}
         delta={renderDelta(comparison.total_delta_pct)}
       />
       <PageMetricStripItem
@@ -71,21 +67,15 @@ export function CostKpiRail({ overview, comparison, peakBucket, className }: Cos
         value={formatCost(overview.today_cost_usd)}
         hint={
           comparison.previous_today_cost_usd == null
-            ? oneLine(t("costs.page.kpiContexts.noComparableBase", { defaultValue: "No comparable baseline" }))
-            : oneLine(t("costs.page.kpiContexts.previousBase", {
-              defaultValue: "Previous base {{value}}",
-              value: formatCost(comparison.previous_today_cost_usd),
-            }))
+            ? oneLine(t("costs.page.kpiContexts.noComparableBase", undefined))
+            : oneLine(t("costs.page.kpiContexts.previousBase", { value: formatCost(comparison.previous_today_cost_usd) }))
         }
         delta={renderDelta(comparison.today_delta_pct)}
       />
       <PageMetricStripItem
         label={t("costs.kpis.costPerResolved")}
         value={formatCost(overview.avg_cost_per_resolved_conversation)}
-        hint={oneLine(t("costs.page.kpiContexts.resolvedConversations", {
-          defaultValue: "{{count}} resolved conversations",
-          count: overview.resolved_conversations,
-        }))}
+        hint={oneLine(t("costs.page.kpiContexts.resolvedConversations", { count: overview.resolved_conversations }))}
         delta={renderDelta(comparison.avg_cost_per_resolved_delta_pct)}
       />
       <PageMetricStripItem

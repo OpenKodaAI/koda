@@ -122,4 +122,24 @@ describe("LoginScreen", () => {
       expect(replaceMock).toHaveBeenCalledWith("/");
     });
   });
+
+  it("uses a spinner-only visual state while submitting", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockImplementationOnce(
+      () => new Promise(() => {}),
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <LoginScreen />
+      </I18nProvider>,
+    );
+
+    await user.type(screen.getByLabelText(/email|username/i), "owner");
+    await user.type(screen.getByLabelText(/password/i), "CorrectHorseBattery!9");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+
+    const busyButton = screen.getByRole("button", { name: /signing in/i });
+    expect(busyButton).toHaveAttribute("aria-busy", "true");
+    expect(screen.queryByText(/signing in/i)).not.toBeInTheDocument();
+  });
 });

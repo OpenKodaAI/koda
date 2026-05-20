@@ -21,7 +21,7 @@ export function SettingsWarningIndicator({
   className?: string;
 }) {
   const { localWarnings } = useSystemSettings();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -37,17 +37,17 @@ export function SettingsWarningIndicator({
 
   const countLabel = useMemo(() => {
     if (localWarnings.length === 1) {
-      return compact ? "1" : tl("1 aviso");
+      return compact ? "1" : t("generated.controlPlane.1_aviso_ae3343ad");
     }
 
-    return compact ? String(localWarnings.length) : tl("{{count}} avisos", { count: localWarnings.length });
-  }, [compact, localWarnings.length, tl]);
+    return compact ? String(localWarnings.length) : t("generated.controlPlane.count_avisos_0379cd39", { count: localWarnings.length });
+  }, [compact, localWarnings.length, t, tl]);
 
   const title = useMemo(() => {
     return localWarnings.length === 1
-      ? tl("1 aviso de configuração")
-      : tl("{{count}} avisos de configuração", { count: localWarnings.length });
-  }, [localWarnings.length, tl]);
+      ? t("generated.controlPlane.1_aviso_de_configuracao_af6f7c61")
+      : t("generated.controlPlane.count_avisos_de_configuracao_2dffaba4", { count: localWarnings.length });
+  }, [localWarnings.length, t, tl]);
 
   const updatePanelPosition = useCallback(() => {
     if (!triggerRef.current || !panelRef.current) {
@@ -189,7 +189,7 @@ export function SettingsWarningIndicator({
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-[var(--text-primary)]">{title}</p>
                     <p className="text-xs text-[var(--text-quaternary)]">
-                      {tl("Revise estes pontos antes de publicar configurações globais.")}
+                      {t("generated.controlPlane.revise_estes_pontos_antes_de_publicar_config_aba1ddd3")}
                     </p>
                   </div>
                 </div>

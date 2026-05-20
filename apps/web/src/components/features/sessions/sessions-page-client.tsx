@@ -1,8 +1,8 @@
 "use client";
 
 
-import { Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   useAnimatedPresence,
   useBodyScrollLock,
@@ -11,22 +11,41 @@ import {
 } from "@/hooks/use-animated-presence";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useAppTour } from "@/hooks/use-app-tour";
-import { keepPreviousData, useQueryClient } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  type InfiniteData,
+  useInfiniteQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useControlPlaneQuery } from "@/hooks/use-app-query";
 import { useContentStable } from "@/hooks/use-content-stable";
-import { useDebouncedValue } from "@/hooks/use-debounced-value";
+import { useMinDurationFlag } from "@/hooks/use-min-duration-flag";
 import { useStableQueryData } from "@/hooks/use-stable-query-data";
+import { useToast } from "@/hooks/use-toast";
+import {
+  readCurrentUrlSearchParam,
+  replaceUrlSearchParamsSilently,
+  useUrlSyncedSearch,
+} from "@/hooks/use-url-synced-search";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { ChatComposer } from "@/components/sessions/chat/chat-composer";
 import type { ChatCommand } from "@/lib/contracts/chat-commands";
 import type { Mention } from "@/lib/contracts/sessions";
 import { ChatHeader } from "@/components/sessions/chat/chat-header";
 import { ChatThread, type PendingChatMessage } from "@/components/sessions/chat/chat-thread";
-import { SessionContextDrawer } from "@/components/sessions/context/session-context-drawer";
+import {
+  collectArtifactsFromDetail,
+  SessionArtifactRail,
+} from "@/components/sessions/context/session-artifact-rail";
 import { SessionRail } from "@/components/sessions/rail/session-rail";
+import { NewRoomDialog } from "@/components/sessions/rail/new-room-dialog";
+import { RoomChatPane } from "@/components/sessions/chat/room-chat-pane";
+import { useRooms, type RoomEntry } from "@/hooks/use-rooms";
+import { ConfirmationDialog } from "@/components/control-plane/shared/confirmation-dialog";
 import { SessionsRouteLoading } from "@/components/layout/route-loading";
 import { useSessionStream } from "@/hooks/use-session-stream";
 import type { SessionStreamEvent } from "@/lib/contracts/sessions";
+import type { SquadThreadOverviewResponse } from "@/lib/squads";
 import { parseArtifactReadyPayload } from "@/lib/contracts/artifacts";
 import { executionArtifactDedupeKey } from "@/components/sessions/artifacts/artifact-detail";
 import {
@@ -34,6 +53,14 @@ import {
   fetchControlPlaneDashboardJsonAllowError,
   mutateControlPlaneDashboardJson,
 } from "@/lib/control-plane-dashboard";
+import {
+  DASHBOARD_CACHE_GC_MS,
+  DASHBOARD_CACHE_STALE_MS,
+  DASHBOARD_PAGE_SIZE,
+  mergePaginatedItems,
+  normalizePaginatedListResponse,
+  type PaginatedListResponse,
+} from "@/lib/pagination";
 import { queryKeys } from "@/lib/query/keys";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import type {
@@ -46,9 +73,16 @@ import type {
 } from "@/lib/types";
 import { cn, truncateText } from "@/lib/utils";
 
-const SESSION_FETCH_LIMIT = 200;
+const SESSION_FETCH_LIMIT = DASHBOARD_PAGE_SIZE;
 const SESSION_THREAD_PAGE_SIZE = 24;
+const CHAT_HISTORY_STALE_MS = 5 * 60 * 1000;
+const CHAT_HISTORY_GC_MS = 15 * 60 * 1000;
 const NEW_SESSION_PLACEHOLDER_ID = "__new_session__";
+const EMPTY_SESSION_DETAIL_PAGES: SessionDetail[] = [];
+
+type SessionPage = PaginatedListResponse<SessionSummary> & {
+  unavailable?: boolean;
+};
 
 function createClientSessionId() {
   const id =
@@ -170,12 +204,16 @@ function mergeSessionHistoryPages(
     orderedPages.push(latestDetail);
   }
 
-  const seen = new Set<string>();
+  const indexById = new Map<string, number>();
   const messages: SessionMessage[] = [];
   for (const page of orderedPages) {
     for (const message of page.messages) {
-      if (seen.has(message.id)) continue;
-      seen.add(message.id);
+      const existingIndex = indexById.get(message.id);
+      if (existingIndex !== undefined) {
+        messages[existingIndex] = message;
+        continue;
+      }
+      indexById.set(message.id, messages.length);
       messages.push(message);
     }
   }
@@ -194,17 +232,23 @@ function SessionsPageContent() {
   const { t } = useAppI18n();
   const { currentStep, status } = useAppTour();
   const { agents } = useAgentCatalog();
-  const router = useRouter();
-  const pathname = usePathname();
   const searchParams = useSearchParams();
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
-  const queryBotId = searchParams.get("agent");
+  const [queryBotId, setQueryBotId] = useState<string | null>(() =>
+    searchParams.get("agent"),
+  );
+  const searchState = useUrlSyncedSearch({
+    debounceMs: 220,
+    initialValue: searchParams.get("search"),
+    syncToUrl: false,
+  });
 
   const [activeBotId, setActiveBotId] = useState<string | undefined>(() =>
     normalizeSelectedBotId(queryBotId, availableBotIds)
   );
-  const [search, setSearch] = useState(searchParams.get("search") ?? "");
+  const search = searchState.value;
+  const setSearch = searchState.setValue;
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(
     searchParams.get("session")
   );
@@ -215,11 +259,18 @@ function SessionsPageContent() {
   const [composerError, setComposerError] = useState<string | null>(null);
   const [composerSubmitting, setComposerSubmitting] = useState(false);
   const [mobileRailOpen, setMobileRailOpen] = useState(false);
-  const [contextDrawerOpen, setContextDrawerOpen] = useState(false);
+  const [contextPanelOpen, setContextPanelOpen] = useState(true);
+  const [pendingDeleteSession, setPendingDeleteSession] =
+    useState<SessionSummary | null>(null);
+  const [deleteSubmitting, setDeleteSubmitting] = useState(false);
+  const [selectedRoomId, setSelectedRoomId] = useState<string | null>(
+    searchParams.get("room"),
+  );
+  const [activeRoomDetail, setActiveRoomDetail] =
+    useState<SquadThreadOverviewResponse | null>(null);
+  const [newRoomOpen, setNewRoomOpen] = useState(false);
   const [threadScrolled, setThreadScrolled] = useState(false);
   const [pendingMessages, setPendingMessages] = useState<PendingChatMessage[]>([]);
-  const [olderDetailPages, setOlderDetailPages] = useState<SessionDetail[]>([]);
-  const [loadingOlderDetailPages, setLoadingOlderDetailPages] = useState(false);
   const [pendingRequest, setPendingRequest] = useState<{
     requestId: string;
     text: string;
@@ -231,8 +282,18 @@ function SessionsPageContent() {
   const autoSelectedContextRef = useRef<string | null>(null);
 
   const queryClient = useQueryClient();
-  const deferredSearch = useDeferredValue(search.trim());
-  const debouncedSearch = useDebouncedValue(deferredSearch, 220);
+  const { showToast } = useToast();
+  const debouncedSearch = searchState.debouncedValue;
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setQueryBotId(readCurrentUrlSearchParam("agent") || null);
+      setSelectedSessionId(readCurrentUrlSearchParam("session") || null);
+      setSelectedRoomId(readCurrentUrlSearchParam("room") || null);
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
 
   useEffect(() => {
     if (availableBotIds.length === 0) {
@@ -278,83 +339,132 @@ function SessionsPageContent() {
 
   useEffect(() => {
     if (queryBotId && availableBotIds.length === 0) return;
-    const params = new URLSearchParams(searchParams.toString());
-    if (activeBotId) {
-      params.set("agent", activeBotId);
-    } else {
-      params.delete("agent");
-    }
-    if (debouncedSearch) {
-      params.set("search", debouncedSearch);
-    } else {
-      params.delete("search");
-    }
-    if (selectedSessionId) {
-      params.set("session", selectedSessionId);
-    } else {
-      params.delete("session");
-    }
-    const nextQuery = params.toString();
-    const currentQuery = searchParams.toString();
-    if (nextQuery === currentQuery) return;
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    replaceUrlSearchParamsSilently((params) => {
+      if (activeBotId) params.set("agent", activeBotId);
+      else params.delete("agent");
+
+      if (debouncedSearch) params.set("search", debouncedSearch);
+      else params.delete("search");
+
+      if (selectedSessionId) params.set("session", selectedSessionId);
+      else params.delete("session");
+
+      if (selectedRoomId) params.set("room", selectedRoomId);
+      else params.delete("room");
+    });
   }, [
     activeBotId,
     availableBotIds.length,
     debouncedSearch,
-    pathname,
     queryBotId,
-    router,
-    searchParams,
+    selectedRoomId,
     selectedSessionId,
   ]);
 
-  const sessionsQueryKey = queryKeys.dashboard.sessions({
-    search: debouncedSearch,
-    limit: SESSION_FETCH_LIMIT,
-  });
-
-  const sessionsQuery = useControlPlaneQuery<{
-    items: SessionSummary[];
-    unavailable: boolean;
-  }>({
-    tier: "live",
-    queryKey: sessionsQueryKey,
-    refetchInterval: 15_000,
-    notifyOnChangeProps: ["data", "error"],
-    placeholderData: keepPreviousData,
-    refetchOnWindowFocus: false,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    queryFn: async ({ signal }) => {
-      const response = await fetchControlPlaneDashboardJsonAllowError<SessionSummary[]>(
+  const sessionsQueryKey = useMemo(
+    () =>
+      queryKeys.dashboard.sessionPages({
+        search: debouncedSearch,
+        limit: SESSION_FETCH_LIMIT,
+      }),
+    [debouncedSearch],
+  );
+  const fetchSessionsPage = useCallback(
+    async ({
+      signal,
+      offset,
+    }: {
+      signal?: AbortSignal;
+      offset: number;
+    }): Promise<SessionPage> => {
+      const response = await fetchControlPlaneDashboardJsonAllowError<
+        PaginatedListResponse<SessionSummary>
+      >(
         "/sessions",
         {
           signal,
           params: {
+            paged: 1,
             limit: SESSION_FETCH_LIMIT,
+            offset,
             search: debouncedSearch || null,
           },
           fallbackError: t("sessions.loadError"),
         },
       );
+      const page = normalizePaginatedListResponse<SessionSummary>(
+        response.data,
+        SESSION_FETCH_LIMIT,
+        offset,
+      );
       return {
-        items: Array.isArray(response.data) ? response.data : [],
-        unavailable: false,
+        ...page,
+        unavailable: !response.ok,
       };
+    },
+    [debouncedSearch, t],
+  );
+  const refreshSessionsFirstPage = useCallback(async () => {
+    try {
+      const firstPage = await fetchSessionsPage({ offset: 0 });
+      queryClient.setQueryData<InfiniteData<SessionPage, number>>(
+        sessionsQueryKey,
+        (current) => {
+          if (!current) {
+            return {
+              pages: [firstPage],
+              pageParams: [0],
+            };
+          }
+          return {
+            ...current,
+            pages: [firstPage, ...current.pages.slice(1)],
+            pageParams: current.pageParams.length > 0 ? current.pageParams : [0],
+          };
+        },
+      );
+    } catch {
+      // Background freshness should not interrupt the active chat interaction.
+    }
+  }, [fetchSessionsPage, queryClient, sessionsQueryKey]);
+
+  const sessionsQuery = useInfiniteQuery<SessionPage, Error>({
+    queryKey: sessionsQueryKey,
+    initialPageParam: 0,
+    staleTime: DASHBOARD_CACHE_STALE_MS,
+    gcTime: DASHBOARD_CACHE_GC_MS,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
+    getNextPageParam: (lastPage) =>
+      lastPage.page.has_more ? lastPage.page.next_offset : undefined,
+    queryFn: async ({ signal, pageParam }) => {
+      const offset = typeof pageParam === "number" ? pageParam : 0;
+      return fetchSessionsPage({ signal, offset });
     },
   });
 
   const stableSessionsQuery = useStableQueryData({
     data: sessionsQuery.data,
-    resetKey: "dashboard:sessions",
+    resetKey: JSON.stringify({ search: debouncedSearch, limit: SESSION_FETCH_LIMIT }),
     isPending: sessionsQuery.isPending,
     isFetching: sessionsQuery.isFetching,
     error: sessionsQuery.error,
   });
   const stableSessionsPayload = useContentStable(stableSessionsQuery.data ?? undefined);
-  const sessions = useMemo(() => stableSessionsPayload?.items ?? [], [stableSessionsPayload]);
-  const sessionsUnavailable = stableSessionsPayload?.unavailable ?? false;
+  const sessions = useMemo(
+    () =>
+      mergePaginatedItems(
+        stableSessionsPayload?.pages,
+        (session) => `${session.bot_id}:${session.session_id}`,
+      ),
+    [stableSessionsPayload],
+  );
+  const sessionsUnavailable = stableSessionsPayload?.pages.some((page) => page.unavailable) ?? false;
+  const loadMoreSessions = useCallback(() => {
+    if (!sessionsQuery.hasNextPage || sessionsQuery.isFetchingNextPage) return;
+    void sessionsQuery.fetchNextPage();
+  }, [sessionsQuery]);
   const selectedSessionSummary = useMemo(
     () => sessions.find((session) => session.session_id === selectedSessionId) ?? null,
     [selectedSessionId, sessions]
@@ -363,6 +473,7 @@ function SessionsPageContent() {
     () => normalizeSelectedBotId(selectedSessionSummary?.bot_id, availableBotIds),
     [availableBotIds, selectedSessionSummary?.bot_id],
   );
+  const conversationPaneActive = !selectedRoomId;
   const detailBotId = selectedSessionBotId ?? activeBotId;
 
   const detailQueryBaseKey = useMemo(
@@ -396,7 +507,7 @@ function SessionsPageContent() {
         const artifact = artifactReadyEventToExecutionArtifact(event);
         if (artifact) {
           queryClient.setQueriesData<SessionDetail>(
-            { queryKey: detailQueryBaseKey },
+            { queryKey: detailQueryKey },
             (current) => attachArtifactToSessionDetail(current, event.task_id, artifact),
           );
         }
@@ -406,11 +517,11 @@ function SessionsPageContent() {
       }
       streamInvalidateTimerRef.current = setTimeout(() => {
         streamInvalidateTimerRef.current = null;
-        void queryClient.invalidateQueries({ queryKey: detailQueryBaseKey });
-        void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
+        void queryClient.invalidateQueries({ queryKey: detailQueryKey });
+        void refreshSessionsFirstPage();
       }, 120);
     },
-    [queryClient, detailQueryBaseKey, sessionsQueryKey],
+    [queryClient, detailQueryKey, refreshSessionsFirstPage],
   );
 
   const streamSessionId =
@@ -420,14 +531,14 @@ function SessionsPageContent() {
   const { connected: streamConnected } = useSessionStream({
     agentId: detailBotId ?? null,
     sessionId: streamSessionId,
-    enabled: Boolean(detailBotId && streamSessionId),
+    enabled: Boolean(conversationPaneActive && detailBotId && streamSessionId),
     onEvent: handleSessionStreamEvent,
   });
 
   const detailQuery = useControlPlaneQuery<SessionDetail>({
     tier: "realtime",
     queryKey: detailQueryKey,
-    enabled: Boolean(detailBotId && selectedSessionId),
+    enabled: Boolean(conversationPaneActive && detailBotId && selectedSessionId),
     refetchInterval: streamConnected
       ? false
       : pendingRequest
@@ -465,6 +576,53 @@ function SessionsPageContent() {
   });
   const stableDetailPayload = useContentStable(stableDetailQuery.data ?? undefined);
   const activeDetail = stableDetailPayload ?? null;
+  const latestHistoryBoundaryCursor = activeDetail?.page?.next_cursor ?? null;
+  const olderDetailPagesQueryKey = useMemo(
+    () =>
+      queryKeys.dashboard.sessionOlderPages(
+        detailBotId ?? "__disabled__",
+        selectedSessionId ?? "__disabled__",
+        latestHistoryBoundaryCursor ?? "__none__",
+        SESSION_THREAD_PAGE_SIZE,
+      ),
+    [detailBotId, latestHistoryBoundaryCursor, selectedSessionId],
+  );
+  const olderDetailPagesEnabled = Boolean(
+    conversationPaneActive &&
+      detailBotId &&
+      selectedSessionId &&
+      latestHistoryBoundaryCursor,
+  );
+  const olderDetailPagesQuery = useInfiniteQuery({
+    queryKey: olderDetailPagesQueryKey,
+    enabled: olderDetailPagesEnabled,
+    initialPageParam: latestHistoryBoundaryCursor ?? "",
+    staleTime: CHAT_HISTORY_STALE_MS,
+    gcTime: CHAT_HISTORY_GC_MS,
+    retry: 1,
+    refetchOnWindowFocus: false,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    queryFn: ({ pageParam, signal }) => {
+      const cursor = typeof pageParam === "string" ? pageParam : "";
+      if (!detailBotId || !selectedSessionId || !cursor) {
+        throw new Error(t("sessions.noSelection"));
+      }
+      return fetchControlPlaneDashboardJson<SessionDetail>(
+        `/agents/${detailBotId}/sessions/${encodeURIComponent(selectedSessionId)}`,
+        {
+          signal,
+          params: {
+            limit: SESSION_THREAD_PAGE_SIZE,
+            before: cursor,
+          },
+          fallbackError: t("sessions.loadError"),
+        },
+      );
+    },
+    getNextPageParam: (lastPage) => lastPage.page?.next_cursor ?? undefined,
+  });
+  const olderDetailPages = olderDetailPagesQuery.data?.pages ?? EMPTY_SESSION_DETAIL_PAGES;
   const loadedHistoryMessages = useMemo(
     () => mergeSessionHistoryPages(activeDetail, olderDetailPages),
     [activeDetail, olderDetailPages],
@@ -473,13 +631,18 @@ function SessionsPageContent() {
   const effectiveBotId =
     normalizeSelectedBotId(selectedSummary?.bot_id, availableBotIds) ?? activeBotId;
   const oldestLoadedPage = olderDetailPages[olderDetailPages.length - 1] ?? activeDetail;
-  const hasOlderMessages = oldestLoadedPage?.page?.has_more ?? false;
-  const nextHistoryCursor = oldestLoadedPage?.page?.next_cursor ?? null;
+  const hasOlderMessages = Boolean(
+    latestHistoryBoundaryCursor &&
+      (olderDetailPages.length > 0
+        ? oldestLoadedPage?.page?.has_more
+        : activeDetail?.page?.has_more),
+  );
+  const loadingOlderDetailPages = olderDetailPagesQuery.isFetchingNextPage;
+  const fetchOlderDetailPage = olderDetailPagesQuery.fetchNextPage;
 
   useEffect(() => {
-    setOlderDetailPages([]);
-    setLoadingOlderDetailPages(false);
-  }, [detailBotId, selectedSessionId]);
+    setActiveRoomDetail(null);
+  }, [selectedRoomId]);
 
   useEffect(() => {
     if (!pendingRequest || !activeDetail) return;
@@ -496,12 +659,13 @@ function SessionsPageContent() {
       current.filter((message) => message.requestId !== pendingRequest.requestId)
     );
     setPendingRequest(null);
-    void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
-  }, [activeDetail, pendingRequest, queryClient, sessionsQueryKey]);
+    void refreshSessionsFirstPage();
+  }, [activeDetail, pendingRequest, refreshSessionsFirstPage]);
 
   useEffect(() => {
     if (stableSessionsQuery.initialLoading) return;
     if (isNewChatMode) return;
+    if (selectedRoomId) return;
     const contextKey = `${activeBotId ?? "*"}:${debouncedSearch || "*"}`;
     if (autoSelectedContextRef.current === contextKey) return;
     if (!selectedSessionId && sessions.length > 0 && isDesktop) {
@@ -514,6 +678,7 @@ function SessionsPageContent() {
     isDesktop,
     isNewChatMode,
     selectedSessionId,
+    selectedRoomId,
     sessions,
     stableSessionsQuery.initialLoading,
   ]);
@@ -528,43 +693,14 @@ function SessionsPageContent() {
     setComposerError(null);
     setPendingRequest(null);
     setPendingMessages([]);
-    setOlderDetailPages([]);
-    setLoadingOlderDetailPages(false);
   }, []);
 
   const loadOlderMessages = useCallback(async () => {
-    if (!detailBotId || !selectedSessionId || !activeDetail || loadingOlderDetailPages) {
+    if (!hasOlderMessages || loadingOlderDetailPages) {
       return;
     }
-    if (!hasOlderMessages || !nextHistoryCursor) {
-      return;
-    }
-
-    setLoadingOlderDetailPages(true);
-    try {
-      const page = await fetchControlPlaneDashboardJson<SessionDetail>(
-        `/agents/${detailBotId}/sessions/${encodeURIComponent(selectedSessionId)}`,
-        {
-          params: {
-            limit: SESSION_THREAD_PAGE_SIZE,
-            before: nextHistoryCursor,
-          },
-          fallbackError: t("sessions.loadError"),
-        },
-      );
-      setOlderDetailPages((current) => [...current, page]);
-    } finally {
-      setLoadingOlderDetailPages(false);
-    }
-  }, [
-    activeDetail,
-    detailBotId,
-    hasOlderMessages,
-    loadingOlderDetailPages,
-    nextHistoryCursor,
-    selectedSessionId,
-    t,
-  ]);
+    await fetchOlderDetailPage();
+  }, [fetchOlderDetailPage, hasOlderMessages, loadingOlderDetailPages]);
 
   const handleAgentChange = useCallback(
     (agentId: string | undefined) => {
@@ -578,7 +714,6 @@ function SessionsPageContent() {
       setActiveBotId(normalizeSelectedBotId(agentId, availableBotIds));
       setNewChatSessionId(null);
       setComposerError(null);
-      setContextDrawerOpen(false);
 
       if (!hasSelectedSession) return;
 
@@ -598,6 +733,8 @@ function SessionsPageContent() {
         normalizeSelectedBotId(session.bot_id, availableBotIds) ?? session.bot_id
       );
       setSelectedSessionId(session.session_id);
+      setSelectedRoomId(null);
+      setContextPanelOpen(true);
       setNewChatSessionId(null);
       setIsNewChatMode(false);
       setComposerError(null);
@@ -612,6 +749,85 @@ function SessionsPageContent() {
     [availableBotIds, isDesktop]
   );
 
+  const handleSelectRoom = useCallback(
+    (entry: RoomEntry) => {
+      setSelectedRoomId(entry.thread.id);
+      setSelectedSessionId(null);
+      setContextPanelOpen(true);
+      setNewChatSessionId(null);
+      setIsNewChatMode(false);
+      setComposerError(null);
+      setPendingRequest(null);
+      setPendingMessages([]);
+      if (!isDesktop) {
+        setMobileRailOpen(false);
+      }
+    },
+    [isDesktop],
+  );
+
+  const handleRoomCreated = useCallback(
+    (result: { threadId: string; squadId: string; workspaceId: string }) => {
+      setNewRoomOpen(false);
+      setSelectedRoomId(result.threadId);
+      setSelectedSessionId(null);
+      setContextPanelOpen(true);
+      setNewChatSessionId(null);
+      setIsNewChatMode(false);
+      setComposerError(null);
+      setPendingRequest(null);
+      setPendingMessages([]);
+      if (!isDesktop) {
+        setMobileRailOpen(false);
+      }
+    },
+    [isDesktop],
+  );
+
+  const handleRequestDeleteSession = useCallback((session: SessionSummary) => {
+    setPendingDeleteSession(session);
+  }, []);
+
+  const handleConfirmDeleteSession = useCallback(async () => {
+    const session = pendingDeleteSession;
+    if (!session || deleteSubmitting) return;
+    const targetBotId =
+      normalizeSelectedBotId(session.bot_id, availableBotIds) ?? session.bot_id;
+    setDeleteSubmitting(true);
+    try {
+      await mutateControlPlaneDashboardJson(
+        `/agents/${targetBotId}/sessions/${encodeURIComponent(session.session_id)}`,
+        {
+          method: "DELETE",
+          fallbackError: t("sessions.delete.failed", undefined),
+        },
+      );
+      if (selectedSessionId === session.session_id) {
+        setSelectedSessionId(null);
+        resetThreadState();
+      }
+      setPendingDeleteSession(null);
+      void refreshSessionsFirstPage();
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : t("sessions.delete.failed", undefined);
+      showToast(message, "error");
+    } finally {
+      setDeleteSubmitting(false);
+    }
+  }, [
+    availableBotIds,
+    deleteSubmitting,
+    pendingDeleteSession,
+    refreshSessionsFirstPage,
+    resetThreadState,
+    selectedSessionId,
+    showToast,
+    t,
+  ]);
+
   const handleNewChat = useCallback((agentId?: string) => {
     const nextSessionId = createClientSessionId();
     setActiveBotId((current) => {
@@ -620,9 +836,10 @@ function SessionsPageContent() {
       return normalizeSelectedBotId(candidate, availableBotIds) ?? current;
     });
     setSelectedSessionId(null);
+    setSelectedRoomId(null);
+    setContextPanelOpen(false);
     setNewChatSessionId(nextSessionId);
     setIsNewChatMode(true);
-    setContextDrawerOpen(false);
     resetThreadState();
     if (!isDesktop) {
       setMobileRailOpen(false);
@@ -716,13 +933,13 @@ function SessionsPageContent() {
         setSelectedSessionId(resolvedSessionId);
         setIsNewChatMode(false);
         setDraft("");
-        void queryClient.invalidateQueries({ queryKey: sessionsQueryKey });
+        void refreshSessionsFirstPage();
       } catch (error) {
         const message =
           error instanceof Error && error.message.trim()
             ? error.message
             : t("sessions.sendUnavailable");
-        setComposerError(message);
+        showToast(message, "error");
         setPendingMessages((current) =>
           current.flatMap((item) => {
             if (item.requestId !== requestId) return [item];
@@ -734,7 +951,7 @@ function SessionsPageContent() {
         setComposerSubmitting(false);
       }
     },
-    [composerMentions, effectiveBotId, composerSubmitting, newChatSessionId, queryClient, selectedSessionId, sessionsQueryKey, t]
+    [composerMentions, effectiveBotId, composerSubmitting, newChatSessionId, refreshSessionsFirstPage, selectedSessionId, showToast, t]
   );
 
   const handleRetryPendingMessage = useCallback(
@@ -773,14 +990,13 @@ function SessionsPageContent() {
           handleNewChat();
           return;
         case "open-context":
-          if (selectedSummary) setContextDrawerOpen(true);
+          // Context drawer was retired; the artifact rail surfaces the same
+          // information inline.
           return;
         case "summarize": {
           const prompt =
             (action.payload?.prompt as string | undefined) ??
-            t("chat.composer.summarizePrompt", {
-              defaultValue: "Summarize this conversation so far.",
-            });
+            t("chat.composer.summarizePrompt", undefined);
           void sendMessage(prompt);
           return;
         }
@@ -790,21 +1006,24 @@ function SessionsPageContent() {
           return;
       }
     },
-    [handleNewChat, selectedSummary, sendMessage, t],
+    [handleNewChat, sendMessage, t],
   );
 
   const composerDisabled = !effectiveBotId;
   const showThinking = Boolean(
     pendingRequest ||
       (selectedSummary?.running_count && selectedSummary.running_count > 0) ||
-      (selectedSummary?.latest_status === "running" || selectedSummary?.latest_status === "retrying"),
+      (selectedSummary?.latest_status === "running" ||
+        selectedSummary?.latest_status === "retrying" ||
+        selectedSummary?.latest_status === "stalled" ||
+        selectedSummary?.latest_status === "degraded"),
   );
 
   const resolvedTitle = selectedSummary
     ? resolveSessionTitle(selectedSummary)
     : isNewChatMode
-      ? t("chat.thread.empty", { defaultValue: "Start a conversation" })
-      : t("chat.thread.empty", { defaultValue: "Start a conversation" });
+      ? t("chat.thread.empty", undefined)
+      : t("chat.thread.empty", undefined);
 
   const effectiveAgentLabel = useMemo(() => {
     if (!effectiveBotId) return null;
@@ -821,6 +1040,46 @@ function SessionsPageContent() {
     }
     return null;
   }, [activeDetail]);
+
+  const roomsQuery = useRooms();
+  const rooms = roomsQuery.rooms;
+  const railSearchPending =
+    searchState.isSearching ||
+    (sessionsQuery.isFetching &&
+      !sessionsQuery.isFetchingNextPage &&
+      search.trim() === debouncedSearch);
+  const railSessionsLoading = useMinDurationFlag(
+    stableSessionsQuery.initialLoading || railSearchPending,
+    180,
+  );
+  const railRoomsLoading = useMinDurationFlag(roomsQuery.loading, 180);
+  const railRefreshing =
+    stableSessionsQuery.refreshing || roomsQuery.refreshing || railSearchPending;
+  const selectedRoomEntry = useMemo(
+    () => rooms.find((entry) => entry.thread.id === selectedRoomId) ?? null,
+    [rooms, selectedRoomId],
+  );
+  const sessionArtifacts = useMemo(
+    () => collectArtifactsFromDetail(selectedRoomId ? null : activeDetail),
+    [activeDetail, selectedRoomId],
+  );
+  const contextPanelAvailable = Boolean(
+    selectedRoomEntry || (!selectedRoomId && sessionArtifacts.length > 0),
+  );
+  const chatDetailFetchingWithoutData = Boolean(
+    selectedSessionId &&
+      !selectedRoomId &&
+      !stableDetailQuery.hasData &&
+      detailQuery.isFetching,
+  );
+  const chatThreadLoading = useMinDurationFlag(
+    Boolean(
+      selectedSessionId &&
+        !selectedRoomId &&
+        (stableDetailQuery.initialLoading || chatDetailFetchingWithoutData),
+    ),
+    220,
+  );
 
   const tourVariant =
     stableSessionsQuery.showBlockingError || (sessionsUnavailable && sessions.length === 0)
@@ -839,31 +1098,55 @@ function SessionsPageContent() {
       <div className="hidden md:flex" {...tourAnchor("sessions.conversation-rail")}>
         <SessionRail
           sessions={sessions}
+          rooms={rooms}
           selectedSessionId={selectedSessionId}
+          selectedRoomId={selectedRoomId}
           onSelectSession={handleSelectSession}
+          onSelectRoom={handleSelectRoom}
           onNewChat={handleNewChat}
+          onNewRoom={() => setNewRoomOpen(true)}
+          onDeleteSession={handleRequestDeleteSession}
           search={search}
           onSearchChange={setSearch}
-          loading={stableSessionsQuery.initialLoading}
+          searching={railSearchPending}
+          sessionsLoading={railSessionsLoading}
+          roomsLoading={railRoomsLoading}
+          refreshing={railRefreshing}
+          hasMoreSessions={Boolean(sessionsQuery.hasNextPage)}
+          loadingMoreSessions={sessionsQuery.isFetchingNextPage}
+          onLoadMoreSessions={loadMoreSessions}
           error={stableSessionsQuery.showBlockingError ? sessionsQuery.error?.message ?? null : null}
+          roomsError={roomsQuery.error?.message ?? null}
           unavailable={sessionsUnavailable}
         />
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col" {...tourAnchor("sessions.thread")}>
+      <div className="flex min-h-0 flex-1 flex-col min-w-0" {...tourAnchor("sessions.thread")}>
+        {selectedRoomId ? (
+          <RoomChatPane
+            threadId={selectedRoomId}
+            onOpenRail={() => setMobileRailOpen(true)}
+            showRailToggle
+            onThreadDetailChange={setActiveRoomDetail}
+          />
+        ) : (
+          <>
         <ChatHeader
           title={resolvedTitle}
           agentId={effectiveBotId ?? null}
           sessionId={streamSessionId}
           onOpenRail={() => setMobileRailOpen(true)}
-          onOpenContext={Boolean(selectedSummary) ? () => setContextDrawerOpen(true) : undefined}
           showRailToggle
-          showContextToggle={Boolean(selectedSummary)}
+          showContextToggle={contextPanelAvailable}
+          contextPanelOpen={contextPanelOpen}
+          onToggleContextPanel={() => setContextPanelOpen((current) => !current)}
           scrolled={threadScrolled}
           sessionActive={Boolean(
             selectedSummary &&
               (selectedSummary.latest_status === "running" ||
                 selectedSummary.latest_status === "retrying" ||
+                selectedSummary.latest_status === "stalled" ||
+                selectedSummary.latest_status === "degraded" ||
                 selectedSummary.latest_status === "queued"),
           )}
           sessionPaused={selectedSummary?.latest_status === "paused"}
@@ -873,7 +1156,7 @@ function SessionsPageContent() {
           pendingMessages={visiblePendingMessages}
           orphanExecutions={activeDetail?.orphan_executions ?? []}
           showThinking={showThinking}
-          loading={Boolean(selectedSessionId && stableDetailQuery.initialLoading)}
+          loading={chatThreadLoading}
           error={stableDetailQuery.showBlockingError ? detailQuery.error?.message ?? null : null}
           agentLabel={effectiveAgentLabel}
           onRetryPending={handleRetryPendingMessage}
@@ -902,9 +1185,7 @@ function SessionsPageContent() {
                 busy={composerSubmitting}
                 helper={
                   composerDisabled
-                    ? t("sessions.composer.selectAgentToStart", {
-                        defaultValue: "Select a specific agent to start a chat.",
-                      })
+                    ? t("sessions.composer.selectAgentToStart", undefined)
                     : null
                 }
                 error={composerError}
@@ -912,20 +1193,28 @@ function SessionsPageContent() {
             </div>
           }
         />
+          </>
+        )}
       </div>
 
-      <SessionContextDrawer
-        open={contextDrawerOpen}
-        onOpenChange={setContextDrawerOpen}
-        detail={activeDetail}
-        summary={selectedSummary}
+      <SessionArtifactRail
+        detail={selectedRoomId ? null : activeDetail}
+        summary={selectedRoomId ? null : selectedSummary}
+        room={selectedRoomEntry}
+        open={selectedRoomId ? true : contextPanelOpen && contextPanelAvailable}
+        onOpenChange={selectedRoomId ? undefined : setContextPanelOpen}
+        onRoomArchived={() => {
+          setSelectedRoomId(null);
+          setContextPanelOpen(false);
+        }}
+        roomThreadMessages={selectedRoomId ? activeRoomDetail?.recentMessages ?? [] : []}
       />
 
       {mobileRailPresence.shouldRender ? (
         <>
           <button
             type="button"
-            aria-label={t("chat.rail.close", { defaultValue: "Close" })}
+            aria-label={t("chat.rail.close", undefined)}
             onClick={() => setMobileRailOpen(false)}
             className={cn(
               "app-overlay-backdrop !z-[48] cursor-default border-0 md:hidden",
@@ -941,17 +1230,29 @@ function SessionsPageContent() {
             )}
             role="dialog"
             aria-modal="true"
-            aria-label={t("chat.rail.title", { defaultValue: "Conversations" })}
+            aria-label={t("chat.rail.title", undefined)}
           >
             <SessionRail
               sessions={sessions}
+              rooms={rooms}
               selectedSessionId={selectedSessionId}
+              selectedRoomId={selectedRoomId}
               onSelectSession={handleSelectSession}
+              onSelectRoom={handleSelectRoom}
               onNewChat={handleNewChat}
+              onNewRoom={() => setNewRoomOpen(true)}
+              onDeleteSession={handleRequestDeleteSession}
               search={search}
               onSearchChange={setSearch}
-              loading={stableSessionsQuery.initialLoading}
+              searching={railSearchPending}
+              sessionsLoading={railSessionsLoading}
+              roomsLoading={railRoomsLoading}
+              refreshing={railRefreshing}
+              hasMoreSessions={Boolean(sessionsQuery.hasNextPage)}
+              loadingMoreSessions={sessionsQuery.isFetchingNextPage}
+              onLoadMoreSessions={loadMoreSessions}
               error={stableSessionsQuery.showBlockingError ? sessionsQuery.error?.message ?? null : null}
+              roomsError={roomsQuery.error?.message ?? null}
               unavailable={sessionsUnavailable}
               onClose={() => setMobileRailOpen(false)}
               className="border-r-0"
@@ -959,6 +1260,26 @@ function SessionsPageContent() {
           </div>
         </>
       ) : null}
+
+      <NewRoomDialog
+        open={newRoomOpen}
+        onClose={() => setNewRoomOpen(false)}
+        onCreated={handleRoomCreated}
+      />
+
+      <ConfirmationDialog
+        open={Boolean(pendingDeleteSession)}
+        title={t("sessions.delete.title", undefined)}
+        message={t("sessions.delete.message", undefined)}
+        confirmLabel={t("sessions.delete.confirm", undefined)}
+        confirmBusy={deleteSubmitting}
+        confirmBusyLabel={t("sessions.delete.deleting", undefined)}
+        onConfirm={() => void handleConfirmDeleteSession()}
+        onCancel={() => {
+          if (deleteSubmitting) return;
+          setPendingDeleteSession(null);
+        }}
+      />
     </div>
   );
 }

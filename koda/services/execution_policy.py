@@ -145,6 +145,26 @@ def _resolve_legacy_mcp_policy(tool_id: str) -> str | None:
         return None
 
 
+def _resolve_mcp_risk_class(tool_id: str) -> str:
+    try:
+        from koda.services.mcp_bridge import parse_mcp_tool_id
+        from koda.services.mcp_risk import normalize_mcp_risk_class
+
+        parsed_tool = parse_mcp_tool_id(tool_id)
+        if parsed_tool is None:
+            return "unknown"
+        server_key, tool_name = parsed_tool
+        from koda.control_plane.manager import get_control_plane_manager
+
+        payload = get_control_plane_manager().get_mcp_connection_tools(AGENT_ID or "default", server_key)
+        for tool in payload.get("tools") or []:
+            if str(tool.get("name") or "") == tool_name:
+                return normalize_mcp_risk_class(tool.get("risk_class") or tool.get("risk_level"))
+    except Exception:
+        return "unknown"
+    return "unknown"
+
+
 def normalize_execution_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     """Normalize the first-class execution-policy document."""
     raw = dict(_safe_json_object(policy))
@@ -417,13 +437,29 @@ def _legacy_mcp_decision(
             audit_payload={"source": "legacy_mcp_policy", "policy": normalized},
             legacy_compiled=True,
         )
-    if normalized == "always_allow":
+    from koda.services.mcp_risk import HIGH_RISK_MCP_CLASSES
+
+    risk_class = _resolve_mcp_risk_class(envelope.tool_id)
+    if normalized == "always_allow" and risk_class not in HIGH_RISK_MCP_CLASSES:
         return PolicyEvaluation(
             decision="allow",
             reason_code="mcp_always_allow",
             reason="Allowed by legacy MCP tool policy.",
             envelope=envelope,
             audit_payload={"source": "legacy_mcp_policy", "policy": normalized},
+            legacy_compiled=True,
+        )
+    if normalized == "always_allow":
+        preview_text, preview_fields = _build_preview_text(envelope, params)
+        return PolicyEvaluation(
+            decision="require_approval",
+            reason_code="mcp_high_risk_requires_approval",
+            reason="MCP risk taxonomy requires approval before this action can execute.",
+            envelope=envelope,
+            approval_scope=ApprovalScope(kind="scope", ttl_seconds=900, max_uses=10),
+            preview_text=preview_text,
+            preview_fields=preview_fields,
+            audit_payload={"source": "mcp_risk_taxonomy", "legacy_policy": normalized, "risk_class": risk_class},
             legacy_compiled=True,
         )
     preview_text, preview_fields = _build_preview_text(envelope, params)

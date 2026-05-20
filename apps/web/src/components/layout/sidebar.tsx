@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { usePathname, useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent } from "react";
 import { Plus } from "lucide-react";
 import {
   buildSidebarFooterSections,
@@ -12,23 +13,8 @@ import {
 } from "@/components/layout/sidebar-nav";
 import { KodaMark } from "@/components/layout/koda-mark";
 import { useAppI18n } from "@/hooks/use-app-i18n";
-import { usePrefetchRouteData } from "@/hooks/use-prefetch-route-data";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { cn } from "@/lib/utils";
-
-type IdleWindow = typeof window & {
-  requestIdleCallback?: (cb: () => void, opts?: { timeout?: number }) => number;
-};
-
-function scheduleIdle(fn: () => void) {
-  if (typeof window === "undefined") return;
-  const win = window as IdleWindow;
-  if (typeof win.requestIdleCallback === "function") {
-    win.requestIdleCallback(fn, { timeout: 2000 });
-  } else {
-    setTimeout(fn, 300);
-  }
-}
 
 interface SidebarProps {
   mobileOpen: boolean;
@@ -36,7 +22,7 @@ interface SidebarProps {
   collapsed?: boolean;
 }
 
-function isPlainLeftClick(event: React.MouseEvent<HTMLAnchorElement>) {
+function isPlainLeftClick(event: MouseEvent<HTMLAnchorElement>) {
   return (
     event.button === 0 &&
     !event.metaKey &&
@@ -49,15 +35,23 @@ function isPlainLeftClick(event: React.MouseEvent<HTMLAnchorElement>) {
 function SidebarNavLink({
   item,
   pathname,
+  visualPathname,
+  pendingHref,
   collapsed,
   onNavigate,
+  onPrefetch,
 }: {
   item: SidebarNavItem;
   pathname: string;
+  visualPathname: string;
+  pendingHref: string | null;
   collapsed: boolean;
   onNavigate: (href: string) => void;
+  onPrefetch: (href: string) => void;
 }) {
-  const isActive = isSidebarItemActive(pathname, item);
+  const isActualActive = isSidebarItemActive(pathname, item);
+  const isActive = isSidebarItemActive(visualPathname, item);
+  const isPending = pendingHref === item.href && !isActualActive;
 
   return (
     <Link
@@ -65,15 +59,20 @@ function SidebarNavLink({
       prefetch
       scroll={false}
       {...tourAnchor(`shell.sidebar.nav.${item.href === "/" ? "home" : item.href.slice(1).replace(/\//g, ".")}`)}
+      onFocus={() => onPrefetch(item.href)}
+      onPointerEnter={() => onPrefetch(item.href)}
+      onTouchStart={() => onPrefetch(item.href)}
       onClick={(event) => {
-        if (!isPlainLeftClick(event) || isActive) {
+        if (!isPlainLeftClick(event) || isActualActive) {
           return;
         }
+        onPrefetch(item.href);
         onNavigate(item.href);
       }}
       className={cn(
         "app-sidebar__link group",
         isActive && "is-active",
+        isPending && "is-pending",
         collapsed &&
           "lg:h-12 lg:min-h-0 lg:w-12 lg:self-center lg:justify-center lg:gap-0 lg:rounded-lg lg:px-0",
       )}
@@ -96,13 +95,19 @@ function SidebarNavLink({
 function SidebarNavList({
   items,
   pathname,
+  visualPathname,
+  pendingHref,
   collapsed,
   onNavigate,
+  onPrefetch,
 }: {
   items: SidebarNavItem[];
   pathname: string;
+  visualPathname: string;
+  pendingHref: string | null;
   collapsed: boolean;
   onNavigate: (href: string) => void;
+  onPrefetch: (href: string) => void;
 }) {
   return (
     <div
@@ -116,8 +121,11 @@ function SidebarNavList({
           key={item.href}
           item={item}
           pathname={pathname}
+          visualPathname={visualPathname}
+          pendingHref={pendingHref}
           collapsed={collapsed}
           onNavigate={onNavigate}
+          onPrefetch={onPrefetch}
         />
       ))}
     </div>
@@ -131,19 +139,47 @@ export function Sidebar({
 }: SidebarProps) {
   const { t } = useAppI18n();
   const pathname = usePathname();
-  const prefetchRouteData = usePrefetchRouteData();
+  const router = useRouter();
+  const [optimisticNavigation, setOptimisticNavigation] = useState<{
+    from: string;
+    href: string;
+  } | null>(null);
+  const prefetchedHrefRef = useRef(new Set<string>());
   const primaryItems = buildSidebarPrimarySections(t).flatMap((section) => section.items);
   const footerItems = buildSidebarFooterSections(t).flatMap((section) => section.items);
+  const allItems = useMemo(
+    () => [...primaryItems, ...footerItems],
+    [footerItems, primaryItems],
+  );
+  const viewportPrefetchKey = allItems
+    .filter((item) => item.prefetchStrategy === "viewport")
+    .map((item) => item.href)
+    .join("|");
+  const pendingHref = optimisticNavigation?.from === pathname ? optimisticNavigation.href : null;
+  const visualPathname = pendingHref ?? pathname;
 
-  useEffect(() => {
-    scheduleIdle(() => {
-      for (const item of [...primaryItems, ...footerItems]) {
-        prefetchRouteData(item.href);
+  const prefetchHref = useCallback(
+    (href: string) => {
+      if (prefetchedHrefRef.current.has(href)) {
+        return;
       }
-    });
-    // primaryItems/footerItems are derived from a stable translator; prefetch runs once per mount.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      prefetchedHrefRef.current.add(href);
+      try {
+        router.prefetch(href);
+      } catch {
+        prefetchedHrefRef.current.delete(href);
+      }
+    },
+    [router],
+  );
+
+  const navigateOptimistically = useCallback(
+    (href: string) => {
+      setOptimisticNavigation({ from: pathname, href });
+      onMobileOpenChange(false);
+    },
+    [onMobileOpenChange, pathname],
+  );
 
   // Close the mobile menu on route navigation (but only when pathname actually
   // changes — not on initial mount). The previous version re-fired on every
@@ -155,6 +191,40 @@ export function Sidebar({
     lastPathnameRef.current = pathname;
     onMobileOpenChange(false);
   }, [onMobileOpenChange, pathname]);
+
+  useEffect(() => {
+    if (!optimisticNavigation) return;
+
+    const timeout = window.setTimeout(() => {
+      setOptimisticNavigation(null);
+    }, 8000);
+
+    return () => window.clearTimeout(timeout);
+  }, [optimisticNavigation]);
+
+  useEffect(() => {
+    const hrefs = viewportPrefetchKey.split("|").filter(Boolean);
+    if (hrefs.length === 0) {
+      return undefined;
+    }
+
+    const idleWindow = window as Window & {
+      cancelIdleCallback?: (handle: number) => void;
+      requestIdleCallback?: (
+        callback: IdleRequestCallback,
+        options?: IdleRequestOptions,
+      ) => number;
+    };
+    const run = () => hrefs.forEach(prefetchHref);
+
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      const handle = idleWindow.requestIdleCallback(run, { timeout: 1600 });
+      return () => idleWindow.cancelIdleCallback?.(handle);
+    }
+
+    const timeout = window.setTimeout(run, 120);
+    return () => window.clearTimeout(timeout);
+  }, [prefetchHref, viewportPrefetchKey]);
 
   useEffect(() => {
     if (!mobileOpen) return;
@@ -206,7 +276,19 @@ export function Sidebar({
             <Link
               href="/"
               aria-label="Koda"
+              prefetch
+              scroll={false}
               {...tourAnchor("shell.sidebar.brand")}
+              onFocus={() => prefetchHref("/")}
+              onPointerEnter={() => prefetchHref("/")}
+              onTouchStart={() => prefetchHref("/")}
+              onClick={(event) => {
+                if (!isPlainLeftClick(event) || pathname === "/") {
+                  return;
+                }
+                prefetchHref("/");
+                navigateOptimistically("/");
+              }}
               className={cn(
                 "group flex items-center gap-2 rounded-[var(--radius-panel-sm)] px-1.5 py-1 transition-colors",
                 collapsed && "lg:justify-center lg:px-0"
@@ -226,9 +308,18 @@ export function Sidebar({
           <div className={cn("mt-4", collapsed && "lg:mt-3 lg:flex lg:justify-center")}>
             <Link
               href="/runtime"
+              prefetch
+              scroll={false}
               aria-label={t("sidebar.newSessionLabel")}
-              onClick={() => {
-                onMobileOpenChange(false);
+              onFocus={() => prefetchHref("/runtime")}
+              onPointerEnter={() => prefetchHref("/runtime")}
+              onTouchStart={() => prefetchHref("/runtime")}
+              onClick={(event) => {
+                if (!isPlainLeftClick(event) || pathname.startsWith("/runtime")) {
+                  return;
+                }
+                prefetchHref("/runtime");
+                navigateOptimistically("/runtime");
               }}
               className={cn(
                 "inline-flex min-h-[34px] items-center justify-center gap-2 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--panel-strong)]",
@@ -246,8 +337,11 @@ export function Sidebar({
             <SidebarNavList
               items={primaryItems}
               pathname={pathname}
+              visualPathname={visualPathname}
+              pendingHref={pendingHref}
               collapsed={collapsed}
-              onNavigate={() => onMobileOpenChange(false)}
+              onNavigate={navigateOptimistically}
+              onPrefetch={prefetchHref}
             />
           </nav>
 
@@ -256,8 +350,11 @@ export function Sidebar({
               <SidebarNavList
                 items={footerItems}
                 pathname={pathname}
+                visualPathname={visualPathname}
+                pendingHref={pendingHref}
                 collapsed={collapsed}
-                onNavigate={() => onMobileOpenChange(false)}
+                onNavigate={navigateOptimistically}
+                onPrefetch={prefetchHref}
               />
             </nav>
           </div>

@@ -10,7 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ArrowDown, MessageSquareText } from "lucide-react";
+import { ArrowDown, LoaderCircle, MessageSquareText } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { AssistantMessage } from "@/components/sessions/chat/assistant-message";
 import { DaySeparator } from "@/components/sessions/chat/day-separator";
@@ -53,6 +53,8 @@ type ThreadItem =
   | { kind: "message"; message: SessionMessage | PendingChatMessage; key: string }
   | { kind: "separator"; label: string; key: string }
   | { kind: "orphan"; execution: ExecutionSummary; key: string };
+
+const TOP_LOAD_THRESHOLD_PX = 320;
 
 function formatDayLabel(value: string | null | undefined) {
   if (!value) return null;
@@ -128,6 +130,21 @@ function ChatThreadImpl({
     return result;
   }, [messages, pendingMessages, orphanExecutions]);
 
+  const triggerLoadOlder = useCallback(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !hasOlder || loadingOlder || !onLoadOlder || loadOlderLockRef.current) {
+      return;
+    }
+    loadOlderLockRef.current = true;
+    prependAnchorRef.current = {
+      scrollHeight: viewport.scrollHeight,
+      scrollTop: viewport.scrollTop,
+    };
+    void Promise.resolve(onLoadOlder()).finally(() => {
+      loadOlderLockRef.current = false;
+    });
+  }, [hasOlder, loadingOlder, onLoadOlder]);
+
   const handleScroll = useCallback(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -144,19 +161,32 @@ function ChatThreadImpl({
       onScrollStateChange?.(nextScrolledPastTop);
     }
 
-    if (viewport.scrollTop <= 120 && hasOlder && !loadingOlder && onLoadOlder && !loadOlderLockRef.current) {
-      loadOlderLockRef.current = true;
-      prependAnchorRef.current = {
-        scrollHeight: viewport.scrollHeight,
-        scrollTop: viewport.scrollTop,
-      };
-      void onLoadOlder();
+    if (viewport.scrollTop <= TOP_LOAD_THRESHOLD_PX) {
+      triggerLoadOlder();
     }
-  }, [hasOlder, loadingOlder, onLoadOlder, onScrollStateChange]);
+  }, [onScrollStateChange, triggerLoadOlder]);
 
   useEffect(() => {
     if (!loadingOlder) loadOlderLockRef.current = false;
   }, [loadingOlder]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || !hasOlder || loadingOlder) return;
+    if (viewport.clientHeight <= 0) return;
+    if (viewport.scrollTop <= TOP_LOAD_THRESHOLD_PX) {
+      triggerLoadOlder();
+    }
+  }, [hasOlder, items.length, loadingOlder, triggerLoadOlder]);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport || items.length === 0) return;
+    if (viewport.clientHeight <= 0) return;
+    if (viewport.scrollHeight <= viewport.clientHeight + TOP_LOAD_THRESHOLD_PX) {
+      triggerLoadOlder();
+    }
+  }, [items.length, triggerLoadOlder]);
 
   const bindFooterElement = useCallback((footerElement: HTMLDivElement | null) => {
     footerResizeObserverRef.current?.disconnect();
@@ -208,6 +238,7 @@ function ChatThreadImpl({
 
   const hasConversation = items.length > 0;
   const showNewIndicator = showJumpToBottom && hasConversation;
+  const loadingLabel = t("chat.thread.loading", undefined);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--canvas)]">
@@ -217,18 +248,33 @@ function ChatThreadImpl({
         role="log"
         aria-live="polite"
         aria-relevant="additions text"
+        aria-busy={loading || loadingOlder ? true : undefined}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
       >
         {loading && !hasConversation ? (
-          <div className="mx-auto flex w-full max-w-[720px] flex-col gap-8 px-6 pt-10 pb-8">
+          <div
+            role="status"
+            aria-label={loadingLabel}
+            className="mx-auto flex w-full max-w-[960px] flex-col gap-5 px-6 pt-8 pb-8 lg:px-10"
+          >
+            <div className="flex justify-center pb-1">
+              <LoaderCircle className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" strokeWidth={2} aria-hidden />
+            </div>
             {Array.from({ length: 3 }).map((_, index) => (
               <div
                 key={index}
                 className={cn(
-                  "h-16 w-full animate-pulse rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)]",
+                  "grid w-full animate-pulse grid-cols-[2.5rem_minmax(0,1fr)] gap-3 rounded-[var(--radius-panel-sm)] px-2 py-1.5",
                   index % 2 === 1 && "ml-auto max-w-[70%]",
                 )}
-              />
+              >
+                <span className="h-9 w-9 rounded-[0.65rem] bg-[var(--panel-soft)]" aria-hidden />
+                <span className="flex min-w-0 flex-col gap-2 pt-0.5" aria-hidden>
+                  <span className="h-3 w-32 rounded-full bg-[var(--panel-soft)]" />
+                  <span className="h-3 w-full max-w-[34rem] rounded-full bg-[var(--panel-soft)]" />
+                  <span className="h-3 w-2/3 rounded-full bg-[var(--panel-soft)]" />
+                </span>
+              </div>
             ))}
           </div>
         ) : error && !hasConversation ? (
@@ -237,38 +283,46 @@ function ChatThreadImpl({
               <MessageSquareText className="icon-md" strokeWidth={1.75} />
             </span>
             <p className="m-0 text-[var(--font-size-md)] font-medium text-[var(--text-primary)]">
-              {t("chat.thread.errorGeneric", { defaultValue: "Something went wrong." })}
+              {t("chat.thread.errorGeneric", undefined)}
             </p>
             <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">{error}</p>
           </div>
         ) : !hasConversation ? (
-          <div className="mx-auto flex h-full w-full max-w-[680px] flex-col items-center justify-center gap-4 px-6 text-center">
+          <div className="mx-auto flex h-full w-full max-w-[620px] flex-col items-center justify-center gap-3 px-6 text-center">
             <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
               {emptyEyebrow ??
                 agentLabel ??
-                t("sessions.thread.newChatEyebrow", { defaultValue: "New conversation" })}
+                t("sessions.thread.newChatEyebrow", undefined)}
             </p>
-            <h1 className="display-serif m-0 text-[var(--font-size-display)] font-medium leading-[1.05] text-[var(--text-primary)]">
+            <h1 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
               {emptyTitle ??
-                t("sessions.thread.heroTitle", { defaultValue: "What could we build today?" })}
+                t("sessions.thread.heroTitle", undefined)}
             </h1>
             <p className="m-0 max-w-[480px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
               {emptyDescription ??
-                t("sessions.thread.heroHelper", {
-                  defaultValue:
-                    "Describe a task. Your agent responds with reasoning, tool calls, and artifacts.",
-                })}
+                t("sessions.thread.heroHelper", undefined)}
             </p>
           </div>
         ) : (
-          <div className="mx-auto flex w-full max-w-[720px] flex-col gap-8 px-6 pt-10 pb-8">
+          <div className="mx-auto flex w-full max-w-[960px] flex-col gap-6 px-6 pt-8 pb-8 lg:px-10">
+            {loading ? (
+              <div className="sticky top-3 z-10 flex justify-center">
+                <span
+                  role="status"
+                  aria-label={loadingLabel}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--divider-hair)] bg-[var(--panel)] text-[var(--text-tertiary)] shadow-[var(--shadow-xs)] backdrop-blur"
+                >
+                  <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden />
+                </span>
+              </div>
+            ) : null}
             {loadingOlder ? (
               <div className="flex justify-center">
-                <span className="chat-thinking-dots" aria-hidden>
-                  <span />
-                  <span />
-                  <span />
-                </span>
+                <LoaderCircle
+                  className="h-4 w-4 animate-spin text-[var(--text-tertiary)]"
+                  aria-label={t("sessions.thread.loadingOlder", undefined)}
+                  strokeWidth={1.75}
+                />
               </div>
             ) : null}
             {items.map((item) => {
@@ -358,7 +412,7 @@ function ChatThreadImpl({
           >
             <ArrowDown className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
             <span className="sr-only">
-              {t("chat.thread.newMessages", { defaultValue: "New messages" })}
+              {t("chat.thread.newMessages", undefined)}
             </span>
           </button>
         </div>

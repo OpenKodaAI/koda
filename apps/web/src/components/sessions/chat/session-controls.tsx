@@ -48,7 +48,7 @@ export function SessionControls({
   active = false,
   paused = false,
 }: SessionControlsProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const queryClient = useQueryClient();
   const [pending, setPending] = useState<Action | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,14 +80,14 @@ export function SessionControls({
           type="button"
           onClick={() => handle("pause")}
           disabled={disabled || pending !== null}
-          title={tl("Pause execution")}
+          title={t("generated.sessions.pause_execution_f0f72c38")}
           className={cn(
             "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-[0.75rem] text-[var(--text-secondary)]",
             "transition-colors hover:border-[color:var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-50",
           )}
         >
           <Pause strokeWidth={1.75} className="icon-xs" />
-          {tl("Pause")}
+          {t("generated.sessions.pause_0e147d27")}
         </button>
       ) : null}
       {paused ? (
@@ -95,14 +95,14 @@ export function SessionControls({
           type="button"
           onClick={() => handle("resume")}
           disabled={disabled || pending !== null}
-          title={tl("Resume execution")}
+          title={t("generated.sessions.resume_execution_0fbffd9d")}
           className={cn(
             "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-[0.75rem] text-[var(--text-secondary)]",
             "transition-colors hover:border-[color:var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-50",
           )}
         >
           <Play strokeWidth={1.75} className="icon-xs" />
-          {tl("Resume")}
+          {t("generated.sessions.resume_62522b84")}
         </button>
       ) : null}
       {active ? (
@@ -110,14 +110,14 @@ export function SessionControls({
           type="button"
           onClick={() => handle("cancel")}
           disabled={disabled || pending !== null}
-          title={tl("Stop execution")}
+          title={t("generated.sessions.stop_execution_e73fad37")}
           className={cn(
             "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--tone-danger-border)] bg-transparent px-2 text-[0.75rem] text-[var(--tone-danger-text)]",
             "transition-colors hover:bg-[var(--tone-danger-bg)] disabled:opacity-50",
           )}
         >
           <Square strokeWidth={1.75} className="icon-xs" />
-          {tl("Stop")}
+          {t("generated.sessions.stop_6a8e45e4")}
         </button>
       ) : null}
       {error ? (

@@ -3,17 +3,34 @@
 import type { ImgHTMLAttributes } from "react";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { ProviderAccordionItem, ProviderLogo, isSelectableProvider } from "@/components/control-plane/system/sections/section-models";
+import {
+  ProviderAccordionItem,
+  ProviderLogo,
+  isSelectableProvider,
+  providerDescription,
+  providerLabel,
+} from "@/components/control-plane/system/sections/section-models";
+import { translateForLanguage } from "@/lib/i18n";
 
 vi.mock("next/image", () => ({
   default: (props: ImgHTMLAttributes<HTMLImageElement>) => <img {...props} alt={props.alt || ""} />,
 }));
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    tl: (value: string) => value,
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 const useSystemSettingsMock = vi.fn();
 const clipboardWriteTextMock = vi.fn();
@@ -33,6 +50,10 @@ function makeBaseSystemSettingsMock() {
           kokoro_default_language: "pt-br",
           kokoro_default_voice: "pf_dora",
           kokoro_default_voice_label: "",
+          supertonic_default_model: "supertonic-3",
+          supertonic_default_language: "pt",
+          supertonic_default_voice: "F1",
+          supertonic_default_voice_label: "F1",
           metal_enabled: true,
         },
       },
@@ -61,17 +82,40 @@ function makeBaseSystemSettingsMock() {
     },
     kokoroVoicesLoading: false,
     kokoroModelStatus: null,
+    supertonicVoiceCatalog: {
+      items: [],
+      available_languages: [],
+      selected_model: "supertonic-3",
+      selected_language: "pt",
+      default_model: "supertonic-3",
+      default_language: "pt",
+      default_voice: "F1",
+      default_voice_label: "F1",
+      downloaded_voice_ids: [],
+      provider_connected: true,
+    },
+    supertonicVoicesLoading: false,
+    supertonicModelCatalog: null,
+    supertonicModelsLoading: false,
     whisperCatalog: null,
     isDownloadingKokoroAsset: vi.fn(() => false),
+    isDownloadingSupertonicAsset: vi.fn(() => false),
     isDownloadingWhisperVariant: vi.fn(() => false),
     loadKokoroVoices: vi.fn(),
     loadKokoroModelStatus: vi.fn(),
+    loadSupertonicModels: vi.fn(),
+    loadSupertonicVoices: vi.fn(),
     loadWhisperCatalog: vi.fn(),
     downloadKokoroVoice: vi.fn(),
     downloadKokoroModel: vi.fn(),
+    downloadSupertonicModel: vi.fn(),
+    downloadSupertonicVoice: vi.fn(),
+    importSupertonicVoice: vi.fn(),
     downloadWhisperModel: vi.fn(),
     deleteKokoroModelAsset: vi.fn(),
     deleteKokoroVoiceAsset: vi.fn(),
+    deleteSupertonicModelAsset: vi.fn(),
+    deleteSupertonicVoiceAsset: vi.fn(),
     deleteWhisperVariantAsset: vi.fn(),
     ollamaModelCatalog: { items: [], cached: false, provider_connected: false, base_url: "", auth_mode: "local" },
     ollamaModelsLoading: false,
@@ -118,6 +162,25 @@ describe("isSelectableProvider", () => {
 
     expect(isSelectableProvider(provider, connection, "image")).toBe(true);
     expect(isSelectableProvider(provider, connection, "general")).toBe(false);
+  });
+});
+
+describe("provider copy", () => {
+  it("labels OpenRouter and describes its routed catalog", () => {
+    expect(providerLabel("openrouter")).toBe("OpenRouter");
+    expect(providerDescription("openrouter", "general", (key, options) => translateForLanguage("pt-BR", key, options))).toContain("catálogo dinâmico");
+  });
+});
+
+describe("ProviderLogo", () => {
+  it("renders OpenRouter with the official SVG mask so it adapts to the active theme", () => {
+    render(<ProviderLogo providerId="openrouter" title="OpenRouter" />);
+
+    const logo = screen.getByTestId("provider-logo-openrouter");
+
+    expect(logo).toHaveAttribute("data-provider-logo-glyph", "openrouter");
+    expect(logo).toHaveStyle({ backgroundColor: "var(--text-primary)" });
+    expect(logo.getAttribute("style") ?? "").toContain("/providers/openrouter.svg");
   });
 });
 
@@ -477,6 +540,99 @@ describe("ProviderAccordionItem", () => {
     expect(loadWhisperCatalog).not.toHaveBeenCalled();
   });
 
+  it("keeps Kokoro selectors populated while the voice catalog is loading", () => {
+    useSystemSettingsMock.mockReturnValue({
+      ...makeBaseSystemSettingsMock(),
+      kokoroVoicesLoading: true,
+      kokoroVoiceCatalog: {
+        items: [],
+        available_languages: [],
+        selected_language: "pt-br",
+        default_language: "pt-br",
+        default_voice: "pf_dora",
+        default_voice_label: "pf_dora",
+        downloaded_voice_ids: [],
+        provider_connected: true,
+      },
+    });
+
+    const { container } = render(
+      <ProviderAccordionItem
+        provider={{
+          id: "kokoro",
+          title: "Kokoro",
+          vendor: "Open Source",
+          category: "voice",
+          commandPresent: true,
+          supportsApiKey: false,
+          supportsSubscriptionLogin: false,
+          supportsLocalConnection: false,
+          supportedAuthModes: ["none"],
+          loginFlowKind: "",
+          requiresProjectId: false,
+          connectionManaged: false,
+          showInSettings: true,
+        }}
+        isOpen
+        onToggle={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("pt-br")).toBeInTheDocument();
+    expect(screen.getByText("pf_dora")).toBeInTheDocument();
+    expect(container.querySelectorAll(".async-spinner").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByRole("combobox").some((item) => item.getAttribute("aria-busy") === "true")).toBe(true);
+  });
+
+  it("keeps Supertonic selectors populated while catalogs are loading", () => {
+    useSystemSettingsMock.mockReturnValue({
+      ...makeBaseSystemSettingsMock(),
+      supertonicVoicesLoading: true,
+      supertonicModelsLoading: true,
+      supertonicModelCatalog: null,
+      supertonicVoiceCatalog: {
+        items: [],
+        available_languages: [],
+        selected_model: "supertonic-3",
+        selected_language: "pt",
+        default_model: "supertonic-3",
+        default_language: "pt",
+        default_voice: "F1",
+        default_voice_label: "F1",
+        downloaded_voice_ids: [],
+        provider_connected: true,
+      },
+    });
+
+    const { container } = render(
+      <ProviderAccordionItem
+        provider={{
+          id: "supertonic",
+          title: "Supertonic",
+          vendor: "Supertone",
+          category: "voice",
+          commandPresent: true,
+          supportsApiKey: false,
+          supportsSubscriptionLogin: false,
+          supportsLocalConnection: false,
+          supportedAuthModes: ["none"],
+          loginFlowKind: "",
+          requiresProjectId: false,
+          connectionManaged: false,
+          showInSettings: true,
+        }}
+        isOpen
+        onToggle={() => {}}
+      />,
+    );
+
+    expect(screen.getByText("supertonic-3")).toBeInTheDocument();
+    expect(screen.getByText("pt")).toBeInTheDocument();
+    expect(screen.getByText("F1")).toBeInTheDocument();
+    expect(container.querySelectorAll(".async-spinner").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByRole("combobox").some((item) => item.getAttribute("aria-busy") === "true")).toBe(true);
+  });
+
   it("highlights the device code and lets the user copy it during official login", async () => {
     useSystemSettingsMock.mockReturnValue({
       ...makeBaseSystemSettingsMock(),
@@ -647,7 +803,7 @@ describe("ProviderAccordionItem", () => {
       />,
     );
 
-    expect(screen.getByText("Authentication Code")).toBeInTheDocument();
+    expect(screen.getByText("Código de autenticação")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Cole o código de autenticação")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Abrir página de autorização" })).toHaveAttribute(
       "href",

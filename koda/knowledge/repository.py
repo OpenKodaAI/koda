@@ -13,7 +13,7 @@ from koda.config import AGENT_ID
 from koda.knowledge.config import KNOWLEDGE_V2_STORAGE_MODE
 from koda.knowledge.types import ArtifactEvidenceNode, GraphEntity, GraphRelation, RetrievalTrace
 from koda.knowledge.v2.postgres_backend import KnowledgeV2PostgresBackend
-from koda.state.primary import primary_execute, primary_fetch_all, primary_fetch_val
+from koda.state.primary import primary_execute, primary_fetch_all, primary_fetch_one, primary_fetch_val
 
 
 def _scope(agent_id: str | None) -> str:
@@ -34,6 +34,10 @@ def _json_load(value: Any, default: Any) -> Any:
         return json.loads(str(value))
     except (TypeError, ValueError, json.JSONDecodeError):
         return default
+
+
+def _json_dump(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=True, sort_keys=True, default=str)
 
 
 def _retrieval_trace_from_row(row: Any, hits: Sequence[Any]) -> dict[str, Any]:
@@ -226,7 +230,7 @@ def _evaluation_run_from_row(row: Any) -> dict[str, Any]:
             "verification_before_finalize_rate": float(row.get("verification_before_finalize_rate") or 0.0),
             "human_correction_rate": float(row.get("human_correction_rate") or 0.0),
             "task_success_proxy": float(row.get("task_success_proxy") or 0.0),
-            "metrics": _json_load(row.get("metrics_json"), {}),
+            "metrics": _json_load(row.get("metrics_json") or row.get("metadata_json"), {}),
             "created_at": row.get("created_at"),
         }
     return {
@@ -248,6 +252,65 @@ def _evaluation_run_from_row(row: Any) -> dict[str, Any]:
     }
 
 
+def _normalize_improvement_source_kind(source_kind: Any) -> str:
+    raw = str(source_kind or "").strip()
+    if raw == "eval_failure" or raw == "eval_run":
+        return "eval"
+    if raw in {"memory_quality", "knowledge_candidate"}:
+        return "manual"
+    return raw
+
+
+def _improvement_proposal_from_row(row: Any) -> dict[str, Any]:
+    return {
+        "proposal_id": row.get("proposal_id") or "",
+        "schema_version": row.get("schema_version") or "improvement_proposal.v1",
+        "agent_id": row.get("agent_id") or "",
+        "source_kind": _normalize_improvement_source_kind(row.get("source_kind")),
+        "source_ref": row.get("source_ref") or "",
+        "proposal_type": row.get("proposal_type") or "",
+        "summary": row.get("summary") or "",
+        "evidence_refs": _json_load(row.get("evidence_refs_json"), []),
+        "diff_preview": _json_load(row.get("diff_preview_json"), {}),
+        "risk_class": row.get("risk_class") or "medium",
+        "validation_plan": _json_load(row.get("validation_plan_json"), {}),
+        "validation_result": _json_load(row.get("validation_result_json"), {}),
+        "rollback_plan": _json_load(row.get("rollback_plan_json"), {}),
+        "status": row.get("status") or "pending_review",
+        "reviewer": row.get("reviewer") or "",
+        "idempotency_hash": row.get("idempotency_hash") or "",
+        "run_graph_node_ids": _json_load(row.get("run_graph_node_ids_json"), []),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "reviewed_at": row.get("reviewed_at") or "",
+        "validated_at": row.get("validated_at") or "",
+        "applied_at": row.get("applied_at") or "",
+        "rolled_back_at": row.get("rolled_back_at") or "",
+        "status_history": _json_load(row.get("status_history_json"), []),
+    }
+
+
+def _improvement_proposal_effect_from_row(row: Any) -> dict[str, Any]:
+    return {
+        "effect_id": row.get("effect_id") or "",
+        "proposal_id": row.get("proposal_id") or "",
+        "agent_id": row.get("agent_id") or "",
+        "effect_kind": row.get("effect_kind") or "",
+        "target_ref": row.get("target_ref") or "",
+        "before_ref": _json_load(row.get("before_ref_json"), {}),
+        "after_ref": _json_load(row.get("after_ref_json"), {}),
+        "status": row.get("status") or "pending",
+        "apply_idempotency_key": row.get("apply_idempotency_key") or "",
+        "rollback_idempotency_key": row.get("rollback_idempotency_key") or "",
+        "error": _json_load(row.get("error_json"), {}),
+        "metadata": _json_load(row.get("metadata_json"), {}),
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "applied_at": row.get("applied_at") or "",
+        "rolled_back_at": row.get("rolled_back_at") or "",
+    }
+
+
 class KnowledgeRepository:
     """Repository wrapper that centralizes knowledge persistence details."""
 
@@ -255,6 +318,10 @@ class KnowledgeRepository:
         self._agent_id = agent_id
         self._scope = _scope(agent_id)
         self._postgres = KnowledgeV2PostgresBackend(agent_id=agent_id)
+
+    @property
+    def agent_id(self) -> str:
+        return self._scope.upper()
 
     def _primary_mode(self) -> bool:
         return KNOWLEDGE_V2_STORAGE_MODE == "primary"
@@ -575,7 +642,8 @@ class KnowledgeRepository:
     def list_evaluation_cases(self, *, limit: int = 100) -> list[dict[str, Any]]:
         rows = self._run_coro_sync(
             primary_fetch_all(
-                """SELECT id, case_key, agent_id, source_task_id, query_text, task_kind, project_key, environment,
+                """SELECT id, case_key, agent_id, source_task_id, query AS query_text, task_kind,
+                          project_key, environment,
                           team, modality, expected_sources_json, expected_layers_json, reference_answer, status,
                           gold_source_kind, validated_by, validated_at, metadata_json, created_at, updated_at
                    FROM evaluation_cases
@@ -599,14 +667,14 @@ class KnowledgeRepository:
             payload.get("environment", ""),
             payload.get("team", ""),
             payload.get("modality", "text"),
-            list(payload.get("expected_sources") or []),
-            list(payload.get("expected_layers") or []),
+            _json_dump(list(payload.get("expected_sources") or [])),
+            _json_dump(list(payload.get("expected_layers") or [])),
             payload.get("reference_answer", ""),
             payload.get("status", "draft"),
             payload.get("gold_source_kind", "manual_gold"),
             payload.get("validated_by", ""),
             payload.get("validated_at", ""),
-            dict(payload.get("metadata") or {}),
+            _json_dump(dict(payload.get("metadata") or {})),
             now,
             now,
         )
@@ -614,16 +682,15 @@ class KnowledgeRepository:
             primary_fetch_val(
                 """INSERT INTO evaluation_cases
                    (
-                    case_key, agent_id, source_task_id, query_text, task_kind,
+                    case_key, agent_id, source_task_id, query, task_kind,
                     project_key, environment, team, modality,
                     expected_sources_json, expected_layers_json, reference_answer, status, gold_source_kind,
                     validated_by, validated_at, metadata_json, created_at, updated_at)
-                   )
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(case_key) DO UPDATE SET
+                   ON CONFLICT(agent_id, case_key) DO UPDATE SET
                        agent_id = EXCLUDED.agent_id,
                        source_task_id = EXCLUDED.source_task_id,
-                       query_text = EXCLUDED.query_text,
+                       query = EXCLUDED.query,
                        task_kind = EXCLUDED.task_kind,
                        project_key = EXCLUDED.project_key,
                        environment = EXCLUDED.environment,
@@ -652,10 +719,10 @@ class KnowledgeRepository:
         values: list[Any] = [_now_iso()]
         if "expected_sources" in payload and payload["expected_sources"] is not None:
             fields.append("expected_sources_json = ?")
-            values.append(list(payload["expected_sources"]))
+            values.append(_json_dump(list(payload["expected_sources"])))
         if "expected_layers" in payload and payload["expected_layers"] is not None:
             fields.append("expected_layers_json = ?")
-            values.append(list(payload["expected_layers"]))
+            values.append(_json_dump(list(payload["expected_layers"])))
         if "reference_answer" in payload and payload["reference_answer"] is not None:
             fields.append("reference_answer = ?")
             values.append(payload["reference_answer"])
@@ -673,16 +740,31 @@ class KnowledgeRepository:
             values.append(payload["validated_at"])
         if "metadata" in payload and payload["metadata"] is not None:
             fields.append("metadata_json = ?")
-            values.append(dict(payload["metadata"]))
-        values.append(case_key)
+            values.append(_json_dump(dict(payload["metadata"])))
+        values.extend([self._scope, case_key])
         updated = self._run_coro_sync(
             primary_execute(
-                f"UPDATE evaluation_cases SET {', '.join(fields)} WHERE case_key = ?",
+                f"UPDATE evaluation_cases SET {', '.join(fields)} WHERE agent_id = ? AND case_key = ?",
                 tuple(values),
                 agent_id=self._scope,
             )
         )
         return bool(updated)
+
+    def get_evaluation_case(self, case_key: str) -> dict[str, Any] | None:
+        row = self._run_coro_sync(
+            primary_fetch_one(
+                """SELECT id, case_key, agent_id, source_task_id, query AS query_text, task_kind, project_key,
+                          environment, team, modality, expected_sources_json, expected_layers_json,
+                          reference_answer, status, gold_source_kind, validated_by, validated_at,
+                          metadata_json, created_at, updated_at
+                   FROM evaluation_cases
+                   WHERE agent_id = ? AND case_key = ?""",
+                (self._scope, case_key),
+                agent_id=self._scope,
+            )
+        )
+        return _evaluation_case_from_row(row) if row is not None else None
 
     def list_evaluation_runs(
         self,
@@ -705,7 +787,7 @@ class KnowledgeRepository:
                 """SELECT id, case_key, agent_id, strategy, retrieval_trace_id, recall_at_k, ndcg_at_k,
                           citation_accuracy, groundedness_precision, conflict_detection_rate,
                           verification_before_finalize_rate, human_correction_rate, task_success_proxy,
-                          metrics_json, created_at
+                          metadata_json AS metrics_json, created_at
                    FROM evaluation_runs WHERE """
                 + " AND ".join(primary_where)
                 + " ORDER BY id DESC LIMIT ?",
@@ -721,7 +803,7 @@ class KnowledgeRepository:
                 """INSERT INTO evaluation_runs
                    (case_key, agent_id, strategy, retrieval_trace_id, recall_at_k, ndcg_at_k, citation_accuracy,
                     groundedness_precision, conflict_detection_rate, verification_before_finalize_rate,
-                    human_correction_rate, task_success_proxy, metrics_json, created_at)
+                    human_correction_rate, task_success_proxy, metadata_json, created_at)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    RETURNING id""",
                 (
@@ -737,7 +819,7 @@ class KnowledgeRepository:
                     payload.get("verification_before_finalize_rate", 0.0),
                     payload.get("human_correction_rate", 0.0),
                     payload.get("task_success_proxy", 0.0),
-                    dict(payload.get("metrics_payload") or {}),
+                    _json_dump(dict(payload.get("metrics_payload") or payload.get("metrics") or {})),
                     _now_iso(),
                 ),
                 agent_id=self._scope,
@@ -746,6 +828,400 @@ class KnowledgeRepository:
         if row_id is None:
             raise RuntimeError("failed_to_persist_primary_evaluation_run")
         return int(row_id)
+
+    def upsert_eval_run_batch(self, payload: dict[str, Any]) -> str:
+        run_id = str(payload["run_id"])
+        self._run_coro_sync(
+            primary_execute(
+                """INSERT INTO eval_run_batches
+                   (run_id, agent_id, suite_id, strategy, status, score, summary_json, case_results_json,
+                    requested_by, created_at, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(agent_id, run_id) DO UPDATE SET
+                       suite_id = EXCLUDED.suite_id,
+                       strategy = EXCLUDED.strategy,
+                       status = EXCLUDED.status,
+                       score = EXCLUDED.score,
+                       summary_json = EXCLUDED.summary_json,
+                       case_results_json = EXCLUDED.case_results_json,
+                       requested_by = EXCLUDED.requested_by,
+                       updated_at = EXCLUDED.updated_at""",
+                (
+                    run_id,
+                    self._scope,
+                    payload.get("suite_id", "default"),
+                    payload.get("strategy", "offline_replay"),
+                    payload.get("status", "failed"),
+                    float(payload.get("score") or 0.0),
+                    _json_dump(dict(payload.get("summary") or {})),
+                    _json_dump(list(payload.get("case_results") or [])),
+                    payload.get("requested_by", ""),
+                    payload.get("created_at") or _now_iso(),
+                    _now_iso(),
+                ),
+                agent_id=self._scope,
+            )
+        )
+        return run_id
+
+    def _eval_run_batch_from_row(self, row: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "schema_version": "eval_run.v1",
+            "run_id": row.get("run_id"),
+            "agent_id": row.get("agent_id"),
+            "suite_id": row.get("suite_id") or "default",
+            "strategy": row.get("strategy") or "offline_replay",
+            "status": row.get("status") or "failed",
+            "score": float(row.get("score") or 0.0),
+            "summary": _json_load(row.get("summary_json"), {}),
+            "case_results": _json_load(row.get("case_results_json"), []),
+            "requested_by": row.get("requested_by") or "",
+            "created_at": row.get("created_at"),
+            "updated_at": row.get("updated_at"),
+        }
+
+    def get_eval_run_batch(self, run_id: str) -> dict[str, Any] | None:
+        row = self._run_coro_sync(
+            primary_fetch_one(
+                """SELECT run_id, agent_id, suite_id, strategy, status, score, summary_json,
+                          case_results_json, requested_by, created_at, updated_at
+                   FROM eval_run_batches
+                   WHERE agent_id = ? AND run_id = ?""",
+                (self._scope, run_id),
+                agent_id=self._scope,
+            )
+        )
+        return self._eval_run_batch_from_row(row) if row is not None else None
+
+    def list_eval_run_batches(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._run_coro_sync(
+            primary_fetch_all(
+                """SELECT run_id, agent_id, suite_id, strategy, status, score, summary_json,
+                          case_results_json, requested_by, created_at, updated_at
+                   FROM eval_run_batches
+                   WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?""",
+                (self._scope, max(1, limit)),
+                agent_id=self._scope,
+            )
+        )
+        return [self._eval_run_batch_from_row(row) for row in rows]
+
+    def list_improvement_proposals(
+        self,
+        *,
+        status: str | None = None,
+        proposal_type: str | None = None,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        where = ["agent_id = ?"]
+        params: list[Any] = [self.agent_id]
+        if status:
+            where.append("status = ?")
+            params.append(status)
+        if proposal_type:
+            where.append("proposal_type = ?")
+            params.append(proposal_type)
+        params.append(max(1, limit))
+        rows = self._run_coro_sync(
+            primary_fetch_all(
+                """SELECT proposal_id, schema_version, agent_id, source_kind, source_ref, proposal_type,
+                          summary, evidence_refs_json, diff_preview_json, risk_class, validation_plan_json,
+                          validation_result_json, rollback_plan_json, status, reviewer, idempotency_hash,
+                          run_graph_node_ids_json, created_at, updated_at, reviewed_at, validated_at, applied_at,
+                          rolled_back_at, status_history_json
+                   FROM improvement_proposals
+                   WHERE """
+                + " AND ".join(where)
+                + " ORDER BY updated_at DESC LIMIT ?",
+                tuple(params),
+                agent_id=self.agent_id,
+            )
+        )
+        return [_improvement_proposal_from_row(row) for row in rows]
+
+    def get_improvement_proposal(self, proposal_id: str) -> dict[str, Any] | None:
+        row = self._run_coro_sync(
+            primary_fetch_one(
+                """SELECT proposal_id, schema_version, agent_id, source_kind, source_ref, proposal_type,
+                          summary, evidence_refs_json, diff_preview_json, risk_class, validation_plan_json,
+                          validation_result_json, rollback_plan_json, status, reviewer, idempotency_hash,
+                          run_graph_node_ids_json, created_at, updated_at, reviewed_at, validated_at, applied_at,
+                          rolled_back_at, status_history_json
+                   FROM improvement_proposals
+                   WHERE agent_id = ? AND proposal_id = ?""",
+                (self.agent_id, proposal_id),
+                agent_id=self.agent_id,
+            )
+        )
+        return _improvement_proposal_from_row(row) if row is not None else None
+
+    def get_improvement_proposal_by_idempotency_hash(self, idempotency_hash: str) -> dict[str, Any] | None:
+        row = self._run_coro_sync(
+            primary_fetch_one(
+                """SELECT proposal_id, schema_version, agent_id, source_kind, source_ref, proposal_type,
+                          summary, evidence_refs_json, diff_preview_json, risk_class, validation_plan_json,
+                          validation_result_json, rollback_plan_json, status, reviewer, idempotency_hash,
+                          run_graph_node_ids_json, created_at, updated_at, reviewed_at, validated_at, applied_at,
+                          rolled_back_at, status_history_json
+                   FROM improvement_proposals
+                   WHERE agent_id = ? AND idempotency_hash = ?""",
+                (self.agent_id, idempotency_hash),
+                agent_id=self.agent_id,
+            )
+        )
+        return _improvement_proposal_from_row(row) if row is not None else None
+
+    def create_improvement_proposal(self, payload: dict[str, Any]) -> dict[str, Any]:
+        row = self._run_coro_sync(
+            primary_fetch_one(
+                """INSERT INTO improvement_proposals
+                   (
+                    proposal_id, schema_version, agent_id, source_kind, source_ref, proposal_type, summary,
+                    evidence_refs_json, diff_preview_json, risk_class, validation_plan_json,
+                    validation_result_json, rollback_plan_json, status, reviewer, idempotency_hash,
+                    run_graph_node_ids_json, created_at, updated_at, reviewed_at, validated_at, applied_at,
+                    rolled_back_at, status_history_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   RETURNING proposal_id, schema_version, agent_id, source_kind, source_ref, proposal_type,
+                             summary, evidence_refs_json, diff_preview_json, risk_class, validation_plan_json,
+                             validation_result_json, rollback_plan_json, status, reviewer, idempotency_hash,
+                             run_graph_node_ids_json, created_at, updated_at, reviewed_at, validated_at,
+                             applied_at, rolled_back_at, status_history_json""",
+                (
+                    payload["proposal_id"],
+                    payload["schema_version"],
+                    self.agent_id,
+                    payload["source_kind"],
+                    payload["source_ref"],
+                    payload["proposal_type"],
+                    payload["summary"],
+                    _json_dump(payload.get("evidence_refs") or []),
+                    _json_dump(payload.get("diff_preview") or {}),
+                    payload["risk_class"],
+                    _json_dump(payload.get("validation_plan") or {}),
+                    _json_dump(payload.get("validation_result") or {}),
+                    _json_dump(payload.get("rollback_plan") or {}),
+                    payload["status"],
+                    payload.get("reviewer", ""),
+                    payload["idempotency_hash"],
+                    _json_dump(payload.get("run_graph_node_ids") or []),
+                    payload["created_at"],
+                    payload["updated_at"],
+                    payload.get("reviewed_at", ""),
+                    payload.get("validated_at", ""),
+                    payload.get("applied_at", ""),
+                    payload.get("rolled_back_at", ""),
+                    _json_dump(payload.get("status_history") or []),
+                ),
+                agent_id=self.agent_id,
+            )
+        )
+        if row is None:
+            raise RuntimeError("failed_to_create_improvement_proposal")
+        return _improvement_proposal_from_row(row)
+
+    def update_improvement_proposal(self, proposal_id: str, **payload: Any) -> dict[str, Any] | None:
+        columns = {
+            "status": "status",
+            "reviewer": "reviewer",
+            "updated_at": "updated_at",
+            "reviewed_at": "reviewed_at",
+            "validated_at": "validated_at",
+            "applied_at": "applied_at",
+            "rolled_back_at": "rolled_back_at",
+            "validation_result": "validation_result_json",
+            "status_history": "status_history_json",
+            "run_graph_node_ids": "run_graph_node_ids_json",
+        }
+        assignments: list[str] = []
+        values: list[Any] = []
+        for field, column in columns.items():
+            if field not in payload:
+                continue
+            assignments.append(f"{column} = ?")
+            if field in {"validation_result", "status_history", "run_graph_node_ids"}:
+                values.append(_json_dump(payload[field]))
+            else:
+                values.append(payload[field])
+        if not assignments:
+            return self.get_improvement_proposal(proposal_id)
+        values.extend([self.agent_id, proposal_id])
+        row = self._run_coro_sync(
+            primary_fetch_one(
+                f"""UPDATE improvement_proposals
+                    SET {", ".join(assignments)}
+                    WHERE agent_id = ? AND proposal_id = ?
+                    RETURNING proposal_id, schema_version, agent_id, source_kind, source_ref, proposal_type,
+                              summary, evidence_refs_json, diff_preview_json, risk_class, validation_plan_json,
+                              validation_result_json, rollback_plan_json, status, reviewer, idempotency_hash,
+                              run_graph_node_ids_json, created_at, updated_at, reviewed_at, validated_at,
+                              applied_at, rolled_back_at, status_history_json""",
+                tuple(values),
+                agent_id=self.agent_id,
+            )
+        )
+        return _improvement_proposal_from_row(row) if row is not None else None
+
+    def list_improvement_proposal_effects(self, proposal_id: str) -> list[dict[str, Any]]:
+        rows = self._run_coro_sync(
+            primary_fetch_all(
+                """SELECT effect_id, proposal_id, agent_id, effect_kind, target_ref, before_ref_json,
+                          after_ref_json, status, apply_idempotency_key, rollback_idempotency_key,
+                          error_json, metadata_json, created_at, updated_at, applied_at, rolled_back_at
+                   FROM improvement_proposal_effects
+                   WHERE agent_id = ? AND proposal_id = ?
+                   ORDER BY created_at ASC, effect_id ASC""",
+                (self.agent_id, proposal_id),
+                agent_id=self.agent_id,
+            )
+        )
+        return [_improvement_proposal_effect_from_row(row) for row in rows]
+
+    def create_improvement_proposal_effect(self, payload: dict[str, Any]) -> dict[str, Any]:
+        now = _now_iso()
+        row = self._run_coro_sync(
+            primary_fetch_one(
+                """INSERT INTO improvement_proposal_effects
+                   (
+                    effect_id, proposal_id, agent_id, effect_kind, target_ref, before_ref_json,
+                    after_ref_json, status, apply_idempotency_key, rollback_idempotency_key,
+                    error_json, metadata_json, created_at, updated_at, applied_at, rolled_back_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(agent_id, proposal_id, apply_idempotency_key) DO UPDATE SET
+                       updated_at = improvement_proposal_effects.updated_at
+                   RETURNING effect_id, proposal_id, agent_id, effect_kind, target_ref, before_ref_json,
+                             after_ref_json, status, apply_idempotency_key, rollback_idempotency_key,
+                             error_json, metadata_json, created_at, updated_at, applied_at, rolled_back_at""",
+                (
+                    payload["effect_id"],
+                    payload["proposal_id"],
+                    self.agent_id,
+                    payload["effect_kind"],
+                    payload["target_ref"],
+                    _json_dump(payload.get("before_ref") or {}),
+                    _json_dump(payload.get("after_ref") or {}),
+                    payload.get("status", "pending"),
+                    payload["apply_idempotency_key"],
+                    payload["rollback_idempotency_key"],
+                    _json_dump(payload.get("error") or {}),
+                    _json_dump(payload.get("metadata") or {}),
+                    payload.get("created_at") or now,
+                    payload.get("updated_at") or now,
+                    payload.get("applied_at") or "",
+                    payload.get("rolled_back_at") or "",
+                ),
+                agent_id=self.agent_id,
+            )
+        )
+        if row is None:
+            raise RuntimeError("failed_to_create_improvement_proposal_effect")
+        return _improvement_proposal_effect_from_row(row)
+
+    def update_improvement_proposal_effect(self, effect_id: str, **payload: Any) -> dict[str, Any] | None:
+        columns = {
+            "status": "status",
+            "updated_at": "updated_at",
+            "applied_at": "applied_at",
+            "rolled_back_at": "rolled_back_at",
+            "error": "error_json",
+            "metadata": "metadata_json",
+        }
+        assignments: list[str] = []
+        values: list[Any] = []
+        payload = {"updated_at": _now_iso(), **payload}
+        for field, column in columns.items():
+            if field not in payload:
+                continue
+            assignments.append(f"{column} = ?")
+            if field in {"error", "metadata"}:
+                values.append(_json_dump(payload[field]))
+            else:
+                values.append(payload[field])
+        if not assignments:
+            rows = self.list_improvement_proposal_effects(str(payload.get("proposal_id") or ""))
+            return next((row for row in rows if row.get("effect_id") == effect_id), None)
+        values.extend([self.agent_id, effect_id])
+        row = self._run_coro_sync(
+            primary_fetch_one(
+                f"""UPDATE improvement_proposal_effects
+                    SET {", ".join(assignments)}
+                    WHERE agent_id = ? AND effect_id = ?
+                    RETURNING effect_id, proposal_id, agent_id, effect_kind, target_ref, before_ref_json,
+                              after_ref_json, status, apply_idempotency_key, rollback_idempotency_key,
+                              error_json, metadata_json, created_at, updated_at, applied_at, rolled_back_at""",
+                tuple(values),
+                agent_id=self.agent_id,
+            )
+        )
+        return _improvement_proposal_effect_from_row(row) if row is not None else None
+
+    def create_trajectory_export(self, payload: dict[str, Any]) -> str:
+        export_id = str(payload["export_id"])
+        self._run_coro_sync(
+            primary_execute(
+                """INSERT INTO trajectory_exports
+                   (export_id, agent_id, task_id, status, package_hash, payload_json, jsonl_text, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(agent_id, export_id) DO UPDATE SET
+                       status = EXCLUDED.status,
+                       package_hash = EXCLUDED.package_hash,
+                       payload_json = EXCLUDED.payload_json,
+                       jsonl_text = EXCLUDED.jsonl_text""",
+                (
+                    export_id,
+                    self._scope,
+                    payload.get("task_id"),
+                    payload.get("status", "created"),
+                    payload.get("package_hash", ""),
+                    _json_dump({key: value for key, value in payload.items() if key != "jsonl"}),
+                    payload.get("jsonl", ""),
+                    payload.get("generated_at") or _now_iso(),
+                ),
+                agent_id=self._scope,
+            )
+        )
+        return export_id
+
+    def list_trajectory_exports(self, *, limit: int = 20) -> list[dict[str, Any]]:
+        rows = self._run_coro_sync(
+            primary_fetch_all(
+                """SELECT export_id, agent_id, task_id, status, package_hash, payload_json, created_at
+                   FROM trajectory_exports
+                   WHERE agent_id = ? ORDER BY created_at DESC LIMIT ?""",
+                (self._scope, max(1, limit)),
+                agent_id=self._scope,
+            )
+        )
+        items: list[dict[str, Any]] = []
+        for row in rows:
+            payload = _json_load(row.get("payload_json"), {})
+            if not isinstance(payload, dict):
+                payload = {}
+            payload.setdefault("schema_version", "trajectory_export.v1")
+            payload.setdefault("export_id", row.get("export_id"))
+            payload.setdefault("agent_id", row.get("agent_id"))
+            payload.setdefault("task_id", row.get("task_id"))
+            payload.setdefault("status", row.get("status"))
+            payload.setdefault("package_hash", row.get("package_hash"))
+            payload.setdefault("created_at", row.get("created_at"))
+            items.append(payload)
+        return items
+
+    def create_release_quality_report(self, payload: dict[str, Any]) -> None:
+        self._run_coro_sync(
+            primary_execute(
+                """INSERT INTO release_quality_runs
+                   (agent_id, status, payload_json, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    self._scope,
+                    payload.get("status", "failed"),
+                    _json_dump(dict(payload)),
+                    payload.get("generated_at") or _now_iso(),
+                ),
+                agent_id=self._scope,
+            )
+        )
 
     def _schedule_external_graph_sync(
         self,

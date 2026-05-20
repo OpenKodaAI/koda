@@ -63,6 +63,15 @@ def test_whisper_function_catalog_uses_only_downloaded_variants() -> None:
     assert "whisper-cpp-local" not in {item["model_id"] for item in models}
 
 
+def test_whisper_function_catalog_knows_managed_variants_without_live_catalog() -> None:
+    model_ids = {item["model_id"] for item in resolve_provider_function_model_catalog("whispercpp")}
+
+    assert "large-v3-turbo-q5_0" in model_ids
+    assert "large-v3-turbo" in model_ids
+    assert "medium-q5_0" in model_ids
+    assert "whisper-cpp-local" in model_ids
+
+
 def _make_manager(monkeypatch):
     import koda.control_plane.manager as manager_mod
 
@@ -171,6 +180,23 @@ def test_core_provider_catalog_exposes_connection_flags():
     assert catalog["kokoro"]["connection_managed"] is False
 
 
+def test_provider_command_availability_blocks_general_providers_only():
+    import koda.control_plane.manager as manager_mod
+
+    errors, warnings = manager_mod._provider_command_availability_issues(
+        {
+            "providers": {
+                "claude": {"enabled": True, "category": "general", "command_present": False},
+                "whispercpp": {"enabled": True, "category": "transcription", "command_present": False},
+                "security": {"enabled": True, "category": "infra", "command_present": False},
+            }
+        }
+    )
+
+    assert errors == ["provider 'claude' is enabled but its runtime command is not available"]
+    assert warnings == ["provider 'whispercpp' is enabled but its runtime command is not available"]
+
+
 def test_function_model_catalog_preserves_resolved_ollama_models():
     catalog = build_function_model_catalog(
         {
@@ -250,6 +276,39 @@ def test_provider_catalog_uses_detected_ollama_models_when_live_catalog_is_empty
     assert any(
         item["provider_id"] == "ollama" and item["model_id"] == "llama3.2:latest" and item["function_id"] == "general"
         for item in ollama["functional_models"]
+    )
+
+
+def test_openrouter_catalog_merges_curated_and_detected_models(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    manager._resolve_ollama_connection_inputs = (  # type: ignore[attr-defined]
+        lambda env=None: ("api_key", "https://ollama.com", "sk-ollama-cloud")
+    )
+    manager._fetch_ollama_model_catalog = lambda **kwargs: {  # type: ignore[attr-defined]
+        "items": [],
+        "cached": False,
+        "provider_connected": False,
+        "base_url": "https://ollama.com",
+        "auth_mode": "api_key",
+    }
+    manager._provider_detected_model_ids = (  # type: ignore[attr-defined]
+        lambda provider_id: ["vendor/custom-model"] if provider_id == "openrouter" else []
+    )
+    monkeypatch.setattr(manager_mod, "provider_command_present", lambda provider_id, base_env=None: True)
+
+    catalog = manager_mod.ControlPlaneManager._provider_catalog_from_env(manager, {})
+    openrouter = catalog["providers"]["openrouter"]
+
+    assert "openrouter/auto" in openrouter["available_models"]
+    assert "~google/gemini-flash-latest" in openrouter["available_models"]
+    assert "vendor/custom-model" in openrouter["available_models"]
+    assert any(
+        item["provider_id"] == "openrouter"
+        and item["model_id"] == "vendor/custom-model"
+        and item["function_id"] == "general"
+        for item in openrouter["functional_models"]
     )
 
 

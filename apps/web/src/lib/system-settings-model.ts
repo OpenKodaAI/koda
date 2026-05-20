@@ -5,7 +5,7 @@ import type {
   GeneralSystemSettingsValueSource,
   GeneralSystemSettingsVariable,
 } from "@/lib/control-plane";
-import { translateLiteral } from "@/lib/i18n";
+import { translate } from "@/lib/i18n";
 
 // --- Section-based navigation ---
 
@@ -106,9 +106,9 @@ export const AGENT_ONLY_INTEGRATIONS = new Set([
 ]);
 
 export function sourceBadgeLabel(source: GeneralSystemSettingsValueSource) {
-  if (source === "custom") return translateLiteral("Personalizado");
-  if (source === "env") return translateLiteral("Vindo do .env");
-  return translateLiteral("Padrão do sistema");
+  if (source === "custom") return translate("generated.lib.personalizado_7ea72406");
+  if (source === "env") return translate("generated.lib.vindo_do_env_cde8efdd");
+  return translate("generated.lib.padrao_do_sistema_e12b5d06");
 }
 
 export function sourceBadgeTone(source: GeneralSystemSettingsValueSource) {

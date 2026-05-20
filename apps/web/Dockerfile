@@ -1,8 +1,12 @@
-FROM node:22-slim AS deps
+ARG PNPM_VERSION=10.26.2
+
+FROM node:26-slim AS deps
+
+ARG PNPM_VERSION
 
 WORKDIR /workspace
 
-RUN corepack enable
+RUN npm install -g pnpm@${PNPM_VERSION}
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json
@@ -10,11 +14,13 @@ COPY packages/cli/package.json packages/cli/package.json
 
 RUN pnpm install --frozen-lockfile
 
-FROM node:22-slim AS prod-deps
+FROM node:26-slim AS prod-deps
+
+ARG PNPM_VERSION
 
 WORKDIR /workspace
 
-RUN corepack enable
+RUN npm install -g pnpm@${PNPM_VERSION}
 
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web/package.json apps/web/package.json
@@ -22,11 +28,13 @@ COPY packages/cli/package.json packages/cli/package.json
 
 RUN pnpm install --frozen-lockfile --prod
 
-FROM node:22-slim AS builder
+FROM node:26-slim AS builder
+
+ARG PNPM_VERSION
 
 WORKDIR /workspace
 
-RUN corepack enable
+RUN npm install -g pnpm@${PNPM_VERSION}
 
 COPY --from=deps /workspace/node_modules ./node_modules
 COPY --from=deps /workspace/apps/web/node_modules ./apps/web/node_modules
@@ -38,15 +46,17 @@ ENV SECURE_COOKIES=${SECURE_COOKIES}
 
 RUN pnpm --filter koda-web build
 
-FROM node:22-slim AS runner
+FROM node:26-slim AS runner
 
 WORKDIR /app
+
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/*
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=3000
-
-RUN corepack enable
 
 COPY --from=prod-deps /workspace/node_modules ./node_modules
 COPY --from=prod-deps /workspace/apps/web/node_modules ./apps/web/node_modules

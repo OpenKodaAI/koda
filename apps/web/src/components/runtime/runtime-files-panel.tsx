@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { translate } from "@/lib/i18n";
 import {
   AlertTriangle,
   ChevronDown,
@@ -1505,7 +1506,8 @@ export function RuntimeFilesPanel({
             <div className="runtime-files-project-search__field">
               <Search className="h-3.5 w-3.5 shrink-0" />
               <input
-                type="search"
+                type="text"
+                role="searchbox"
                 value={projectSearchQuery}
                 onChange={(event) => {
                   setProjectSearchQuery(event.target.value);
@@ -1514,6 +1516,7 @@ export function RuntimeFilesPanel({
                 onFocus={() => setProjectSearchOpen(true)}
                 placeholder={t("runtime.files.projectSearchPlaceholder")}
                 aria-label={t("runtime.files.projectSearch")}
+                className="search-input--custom-clear"
               />
               {projectSearchLoading ? <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin" /> : null}
               {projectSearchQuery ? (
@@ -1540,8 +1543,7 @@ export function RuntimeFilesPanel({
                 aria-pressed={projectSearchCaseSensitive}
                 title={t("runtime.files.matchCase")}
               >
-                Aa
-              </button>
+                {translate("generated.runtime.aa_d22b71f7")}</button>
               <button
                 type="button"
                 className={cn("runtime-files-project-search__toggle", projectSearchWholeWord && "is-active")}
@@ -1550,8 +1552,7 @@ export function RuntimeFilesPanel({
                 aria-pressed={projectSearchWholeWord}
                 title={t("runtime.files.matchWholeWord")}
               >
-                Ab
-              </button>
+                {translate("generated.runtime.ab_29f3d49e")}</button>
               <button
                 type="button"
                 className={cn("runtime-files-project-search__toggle", projectSearchRegex && "is-active")}
@@ -1805,8 +1806,7 @@ export function RuntimeFilesPanel({
                     aria-pressed={searchCaseSensitive}
                     title={t("runtime.files.matchCase")}
                   >
-                    Aa
-                  </button>
+                    {translate("generated.runtime.aa_d22b71f7")}</button>
                   <button
                     type="button"
                     className={cn("runtime-files-search__toggle", searchWholeWord && "is-active")}
@@ -1818,8 +1818,7 @@ export function RuntimeFilesPanel({
                     aria-pressed={searchWholeWord}
                     title={t("runtime.files.matchWholeWord")}
                   >
-                    Ab
-                  </button>
+                    {translate("generated.runtime.ab_29f3d49e")}</button>
                   <button
                     type="button"
                     className={cn("runtime-files-search__toggle", searchRegex && "is-active")}
@@ -1961,10 +1960,10 @@ export function RuntimeFilesPanel({
                   </span>
                   <span>{formatBytes(new TextEncoder().encode(activeContent).byteLength)}</span>
                   <span>{langLabel || t("runtime.files.noSelection")}</span>
-                  <span>UTF-8</span>
+                  <span>{translate("generated.runtime.utf_8_11586a5c")}</span>
                   <span>{activeTab?.dirty ? t("runtime.files.unsaved") : t("runtime.files.saved")}</span>
                   {activeChange ? <span>{activeChange.status}</span> : null}
-                  {isEditing ? <span>Ln {cursorLine}, Col {cursorCol}</span> : null}
+                  {isEditing ? <span>{translate("generated.runtime.ln_7be0e8d8")}{cursorLine}{translate("generated.runtime.col_f6154bf3")}{cursorCol}</span> : null}
                 </>
               )}
             </div>

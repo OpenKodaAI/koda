@@ -37,7 +37,7 @@ services:
       resources:
         limits:
           cpus: "${KODA_DEV_WEB_CPUS:-2.0}"
-          memory: "${KODA_DEV_WEB_MEMORY_LIMIT:-3G}"
+          memory: "${KODA_DEV_WEB_MEMORY_LIMIT:-8G}"
     read_only: false
     working_dir: /workspace
     command: ["sh", "/workspace/scripts/dev/run_web_dev.sh"]
@@ -48,7 +48,7 @@ services:
       retries: 24
     environment:
       NODE_ENV: "development"
-      NODE_OPTIONS: "${KODA_DEV_WEB_NODE_OPTIONS:---max-old-space-size=2048}"
+      NODE_OPTIONS: "${KODA_DEV_WEB_NODE_OPTIONS:---max-old-space-size=4096}"
       NEXT_TELEMETRY_DISABLED: "1"
       WATCHPACK_POLLING: "${WATCHPACK_POLLING:-true}"
       CHOKIDAR_USEPOLLING: "${CHOKIDAR_USEPOLLING:-true}"

@@ -337,6 +337,7 @@ def emit_execution_trace(
         "grounding": grounding or {},
         "raw_artifacts": raw_artifacts or {},
     }
+    _emit_run_graph_from_execution_trace(task_id=task_id, details=details)
     emit(
         AuditEvent(
             event_type="task.execution_trace",
@@ -348,6 +349,28 @@ def emit_execution_trace(
             details=details,
         )
     )
+
+
+def _emit_run_graph_from_execution_trace(*, task_id: int | None, details: dict[str, Any]) -> None:
+    """Best-effort RunGraph write for KG-05."""
+
+    if task_id is None:
+        return
+
+    def _persist() -> None:
+        try:
+            from koda.services.run_graph_store import persist_run_graph_from_trace
+
+            persist_run_graph_from_trace(agent_id=config_module.AGENT_ID, task_id=task_id, trace=details)
+        except Exception:
+            log.warning("audit_run_graph_persist_failed", task_id=task_id, exc_info=True)
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        _persist()
+        return
+    loop.run_in_executor(None, _persist)
 
 
 async def cleanup_expired_audit_events() -> int:

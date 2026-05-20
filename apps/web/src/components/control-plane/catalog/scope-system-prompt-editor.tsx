@@ -4,6 +4,7 @@ import { type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-editor-field";
+import { InlineSpinner } from "@/components/ui/async-feedback";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   useAnimatedPresence,
@@ -42,7 +43,7 @@ export function ScopeSystemPromptEditor({
   onClose,
   onSave,
 }: ScopeSystemPromptEditorProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const presence = useAnimatedPresence(open, null, { duration: 200 });
 
   useBodyScrollLock(presence.shouldRender);
@@ -72,7 +73,7 @@ export function ScopeSystemPromptEditor({
                 type="button"
                 onClick={onClose}
                 className="app-surface-close"
-                aria-label={tl("Fechar modal")}
+                aria-label={t("generated.controlPlane.fechar_modal_1b5b2901")}
               >
                 <X className="h-4 w-4" />
               </button>
@@ -103,8 +104,12 @@ export function ScopeSystemPromptEditor({
 
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-5">
                 {loading ? (
-                  <div className="flex min-h-0 flex-1 items-center justify-center text-sm text-[var(--text-quaternary)]">
-                    {tl("Carregando...")}
+                  <div
+                    className="flex min-h-0 flex-1 items-center justify-center text-sm text-[var(--text-quaternary)]"
+                    role="status"
+                    aria-label={t("generated.controlPlane.carregando_62b04e95")}
+                  >
+                    <InlineSpinner className="h-5 w-5" />
                   </div>
                 ) : (
                   <div className="flex min-h-0 flex-1 flex-col">
@@ -129,15 +134,18 @@ export function ScopeSystemPromptEditor({
                   onClick={onClose}
                   className="button-shell button-shell--secondary"
                 >
-                  {tl("Cancelar")}
+                  {t("generated.controlPlane.cancelar_091200fb")}
                 </button>
                 <button
                   type="button"
                   onClick={onSave}
                   disabled={loading || saving}
+                  aria-label={saving ? t("generated.controlPlane.salvando_b58cece2") : undefined}
+                  aria-busy={saving || undefined}
                   className="button-shell button-shell--primary"
                 >
-                  {saving ? tl("Salvando...") : tl("Salvar system prompt")}
+                  {saving ? <InlineSpinner className="h-4 w-4" /> : null}
+                  <span>{t("generated.controlPlane.salvar_system_prompt_ff8b05a5")}</span>
                 </button>
               </div>
             </div>

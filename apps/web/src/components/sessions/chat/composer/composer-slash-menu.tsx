@@ -12,6 +12,7 @@ import type { ChatCommand } from "@/lib/contracts/chat-commands";
 
 export interface ComposerSlashMenuContentProps {
   query: string;
+  onQueryChange?: (next: string) => void;
   agentId?: string | null;
   activeIndex: number;
   onItemsChange: (items: ChatCommand[]) => void;
@@ -26,12 +27,13 @@ function commandToSuggestionItem(command: ChatCommand): SuggestionItem {
     id: command.id,
     label: command.label,
     description: command.description,
-    meta: command.action.kind === "execute" ? "action" : null,
+    meta: null,
   };
 }
 
 export function ComposerSlashMenuContent({
   query,
+  onQueryChange,
   agentId,
   activeIndex,
   onItemsChange,
@@ -54,7 +56,7 @@ export function ComposerSlashMenuContent({
   const groups: SuggestionGroup[] = [
     {
       id: "commands",
-      label: t("chat.composer.suggestions.commands", { defaultValue: "Commands" }),
+      label: null,
       items: filtered.map(commandToSuggestionItem),
     },
   ];
@@ -68,12 +70,13 @@ export function ComposerSlashMenuContent({
         if (command) onSelect(command);
       }}
       onHover={onActiveIndex}
-      emptyLabel={t("chat.composer.suggestions.empty", { defaultValue: "No matches" })}
-      ariaLabel={t("chat.composer.suggestions.commands", {
-        defaultValue: "Commands",
-      })}
+      emptyLabel={t("chat.composer.suggestions.empty", undefined)}
+      ariaLabel={t("chat.composer.suggestions.commands", undefined)}
       idPrefix={idPrefix}
       listboxId={listboxId}
+      searchValue={query}
+      onSearchChange={onQueryChange}
+      searchPlaceholder={t("chat.composer.suggestions.searchCommands", undefined)}
     />
   );
 }

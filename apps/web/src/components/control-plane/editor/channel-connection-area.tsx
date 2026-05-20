@@ -126,9 +126,11 @@ function ChannelCard({
   agentUsername?: string;
   onClick: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const logo = renderChannelLogo(channel.logoKey, "h-6 w-6");
   const vs = connected ? "connected" as const : "disconnected" as const;
+  const channelLabel = t(channel.labelKey);
+  const channelTagline = t(channel.taglineKey);
 
   return (
     <button
@@ -141,7 +143,7 @@ function ChannelCard({
         "border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)]",
         "hover:bg-[var(--surface-hover)]",
       )}
-      aria-label={`${channel.label} — ${connected ? tl("Conectado") : tl("Desconectado")}`}
+      aria-label={`${channelLabel} — ${connected ? t("generated.controlPlane.conectado_e04915ac") : t("generated.controlPlane.desconectado_c3597850")}`}
     >
       <div
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors"
@@ -151,13 +153,13 @@ function ChannelCard({
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
-          {channel.label}
+          {channelLabel}
         </div>
         <div className="mt-0.5 truncate text-xs text-[var(--text-quaternary)]">
-          {connected && agentUsername ? `@${agentUsername}` : tl(channel.tagline)}
+          {connected && agentUsername ? `@${agentUsername}` : channelTagline}
           {!channel.isOfficial && (
             <span className="ml-1 inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400/80">
-              {tl("(não oficial)")}
+              {t("generated.controlPlane.nao_oficial_1345436c")}
             </span>
           )}
         </div>

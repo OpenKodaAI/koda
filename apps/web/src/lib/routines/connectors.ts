@@ -27,7 +27,8 @@ const CATALOG: RoutineConnectorOption[] = [
   { id: "vercel", label: "Vercel", category: "developer" },
 ];
 
-export function listAvailableConnectors(_agentId: string | null): RoutineConnectorOption[] {
+export function listAvailableConnectors(agentId: string | null): RoutineConnectorOption[] {
+  void agentId;
   return CATALOG;
 }
 

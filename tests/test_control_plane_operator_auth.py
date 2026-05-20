@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import io
 import uuid
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
 from koda.control_plane import operator_auth as operator_auth_mod
+from koda.control_plane import operator_profile_photos
 
 STRONG_PASSWORD = "CorrectHorseBattery!9"
 ANOTHER_STRONG_PASSWORD = "R3volution@Nebula!42"
@@ -254,6 +257,8 @@ class FakeOperatorAuthDb:
                 "disabled": int(disabled),
                 "totp_secret": str(totp_secret),
                 "recovery_generation": str(recovery_generation),
+                "profile_photo_hash": "",
+                "profile_photo_updated_at": "",
             }
             return
 
@@ -371,6 +376,35 @@ class FakeOperatorAuthDb:
             password_hash, updated_at, user_id = params
             row = self.users[str(user_id)]
             row["password_hash"] = str(password_hash)
+            row["updated_at"] = str(updated_at)
+            return
+
+        if "UPDATE cp_operator_users SET display_name = ?, updated_at = ? WHERE id = ?" in normalized:
+            display_name, updated_at, user_id = params
+            row = self.users[str(user_id)]
+            row["display_name"] = str(display_name)
+            row["updated_at"] = str(updated_at)
+            return
+
+        if (
+            "UPDATE cp_operator_users SET profile_photo_hash = ?, profile_photo_updated_at = ?, "
+            "updated_at = ? WHERE id = ?"
+        ) in normalized:
+            photo_hash, photo_updated_at, updated_at, user_id = params
+            row = self.users[str(user_id)]
+            row["profile_photo_hash"] = str(photo_hash)
+            row["profile_photo_updated_at"] = str(photo_updated_at)
+            row["updated_at"] = str(updated_at)
+            return
+
+        if (
+            "UPDATE cp_operator_users SET profile_photo_hash = '', profile_photo_updated_at = '', "
+            "updated_at = ? WHERE id = ?"
+        ) in normalized:
+            updated_at, user_id = params
+            row = self.users[str(user_id)]
+            row["profile_photo_hash"] = ""
+            row["profile_photo_updated_at"] = ""
             row["updated_at"] = str(updated_at)
             return
 
@@ -718,6 +752,117 @@ def test_change_password_rejects_wrong_current_password(
             context,
             current_password="definitely-wrong-password-XYZ",
             new_password=ANOTHER_STRONG_PASSWORD,
+        )
+
+
+def test_update_profile_normalizes_and_persists_display_name(fake_operator_db: FakeOperatorAuthDb) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    context = service.resolve_bearer_token(payload["session_token"])
+    assert context is not None
+
+    updated = service.update_profile(context, display_name="  Avery   Stone  ")
+
+    assert updated["operator"]["display_name"] == "Avery Stone"
+    assert fake_operator_db.users[payload["operator"]["id"]]["display_name"] == "Avery Stone"
+    refreshed = service.resolve_bearer_token(payload["session_token"])
+    assert refreshed is not None
+    assert service.auth_status(refreshed)["operator"]["display_name"] == "Avery Stone"
+
+
+def test_update_profile_rejects_invalid_display_name(fake_operator_db: FakeOperatorAuthDb) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    context = service.resolve_bearer_token(payload["session_token"])
+    assert context is not None
+
+    with pytest.raises(ValueError, match="required"):
+        service.update_profile(context, display_name="   ")
+    with pytest.raises(ValueError, match="control"):
+        service.update_profile(context, display_name="Bad\nName")
+    with pytest.raises(ValueError, match="80"):
+        service.update_profile(context, display_name="A" * 81)
+
+
+def test_profile_photo_upload_read_and_delete(
+    fake_operator_db: FakeOperatorAuthDb,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    context = service.resolve_bearer_token(payload["session_token"])
+    assert context is not None
+
+    monkeypatch.setattr(
+        operator_auth_mod,
+        "save_operator_profile_photo",
+        lambda user_id, raw: SimpleNamespace(content_hash="abc123", byte_size=len(raw)),
+    )
+    monkeypatch.setattr(operator_auth_mod, "read_operator_profile_photo", lambda user_id: b"jpeg-bytes")
+    removed: list[str] = []
+    monkeypatch.setattr(
+        operator_auth_mod,
+        "delete_operator_profile_photo",
+        lambda user_id: not removed.append(user_id),
+    )
+
+    uploaded = service.set_profile_photo(context, raw=b"raw-image")
+
+    assert uploaded["photoHash"] == "abc123"
+    assert uploaded["photoUrl"] == "/api/control-plane/auth/profile/photo?v=abc123"
+    assert uploaded["operator"]["profile_photo_hash"] == "abc123"
+    assert uploaded["operator"]["profile_photo_url"] == "/api/control-plane/auth/profile/photo?v=abc123"
+
+    data, photo_hash = service.get_profile_photo(context, requested_hash="abc123")
+    assert data == b"jpeg-bytes"
+    assert photo_hash == "abc123"
+    with pytest.raises(FileNotFoundError):
+        service.get_profile_photo(context, requested_hash="old-hash")
+
+    deleted = service.delete_profile_photo(context)
+
+    assert deleted["removed"] is True
+    assert deleted["operator"]["profile_photo_hash"] is None
+    assert deleted["operator"]["profile_photo_url"] is None
+    assert removed == [payload["operator"]["id"]]
+
+
+def test_operator_profile_photo_storage_processes_image(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    Image = pytest.importorskip("PIL.Image")
+    monkeypatch.setattr(operator_profile_photos, "STATE_ROOT_DIR", tmp_path)
+
+    source = Image.new("RGB", (80, 40), color=(217, 119, 87))
+    raw = io.BytesIO()
+    source.save(raw, format="PNG")
+
+    stored = operator_profile_photos.save_operator_profile_photo("usr_test", raw.getvalue())
+
+    assert stored.path.exists()
+    assert stored.content_hash
+    processed = operator_profile_photos.read_operator_profile_photo("usr_test")
+    assert processed is not None
+    with Image.open(io.BytesIO(processed)) as image:
+        assert image.format == "JPEG"
+        assert image.size == (40, 40)
+    assert operator_profile_photos.delete_operator_profile_photo("usr_test") is True
+    assert operator_profile_photos.read_operator_profile_photo("usr_test") is None
+
+
+def test_operator_profile_photo_storage_rejects_unsafe_or_large_payload(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(operator_profile_photos, "STATE_ROOT_DIR", tmp_path)
+
+    with pytest.raises(ValueError, match="unsafe"):
+        operator_profile_photos.profile_photo_path_for("../bad")
+    with pytest.raises(operator_profile_photos.ProfilePhotoTooLargeError):
+        operator_profile_photos.save_operator_profile_photo(
+            "usr_test",
+            b"x" * (operator_profile_photos.MAX_INPUT_BYTES + 1),
         )
 
 

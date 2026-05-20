@@ -3,11 +3,21 @@ import { describe, expect, it, vi } from "vitest";
 import { IntegrationCard } from "@/components/control-plane/system/integrations/integration-card";
 import type { UnifiedIntegrationEntry } from "@/components/control-plane/system/integrations/integration-marketplace-data";
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    tl: (value: string) => value,
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 vi.mock("@/components/control-plane/system/integrations/integration-logos", () => ({
   renderIntegrationLogo: () => null,

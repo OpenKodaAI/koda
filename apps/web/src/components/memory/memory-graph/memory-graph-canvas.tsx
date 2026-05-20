@@ -7,12 +7,14 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { MemoryGraphEdge } from "@/lib/types";
 import { cn, truncateText } from "@/lib/utils";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { ACTIVITY_HEATMAP_PRIMARY } from "@/lib/activity-palette";
 import {
   createSimulation,
   type SimNode,
@@ -37,6 +39,10 @@ interface MemoryGraphCanvasProps {
   onSelectNode: (id: string | null) => void;
   onRequestSearchFocus?: () => void;
 }
+
+const MEMORY_GRAPH_ACCENT_STYLE = {
+  "--memory-graph-accent": ACTIVITY_HEATMAP_PRIMARY,
+} as CSSProperties;
 
 function buildNeighbors(edges: MemoryGraphEdge[], focusId: string | null) {
   const neighbors = new Set<string>();
@@ -277,10 +283,11 @@ export function MemoryGraphCanvas({
       ref={containerRef}
       className="memory-graph-surface relative flex h-full w-full overflow-hidden bg-black"
       data-panning={interaction.isPanning ? "true" : undefined}
+      style={MEMORY_GRAPH_ACCENT_STYLE}
     >
       <svg
         role="application"
-        aria-label={t("memory.map.canvasAriaLabel", { defaultValue: "Mapa neural de memórias" })}
+        aria-label={t("memory.map.canvasAriaLabel", undefined)}
         className="memory-graph-svg absolute inset-0 h-full w-full select-none"
         onPointerDown={interaction.handleBackgroundPointerDown}
         onPointerMove={interaction.handleBackgroundPointerMove}
@@ -414,7 +421,7 @@ export function MemoryGraphCanvas({
           type="button"
           onClick={interaction.zoomOut}
           className="memory-graph-control"
-          aria-label={t("memory.map.zoomOut", { defaultValue: "Diminuir zoom" })}
+          aria-label={t("memory.map.zoomOut", undefined)}
         >
           <Minus className="icon-xs" strokeWidth={1.75} />
         </button>
@@ -425,7 +432,7 @@ export function MemoryGraphCanvas({
           type="button"
           onClick={interaction.zoomIn}
           className="memory-graph-control"
-          aria-label={t("memory.map.zoomIn", { defaultValue: "Aumentar zoom" })}
+          aria-label={t("memory.map.zoomIn", undefined)}
         >
           <Plus className="icon-xs" strokeWidth={1.75} />
         </button>
@@ -434,7 +441,7 @@ export function MemoryGraphCanvas({
           type="button"
           onClick={interaction.fitViewport}
           className="memory-graph-control"
-          aria-label={t("memory.map.reset", { defaultValue: "Recentralizar" })}
+          aria-label={t("memory.map.reset", undefined)}
         >
           <RotateCcw className="icon-xs" strokeWidth={1.75} />
         </button>

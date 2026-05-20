@@ -202,6 +202,15 @@ _DYNAMIC_GENERAL_MODEL_LABELS: dict[str, dict[str, str]] = {
         "grok-2-vision-1212": "Grok 2 Vision",
         "grok-2-1212": "Grok 2",
     },
+    "openrouter": {
+        "openrouter/auto": "OpenRouter Auto",
+        "~openai/gpt-mini-latest": "OpenAI GPT Mini Latest",
+        "~google/gemini-flash-latest": "Google Gemini Flash Latest",
+        "~google/gemini-pro-latest": "Google Gemini Pro Latest",
+        "~anthropic/claude-sonnet-latest": "Anthropic Claude Sonnet Latest",
+        "~openai/gpt-latest": "OpenAI GPT Latest",
+        "openrouter/pareto-code": "Pareto Code Router",
+    },
 }
 
 # ── Real pricing & metadata for general (dynamic) models ─────────────
@@ -1373,6 +1382,57 @@ _GENERAL_MODEL_METADATA: dict[tuple[str, str], dict[str, Any]] = {
         "speed_tier": 4,
         "intelligence_tier": 4,
     },
+    # ── OpenRouter curated aliases (dynamic catalog fills provider/model IDs) ─
+    ("openrouter", "openrouter/auto"): {
+        "description": "Roteador automatico do OpenRouter para escolher modelos e fallback conforme disponibilidade.",
+        "context_window": 2_000_000,
+        "speed_tier": 4,
+        "intelligence_tier": 4,
+    },
+    ("openrouter", "~openai/gpt-mini-latest"): {
+        "description": "Alias OpenRouter para o modelo mini mais recente da OpenAI.",
+        "context_window": 400_000,
+        "input_cost_per_1m": 0.75,
+        "output_cost_per_1m": 4.50,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+    },
+    ("openrouter", "~google/gemini-flash-latest"): {
+        "description": "Alias OpenRouter para Gemini Flash recente, bom equilibrio de latencia e contexto longo.",
+        "context_window": 1_048_576,
+        "input_cost_per_1m": 0.50,
+        "output_cost_per_1m": 3.00,
+        "speed_tier": 5,
+        "intelligence_tier": 4,
+    },
+    ("openrouter", "~google/gemini-pro-latest"): {
+        "description": "Alias OpenRouter para Gemini Pro recente, focado em contexto longo e tarefas complexas.",
+        "context_window": 1_048_576,
+        "speed_tier": 3,
+        "intelligence_tier": 5,
+    },
+    ("openrouter", "~anthropic/claude-sonnet-latest"): {
+        "description": "Alias OpenRouter para Claude Sonnet recente, forte em raciocinio e agentes.",
+        "context_window": 1_000_000,
+        "input_cost_per_1m": 3.00,
+        "output_cost_per_1m": 15.00,
+        "speed_tier": 4,
+        "intelligence_tier": 5,
+    },
+    ("openrouter", "~openai/gpt-latest"): {
+        "description": "Alias OpenRouter para o modelo GPT generalista mais recente da OpenAI.",
+        "context_window": 1_050_000,
+        "input_cost_per_1m": 5.00,
+        "output_cost_per_1m": 30.00,
+        "speed_tier": 3,
+        "intelligence_tier": 5,
+    },
+    ("openrouter", "openrouter/pareto-code"): {
+        "description": "Roteador OpenRouter orientado a tarefas de codigo.",
+        "context_window": 2_000_000,
+        "speed_tier": 4,
+        "intelligence_tier": 5,
+    },
 }
 
 _STATIC_PROVIDER_MODELS: tuple[ProviderModelDefinition, ...] = (
@@ -1609,6 +1669,29 @@ _STATIC_PROVIDER_MODELS: tuple[ProviderModelDefinition, ...] = (
     ),
     ProviderModelDefinition("kokoro", "kokoro-v1", "Kokoro v1", "audio", "Modelo local de TTS."),
     ProviderModelDefinition(
+        "supertonic",
+        "supertonic-3",
+        "Supertonic 3",
+        "audio",
+        "Modelo local ONNX de TTS multilingue com 31 idiomas.",
+    ),
+    ProviderModelDefinition(
+        "supertonic",
+        "supertonic-2",
+        "Supertonic 2",
+        "audio",
+        "Modelo local ONNX legado com cobertura multilingue menor.",
+        status="legacy",
+    ),
+    ProviderModelDefinition(
+        "supertonic",
+        "supertonic",
+        "Supertonic",
+        "audio",
+        "Modelo local ONNX legado em ingles.",
+        status="legacy",
+    ),
+    ProviderModelDefinition(
         "whispercpp",
         "whisper-cpp-local",
         "Whisper CPP (local)",
@@ -1728,6 +1811,38 @@ def resolve_model_function_catalog() -> list[dict[str, Any]]:
 def _general_model_title(provider_id: str, model_id: str) -> str:
     lookup = _DYNAMIC_GENERAL_MODEL_LABELS.get(provider_id, {})
     return lookup.get(model_id, model_id)
+
+
+def _resolve_known_whispercpp_variant_models() -> list[dict[str, Any]]:
+    try:
+        from koda.services.whisper_manager import KNOWN_WHISPER_VARIANTS
+    except Exception:
+        return []
+
+    items: list[dict[str, Any]] = []
+    for variant_id, descriptor in KNOWN_WHISPER_VARIANTS.items():
+        normalized = str(variant_id).strip()
+        if not normalized:
+            continue
+        items.append(
+            {
+                "provider_id": "whispercpp",
+                "model_id": normalized,
+                "title": str(descriptor.get("label") or normalized),
+                "function_id": "transcription",
+                "description": str(descriptor.get("description") or "Transcricao local via whisper.cpp."),
+                "status": "current",
+                "context_window": 0,
+                "input_cost_per_1m": 0,
+                "output_cost_per_1m": 0,
+                "speed_tier": 3,
+                "intelligence_tier": 3,
+                "filename": str(descriptor.get("filename") or "") or None,
+                "size_bytes": int(descriptor.get("approx_size_bytes") or 0) or None,
+                "downloaded": False,
+            }
+        )
+    return items
 
 
 def resolve_known_general_model_ids(provider_id: str) -> list[str]:
@@ -2027,6 +2142,17 @@ def resolve_provider_function_model_catalog(
                     "downloaded": True,
                 }
             )
+
+    if normalized_provider == "whispercpp" and whisper_catalog_items is None:
+        for item in _resolve_known_whispercpp_variant_models():
+            variant_id = str(item.get("model_id") or "").strip()
+            if not variant_id:
+                continue
+            entry_key = ("transcription", variant_id)
+            if entry_key in seen:
+                continue
+            seen.add(entry_key)
+            items.append(item)
 
     for model_id in general_models:
         normalized_model = str(model_id).strip()

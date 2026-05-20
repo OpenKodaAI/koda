@@ -77,7 +77,7 @@ export function TabIntegracoes() {
     updateAgentSpecField,
   } = useAgentEditor();
   const { showToast } = useToast();
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { runAction } = useAsyncAction();
 
   const agentId = state.agent.id;
@@ -174,7 +174,7 @@ export function TabIntegracoes() {
     },
     onError: (error) => {
       setPendingOAuthEntryId(null);
-      showToast(tl("Erro na conexao OAuth: {{error}}", { error }), "warning");
+      showToast(t("generated.controlPlane.erro_na_conexao_oauth_error_61fd59f4", { error }), "warning");
     },
   });
 
@@ -188,14 +188,14 @@ export function TabIntegracoes() {
     ...systemSettings.shared_variables.map((item) => ({
       value: item.key,
       label: item.key,
-      status: tl("Disponivel globalmente"),
+      status: t("generated.controlPlane.disponivel_globalmente_da91c50c"),
     })),
     ...grantedSharedKeys
       .filter((key) => !systemSettings.shared_variables.some((item) => item.key === key))
       .map((key) => ({
         value: key,
         label: key,
-        status: tl("Indisponivel"),
+        status: t("generated.controlPlane.indisponivel_54e299bf"),
       })),
   ];
 
@@ -203,7 +203,7 @@ export function TabIntegracoes() {
     ...grantableGlobalSecrets.map((item) => ({
       value: item.secret_key,
       label: item.secret_key,
-      status: tl("Grantavel"),
+      status: t("generated.controlPlane.grantavel_2d9b1b4a"),
     })),
     ...grantedSecretKeys
       .filter((key) => !grantableGlobalSecrets.some((item) => item.secret_key === key))
@@ -216,8 +216,8 @@ export function TabIntegracoes() {
           label: key,
           status:
             protectedSecret && isGrantableSecret(protectedSecret) === false
-              ? tl("Somente sistema")
-              : tl("Indisponivel"),
+              ? t("generated.controlPlane.somente_sistema_49d36183")
+              : t("generated.controlPlane.indisponivel_54e299bf"),
         };
       }),
   ];
@@ -271,8 +271,8 @@ export function TabIntegracoes() {
         await refreshIntegrations();
       },
       {
-        successMessage: tl("Padrão do sistema importado para este agente."),
-        errorMessage: tl("Não foi possível importar o padrão do sistema."),
+        successMessage: t("generated.controlPlane.padrao_do_sistema_importado_para_este_agente_b3719846"),
+        errorMessage: t("generated.controlPlane.nao_foi_possivel_importar_o_padrao_do_sistem_f3724970"),
       },
     );
   }
@@ -290,8 +290,8 @@ export function TabIntegracoes() {
         await refreshIntegrations();
       },
       {
-        successMessage: tl("Conexão do agente removida."),
-        errorMessage: tl("Não foi possível remover a conexão deste agente."),
+        successMessage: t("generated.controlPlane.conexao_do_agente_removida_3fa1a90e"),
+        errorMessage: t("generated.controlPlane.nao_foi_possivel_remover_a_conexao_deste_age_9c790c11"),
       },
     );
   }
@@ -300,7 +300,7 @@ export function TabIntegracoes() {
     <div className="flex flex-col gap-6">
       <section className="flex flex-col gap-6">
         <PolicyCard
-          title={tl("Integracoes")}
+          title={t("generated.controlPlane.integracoes_fe756444")}
           icon={Plug}
           dirty={state.dirty.agentSpec}
           defaultOpen
@@ -430,10 +430,10 @@ export function TabIntegracoes() {
                           try {
                             parsed = JSON.parse(rawJson);
                           } catch {
-                            throw new Error(tl("JSON inválido."));
+                            throw new Error(t("generated.controlPlane.json_invalido_18ca930c"));
                           }
                           if (!parsed || typeof parsed !== "object" || !("mcpServers" in (parsed as Record<string, unknown>))) {
-                            throw new Error(tl("Esperado um objeto com mcpServers."));
+                            throw new Error(t("generated.controlPlane.esperado_um_objeto_com_mcpservers_76807978"));
                           }
                           await importClaudeDesktopMcp(parsed as { mcpServers: Record<string, unknown> }, {
                             agentScoped: true,
@@ -493,7 +493,7 @@ export function TabIntegracoes() {
                           await removeCustomMcpServer(selectedIntegration.key, {
                             agentScoped: selectedIntegration.customScope === "agent",
                           });
-                          showToast(tl("Servidor MCP removido."), "success");
+                          showToast(t("generated.controlPlane.servidor_mcp_removido_467623d7"), "success");
                           selectIntegration(null);
                         }
                       : undefined
@@ -512,7 +512,7 @@ export function TabIntegracoes() {
                 transition={{ duration: 0.28, ease: EASE_OUT as unknown as [number, number, number, number] }}
               >
                 <p className="text-xs text-[var(--text-quaternary)] mb-3">
-                  {tl("Integracoes nativas estao ativas por padrao. Aqui voce gerencia integracoes adicionais.")}
+                  {t("generated.controlPlane.integracoes_nativas_estao_ativas_por_padrao__8b4de9ac")}
                 </p>
 
                 <div className="mb-4 flex items-center gap-2">
@@ -522,7 +522,7 @@ export function TabIntegracoes() {
                       type="text"
                       value={integrationSearch}
                       onChange={(e) => setIntegrationSearch(e.target.value)}
-                      placeholder={tl("Buscar integracoes...")}
+                      placeholder={t("generated.controlPlane.buscar_integracoes_bd87b9fd")}
                       className="pl-9"
                     />
                   </div>
@@ -532,7 +532,7 @@ export function TabIntegracoes() {
                     className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
                   >
                     <Plus size={13} />
-                    <span>{tl("Adicionar servidor")}</span>
+                    <span>{t("generated.controlPlane.adicionar_servidor_5ad219d2")}</span>
                   </button>
                   <button
                     type="button"
@@ -540,7 +540,7 @@ export function TabIntegracoes() {
                     className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
                   >
                     <FilePlus2 size={13} />
-                    <span>{tl("Importar JSON")}</span>
+                    <span>{t("generated.controlPlane.importar_json_283a7ae7")}</span>
                   </button>
                 </div>
 
@@ -565,11 +565,11 @@ export function TabIntegracoes() {
                   </div>
                 ) : integrationEntries.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-4 text-sm text-[var(--text-quaternary)]">
-                    {tl("Nenhuma integracao adicional disponivel.")}
+                    {t("generated.controlPlane.nenhuma_integracao_adicional_disponivel_7df27eb4")}
                   </div>
                 ) : groupedIntegrations.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-4 text-sm text-[var(--text-quaternary)]">
-                    {tl("Nenhuma integracao encontrada para esta busca.")}
+                    {t("generated.controlPlane.nenhuma_integracao_encontrada_para_esta_busc_6956d0ff")}
                   </div>
                 ) : (
                   <div className="flex flex-col gap-5">
@@ -665,19 +665,19 @@ export function TabIntegracoes() {
         agentLabel={state.displayName || agentId}
         onSubmitForm={async ({ scope, payload }) => {
           const result = await addCustomMcpServer(payload, { agentScoped: scope === "agent" });
-          showToast(tl("Servidor MCP adicionado."), "success");
+          showToast(t("generated.controlPlane.servidor_mcp_adicionado_66b5c0cd"), "success");
           return result;
         }}
         onSubmitImport={async ({ scope, raw }) => {
           const result = await importClaudeDesktopMcp(raw, { agentScoped: scope === "agent" });
           if (result.errors.length > 0) {
             showToast(
-              tl("{{count}} servidor(es) com erro durante import.", { count: result.errors.length }),
+              t("generated.controlPlane.count_servidor_es_com_erro_durante_import_0dba4e69", { count: result.errors.length }),
               "warning",
             );
           } else if (result.created.length || result.updated.length) {
             showToast(
-              tl("Importação concluída: {{count}} servidor(es).", {
+              t("generated.controlPlane.importacao_concluida_count_servidor_es_7173a702", {
                 count: result.created.length + result.updated.length,
               }),
               "success",

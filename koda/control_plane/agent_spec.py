@@ -199,6 +199,15 @@ def _trimmed(value: Any) -> str:
     return str(value or "").strip()
 
 
+def _is_local_whispercpp_model_reference(function_id: str, provider_id: str, model_id: str) -> bool:
+    if function_id != "transcription" or provider_id != "whispercpp":
+        return False
+    normalized = _trimmed(model_id)
+    if not normalized or normalized == "whisper-cpp-local":
+        return False
+    return normalized.endswith(".bin") or "/" in normalized or "\\" in normalized
+
+
 def _slugify_identifier(value: Any) -> str:
     text = _trimmed(value).lower()
     if not text:
@@ -264,7 +273,7 @@ def normalize_skill_policy(value: Any) -> dict[str, Any]:
     skill_budget_pct = _as_float(raw.get("skill_budget_pct"))
     if skill_budget_pct is not None and skill_budget_pct > 0:
         normalized["skill_budget_pct"] = skill_budget_pct
-    for key in ("enabled_skills", "disabled_skills"):
+    for key in ("enabled_skills", "disabled_skills", "enabled_skill_packages"):
         items = normalize_string_list(raw.get(key))
         if items:
             normalized[key] = items
@@ -409,7 +418,17 @@ def render_markdown_documents_from_agent_spec(agent_spec: dict[str, Any]) -> dic
         "identity_md": _render_section(
             "Mission Profile",
             mission_profile,
-            order=("mission", "role", "audience", "primary_outcomes", "kpis", "responsibility_limits"),
+            order=(
+                "mission",
+                "role",
+                "audience",
+                "primary_outcomes",
+                "kpis",
+                "responsibility_limits",
+                "domains",
+                "delegate_when",
+                "do_not_delegate",
+            ),
         )
         if mission_profile
         else "",
@@ -528,9 +547,17 @@ def iter_agent_prompt_blocks(documents: dict[str, Any]) -> list[tuple[str, str, 
     return blocks
 
 
-def compose_agent_prompt(documents: dict[str, Any]) -> str:
+def compose_agent_prompt(documents: dict[str, Any], *, squad_context: str | None = None) -> str:
     """Compose the published agent-local contract prompt from markdown layers."""
-    blocks = [f"<{tag}>\n{content}\n</{tag}>" for _, tag, content in iter_agent_prompt_blocks(documents)]
+    blocks: list[str] = []
+    inserted_squad_context = False
+    for kind, tag, content in iter_agent_prompt_blocks(documents):
+        if squad_context and not inserted_squad_context and kind == "rules_md":
+            blocks.append(squad_context.strip())
+            inserted_squad_context = True
+        blocks.append(f"<{tag}>\n{content}\n</{tag}>")
+    if squad_context and not inserted_squad_context:
+        blocks.append(squad_context.strip())
     if not blocks:
         return ""
 
@@ -848,6 +875,36 @@ def normalize_tool_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     return _compact_mapping(raw)
 
 
+_DELEGATION_MODES = {"auto", "always_self", "always_delegate"}
+
+
+def normalize_delegation_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
+    raw = dict(_safe_json_object(policy))
+    if not raw:
+        return {}
+    mode = _trimmed(raw.get("mode")).lower()
+    if mode in _DELEGATION_MODES:
+        raw["mode"] = mode
+    elif mode:
+        raw.pop("mode", None)
+    prefer_self = normalize_string_list(raw.get("prefer_self_for"))
+    if prefer_self:
+        raw["prefer_self_for"] = prefer_self
+    else:
+        raw.pop("prefer_self_for", None)
+    escalate_to = _trimmed(raw.get("escalate_to"))
+    if escalate_to:
+        raw["escalate_to"] = escalate_to
+    else:
+        raw.pop("escalate_to", None)
+    max_self = _as_float(raw.get("max_self_attempts"))
+    if max_self is not None and max_self >= 0:
+        raw["max_self_attempts"] = int(max_self)
+    else:
+        raw.pop("max_self_attempts", None)
+    return _compact_mapping(raw)
+
+
 def normalize_autonomy_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     raw = dict(_safe_json_object(policy))
     if not raw:
@@ -1016,6 +1073,7 @@ def normalize_agent_spec(agent_spec: dict[str, Any]) -> dict[str, Any]:
         "memory_policy": normalize_memory_policy(_safe_json_object(agent_spec.get("memory_policy"))),
         "knowledge_policy": normalize_knowledge_policy(_safe_json_object(agent_spec.get("knowledge_policy"))),
         "autonomy_policy": normalize_autonomy_policy(_safe_json_object(agent_spec.get("autonomy_policy"))),
+        "delegation_policy": normalize_delegation_policy(_safe_json_object(agent_spec.get("delegation_policy"))),
         "execution_policy": normalize_execution_policy(_safe_json_object(agent_spec.get("execution_policy"))),
         "resource_access_policy": normalize_resource_access_policy(
             _safe_json_object(agent_spec.get("resource_access_policy"))
@@ -1229,7 +1287,11 @@ def validate_agent_spec(
                 (str(item.get("provider_id")).lower(), _trimmed(item.get("model_id")))
                 for item in function_model_options.get(function_id, [])
             }
-            if known_options and (provider_id, model_id) not in known_options:
+            if (
+                known_options
+                and (provider_id, model_id) not in known_options
+                and not _is_local_whispercpp_model_reference(function_id, provider_id, model_id)
+            ):
                 errors.append(
                     "model_policy.functional_defaults."
                     f"{function_id} references unknown model '{model_id}' "

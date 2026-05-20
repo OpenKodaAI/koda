@@ -153,10 +153,25 @@ def run_doctor(
         except Exception as exc:  # pragma: no cover - exercised via failure payload expectations
             checks.append({"name": "provider_verification", "ok": False, "provider_id": provider_id, "error": str(exc)})
 
+    sandbox_doctor = build_sandbox_doctor(env)
+    checks.append(
+        {
+            "name": "sandbox_doctor",
+            "ok": sandbox_doctor.get("status") in {"passed", "degraded"},
+            "status": sandbox_doctor.get("status"),
+            "failed_checks": [
+                item.get("id")
+                for item in sandbox_doctor.get("checks", [])
+                if isinstance(item, dict) and item.get("status") == "failed"
+            ],
+        }
+    )
+
     ok = all(bool(item.get("ok")) for item in checks)
     return {
         "ok": ok,
         "checks": checks,
+        "sandbox_doctor": sandbox_doctor,
         "base_url": base_url,
         "dashboard_url": dashboard_url,
         "dashboard_setup_url": f"{dashboard_url.rstrip('/')}/setup",
@@ -314,6 +329,31 @@ def os_access(path: Path, *, write: bool) -> bool:
         return _os.access(str(path), mode)
     except OSError:
         return False
+
+
+def build_sandbox_doctor(env: dict[str, str]) -> dict[str, Any]:
+    try:
+        from koda.services.sandbox_doctor import build_cli_sandbox_doctor_payload
+
+        return build_cli_sandbox_doctor_payload(env)
+    except Exception as exc:  # pragma: no cover - defensive for packaged installs
+        return {
+            "doctor_version": "sandbox_doctor.v1",
+            "schema_version": "sandbox_doctor.v1",
+            "status": "unavailable",
+            "checks": [
+                {
+                    "id": "sandbox_doctor_unavailable",
+                    "scope": "shell",
+                    "title": "Sandbox doctor",
+                    "severity": "warning",
+                    "status": "unavailable",
+                    "message": str(exc),
+                    "user_action": "Run doctor from a complete Koda install with Python package imports available.",
+                }
+            ],
+            "degraded_components": ["sandbox"],
+        }
 
 
 def _build_parser() -> argparse.ArgumentParser:

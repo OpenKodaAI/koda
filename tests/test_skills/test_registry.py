@@ -69,7 +69,8 @@ def test_build_registry_uses_only_custom_skills() -> None:
                 "aliases": ["only"],
                 "content": "# Agent Only",
             }
-        ]
+        ],
+        {"enabled_skills": ["agent-only"]},
     )
 
     assert sorted(registry.get_all()) == ["agent-only"]
@@ -83,7 +84,8 @@ def test_build_registry_ignores_disabled_and_empty_skills() -> None:
             {"id": "enabled", "name": "Enabled", "content": "body"},
             {"id": "disabled", "name": "Disabled", "content": "body", "enabled": False},
             {"id": "empty", "name": "Empty", "content": ""},
-        ]
+        ],
+        {"enabled_skills": ["enabled", "disabled", "empty"]},
     )
 
     assert sorted(registry.get_all()) == ["enabled"]
@@ -99,6 +101,36 @@ def test_build_registry_applies_skill_policy() -> None:
     )
 
     assert sorted(registry.get_all()) == ["allowed"]
+
+
+def test_build_registry_requires_package_allowlist_for_package_skills() -> None:
+    registry = build_skill_registry_from_custom_skills(
+        [
+            {
+                "id": "pkg-skill",
+                "name": "Package Skill",
+                "content": "body",
+                "source_package_id": "safe_pack",
+            },
+        ],
+        {"enabled_skills": ["pkg-skill"], "enabled_skill_packages": []},
+    )
+
+    assert registry.get_all() == {}
+
+    registry = build_skill_registry_from_custom_skills(
+        [
+            {
+                "id": "pkg-skill",
+                "name": "Package Skill",
+                "content": "body",
+                "source_package_id": "safe_pack",
+            },
+        ],
+        {"enabled_skills": ["pkg-skill"], "enabled_skill_packages": ["safe_pack"]},
+    )
+
+    assert sorted(registry.get_all()) == ["pkg-skill"]
 
 
 def test_build_registry_policy_disabled_returns_empty() -> None:

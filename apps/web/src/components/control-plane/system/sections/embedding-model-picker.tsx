@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { translate } from "@/lib/i18n";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -90,12 +91,6 @@ async function fetchEmbeddingCatalog(): Promise<CatalogPayload> {
       (parsed && typeof parsed === "object" && "error" in (parsed as Record<string, unknown>)
         ? String((parsed as Record<string, unknown>).error || "")
         : "") || text.slice(0, 200);
-     
-    console.error("embedding catalog load failed", {
-      status: res.status,
-      contentType: res.headers.get("content-type"),
-      body: text.slice(0, 500),
-    });
     throw new Error(errorText || `HTTP ${res.status}`);
   }
   if (
@@ -103,15 +98,13 @@ async function fetchEmbeddingCatalog(): Promise<CatalogPayload> {
     typeof parsed !== "object" ||
     !Array.isArray((parsed as Record<string, unknown>).items)
   ) {
-     
-    console.error("embedding catalog malformed payload", { body: text.slice(0, 500) });
     throw new Error("embedding.catalog.malformed");
   }
   return parsed as CatalogPayload;
 }
 
 export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?: boolean }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const { showToast } = useToast();
   const { start, isActive } = useDownloadJob();
   const queryClient = useQueryClient();
@@ -152,14 +145,14 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
         providerId: "embedding",
         assetKey: model.id,
         startEndpoint: `/api/control-plane/providers/embedding/models/${model.id}/download`,
-        toastTitle: `${tl("Baixando")} ${model.title}`,
-        successMessage: tl("Modelo baixado e pronto para uso"),
+        toastTitle: `${t("generated.controlPlane.baixando_741a1547")} ${model.title}`,
+        successMessage: t("generated.controlPlane.modelo_baixado_e_pronto_para_uso_2f07b6f7"),
         onComplete: async () => {
           await queryClient.invalidateQueries({ queryKey: EMBEDDING_CATALOG_QUERY_KEY });
         },
       });
     },
-    [queryClient, start, tl],
+    [queryClient, start, t, tl],
   );
 
   const selectMutation = useAppMutation<CatalogPayload, EmbeddingModel>({
@@ -170,16 +163,16 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
       );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error || tl("Falha ao selecionar modelo"));
+        throw new Error(body.error || t("generated.controlPlane.falha_ao_selecionar_modelo_dc211fc9"));
       }
       return (await res.json()) as CatalogPayload;
     },
     onSuccess: (json, model) => {
       setCatalog(json);
-      showToast(`${tl("Modelo ativo")}: ${model.title}`, "success");
+      showToast(`${t("generated.controlPlane.modelo_ativo_61c3d51b")}: ${model.title}`, "success");
     },
     onError: (err) => {
-      showToast(err.message || tl("Falha ao selecionar modelo"), "error");
+      showToast(err.message || t("generated.controlPlane.falha_ao_selecionar_modelo_dc211fc9"), "error");
     },
     onSettled: () => setBusyId(null),
   });
@@ -192,16 +185,16 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
       );
       if (!res.ok) {
         const body = (await res.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error || tl("Falha ao apagar modelo"));
+        throw new Error(body.error || t("generated.controlPlane.falha_ao_apagar_modelo_4ca369e2"));
       }
       return (await res.json()) as CatalogPayload;
     },
     onSuccess: (json, model) => {
       setCatalog(json);
-      showToast(`${tl("Modelo apagado")}: ${model.title}`, "success");
+      showToast(`${t("generated.controlPlane.modelo_apagado_281c09ee")}: ${model.title}`, "success");
     },
     onError: (err) => {
-      showToast(err.message || tl("Falha ao apagar modelo"), "error");
+      showToast(err.message || t("generated.controlPlane.falha_ao_apagar_modelo_4ca369e2"), "error");
     },
     onSettled: () => setBusyId(null),
   });
@@ -235,11 +228,11 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
   if (catalogError && !catalog) {
     const message =
       catalogError.message === "embedding.catalog.malformed"
-        ? tl("Resposta inesperada do catálogo")
-        : catalogError.message || tl("Falha ao carregar catálogo");
+        ? t("generated.controlPlane.resposta_inesperada_do_catalogo_1b4e7c37")
+        : catalogError.message || t("generated.controlPlane.falha_ao_carregar_catalogo_a8ca4b8a");
     return (
       <div className="rounded-xl border border-[color:var(--tone-warning-border)] bg-[color:var(--tone-warning-bg)] p-4 text-sm text-[color:var(--tone-warning-text)]">
-        <div className="font-medium mb-1">{tl("Não foi possível carregar o catálogo")}</div>
+        <div className="font-medium mb-1">{t("generated.controlPlane.nao_foi_possivel_carregar_o_catalogo_5d80e428")}</div>
         <div className="text-[12px] text-[color:var(--text-secondary)]">{message}</div>
         <button
           type="button"
@@ -248,7 +241,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
             void refetch();
           }}
         >
-          {tl("Tentar novamente")}
+          {t("generated.controlPlane.tentar_novamente_14dc7f3f")}
         </button>
       </div>
     );
@@ -257,7 +250,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
   if (!catalog || catalogLoading) {
     return (
       <div className="rounded-xl border border-[color:var(--divider-hair)] p-4 text-sm text-[var(--text-tertiary)]">
-        {tl("Carregando catálogo de modelos...")}
+        {t("generated.controlPlane.carregando_catalogo_de_modelos_6c45df79")}
       </div>
     );
   }
@@ -281,7 +274,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
           <AlertTriangle size={14} strokeWidth={1.75} className="mt-[2px] shrink-0" />
           <div className="flex flex-col gap-0.5">
             <span className="font-medium">
-              {tl("Memória ativada sem modelo de embedding instalado")}
+              {t("generated.controlPlane.memoria_ativada_sem_modelo_de_embedding_inst_ee8a3751")}
             </span>
             <span className="leading-snug text-[var(--text-secondary)]">
               {tl(
@@ -323,7 +316,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
                   {isActiveModel ? (
                     <span className="inline-flex shrink-0 items-center gap-1 rounded-pill bg-[color:var(--accent)]/15 px-1.5 py-0.5 text-[10px] font-medium text-[color:var(--accent)]">
                       <CheckCircle2 size={10} />
-                      {tl("Ativo")}
+                      {t("generated.controlPlane.ativo_70b78dfa")}
                     </span>
                   ) : null}
                 </div>
@@ -340,9 +333,12 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
                     </Button>
                   ) : null}
                   {showDownloading ? (
-                    <span className="inline-flex items-center gap-1 rounded-pill bg-[color:var(--panel-strong)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]">
+                    <span
+                      className="inline-flex h-5 min-w-7 items-center justify-center rounded-pill bg-[color:var(--panel-strong)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]"
+                      role="status"
+                      aria-label={t("generated.controlPlane.baixando_732b403f")}
+                    >
                       <Loader2 size={11} className="animate-spin" />
-                      {tl("Baixando...")}
                     </span>
                   ) : null}
                   {model.installed ? (
@@ -353,7 +349,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
                       onClick={() => handleSelect(model)}
                       data-testid={`embedding-select-${model.id}`}
                     >
-                      {isActiveModel ? tl("Em uso") : tl("Usar este")}
+                      {isActiveModel ? t("generated.controlPlane.em_uso_18b967aa") : t("generated.controlPlane.usar_este_b7a8b8ca")}
                     </Button>
                   ) : null}
                   {canDelete ? (
@@ -364,12 +360,12 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
                       onClick={() => handleDelete(model)}
                       data-testid={`embedding-delete-${model.id}`}
                       title={
-                        armed ? tl("Confirmar — clique novamente para apagar") : tl("Apagar modelo")
+                        armed ? t("generated.controlPlane.confirmar_clique_novamente_para_apagar_6fb78678") : t("generated.controlPlane.apagar_modelo_c94d0bbe")
                       }
-                      aria-label={tl("Apagar modelo")}
+                      aria-label={t("generated.controlPlane.apagar_modelo_c94d0bbe")}
                     >
                       <Trash2 size={13} />
-                      {armed ? tl("Confirmar") : null}
+                      {armed ? t("generated.controlPlane.confirmar_5aa769d9") : null}
                     </Button>
                   ) : null}
                 </div>
@@ -391,8 +387,8 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
                   {tl(HARDWARE_LABEL[model.hardware_hint] ?? model.hardware_hint)}
                 </span>
                 <span>
-                  {formatSize(model.size_mb)} · {model.dimension}d ·{" "}
-                  {model.multilingual ? tl("multi") : tl("EN")}
+                  {formatSize(model.size_mb)} · {model.dimension}{translate("generated.controlPlane.d_ca9b7af8")}{" "}
+                  {model.multilingual ? t("generated.controlPlane.multi_177b02bb") : t("generated.controlPlane.en_57756381")}
                 </span>
               </footer>
             </article>

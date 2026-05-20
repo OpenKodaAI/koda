@@ -14,6 +14,7 @@ import {
   readDocumentCookie,
   safeLocalStorageGet,
   safeLocalStorageSetValue,
+  writeDocumentCookie,
 } from "@/lib/browser-storage";
 import { themePreferenceStorageCodec } from "@/lib/storage-codecs";
 import {
@@ -73,7 +74,9 @@ function readStoredThemePreference(fallback: ThemePreference): ThemePreference {
 
 function persistThemePreference(preference: ThemePreference) {
   safeLocalStorageSetValue(themePreferenceStorageCodec, preference);
-  document.cookie = `${themePreferenceStorageCodec.key}=${encodeURIComponent(preference)}; path=/; max-age=31536000; samesite=lax`;
+  writeDocumentCookie(
+    `${themePreferenceStorageCodec.key}=${encodeURIComponent(preference)}; path=/; max-age=31536000; samesite=lax`,
+  );
 }
 
 function getFallbackThemeContextValue(): ThemeContextValue {

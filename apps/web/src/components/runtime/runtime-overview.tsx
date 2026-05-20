@@ -1,20 +1,19 @@
 "use client";
 
 import Link from "next/link";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
-import { Activity, Bot as AgentIcon, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Activity } from "lucide-react";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
-import { AgentSigil } from "@/components/control-plane/shared/agent-sigil";
 import { useAgentCatalog } from "@/components/providers/agent-catalog-provider";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { resolveAgentSelection } from "@/lib/agent-selection";
 import { useRuntimeOverview } from "@/hooks/use-runtime-overview";
+import { useRuntimeRooms } from "@/hooks/use-runtime-rooms";
 import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
+import { translate } from "@/lib/i18n";
 import {
-  buildRuntimeRoomRows,
   getRuntimeRowSummary,
-  matchesRuntimeRoomFilter,
   type RuntimeRoomFilter,
   type RuntimeRoomRow,
 } from "@/lib/runtime-overview-model";
@@ -26,8 +25,15 @@ import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import {
   PageMetricStrip,
   PageMetricStripItem,
+  PageSearchField,
 } from "@/components/ui/page-primitives";
+import { InfiniteListFooter } from "@/components/ui/infinite-list-footer";
 import { useToast } from "@/hooks/use-toast";
+import {
+  replaceUrlSearchParamsSilently,
+  useUrlSyncedSearch,
+} from "@/hooks/use-url-synced-search";
+import { mergePaginatedItems } from "@/lib/pagination";
 import { cn, formatRelativeTime, truncateText } from "@/lib/utils";
 
 function toneToStatusDot(tone: SemanticTone): StatusDotTone {
@@ -35,6 +41,41 @@ function toneToStatusDot(tone: SemanticTone): StatusDotTone {
     return tone;
   }
   return "neutral";
+}
+
+function normalizeRuntimeNotice(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "");
+}
+
+function isSilentRuntimeAvailabilityNotice(message: string) {
+  const normalized = normalizeRuntimeNotice(message);
+  if (!normalized.startsWith("runtime")) return false;
+  return (
+    normalized.includes("unavailable") ||
+    normalized.includes("indisponivel") ||
+    normalized.includes("no disponible") ||
+    normalized.includes("disabled") ||
+    normalized.includes("desabilitado") ||
+    normalized.includes("deshabilitado") ||
+    normalized.includes("degraded") ||
+    normalized.includes("degradado")
+  );
+}
+
+function logSilentRuntimeNotice(
+  kind: "error" | "incident",
+  detail: Record<string, string | null | undefined>,
+) {
+  console.info("runtime_overview_silent_notice", { kind, ...detail });
+}
+
+function readCurrentAgentParams() {
+  if (typeof window === "undefined") return [];
+  return new URL(window.location.href).searchParams.getAll("agent").filter(Boolean);
 }
 
 function RuntimeOverviewSkeleton() {
@@ -56,163 +97,89 @@ function RuntimeOverviewSkeleton() {
         </div>
       </div>
 
-      <div className="metric-strip">
+      <PageMetricStrip>
         {Array.from({ length: 3 }).map((_, index) => (
           <div key={index} className="metric-strip__item">
             <div className="skeleton h-3 w-20 rounded" />
             <div className="skeleton mt-2 h-6 w-16 rounded" />
           </div>
         ))}
-      </div>
+      </PageMetricStrip>
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_320px]">
+      <div>
         <section className="min-h-[360px] space-y-2">
           <div className="skeleton h-4 w-32 rounded" />
           {Array.from({ length: 6 }).map((_, index) => (
             <div key={index} className="skeleton h-10 w-full rounded" />
           ))}
         </section>
-        <aside className="min-h-[360px] space-y-2">
-          <div className="skeleton h-4 w-16 rounded" />
-          {Array.from({ length: 4 }).map((_, index) => (
-            <div key={index} className="skeleton h-10 w-full rounded" />
-          ))}
-        </aside>
       </div>
     </div>
   );
 }
 
-function LiveRow({ row, index }: { row: RuntimeRoomRow; index: number }) {
+const liveTableColumns =
+  "grid-cols-[154px_72px_116px_92px_minmax(360px,1fr)_116px]";
+const liveTablePinnedColumn =
+  "sticky right-0 z-[1] -mr-3 flex h-full items-center justify-end border-l border-[var(--divider-hair)] bg-[var(--panel)] pl-3 pr-3";
+
+function LiveRow({ row }: { row: RuntimeRoomRow }) {
   const { t } = useAppI18n();
   const agentColor = getAgentColor(row.agentId);
   const summary = truncateText(getRuntimeRowSummary(row), 120);
   const phaseTone = toneToStatusDot(getRuntimeTone(row.phase));
   const phaseLabel = getRuntimeLabel(row.phase);
   const isLive = phaseTone === "info" || phaseTone === "warning";
+  const sourceLabel =
+    row.source === "environment"
+      ? t("runtime.overview.sources.environment", undefined)
+      : t("runtime.overview.sources.queue", undefined);
 
   return (
     <Link
       href={`/runtime/${row.agentId}/tasks/${row.taskId}`}
       className={cn(
-        "group grid w-full gap-x-3 gap-y-1.5 px-3 py-3 text-left transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "grid-cols-[auto_1fr_auto] items-center sm:grid-cols-[auto_auto_auto_1fr_auto]",
+        "group grid w-full items-center gap-4 border-b border-[color:var(--divider-hair)] px-3 py-2.5 text-left last:border-b-0",
+        "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
         "hover:bg-[var(--hover-tint)] focus-visible:bg-[var(--hover-tint)]",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] rounded-[var(--radius-panel-sm)]",
-        index > 0 && "border-t border-[color:var(--divider-hair)]",
+        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] focus-visible:ring-inset",
+        liveTableColumns,
       )}
     >
-      <StatusDot color={agentColor} />
-      <span className="hidden font-mono text-[0.75rem] text-[var(--text-secondary)] sm:inline">
-        {getAgentLabel(row.agentId)}
+      <span className="flex min-w-0 items-center gap-2">
+        <StatusDot color={agentColor} />
+        <span className="truncate font-mono text-[0.75rem] text-[var(--text-secondary)]">
+          {getAgentLabel(row.agentId)}
+        </span>
       </span>
-      <span className="hidden font-mono text-[0.75rem] text-[var(--text-quaternary)] sm:inline">
+
+      <span className="font-mono text-[0.75rem] tabular-nums text-[var(--text-quaternary)]">
         #{row.taskId}
       </span>
+
       <span className="flex min-w-0 items-center gap-2">
-        <span className="font-mono text-[0.75rem] text-[var(--text-secondary)] sm:hidden">
-          {getAgentLabel(row.agentId)} #{row.taskId}
-        </span>
         <StatusDot tone={phaseTone} pulse={isLive} />
-        <span className="text-[0.75rem] text-[var(--text-tertiary)]">{phaseLabel}</span>
-        <span className="mx-1 text-[var(--text-quaternary)]">·</span>
-        <span className="truncate text-[0.8125rem] text-[var(--text-secondary)]">{summary}</span>
+        <span className="truncate text-[0.75rem] text-[var(--text-tertiary)]">{phaseLabel}</span>
       </span>
-      <span className="whitespace-nowrap text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+
+      <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+        {sourceLabel}
+      </span>
+
+      <span className="truncate text-[0.8125rem] text-[var(--text-secondary)]">
+        {summary}
+      </span>
+
+      <span
+        className={cn(
+          liveTablePinnedColumn,
+          "whitespace-nowrap text-right font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]",
+          "group-hover:bg-[var(--hover-tint)] group-focus-visible:bg-[var(--hover-tint)]",
+        )}
+      >
         {row.updatedAt ? formatRelativeTime(row.updatedAt) : t("common.now")}
       </span>
     </Link>
-  );
-}
-
-function RuntimeLayerPill({
-  label,
-  status,
-}: {
-  label: string;
-  status: string;
-}) {
-  const tone: StatusDotTone =
-    status === "available"
-      ? "success"
-      : status === "partial" || status === "unknown"
-        ? "warning"
-        : status === "unavailable" || status === "offline" || status === "disabled"
-          ? "danger"
-          : toneToStatusDot(getRuntimeTone(status));
-  return (
-    <span
-      className="inline-flex min-w-0 items-center gap-1.5 rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-2 py-1 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]"
-      title={`${label}: ${getRuntimeLabel(status)}`}
-    >
-      <StatusDot tone={tone} />
-      <span>{label}</span>
-    </span>
-  );
-}
-
-function AgentRailRow({
-  overview,
-  live,
-  index,
-}: {
-  overview: RuntimeOverview;
-  live: boolean;
-  index: number;
-}) {
-  const { t } = useAppI18n();
-  const activeCount = overview.snapshot?.active_environments ?? 0;
-  const attentionCount =
-    (overview.snapshot?.recovery_backlog ?? 0) +
-    (overview.snapshot?.cleanup_backlog ?? 0) +
-    overview.incidents.length;
-  const retainedCount = overview.snapshot?.retained_environments ?? 0;
-  const runtimeTone = toneToStatusDot(
-    live ? "info" : getRuntimeTone(overview.availability.runtime),
-  );
-  const label = live ? t("runtime.overview.live") : getRuntimeLabel(overview.availability.runtime);
-  const layers = [
-    { label: "RT", status: overview.availability.runtime },
-    { label: "DB", status: overview.availability.database },
-    { label: "BR", status: overview.availability.browser },
-    { label: "AT", status: overview.availability.attach },
-  ];
-
-  return (
-    <div
-      className={cn(
-        "grid items-start gap-3 px-3 py-3",
-        "grid-cols-[auto_1fr]",
-        index > 0 && "border-t border-[color:var(--divider-hair)]",
-      )}
-    >
-      <AgentSigil
-        agentId={overview.agentId}
-        label={overview.agentLabel}
-        color={overview.agentColor}
-        status={live ? "running" : undefined}
-        size="xs"
-      />
-      <div className="flex min-w-0 items-center gap-2">
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
-              {overview.agentLabel}
-            </span>
-            <StatusDot tone={runtimeTone} pulse={live} />
-            <span className="text-[0.6875rem] text-[var(--text-tertiary)]">{label}</span>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {layers.map((item) => (
-              <RuntimeLayerPill key={item.label} label={item.label} status={item.status} />
-            ))}
-          </div>
-        </div>
-        <span className="shrink-0 font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
-          {activeCount}·{retainedCount}·{attentionCount}
-        </span>
-      </div>
-    </div>
   );
 }
 
@@ -225,17 +192,56 @@ export function RuntimeOverviewScreen({
   const { showToast } = useToast();
   const { agents } = useAgentCatalog();
   const lastErrorToastRef = useRef<string | null>(null);
+  const lastRuntimeRoomsRefreshRef = useRef<number | null>(null);
   const incidentToastKeysRef = useRef<Set<string>>(new Set());
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>(initialBotIds ?? []);
   const [statusFilter, setStatusFilter] = useState<RuntimeRoomFilter>("all");
-  const [search, setSearch] = useState("");
-  const deferredSearch = useDeferredValue(search);
+  const searchState = useUrlSyncedSearch({ debounceMs: 180 });
+  const search = searchState.value;
+  const setSearch = searchState.setValue;
+  const debouncedSearch = searchState.debouncedValue;
   const availableBotIds = useMemo(() => agents.map((agent) => agent.id), [agents]);
   const visibleBotIds = useMemo(
     () => resolveAgentSelection(selectedBotIds, availableBotIds),
     [availableBotIds, selectedBotIds],
   );
-  const { overviews, loading, connected, error } = useRuntimeOverview(selectedBotIds);
+  const {
+    overviews,
+    loading,
+    connected,
+    error,
+    lastUpdated,
+  } = useRuntimeOverview(selectedBotIds);
+  const runtimeRoomsQuery = useRuntimeRooms({
+    agentIds: visibleBotIds,
+    status: statusFilter,
+    search: debouncedSearch,
+  });
+  const refreshRuntimeRoomsFirstPage = runtimeRoomsQuery.refreshFirstPage;
+
+  useEffect(() => {
+    const handlePopState = () => setSelectedBotIds(readCurrentAgentParams());
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  useEffect(() => {
+    replaceUrlSearchParamsSilently((params) => {
+      params.delete("agent");
+      selectedBotIds.forEach((agentId) => params.append("agent", agentId));
+    });
+  }, [selectedBotIds]);
+
+  useEffect(() => {
+    if (!lastUpdated) return;
+    if (lastRuntimeRoomsRefreshRef.current === null) {
+      lastRuntimeRoomsRefreshRef.current = lastUpdated;
+      return;
+    }
+    if (lastRuntimeRoomsRefreshRef.current === lastUpdated) return;
+    lastRuntimeRoomsRefreshRef.current = lastUpdated;
+    void refreshRuntimeRoomsFirstPage().catch(() => undefined);
+  }, [lastUpdated, refreshRuntimeRoomsFirstPage]);
 
   const selectedOverviews = useMemo(() => {
     return visibleBotIds
@@ -243,27 +249,18 @@ export function RuntimeOverviewScreen({
       .filter((item): item is RuntimeOverview => Boolean(item));
   }, [overviews, visibleBotIds]);
 
-  const roomRows = useMemo(() => {
-    const query = deferredSearch.trim().toLowerCase();
-    return buildRuntimeRoomRows(selectedOverviews).filter((row) => {
-      if (!matchesRuntimeRoomFilter(row, statusFilter)) return false;
-      if (!query) return true;
-
-      const haystack = [
-        row.queryText,
-        row.queue?.query_text,
-        row.environment?.branch_name,
-        row.environment?.workspace_path,
-        getAgentLabel(row.agentId),
-        row.phase,
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-
-      return haystack.includes(query);
-    });
-  }, [deferredSearch, selectedOverviews, statusFilter]);
+  const roomRows = useMemo(
+    () =>
+      mergePaginatedItems(
+        runtimeRoomsQuery.data?.pages,
+        (row) => `${row.agentId}:${row.taskId}:${row.source}`,
+      ),
+    [runtimeRoomsQuery.data],
+  );
+  const loadMoreRuntimeRooms = useCallback(() => {
+    if (!runtimeRoomsQuery.hasNextPage || runtimeRoomsQuery.isFetchingNextPage) return;
+    void runtimeRoomsQuery.fetchNextPage();
+  }, [runtimeRoomsQuery]);
 
   const totals = useMemo(
     () => ({
@@ -305,11 +302,13 @@ export function RuntimeOverviewScreen({
       ["available", "partial"].includes(overview.availability.runtime),
   ).length;
   const attentionCount = totals.recovery + totals.cleanup + incidentEntries.length;
-  const visibleRows = roomRows.slice(0, 10);
-
   useEffect(() => {
     if (!error || lastErrorToastRef.current === error) return;
     lastErrorToastRef.current = error;
+    if (isSilentRuntimeAvailabilityNotice(error)) {
+      logSilentRuntimeNotice("error", { message: error });
+      return;
+    }
     showToast(error, "error", { id: "runtime-overview:error" });
   }, [error, showToast]);
 
@@ -319,6 +318,14 @@ export function RuntimeOverviewScreen({
       const key = `${entry.agentId}:${entry.incident}`;
       nextKeys.add(key);
       if (incidentToastKeysRef.current.has(key)) continue;
+      if (isSilentRuntimeAvailabilityNotice(entry.incident)) {
+        logSilentRuntimeNotice("incident", {
+          agentId: entry.agentId,
+          agentLabel: entry.agentLabel,
+          message: entry.incident,
+        });
+        continue;
+      }
       showToast(`${entry.agentLabel} · ${entry.incident}`, "warning", {
         id: `runtime-overview:incident:${key}`,
       });
@@ -345,6 +352,11 @@ export function RuntimeOverviewScreen({
     { id: "retained", label: t("runtime.overview.filters.retained") },
     { id: "recovery", label: t("runtime.overview.filters.recovery") },
   ];
+  const searchLoading =
+    searchState.isSearching ||
+    (runtimeRoomsQuery.isFetching &&
+      !runtimeRoomsQuery.isFetchingNextPage &&
+      search.trim() === debouncedSearch);
 
   return (
     <div
@@ -360,7 +372,7 @@ export function RuntimeOverviewScreen({
         <div className="min-w-0">
           <p className="eyebrow">{t("runtime.overview.title")}</p>
           <h1 className="m-0 mt-1 text-[1.375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
-            {t("runtime.controlCard.title", { defaultValue: "Runtime operations" })}
+            {t("runtime.controlCard.title", undefined)}
           </h1>
         </div>
 
@@ -376,18 +388,17 @@ export function RuntimeOverviewScreen({
             />
           </div>
 
-          <label
-            className="inline-flex h-9 w-full items-center gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-primary)] transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] focus-within:border-[var(--accent)] sm:w-auto"
-            {...tourAnchor("runtime.search")}
-          >
-            <Search className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />
-            <input
+          <div className="w-full sm:w-auto" {...tourAnchor("runtime.search")}>
+            <PageSearchField
+              className="w-full sm:w-64 xl:w-64"
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={setSearch}
               placeholder={t("runtime.overview.searchPlaceholder")}
-              className="w-full bg-transparent text-[0.8125rem] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)] sm:w-44"
+              loading={searchLoading}
+              loadingLabel={t("runtime.overview.searching", undefined)}
+              clearLabel={t("common.clear", undefined)}
             />
-          </label>
+          </div>
 
           <div {...tourAnchor("runtime.filters")}>
             <SoftTabs
@@ -429,70 +440,82 @@ export function RuntimeOverviewScreen({
       </div>
 
       {/* Main grid */}
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.6fr)_320px]">
-        <section>
-          <header className="mb-2 flex items-baseline justify-between px-3">
-            <h3 className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
-              {t("runtime.overview.liveExecutions")}
-            </h3>
-            <span className="eyebrow">
-              {visibleRows.length} / {roomRows.length}
+      <div>
+        <section className="overflow-hidden rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel)]">
+          <header className="flex items-baseline justify-between gap-3 border-b border-[var(--divider-hair)] px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="eyebrow truncate">{translate("generated.runtime.runtime_5359aeee")}</p>
+              <h3 className="m-0 mt-1 truncate text-[var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+                {t("runtime.overview.liveExecutions")}
+              </h3>
+            </div>
+            <span className="shrink-0 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+              {roomRows.length}
             </span>
           </header>
 
-          <div
-            className="flex flex-col"
-            data-testid="runtime-live-list"
-          >
-            {visibleRows.length === 0 ? (
-              <div
-                className="flex flex-col items-center gap-2 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]"
-                {...tourAnchor("runtime.empty-live")}
-              >
-                <Activity className="h-4 w-4 text-[var(--text-quaternary)]" />
-                <p className="m-0">{t("runtime.overview.noExecutionsMatch")}</p>
+          <div data-testid="runtime-live-list">
+            <div className="max-h-[520px] min-h-[280px] overflow-auto overscroll-contain lg:max-h-[calc(100vh-24rem)]">
+              <div className="min-w-[910px]">
+                <div
+                  className={cn(
+                    "sticky top-0 z-10 grid items-center gap-4 border-b border-[var(--divider-hair)] bg-[var(--panel)] px-3 py-2",
+                    liveTableColumns,
+                  )}
+                >
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                    {t("runtime.overview.table.agent", undefined)}
+                  </span>
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                    {t("runtime.overview.table.task", undefined)}
+                  </span>
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                    {t("common.status")}
+                  </span>
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                    {t("runtime.overview.table.source", undefined)}
+                  </span>
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                    {t("runtime.overview.table.summary", undefined)}
+                  </span>
+                  <span
+                    className={cn(
+                      liveTablePinnedColumn,
+                      "z-20 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]",
+                    )}
+                  >
+                    {t("runtime.overview.table.updated", undefined)}
+                  </span>
+                </div>
+
+                <div>
+                  {roomRows.length === 0 ? (
+                    <div
+                      className="flex min-h-[240px] flex-col items-center justify-center gap-2 px-3 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]"
+                      {...tourAnchor("runtime.empty-live")}
+                    >
+                      <Activity className="h-4 w-4 text-[var(--text-quaternary)]" />
+                      <p className="m-0">{t("runtime.overview.noExecutionsMatch")}</p>
+                    </div>
+                  ) : (
+                    roomRows.map((row) => (
+                      <LiveRow
+                        key={`${row.agentId}-${row.taskId}-${row.source}`}
+                        row={row}
+                      />
+                    ))
+                  )}
+                  <InfiniteListFooter
+                    hasMore={Boolean(runtimeRoomsQuery.hasNextPage)}
+                    loading={runtimeRoomsQuery.isFetchingNextPage}
+                    onLoadMore={loadMoreRuntimeRooms}
+                    label={t("common.loadMore", undefined)}
+                  />
+                </div>
               </div>
-            ) : (
-              visibleRows.map((row, index) => (
-                <LiveRow
-                  key={`${row.agentId}-${row.taskId}-${row.source}`}
-                  row={row}
-                  index={index}
-                />
-              ))
-            )}
+            </div>
           </div>
         </section>
-
-        <aside>
-          <header className="mb-2 flex items-baseline justify-between px-3">
-            <h3 className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
-              {t("runtime.overview.agents")}
-            </h3>
-            <span className="eyebrow">{liveAgents}/{selectedOverviews.length || 0}</span>
-          </header>
-
-          <div className="flex flex-col">
-            {selectedOverviews.length === 0 ? (
-              <div
-                className="flex flex-col items-center gap-2 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]"
-                {...tourAnchor("runtime.empty-agents")}
-              >
-                <AgentIcon className="h-4 w-4 text-[var(--text-quaternary)]" />
-                <p className="m-0">{t("runtime.overview.noVisibleAgents")}</p>
-              </div>
-            ) : (
-              selectedOverviews.map((overview, index) => (
-                <AgentRailRow
-                  key={overview.agentId}
-                  overview={overview}
-                  live={Boolean(connected[overview.agentId])}
-                  index={index}
-                />
-              ))
-            )}
-          </div>
-        </aside>
       </div>
     </div>
   );

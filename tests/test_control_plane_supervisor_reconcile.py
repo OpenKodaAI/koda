@@ -216,6 +216,53 @@ async def test_reconcile_caches_health_url_for_dashboard() -> None:
 
 
 @pytest.mark.asyncio
+async def test_reconcile_skips_agent_when_publish_fails() -> None:
+    """A bad draft must not poison the whole reconcile cycle."""
+    manager = _FakeManager(
+        [
+            {"id": "BROKEN", "status": "active", "applied_version": None, "desired_version": None},
+            {"id": "HEALTHY", "status": "active", "applied_version": 1},
+        ]
+    )
+    manager.add_snapshot(_runtime_snapshot("HEALTHY", port=9100))
+
+    def publish_agent(agent_id: str) -> dict[str, Any]:
+        manager.publish_calls.append(agent_id)
+        if agent_id == "BROKEN":
+            raise ValueError("invalid draft")
+        return {"version": 1}
+
+    manager.publish_agent = publish_agent  # type: ignore[method-assign]
+
+    captured: dict[str, Any] = {}
+
+    async def fake_ensure(desired: list[AgentWorkerSpec]) -> EnsureOutcome:
+        captured["desired"] = desired
+        return EnsureOutcome(
+            current=(_running_status("HEALTHY"),),
+            spawned=1,
+            terminated=0,
+            restarted=0,
+            unchanged=0,
+        )
+
+    fake_link = SimpleNamespace(
+        start=AsyncMock(),
+        stop=AsyncMock(),
+        ensure_agent_workers=AsyncMock(side_effect=fake_ensure),
+        target="unix:///tmp/fake.sock",
+    )
+
+    supervisor = _make_supervisor(manager, fake_link)
+    await supervisor._reconcile_once()
+
+    assert manager.publish_calls == ["BROKEN"]
+    assert [s.agent_id for s in captured["desired"]] == ["HEALTHY"]
+    assert "HEALTHY" in supervisor._statuses
+    assert "BROKEN" not in supervisor._statuses
+
+
+@pytest.mark.asyncio
 async def test_reconcile_binds_worker_health_api_for_remote_kernel(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RUNTIME_EPHEMERAL_ROOT", "/var/lib/koda/runtime")
     monkeypatch.setenv("STATE_ROOT_DIR", "/var/lib/koda/state")
@@ -412,11 +459,14 @@ async def test_build_spec_forwards_safe_parent_env_and_overrides_runtime_env() -
     snapshot.process_env["PATH"] = "/snapshot/bin"  # snapshot tries to override
     snapshot.process_env["AGENT_ID"] = "AGENT_E"
     snapshot.process_env["POSTGRES_URL"] = "postgres://stale"
+    snapshot.process_env["INTER_AGENT_BUS_BACKEND"] = "memory"
 
     parent_env = {
         "PATH": "/usr/bin:/usr/local/bin",
         "HOME": "/workspace/koda",
         "POSTGRES_URL": "postgres://live",
+        "INTER_AGENT_BUS_BACKEND": "postgres",
+        "SQUAD_BUS_LISTEN_ENABLED": "false",
         "DANGEROUS_LEAK": "should-not-forward",
     }
     with patch.dict(os.environ, parent_env, clear=False):
@@ -430,6 +480,8 @@ async def test_build_spec_forwards_safe_parent_env_and_overrides_runtime_env() -
     assert env["AGENT_ID"] == "AGENT_E"
     # System-critical infra env is forced from parent regardless of snapshot.
     assert env["POSTGRES_URL"] == "postgres://live"
+    assert env["INTER_AGENT_BUS_BACKEND"] == "postgres"
+    assert env["SQUAD_BUS_LISTEN_ENABLED"] == "false"
     # Non-whitelisted host env never leaks.
     assert "DANGEROUS_LEAK" not in env
     # Boot guard so the worker boots in agent mode.

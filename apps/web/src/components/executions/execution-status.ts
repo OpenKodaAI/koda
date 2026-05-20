@@ -7,6 +7,8 @@ export const EXECUTION_STATUS_TONE: Record<TaskStatus, StatusDotTone> = {
   queued: "warning",
   running: "info",
   retrying: "retry",
+  stalled: "warning",
+  degraded: "warning",
   completed: "success",
   failed: "danger",
   paused: "warning",
@@ -58,5 +60,5 @@ export function executionStatusTone(status: string): StatusDotTone {
 }
 
 export function isRunningStatus(status: string): boolean {
-  return status === "running" || status === "retrying";
+  return status === "running" || status === "retrying" || status === "stalled";
 }

@@ -1,5 +1,6 @@
 "use client";
 
+import { translate } from "@/lib/i18n";
 /**
  * DynamicConstraintsPanel
  *
@@ -62,7 +63,7 @@ type FieldProps = {
 };
 
 function ListField({ label, description, value, placeholder, onChange }: FieldProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <label className="flex flex-col gap-1.5">
       <span className="text-xs font-medium text-[var(--text-secondary)]">{label}</span>
@@ -73,7 +74,7 @@ function ListField({ label, description, value, placeholder, onChange }: FieldPr
         type="text"
         value={value}
         onChange={(event) => onChange(parseConstraintList(event.target.value))}
-        placeholder={placeholder ?? tl("Separe por vírgulas")}
+        placeholder={placeholder ?? t("generated.controlPlane.separe_por_virgulas_e538ef88")}
         className="field-shell text-[var(--text-primary)]"
       />
     </label>
@@ -91,7 +92,7 @@ export function DynamicConstraintsPanel({
   grant,
   onPatch,
 }: DynamicConstraintsPanelProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   if (!constraints || constraints.length === 0) {
     return null;
@@ -104,25 +105,25 @@ export function DynamicConstraintsPanel({
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-4">
       <div className="flex flex-col gap-1">
-        <span className="eyebrow">{tl("Restrições de runtime")}</span>
+        <span className="eyebrow">{t("generated.controlPlane.restricoes_de_runtime_3814efcf")}</span>
         <span className="text-xs text-[var(--text-quaternary)]">
-          {tl("Apenas os limites aplicáveis a esta integração.")}
+          {t("generated.controlPlane.apenas_os_limites_aplicaveis_a_esta_integrac_21b79406")}
         </span>
       </div>
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         {constraints.includes("allowed_domains") ? (
           <ListField
-            label={tl("Domínios permitidos")}
+            label={t("generated.controlPlane.dominios_permitidos_af4880d0")}
             value={allowedDomains}
-            placeholder="googleapis.com, api.github.com"
+            placeholder={translate("generated.controlPlane.googleapis_com_api_github_com_1ca6d071")}
             onChange={(next) => onPatch({ allowed_domains: next })}
           />
         ) : null}
 
         {constraints.includes("allowed_paths") ? (
           <ListField
-            label={tl("Paths permitidos")}
+            label={t("generated.controlPlane.paths_permitidos_461b92bf")}
             value={allowedPaths}
             placeholder="/workspace/project, /tmp/reports"
             onChange={(next) => onPatch({ allowed_paths: next })}
@@ -131,9 +132,9 @@ export function DynamicConstraintsPanel({
 
         {constraints.includes("allowed_db_envs") ? (
           <ListField
-            label={tl("DB envs permitidos")}
+            label={t("generated.controlPlane.db_envs_permitidos_b0625b1b")}
             value={allowedDbEnvs}
-            placeholder="dev, staging, readonly"
+            placeholder={translate("generated.controlPlane.dev_staging_readonly_e4032aa5")}
             onChange={(next) => onPatch({ allowed_db_envs: next })}
           />
         ) : null}
@@ -142,10 +143,10 @@ export function DynamicConstraintsPanel({
           <div className="flex items-center justify-between rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] px-4 py-3">
             <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-[var(--text-secondary)]">
-                {tl("Permitir rede privada")}
+                {t("generated.controlPlane.permitir_rede_privada_52d496b0")}
               </span>
               <span className="text-[11px] text-[var(--text-quaternary)]">
-                {tl("Necessário para destinos internos, localhost e IPs privados.")}
+                {t("generated.controlPlane.necessario_para_destinos_internos_localhost__efa3ba7f")}
               </span>
             </div>
             <GrantSwitch
@@ -159,10 +160,10 @@ export function DynamicConstraintsPanel({
           <div className="flex items-center justify-between rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] px-4 py-3">
             <div className="flex flex-col gap-1">
               <span className="text-xs font-medium text-[var(--text-secondary)]">
-                {tl("Modo somente leitura")}
+                {t("generated.controlPlane.modo_somente_leitura_f27e8e0c")}
               </span>
               <span className="text-[11px] text-[var(--text-quaternary)]">
-                {tl("Bloqueia tools destrutivas no runtime mesmo que a conexão permita.")}
+                {t("generated.controlPlane.bloqueia_tools_destrutivas_no_runtime_mesmo__c011874f")}
               </span>
             </div>
             <GrantSwitch

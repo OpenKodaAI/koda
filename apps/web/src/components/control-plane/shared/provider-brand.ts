@@ -23,6 +23,7 @@ export const PROVIDER_LOGOS: Record<string, string> = {
   groq: "/providers/groq.svg",
   deepseek: "/providers/deepseek.svg",
   xai: "/providers/xai.svg",
+  openrouter: "/providers/openrouter.svg",
 };
 
 /**
@@ -34,6 +35,7 @@ export const PROVIDER_LOGOS: Record<string, string> = {
  */
 export const PROVIDER_ICON_COMPONENTS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
   kokoro: Cpu,
+  supertonic: Cpu,
 };
 
 /**
@@ -49,6 +51,7 @@ export const PROVIDER_ACCENTS: Record<string, string> = {
   elevenlabs: "250 204 21", // ElevenLabs yellow
   ollama: "56 189 248", // Ollama brand light blue
   kokoro: "148 152 160", // Local-runtime neutral grey
+  supertonic: "148 152 160", // Local-runtime neutral grey
   perplexity: "32 178 170", // Perplexity teal
   mistral: "255 95 0", // Mistral hot orange
   qwen: "97 84 219", // Qwen purple
@@ -56,6 +59,7 @@ export const PROVIDER_ACCENTS: Record<string, string> = {
   groq: "242 87 53", // Groq orange-red
   deepseek: "76 99 230", // DeepSeek blue
   xai: "230 230 230", // xAI near-white
+  openrouter: "216 222 232", // OpenRouter neutral
 };
 
 /**
@@ -68,6 +72,7 @@ export const MONOCHROME_LOGO_PROVIDERS: ReadonlySet<string> = new Set([
   "ollama",
   "groq",
   "xai",
+  "openrouter",
 ]);
 
 /**
@@ -88,7 +93,7 @@ export const COLORED_BRAND_LOGO_PROVIDERS: ReadonlySet<string> = new Set([
  * Used for vendor logos whose default rendering is too contrasty against the
  * dark canvas, e.g. Gemini's blue-on-white badge.
  */
-export const MASKED_LOGO_PROVIDERS: ReadonlySet<string> = new Set(["gemini"]);
+export const MASKED_LOGO_PROVIDERS: ReadonlySet<string> = new Set(["gemini", "openrouter"]);
 
 /**
  * Local-only providers — the agent editor surfaces a "local" hint and uses
@@ -97,6 +102,7 @@ export const MASKED_LOGO_PROVIDERS: ReadonlySet<string> = new Set(["gemini"]);
  */
 export const LOCAL_RUNTIME_PROVIDERS: ReadonlySet<string> = new Set([
   "kokoro",
+  "supertonic",
 ]);
 
 export function isLocalRuntimeProvider(providerId: string): boolean {
@@ -126,6 +132,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   gemini: "Google",
   ollama: "Ollama",
   kokoro: "Kokoro (local)",
+  supertonic: "Supertonic (local)",
   perplexity: "Perplexity",
   mistral: "Mistral",
   qwen: "Qwen",
@@ -134,6 +141,7 @@ export const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   deepseek: "DeepSeek",
   xai: "xAI",
   elevenlabs: "ElevenLabs",
+  openrouter: "OpenRouter",
 };
 
 export function providerDisplayName(providerId: string): string {

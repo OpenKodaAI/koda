@@ -15,6 +15,7 @@ from koda.memory.config import (
     MEMORY_RECALL_THRESHOLD,
     MEMORY_RECENCY_HALF_LIFE_DAYS,
 )
+from koda.memory.namespaces import normalize_namespace_kind, normalize_sensitivity
 from koda.memory.napkin import get_recent_high_importance, log_memory_recall_audit
 from koda.memory.procedural import build_procedural_context as _build_procedural_context
 from koda.memory.profile import MemoryProfile
@@ -25,11 +26,13 @@ from koda.memory.types import (
     Memory,
     MemoryLayer,
     MemoryResolution,
+    MemoryStatus,
     RecallConflict,
     RecallDiscard,
     RecallExplanation,
     RecallResult,
 )
+from koda.services.runtime.redaction import redact_value
 
 log = get_logger(__name__)
 
@@ -52,6 +55,9 @@ def _cache_key(
     source_query_id: int | None = None,
     source_task_id: int | None = None,
     source_episode_id: int | None = None,
+    namespace_kind: str | None = None,
+    namespace_key: str | None = None,
+    include_sensitive: bool = False,
 ) -> str:
     h = hashlib.sha256(query[:500].encode(), usedforsecurity=False).hexdigest()[:16]
     scope = "|".join(
@@ -64,9 +70,19 @@ def _cache_key(
             str(source_query_id or ""),
             str(source_task_id or ""),
             str(source_episode_id or ""),
+            str(namespace_kind or ""),
+            str(namespace_key or ""),
+            "sensitive" if include_sensitive else "normal",
         ]
     )
     return f"{user_id}:{scope}:{h}"
+
+
+def _redacted_memory_preview(content: str, *, limit: int = 180) -> str:
+    try:
+        return str(redact_value(content[: max(limit * 2, limit)], key_hint="memory_recall"))[:limit]
+    except Exception:
+        return "[redacted preview unavailable]"
 
 
 def _retrieval_bonus(result: RecallResult) -> float:
@@ -206,6 +222,9 @@ def _build_explanation(result: RecallResult) -> RecallExplanation:
         source_query_id=result.memory.source_query_id,
         source_task_id=result.memory.source_task_id,
         source_episode_id=result.memory.source_episode_id,
+        namespace_kind=normalize_namespace_kind(result.memory.namespace_kind),
+        namespace_key=str(result.memory.namespace_key or result.memory.agent_id or "default"),
+        sensitivity=normalize_sensitivity(result.memory.sensitivity),
     )
 
 
@@ -217,6 +236,9 @@ def _build_discard(result: RecallResult, reason: str) -> RecallDiscard:
         retrieval_source=result.retrieval_source,
         reason=reason,
         score=round(result.combined_score, 4),
+        namespace_kind=normalize_namespace_kind(result.memory.namespace_kind),
+        namespace_key=str(result.memory.namespace_key or result.memory.agent_id or "default"),
+        sensitivity=normalize_sensitivity(result.memory.sensitivity),
     )
 
 
@@ -288,6 +310,8 @@ def _resolve_conflicts(
                 winner_layer=_infer_layer(winner),
                 winner_retrieval_source=winner.retrieval_source,
                 winner_score=round(winner.combined_score, 4),
+                namespace_kind=normalize_namespace_kind(winner.memory.namespace_kind),
+                namespace_key=str(winner.memory.namespace_key or winner.memory.agent_id or "default"),
             )
         )
         for loser in losers:
@@ -388,6 +412,9 @@ async def build_memory_resolution(
     source_query_id: int | None = None,
     source_task_id: int | None = None,
     source_episode_id: int | None = None,
+    namespace_kind: str | None = None,
+    namespace_key: str | None = None,
+    include_sensitive: bool = False,
 ) -> MemoryResolution:
     """Build a recall envelope with context, explanations, and audit metadata."""
     if max_tokens is None:
@@ -407,6 +434,9 @@ async def build_memory_resolution(
         source_query_id=source_query_id,
         source_task_id=source_task_id,
         source_episode_id=source_episode_id,
+        namespace_kind=namespace_kind,
+        namespace_key=namespace_key,
+        include_sensitive=include_sensitive,
     )
     cached = _recall_cache.get(key)
     if cached and (_time.time() - cached[0]) < _CACHE_TTL:
@@ -429,6 +459,9 @@ async def build_memory_resolution(
         source_query_id=source_query_id,
         source_task_id=source_task_id,
         source_episode_id=source_episode_id,
+        namespace_kind=namespace_kind,
+        namespace_key=namespace_key,
+        include_sensitive=include_sensitive,
     )
     if not results:
         resolution = MemoryResolution(context="")
@@ -439,6 +472,15 @@ async def build_memory_resolution(
     considered: list[RecallResult] = []
     discarded: list[RecallDiscard] = []
     for result in results:
+        memory_status = str(result.memory.memory_status or MemoryStatus.ACTIVE.value)
+        if memory_status != MemoryStatus.ACTIVE.value:
+            result.combined_score = 0.0
+            discarded.append(_build_discard(result, f"memory_status_{memory_status}"))
+            continue
+        if normalize_sensitivity(result.memory.sensitivity) == "sensitive" and not include_sensitive:
+            result.combined_score = 0.0
+            discarded.append(_build_discard(result, "sensitive_memory_not_allowed"))
+            continue
         similarity = 1.0 - result.relevance_score
         if similarity < MEMORY_RECALL_THRESHOLD and result.retrieval_source not in {
             "query_link",
@@ -543,30 +585,50 @@ async def build_memory_resolution(
             considered=[
                 {
                     "memory_id": item.memory.id,
-                    "content": item.memory.content[:180],
+                    "content_preview": _redacted_memory_preview(item.memory.content),
                     "score": round(item.combined_score, 4),
                     "layer": _infer_layer(item),
                     "retrieval_source": item.retrieval_source,
+                    "namespace_kind": normalize_namespace_kind(item.memory.namespace_kind),
+                    "namespace_key": str(item.memory.namespace_key or item.memory.agent_id or "default"),
+                    "sensitivity": normalize_sensitivity(item.memory.sensitivity),
+                    "source": {
+                        "source_query_id": item.memory.source_query_id,
+                        "source_task_id": item.memory.source_task_id,
+                        "source_episode_id": item.memory.source_episode_id,
+                    },
                 }
                 for item in considered
             ],
             selected=[
                 {
                     "memory_id": item.memory.id,
-                    "content": item.memory.content[:180],
+                    "content_preview": _redacted_memory_preview(item.memory.content),
                     "score": round(item.combined_score, 4),
                     "layer": _infer_layer(item),
                     "retrieval_source": item.retrieval_source,
+                    "namespace_kind": normalize_namespace_kind(item.memory.namespace_kind),
+                    "namespace_key": str(item.memory.namespace_key or item.memory.agent_id or "default"),
+                    "sensitivity": normalize_sensitivity(item.memory.sensitivity),
+                    "source": {
+                        "source_query_id": item.memory.source_query_id,
+                        "source_task_id": item.memory.source_task_id,
+                        "source_episode_id": item.memory.source_episode_id,
+                    },
                 }
                 for item in selected
             ],
             discarded=[
                 {
                     "memory_id": item.memory_id,
+                    "content_preview": item.content_preview,
                     "reason": item.reason,
                     "layer": item.layer,
                     "retrieval_source": item.retrieval_source,
                     "score": item.score,
+                    "namespace_kind": item.namespace_kind,
+                    "namespace_key": item.namespace_key,
+                    "sensitivity": item.sensitivity,
                 }
                 for item in discarded
             ],
@@ -578,6 +640,8 @@ async def build_memory_resolution(
                     "winner_layer": item.winner_layer,
                     "winner_retrieval_source": item.winner_retrieval_source,
                     "winner_score": item.winner_score,
+                    "namespace_kind": item.namespace_kind,
+                    "namespace_key": item.namespace_key,
                 }
                 for item in conflicts
             ],
@@ -592,6 +656,9 @@ async def build_memory_resolution(
                     "source_query_id": item.source_query_id,
                     "source_task_id": item.source_task_id,
                     "source_episode_id": item.source_episode_id,
+                    "namespace_kind": item.namespace_kind,
+                    "namespace_key": item.namespace_key,
+                    "sensitivity": item.sensitivity,
                 }
                 for item in explanations
             ],
@@ -628,6 +695,9 @@ async def build_memory_context(
     source_query_id: int | None = None,
     source_task_id: int | None = None,
     source_episode_id: int | None = None,
+    namespace_kind: str | None = None,
+    namespace_key: str | None = None,
+    include_sensitive: bool = False,
 ) -> str:
     resolution = await build_memory_resolution(
         store,
@@ -643,6 +713,9 @@ async def build_memory_context(
         source_query_id=source_query_id,
         source_task_id=source_task_id,
         source_episode_id=source_episode_id,
+        namespace_kind=namespace_kind,
+        namespace_key=namespace_key,
+        include_sensitive=include_sensitive,
     )
     return resolution.context
 

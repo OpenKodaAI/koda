@@ -93,6 +93,10 @@ export function getControlPlaneMutationInvalidation(pathSegments: string[]) {
     paths.add("/control-plane/system");
   }
 
+  if (root === "auth" && maybeBotId === "profile") {
+    paths.add("/settings/account");
+  }
+
   return {
     tags: Array.from(tags),
     paths: Array.from(paths),

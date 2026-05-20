@@ -132,6 +132,9 @@ def log_query(
     provider_session_id: str | None = None,
     usage: dict | None = None,
     error: bool = False,
+    squad_thread_id: str | None = None,
+    squad_message_id: str | None = None,
+    squad_task_id: str | None = None,
 ) -> int:
     """Insert a query record and return its row ID."""
     from koda.services.llm_runner import serialize_usage
@@ -160,6 +163,9 @@ def log_query(
                 usage=usage_payload,
                 work_dir=work_dir,
                 error=error,
+                squad_thread_id=squad_thread_id,
+                squad_message_id=squad_message_id,
+                squad_task_id=squad_task_id,
             )
         )
         if row_id is None:

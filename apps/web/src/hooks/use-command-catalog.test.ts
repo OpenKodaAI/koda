@@ -19,7 +19,7 @@ describe("skillsFromAgentSpec", () => {
           content: "hidden",
         },
       ],
-      skill_policy: { enabled: true },
+      skill_policy: { enabled: true, enabled_skills: ["deploy-review"] },
     });
 
     expect(skills).toEqual([
@@ -30,6 +30,15 @@ describe("skillsFromAgentSpec", () => {
         category: "operations",
       },
     ]);
+  });
+
+  it("requires an explicit skill allow-list", () => {
+    expect(
+      skillsFromAgentSpec({
+        custom_skills: [{ id: "review", name: "Review", content: "body" }],
+        skill_policy: { enabled: true },
+      }),
+    ).toEqual([]);
   });
 
   it("respects skill_policy enabled, allow-list, and block-list", () => {

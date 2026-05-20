@@ -174,6 +174,13 @@ def _trace_redactions(trace: dict[str, Any] | None) -> dict[str, Any] | None:
     return redactions if isinstance(redactions, dict) else None
 
 
+def _trace_grounding(trace: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(trace, dict):
+        return {}
+    grounding = trace.get("grounding")
+    return grounding if isinstance(grounding, dict) else {}
+
+
 def _safe_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
 
@@ -411,6 +418,18 @@ def get_dashboard_execution_detail(agent_id: str, task_id: int) -> dict[str, Any
     warnings = [str(item) for item in _json_list(runtime.get("warnings"))]
     redactions = _trace_redactions(trace)
     reasoning_summary = [str(item) for item in _json_list(runtime.get("reasoning_summary")) if str(item or "").strip()]
+    run_graph_payload = get_dashboard_execution_run_graph(agent_id, task_id)
+    run_graph_summary = run_graph_payload.get("summary") if isinstance(run_graph_payload, dict) else {}
+    run_replay_payload = get_dashboard_execution_replay(agent_id, task_id)
+    sandbox_doctor_payload = get_dashboard_execution_sandbox_doctor(agent_id, task_id)
+    try:
+        from koda.services.child_runs import list_child_runs_for_parent_sync
+
+        child_runs_payload = list_child_runs_for_parent_sync(normalized, task_id)
+    except Exception:
+        child_runs_payload = []
+    trace_grounding = _trace_grounding(trace)
+    context_governance_payload = trace_grounding.get("context_governance")
     return {
         **_serialize_execution_summary(row, trace, episode),
         "response_text": str(assistant.get("response_text") or "") or None,
@@ -451,10 +470,110 @@ def get_dashboard_execution_detail(agent_id: str, task_id: int) -> dict[str, Any
         "artifacts": [],
         "reasoning_summary": reasoning_summary,
         "redactions": redactions,
+        "run_graph_summary": run_graph_summary if isinstance(run_graph_summary, dict) else {},
+        "run_graph_available": bool(run_graph_payload and run_graph_payload.get("nodes")),
+        "run_graph": run_graph_payload,
+        "run_replay": run_replay_payload,
+        "sandbox_doctor": sandbox_doctor_payload,
+        "child_runs": child_runs_payload,
+        "context_governance": context_governance_payload if isinstance(context_governance_payload, dict) else None,
     }
 
 
-def _build_stats(agent_id: str) -> dict[str, Any]:
+def _fetch_runtime_events_for_task(agent_id: str, task_id: int) -> list[dict[str, Any]]:
+    rows = _fetch_all(
+        """
+        SELECT id, task_id, env_id, attempt, phase, event_type, severity,
+               payload_json, artifact_refs_json, resource_snapshot_ref, created_at
+          FROM runtime_events
+         WHERE agent_id = ? AND task_id = ?
+      ORDER BY id ASC
+        """,
+        (agent_id, task_id),
+        agent_ids=[agent_id],
+    )
+    events: list[dict[str, Any]] = []
+    for row in rows:
+        events.append(
+            {
+                "id": row.get("id"),
+                "task_id": row.get("task_id"),
+                "env_id": row.get("env_id"),
+                "attempt": row.get("attempt"),
+                "phase": row.get("phase"),
+                "event_type": row.get("event_type"),
+                "severity": row.get("severity"),
+                "payload": _json_object(row.get("payload_json")),
+                "artifact_refs": _json_list(row.get("artifact_refs_json")),
+                "resource_snapshot_ref": row.get("resource_snapshot_ref"),
+                "created_at": _iso(row.get("created_at")),
+            }
+        )
+    return events
+
+
+def get_dashboard_execution_run_graph(agent_id: str, task_id: int) -> dict[str, Any] | None:
+    normalized = _normalize_agent_id(agent_id)
+    row = _fetch_one(
+        "SELECT id FROM tasks WHERE agent_id = ? AND id = ?",
+        (normalized, task_id),
+        agent_ids=[normalized],
+    )
+    if row is None:
+        return None
+    trace = _fetch_latest_traces([normalized], [task_id]).get(task_id)
+    runtime_events = _fetch_runtime_events_for_task(normalized, task_id)
+    from koda.services.run_graph_store import graph_payload_for_execution
+
+    return graph_payload_for_execution(
+        agent_id=normalized,
+        task_id=task_id,
+        trace=trace,
+        runtime_events=runtime_events,
+    )
+
+
+def get_dashboard_execution_replay(agent_id: str, task_id: int) -> dict[str, Any] | None:
+    normalized = _normalize_agent_id(agent_id)
+    row = _fetch_one(
+        "SELECT id FROM tasks WHERE agent_id = ? AND id = ?",
+        (normalized, task_id),
+        agent_ids=[normalized],
+    )
+    if row is None:
+        return None
+    trace = _fetch_latest_traces([normalized], [task_id]).get(task_id)
+    runtime_events = _fetch_runtime_events_for_task(normalized, task_id)
+    from koda.services.run_graph_store import replay_payload_for_execution
+
+    return replay_payload_for_execution(
+        agent_id=normalized,
+        task_id=task_id,
+        trace=trace,
+        runtime_events=runtime_events,
+    )
+
+
+def get_dashboard_execution_sandbox_doctor(agent_id: str, task_id: int) -> dict[str, Any] | None:
+    normalized = _normalize_agent_id(agent_id)
+    row = _fetch_one(
+        """
+        SELECT id, agent_id, user_id, chat_id, status, query_text, model, work_dir, attempt, max_attempts,
+               cost_usd, error_message, created_at, started_at, completed_at, session_id
+          FROM tasks
+         WHERE agent_id = ? AND id = ?
+        """,
+        (normalized, task_id),
+        agent_ids=[normalized],
+    )
+    if row is None:
+        return None
+    from koda.services.sandbox_doctor import build_sandbox_doctor_payload
+
+    return build_sandbox_doctor_payload(agent_id=normalized, task_id=task_id, task=row)
+
+
+def _build_stats(agent_id: str, *, recent_task_limit: int = 5) -> dict[str, Any]:
     agent_rows = _fetch_all(
         """
         SELECT status, COUNT(*) AS count
@@ -502,7 +621,18 @@ def _build_stats(agent_id: str) -> dict[str, Any]:
         (agent_id, (_now_utc() - timedelta(days=30)).date()),
         agent_ids=[agent_id],
     )
-    recent_tasks = [_serialize_task(task) for task in _fetch_task_rows(agent_ids=[agent_id], limit=5, offset=0)]
+    recent_tasks = (
+        [
+            _serialize_task(task)
+            for task in _fetch_task_rows(
+                agent_ids=[agent_id],
+                limit=max(1, int(recent_task_limit)),
+                offset=0,
+            )
+        ]
+        if recent_task_limit > 0
+        else []
+    )
     return {
         "agentId": agent_id,
         "totalTasks": sum(task_counts.values()),
@@ -525,13 +655,17 @@ def _build_stats(agent_id: str) -> dict[str, Any]:
     }
 
 
-def list_dashboard_agent_summaries(agent_ids: list[str] | None = None) -> list[dict[str, Any]]:
-    return [_build_stats(agent_id) for agent_id in _resolve_agent_ids(agent_ids)]
+def list_dashboard_agent_summaries(
+    agent_ids: list[str] | None = None,
+    *,
+    recent_task_limit: int = 5,
+) -> list[dict[str, Any]]:
+    return [_build_stats(agent_id, recent_task_limit=recent_task_limit) for agent_id in _resolve_agent_ids(agent_ids)]
 
 
-def get_dashboard_agent_stats(agent_id: str) -> dict[str, Any]:
+def get_dashboard_agent_stats(agent_id: str, *, recent_task_limit: int = 5) -> dict[str, Any]:
     normalized = _normalize_agent_id(agent_id)
-    return _build_stats(normalized)
+    return _build_stats(normalized, recent_task_limit=recent_task_limit)
 
 
 def _session_rows(agent_id: str) -> list[dict[str, Any]]:
@@ -796,6 +930,7 @@ def list_dashboard_dlq(
     *,
     agent_ids: list[str],
     limit: int = 50,
+    offset: int = 0,
     retry_eligible: bool | None = None,
 ) -> list[dict[str, Any]]:
     resolved_agent_ids = _compact_agent_ids(agent_ids)
@@ -806,7 +941,7 @@ def list_dashboard_dlq(
     if retry_eligible is not None:
         clauses.append("retry_eligible = ?")
         params.append(1 if retry_eligible else 0)
-    params.append(max(1, int(limit)))
+    params.extend([max(1, int(limit)), max(0, int(offset))])
     rows = _fetch_all(
         f"""
         SELECT id, task_id, user_id, chat_id, agent_id, pod_name, query_text, model, error_message, error_class,
@@ -814,7 +949,7 @@ def list_dashboard_dlq(
           FROM dead_letter_queue
          WHERE {" AND ".join(clauses)}
       ORDER BY failed_at DESC, id DESC
-         LIMIT ?
+         LIMIT ? OFFSET ?
         """,
         tuple(params),
         agent_ids=resolved_agent_ids,
@@ -843,7 +978,12 @@ def list_dashboard_dlq(
     ]
 
 
-def list_dashboard_schedules(agent_ids: list[str] | None = None) -> list[dict[str, Any]]:
+def list_dashboard_schedules(
+    agent_ids: list[str] | None = None,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[dict[str, Any]]:
     resolved = _resolve_agent_ids(agent_ids)
     if not resolved:
         return []
@@ -857,8 +997,9 @@ def list_dashboard_schedules(agent_ids: list[str] | None = None) -> list[dict[st
           FROM scheduled_jobs
          WHERE agent_id IN ({_placeholders(len(resolved))})
       ORDER BY COALESCE(next_run_at, updated_at) ASC, id DESC
+         LIMIT ? OFFSET ?
         """,
-        tuple(resolved),
+        tuple([*resolved, max(1, int(limit)), max(0, int(offset))]),
         agent_ids=resolved,
     )
     items: list[dict[str, Any]] = []

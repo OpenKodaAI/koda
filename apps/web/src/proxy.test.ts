@@ -73,6 +73,28 @@ describe("web proxy auth gate", () => {
     expect(response.status).toBe(200);
   });
 
+  it("redirects /setup to /login when the owner hint cookie is present", () => {
+    const nextUrl = new URL("http://localhost/setup?next=%2Fexecutions");
+    const response = proxy({
+      nextUrl: Object.assign(nextUrl, {
+        clone: () => new URL(nextUrl.toString()),
+      }),
+      method: "GET",
+      cookies: {
+        get: (name: string) =>
+          name === "koda_has_owner" ? { value: "1" } : undefined,
+      },
+      headers: {
+        get: () => null,
+      },
+    } as never);
+
+    expect(response.status).toBe(307);
+    expect(response.headers.get("location")).toBe(
+      "http://localhost/login?next=%2Fexecutions",
+    );
+  });
+
   it("requires the operator session cookie even in development mode", () => {
     vi.stubEnv("NODE_ENV", "development");
 

@@ -42,10 +42,7 @@ describe("agent-catalog-cache", () => {
     const { getCachedAgentDisplays } = await import("@/lib/agent-catalog-cache");
 
     await expect(getCachedAgentDisplays()).resolves.toEqual([]);
-    expect(warnSpy).toHaveBeenCalledWith(
-      "bot_catalog_cache_unavailable",
-      expect.objectContaining({ message: "fetch failed" }),
-    );
+    expect(warnSpy).not.toHaveBeenCalled();
   });
 
   it("rethrows non-control-plane failures", async () => {

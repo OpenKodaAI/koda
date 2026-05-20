@@ -290,6 +290,7 @@ async def _send_media(
     context: BotContext,
     update: Update | None,
     caption: str,
+    message_thread_id: int | None = None,
 ) -> None:
     """Send media via reply or context.bot, eliminating if/else duplication."""
     if update and update.message:
@@ -297,7 +298,10 @@ async def _send_media(
         await method(**{method_name: file_obj}, caption=caption)
     else:
         method = getattr(context.bot, f"send_{method_name}")
-        await method(chat_id=chat_id, **{method_name: file_obj}, caption=caption)
+        kwargs = {"chat_id": chat_id, method_name: file_obj, "caption": caption}
+        if message_thread_id is not None:
+            kwargs["message_thread_id"] = message_thread_id
+        await method(**kwargs)
 
 
 async def _send_media_with_document_fallback(
@@ -309,15 +313,16 @@ async def _send_media_with_document_fallback(
     caption: str,
     *,
     path: str,
+    message_thread_id: int | None = None,
 ) -> None:
     try:
-        await _send_media(method_name, file_obj, chat_id, context, update, caption)
+        await _send_media(method_name, file_obj, chat_id, context, update, caption, message_thread_id)
     except Exception:
         if method_name == "document":
             raise
         log.warning(f"{method_name}_send_failed_fallback_document", path=path)
         file_obj.seek(0)
-        await _send_media("document", file_obj, chat_id, context, update, caption)
+        await _send_media("document", file_obj, chat_id, context, update, caption, message_thread_id)
 
 
 async def send_created_files(
@@ -325,6 +330,7 @@ async def send_created_files(
     chat_id: int,
     context: BotContext,
     update: Update | None,
+    message_thread_id: int | None = None,
 ) -> int:
     """Send created files to Telegram. Returns count of files sent."""
     sent = 0
@@ -345,7 +351,7 @@ async def send_created_files(
             with open(path, "rb") as f:
                 if ext in IMAGE_EXTS:
                     if file_size > MAX_PHOTO_SIZE or not _is_valid_image(path):
-                        await _send_media("document", f, chat_id, context, update, caption)
+                        await _send_media("document", f, chat_id, context, update, caption, message_thread_id)
                     else:
                         await _send_media_with_document_fallback(
                             "photo",
@@ -355,6 +361,7 @@ async def send_created_files(
                             update,
                             caption,
                             path=path,
+                            message_thread_id=message_thread_id,
                         )
                 elif ext in GIF_EXTS:
                     await _send_media_with_document_fallback(
@@ -365,6 +372,7 @@ async def send_created_files(
                         update,
                         caption,
                         path=path,
+                        message_thread_id=message_thread_id,
                     )
                 elif ext in VIDEO_EXTS:
                     await _send_media_with_document_fallback(
@@ -375,6 +383,7 @@ async def send_created_files(
                         update,
                         caption,
                         path=path,
+                        message_thread_id=message_thread_id,
                     )
                 elif ext in AUDIO_EXTS:
                     await _send_media_with_document_fallback(
@@ -385,6 +394,7 @@ async def send_created_files(
                         update,
                         caption,
                         path=path,
+                        message_thread_id=message_thread_id,
                     )
                 elif ext in VOICE_EXTS:
                     await _send_media_with_document_fallback(
@@ -395,9 +405,10 @@ async def send_created_files(
                         update,
                         caption,
                         path=path,
+                        message_thread_id=message_thread_id,
                     )
                 else:
-                    await _send_media("document", f, chat_id, context, update, caption)
+                    await _send_media("document", f, chat_id, context, update, caption, message_thread_id)
             sent += 1
         except Exception:
             log.exception("artifact_send_error", path=path)

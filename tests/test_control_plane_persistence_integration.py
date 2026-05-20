@@ -71,6 +71,31 @@ def _manager() -> manager_mod.ControlPlaneManager:
     return manager_mod.ControlPlaneManager.__new__(manager_mod.ControlPlaneManager)
 
 
+def test_load_global_sections_uses_short_lived_cache(monkeypatch):
+    manager = _manager()
+    calls = 0
+
+    def _fetch_all(query, params=()):
+        nonlocal calls
+        calls += 1
+        return [{"section": "access", "data_json": '{"env": {"A": "1"}}'}]
+
+    monkeypatch.setattr(manager_mod, "fetch_all", _fetch_all)
+    monkeypatch.setattr(manager_mod.time, "monotonic", lambda: 100.0)
+
+    first = manager_mod.ControlPlaneManager._load_global_sections(manager)
+    first["access"]["env"]["A"] = "mutated"
+    second = manager_mod.ControlPlaneManager._load_global_sections(manager)
+
+    assert calls == 1
+    assert second == {"access": {"env": {"A": "1"}}}
+
+    manager_mod.ControlPlaneManager._invalidate_global_sections_cache(manager)
+    third = manager_mod.ControlPlaneManager._load_global_sections(manager)
+    assert calls == 2
+    assert third == {"access": {"env": {"A": "1"}}}
+
+
 def test_persist_global_sections_raises_when_rows_are_lost(monkeypatch):
     """Simulates a silent DB failure: execute returns success but the row is
     never visible on read. Persist must raise, not pretend success."""

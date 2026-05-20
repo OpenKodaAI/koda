@@ -63,6 +63,8 @@ export function getRuntimeTone(value: string | null | undefined): SemanticTone {
   if (
     normalized.includes("queued") ||
     normalized.includes("paused") ||
+    normalized.includes("stalled") ||
+    normalized.includes("degraded") ||
     normalized.includes("clean") ||
     normalized.includes("pending")
   ) {

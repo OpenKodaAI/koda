@@ -49,6 +49,6 @@ describe("ToastNotification translations", () => {
     expect(screen.getByText("Descargando modelo Kokoro")).toBeInTheDocument();
     expect(screen.getByText("Reanudando descarga...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Cancelar descarga" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Cerrar aviso" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Descartar notificación" })).toBeInTheDocument();
   });
 });

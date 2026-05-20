@@ -25,7 +25,7 @@ interface DatePickerProps {
 }
 
 export function DatePicker({ value, onChange, disabled = false, className }: DatePickerProps) {
-  const { i18n, tl } = useAppI18n();
+  const { t, i18n } = useAppI18n();
   const locale = i18n.language || "en-US";
   const [open, setOpen] = useState(false);
   const [month, setMonth] = useState(() => startOfMonth(value));
@@ -95,7 +95,7 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
             type="button"
             onClick={() => setMonth((current) => subMonths(current, 1))}
             className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
-            aria-label={tl("Previous month")}
+            aria-label={t("generated.routines.previous_month_3c384833")}
           >
             <ChevronLeft className="icon-sm" strokeWidth={1.75} />
           </button>
@@ -106,7 +106,7 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
             type="button"
             onClick={() => setMonth((current) => addMonths(current, 1))}
             className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
-            aria-label={tl("Next month")}
+            aria-label={t("generated.routines.next_month_cfc56572")}
           >
             <ChevronRight className="icon-sm" strokeWidth={1.75} />
           </button>

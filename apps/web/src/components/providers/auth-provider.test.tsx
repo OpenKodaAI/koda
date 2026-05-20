@@ -70,10 +70,39 @@ function renderWithProviders(ui: React.ReactNode) {
   );
 }
 
+function renderWithAuth(ui: React.ReactNode, auth: typeof initialAuth | null) {
+  return render(
+    <I18nProvider initialLanguage="en-US">
+      <ToastProvider>
+        <AuthProvider initialAuth={auth}>
+          {ui}
+          <ToastNotification />
+        </AuthProvider>
+      </ToastProvider>
+    </I18nProvider>,
+  );
+}
+
 describe("AuthProvider", () => {
   it("exposes the initial operator", () => {
     renderWithProviders(<Probe />);
     expect(screen.getByTestId("email").textContent).toBe("owner@koda.dev");
+  });
+
+  it("hydrates the operator on the client when SSR auth status was unavailable", async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(JSON.stringify(initialAuth), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    renderWithAuth(<Probe />, null);
+    expect(screen.getByTestId("email").textContent).toBe("anon");
+    expect(await screen.findByText("owner@koda.dev")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/control-plane/auth/status",
+      expect.objectContaining({ cache: "no-store" }),
+    );
   });
 
   it("clears the operator and redirects on signOut()", async () => {

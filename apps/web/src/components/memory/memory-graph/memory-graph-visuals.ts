@@ -1,4 +1,5 @@
 import type { MemoryGraphEdge, MemoryGraphNode, MemoryLearningNode } from "@/lib/types";
+import { ACTIVITY_HEATMAP_PRIMARY } from "@/lib/activity-palette";
 
 export type MemoryNode = MemoryGraphNode | MemoryLearningNode;
 
@@ -47,9 +48,11 @@ export interface NodeStyle {
 }
 
 const NODE_FILL_IDLE = "rgba(220, 220, 220, 0.95)";
-const NODE_FILL_ACCENT = "var(--accent)";
+const MEMORY_GRAPH_ACCENT = `var(--memory-graph-accent, ${ACTIVITY_HEATMAP_PRIMARY})`;
+
+const NODE_FILL_ACCENT = MEMORY_GRAPH_ACCENT;
 const NODE_STROKE_IDLE = "rgba(0, 0, 0, 0.85)";
-const NODE_STROKE_ACCENT = "var(--accent)";
+const NODE_STROKE_ACCENT = MEMORY_GRAPH_ACCENT;
 
 export function getNodeStyle(_node: MemoryNode, state: NodeInteractionState): NodeStyle {
   if (state === "selected") {
@@ -89,7 +92,7 @@ export interface EdgeStyle {
 }
 
 const EDGE_STROKE_IDLE = "rgba(180, 180, 180, 1)";
-const EDGE_STROKE_ACTIVE = "var(--accent)";
+const EDGE_STROKE_ACTIVE = MEMORY_GRAPH_ACCENT;
 
 export function getEdgeStyle(_edge: MemoryGraphEdge, state: EdgeInteractionState): EdgeStyle {
   if (state === "active") {
