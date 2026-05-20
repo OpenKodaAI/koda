@@ -2,6 +2,7 @@
 
 import { AlertTriangle, LockKeyhole, ShieldCheck, ShieldQuestion, Wrench } from "lucide-react";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
+import { translate } from "@/lib/i18n";
 import type {
   McpCapabilityRisk,
   McpGrantState,
@@ -80,8 +81,7 @@ export function McpRiskBadgeGroup({
         title={`${capabilityName}: mcp_risk.v1 unavailable`}
       >
         <ShieldQuestion className="h-3 w-3" strokeWidth={1.75} />
-        Unknown risk
-      </span>
+        {translate("generated.controlPlane.unknown_risk_76bd9eb9")}</span>
     );
   }
 
@@ -126,8 +126,7 @@ export function McpRiskBadgeGroup({
       </span>
       {risk.redaction_required ? (
         <span className="inline-flex items-center gap-1 rounded-[var(--radius-chip)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--tone-warning-text)]">
-          Redaction
-        </span>
+          {translate("generated.controlPlane.redaction_a63a6db7")}</span>
       ) : null}
     </span>
   );

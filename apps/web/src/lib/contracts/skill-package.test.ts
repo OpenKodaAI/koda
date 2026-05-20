@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   parseSkillPackageError,
   parseSkillPackageLocks,
+  parseSkillRegistry,
   parseSkillScanResult,
   skillPackageErrorMessage,
 } from "@/lib/contracts/skill-package";
@@ -63,6 +64,10 @@ describe("skill package contracts", () => {
           installed_skills: [{ id: "safe_review" }],
           installed_tools: [{ id: "safe_notes" }],
           scan_summary: {},
+          skill_evals: [{ eval_id: "safe_review.eval", result: { status: "passed" } }],
+          recommendation_status: "unreviewed",
+          eval_summary: { passed: 1, failed: 0 },
+          trust_summary: { source: "local", score: 0.92 },
           rollback_ref: null,
         },
       ],
@@ -70,6 +75,61 @@ describe("skill package contracts", () => {
 
     expect(locks).toHaveLength(1);
     expect(locks[0]?.installed_tools[0]?.id).toBe("safe_notes");
+    expect(locks[0]?.recommendation_status).toBe("unreviewed");
+    expect(locks[0]?.skill_evals[0]?.eval_id).toBe("safe_review.eval");
+    expect(locks[0]?.eval_summary.passed).toBe(1);
+    expect(locks[0]?.trust_summary.score).toBe(0.92);
+  });
+
+  it("rejects invalid recommendation statuses", () => {
+    const locks = parseSkillPackageLocks({
+      items: [
+        {
+          schema_version: "skill_lock.v1",
+          package_id: "safe_pack",
+          name: "Safe Pack",
+          version: "1.0.0",
+          package_hash: "abc123",
+          agent_id: "ATLAS",
+          installed_skills: [],
+          installed_tools: [],
+          scan_summary: {},
+          recommendation_status: "safe_enough",
+        },
+      ],
+    });
+
+    expect(locks).toEqual([]);
+  });
+
+  it("parses skill_registry.v1 payloads", () => {
+    const registry = parseSkillRegistry({
+      schema_version: "skill_registry.v1",
+      agent_id: "ATLAS",
+      items: [
+        {
+          schema_version: "skill_registry.v1",
+          agent_id: "ATLAS",
+          package_id: "safe_pack",
+          name: "Safe Pack",
+          version: "1.0.0",
+          package_hash: "abc123",
+          installed: true,
+          recommendation_status: "recommended",
+          scan_summary: { decision: "allow" },
+          eval_summary: { required_passed_all: true },
+          trust_summary: { recommended: true },
+          skills: [{ id: "safe_review" }],
+          tools: [{ id: "safe_notes" }],
+          rollback_available: true,
+          run_graph_evidence: { node_type: "runtime_event" },
+        },
+      ],
+    });
+
+    expect(registry.items[0]?.package_id).toBe("safe_pack");
+    expect(registry.items[0]?.recommendation_status).toBe("recommended");
+    expect(registry.items[0]?.run_graph_evidence.node_type).toBe("runtime_event");
   });
 
   it("extracts structured error envelope messages", () => {

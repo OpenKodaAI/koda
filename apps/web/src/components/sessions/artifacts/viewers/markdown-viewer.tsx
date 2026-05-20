@@ -36,12 +36,12 @@ export function MarkdownViewer({ content, filename }: MarkdownViewerProps) {
           {showRaw ? (
             <>
               <Eye className="icon-xs" strokeWidth={1.75} aria-hidden />
-              {t("sessions.artifacts.rendered", { defaultValue: "Rendered" })}
+              {t("sessions.artifacts.rendered", undefined)}
             </>
           ) : (
             <>
               <Code2 className="icon-xs" strokeWidth={1.75} aria-hidden />
-              {t("sessions.artifacts.raw", { defaultValue: "Raw" })}
+              {t("sessions.artifacts.raw", undefined)}
             </>
           )}
         </Button>

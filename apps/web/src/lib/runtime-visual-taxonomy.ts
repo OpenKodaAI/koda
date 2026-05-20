@@ -88,6 +88,7 @@ const RUN_GRAPH_NODE_VISUALS: Record<RunGraphNodeType, RuntimeVisualDescriptor> 
   agent_request: { key: "agent_request", label: "Agent request", icon: Bot, tone: "warning" },
   agent_followup: { key: "agent_followup", label: "Agent follow-up", icon: RefreshCcw, tone: "retry" },
   reply_obligation: { key: "reply_obligation", label: "Reply obligation", icon: ListChecks, tone: "warning" },
+  handoff_event: { key: "handoff_event", label: "Handoff", icon: GitBranch, tone: "info" },
   coordinator_synthesis: { key: "coordinator_synthesis", label: "Coordinator synthesis", icon: Split, tone: "success" },
   artifact: { key: "artifact", label: "Artifact", icon: FileArchive, tone: "neutral" },
   cost: { key: "cost", label: "Cost", icon: CircleDollarSign, tone: "neutral" },

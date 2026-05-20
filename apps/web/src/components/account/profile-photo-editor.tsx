@@ -135,11 +135,11 @@ export function ProfilePhotoEditor({
     async (file: File) => {
       setError(null);
       if (!file.type.startsWith("image/")) {
-        setError(t("account.profile.photo.invalid_type", { defaultValue: "Choose an image file." }));
+        setError(t("account.profile.photo.invalid_type", undefined));
         return;
       }
       if (file.size > MAX_IMAGE_BYTES) {
-        setError(t("account.profile.photo.too_large", { defaultValue: "Image must be 12 MB or smaller." }));
+        setError(t("account.profile.photo.too_large", undefined));
         return;
       }
 
@@ -162,7 +162,7 @@ export function ProfilePhotoEditor({
         });
       } catch {
         URL.revokeObjectURL(objectUrl);
-        setError(t("account.profile.photo.decode_failed", { defaultValue: "Could not read this image." }));
+        setError(t("account.profile.photo.decode_failed", undefined));
       }
     },
     [releasePicked, t],
@@ -247,7 +247,7 @@ export function ProfilePhotoEditor({
       await onUpload(blob);
       releasePicked(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("account.profile.photo.upload_failed", { defaultValue: "Upload failed." }));
+      setError(err instanceof Error ? err.message : t("account.profile.photo.upload_failed", undefined));
     } finally {
       setUploadStage("idle");
     }
@@ -262,7 +262,7 @@ export function ProfilePhotoEditor({
       try {
         await onRemove();
       } catch (err) {
-        setError(err instanceof Error ? err.message : t("account.profile.photo.remove_failed", { defaultValue: "Remove failed." }));
+        setError(err instanceof Error ? err.message : t("account.profile.photo.remove_failed", undefined));
       } finally {
         setRemoving(false);
       }
@@ -276,8 +276,8 @@ export function ProfilePhotoEditor({
   const showImage = !isCropping && Boolean(currentPhotoUrl) && !imgError;
   const sizePx = isCropping ? CROP_PX : IDLE_PX;
   const uploadStatus = uploadStage === "preparing"
-    ? t("account.profile.photo.preparing", { defaultValue: "Preparing profile photo" })
-    : t("account.profile.photo.saving", { defaultValue: "Saving profile photo" });
+    ? t("account.profile.photo.preparing", undefined)
+    : t("account.profile.photo.saving", undefined);
 
   return (
     <div className={cn("flex min-w-0 flex-col items-center gap-3", className)}>
@@ -301,8 +301,8 @@ export function ProfilePhotoEditor({
           disabled={isBusy}
           aria-label={
             isCropping
-              ? t("account.profile.photo.adjust", { defaultValue: "Adjust profile photo" })
-              : t("account.profile.photo.choose", { defaultValue: "Choose profile photo" })
+              ? t("account.profile.photo.adjust", undefined)
+              : t("account.profile.photo.choose", undefined)
           }
           className={cn(
             "group relative flex h-full w-full items-center justify-center overflow-hidden rounded-full border-0 bg-[var(--panel-soft)] p-0 outline-none ring-1 ring-[color:var(--border-subtle)]",
@@ -360,7 +360,7 @@ export function ProfilePhotoEditor({
             type="button"
             onClick={(event) => void handleRemove(event)}
             disabled={isBusy}
-            aria-label={t("account.profile.photo.remove", { defaultValue: "Remove profile photo" })}
+            aria-label={t("account.profile.photo.remove", undefined)}
             className="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--panel-strong)] text-[var(--text-tertiary)] shadow-[var(--shadow-xs)] transition-[background-color,border-color,color] duration-[160ms] hover:border-[var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-wait disabled:opacity-80"
             style={{ position: "absolute", top: -4, right: -4, transform: "translateZ(0)" }}
           >
@@ -383,7 +383,7 @@ export function ProfilePhotoEditor({
             value={zoom}
             onChange={handleZoomChange}
             disabled={isUploading}
-            aria-label={t("account.profile.photo.zoom", { defaultValue: "Zoom" })}
+            aria-label={t("account.profile.photo.zoom", undefined)}
             className="ui-slider w-full disabled:cursor-wait disabled:opacity-70"
             style={{
               height: 8,
@@ -393,7 +393,7 @@ export function ProfilePhotoEditor({
           <div className="grid w-full grid-cols-2 gap-2">
             <Button type="button" variant="outline" size="sm" onClick={handleResetCrop} disabled={isUploading} className="min-w-0 px-2">
               <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
-              <span>{t("common.reset", { defaultValue: "Reset" })}</span>
+              <span>{t("common.reset", undefined)}</span>
             </Button>
             <Button
               type="button"
@@ -404,7 +404,7 @@ export function ProfilePhotoEditor({
               className="min-w-0 px-2"
             >
               <X className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
-              <span>{t("common.cancel", { defaultValue: "Cancel" })}</span>
+              <span>{t("common.cancel", undefined)}</span>
             </Button>
             <Button
               type="button"
@@ -412,7 +412,7 @@ export function ProfilePhotoEditor({
               size="sm"
               onClick={() => void handleUpload()}
               disabled={isUploading}
-              aria-label={isUploading ? uploadStatus : t("common.save", { defaultValue: "Save" })}
+              aria-label={isUploading ? uploadStatus : t("common.save", undefined)}
               aria-busy={isUploading}
               className={cn("col-span-2 min-w-0", isUploading && "ring-1 ring-[var(--accent)]")}
             >
@@ -421,7 +421,7 @@ export function ProfilePhotoEditor({
               ) : (
                 <Check className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
               )}
-              <span>{t("common.save", { defaultValue: "Save" })}</span>
+              <span>{t("common.save", undefined)}</span>
             </Button>
           </div>
           {isUploading ? (

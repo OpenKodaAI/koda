@@ -66,6 +66,39 @@ groups:
           summary: "Provider {{ $labels.provider }} contract errors detected"
           description: "Provider adapter is rejecting CLI output. Likely vendor schema change."
 
+      - alert: KodaRunGraphCompletenessFailed
+        expr: increase(koda_run_graph_completeness_gates_total{status="failed"}[10m]) > 0
+        labels:
+          severity: high
+        annotations:
+          summary: "RunGraph completeness gate failed"
+          description: "A release/eval/smoke flow could not prove required causal nodes or edges. Inspect failure_category={{ $labels.failure_category }} and rerun release quality."
+
+      - alert: KodaCriticalReleaseBlockers
+        expr: sum(koda_release_blockers{severity=~"critical|high"}) > 0
+        for: 1m
+        labels:
+          severity: high
+        annotations:
+          summary: "Critical or high release blockers are active"
+          description: "The release blocker view derived from release_quality.v1 has active high-severity blockers. Open the quality cockpit or release blocker dashboard."
+
+      - alert: KodaChannelGatewayDenySpike
+        expr: increase(koda_channel_gateway_events_total{event="policy_denied"}[15m]) > 10
+        labels:
+          severity: medium
+        annotations:
+          summary: "Channel gateway policy denied spike"
+          description: "Many channel identities were denied before queueing. Check pairing/block/revoke state and possible abuse."
+
+      - alert: KodaOpsBenchmarkFailed
+        expr: increase(koda_ops_benchmark_runs_total{status!="passed"}[30m]) > 0
+        labels:
+          severity: medium
+        annotations:
+          summary: "Ops benchmark failed"
+          description: "The queue/runtime/channel benchmark reported a failure. Inspect ops_benchmark.v1 output before release."
+
   - name: koda-postgres
     interval: 30s
     rules:

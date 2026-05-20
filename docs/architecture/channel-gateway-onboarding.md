@@ -3,8 +3,8 @@
 Phase 6 closes KG-12 and KG-13 with two versioned contracts:
 `channel_gateway.v1` for inbound channel identity and `onboarding_readiness.v1`
 for first-run UX/DX readiness. Telegram is the production pilot. Slack and
-Discord stay contract-ready and must reuse the same identity gateway before
-they are enabled for production routing.
+Discord are now contract-gated through the same `ChannelManager` path; live
+credentialed E2E remains required before they are called production-ready.
 
 ## Goals
 
@@ -112,6 +112,10 @@ All mutating routes require an operator session.
   text as a task. The user must send the task again after pairing.
 - Unknown senders create or update a pending identity and unknown-sender queue
   item, then return a deny response.
+- Slack and Discord adapters must only normalize `IncomingMessage` payloads.
+  The central `ChannelManager` calls `channel_gateway.v1` and invokes the
+  runtime callback only when the decision is allowed.
+- Gateway errors fail closed and do not call the adapter callback.
 
 ## Persistence
 
@@ -149,6 +153,21 @@ Events are emitted through audit as `channel_gateway.<event>` and metrics as
 `koda_channel_gateway_events_total{agent_id,event,status}`. These event names
 are RunGraph-compatible runtime events until a dedicated channel node type is
 introduced.
+
+## Release Smoke
+
+`channel_gateway_smoke.v1` is the offline release gate for KAT-060:
+
+```bash
+uv run python scripts/channel_gateway_smoke.py \
+  --input tests/fixtures/channels/channel_gateway_smoke.v1.json
+```
+
+The smoke proves unknown sender deny-before-route, pairing-code discard,
+operator approve, block, revoke, group mention routing, ignored unmentioned
+group traffic, room/squad metadata and reply-channel `reply_to_id` preservation.
+Slack and Discord contract tests live in `tests/test_channels/test_manager.py`
+and use SDK-free fake adapters so they cannot bypass the gateway.
 
 ## `onboarding_readiness.v1`
 

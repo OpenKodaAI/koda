@@ -37,8 +37,8 @@ export function TextViewer({ text, filename, showLineCount = true }: TextViewerP
         <Button type="button" variant="ghost" size="sm" onClick={handleCopy}>
           <Copy className="icon-xs" strokeWidth={1.75} aria-hidden />
           {copied
-            ? t("common.copied", { defaultValue: "Copied" })
-            : t("common.copy", { defaultValue: "Copy" })}
+            ? t("common.copied", undefined)
+            : t("common.copy", undefined)}
         </Button>
       </div>
       <pre

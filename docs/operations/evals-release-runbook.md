@@ -31,6 +31,9 @@ Control-plane endpoints:
 - `GET /api/control-plane/agents/{agent_id}/evals/runs/{run_id}`
 - `POST /api/control-plane/agents/{agent_id}/evals/trajectory-exports`
 - `GET /api/control-plane/agents/{agent_id}/evals/release-quality/latest`
+- `GET /api/control-plane/dashboard/quality/overview`
+- `GET /api/control-plane/dashboard/quality/agents/{agent_id}`
+- `POST /api/control-plane/dashboard/quality/failures/{failure_id}/proposal`
 
 Legacy `evaluation-cases` and `knowledge-evals/runs` endpoints remain
 compatibility surfaces, but new release gates should use `/evals/*`.
@@ -45,6 +48,10 @@ A Phase 5 release-quality gate passes only when:
   network dependencies
 - every release-blocking assertion passes
 - no forbidden tool or policy downgrade appears in observed trajectory
+- RunGraph completeness gate passes, including scenario-specific squad nodes,
+  valid causal edges, and synthesis evidence
+- squad golden quality proves the squad beats the single-agent baseline with
+  evidence-backed quality claims and zero provider calls
 - trajectory export redaction passes
 - security deny/fail-closed paths pass
 - smoke eval script exits zero
@@ -85,6 +92,13 @@ Common Phase 5 codes:
 | `trajectory.export_denied` | Export is unsafe or lacks authorized source data. | Resolve redaction/source issue before exporting. |
 | `release_quality.gate_failed` | Release quality status is failed. | Fix failing smoke/eval/security/docs gate. |
 | `release_quality.e2e_blocked` | Full authenticated E2E is unavailable. | Record blocker and keep mocked smoke coverage current. |
+
+Eval failures may also create `improvement_proposal.v1` rows. Review them in
+the proposal queue; creation alone does not apply any change.
+
+Quality cockpit failures use the same proposal queue. The cockpit action
+creates `improvement_proposal.v1` evidence and never validates, applies, or
+rolls back by itself.
 
 ## Redaction Rules
 
@@ -140,11 +154,13 @@ pnpm lint:web
 pnpm test:web
 pnpm build:web
 python scripts/eval_smoke.py --input tests/fixtures/evals/release_quality.v1.pass.json
+python scripts/squad_smoke.py --input tests/fixtures/evals/squad_smoke.v1.json
 ```
 
 The exact focused pytest paths may change with the implementation, but the gate
 must include eval contracts, eval-from-run, deterministic runner, trajectory
-redaction, release smoke, frontend contracts, and dashboard smoke coverage.
+redaction, release smoke, RunGraph completeness, squad golden quality,
+frontend contracts, and dashboard smoke coverage.
 
 ## Troubleshooting
 

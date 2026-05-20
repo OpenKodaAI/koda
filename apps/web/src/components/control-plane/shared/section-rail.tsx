@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { translate } from "@/lib/i18n";
 
 export interface SectionRailItem {
   id: string;
@@ -67,7 +68,7 @@ export function SectionRail({
 
   return (
     <nav
-      aria-label="Sections"
+      aria-label={translate("generated.controlPlane.sections_63449d6f")}
       className={cn(
         "sticky top-0 flex w-48 shrink-0 flex-col gap-0.5 py-6 pr-2",
         className,

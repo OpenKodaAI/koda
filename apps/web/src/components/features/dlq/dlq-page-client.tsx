@@ -238,7 +238,7 @@ export default function DLQPage() {
                   hasMore={Boolean(entriesQuery.hasNextPage)}
                   loading={entriesQuery.isFetchingNextPage}
                   onLoadMore={loadMoreEntries}
-                  label={t("common.loadMore", { defaultValue: "Load more" })}
+                  label={t("common.loadMore", undefined)}
                 />
               </div>
             )}

@@ -35,7 +35,7 @@ export function ConfirmationDialog({
   const cancelRef = useRef<HTMLButtonElement>(null);
   const presence = useAnimatedPresence(open, null, { duration: 200 });
   const resolvedConfirmLabel =
-    confirmLabel ?? t("controlPlane.shared.confirmation.confirm", { defaultValue: "Confirm" });
+    confirmLabel ?? t("controlPlane.shared.confirmation.confirm", undefined);
 
   useEffect(() => {
     if (!presence.isVisible) return;

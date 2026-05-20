@@ -8,6 +8,7 @@ import { SettingsFieldGroup } from "@/components/control-plane/system/settings-f
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
 import { ToggleField } from "@/components/control-plane/shared/toggle-field";
 import { EmbeddingModelPicker } from "@/components/control-plane/system/sections/embedding-model-picker";
+import { translate } from "@/lib/i18n";
 import {
   Select,
   SelectContent,
@@ -31,7 +32,7 @@ function asOptions(
 
 export function SectionIntelligence() {
   const { draft, setField, sectionErrors } = useSystemSettings();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const mk = draft.values.memory_and_knowledge;
   const catalogs = draft.catalogs ?? {};
   const intelligenceErrors = sectionErrors.intelligence;
@@ -60,9 +61,9 @@ export function SectionIntelligence() {
   const memoryProfileOptions = useMemo(
     () =>
       asOptions(catalogs.memory_profiles, [
-        { value: "conservative", label: "Conservador" },
-        { value: "balanced", label: "Equilibrado" },
-        { value: "strong_learning", label: "Aprendizado forte" },
+        { value: "conservative", label: "controlPlane.intelligence.memoryProfiles.conservative" },
+        { value: "balanced", label: "controlPlane.intelligence.memoryProfiles.balanced" },
+        { value: "strong_learning", label: "controlPlane.intelligence.memoryProfiles.strongLearning" },
       ]),
     [catalogs.memory_profiles],
   );
@@ -70,9 +71,12 @@ export function SectionIntelligence() {
   const knowledgeProfileOptions = useMemo(
     () =>
       asOptions(catalogs.knowledge_profiles, [
-        { value: "curated_only", label: "Curado apenas" },
-        { value: "curated_workspace", label: "Curado + workspace" },
-        { value: "curated_workspace_patterns", label: "Curado + workspace + padrões" },
+        { value: "curated_only", label: "controlPlane.intelligence.knowledgeProfiles.curatedOnly" },
+        { value: "curated_workspace", label: "controlPlane.intelligence.knowledgeProfiles.curatedWorkspace" },
+        {
+          value: "curated_workspace_patterns",
+          label: "controlPlane.intelligence.knowledgeProfiles.curatedWorkspacePatterns",
+        },
       ]),
     [catalogs.knowledge_profiles],
   );
@@ -80,10 +84,10 @@ export function SectionIntelligence() {
   const provenancePolicyOptions = useMemo(
     () =>
       asOptions(catalogs.provenance_policies, [
-        { value: "standard", label: tl("Standard") },
-        { value: "strict", label: tl("Strict") },
+        { value: "standard", label: t("generated.controlPlane.standard_ec6537f7") },
+        { value: "strict", label: t("generated.controlPlane.strict_d1df64ff") },
       ]),
-    [catalogs.provenance_policies, tl],
+    [catalogs.provenance_policies, t],
   );
 
   const autonomyTierOptions = useMemo(
@@ -99,21 +103,21 @@ export function SectionIntelligence() {
   return (
     <SettingsSectionShell
       sectionId="intelligence"
-      title="settings.sections.intelligence.label"
-      description="settings.sections.intelligence.description"
+      title={translate("generated.controlPlane.settings_sections_intelligence_label_5f1c5ee4")}
+      description={translate("generated.controlPlane.settings_sections_intelligence_description_bb278541")}
     >
       {/* ── Memory ──────────────────────────────────────────────────────── */}
-      <SettingsFieldGroup title={tl("Memory")}>
+      <SettingsFieldGroup title={t("generated.controlPlane.memory_9aa6101b")}>
         <ToggleField
-          label={tl("Memory enabled")}
-          description={tl("Enable persistent memory and recall for agents.")}
+          label={t("generated.controlPlane.memory_enabled_cdbdeb65")}
+          description={t("generated.controlPlane.enable_persistent_memory_and_recall_for_agen_97d1b42a")}
           checked={mk.memory_enabled}
           onChange={(next) => update({ memory_enabled: next })}
         />
 
         <FieldShell
-          label={tl("Memory profile")}
-          description={tl("Preset baseline for retention, recall and maintenance.")}
+          label={t("generated.controlPlane.memory_profile_81c8bd70")}
+          description={t("generated.controlPlane.preset_baseline_for_retention_recall_and_mai_e586e017")}
           error={
             findFieldError(intelligenceErrors, "memory_and_knowledge.memory_policy.profile")
               ?.message
@@ -137,42 +141,39 @@ export function SectionIntelligence() {
         </FieldShell>
 
         <ToggleField
-          label={tl("Procedural memory")}
-          description={tl("Enable storage of procedural knowledge and learned workflows.")}
+          label={t("generated.controlPlane.procedural_memory_54c924ab")}
+          description={t("generated.controlPlane.enable_storage_of_procedural_knowledge_and_l_04c8d09e")}
           checked={mk.procedural_enabled}
           onChange={(next) => update({ procedural_enabled: next })}
         />
 
         <ToggleField
-          label={tl("Proactive memory")}
-          description={tl("Allow agents to proactively surface relevant memories.")}
+          label={t("generated.controlPlane.proactive_memory_ff96b94a")}
+          description={t("generated.controlPlane.allow_agents_to_proactively_surface_relevant_beaa45a1")}
           checked={mk.proactive_enabled}
           onChange={(next) => update({ proactive_enabled: next })}
         />
 
         <FieldShell
-          label={tl("Modelo de embedding")}
-          description={tl(
-            "O modelo usado para indexar memórias, knowledge base e cache semântico. " +
-              "Nenhum modelo vem instalado: baixe sob demanda apenas se precisar.",
-          )}
+          label={t("generated.controlPlane.modelo_de_embedding_0ed9f55e")}
+          description={t("controlPlane.intelligence.embeddingModelDescription")}
         >
           <EmbeddingModelPicker memoryEnabled={mk.memory_enabled} />
         </FieldShell>
       </SettingsFieldGroup>
 
       {/* ── Knowledge ───────────────────────────────────────────────────── */}
-      <SettingsFieldGroup title={tl("Knowledge")}>
+      <SettingsFieldGroup title={t("generated.controlPlane.knowledge_b125a195")}>
         <ToggleField
-          label={tl("Knowledge enabled")}
-          description={tl("Enable knowledge grounding and RAG for agents.")}
+          label={t("generated.controlPlane.knowledge_enabled_fe557f9d")}
+          description={t("generated.controlPlane.enable_knowledge_grounding_and_rag_for_agent_fd201a99")}
           checked={mk.knowledge_enabled}
           onChange={(next) => update({ knowledge_enabled: next })}
         />
 
         <FieldShell
-          label={tl("Knowledge profile")}
-          description={tl("Preset baseline for layers, recall and freshness.")}
+          label={t("generated.controlPlane.knowledge_profile_77ba3b95")}
+          description={t("generated.controlPlane.preset_baseline_for_layers_recall_and_freshn_4d23704e")}
           error={
             findFieldError(intelligenceErrors, "memory_and_knowledge.knowledge_policy.profile")
               ?.message
@@ -196,8 +197,8 @@ export function SectionIntelligence() {
         </FieldShell>
 
         <FieldShell
-          label={tl("Provenance policy")}
-          description={tl("Governance baseline for owner and freshness requirements.")}
+          label={t("generated.controlPlane.provenance_policy_bb7a1848")}
+          description={t("generated.controlPlane.governance_baseline_for_owner_and_freshness__2fa85a58")}
           error={
             findFieldError(
               intelligenceErrors,
@@ -225,10 +226,10 @@ export function SectionIntelligence() {
       </SettingsFieldGroup>
 
       {/* ── Autonomy ─────────────────────────────────────────────────────── */}
-      <SettingsFieldGroup title={tl("Autonomy")}>
+      <SettingsFieldGroup title={t("generated.controlPlane.autonomy_99129e59")}>
         <FieldShell
-          label={tl("Autonomy tier")}
-          description={tl("Default operational autonomy tier for bot executions.")}
+          label={t("generated.controlPlane.autonomy_tier_cf2b9d75")}
+          description={t("generated.controlPlane.default_operational_autonomy_tier_for_bot_ex_310edc03")}
           error={
             findFieldError(
               intelligenceErrors,

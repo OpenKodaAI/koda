@@ -22,6 +22,9 @@ CANONICAL_PHASE5_ROUTES = (
     ("GET", "/api/control-plane/agents/{agent_id}/evals/runs/{run_id}"),
     ("POST", "/api/control-plane/agents/{agent_id}/evals/trajectory-exports"),
     ("GET", "/api/control-plane/agents/{agent_id}/evals/release-quality/latest"),
+    ("GET", "/api/control-plane/dashboard/quality/overview"),
+    ("GET", "/api/control-plane/dashboard/quality/agents/{agent_id}"),
+    ("POST", "/api/control-plane/dashboard/quality/failures/{failure_id}/proposal"),
 )
 
 EXPECTED_MANAGER_METHODS = (
@@ -33,6 +36,9 @@ EXPECTED_MANAGER_METHODS = (
     "get_eval_run",
     "create_trajectory_export",
     "get_release_quality_latest",
+    "get_quality_cockpit_overview",
+    "get_quality_cockpit_agent",
+    "create_quality_failure_proposal",
 )
 
 
@@ -90,7 +96,10 @@ async def test_create_eval_case_from_run_route_delegates_to_manager() -> None:
     }
     request = _JsonRequest({"task_id": 7101}, match_info={"agent_id": "KODA"})
 
-    with patch("koda.control_plane.api._manager", return_value=manager):
+    with (
+        patch("koda.control_plane.api._manager", return_value=manager),
+        patch("koda.control_plane.api._authorize_request", return_value=None),
+    ):
         response = await handler(request)
 
     assert response.status == 201
@@ -229,6 +238,37 @@ def test_trajectory_and_release_quality_serializes_json_fields_for_primary_backe
     assert json.loads(release_values[2])["summary"] == {"suite_score": 1.0}
 
 
+def test_release_quality_latest_fails_when_eval_source_run_graph_is_missing() -> None:
+    manager = MagicMock()
+    manager._require_dashboard_agent.return_value = ("KODA", None)
+    repository = MagicMock()
+    repository.list_eval_run_batches.return_value = [
+        {
+            "schema_version": "eval_run.v1",
+            "run_id": "eval-run:1",
+            "status": "passed",
+            "score": 0.93,
+            "case_results": [{"case_key": "run:KODA:7101", "source_task_id": 7101}],
+        }
+    ]
+    repository.list_trajectory_exports.return_value = []
+    repository.list_evaluation_cases.return_value = [{"case_key": "run:KODA:7101", "source_task_id": 7101}]
+    manager._knowledge_repository.return_value = repository
+    manager._release_quality_run_graphs = ControlPlaneManager._release_quality_run_graphs.__get__(manager)
+    manager.get_dashboard_execution_run_graph.return_value = None
+    manager._emit_eval_audit_event = MagicMock()
+
+    report = ControlPlaneManager.get_release_quality_latest(manager, "KODA")
+
+    assert report["status"] == "failed"
+    assert report["gates"]["run_graph_completeness"]["status"] == "failed"
+    assert report["gates"]["run_graph_completeness"]["failures"][0]["category"] in {
+        "missing_node_type",
+        "missing_run_graph",
+    }
+    manager.get_dashboard_execution_run_graph.assert_called_with("KODA", 7101)
+
+
 @pytest.mark.asyncio
 async def test_release_quality_latest_route_returns_backend_report() -> None:
     handler = getattr(control_plane_api, "get_release_quality_latest_route", None)
@@ -252,3 +292,44 @@ async def test_release_quality_latest_route_returns_backend_report() -> None:
     assert payload["schema_version"] == "release_quality.v1"
     assert payload["status"] == "passed"
     manager.get_release_quality_latest.assert_called_once_with("KODA")
+
+
+@pytest.mark.asyncio
+async def test_quality_cockpit_routes_delegate_to_manager() -> None:
+    manager = MagicMock()
+    manager.get_quality_cockpit_overview.return_value = {
+        "schema_version": "quality_cockpit.v1",
+        "summary": {},
+    }
+    manager.get_quality_cockpit_agent.return_value = {
+        "schema_version": "quality_cockpit.v1",
+        "agent_id": "KODA",
+    }
+    manager.create_quality_failure_proposal.return_value = {
+        "schema_version": "improvement_proposal.v1",
+        "proposal_id": "imp_quality",
+    }
+
+    with (
+        patch("koda.control_plane.api._manager", return_value=manager),
+        patch("koda.control_plane.api._authorize_request", return_value=None),
+    ):
+        overview = await control_plane_api.get_quality_cockpit_overview_route(_JsonRequest())
+        agent = await control_plane_api.get_quality_cockpit_agent_route(_JsonRequest(match_info={"agent_id": "KODA"}))
+        proposal = await control_plane_api.create_quality_failure_proposal_route(
+            _JsonRequest(
+                {"agent_id": "KODA", "requested_by": "operator"},
+                match_info={"failure_id": "quality-failure:abc"},
+            )
+        )
+
+    assert json.loads(overview.text)["schema_version"] == "quality_cockpit.v1"
+    assert json.loads(agent.text)["agent_id"] == "KODA"
+    assert proposal.status == 201
+    manager.get_quality_cockpit_overview.assert_called_once_with()
+    manager.get_quality_cockpit_agent.assert_called_once_with("KODA")
+    manager.create_quality_failure_proposal.assert_called_once_with(
+        agent_id="KODA",
+        failure_id="quality-failure:abc",
+        requested_by="operator",
+    )

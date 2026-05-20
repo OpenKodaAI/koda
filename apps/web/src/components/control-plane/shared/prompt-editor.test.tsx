@@ -3,20 +3,21 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { PromptEditor } from "@/components/control-plane/shared/prompt-editor";
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    t: (key: string, options?: Record<string, unknown>) =>
-      typeof options?.defaultValue === "string" ? options.defaultValue : key,
-    tl: (value: string) => value,
-    i18n: {
-      t: (key: string, options?: Record<string, unknown>) =>
-        typeof options?.defaultValue === "string" ? options.defaultValue : key,
-    },
-    language: "en-US",
-    setLanguage: vi.fn(),
-    options: [],
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 describe("PromptEditor", () => {
   it("uses inline Preview and Markdown tabs without a separate toggle button", async () => {
@@ -31,8 +32,8 @@ describe("PromptEditor", () => {
       />,
     );
 
-    const tablist = screen.getByRole("tablist", { name: "Markdown editor mode" });
-    const previewTab = screen.getByRole("tab", { name: "Preview" });
+    const tablist = screen.getByRole("tablist", { name: "Modo do editor Markdown" });
+    const previewTab = screen.getByRole("tab", { name: "Prévia" });
     const markdownTab = screen.getByRole("tab", { name: "Markdown" });
     expect(tablist).toContainElement(previewTab);
     expect(tablist).toContainElement(markdownTab);

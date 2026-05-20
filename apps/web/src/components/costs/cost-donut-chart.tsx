@@ -34,7 +34,7 @@ const FALLBACK_COLORS = [
 
 function buildChartItems(
   items: CostBreakdownItem[],
-  tl: (value: string, options?: Record<string, unknown>) => string
+  t: (value: string, options?: Record<string, unknown>) => string
 ): CategoryBarChartItem[] {
   const sorted = [...items]
     .filter((item) => item.value > 0)
@@ -53,11 +53,11 @@ function buildChartItems(
     const overflow = sorted.slice(7);
     visible.push({
       id: "other",
-      label: tl("Outros"),
+      label: t("generated.costs.outros_3a86dfb0"),
       value: overflow.reduce((sum, item) => sum + item.value, 0),
       share: overflow.reduce((sum, item) => sum + item.share, 0),
       color: "color-mix(in srgb, var(--text-primary) 28%, transparent)",
-      meta: tl("{{count}} origens", { count: overflow.length }),
+      meta: t("generated.costs.count_origens_3478892d", { count: overflow.length }),
     });
   }
 
@@ -74,9 +74,9 @@ export function CostDonutChart({
   compact = false,
   className,
 }: CostDonutChartProps) {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const chartItems = useMemo(() => buildChartItems(items, tl), [items, tl]);
+  const chartItems = useMemo(() => buildChartItems(items, t), [items, t]);
   const total = chartItems.reduce((sum, item) => sum + item.value, 0);
 
   const activeItem =
@@ -91,7 +91,7 @@ export function CostDonutChart({
       controls={
         <SoftTabs
           items={[
-            { id: "task", label: t("costs.page.allocationModes.task", { defaultValue: "By task" }) },
+            { id: "task", label: t("costs.page.allocationModes.task", undefined) },
             { id: "agent", label: t("costs.mode.byAgent") },
             { id: "model", label: t("costs.mode.byModel") },
           ]}
@@ -105,12 +105,12 @@ export function CostDonutChart({
       deltaLabel={
         activeItem ? (
           <span>
-            {t("costs.page.allocationDominant", { defaultValue: "Dominant:" })}{" "}
+            {t("costs.page.allocationDominant", undefined)}{" "}
             <span className="font-medium text-[var(--text-primary)]">{activeItem.label}</span>{" "}
             <span className="text-[var(--text-tertiary)]">· {activeItem.share.toFixed(1)}%</span>
           </span>
         ) : (
-          t("costs.page.noDominantAllocation", { defaultValue: "No dominant concentration" })
+          t("costs.page.noDominantAllocation", undefined)
         )
       }
       rangeStartLabel={rangeStartLabel}
@@ -120,11 +120,7 @@ export function CostDonutChart({
       onActiveChange={setHoveredId}
       footer={
         activeItem
-          ? t("costs.page.allocationFooter", {
-              defaultValue: "{{label}} · {{value}}",
-              label: activeItem.label,
-              value: formatCost(activeItem.value),
-            })
+          ? t("costs.page.allocationFooter", { label: activeItem.label, value: formatCost(activeItem.value) })
           : undefined
       }
     />

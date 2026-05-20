@@ -105,7 +105,7 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
                 <DetailRow label={t("common.pod")}>
                   <span className="font-mono">{renderedEntry.pod_name ?? "—"}</span>
                 </DetailRow>
-                <DetailRow label={t("Trace ID", { defaultValue: "Trace ID" })}>
+                <DetailRow label={t("Trace ID", undefined)}>
                   <span className="break-all font-mono text-xs">{renderedEntry.trace_id ?? "—"}</span>
                 </DetailRow>
                 <DetailRow label={t("common.user")}>

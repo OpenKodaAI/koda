@@ -3693,6 +3693,11 @@ class ControlPlaneManager:
 
         return KnowledgeRepository(_normalize_agent_id(agent_id))
 
+    def _improvement_proposal_service(self, agent_id: str) -> Any:
+        from koda.services.improvement_proposals import ImprovementProposalService
+
+        return ImprovementProposalService(self._knowledge_repository(agent_id))
+
     def _dashboard_store(self) -> Any:
         from koda.state.dashboard_store import get_dashboard_store
 
@@ -8719,6 +8724,165 @@ class ControlPlaneManager:
         _normalize_agent_id(agent_id)
         return bool(self._knowledge_governance_store().reject_knowledge_candidate(candidate_id, reviewer=reviewer))
 
+    def list_improvement_proposals(
+        self,
+        agent_id: str,
+        *,
+        status: str | None = None,
+        proposal_type: str | None = None,
+        limit: int = 50,
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposals = self._improvement_proposal_service(normalized).list_proposals(
+            status=status,
+            proposal_type=proposal_type,
+            limit=limit,
+        )
+        return {"schema_version": "improvement_proposal.v1", "items": proposals}
+
+    def create_improvement_proposal(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).create(
+                {**payload, "agent_id": normalized},
+                requested_by=str(payload.get("reviewer") or "control-plane"),
+            ),
+        )
+        self._record_improvement_proposal_event(normalized, "created", proposal)
+        return proposal
+
+    def get_improvement_proposal(self, agent_id: str, proposal_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        return cast(dict[str, Any], self._improvement_proposal_service(normalized).get(proposal_id))
+
+    def approve_improvement_proposal(
+        self,
+        agent_id: str,
+        proposal_id: str,
+        *,
+        reviewer: str = "control-plane",
+        note: str = "",
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).approve(proposal_id, reviewer=reviewer, note=note),
+        )
+        self._record_improvement_proposal_event(normalized, "approved", proposal)
+        return proposal
+
+    def reject_improvement_proposal(
+        self,
+        agent_id: str,
+        proposal_id: str,
+        *,
+        reviewer: str = "control-plane",
+        note: str = "",
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).reject(proposal_id, reviewer=reviewer, note=note),
+        )
+        self._record_improvement_proposal_event(normalized, "rejected", proposal)
+        return proposal
+
+    def validate_improvement_proposal(
+        self,
+        agent_id: str,
+        proposal_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        reviewer = str(payload.get("reviewer") or "control-plane")
+        note = str(payload.get("note") or "")
+        validation_result = payload.get("validation_result")
+        if validation_result is None and any(key in payload for key in ("status", "passed", "ok", "details")):
+            validation_result = {key: value for key, value in payload.items() if key not in {"reviewer", "note"}}
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).validate(
+                proposal_id,
+                validation_result=validation_result,
+                reviewer=reviewer,
+                note=note,
+            ),
+        )
+        status = str(proposal.get("status") or "")
+        event = "validating" if status == "validating" else "failed" if status == "failed" else "validated"
+        self._record_improvement_proposal_event(normalized, event, proposal)
+        return proposal
+
+    def apply_improvement_proposal(
+        self,
+        agent_id: str,
+        proposal_id: str,
+        *,
+        reviewer: str = "control-plane",
+        note: str = "",
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).apply(proposal_id, reviewer=reviewer, note=note),
+        )
+        self._record_improvement_proposal_event(normalized, "applied", proposal)
+        return proposal
+
+    def rollback_improvement_proposal(
+        self,
+        agent_id: str,
+        proposal_id: str,
+        *,
+        reviewer: str = "control-plane",
+        note: str = "",
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        proposal = cast(
+            dict[str, Any],
+            self._improvement_proposal_service(normalized).rollback(proposal_id, reviewer=reviewer, note=note),
+        )
+        self._record_improvement_proposal_event(normalized, "rolled_back", proposal)
+        return proposal
+
+    def _record_improvement_proposal_event(
+        self,
+        agent_id: str,
+        event: str,
+        proposal: dict[str, Any],
+    ) -> None:
+        details = {
+            "schema_version": "improvement_proposal.v1",
+            "proposal_id": proposal.get("proposal_id"),
+            "proposal_type": proposal.get("proposal_type"),
+            "status": proposal.get("status"),
+            "risk_class": proposal.get("risk_class"),
+            "source_kind": proposal.get("source_kind"),
+            "source_ref": proposal.get("source_ref"),
+            "evidence_refs": proposal.get("evidence_refs") or [],
+            "validation_status": (proposal.get("validation_result") or {}).get("status")
+            if isinstance(proposal.get("validation_result"), dict)
+            else "",
+            "run_graph_node_ids": proposal.get("run_graph_node_ids") or [],
+        }
+        self._emit_lifecycle_audit_event(
+            agent_id,
+            event_type=f"improvement_proposal.{event}",
+            details=details,
+        )
+        try:
+            from koda.services.metrics import IMPROVEMENT_PROPOSAL_EVENTS
+
+            IMPROVEMENT_PROPOSAL_EVENTS.labels(
+                agent_id=agent_id,
+                event=event,
+                status=str(proposal.get("status") or ""),
+                proposal_type=str(proposal.get("proposal_type") or ""),
+            ).inc()
+        except Exception:
+            log.debug("improvement_proposal_metric_error", exc_info=True)
+
     def list_runbooks(self, agent_id: str, *, status: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
         normalized = _normalize_agent_id(agent_id)
         governance_store = self._knowledge_governance_store()
@@ -9164,6 +9328,14 @@ class ControlPlaneManager:
                     ).observe(float(value))
                 except (TypeError, ValueError):
                     continue
+        if payload.get("create_improvement_proposals", True):
+            proposals = self._create_improvement_proposals_from_eval_failures(normalized, batch)
+            if proposals:
+                batch["improvement_proposals"] = proposals
+                summary = dict(batch.get("summary") or {})
+                summary["improvement_proposals_created"] = len(proposals)
+                batch["summary"] = summary
+                repository.upsert_eval_run_batch(batch)
         self._emit_eval_audit_event(
             normalized,
             event_type="eval.suite_run",
@@ -9175,6 +9347,123 @@ class ControlPlaneManager:
             },
         )
         return batch
+
+    def _create_improvement_proposals_from_eval_failures(
+        self,
+        agent_id: str,
+        batch: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        service = self._improvement_proposal_service(agent_id)
+        proposals: list[dict[str, Any]] = []
+        run_id = str(batch.get("run_id") or "")
+        suite_id = str(batch.get("suite_id") or "default")
+        for result in batch.get("case_results") or []:
+            if not isinstance(result, dict) or str(result.get("status") or "") != "failed":
+                continue
+            case_key = str(result.get("case_key") or "")
+            failures = [item for item in result.get("failures") or [] if isinstance(item, dict)]
+            categories = {str(item.get("category") or "") for item in failures}
+            category_key = ",".join(sorted(item for item in categories if item)) or "eval_failure"
+            proposal_type = "tool_policy" if categories & {"tool_regression", "policy_regression"} else "eval_case"
+            risk_class = "high" if proposal_type == "tool_policy" else "medium"
+            raw_metadata = result.get("metadata")
+            metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+            source_task_id = metadata.get("source_task_id")
+            source_run_graph_id = str(metadata.get("source_run_graph_id") or "").strip()
+            source_run_graph_node_ids = [
+                str(item) for item in metadata.get("source_run_graph_node_ids") or [] if str(item or "").strip()
+            ]
+            source_ref = f"eval:{suite_id}:{case_key or 'unknown'}:{category_key}"
+            evidence_refs: list[dict[str, Any]] = [
+                {"kind": "eval_run", "id": run_id},
+                {"kind": "eval_case", "case_key": case_key},
+            ]
+            if source_task_id is not None:
+                evidence_refs.append({"kind": "source_task", "task_id": source_task_id})
+            if source_run_graph_id:
+                evidence_refs.append({"kind": "run_graph", "id": source_run_graph_id})
+            evidence_refs.extend(
+                {"kind": "run_graph_node", "id": node_id} for node_id in source_run_graph_node_ids[:20]
+            )
+            requested_proposal_type = str(metadata.get("proposal_type") or result.get("proposal_type") or "").strip()
+            skill_id = str(metadata.get("skill_id") or result.get("skill_id") or "").strip()
+            if requested_proposal_type == "skill" or skill_id or "skill_regression" in categories:
+                proposal = service.create_skill_proposal_from_evidence(
+                    {
+                        "source_kind": "eval",
+                        "source_ref": source_ref,
+                        "skill_id": skill_id or case_key or "skill",
+                        "summary": f"Draft skill proposal after eval failure for {case_key or 'unknown case'}.",
+                        "observed_count": metadata.get("observed_count") or 1,
+                        "evidence_refs": evidence_refs,
+                        "instruction_preview": metadata.get("instruction_preview") or "",
+                        "validation_plan": {
+                            "suite_id": suite_id,
+                            "case_key": case_key,
+                            "required": ["scanner_allow_or_review", "offline_eval_pass"],
+                        },
+                        "run_graph_node_ids": source_run_graph_node_ids,
+                    },
+                    requested_by="eval",
+                )
+                self._record_improvement_proposal_event(agent_id, "created_from_eval", proposal)
+                proposals.append(
+                    {
+                        "schema_version": "improvement_proposal.v1",
+                        "proposal_id": proposal.get("proposal_id"),
+                        "status": proposal.get("status"),
+                        "proposal_type": proposal.get("proposal_type"),
+                        "case_key": case_key,
+                    }
+                )
+                continue
+            proposal = service.create(
+                {
+                    "source_kind": "eval",
+                    "source_ref": source_ref,
+                    "proposal_type": proposal_type,
+                    "summary": f"Review {proposal_type} after eval failure for {case_key or 'unknown case'}.",
+                    "evidence_refs": evidence_refs,
+                    "diff_preview": {
+                        "proposed_change": "Create a reviewed improvement from deterministic eval failure evidence.",
+                        "failures": failures[:5],
+                        "score": result.get("score"),
+                        "metrics": result.get("metrics") or {},
+                    },
+                    "risk_class": risk_class,
+                    "validation_plan": {
+                        "strategy": "offline_replay",
+                        "suite_id": suite_id,
+                        "case_key": case_key,
+                    },
+                    "rollback_plan": {
+                        "strategy": "ledger_only",
+                        "effects": [
+                            {
+                                "effect_kind": "ledger_only",
+                                "target_ref": source_ref,
+                                "before_ref": {"status": "eval_failure_unreviewed", "case_key": case_key},
+                                "after_ref": {"status": "proposal_applied", "proposal_type": proposal_type},
+                            }
+                        ],
+                    },
+                    "status": "pending_review",
+                    "reviewer": "eval",
+                    "run_graph_node_ids": source_run_graph_node_ids,
+                },
+                requested_by="eval",
+            )
+            self._record_improvement_proposal_event(agent_id, "created_from_eval", proposal)
+            proposals.append(
+                {
+                    "schema_version": "improvement_proposal.v1",
+                    "proposal_id": proposal.get("proposal_id"),
+                    "status": proposal.get("status"),
+                    "proposal_type": proposal.get("proposal_type"),
+                    "case_key": case_key,
+                }
+            )
+        return proposals
 
     def list_eval_runs(self, agent_id: str, *, limit: int = 50) -> dict[str, Any]:
         normalized, _ = self._require_dashboard_agent(agent_id)
@@ -9253,11 +9542,14 @@ class ControlPlaneManager:
         repository = self._knowledge_repository(normalized)
         runs = repository.list_eval_run_batches(limit=20)
         exports = repository.list_trajectory_exports(limit=20)
+        run_graphs = self._release_quality_run_graphs(normalized, repository=repository, runs=runs)
         report = build_release_quality_report(
             agent_id=normalized,
             latest_run=runs[0] if runs else None,
             recent_runs=runs,
             trajectory_exports=exports,
+            run_graphs=run_graphs,
+            require_run_graphs=bool(runs),
         )
         self._emit_eval_audit_event(
             normalized,
@@ -9270,6 +9562,200 @@ class ControlPlaneManager:
         )
         RELEASE_QUALITY_GATES.labels(agent_id=normalized, status=str(report["status"])).inc()
         return report
+
+    def get_quality_cockpit_overview(self) -> dict[str, Any]:
+        from koda.services.quality_cockpit import build_quality_cockpit
+
+        payload: dict[str, Any] = {"agent_quality": [], "eval_runs": []}
+        for agent in self.list_agents():
+            agent_id = str(agent.get("id") or "").strip()
+            if not agent_id:
+                continue
+            agent_payload = self._quality_cockpit_payload_for_agent(agent_id)
+            payload["agent_quality"].extend(agent_payload.get("agent_quality") or [])
+            payload["eval_runs"].extend(agent_payload.get("eval_runs") or [])
+            for key in ("tool_quality", "skill_quality", "model_quality", "squad_quality"):
+                payload.setdefault(key, []).extend(agent_payload.get(key) or [])
+        return build_quality_cockpit(payload, agent_id="ALL")
+
+    def get_quality_cockpit_agent(self, agent_id: str) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.services.quality_cockpit import build_quality_cockpit
+
+        payload = self._quality_cockpit_payload_for_agent(normalized)
+        with contextlib.suppress(Exception):
+            payload["release_quality"] = self.get_release_quality_latest(normalized)
+        return build_quality_cockpit(payload, agent_id=normalized)
+
+    def create_quality_failure_proposal(
+        self,
+        *,
+        agent_id: str,
+        failure_id: str,
+        requested_by: str = "quality_cockpit",
+    ) -> dict[str, Any]:
+        normalized, _ = self._require_dashboard_agent(agent_id)
+        from koda.services.quality_cockpit import build_quality_proposal_payload
+
+        cockpit = self.get_quality_cockpit_agent(normalized)
+        failure = next(
+            (
+                item
+                for item in cockpit.get("top_failures") or []
+                if isinstance(item, dict) and str(item.get("failure_id") or "") == failure_id
+            ),
+            None,
+        )
+        if failure is None:
+            raise KeyError(failure_id)
+        payload = build_quality_proposal_payload(
+            failure,
+            agent_id=normalized,
+            cockpit_id=str(cockpit.get("cockpit_id") or ""),
+            status="pending_review",
+        )
+        proposal = self._improvement_proposal_service(normalized).create(payload, requested_by=requested_by)
+        self._record_improvement_proposal_event(normalized, "created_from_quality_cockpit", proposal)
+        return cast(dict[str, Any], proposal)
+
+    def _quality_cockpit_payload_for_agent(self, agent_id: str) -> dict[str, Any]:
+        repository = self._knowledge_repository(agent_id)
+        try:
+            eval_runs = repository.list_eval_run_batches(limit=20)
+        except Exception:
+            eval_runs = []
+        execution_rows: list[dict[str, Any]] = []
+        route_outcomes: list[dict[str, Any]] = []
+        try:
+            executions = self.list_dashboard_executions(agent_id, limit=50)
+        except Exception:
+            executions = []
+        for execution in executions:
+            status = str(execution.get("status") or "")
+            cost = execution.get("cost_usd") or execution.get("costUsd") or 0.0
+            execution_rows.append(
+                {
+                    "dimension": "agent",
+                    "entity_id": agent_id,
+                    "agent_id": agent_id,
+                    "status": "passed" if status in {"completed", "success"} else "failed",
+                    "quality_score": 1.0 if status in {"completed", "success"} else 0.0,
+                    "cost_usd": cost,
+                    "failures": (
+                        []
+                        if status in {"completed", "success"}
+                        else [{"category": "runtime_failure", "message": status or "execution did not complete"}]
+                    ),
+                    "run_graph_node_ids": execution.get("run_graph_node_ids") or [],
+                }
+            )
+            model = str(execution.get("model") or execution.get("model_id") or "").strip()
+            if model:
+                execution_rows.append(
+                    {
+                        "dimension": "model",
+                        "entity_id": model,
+                        "agent_id": agent_id,
+                        "status": "passed" if status in {"completed", "success"} else "failed",
+                        "quality_score": 1.0 if status in {"completed", "success"} else 0.0,
+                        "cost_usd": cost,
+                    }
+                )
+            route_outcomes.extend(self._route_outcomes_from_execution(agent_id, execution))
+        return {
+            "agent_quality": execution_rows
+            or [{"dimension": "agent", "entity_id": agent_id, "agent_id": agent_id, "quality_score": 0.0}],
+            "eval_runs": eval_runs,
+            "route_outcomes": route_outcomes,
+        }
+
+    def _route_outcomes_from_execution(self, agent_id: str, execution: dict[str, Any]) -> list[dict[str, Any]]:
+        raw_outcomes = execution.get("route_outcomes")
+        if isinstance(raw_outcomes, list):
+            return [dict(item) for item in raw_outcomes if isinstance(item, dict)]
+        run_graph = execution.get("run_graph")
+        if not isinstance(run_graph, dict):
+            return []
+        outcomes: list[dict[str, Any]] = []
+        for node in run_graph.get("nodes") or []:
+            if not isinstance(node, dict):
+                continue
+            node_type = str(node.get("node_type") or node.get("type") or "")
+            if node_type != "agent_request":
+                continue
+            raw_payload = node.get("payload")
+            payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
+            selected = payload.get("selected_agent_ids") or payload.get("targets") or []
+            if isinstance(selected, str):
+                selected = [selected]
+            for selected_agent in selected:
+                selected_id = str(selected_agent or "").strip()
+                if not selected_id:
+                    continue
+                execution_ref = execution.get("id") or execution.get("task_id")
+                outcomes.append(
+                    {
+                        "schema_version": "route_outcome.v1",
+                        "outcome_id": f"route_outcome:{agent_id}:{execution_ref}:{selected_id}",
+                        "agent_id": selected_id,
+                        "route_source": str(payload.get("source") or "run_graph"),
+                        "status": "success"
+                        if str(execution.get("status") or "") in {"completed", "success"}
+                        else "failure",
+                        "cost_usd": execution.get("cost_usd") or execution.get("costUsd") or 0.0,
+                        "latency_ms": execution.get("duration_ms"),
+                        "run_graph_node_id": str(node.get("node_id") or node.get("id") or ""),
+                    }
+                )
+        return outcomes
+
+    def _release_quality_run_graphs(
+        self,
+        agent_id: str,
+        *,
+        repository: Any,
+        runs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        task_ids: set[int] = set()
+        try:
+            cases = repository.list_evaluation_cases(limit=50)
+        except Exception:
+            cases = []
+        for case in cases:
+            raw_task_id = case.get("source_task_id") if isinstance(case, dict) else None
+            try:
+                if raw_task_id is not None:
+                    task_ids.add(int(raw_task_id))
+            except (TypeError, ValueError):
+                continue
+        for run in runs:
+            for result in run.get("case_results") or []:
+                if not isinstance(result, dict):
+                    continue
+                raw_task_id = result.get("source_task_id") or (result.get("metadata") or {}).get("source_task_id")
+                try:
+                    if raw_task_id is not None:
+                        task_ids.add(int(raw_task_id))
+                except (TypeError, ValueError):
+                    continue
+        graphs: list[dict[str, Any]] = []
+        for task_id in sorted(task_ids):
+            graph = self.get_dashboard_execution_run_graph(agent_id, task_id)
+            if isinstance(graph, dict) and graph:
+                graphs.append(graph)
+            else:
+                graphs.append(
+                    {
+                        "schema_version": "run_graph.v1",
+                        "graph_id": f"missing:{agent_id}:{task_id}",
+                        "agent_id": agent_id,
+                        "task_id": task_id,
+                        "scenario": "missing",
+                        "nodes": [],
+                        "edges": [],
+                    }
+                )
+        return graphs
 
     def _emit_eval_audit_event(
         self,

@@ -13,6 +13,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
+import { translate } from "@/lib/i18n";
 
 /**
  * The auth contract (see `apps/web/CLAUDE.md`) folds every 4xx auth failure —
@@ -62,10 +63,7 @@ export function LoginScreen() {
     } catch (error) {
       if (isUpstreamFailure(error)) {
         setError(
-          t("auth.login.service_unavailable", {
-            defaultValue:
-              "Sign-in service is temporarily unavailable. Please try again in a moment.",
-          }),
+          t("auth.login.service_unavailable", undefined),
         );
       } else {
         // Generic message — never reveal whether the account exists.
@@ -98,7 +96,7 @@ export function LoginScreen() {
               autoComplete="username"
               autoFocus
               disabled={busy}
-              placeholder="owner@yourdomain.com"
+              placeholder={translate("generated.account.owner_yourdomain_com_8d7a5b9d")}
               className="auth-input"
             />
           </label>

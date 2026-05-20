@@ -32,6 +32,74 @@ def test_safe_read_policy_allows_execution() -> None:
     assert policy.to_payload()["policy_version"] == SANDBOX_POLICY_SCHEMA_VERSION
 
 
+def test_remote_dm_read_context_allows_with_allowed_identity() -> None:
+    policy = SandboxEffectivePolicy(
+        isolation_kind="docker",
+        risk_class="read_context",
+        network_mode="none",
+        channel_type="telegram",
+        is_group=False,
+        identity_status="allowed",
+    )
+
+    evaluation = evaluate_sandbox_effective_policy(policy)
+
+    assert evaluation.allowed is True
+    assert policy.remote_session is True
+    assert policy.to_payload()["channel_type"] == "telegram"
+    assert policy.to_payload()["identity_status"] == "allowed"
+
+
+def test_remote_dm_write_defaults_deny_without_explicit_policy() -> None:
+    policy = SandboxEffectivePolicy(
+        isolation_kind="docker",
+        risk_class="low_risk_write",
+        network_mode="none",
+        channel_type="telegram",
+        is_group=False,
+        identity_status="allowed",
+    )
+
+    evaluation = evaluate_sandbox_effective_policy(policy)
+
+    assert evaluation.allowed is False
+    assert "sandbox_remote_unsafe_default" in evaluation.reason_codes
+
+
+def test_remote_group_unknown_identity_fails_closed() -> None:
+    policy = SandboxEffectivePolicy(
+        isolation_kind="docker",
+        risk_class="read_context",
+        network_mode="none",
+        channel_type="slack",
+        is_group=True,
+        identity_status="pending",
+    )
+
+    evaluation = evaluate_sandbox_effective_policy(policy)
+
+    assert evaluation.allowed is False
+    assert policy.remote_session is True
+    assert "sandbox_remote_identity_untrusted" in evaluation.reason_codes
+
+
+def test_remote_group_unsafe_allows_with_explicit_policy_and_safe_sandbox() -> None:
+    policy = SandboxEffectivePolicy(
+        isolation_kind="docker",
+        risk_class="low_risk_write",
+        network_mode="none",
+        channel_type="discord",
+        is_group=True,
+        identity_status="allowed",
+        explicit_remote_policy=True,
+    )
+
+    evaluation = ensure_sandbox_policy_allows_execution(policy)
+
+    assert evaluation.allowed is True
+    assert evaluation.reason_codes == ()
+
+
 def test_forbidden_mount_denies_execution() -> None:
     policy = SandboxEffectivePolicy(
         isolation_kind="docker",
@@ -142,4 +210,19 @@ def test_ensure_sandbox_policy_allows_execution_raises_on_denied() -> None:
     )
 
     with pytest.raises(SandboxPolicyDenied, match="sandbox_native_high_risk"):
+        ensure_sandbox_policy_allows_execution(policy)
+
+
+def test_ensure_sandbox_policy_denies_remote_unsafe_before_execute() -> None:
+    policy = SandboxEffectivePolicy(
+        isolation_kind="docker",
+        risk_class="network_write",
+        network_mode="egress_allowlist",
+        egress_domains=("api.example.com",),
+        channel_type="telegram",
+        remote_session=True,
+        identity_status="allowed",
+    )
+
+    with pytest.raises(SandboxPolicyDenied, match="sandbox_remote_unsafe_default"):
         ensure_sandbox_policy_allows_execution(policy)

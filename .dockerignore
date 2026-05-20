@@ -39,6 +39,8 @@ rust/**/target/**
 *.pickle
 .coverage
 .coverage.*
+artifacts
+artifacts/**
 tmp_images
 agent_history_*
 agent_memory_*
@@ -47,6 +49,18 @@ runtime_smoke
 runtime_smoke_*
 smoke-workspace
 downloads
+proto/rpc_gateway
+proto/rpc_gateway/**
+rust/koda-rpc-gateway
+rust/koda-rpc-gateway/**
+koda/internal_rpc/generated/rpc_gateway
+koda/internal_rpc/generated/rpc_gateway/**
+tests/bench/baselines
+tests/bench/baselines/**
+tests/data
+tests/data/**
+tests/fixtures/audio
+tests/fixtures/audio/**
 docs/*
 !docs/openapi/
 !docs/openapi/**

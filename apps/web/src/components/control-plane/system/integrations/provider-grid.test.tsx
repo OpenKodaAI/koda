@@ -9,11 +9,21 @@ vi.mock("next/image", () => ({
   default: (props: ImgHTMLAttributes<HTMLImageElement>) => <img {...props} alt={props.alt || ""} />,
 }));
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    tl: (value: string) => value,
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 const useSystemSettingsMock = vi.fn();
 

@@ -27,6 +27,7 @@ from koda.config import (
 from koda.logging_config import get_logger
 from koda.squads.capabilities import CapabilitySummary
 from koda.squads.delivery import SQUAD_DELIVERY_SCHEMA_VERSION, delivery_metric
+from koda.squads.dispatch import record_squad_handoff_event
 from koda.squads.routing import extract_mentions
 from koda.squads.semantic_router import (
     CoordinationPlannerInput,
@@ -683,6 +684,33 @@ class SquadCoordinatorEngine:
         pending_task_ids: list[str] = []
         dispatched_agents: list[str] = []
         dispatch_message_ids: list[str] = [f"msg-{decision_message_id}"]
+        handoff_message_ids: list[str] = []
+        handoff_correlation_id: str | None = None
+        if decision.mode == "handoff":
+            handoff_destinations = _handoff_destinations(decision, coordinator_agent_id=coordinator_agent_id)
+            handoff_correlation_id = f"handoff:{thread.id}:msg-{decision_message_id}"
+            handoff_message_id = await record_squad_handoff_event(
+                self._thread_store,
+                thread_id=thread.id,
+                source_agent_id=coordinator_agent_id,
+                destination_agent_ids=handoff_destinations,
+                reason=decision.reasoning_summary,
+                handoff_kind="parallel_consult" if len(handoff_destinations) > 1 else "consult",
+                context_policy={
+                    "source": "coordinator_engine",
+                    "visibility": decision.visibility,
+                    "context_refs": _handoff_context_refs(decision),
+                    "final_response_strategy": decision.final_response_strategy,
+                },
+                deadline=_handoff_deadline(decision),
+                return_criteria=_handoff_return_criteria(decision),
+                status="requested",
+                parent_message_id=parent_message_id,
+                correlation_id=handoff_correlation_id,
+            )
+            if handoff_message_id is not None:
+                handoff_message_ids.append(f"msg-{handoff_message_id}")
+                dispatch_message_ids.append(f"msg-{handoff_message_id}")
         created_by_key: dict[str, str] = {}
         for index, task in enumerate(decision.tasks):
             depends_on = [created_by_key[key] for key in task.depends_on if key in created_by_key]
@@ -703,6 +731,7 @@ class SquadCoordinatorEngine:
                     "coordination_parent_message_id": parent_message_id,
                     "coordination_task_key": task.key or task.kind,
                     "coordination_mode": decision.mode,
+                    "handoff_correlation_id": handoff_correlation_id,
                     "report_via": task.report_via,
                     "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
                     "delivery_status": "waiting_for_replies" if depends_on else "delegated",
@@ -815,6 +844,8 @@ class SquadCoordinatorEngine:
                 "task_ids": task_ids,
                 "agents": dispatched_agents,
                 "mode": decision.mode,
+                "handoff_message_ids": handoff_message_ids,
+                "handoff_correlation_id": handoff_correlation_id,
                 "pending_task_ids": pending_task_ids,
             },
         )
@@ -873,6 +904,53 @@ class SquadCoordinatorEngine:
         )
         delivery_metric(event_type="coordination_decision", status="coordinating", source="coordinator_engine")
         return message_id
+
+
+def _handoff_destinations(decision: CoordinationDecision, *, coordinator_agent_id: str) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for agent_id in [*(task.agent_id for task in decision.tasks), *decision.selected_agents]:
+        normalized = str(agent_id or "").strip()
+        if not normalized or normalized == coordinator_agent_id or normalized in seen:
+            continue
+        seen.add(normalized)
+        out.append(normalized)
+    return out
+
+
+def _handoff_context_refs(decision: CoordinationDecision) -> list[str]:
+    refs: list[str] = []
+    seen: set[str] = set()
+    for task in decision.tasks:
+        for ref in task.context_refs:
+            normalized = str(ref or "").strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                refs.append(normalized)
+    if not refs:
+        refs.append("squad_thread_visible_context")
+    return refs
+
+
+def _handoff_deadline(decision: CoordinationDecision) -> str | None:
+    for task in decision.tasks:
+        if task.deadline:
+            return task.deadline
+    return None
+
+
+def _handoff_return_criteria(decision: CoordinationDecision) -> list[str]:
+    criteria: list[str] = []
+    seen: set[str] = set()
+    for task in decision.tasks:
+        for item in [*task.acceptance_criteria, *task.deliverables]:
+            normalized = str(item or "").strip()
+            if normalized and normalized not in seen:
+                seen.add(normalized)
+                criteria.append(normalized)
+    if not criteria:
+        criteria.append("Return with a visible reply or task_result before coordinator synthesis.")
+    return criteria
 
 
 def _idempotency_key(

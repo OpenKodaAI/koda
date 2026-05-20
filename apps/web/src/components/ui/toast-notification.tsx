@@ -180,7 +180,7 @@ function ToastItem({ toast }: { toast: Toast }) {
           <button
             type="button"
             onClick={() => removeToast(toast.id)}
-            aria-label={tl("Fechar aviso")}
+            aria-label={t("generated.ui.fechar_aviso_b7f6fbc3")}
             className="ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full opacity-70 transition-[opacity,background-color] hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
           >
             <X className="icon-xs" strokeWidth={1.75} />

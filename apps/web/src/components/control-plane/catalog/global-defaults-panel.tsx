@@ -8,6 +8,7 @@ import { InlineSpinner } from "@/components/ui/async-feedback";
 import { useToast } from "@/hooks/use-toast";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { prettyJson } from "@/lib/control-plane-editor";
+import { translate } from "@/lib/i18n";
 
 async function requestJson(path: string, init: RequestInit = {}) {
   const response = await fetch(path, {
@@ -36,7 +37,7 @@ export function GlobalDefaultsPanel({
 }: GlobalDefaultsPanelProps) {
   const router = useRouter();
   const { showToast } = useToast();
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   const [expanded, setExpanded] = useState(false);
   const [json, setJson] = useState(() => prettyJson(sections));
@@ -50,11 +51,11 @@ export function GlobalDefaultsPanel({
         method: "PATCH",
         body: JSON.stringify({ sections: parsed }),
       });
-      showToast(tl("Defaults globais salvos com sucesso."), "success");
+      showToast(t("generated.controlPlane.defaults_globais_salvos_com_sucesso_894c551b"), "success");
       router.refresh();
     } catch (err) {
       showToast(
-        err instanceof Error ? err.message : tl("Erro ao salvar defaults."),
+        err instanceof Error ? err.message : t("generated.controlPlane.erro_ao_salvar_defaults_e3ac17e2"),
         "error",
       );
     } finally {
@@ -74,7 +75,7 @@ export function GlobalDefaultsPanel({
           className="h-3.5 w-3.5 transition-transform duration-200"
           style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}
         />
-        {tl("Defaults globais")} v{version}
+        {t("generated.controlPlane.defaults_globais_cdeeccf3")} {translate("generated.controlPlane.v_76abe6e8")}{version}
       </button>
 
       <AnimatePresence initial={false}>
@@ -98,12 +99,12 @@ export function GlobalDefaultsPanel({
                   type="button"
                   className="button-shell button-shell--primary button-shell--sm"
                   disabled={saving}
-                  aria-label={saving ? tl("Salvando...") : undefined}
+                  aria-label={saving ? t("generated.controlPlane.salvando_b58cece2") : undefined}
                   aria-busy={saving || undefined}
                   onClick={handleSave}
                 >
                   {saving ? <InlineSpinner className="h-3.5 w-3.5" /> : null}
-                  <span>{tl("Salvar defaults")}</span>
+                  <span>{t("generated.controlPlane.salvar_defaults_8eecb9b1")}</span>
                 </button>
               </div>
             </div>

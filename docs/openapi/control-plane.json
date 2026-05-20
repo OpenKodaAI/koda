@@ -412,6 +412,335 @@
             "type": "string"
           }
         }
+      },
+      "ImprovementProposal": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "proposal_id",
+          "source_kind",
+          "source_ref",
+          "proposal_type",
+          "summary",
+          "evidence_refs",
+          "diff_preview",
+          "risk_class",
+          "validation_plan",
+          "rollback_plan",
+          "run_graph_node_ids",
+          "status"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "improvement_proposal.v1"
+          },
+          "proposal_id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "source_kind": {
+            "type": "string",
+            "enum": [
+              "run",
+              "eval",
+              "user_correction",
+              "timeout",
+              "dead_letter",
+              "tool_failure",
+              "manual"
+            ]
+          },
+          "source_ref": {
+            "type": "string"
+          },
+          "proposal_type": {
+            "type": "string",
+            "enum": [
+              "memory",
+              "skill",
+              "prompt",
+              "routing_profile",
+              "tool_policy",
+              "eval_case",
+              "docs"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "evidence_refs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "diff_preview": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "risk_class": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "validation_plan": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "validation_result": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "rollback_plan": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "pending_review",
+              "approved",
+              "rejected",
+              "validating",
+              "applied",
+              "rolled_back",
+              "failed"
+            ]
+          },
+          "status_history": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "idempotency_hash": {
+            "type": "string"
+          },
+          "run_graph_node_ids": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "reviewed_at": {
+            "type": "string"
+          },
+          "validated_at": {
+            "type": "string"
+          },
+          "applied_at": {
+            "type": "string"
+          },
+          "rolled_back_at": {
+            "type": "string"
+          }
+        }
+      },
+      "ImprovementProposalList": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "items"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "improvement_proposal.v1"
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ImprovementProposal"
+            }
+          }
+        }
+      },
+      "ImprovementProposalActionBody": {
+        "type": "object",
+        "properties": {
+          "reviewer": {
+            "type": "string"
+          },
+          "note": {
+            "type": "string"
+          },
+          "validation_result": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      },
+      "QualityCockpit": {
+        "type": "object",
+        "required": [
+          "schema_version",
+          "cockpit_id",
+          "summary",
+          "top_failures",
+          "cost_vs_quality",
+          "eval_trends"
+        ],
+        "properties": {
+          "schema_version": {
+            "type": "string",
+            "const": "quality_cockpit.v1"
+          },
+          "cockpit_id": {
+            "type": "string"
+          },
+          "agent_id": {
+            "type": "string"
+          },
+          "generated_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "degraded",
+              "blocked"
+            ]
+          },
+          "summary": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "groups": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "entities": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "top_failures": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "failure_id",
+                "status",
+                "title",
+                "summary"
+              ],
+              "properties": {
+                "failure_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                },
+                "risk_class": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string"
+                },
+                "proposal_action_available": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "cost_vs_quality": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "eval_trends": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "proposal_payloads": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      },
+      "QualityFailureProposalBody": {
+        "type": "object",
+        "properties": {
+          "agent_id": {
+            "type": "string"
+          },
+          "requested_by": {
+            "type": "string"
+          }
+        }
+      },
+      "OperationalErrorEnvelope": {
+        "type": "object",
+        "required": [
+          "code",
+          "category",
+          "message",
+          "retryable",
+          "user_action"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          },
+          "retryable": {
+            "type": "boolean"
+          },
+          "user_action": {
+            "type": "string"
+          }
+        }
+      },
+      "OperationalErrorResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/OperationalErrorEnvelope"
+          }
+        }
       }
     }
   },
@@ -1575,6 +1904,535 @@
         "responses": {
           "200": {
             "description": "The channel identity was revoked and can no longer enqueue messages."
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/skills/registry": {
+      "get": {
+        "summary": "List local skill registry entries",
+        "description": "Returns the local-first skill_registry.v1 view derived from installed skill package locks, scanner evidence, eval evidence, trust summary, install state, and rollback availability.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "skill_registry.v1 payload"
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/skills/packages/{package_id}/evals/run": {
+      "post": {
+        "summary": "Run offline skill package evals",
+        "description": "Runs deterministic skill_eval.v1 checks from package eval_case.v1 metadata and updates recommendation/trust fields on the skill_lock.v1 payload.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "package_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "skill_eval.v1 result"
+          },
+          "409": {
+            "description": "Operational error envelope"
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals": {
+      "get": {
+        "summary": "List improvement proposals",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Improvement proposal list",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposalList"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Create improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposal"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Improvement proposal created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid proposal payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}": {
+      "get": {
+        "summary": "Get improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Improvement proposal",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Improvement proposal not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/approve": {
+      "post": {
+        "summary": "Approve improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposalActionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal approved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Invalid lifecycle transition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/reject": {
+      "post": {
+        "summary": "Reject improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposalActionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal rejected",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/validate": {
+      "post": {
+        "summary": "Validate improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposalActionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal validation updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/apply": {
+      "post": {
+        "summary": "Apply improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposalActionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal applied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Validation or rollback gate not satisfied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/rollback": {
+      "post": {
+        "summary": "Roll back improvement proposal",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "proposal_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImprovementProposalActionBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Proposal rolled back",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/dashboard/quality/overview": {
+      "get": {
+        "summary": "Get quality cockpit overview",
+        "description": "Returns quality_cockpit.v1 aggregated from existing eval, execution, metric, RunGraph, and proposal evidence.",
+        "responses": {
+          "200": {
+            "description": "quality_cockpit.v1 overview",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityCockpit"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/dashboard/quality/agents/{agent_id}": {
+      "get": {
+        "summary": "Get agent quality cockpit",
+        "description": "Returns quality_cockpit.v1 scoped to one agent.",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "quality_cockpit.v1 agent payload",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QualityCockpit"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Operational error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/control-plane/dashboard/quality/failures/{failure_id}/proposal": {
+      "post": {
+        "summary": "Create improvement proposal from quality failure",
+        "description": "Creates an improvement_proposal.v1 from a quality_cockpit.v1 failure. This action does not validate, apply, or mutate runtime state.",
+        "parameters": [
+          {
+            "name": "failure_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/QualityFailureProposalBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Improvement proposal created from failure evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImprovementProposal"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Operational error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Operational error envelope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalErrorResponse"
+                }
+              }
+            }
           }
         }
       }

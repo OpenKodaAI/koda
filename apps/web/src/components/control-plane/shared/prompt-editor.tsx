@@ -5,6 +5,7 @@ import { SessionRichText } from "@/components/sessions/session-rich-text";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useAutoGrowTextarea } from "@/hooks/use-auto-grow-textarea";
 import { cn } from "@/lib/utils";
+import { translate } from "@/lib/i18n";
 
 interface PromptEditorProps {
   value: string;
@@ -35,9 +36,7 @@ export function PromptEditor({
 
   const resolvedPlaceholder =
     placeholder ??
-    t("controlPlane.prompt.placeholder", {
-      defaultValue: "Write the markdown instructions…",
-    });
+    t("controlPlane.prompt.placeholder", undefined);
 
   const wordCount = useMemo(() => {
     if (!value.trim()) return 0;
@@ -57,9 +56,7 @@ export function PromptEditor({
         <div
           className="absolute right-2 top-2 z-10 inline-flex items-center gap-0.5 rounded-[6px] bg-[var(--panel-soft)] p-0.5 shadow-[0_1px_8px_rgba(0,0,0,0.16)]"
           role="tablist"
-          aria-label={t("controlPlane.prompt.modeTabs", {
-            defaultValue: "Markdown editor mode",
-          })}
+          aria-label={t("controlPlane.prompt.modeTabs", undefined)}
         >
           <button
             type="button"
@@ -67,7 +64,7 @@ export function PromptEditor({
             role="tab"
             onClick={() => setPreviewOpen(true)}
             disabled={disabled}
-            aria-label={t("controlPlane.prompt.preview", { defaultValue: "Preview" })}
+            aria-label={t("controlPlane.prompt.preview", undefined)}
             aria-selected={previewOpen}
             aria-controls={`${editorId}-preview-panel`}
             className={cn(
@@ -76,7 +73,7 @@ export function PromptEditor({
                 "bg-[var(--surface-hover)] text-[var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]",
             )}
           >
-            {t("controlPlane.prompt.preview", { defaultValue: "Preview" })}
+            {t("controlPlane.prompt.preview", undefined)}
           </button>
           <button
             type="button"
@@ -84,7 +81,7 @@ export function PromptEditor({
             role="tab"
             onClick={() => setPreviewOpen(false)}
             disabled={disabled}
-            aria-label={t("controlPlane.prompt.markdown", { defaultValue: "Markdown" })}
+            aria-label={t("controlPlane.prompt.markdown", undefined)}
             aria-selected={!previewOpen}
             aria-controls={`${editorId}-markdown-panel`}
             className={cn(
@@ -93,7 +90,7 @@ export function PromptEditor({
                 "bg-[var(--surface-hover)] text-[var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]",
             )}
           >
-            {t("controlPlane.prompt.markdown", { defaultValue: "Markdown" })}
+            {t("controlPlane.prompt.markdown", undefined)}
           </button>
         </div>
 
@@ -103,7 +100,7 @@ export function PromptEditor({
             role="tabpanel"
             aria-labelledby={`${editorId}-preview-tab`}
             className="min-h-[120px] max-h-[480px] overflow-y-auto px-4 pb-3 pt-11 text-[0.875rem] leading-[1.6] text-[var(--text-primary)]"
-            aria-label={t("controlPlane.prompt.preview", { defaultValue: "Preview" })}
+            aria-label={t("controlPlane.prompt.preview", undefined)}
           >
             {value.trim() ? (
               <SessionRichText content={value} variant="assistant" />
@@ -133,8 +130,7 @@ export function PromptEditor({
       <div className="flex items-center justify-between gap-3 px-1 text-[0.6875rem] text-[var(--text-tertiary)]">
         <div className="min-w-0">{hint ? <span className="hidden sm:inline">{hint}</span> : null}</div>
         <span className="font-mono text-[var(--text-quaternary)]">
-          {wordCount} · {charCount} chars
-        </span>
+          {wordCount} · {charCount} {translate("generated.controlPlane.chars_cf66e897")}</span>
       </div>
     </div>
   );

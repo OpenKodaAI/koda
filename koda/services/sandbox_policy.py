@@ -42,6 +42,14 @@ _NETWORK_ALIASES: dict[str, SandboxNetworkMode] = {
     "all": "any",
     "bridge": "any",
 }
+_LOCAL_CHANNEL_TYPES: frozenset[str] = frozenset({"", "local", "dashboard", "runtime", "doctor", "cli"})
+_ALLOWED_IDENTITY_STATUSES: frozenset[str] = frozenset({"local", "allowed"})
+_REMOTE_UNSAFE_RISK_CLASSES: frozenset[McpRiskClass] = frozenset(
+    {
+        "low_risk_write",
+        *HIGH_RISK_MCP_CLASSES,
+    }
+)
 _FORBIDDEN_ENV_NAMES: frozenset[str] = frozenset(
     {
         "LD_PRELOAD",
@@ -118,6 +126,17 @@ class SandboxEffectivePolicy:
     env_keys: tuple[str, ...] = ()
     allow_private_egress: bool = False
     source: str = "runtime"
+    channel_type: str = "local"
+    is_group: bool = False
+    remote_session: bool = False
+    identity_status: str = "local"
+    explicit_remote_policy: bool = False
+
+    def __post_init__(self) -> None:
+        channel_type = normalize_channel_type(self.channel_type)
+        object.__setattr__(self, "channel_type", channel_type)
+        object.__setattr__(self, "identity_status", normalize_identity_status(self.identity_status))
+        object.__setattr__(self, "remote_session", _is_remote_session(channel_type, self.is_group, self.remote_session))
 
     @classmethod
     def from_runtime(
@@ -129,9 +148,16 @@ class SandboxEffectivePolicy:
         env: Mapping[str, Any] | Iterable[str] | None = None,
         allow_private_egress: bool = False,
         source: str = "runtime",
+        channel_type: Any = "local",
+        is_group: Any = False,
+        remote_session: Any = False,
+        identity_status: Any = "local",
+        explicit_remote_policy: Any = False,
+        channel_context: Mapping[str, Any] | None = None,
     ) -> SandboxEffectivePolicy:
         """Build a policy from runtime isolation constraints without storing env values."""
 
+        channel_context = channel_context or {}
         return cls(
             isolation_kind=normalize_isolation_kind(isolation_kind),
             risk_class=normalize_mcp_risk_class(risk_class),
@@ -141,6 +167,11 @@ class SandboxEffectivePolicy:
             env_keys=_env_key_tuple(env),
             allow_private_egress=bool(allow_private_egress),
             source=str(source or "runtime"),
+            channel_type=channel_context.get("channel_type", channel_type),
+            is_group=_boolish(channel_context.get("is_group", is_group)),
+            remote_session=_boolish(channel_context.get("remote_session", remote_session)),
+            identity_status=channel_context.get("identity_status", identity_status),
+            explicit_remote_policy=_boolish(channel_context.get("explicit_remote_policy", explicit_remote_policy)),
         )
 
     def to_payload(self) -> dict[str, Any]:
@@ -154,6 +185,11 @@ class SandboxEffectivePolicy:
             "env_keys": list(self.env_keys),
             "allow_private_egress": self.allow_private_egress,
             "source": self.source,
+            "channel_type": self.channel_type,
+            "is_group": self.is_group,
+            "remote_session": self.remote_session,
+            "identity_status": self.identity_status,
+            "explicit_remote_policy": self.explicit_remote_policy,
         }
 
 
@@ -213,11 +249,21 @@ def normalize_network_mode(value: Any) -> SandboxNetworkMode:
     return _NETWORK_ALIASES.get(normalized, "unknown")
 
 
+def normalize_channel_type(value: Any) -> str:
+    return str(value or "local").strip().lower().replace(" ", "_") or "local"
+
+
+def normalize_identity_status(value: Any) -> str:
+    return str(value or "unknown").strip().lower().replace(" ", "_") or "unknown"
+
+
 def evaluate_sandbox_effective_policy(policy: SandboxEffectivePolicy) -> SandboxPolicyEvaluation:
     """Evaluate effective sandbox posture and deny unsafe execution."""
 
     checks = (
         _check_known_policy(policy),
+        _check_remote_channel_identity(policy),
+        _check_remote_unsafe_default(policy),
         _check_forbidden_mounts(policy),
         _check_forbidden_env(policy),
         _check_private_egress(policy),
@@ -256,6 +302,63 @@ def _check_known_policy(policy: SandboxEffectivePolicy) -> SandboxPolicyCheck:
         ok=True,
         reason="Sandbox isolation and network mode are known.",
         severity="info",
+    )
+
+
+def _check_remote_channel_identity(policy: SandboxEffectivePolicy) -> SandboxPolicyCheck:
+    if policy.remote_session and policy.identity_status not in _ALLOWED_IDENTITY_STATUSES:
+        return SandboxPolicyCheck(
+            check_id="sandbox_remote_identity_untrusted",
+            ok=False,
+            reason="Remote channel identity is not explicitly allowed.",
+            details={
+                "channel_type": policy.channel_type,
+                "is_group": policy.is_group,
+                "remote_session": policy.remote_session,
+                "identity_status": policy.identity_status,
+            },
+        )
+    return SandboxPolicyCheck(
+        check_id="sandbox_remote_identity_trusted",
+        ok=True,
+        reason="Channel identity is trusted for this sandbox context.",
+        severity="info",
+        details={
+            "channel_type": policy.channel_type,
+            "is_group": policy.is_group,
+            "remote_session": policy.remote_session,
+            "identity_status": policy.identity_status,
+        },
+    )
+
+
+def _check_remote_unsafe_default(policy: SandboxEffectivePolicy) -> SandboxPolicyCheck:
+    unsafe_remote_action = policy.remote_session and policy.risk_class in _REMOTE_UNSAFE_RISK_CLASSES
+    if unsafe_remote_action and not policy.explicit_remote_policy:
+        return SandboxPolicyCheck(
+            check_id="sandbox_remote_unsafe_default",
+            ok=False,
+            reason="Remote or group sessions require explicit policy before unsafe tool execution.",
+            details={
+                "channel_type": policy.channel_type,
+                "is_group": policy.is_group,
+                "remote_session": policy.remote_session,
+                "risk_class": policy.risk_class,
+                "explicit_remote_policy": policy.explicit_remote_policy,
+            },
+        )
+    return SandboxPolicyCheck(
+        check_id="sandbox_remote_unsafe_default",
+        ok=True,
+        reason="Remote session default is compatible with this risk class.",
+        severity="info",
+        details={
+            "channel_type": policy.channel_type,
+            "is_group": policy.is_group,
+            "remote_session": policy.remote_session,
+            "risk_class": policy.risk_class,
+            "explicit_remote_policy": policy.explicit_remote_policy,
+        },
     )
 
 
@@ -337,6 +440,18 @@ def _constraint_value(constraints: Any | None, key: str, default: Any) -> Any:
     if isinstance(constraints, Mapping):
         return constraints.get(key, default)
     return getattr(constraints, key, default)
+
+
+def _is_remote_session(channel_type: str, is_group: bool, remote_session: Any) -> bool:
+    return _boolish(remote_session) or bool(is_group) or channel_type not in _LOCAL_CHANNEL_TYPES
+
+
+def _boolish(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in {"1", "true", "yes", "on", "allowed", "enabled"}
 
 
 def _mount_tuple(value: Any) -> tuple[SandboxMount, ...]:

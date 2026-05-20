@@ -326,9 +326,7 @@ export default function SchedulesPage() {
           limit: DASHBOARD_PAGE_SIZE,
           offset,
         },
-        fallbackError: t("schedules.page.unavailableDescription", {
-          defaultValue: "Unable to load canonical schedules.",
-        }),
+        fallbackError: t("schedules.page.unavailableDescription", undefined),
       });
       const page = normalizePaginatedListResponse<CronJob>(
         response.data,
@@ -723,13 +721,8 @@ export default function SchedulesPage() {
             <div className="py-6">
               <PageEmptyState
                 icon={DatabaseZap}
-                title={t("schedules.page.unavailable", {
-                  defaultValue: "Canonical scheduler data unavailable",
-                })}
-                description={t("schedules.page.unavailableDescription", {
-                  defaultValue:
-                    "The control-plane/runtime APIs do not expose per-agent cron inventory in this deployment.",
-                })}
+                title={t("schedules.page.unavailable", undefined)}
+                description={t("schedules.page.unavailableDescription", undefined)}
               />
             </div>
           ) : botsWithJobs.length === 0 ? (
@@ -774,7 +767,7 @@ export default function SchedulesPage() {
                 hasMore={Boolean(schedulesQuery.hasNextPage)}
                 loading={schedulesQuery.isFetchingNextPage}
                 onLoadMore={loadMoreSchedules}
-                label={t("common.loadMore", { defaultValue: "Load more" })}
+                label={t("common.loadMore", undefined)}
               />
             </section>
           )}
@@ -870,9 +863,7 @@ function RoutineExecutionsDrawer({
       ),
     [detail?.runs],
   );
-  const title = t("schedules.executions.title", {
-    defaultValue: "Routine executions",
-  });
+  const title = t("schedules.executions.title", undefined);
   const routineTitle = getRoutineTitle(job);
 
   return (
@@ -887,11 +878,11 @@ function RoutineExecutionsDrawer({
       }
       description={routineTitle || t("schedules.inspector.detailFallback")}
       width="min(620px, 94vw)"
-      closeLabel={t("common.close", { defaultValue: "Close" })}
+      closeLabel={t("common.close", undefined)}
     >
       <div className="px-5 py-5">
         {loading ? (
-          <div className="space-y-3" aria-label={t("common.loading", { defaultValue: "Loading" })}>
+          <div className="space-y-3" aria-label={t("common.loading", undefined)}>
             {Array.from({ length: 4 }).map((_, index) => (
               <div
                 key={index}
@@ -916,12 +907,10 @@ function RoutineExecutionsDrawer({
               aria-hidden
             />
             <p className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
-              {t("schedules.executions.empty", { defaultValue: "No executions yet." })}
+              {t("schedules.executions.empty", undefined)}
             </p>
             <p className="m-0 max-w-[32rem] text-[0.75rem] leading-[1.5] text-[var(--text-tertiary)]">
-              {t("schedules.executions.emptyDescription", {
-                defaultValue: "When this routine runs, the most recent records appear here first.",
-              })}
+              {t("schedules.executions.emptyDescription", undefined)}
             </p>
           </div>
         ) : (
@@ -933,7 +922,7 @@ function RoutineExecutionsDrawer({
               hasMore={Boolean(detail?.run_page?.has_more)}
               loading={loadingMore}
               onLoadMore={onLoadMore}
-              label={t("common.loadMore", { defaultValue: "Load more" })}
+              label={t("common.loadMore", undefined)}
             />
           </div>
         )}
@@ -970,7 +959,7 @@ function RoutineExecutionRow({ run }: { run: ScheduleRun }) {
             className="m-0 mt-2 line-clamp-2 text-[0.8125rem] leading-[1.5] text-[var(--text-primary)]"
             title={primaryText || undefined}
           >
-            {primaryText || t("schedules.executions.noSummary", { defaultValue: "No summary recorded." })}
+            {primaryText || t("schedules.executions.noSummary", undefined)}
           </p>
         </div>
         <time
@@ -983,9 +972,9 @@ function RoutineExecutionRow({ run }: { run: ScheduleRun }) {
 
       <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)] sm:grid-cols-4">
         <RunMeta label={t("schedules.inspector.runtimeTask")} value={run.task_id ? `#${run.task_id}` : "—"} />
-        <RunMeta label={t("common.duration", { defaultValue: "Duration" })} value={formatDuration(run.duration_ms)} />
-        <RunMeta label={t("common.attempts", { defaultValue: "Attempts" })} value={`${run.attempt}/${run.max_attempts}`} />
-        <RunMeta label={t("common.model", { defaultValue: "Model" })} value={run.model_effective || "—"} />
+        <RunMeta label={t("common.duration", undefined)} value={formatDuration(run.duration_ms)} />
+        <RunMeta label={t("common.attempts", undefined)} value={`${run.attempt}/${run.max_attempts}`} />
+        <RunMeta label={t("common.model", undefined)} value={run.model_effective || "—"} />
       </div>
     </article>
   );

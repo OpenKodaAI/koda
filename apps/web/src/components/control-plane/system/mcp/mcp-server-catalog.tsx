@@ -59,7 +59,7 @@ function SuggestedChip({
   exists: boolean;
   onClick: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <button
       type="button"
@@ -71,7 +71,7 @@ function SuggestedChip({
           ? "cursor-default border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-quaternary)]"
           : "border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
       ].join(" ")}
-      title={exists ? tl("Ja adicionado") : undefined}
+      title={exists ? t("generated.controlPlane.ja_adicionado_2b8a8465") : undefined}
     >
       {!exists && <Plus size={12} />}
       {name}
@@ -82,7 +82,7 @@ function SuggestedChip({
 /*  Main catalog component                                             */
 
 export function McpServerCatalog() {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { servers: suggestedServers, isLoading: suggestedLoading } =
     useMcpCatalogSuggestions();
 
@@ -111,11 +111,11 @@ export function McpServerCatalog() {
       );
       setServers(filterAllowedMcpCatalogEntries(items));
     } catch (err) {
-      setError(err instanceof Error ? err.message : tl("Erro ao carregar servidores"));
+      setError(err instanceof Error ? err.message : t("generated.controlPlane.erro_ao_carregar_servidores_10a6594d"));
     } finally {
       setLoading(false);
     }
-  }, [tl]);
+  }, [t]);
 
   useEffect(() => {
     fetchServers();
@@ -172,7 +172,7 @@ export function McpServerCatalog() {
   };
 
   const handleDelete = async (serverKey: string) => {
-    if (!window.confirm(tl("Tem certeza que deseja remover este servidor? Todas as conexoes de agentes serao removidas."))) return;
+    if (!window.confirm(t("generated.controlPlane.tem_certeza_que_deseja_remover_este_servidor_b779d61c"))) return;
     await requestJson(`/api/control-plane/mcp/catalog/${serverKey}`, {
       method: "DELETE",
     });
@@ -203,12 +203,12 @@ export function McpServerCatalog() {
         <div className="flex items-center gap-2">
           <Puzzle size={20} className="text-[var(--text-tertiary)]" />
           <h1 className="text-xl font-bold tracking-[-0.04em] text-[var(--text-primary)] sm:text-2xl">
-            {tl("Servidores MCP")}
+            {t("generated.controlPlane.servidores_mcp_6dc46f21")}
           </h1>
         </div>
         <p className="mt-1.5 text-sm text-[var(--text-tertiary)]">
-          {tl(
-            "Gerencie servidores do Model Context Protocol para estender as ferramentas dos seus agentes.",
+          {t(
+            "generated.controlPlane.gerencie_servidores_do_model_context_protoco_eea4d009",
           )}
         </p>
 
@@ -223,16 +223,16 @@ export function McpServerCatalog() {
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={tl("Buscar servidores...")}
+              placeholder={t("generated.controlPlane.buscar_servidores_1682e2ce")}
               className="pl-9"
-              aria-label={tl("Buscar servidores MCP")}
+              aria-label={t("generated.controlPlane.buscar_servidores_mcp_2df67126")}
             />
           </div>
 
           <div className="flex items-center gap-2">
-            <div className="flex items-center gap-1" role="tablist" aria-label={tl("Filtrar por categoria")}>
+            <div className="flex items-center gap-1" role="tablist" aria-label={t("generated.controlPlane.filtrar_por_categoria_282524cb")}>
               <CategoryChip
-                label={tl("Todos")}
+                label={t("generated.controlPlane.todos_d6337c41")}
                 active={activeCategory === "all"}
                 onClick={() => setActiveCategory("all")}
               />
@@ -263,7 +263,7 @@ export function McpServerCatalog() {
               }}
             >
               <Plus size={14} />
-              {tl("Adicionar servidor MCP")}
+              {t("generated.controlPlane.adicionar_servidor_mcp_ea88d544")}
             </button>
           </div>
         </div>
@@ -273,7 +273,7 @@ export function McpServerCatalog() {
       {servers.length < 4 && (
         <div className="mt-4">
           <span className="eyebrow mb-2 block text-[var(--text-quaternary)]">
-            {tl("Sugeridos")}
+            {t("generated.controlPlane.sugeridos_356a1292")}
           </span>
           {suggestedLoading ? (
             <div className="flex flex-wrap gap-2" aria-hidden>
@@ -321,8 +321,8 @@ export function McpServerCatalog() {
         ) : filtered.length === 0 ? (
           <div className="py-12 text-center text-sm text-[var(--text-quaternary)]">
             {servers.length === 0
-              ? tl("Nenhum servidor MCP configurado. Adicione um para comecar.")
-              : tl("Nenhum servidor encontrado.")}
+              ? t("generated.controlPlane.nenhum_servidor_mcp_configurado_adicione_um__e0b0b184")
+              : t("generated.controlPlane.nenhum_servidor_encontrado_a6a1a59d")}
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">

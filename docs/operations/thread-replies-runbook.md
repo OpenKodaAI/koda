@@ -39,3 +39,15 @@ Agents can use:
 No existing transcript data is rewritten. To roll back, disable the new tools
 or ignore/drop `squad_reply_obligations`. Messages remain visible through the
 legacy flat `squad_messages` timeline.
+
+## Smoke Gate
+
+Recurring squad validation:
+
+```bash
+python scripts/squad_smoke.py --input tests/fixtures/evals/squad_smoke.v1.json
+```
+
+The fixture must include mention routing, an open/resolved reply obligation, a
+child run or task result, coordinator synthesis, partial timeout evidence, and a
+passing `run_graph_completeness.v1` report.

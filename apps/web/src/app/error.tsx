@@ -10,11 +10,11 @@ export default function AppError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <RouteErrorState
-      title={tl("We hit a route error")}
-      description={error.message || tl("The page could not be rendered.")}
+      title={t("generated.routes.we_hit_a_route_error_e67cad31")}
+      description={error.message || t("generated.routes.the_page_could_not_be_rendered_4d58a8d1")}
       onRetry={reset}
     />
   );

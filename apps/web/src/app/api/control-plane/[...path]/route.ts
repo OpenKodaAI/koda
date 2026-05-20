@@ -12,8 +12,11 @@ import "@/lib/contracts/system";
 import "@/lib/contracts/sessions";
 import "@/lib/contracts/memory";
 import "@/lib/contracts/evals";
+import "@/lib/contracts/improvement-proposals";
 import "@/lib/contracts/channel-gateway";
 import "@/lib/contracts/onboarding-readiness";
+import "@/lib/contracts/handoffs";
+import "@/lib/contracts/quality-cockpit";
 import { controlPlaneFetch, sanitizeControlPlanePayload } from "@/lib/control-plane";
 import { getControlPlaneMutationInvalidation } from "@/lib/control-plane-cache";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
@@ -260,6 +263,22 @@ function unavailableReadPayload(path: string[], request: NextRequest): unknown |
   }
   if (area === "squads" && second && ["threads", "activity", "metrics"].includes(third ?? "")) {
     return emptyCollectionPayload();
+  }
+  if (area === "quality") {
+    return {
+      schema_version: "quality_cockpit.v1",
+      generated_at: "",
+      status: "unknown",
+      summary: {
+        failure_count: 0,
+        run_count: 0,
+        eval_trend: "unknown",
+      },
+      groups: [],
+      top_failures: [],
+      unavailable: true,
+      error: UPSTREAM_UNAVAILABLE_MESSAGE,
+    };
   }
 
   return null;

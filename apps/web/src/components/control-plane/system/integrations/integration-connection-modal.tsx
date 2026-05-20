@@ -29,7 +29,7 @@ export function IntegrationConnectionModal({
     isIntegrationActionPending,
     integrationActionStatus,
   } = useSystemSettings();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   const connection = integrationConnections[entry.key];
   const fields = (connection?.fields || []) as GeneralSystemSettingsCredentialField[];
@@ -97,7 +97,7 @@ export function IntegrationConnectionModal({
             type="button"
             onClick={onClose}
             className="app-surface-close"
-            aria-label={tl("Fechar modal")}
+            aria-label={t("generated.controlPlane.fechar_modal_1b5b2901")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -116,7 +116,7 @@ export function IntegrationConnectionModal({
                   id="connection-modal-title"
                   className="text-lg font-semibold tracking-[-0.03em] text-[var(--text-primary)]"
                 >
-                  {tl("Conectar")} {entry.label}
+                  {t("generated.controlPlane.conectar_a587e076")} {entry.label}
                 </h3>
                 <p className="mt-0.5 text-sm text-[var(--text-quaternary)]">
                   {tl(entry.tagline)}
@@ -133,16 +133,16 @@ export function IntegrationConnectionModal({
                 label={field.label}
                 description={
                   field.storage === "secret" && field.value_present
-                    ? tl("Preencha apenas para substituir.")
+                    ? t("generated.controlPlane.preencha_apenas_para_substituir_f0486ea6")
                     : field.required
-                      ? tl("Obrigatório")
-                      : tl("Opcional")
+                      ? t("generated.controlPlane.obrigatorio_ea9fd1bf")
+                      : t("generated.controlPlane.opcional_f6c7765c")
                 }
               >
                 <div className="space-y-2">
                   {field.storage === "secret" && field.value_present ? (
                     <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
-                      {tl("Configurada")}
+                      {t("generated.controlPlane.configurada_df5188a8")}
                     </span>
                   ) : null}
                   {field.storage === "secret" ? (
@@ -155,7 +155,7 @@ export function IntegrationConnectionModal({
                           clear: false,
                         }))
                       }
-                      placeholder={tl("Digite para substituir")}
+                      placeholder={t("generated.controlPlane.digite_para_substituir_5f794493")}
                     />
                   ) : (
                     <input
@@ -169,7 +169,7 @@ export function IntegrationConnectionModal({
                           clear: false,
                         }))
                       }
-                      placeholder={tl("Preencha o valor")}
+                      placeholder={t("generated.controlPlane.preencha_o_valor_b94f6d3d")}
                     />
                   )}
                 </div>
@@ -191,7 +191,7 @@ export function IntegrationConnectionModal({
                     )}
                   >
                     <Trash2 size={12} />
-                    {field.clear ? tl("Será removido ao salvar") : tl("Remover segredo")}
+                    {field.clear ? t("generated.controlPlane.sera_removido_ao_salvar_8111eef5") : t("generated.controlPlane.remover_segredo_a2cb1ebd")}
                   </button>
                 ) : null}
               </FieldShell>
@@ -203,7 +203,7 @@ export function IntegrationConnectionModal({
             {/* Security indicator */}
             <div className="flex items-center gap-1.5 text-xs text-[var(--text-quaternary)]">
               <Lock size={11} />
-              <span>{tl("Credenciais criptografadas")}</span>
+              <span>{t("generated.controlPlane.credenciais_criptografadas_657054e7")}</span>
             </div>
 
             <div className="flex items-center gap-3">
@@ -212,21 +212,21 @@ export function IntegrationConnectionModal({
                 onClick={onClose}
                 className="rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
               >
-                {tl("Cancelar")}
+                {t("generated.controlPlane.cancelar_091200fb")}
               </button>
               <AsyncActionButton
                 type="button"
                 onClick={handleConnect}
                 loading={isIntegrationActionPending(entry.key, "connect")}
                 status={integrationActionStatus(entry.key, "connect")}
-                loadingLabel={tl("Salvando")}
+                loadingLabel={t("generated.controlPlane.salvando_7eeded02")}
                 className="rounded-lg px-4 py-2 text-sm font-semibold text-[var(--interactive-active-text)] transition-all"
                 style={{
                   background: `linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))`,
                   border: "1px solid var(--interactive-active-border)",
                 }}
               >
-                {tl("Salvar conexão")}
+                {t("generated.controlPlane.salvar_conexao_53e83802")}
               </AsyncActionButton>
             </div>
           </div>

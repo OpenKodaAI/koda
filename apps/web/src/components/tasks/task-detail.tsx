@@ -36,7 +36,7 @@ function copyText(value: string | null | undefined) {
 }
 
 export function TaskDetail({ task, onClose }: TaskDetailProps) {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const presence = useAnimatedPresence(Boolean(task), { task }, { duration: 180 });
   const renderedTask = presence.renderedValue.task;
   const agentColor = renderedTask?.agentId ? getAgentColor(renderedTask.agentId) : null;
@@ -158,7 +158,7 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
                 <DetailRow label={t("common.user")}>
                   <span className="font-mono">{renderedTask.user_id}</span>
                 </DetailRow>
-                <DetailRow label={tl("Chat")}>
+                <DetailRow label={t("generated.common.chat_081921a7")}>
                   <span className="font-mono">{renderedTask.chat_id}</span>
                 </DetailRow>
                 <DetailRow label={t("common.workspaceDirectory")}>

@@ -37,7 +37,7 @@ export function FormField({
   error,
   children,
 }: FormFieldProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   return (
     <label className="flex flex-col gap-1.5">
@@ -82,7 +82,7 @@ export function FormInput({
   className,
   ...rest
 }: FormInputProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   return (
     <FormField
@@ -226,14 +226,14 @@ export function FormSelect({
   id,
   placeholder,
 }: FormSelectProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const selectedValue = typeof value === "string" ? value : typeof defaultValue === "string" ? defaultValue : "";
   const hasExplicitEmptyOption = options.some((option) => option.value === "");
   const internalSelectedValue =
     selectedValue === "" && hasExplicitEmptyOption ? EMPTY_SELECT_SENTINEL : selectedValue;
   const selectedOption = options.find((option) => option.value === selectedValue);
   const placeholderLabel =
-    typeof placeholder === "string" ? tl(placeholder) : tl("Selecione");
+    typeof placeholder === "string" ? tl(placeholder) : t("generated.controlPlane.selecione_182d6c26");
   const groupedOptions = options.reduce<
     Array<{
       group: string | null;
@@ -348,7 +348,7 @@ export function FormTextarea({
   className,
   ...rest
 }: FormTextareaProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   return (
     <FormField

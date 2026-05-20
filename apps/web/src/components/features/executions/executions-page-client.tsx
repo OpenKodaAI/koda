@@ -284,8 +284,8 @@ export default function ExecutionsPage() {
               onChange={handleSearchChange}
               placeholder={t("executions.searchPlaceholder")}
               loading={searchLoading}
-              loadingLabel={t("executions.searching", { defaultValue: "Searching executions" })}
-              clearLabel={t("common.clear", { defaultValue: "Clear" })}
+              loadingLabel={t("executions.searching", undefined)}
+              clearLabel={t("common.clear", undefined)}
             />
           </div>
           <div className="w-full md:w-auto md:shrink-0" {...tourAnchor("executions.status-filters")}>
@@ -352,7 +352,7 @@ export default function ExecutionsPage() {
               hasMore={Boolean(executionsQuery.hasNextPage)}
               loading={executionsQuery.isFetchingNextPage}
               onLoadMore={loadMoreExecutions}
-              label={t("common.loadMore", { defaultValue: "Load more" })}
+              label={t("common.loadMore", undefined)}
             />
           </div>
         )}

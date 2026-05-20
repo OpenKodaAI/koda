@@ -18,15 +18,25 @@ from koda.services.metrics import (
     KNOWLEDGE_MISSES,
     KNOWLEDGE_RECALL_DURATION,
     MEMORY_RECALL_DURATION,
+    OPS_BENCHMARK_DURATION,
+    OPS_BENCHMARK_RUNS,
     PROCEDURAL_HITS,
     PROCEDURAL_MISSES,
     PROVIDER_ADAPTER_CONTRACT_ERRORS_TOTAL,
     PROVIDER_COMPATIBILITY_STATE,
     PROVIDER_RESUME_DEGRADED_TOTAL,
+    QUALITY_COCKPIT_FAILURES,
     QUEUE_DEPTH,
+    RELEASE_BLOCKERS,
     REQUEST_DURATION,
     REQUESTS_TOTAL,
     ROLLBACK_NEEDED,
+    ROUTE_OUTCOME_EVENTS,
+    RUN_GRAPH_COMPLETENESS_GATES,
+    SKILL_PACKAGE_EVENTS,
+    SQUAD_HANDOFF_EVENTS,
+    SQUAD_ROUTE_QUALITY,
+    SQUAD_SYNTHESIS_GATE,
     STALE_SOURCE_USAGE,
     TOOL_EXECUTIONS,
     VERIFICATION_BEFORE_FINALIZE,
@@ -74,6 +84,16 @@ class TestMetricsExist:
         assert WORKSPACE_IMPORT_APPLIES_TOTAL is not None
         assert WORKSPACE_IMPORT_BLOCKED_TOTAL is not None
         assert WORKSPACE_IMPORT_LIMIT_HITS_TOTAL is not None
+        assert SQUAD_HANDOFF_EVENTS is not None
+        assert SQUAD_ROUTE_QUALITY is not None
+        assert SQUAD_SYNTHESIS_GATE is not None
+        assert QUALITY_COCKPIT_FAILURES is not None
+        assert RUN_GRAPH_COMPLETENESS_GATES is not None
+        assert ROUTE_OUTCOME_EVENTS is not None
+        assert SKILL_PACKAGE_EVENTS is not None
+        assert RELEASE_BLOCKERS is not None
+        assert OPS_BENCHMARK_RUNS is not None
+        assert OPS_BENCHMARK_DURATION is not None
 
     def test_counter_increment(self):
         REQUESTS_TOTAL.labels(agent_id="test", status="completed").inc()
@@ -97,3 +117,70 @@ class TestMetricsExist:
             provider="codex",
             turn_mode="resume_turn",
         ).inc()
+
+    def test_top_tier_metrics_accept_bounded_labels(self):
+        RUN_GRAPH_COMPLETENESS_GATES.labels(
+            agent_id="KODA",
+            scenario="squad",
+            status="failed",
+            failure_category="missing_node_type",
+        ).inc()
+        ROUTE_OUTCOME_EVENTS.labels(
+            agent_id="KODA",
+            route_source="semantic",
+            status="success",
+            timeout="false",
+        ).inc()
+        SKILL_PACKAGE_EVENTS.labels(
+            agent_id="KODA",
+            event="evals_run",
+            decision="allow",
+            recommendation_status="recommended",
+        ).inc()
+        RELEASE_BLOCKERS.labels(
+            agent_id="KODA",
+            gate_id="run_graph_completeness",
+            severity="high",
+            status="failing",
+        ).set(1)
+        OPS_BENCHMARK_RUNS.labels(mode="quick", status="passed").inc()
+        OPS_BENCHMARK_DURATION.labels(mode="quick").observe(0.25)
+
+
+class TestMetricCatalog:
+    FORBIDDEN_LABEL_NAMES = {
+        "chat_id",
+        "message",
+        "path",
+        "proposal_id",
+        "raw_prompt",
+        "raw_text",
+        "run_id",
+        "task_id",
+        "text",
+        "user_id",
+    }
+
+    def test_every_prometheus_metric_is_named_documented_and_prefixed(self):
+        import koda.services.metrics as metrics
+
+        seen = []
+        for value in vars(metrics).values():
+            actual_name = getattr(value, "_name", "")
+            if not isinstance(actual_name, str) or not actual_name.startswith("koda_"):
+                continue
+            seen.append(actual_name)
+            assert str(getattr(value, "_documentation", "")).strip(), actual_name
+            assert actual_name == actual_name.lower(), actual_name
+        assert len(seen) >= 80
+
+    def test_metric_labels_stay_low_cardinality_and_safe(self):
+        import koda.services.metrics as metrics
+
+        for public_name, value in vars(metrics).items():
+            actual_name = getattr(value, "_name", "")
+            if not isinstance(actual_name, str) or not actual_name.startswith("koda_"):
+                continue
+            labels = tuple(getattr(value, "_labelnames", ()) or ())
+            unsafe = self.FORBIDDEN_LABEL_NAMES.intersection(labels)
+            assert not unsafe, f"{public_name} exposes unsafe/high-cardinality labels: {sorted(unsafe)}"

@@ -1,5 +1,6 @@
 "use client";
 
+import { translate } from "@/lib/i18n";
 import {
   useCallback,
   useEffect,
@@ -109,7 +110,7 @@ export function RoomSettingsDrawer({
       open={open}
       onOpenChange={onOpenChange}
       modal
-      title={t("sessions.room.settings.title", { defaultValue: "Info" })}
+      title={t("sessions.room.settings.title", undefined)}
       width="min(460px, 92vw)"
     >
       <RoomSettingsPanel
@@ -151,9 +152,7 @@ export function RoomSettingsPanel({
         `/squads/threads/${threadId}`,
         {
           signal,
-          fallbackError: t("sessions.room.settings.loadError", {
-            defaultValue: "Could not load room settings.",
-          }),
+          fallbackError: t("sessions.room.settings.loadError", undefined),
         },
       ),
   });
@@ -282,9 +281,7 @@ export function RoomSettingsPanel({
       await mutateControlPlaneDashboardJson(`/squads/threads/${threadId}`, {
         method: "PATCH",
         body: { title: nextTitle },
-        fallbackError: t("sessions.room.settings.saveError", {
-          defaultValue: "Could not save changes.",
-        }),
+        fallbackError: t("sessions.room.settings.saveError", undefined),
       });
       invalidateThread();
       setTitleDraft(nextTitle);
@@ -330,9 +327,7 @@ export function RoomSettingsPanel({
           {
             method: "PATCH",
             body: { role: nextRole },
-            fallbackError: t("sessions.room.settings.roleError", {
-              defaultValue: "Could not change role.",
-            }),
+            fallbackError: t("sessions.room.settings.roleError", undefined),
           },
         );
         invalidateThread();
@@ -354,9 +349,7 @@ export function RoomSettingsPanel({
           `/squads/threads/${threadId}/participants/${encodeURIComponent(agentId)}`,
           {
             method: "DELETE",
-            fallbackError: t("sessions.room.settings.removeError", {
-              defaultValue: "Could not remove agent.",
-            }),
+            fallbackError: t("sessions.room.settings.removeError", undefined),
           },
         );
         invalidateThread();
@@ -379,9 +372,7 @@ export function RoomSettingsPanel({
           {
             method: "POST",
             body: { agentId, role: "worker" },
-            fallbackError: t("sessions.room.settings.addError", {
-              defaultValue: "Could not add agent.",
-            }),
+            fallbackError: t("sessions.room.settings.addError", undefined),
           },
         );
         invalidateThread();
@@ -401,9 +392,7 @@ export function RoomSettingsPanel({
     try {
       await mutateControlPlaneDashboardJson(`/squads/threads/${threadId}`, {
         method: "DELETE",
-        fallbackError: t("sessions.room.settings.archiveError", {
-          defaultValue: "Could not archive room.",
-        }),
+        fallbackError: t("sessions.room.settings.archiveError", undefined),
       });
       invalidateThread();
       setArchiveOpen(false);
@@ -422,9 +411,7 @@ export function RoomSettingsPanel({
     if (!detail || pausing) return;
     if (status !== "open" && status !== "paused") {
       showToast(
-        t("sessions.room.settings.pauseUnavailable", {
-          defaultValue: "Pause is only available for active rooms.",
-        }),
+        t("sessions.room.settings.pauseUnavailable", undefined),
         "warning",
       );
       return;
@@ -435,9 +422,7 @@ export function RoomSettingsPanel({
       await mutateControlPlaneDashboardJson(`/squads/threads/${threadId}`, {
         method: "PATCH",
         body: { status: nextStatus },
-        fallbackError: t("sessions.room.settings.pauseError", {
-          defaultValue: "Could not change room status.",
-        }),
+        fallbackError: t("sessions.room.settings.pauseError", undefined),
       });
       invalidateThread();
     } catch (err) {
@@ -453,19 +438,12 @@ export function RoomSettingsPanel({
 
   const memberLabel = useMemo(() => {
     if (memberCount === 0) {
-      return t("sessions.room.settings.zeroMembers", {
-        defaultValue: "No members yet",
-      });
+      return t("sessions.room.settings.zeroMembers", undefined);
     }
     if (memberCount === 1) {
-      return t("sessions.room.settings.oneMember", {
-        defaultValue: "1 member",
-      });
+      return t("sessions.room.settings.oneMember", undefined);
     }
-    return t("sessions.room.settings.nMembers", {
-      defaultValue: "{{count}} members",
-      count: memberCount,
-    });
+    return t("sessions.room.settings.nMembers", { count: memberCount });
   }, [memberCount, t]);
 
   if (!detail && detailQuery.isPending) {
@@ -533,12 +511,8 @@ export function RoomSettingsPanel({
                 onKeyDown={handleTitleKeyDown}
                 disabled={!detail || savingMeta}
                 maxLength={200}
-                aria-label={t("sessions.room.settings.nameLabel", {
-                  defaultValue: "Room name",
-                })}
-                placeholder={t("sessions.room.settings.namePlaceholder", {
-                  defaultValue: "Room name",
-                })}
+                aria-label={t("sessions.room.settings.nameLabel", undefined)}
+                placeholder={t("sessions.room.settings.namePlaceholder", undefined)}
                 className={cn(
                   "h-8 w-full truncate rounded-[var(--radius-input)] border border-transparent bg-transparent px-2.5 pr-8 font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)] outline-none",
                   "transition-[border-color,background-color,box-shadow] duration-[140ms] ease-[var(--ease-out-quart)]",
@@ -587,9 +561,7 @@ export function RoomSettingsPanel({
           {!inline ? (
             <ActionTile
               icon={<MessageSquare className="h-4 w-4" strokeWidth={1.75} />}
-              label={t("sessions.room.settings.action.message", {
-                defaultValue: "Message",
-              })}
+              label={t("sessions.room.settings.action.message", undefined)}
               onClick={onClose}
             />
           ) : null}
@@ -604,12 +576,8 @@ export function RoomSettingsPanel({
             }
             label={
               isPaused
-                ? t("sessions.room.settings.action.resume", {
-                    defaultValue: "Resume",
-                  })
-                : t("sessions.room.settings.action.pause", {
-                    defaultValue: "Pause",
-                  })
+                ? t("sessions.room.settings.action.resume", undefined)
+                : t("sessions.room.settings.action.pause", undefined)
             }
             busy={pausing}
             onClick={() => void handleTogglePause()}
@@ -617,9 +585,7 @@ export function RoomSettingsPanel({
           <ActionTile
             variant={inline ? "compact" : "tile"}
             icon={<Archive className="h-4 w-4" strokeWidth={1.75} />}
-            label={t("sessions.room.settings.action.archive", {
-              defaultValue: "Archive",
-            })}
+            label={t("sessions.room.settings.action.archive", undefined)}
             tone="danger"
             onClick={() => setArchiveOpen(true)}
           />
@@ -641,9 +607,7 @@ export function RoomSettingsPanel({
             >
               <span className="flex items-center gap-2 text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
                 <Users className="h-3 w-3" strokeWidth={1.75} aria-hidden />
-                {t("sessions.room.settings.members.eyebrow", {
-                  defaultValue: "Members",
-                })}
+                {t("sessions.room.settings.members.eyebrow", undefined)}
               </span>
               <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
                 {participants.length}
@@ -663,10 +627,8 @@ export function RoomSettingsPanel({
                 )}
               >
                 {editing
-                  ? t("sessions.room.settings.done", { defaultValue: "Done" })
-                  : t("sessions.room.settings.manage", {
-                      defaultValue: "Manage",
-                    })}
+                  ? t("sessions.room.settings.done", undefined)
+                  : t("sessions.room.settings.manage", undefined)}
               </Button>
             </header>
             <ul className="flex flex-col">
@@ -706,15 +668,13 @@ export function RoomSettingsPanel({
                             strokeWidth={2}
                             aria-label={t(
                               "sessions.room.settings.coordinator",
-                              { defaultValue: "Coordinator" },
+                              undefined,
                             )}
                           />
                         ) : null}
                         {agentPaused ? (
                           <span className="ml-1 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.5625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
-                            {t("sessions.room.create.pausedBadge", {
-                              defaultValue: "paused",
-                            })}
+                            {t("sessions.room.create.pausedBadge", undefined)}
                           </span>
                         ) : null}
                       </span>
@@ -745,9 +705,7 @@ export function RoomSettingsPanel({
                           disabled={
                             pendingMutation === `remove:${participant.agentId}`
                           }
-                          aria-label={t("sessions.room.settings.removeAgent", {
-                            defaultValue: "Remove from room",
-                          })}
+                          aria-label={t("sessions.room.settings.removeAgent", undefined)}
                           className="h-7 w-7 px-0 text-[var(--text-tertiary)] hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)]"
                         >
                           <UserMinus
@@ -795,9 +753,7 @@ export function RoomSettingsPanel({
                             </div>
                             {isPaused ? (
                               <span className="rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
-                                {t("sessions.room.create.pausedBadge", {
-                                  defaultValue: "paused",
-                                })}
+                                {t("sessions.room.create.pausedBadge", undefined)}
                               </span>
                             ) : null}
                           </button>
@@ -818,9 +774,7 @@ export function RoomSettingsPanel({
                         )}
                       >
                         <Plus className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
-                        {t("sessions.room.settings.addMember", {
-                          defaultValue: "Add member",
-                        })}
+                        {t("sessions.room.settings.addMember", undefined)}
                       </button>
                     </div>
                   )}
@@ -833,21 +787,12 @@ export function RoomSettingsPanel({
 
       <ConfirmationDialog
         open={archiveOpen}
-        title={t("sessions.room.settings.confirmArchiveTitle", {
-          defaultValue: "Archive this room?",
-        })}
-        message={t("sessions.room.settings.confirmArchiveMessage", {
-          defaultValue:
-            "The room will disappear from your rail. Conversation history is preserved on the backend and can be restored.",
-        })}
+        title={t("sessions.room.settings.confirmArchiveTitle", undefined)}
+        message={t("sessions.room.settings.confirmArchiveMessage", undefined)}
         confirmLabel={
           archivingPending
-            ? t("sessions.room.settings.archiving", {
-                defaultValue: "Archiving…",
-              })
-            : t("sessions.room.settings.confirmArchive", {
-                defaultValue: "Archive",
-              })
+            ? t("sessions.room.settings.archiving", undefined)
+            : t("sessions.room.settings.confirmArchive", undefined)
         }
         onConfirm={() => void handleArchive()}
         onCancel={() => {
@@ -875,7 +820,7 @@ function RoomSettingsSkeleton({
       )}
     >
       <section
-        aria-label="Loading room settings"
+        aria-label={translate("generated.sessions.loading_room_settings_2dffc99a")}
         className={cn(
           "flex gap-3 border-b border-[color:var(--divider-hair)] px-0 pb-3 pt-0",
           inline ? "items-center" : "flex-col items-center px-4 pt-3",
@@ -1045,9 +990,7 @@ function RoleSelect({
         <button
           type="button"
           disabled={busy}
-          aria-label={t("sessions.room.settings.role", {
-            defaultValue: "Role",
-          })}
+          aria-label={t("sessions.room.settings.role", undefined)}
           data-state={open ? "open" : "closed"}
           className={cn(
             "inline-flex h-7 shrink-0 items-center gap-1 rounded-[var(--radius-pill)] px-2.5",

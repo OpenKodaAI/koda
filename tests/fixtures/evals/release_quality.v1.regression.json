@@ -18,6 +18,16 @@
       "id": "tool_policy_regression",
       "status": "failed",
       "message": "A tool call and policy decision drifted."
+    },
+    {
+      "id": "run_graph_completeness",
+      "status": "failed",
+      "message": "Required squad RunGraph evidence is incomplete."
+    },
+    {
+      "id": "squad_golden_quality",
+      "status": "failed",
+      "message": "Squad did not beat the single-agent golden baseline."
     }
   ],
   "eval_runs": [

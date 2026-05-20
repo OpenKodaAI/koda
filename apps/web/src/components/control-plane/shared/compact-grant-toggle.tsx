@@ -83,9 +83,9 @@ export function CompactGrantToggle({
   selected,
   onToggle,
 }: CompactGrantToggleProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
-  const countLabel = tl("{{selected}}/{{total}} concedido(s)", {
+  const countLabel = t("generated.controlPlane.selected_total_concedido_s_0782864c", {
     selected: selected.length,
     total: options.length,
   });
@@ -107,20 +107,20 @@ export function CompactGrantToggle({
       <div className="mt-3">
         {options.length === 0 ? (
           <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-3 text-xs text-[var(--text-quaternary)]">
-            {tl("Nenhum item disponivel.")}
+            {t("generated.controlPlane.nenhum_item_disponivel_8050255d")}
           </div>
         ) : (
           <div className="divide-y divide-[rgba(255,255,255,0.04)]">
             {options.map((option) => {
               const isSelected = selected.includes(option.value);
               const isBlocked =
-                option.status === tl("Somente sistema") ||
-                option.status === tl("Indisponivel");
+                option.status === t("generated.controlPlane.somente_sistema_49d36183") ||
+                option.status === t("generated.controlPlane.indisponivel_54e299bf");
               const disabled = !isSelected && isBlocked;
 
               const pillTone: "accent" | "neutral" =
-                option.status === tl("Grantavel") ||
-                option.status === tl("Disponivel globalmente")
+                option.status === t("generated.controlPlane.grantavel_2d9b1b4a") ||
+                option.status === t("generated.controlPlane.disponivel_globalmente_da91c50c")
                   ? "accent"
                   : "neutral";
 

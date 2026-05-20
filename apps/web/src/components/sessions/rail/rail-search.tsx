@@ -15,7 +15,7 @@ interface RailSearchProps {
 export function RailSearch({ value, onChange, placeholder, loading = false, className }: RailSearchProps) {
   const { t } = useAppI18n();
   const resolvedPlaceholder =
-    placeholder ?? t("chat.rail.search", { defaultValue: "Search conversations" });
+    placeholder ?? t("chat.rail.search", undefined);
 
   return (
     <label
@@ -29,7 +29,7 @@ export function RailSearch({ value, onChange, placeholder, loading = false, clas
       {loading ? (
         <span
           role="status"
-          aria-label={t("chat.rail.searching", { defaultValue: "Searching conversations" })}
+          aria-label={t("chat.rail.searching", undefined)}
         >
           <LoaderCircle
             className="icon-sm animate-spin text-[var(--text-quaternary)]"
@@ -52,7 +52,7 @@ export function RailSearch({ value, onChange, placeholder, loading = false, clas
         <button
           type="button"
           onClick={() => onChange("")}
-          aria-label={t("chat.rail.clearSearch", { defaultValue: "Clear search" })}
+          aria-label={t("chat.rail.clearSearch", undefined)}
           className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]"
         >
           <X className="icon-xs" strokeWidth={1.75} aria-hidden />

@@ -119,7 +119,7 @@ export function JsonViewer({ content, filename }: JsonViewerProps) {
     return (
       <div className="flex flex-col">
         <p className="m-0 px-4 py-2 text-[0.75rem] text-[var(--tone-danger-dot)]">
-          {t("sessions.artifacts.invalidJson", { defaultValue: "Invalid JSON" })}: {parsed.error}
+          {t("sessions.artifacts.invalidJson", undefined)}: {parsed.error}
         </p>
         <TextViewer text={content} filename={filename} />
       </div>
@@ -146,12 +146,12 @@ export function JsonViewer({ content, filename }: JsonViewerProps) {
           {showRaw ? (
             <>
               <Eye className="icon-xs" strokeWidth={1.75} aria-hidden />
-              {t("sessions.artifacts.tree", { defaultValue: "Tree" })}
+              {t("sessions.artifacts.tree", undefined)}
             </>
           ) : (
             <>
               <Code2 className="icon-xs" strokeWidth={1.75} aria-hidden />
-              {t("sessions.artifacts.raw", { defaultValue: "Raw" })}
+              {t("sessions.artifacts.raw", undefined)}
             </>
           )}
         </Button>

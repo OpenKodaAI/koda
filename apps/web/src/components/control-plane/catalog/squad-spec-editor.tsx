@@ -22,7 +22,7 @@ export function SquadSpecEditor({
   open,
   onClose,
 }: SquadSpecEditorProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { showToast } = useToast();
   const [promptValue, setPromptValue] = useState("");
   const [loading, setLoading] = useState(false);
@@ -55,11 +55,11 @@ export function SquadSpecEditor({
           },
         }),
       });
-      showToast(tl("System prompt do time salvo com sucesso."), "success");
+      showToast(t("generated.controlPlane.system_prompt_do_time_salvo_com_sucesso_4532fabe"), "success");
       onClose();
     } catch (err) {
       showToast(
-        err instanceof Error ? err.message : tl("Erro ao salvar o system prompt do time."),
+        err instanceof Error ? err.message : t("generated.controlPlane.erro_ao_salvar_o_system_prompt_do_time_0a6d5a62"),
         "error",
       );
     } finally {
@@ -73,21 +73,12 @@ export function SquadSpecEditor({
       loading={loading}
       saving={saving}
       icon={<Users size={18} />}
-      title={tl("System prompt do time")}
+      title={t("generated.controlPlane.system_prompt_do_time_4067e288")}
       subtitle={squadName}
-      description={tl("Defina o contexto, os acordos de execucao e o conhecimento que devem orientar os agentes deste time.")}
-      fieldLabel={tl("System prompt")}
+      description={t("generated.controlPlane.defina_o_contexto_os_acordos_de_execucao_e_o_7184ccd1")}
+      fieldLabel={t("generated.controlPlane.system_prompt_0bbdbb67")}
       value={promptValue}
-      placeholder={tl(`Ex.:
-# Missao do time
-Garantir entregas de plataforma com confiabilidade e baixo risco.
-
-# Forma de atuar
-- Quebrar tarefas em etapas verificaveis.
-- Explicitar riscos e rollback sempre que houver mudancas sensiveis.
-
-# Conhecimento util
-Preferimos solucoes simples, reversiveis e com boa observabilidade.`)}
+      placeholder={t("generated.controlPlane.ex_missao_do_time_garantir_entregas_de_plata_4a3381c8")}
       onChange={setPromptValue}
       onClose={onClose}
       onSave={() => void handleSave()}

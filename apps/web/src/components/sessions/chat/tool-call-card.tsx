@@ -29,22 +29,22 @@ export function ToolCallCard({ execution, onOpenDetails }: ToolCallCardProps) {
 
   const statusLabel =
     execution.status === "running"
-      ? t("chat.toolCall.running", { defaultValue: "Running" })
+      ? t("chat.toolCall.running", undefined)
       : execution.status === "retrying"
-        ? t("chat.toolCall.retrying", { defaultValue: "Retrying" })
+        ? t("chat.toolCall.retrying", undefined)
         : execution.status === "stalled"
-          ? t("chat.toolCall.stalled", { defaultValue: "Stalled" })
+          ? t("chat.toolCall.stalled", undefined)
           : execution.status === "degraded"
-            ? t("chat.toolCall.degraded", { defaultValue: "Degraded" })
+            ? t("chat.toolCall.degraded", undefined)
             : execution.status === "completed"
-              ? t("chat.toolCall.completed", { defaultValue: "Completed" })
+              ? t("chat.toolCall.completed", undefined)
               : execution.status === "failed"
-                ? t("chat.toolCall.failed", { defaultValue: "Failed" })
+                ? t("chat.toolCall.failed", undefined)
                 : execution.status === "paused"
-                  ? t("chat.toolCall.paused", { defaultValue: "Paused" })
+                  ? t("chat.toolCall.paused", undefined)
                   : execution.status === "cancelled"
-                    ? t("chat.toolCall.cancelled", { defaultValue: "Cancelled" })
-                    : t("chat.toolCall.queued", { defaultValue: "Queued" });
+                    ? t("chat.toolCall.cancelled", undefined)
+                    : t("chat.toolCall.queued", undefined);
 
   const durationLabel =
     typeof execution.duration_ms === "number" && execution.duration_ms > 0
@@ -57,12 +57,12 @@ export function ToolCallCard({ execution, onOpenDetails }: ToolCallCardProps) {
 
   const metadataItems: Array<{ label: string; value: string; visual: RuntimeVisualDescriptor }> = [
     {
-      label: t("chat.toolCall.task", { defaultValue: "task" }),
+      label: t("chat.toolCall.task", undefined),
       value: `#${execution.task_id}`,
       visual: getExecutionMetadataVisual("task"),
     },
     {
-      label: t("chat.toolCall.status", { defaultValue: "status" }),
+      label: t("chat.toolCall.status", undefined),
       value: statusLabel,
       visual: statusVisual,
     },
@@ -70,35 +70,35 @@ export function ToolCallCard({ execution, onOpenDetails }: ToolCallCardProps) {
 
   if (durationLabel) {
     metadataItems.push({
-      label: t("chat.toolCall.duration", { defaultValue: "duration" }),
+      label: t("chat.toolCall.duration", undefined),
       value: durationLabel,
       visual: getExecutionMetadataVisual("duration"),
     });
   }
   if (typeof execution.tool_count === "number") {
     metadataItems.push({
-      label: t("chat.toolCall.tools", { defaultValue: "tools" }),
+      label: t("chat.toolCall.tools", undefined),
       value: String(execution.tool_count),
       visual: getExecutionMetadataVisual("tools"),
     });
   }
   if (typeof execution.cost_usd === "number") {
     metadataItems.push({
-      label: t("chat.toolCall.cost", { defaultValue: "cost" }),
+      label: t("chat.toolCall.cost", undefined),
       value: `$${execution.cost_usd.toFixed(4)}`,
       visual: getExecutionMetadataVisual("cost"),
     });
   }
   if (execution.model) {
     metadataItems.push({
-      label: t("chat.toolCall.model", { defaultValue: "model" }),
+      label: t("chat.toolCall.model", undefined),
       value: execution.model,
       visual: getExecutionMetadataVisual("model"),
     });
   }
   if (typeof execution.attempt === "number" && typeof execution.max_attempts === "number") {
     metadataItems.push({
-      label: t("chat.toolCall.attempt", { defaultValue: "attempt" }),
+      label: t("chat.toolCall.attempt", undefined),
       value: `${execution.attempt}/${execution.max_attempts}`,
       visual: getExecutionMetadataVisual("attempts"),
     });
@@ -122,7 +122,7 @@ export function ToolCallCard({ execution, onOpenDetails }: ToolCallCardProps) {
         />
         <StatusDot tone={tone} pulse={isRunning} className="opacity-70" />
         <span className="truncate text-[var(--text-tertiary)]">
-          {t("chat.toolCall.metadata", { defaultValue: "Metadata" })}
+          {t("chat.toolCall.metadata", undefined)}
         </span>
         <span aria-hidden className="text-[var(--text-quaternary)]">
           ·
@@ -163,7 +163,7 @@ export function ToolCallCard({ execution, onOpenDetails }: ToolCallCardProps) {
                 }}
                 className="inline-flex items-center gap-1 rounded-[var(--radius-chip)] py-0.5 pr-1.5 text-[0.6875rem] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)]"
               >
-                {t("chat.toolCall.viewExecution", { defaultValue: "View execution" })}
+                {t("chat.toolCall.viewExecution", undefined)}
                 <ExternalLink className="icon-xs" strokeWidth={1.75} aria-hidden />
               </button>
             ) : null}

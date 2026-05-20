@@ -23,6 +23,8 @@ REQUIRED_GATE_IDS = frozenset(
         "deterministic_eval_suite",
         "trajectory_export_redaction",
         "tool_policy_regression",
+        "run_graph_completeness",
+        "squad_golden_quality",
     }
 )
 

@@ -18,7 +18,7 @@ export function SecretVisibilityButton({
   className,
   masked = false,
 }: SecretVisibilityButtonProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   return (
     <button
@@ -26,11 +26,11 @@ export function SecretVisibilityButton({
       aria-label={
         masked
           ? revealed
-            ? tl("Ocultar valor mascarado")
-            : tl("Mostrar valor mascarado")
+            ? t("generated.ui.ocultar_valor_mascarado_7da979ac")
+            : t("generated.ui.mostrar_valor_mascarado_e93a2eaf")
           : revealed
-            ? tl("Esconder valor")
-            : tl("Visualizar valor")
+            ? t("generated.ui.esconder_valor_e175915b")
+            : t("generated.ui.visualizar_valor_1d66e788")
       }
       onClick={onToggle}
       className={cn(

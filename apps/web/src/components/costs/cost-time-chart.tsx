@@ -190,7 +190,7 @@ export function CostTimeChart({
         )}
       >
         <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--text-quaternary)]" />
-        <span>{t("costs.page.timeChart.emptyShort", { defaultValue: "No data" })}</span>
+        <span>{t("costs.page.timeChart.emptyShort", undefined)}</span>
       </div>
     );
   }
@@ -214,18 +214,15 @@ export function CostTimeChart({
           <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
             <div className="inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2.5 py-1 text-[0.75rem]">
               <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                {activeDatum?.label ?? t("costs.page.timeChart.noBucket", { defaultValue: "No bucket" })}
+                {activeDatum?.label ?? t("costs.page.timeChart.noBucket", undefined)}
               </span>
               <span className="shrink-0 font-mono text-[var(--text-primary)]">
                 {activeDatum ? formatCost(activeDatum.total) : "—"}
               </span>
               <span className="hidden min-w-0 truncate text-[var(--text-tertiary)] sm:inline">
                 {activeDatum?.driverLabel
-                  ? t("costs.page.timeChart.driver", {
-                      defaultValue: "Driver · {{value}}",
-                      value: activeDatum.driverLabel,
-                    })
-                  : t("costs.page.timeChart.noDriver", { defaultValue: "No dominant driver" })}
+                  ? t("costs.page.timeChart.driver", { value: activeDatum.driverLabel })
+                  : t("costs.page.timeChart.noDriver", undefined)}
               </span>
             </div>
 
@@ -236,7 +233,7 @@ export function CostTimeChart({
               ]}
               value={mode}
               onChange={(id) => onModeChange?.(id as CostTimelineMode)}
-              ariaLabel={t("costs.page.timeChart.modeLabel", { defaultValue: "Group by" })}
+              ariaLabel={t("costs.page.timeChart.modeLabel", undefined)}
               className="self-start"
             />
           </div>

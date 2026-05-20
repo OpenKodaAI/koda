@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Mapping
 from datetime import datetime
+from typing import Any
 
 from koda.config import STATE_BACKEND
 from koda.internal_rpc.memory_engine import MemoryEngineClient, build_memory_engine_client
@@ -21,6 +23,12 @@ from koda.memory.embedding_queue import (
     get_embedding_job_stats,
     mark_embedding_job_completed,
 )
+from koda.memory.namespaces import (
+    namespace_allowed,
+    namespace_for_memory,
+    normalize_namespace_kind,
+    normalize_sensitivity,
+)
 from koda.memory.napkin import (
     add_entry,
     deactivate_all,
@@ -36,6 +44,7 @@ from koda.memory.napkin import (
 from koda.memory.napkin import batch_deactivate as napkin_batch_deactivate
 from koda.memory.napkin import batch_update_access as napkin_batch_update_access
 from koda.memory.quality import record_dedup_decision, record_memory_quality_counter
+from koda.memory.safety import MemorySafetyError, assert_memory_text_safe
 from koda.memory.types import (
     LEXICAL_READY_EMBEDDING_STATUS,
     Memory,
@@ -105,7 +114,41 @@ class MemoryStore:
     def _hydrate_memory(self, memory: Memory) -> Memory:
         memory.agent_id = normalize_agent_scope(memory.agent_id, fallback=self._agent_id)
         memory.embedding_status = memory.embedding_status or "pending"
+        namespace = namespace_for_memory(memory, fallback_agent_id=self._agent_id)
+        memory.namespace_kind = namespace.kind
+        memory.namespace_key = namespace.key
+        memory.namespace_scope = namespace.scope
+        memory.sensitivity = normalize_sensitivity(memory.sensitivity or memory.metadata.get("sensitivity"))
         return memory
+
+    def _record_safety_blocked(self, result: Any) -> None:
+        categories = list(getattr(result, "blocked_categories", []) or ["unknown"])
+        for category in categories:
+            record_memory_quality_counter(self._agent_id, "memory_safety", "blocked", str(category))
+            try:
+                from koda.services import metrics
+
+                metrics.MEMORY_SAFETY_BLOCKS.labels(agent_id=self._agent_id, category=str(category)).inc()
+            except Exception:
+                log.debug("memory_safety_metric_error", exc_info=True)
+
+    def _assert_memories_safe(self, memories: list[Memory], *, surface: str) -> None:
+        for memory in memories:
+            try:
+                assert_memory_text_safe(
+                    {
+                        "content": memory.content,
+                        "subject": memory.subject,
+                        "claim_kind": memory.claim_kind,
+                        "decision_source": memory.decision_source,
+                        "retention_reason": memory.retention_reason,
+                        "metadata": memory.metadata,
+                    },
+                    surface=surface,
+                )
+            except MemorySafetyError as exc:
+                self._record_safety_blocked(exc.result)
+                raise
 
     def _persist_canonical(self, memory: Memory) -> Memory:
         row_id = add_entry(memory)
@@ -220,8 +263,10 @@ class MemoryStore:
     async def repair_pending_embeddings(self, limit: int = 16) -> int:
         """Consume the persisted repair queue and backfill missing embeddings."""
         async with self._repair_lock:
+            started = time.perf_counter()
             jobs = claim_embedding_jobs(self._agent_id, limit=max(1, min(limit, MEMORY_EMBEDDING_REPAIR_BATCH_SIZE)))
             if not jobs:
+                self._publish_embedding_repair_metrics(status="empty", repaired=0, duration_seconds=0.0)
                 return 0
 
             sem = asyncio.Semaphore(4)
@@ -247,11 +292,27 @@ class MemoryStore:
                     metrics.MEMORY_EMBEDDING_QUEUE.labels(agent_id=self._agent_id, status=status).set(count)
             except Exception:
                 log.debug("memory_embedding_queue_metrics_error", exc_info=True)
+            repair_status = "success" if resolved == len(jobs) else ("partial" if resolved else "failed")
+            self._publish_embedding_repair_metrics(
+                status=repair_status,
+                repaired=resolved,
+                duration_seconds=time.perf_counter() - started,
+            )
             return resolved
+
+    def _publish_embedding_repair_metrics(self, *, status: str, repaired: int, duration_seconds: float) -> None:
+        try:
+            from koda.services import metrics
+
+            metrics.MEMORY_EMBEDDING_REPAIRS.labels(agent_id=self._agent_id, status=status).inc(max(0, repaired))
+            metrics.MEMORY_EMBEDDING_REPAIR_LATENCY.labels(agent_id=self._agent_id).observe(max(0.0, duration_seconds))
+        except Exception:
+            log.debug("memory_embedding_repair_metrics_error", exc_info=True)
 
     async def add(self, memory: Memory) -> Memory:
         """Add a memory to the canonical store."""
         memory = self._hydrate_memory(memory)
+        self._assert_memories_safe([memory], surface="memory.write")
         if find_active_duplicate(memory):
             log.info("memory_duplicate_skipped", reason="canonical_hash", content=memory.content[:80])
             record_dedup_decision(self._agent_id, "canonical_hash")
@@ -276,6 +337,7 @@ class MemoryStore:
             return []
 
         normalized = [self._hydrate_memory(memory) for memory in memories]
+        self._assert_memories_safe(normalized, surface="memory.batch_write")
         user_id = normalized[0].user_id
 
         unique: list[Memory] = []
@@ -290,6 +352,8 @@ class MemoryStore:
                 memory.environment,
                 memory.team,
                 memory.origin_kind,
+                memory.namespace_kind,
+                memory.namespace_key,
             )
             if scope_hash in seen_scope_hashes:
                 continue
@@ -365,6 +429,9 @@ class MemoryStore:
         memory_statuses: list[str] | None = None,
         allowed_layers: list[str] | None = None,
         allowed_retrieval_sources: list[str] | None = None,
+        namespace_kind: str | None = None,
+        namespace_key: str | None = None,
+        include_sensitive: bool = False,
     ) -> list[RecallResult]:
         """Search memories via the Rust memory engine."""
         await self._require_memory_engine("recall")
@@ -420,6 +487,12 @@ class MemoryStore:
                 conflict_key=str(row.get("conflict_key") or ""),
                 supersedes_memory_id=int(row.get("supersedes_memory_id") or 0) or None,
                 memory_status=str(row.get("memory_status") or MemoryStatus.ACTIVE.value),
+                namespace_kind=normalize_namespace_kind(row.get("namespace_kind")),
+                namespace_key=str(row.get("namespace_key") or row.get("agent_id") or self._agent_id),
+                namespace_scope=dict(row.get("namespace_scope") or {})
+                if isinstance(row.get("namespace_scope"), Mapping)
+                else {},
+                sensitivity=normalize_sensitivity(row.get("sensitivity")),
                 retention_reason=str(row.get("retention_reason") or ""),
                 embedding_attempts=int(row.get("embedding_attempts") or 0),
                 embedding_last_error=str(row.get("embedding_last_error") or ""),
@@ -434,6 +507,14 @@ class MemoryStore:
                 vector_ref_id=str(row.get("vector_ref_id") or "") or None,
                 id=int(row.get("id") or 0) or None,
             )
+            if (namespace_kind or namespace_key) and not namespace_allowed(
+                memory,
+                namespace_kind=namespace_kind,
+                namespace_key=namespace_key,
+            ):
+                continue
+            if not include_sensitive and memory.sensitivity == "sensitive":
+                continue
             results.append(
                 RecallResult(
                     memory=memory,
@@ -496,6 +577,9 @@ class MemoryStore:
                     "subject": memory.subject,
                     "content": memory.content,
                     "session_id": memory.session_id,
+                    "namespace_kind": memory.namespace_kind,
+                    "namespace_key": memory.namespace_key,
+                    "sensitivity": memory.sensitivity,
                 }
             )
         return rows

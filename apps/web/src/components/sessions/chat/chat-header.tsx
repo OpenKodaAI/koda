@@ -62,7 +62,7 @@ export function ChatHeader({
           <button
             type="button"
             onClick={onOpenRail}
-            aria-label={t("chat.rail.openLabel", { defaultValue: "Open conversations" })}
+            aria-label={t("chat.rail.openLabel", undefined)}
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] md:hidden"
           >
             <PanelLeft className="icon-sm" strokeWidth={1.75} aria-hidden />
@@ -79,7 +79,7 @@ export function ChatHeader({
             maxVisible={1}
             size="xs"
             showInitials={false}
-            ariaLabel={t("chat.header.activeAgent", { defaultValue: "Active agent" })}
+            ariaLabel={t("chat.header.activeAgent", undefined)}
             className="hidden sm:inline-flex"
           />
         ) : null}
@@ -89,8 +89,8 @@ export function ChatHeader({
             onClick={onToggleContextPanel}
             aria-label={
               contextPanelOpen
-                ? t("sessions.context.collapse", { defaultValue: "Collapse panel" })
-                : t("sessions.context.expand", { defaultValue: "Expand panel" })
+                ? t("sessions.context.collapse", undefined)
+                : t("sessions.context.expand", undefined)
             }
             aria-pressed={contextPanelOpen}
             className={cn(

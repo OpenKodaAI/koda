@@ -116,6 +116,7 @@ def _effective_policy(
     allow_private_egress = _boolish(
         env.get("KODA_MCP_ALLOW_PRIVATE_EGRESS", env.get("BROWSER_ALLOW_PRIVATE_NETWORK", False))
     )
+    channel_context = _channel_context(task=task, environment=environment, env=env)
     return SandboxEffectivePolicy.from_runtime(
         isolation_kind=normalize_isolation_kind(isolation),
         risk_class=(task or {}).get("risk_class") or env.get("KODA_MCP_RISK_CLASS") or "read_context",
@@ -127,6 +128,7 @@ def _effective_policy(
         env=_csv_tuple(env.get("KODA_MCP_ENV_KEYS") or env.get("SANDBOX_ENV_KEYS")),
         allow_private_egress=allow_private_egress,
         source="runtime" if task_id is not None else "doctor",
+        channel_context=channel_context,
     )
 
 
@@ -138,7 +140,7 @@ def _policy_payload(policy: SandboxEffectivePolicy, evaluation: SandboxPolicyEva
             "schema_version": SANDBOX_POLICY_SCHEMA_VERSION,
             "decision": evaluation.decision,
             "allowed": evaluation.allowed,
-            "scopes": ["filesystem", "network", "shell", "browser", "environment", "mount", "approval"],
+            "scopes": ["filesystem", "network", "shell", "browser", "environment", "mount", "approval", "channel"],
             "read_only": policy.risk_class == "read_context",
             "shell_mode": "guarded" if policy.isolation_kind != "native" else "native",
             "browser_mode": "private_network_allowed" if policy.allow_private_egress else "restricted",
@@ -150,7 +152,9 @@ def _policy_payload(policy: SandboxEffectivePolicy, evaluation: SandboxPolicyEva
 
 def _policy_check_to_doctor(check: SandboxPolicyCheck) -> dict[str, Any]:
     scope = "filesystem"
-    if "env" in check.check_id:
+    if "remote" in check.check_id:
+        scope = "channel"
+    elif "env" in check.check_id:
         scope = "environment"
     elif "egress" in check.check_id:
         scope = "network"
@@ -268,6 +272,45 @@ def _cgroup_check(env: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _channel_context(
+    *,
+    task: Mapping[str, Any] | None,
+    environment: Mapping[str, Any] | None,
+    env: Mapping[str, Any],
+) -> dict[str, Any]:
+    task_payload = task or {}
+    environment_payload = environment or {}
+    return {
+        "channel_type": (
+            task_payload.get("channel_type")
+            or environment_payload.get("channel_type")
+            or env.get("KODA_CHANNEL_TYPE")
+            or "local"
+        ),
+        "is_group": (
+            task_payload.get("is_group")
+            if "is_group" in task_payload
+            else environment_payload.get("is_group", env.get("KODA_CHANNEL_IS_GROUP", False))
+        ),
+        "remote_session": (
+            task_payload.get("remote_session")
+            if "remote_session" in task_payload
+            else environment_payload.get("remote_session", env.get("KODA_REMOTE_SESSION", False))
+        ),
+        "identity_status": (
+            task_payload.get("identity_status")
+            or environment_payload.get("identity_status")
+            or env.get("KODA_CHANNEL_IDENTITY_STATUS")
+            or "local"
+        ),
+        "explicit_remote_policy": (
+            task_payload.get("explicit_remote_policy")
+            if "explicit_remote_policy" in task_payload
+            else environment_payload.get("explicit_remote_policy", env.get("KODA_EXPLICIT_REMOTE_POLICY", False))
+        ),
+    }
+
+
 def _mcp_risk_summary_check(summary: Mapping[str, Any] | None) -> dict[str, Any]:
     unknown = int((summary or {}).get("unknown") or (summary or {}).get("unknown_risk") or 0)
     high = int((summary or {}).get("high_risk") or 0)
@@ -302,6 +345,10 @@ def _overall_status(checks: list[dict[str, Any]]) -> SandboxDoctorStatus:
 
 
 def _policy_user_action(check_id: str) -> str:
+    if "remote_identity" in check_id:
+        return "Approve the channel identity in the channel gateway before allowing remote execution."
+    if "remote_unsafe" in check_id:
+        return "Add an explicit remote policy for this channel context or retry from a local/dashboard session."
     if "mount" in check_id:
         return "Remove forbidden host mounts or make the mount read-only inside the runtime root."
     if "env" in check_id:

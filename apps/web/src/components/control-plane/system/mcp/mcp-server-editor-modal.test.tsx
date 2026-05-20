@@ -3,12 +3,21 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { McpServerEditorModal } from "./mcp-server-editor-modal";
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    tl: (value: string) => value,
-    t: (_key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? "",
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 describe("McpServerEditorModal", () => {
   it("blocks reserved server keys from being saved", async () => {
@@ -24,10 +33,10 @@ describe("McpServerEditorModal", () => {
       />,
     );
 
-    await user.type(screen.getByPlaceholderText("meu-servidor"), "filesystem");
+    await user.type(screen.getByPlaceholderText("my-server"), "filesystem");
 
     expect(
-      screen.getByText("Este identificador e reservado e nao pode ser usado."),
+      screen.getByText("Este identificador é reservado e não pode ser usado."),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Adicionar servidor" })).toBeDisabled();
 

@@ -287,7 +287,7 @@ export function MemoryGraphCanvas({
     >
       <svg
         role="application"
-        aria-label={t("memory.map.canvasAriaLabel", { defaultValue: "Mapa neural de memórias" })}
+        aria-label={t("memory.map.canvasAriaLabel", undefined)}
         className="memory-graph-svg absolute inset-0 h-full w-full select-none"
         onPointerDown={interaction.handleBackgroundPointerDown}
         onPointerMove={interaction.handleBackgroundPointerMove}
@@ -421,7 +421,7 @@ export function MemoryGraphCanvas({
           type="button"
           onClick={interaction.zoomOut}
           className="memory-graph-control"
-          aria-label={t("memory.map.zoomOut", { defaultValue: "Diminuir zoom" })}
+          aria-label={t("memory.map.zoomOut", undefined)}
         >
           <Minus className="icon-xs" strokeWidth={1.75} />
         </button>
@@ -432,7 +432,7 @@ export function MemoryGraphCanvas({
           type="button"
           onClick={interaction.zoomIn}
           className="memory-graph-control"
-          aria-label={t("memory.map.zoomIn", { defaultValue: "Aumentar zoom" })}
+          aria-label={t("memory.map.zoomIn", undefined)}
         >
           <Plus className="icon-xs" strokeWidth={1.75} />
         </button>
@@ -441,7 +441,7 @@ export function MemoryGraphCanvas({
           type="button"
           onClick={interaction.fitViewport}
           className="memory-graph-control"
-          aria-label={t("memory.map.reset", { defaultValue: "Recentralizar" })}
+          aria-label={t("memory.map.reset", undefined)}
         >
           <RotateCcw className="icon-xs" strokeWidth={1.75} />
         </button>

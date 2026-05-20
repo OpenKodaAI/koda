@@ -73,7 +73,7 @@ jobs:
       - name: Export pinned Python requirements for audit
         # Scope the audit to what actually ships to production:
         #   - runtime dependencies (`[project.dependencies]`)
-        #   - channel integration extras (whatsapp/discord/slack/teams/line/
+        #   - channel integration extras (whatsapp/discord/slack/line/
         #     channels-all), which become part of the runtime surface when
         #     operators enable them
         # Dev tooling (pytest, ruff, mypy, pip-audit, bandit, …) is excluded

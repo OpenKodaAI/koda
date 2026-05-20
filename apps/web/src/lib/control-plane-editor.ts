@@ -1,4 +1,4 @@
-import { translateLiteral } from "@/lib/i18n";
+import { translate } from "@/lib/i18n";
 
 export function prettyJson(value: unknown) {
   return JSON.stringify(value, null, 2);
@@ -18,12 +18,12 @@ export function parseJsonObject(
     parsed = JSON.parse(trimmed);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : translateLiteral("JSON invalido");
+      error instanceof Error ? error.message : translate("generated.lib.json_invalido_27bfe6a8");
     throw new Error(`${label}: ${message}`);
   }
 
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error(`${label}: ${translateLiteral("o valor precisa ser um objeto JSON")}`);
+    throw new Error(`${label}: ${translate("generated.lib.o_valor_precisa_ser_um_objeto_json_63ee7d8a")}`);
   }
 
   return parsed as Record<string, unknown>;
@@ -43,12 +43,12 @@ export function parseJsonArray(
     parsed = JSON.parse(trimmed);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : translateLiteral("JSON invalido");
+      error instanceof Error ? error.message : translate("generated.lib.json_invalido_27bfe6a8");
     throw new Error(`${label}: ${message}`);
   }
 
   if (!Array.isArray(parsed)) {
-    throw new Error(`${label}: ${translateLiteral("o valor precisa ser um array JSON")}`);
+    throw new Error(`${label}: ${translate("generated.lib.o_valor_precisa_ser_um_array_json_5c5cd90a")}`);
   }
 
   const invalidIndex = parsed.findIndex(
@@ -56,7 +56,7 @@ export function parseJsonArray(
   );
   if (invalidIndex >= 0) {
     throw new Error(
-      `${label}: ${translateLiteral("cada item precisa ser um objeto JSON (indice {{index}})", { index: invalidIndex })}`,
+      `${label}: ${translate("generated.lib.cada_item_precisa_ser_um_objeto_json_indice__b6c8ffad", { index: invalidIndex })}`,
     );
   }
 
@@ -66,12 +66,12 @@ export function parseJsonArray(
 export function parseHealthPort(value: string): number {
   const trimmed = value.trim();
   if (!trimmed) {
-    throw new Error(translateLiteral("Health port e obrigatorio."));
+    throw new Error(translate("generated.lib.health_port_e_obrigatorio_16131d9d"));
   }
 
   const parsed = Number(trimmed);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
-    throw new Error(translateLiteral("Health port precisa ser um inteiro entre 1 e 65535."));
+    throw new Error(translate("generated.lib.health_port_precisa_ser_um_inteiro_entre_1_e_b9115df0"));
   }
 
   return parsed;
@@ -90,10 +90,10 @@ export function buildAgentMetadataPayload(input: {
   const displayName = input.displayName.trim();
   const storageNamespace = input.storageNamespace.trim();
   if (!displayName) {
-    throw new Error(translateLiteral("Display name e obrigatorio."));
+    throw new Error(translate("generated.lib.display_name_e_obrigatorio_0275591e"));
   }
   if (!storageNamespace) {
-    throw new Error(translateLiteral("Storage namespace e obrigatorio."));
+    throw new Error(translate("generated.lib.storage_namespace_e_obrigatorio_71d84dd6"));
   }
 
   const appearance: Record<string, unknown> = { ...(input.existingAppearance ?? {}) };

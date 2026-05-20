@@ -108,6 +108,25 @@ describe("control plane proxy route", () => {
     expect(response.headers.get("x-koda-upstream-unavailable")).toBeNull();
   });
 
+  it("keeps proposal reads as hard failures when the upstream is unavailable", async () => {
+    const { controlPlaneFetch } = await import("@/lib/control-plane");
+    const { getWebOperatorTokenFromCookie } = await import("@/lib/web-operator-session");
+    const { isTrustedDashboardRequest } = await import("@/lib/request-origin");
+
+    vi.mocked(getWebOperatorTokenFromCookie).mockResolvedValue("operator-token");
+    vi.mocked(isTrustedDashboardRequest).mockReturnValue(true);
+    vi.mocked(controlPlaneFetch).mockRejectedValue(Object.assign(new Error("down"), { status: 503 }));
+
+    const { GET } = await import("./route");
+    const response = await GET(
+      request("http://localhost/api/control-plane/agents/ATLAS/improvement-proposals?limit=80"),
+      { params: Promise.resolve({ path: ["agents", "ATLAS", "improvement-proposals"] }) },
+    );
+
+    expect(response.status).toBe(503);
+    expect(response.headers.get("x-koda-upstream-unavailable")).toBeNull();
+  });
+
   it("softens public onboarding readiness probes while preserving the schema", async () => {
     const { controlPlaneFetch } = await import("@/lib/control-plane");
     const { getWebOperatorTokenFromCookie } = await import("@/lib/web-operator-session");

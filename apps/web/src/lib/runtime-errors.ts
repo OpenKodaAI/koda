@@ -46,34 +46,19 @@ export function humanizeRuntimeAttachError(
     normalized.includes("invalid runtime token")
   ) {
     return surface === "terminal"
-      ? translate("runtime.terminal.previewHeader", {
-          defaultValue:
-            "Authenticated terminal attach is unavailable; showing the environment log preview.",
-        })
-      : translate("runtime.browser.snapshotMetadata", {
-          defaultValue: "Browser snapshot and metadata",
-        });
+      ? translate("runtime.terminal.previewHeader")
+      : translate("runtime.browser.snapshotMetadata");
   }
 
   if (isTimeoutLikeMessage(message)) {
     return surface === "terminal"
-      ? translate("runtime.attach.terminalTimeout", {
-          defaultValue:
-            "Terminal attach took longer than expected; showing the log preview while the environment responds.",
-        })
-      : translate("runtime.attach.browserTimeout", {
-          defaultValue:
-            "Browser attach took longer than expected; showing snapshot and metadata while the runtime responds.",
-        });
+      ? translate("runtime.attach.terminalTimeout")
+      : translate("runtime.attach.browserTimeout");
   }
 
   return mode === "preview"
     ? message ||
-        translate("runtime.attach.terminalPreviewFallback", {
-          defaultValue: "Could not attach to the terminal; showing log preview.",
-        })
+        translate("runtime.attach.terminalPreviewFallback")
     : message ||
-        translate("runtime.attach.browserSnapshotFallback", {
-          defaultValue: "Could not attach to the browser; showing snapshot.",
-        });
+        translate("runtime.attach.browserSnapshotFallback");
 }

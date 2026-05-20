@@ -19,6 +19,21 @@ const redactionSummarySchema = z
   })
   .passthrough();
 
+const trajectoryExportManifestSchema = z
+  .object({
+    schema_version: z.literal("trajectory_export_manifest.v1"),
+    export_id: tokenSchema,
+    agent_id: safeIdentifier(120),
+    source_refs: z.record(z.string(), z.unknown()).default({}),
+    run_graph_refs: z.array(safeText(500)).max(500).default([]),
+    redaction_summary: z.record(z.string(), z.unknown()).default({}),
+    validation_status: z.enum(["passed", "warning", "blocked"]).default("warning"),
+    missing_data_warnings: z.array(safeText(500)).max(120).default([]),
+    record_count: z.number().int().nonnegative().default(0),
+    package_hash: safeText(240).nullable().optional(),
+  })
+  .passthrough();
+
 export const evalCaseStatusSchema = z.enum([
   "draft",
   "ready",
@@ -179,6 +194,8 @@ export const trajectoryExportSchema = z
     package_ref: safeText(500).nullable().optional(),
     download_url: z.string().trim().max(1000).nullable().optional(),
     warnings: z.array(safeText(500)).max(120).default([]),
+    manifest: trajectoryExportManifestSchema.nullable().optional(),
+    validation_status: z.enum(["passed", "warning", "blocked"]).nullable().optional(),
     redactions: redactionSummarySchema.nullable().optional(),
     error: operationalErrorEnvelopeSchema.nullable().optional(),
     created_at: timestampSchema,
@@ -219,6 +236,28 @@ export type EvalCaseResult = z.infer<typeof evalCaseResultSchema>;
 export type TrajectoryExport = z.infer<typeof trajectoryExportSchema>;
 export type ReleaseQuality = z.infer<typeof releaseQualitySchema>;
 export type ReleaseQualityStatus = z.infer<typeof releaseQualityStatusSchema>;
+
+export function getRunGraphReleaseGate(releaseQuality: ReleaseQuality | null | undefined) {
+  return (
+    releaseQuality?.gates.find((gate) => {
+      const id = gate.id.toLowerCase();
+      const title = gate.title.toLowerCase();
+      return id.includes("run_graph") || id.includes("rungraph") || title.includes("rungraph");
+    }) ?? null
+  );
+}
+
+export function getRunGraphReleaseWarnings(releaseQuality: ReleaseQuality | null | undefined) {
+  const gate = getRunGraphReleaseGate(releaseQuality);
+  const metricWarnings = asArray(releaseQuality?.metrics?.run_graph_warnings)
+    .map(asString)
+    .filter(Boolean);
+  const gateWarning =
+    gate && gate.status !== "passed" && gate.status !== "passing" && gate.summary
+      ? [gate.summary]
+      : [];
+  return [...gateWarning, ...metricWarnings].slice(0, 8);
+}
 
 export const createEvalFromRunBodySchema = z
   .object({

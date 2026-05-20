@@ -91,7 +91,7 @@ describe("AccountIdentityPanel", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(window.localStorage.getItem(OPERATOR_AVATAR_STORAGE_KEY)).toBe("mint");
-    expect(await screen.findByText("Avatar atualizado.")).toBeInTheDocument();
+    expect(await screen.findByText("Updated avatar.")).toBeInTheDocument();
   });
 
   it("updates the display name through the profile API", async () => {
@@ -123,7 +123,7 @@ describe("AccountIdentityPanel", () => {
     expect(authMock.updateOperator).toHaveBeenCalledWith(
       expect.objectContaining({ display_name: "Avery Stone" }),
     );
-    expect(await screen.findByText("Nome atualizado.")).toBeInTheDocument();
+    expect(await screen.findByText("Name updated.")).toBeInTheDocument();
   });
 
   it("blocks invalid display names before making a request", async () => {
@@ -137,7 +137,7 @@ describe("AccountIdentityPanel", () => {
 
     expect(fetchMock).not.toHaveBeenCalled();
     expect(await screen.findByText("Display name is required.")).toBeInTheDocument();
-    expect(await screen.findByText("Informe um nome de exibição válido.")).toBeInTheDocument();
+    expect(await screen.findByText("Enter a valid display name.")).toBeInTheDocument();
   });
 
   it("removes the persisted profile photo", async () => {
@@ -166,7 +166,7 @@ describe("AccountIdentityPanel", () => {
     expect(authMock.updateOperator).toHaveBeenCalledWith(
       expect.objectContaining({ profile_photo_hash: null }),
     );
-    expect(await screen.findByText("Foto removida.")).toBeInTheDocument();
+    expect(await screen.findByText("Photo removed.")).toBeInTheDocument();
   });
 
   it("uploads a cropped profile photo", async () => {
@@ -222,7 +222,7 @@ describe("AccountIdentityPanel", () => {
     expect(authMock.updateOperator).toHaveBeenCalledWith(
       expect.objectContaining({ profile_photo_hash: "abc123" }),
     );
-    expect(await screen.findByText("Foto atualizada.")).toBeInTheDocument();
+    expect(await screen.findByText("Updated photo.")).toBeInTheDocument();
 
     createObjectUrl.mockRestore();
     revokeObjectUrl.mockRestore();

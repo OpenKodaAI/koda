@@ -88,6 +88,7 @@ function WorkspaceSelectorDropdown({
   onSelect: (key: string) => void;
   tl: (value: string, options?: Record<string, unknown>) => string;
 }) {
+  const { t } = useAppI18n();
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -155,20 +156,20 @@ function WorkspaceSelectorDropdown({
         onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
         aria-haspopup="listbox"
-        aria-label={tl("Selecionar workspace")}
+        aria-label={t("generated.controlPlane.selecionar_workspace_7b466718")}
       >
         <span className="flex min-w-0 items-center gap-2.5">
           {activeSection && (
             <span
               className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[10px] font-medium tabular-nums text-[var(--text-tertiary)]"
               aria-hidden="true"
-              title={tl("{{count}} agents", { count: activeSection.totalAgents })}
+              title={t("generated.controlPlane.count_agents_a906521c", { count: activeSection.totalAgents })}
             >
               {activeSection.totalAgents}
             </span>
           )}
           <span className="block min-w-0 truncate text-sm font-medium text-[var(--text-primary)]">
-            {activeSection?.title ?? tl("Workspace")}
+            {activeSection?.title ?? t("generated.controlPlane.workspace_85a7b6fe")}
           </span>
         </span>
         <ChevronDown
@@ -191,7 +192,7 @@ function WorkspaceSelectorDropdown({
                   transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
                   className="app-floating-panel agent-board-ws-selector__menu"
                   role="listbox"
-                  aria-label={tl("Workspaces")}
+                  aria-label={t("generated.controlPlane.workspaces_de6b0823")}
                   style={{
                     position: "fixed",
                     zIndex: 80,
@@ -222,7 +223,7 @@ function WorkspaceSelectorDropdown({
                         <span
                           className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[10px] font-medium tabular-nums text-[var(--text-tertiary)]"
                           aria-hidden="true"
-                          title={tl("{{count}} agents", { count: section.totalAgents })}
+                          title={t("generated.controlPlane.count_agents_a906521c", { count: section.totalAgents })}
                         >
                           {section.totalAgents}
                         </span>
@@ -257,6 +258,7 @@ function CreatePopover({
   hasActiveWorkspace: boolean;
   tl: (value: string, options?: Record<string, unknown>) => string;
 }) {
+  const { t } = useAppI18n();
   const rootRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -324,7 +326,7 @@ function CreatePopover({
           "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[var(--text-primary)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-hover)] active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
           open && "bg-[var(--surface-hover)]",
         )}
-        aria-label={tl("Criar")}
+        aria-label={t("generated.controlPlane.criar_93c27e0c")}
         aria-expanded={open}
         aria-haspopup="menu"
         onClick={() => setOpen((v) => !v)}
@@ -345,7 +347,7 @@ function CreatePopover({
                   transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
                   className="app-floating-panel agent-board-create-popover__menu"
                   role="menu"
-                  aria-label={tl("Criar")}
+                  aria-label={t("generated.controlPlane.criar_93c27e0c")}
                   style={{
                     position: "fixed",
                     zIndex: 80,
@@ -365,7 +367,7 @@ function CreatePopover({
                     }}
                   >
                     <Plus className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                    <span>{tl("Agente")}</span>
+                    <span>{t("generated.controlPlane.agente_794b0ee3")}</span>
                   </button>
                   <button
                     type="button"
@@ -377,7 +379,7 @@ function CreatePopover({
                     }}
                   >
                     <FolderPlus className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                    <span>{tl("Workspace")}</span>
+                    <span>{t("generated.controlPlane.workspace_85a7b6fe")}</span>
                   </button>
                   <button
                     type="button"
@@ -389,7 +391,7 @@ function CreatePopover({
                     }}
                   >
                     <FolderSearch className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                    <span>{tl("Import from folder")}</span>
+                    <span>{t("generated.controlPlane.import_from_folder_fd1e100e")}</span>
                   </button>
                   <button
                     type="button"
@@ -404,7 +406,7 @@ function CreatePopover({
                     }}
                   >
                     <Users className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                    <span>{tl("Squad")}</span>
+                    <span>{t("generated.controlPlane.squad_927b7ee0")}</span>
                   </button>
                 </motion.div>
               ) : null}
@@ -637,14 +639,14 @@ function buildWorkspaceImportPreview(
 
 function workspaceRootStatusLabel(
   workspace: ControlPlaneWorkspace,
-  tl: (value: string, options?: Record<string, unknown>) => string,
+  t: (key: string, options?: Record<string, unknown>) => string,
 ) {
-  if (!workspace.root_path) return tl("No root");
-  if (workspace.root_exists === false) return tl("Missing");
-  if (workspace.scan_status === "completed") return tl("Scanned");
-  if (workspace.scan_status === "stale") return tl("Stale");
-  if (workspace.scan_status === "error") return tl("Scan error");
-  return tl("Never scanned");
+  if (!workspace.root_path) return t("generated.controlPlane.no_root_ce95931f");
+  if (workspace.root_exists === false) return t("generated.controlPlane.missing_320331c5");
+  if (workspace.scan_status === "completed") return t("generated.controlPlane.scanned_1d0960a2");
+  if (workspace.scan_status === "stale") return t("generated.controlPlane.stale_5a9834ce");
+  if (workspace.scan_status === "error") return t("generated.controlPlane.scan_error_3a5b63f9");
+  return t("generated.controlPlane.never_scanned_2056c920");
 }
 
 function workspaceRootStatusTone(workspace: ControlPlaneWorkspace) {
@@ -758,7 +760,7 @@ export function AgentCatalog({
 }: AgentCatalogProps) {
   const router = useRouter();
   const { showToast } = useToast();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   const { createAgent: createAgentViaHook } = useCreateAgent();
 
@@ -857,14 +859,14 @@ export function AgentCatalog({
           return;
         }
         showToast(
-          error instanceof Error ? error.message : tl("Erro ao carregar raizes."),
+          error instanceof Error ? error.message : t("generated.controlPlane.erro_ao_carregar_raizes_2603e84c"),
           "error",
         );
       });
     return () => {
       cancelled = true;
     };
-  }, [showToast, tl, workspaceImportOpen, workspaceTree]);
+  }, [showToast, t, tl, workspaceImportOpen, workspaceTree]);
 
   function normalizeCloneBase(base: string): string {
     const raw = base.toUpperCase().replace(/[^A-Z0-9]/g, "_");
@@ -966,14 +968,14 @@ export function AgentCatalog({
     const includeNoWorkspace =
       !searchQuery ||
       noWorkspaceAgents.length > 0 ||
-      tl("Sem workspace").toLowerCase().includes(searchQuery);
+      t("generated.controlPlane.sem_workspace_ebf8903c").toLowerCase().includes(searchQuery);
 
     if (includeNoWorkspace) {
       sections.push({
         key: NO_WORKSPACE_KEY,
-        title: tl("Sem workspace"),
+        title: t("generated.controlPlane.sem_workspace_ebf8903c"),
         description:
-          tl("Bots livres, ainda fora de um workspace. Arraste para organizar."),
+          t("generated.controlPlane.bots_livres_ainda_fora_de_um_workspace_arras_a8e7c891"),
         color: "#707A8C",
         totalAgents: workspaceTree.virtual_buckets.no_workspace.agent_count,
         visibleAgents: noWorkspaceAgents.length,
@@ -982,9 +984,9 @@ export function AgentCatalog({
         lanes: [
           {
             key: laneKey(null, null),
-            title: tl("Bots livres"),
+            title: t("generated.controlPlane.bots_livres_48db92b2"),
             description:
-              tl("Solte aqui para remover o vínculo com qualquer workspace."),
+              t("generated.controlPlane.solte_aqui_para_remover_o_vinculo_com_qualqu_e5299d04"),
             workspaceId: null,
             squadId: null,
             color: "#707A8C",
@@ -1005,14 +1007,14 @@ export function AgentCatalog({
         !searchQuery ||
         workspaceMatches ||
         noSquadAgents.length > 0 ||
-        tl("Sem squad").toLowerCase().includes(searchQuery);
+        t("generated.controlPlane.sem_squad_c3ac4221").toLowerCase().includes(searchQuery);
 
       const noSquadLane = includeNoSquadLane
         ? {
             key: laneKey(workspace.id, null),
-            title: tl("Sem squad"),
+            title: t("generated.controlPlane.sem_squad_c3ac4221"),
             description:
-              tl("Ponto de entrada do workspace para bots sem time definido."),
+              t("generated.controlPlane.ponto_de_entrada_do_workspace_para_bots_sem__774a69ca"),
             workspaceId: workspace.id,
             squadId: null,
             totalAgents: workspace.virtual_buckets.no_squad.agent_count,
@@ -1036,7 +1038,7 @@ export function AgentCatalog({
           key: laneKey(workspace.id, squad.id),
           title: squad.name,
           description:
-            squad.description || tl("Time dedicado dentro deste workspace."),
+            squad.description || t("generated.controlPlane.time_dedicado_dentro_deste_workspace_c97fd7f1"),
           workspaceId: workspace.id,
           squadId: squad.id,
           totalAgents: squad.agent_count,
@@ -1056,8 +1058,8 @@ export function AgentCatalog({
           const placeholderIndex = lanes.length;
           lanes.push({
             key: `${workspace.id}:__placeholder_${placeholderIndex}__`,
-            title: tl("Nova squad"),
-            description: tl("Espaço reservado para criar um novo time neste workspace."),
+            title: t("generated.controlPlane.nova_squad_d9cf6c8a"),
+            description: t("generated.controlPlane.espaco_reservado_para_criar_um_novo_time_nes_9918198d"),
             workspaceId: workspace.id,
             squadId: null,
             totalAgents: 0,
@@ -1076,8 +1078,8 @@ export function AgentCatalog({
           const placeholderIndex = lanes.length;
           lanes.push({
             key: `${workspace.id}:__placeholder_${placeholderIndex}__`,
-            title: tl("Nova squad"),
-            description: tl("Espaço reservado para criar um novo time neste workspace."),
+            title: t("generated.controlPlane.nova_squad_d9cf6c8a"),
+            description: t("generated.controlPlane.espaco_reservado_para_criar_um_novo_time_nes_9918198d"),
             workspaceId: workspace.id,
             squadId: null,
             totalAgents: 0,
@@ -1098,7 +1100,7 @@ export function AgentCatalog({
           title: workspace.name,
           description:
             workspace.description ||
-            tl("Organize squads e distribua os agentes deste workspace."),
+            t("generated.controlPlane.organize_squads_e_distribua_os_agentes_deste_79c43173"),
           totalAgents: workspace.agent_count,
           visibleAgents,
           workspace,
@@ -1109,7 +1111,7 @@ export function AgentCatalog({
     }
 
     return sections;
-  }, [filteredAgents, searchQuery, tl, workspaceTree]);
+  }, [filteredAgents, searchQuery, t, tl, workspaceTree]);
 
   const workspaceTabs = useMemo(() => {
     const workspaceSections = boardSections.filter((section) => !section.isVirtual);
@@ -1159,7 +1161,7 @@ export function AgentCatalog({
   async function handleWorkspaceImportBrowse(path: string) {
     const cleanPath = path.trim();
     if (!cleanPath) {
-      showToast(tl("Informe uma pasta para navegar."), "error");
+      showToast(t("generated.controlPlane.informe_uma_pasta_para_navegar_885da6b8"), "error");
       return;
     }
     setWorkspaceImportDirectoryBusy(true);
@@ -1171,7 +1173,7 @@ export function AgentCatalog({
       setWorkspaceImportDirectory(directory);
       setWorkspaceImportPath(directory.path);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : tl("Erro ao listar pasta."), "error");
+      showToast(error instanceof Error ? error.message : t("generated.controlPlane.erro_ao_listar_pasta_cf7b0ebe"), "error");
     } finally {
       setWorkspaceImportDirectoryBusy(false);
     }
@@ -1179,7 +1181,7 @@ export function AgentCatalog({
 
   async function handleWorkspaceImportScan() {
     if (!workspaceImportPath.trim()) {
-      showToast(tl("Informe uma pasta para escanear."), "error");
+      showToast(t("generated.controlPlane.informe_uma_pasta_para_escanear_b093b641"), "error");
       return;
     }
     setWorkspaceImportBusy(true);
@@ -1192,7 +1194,7 @@ export function AgentCatalog({
       setWorkspaceImportPath(scan.root_path);
       setWorkspaceImportSelected(importableSourceIds(scan));
     } catch (error) {
-      showToast(error instanceof Error ? error.message : tl("Erro ao escanear pasta."), "error");
+      showToast(error instanceof Error ? error.message : t("generated.controlPlane.erro_ao_escanear_pasta_2334e5df"), "error");
     } finally {
       setWorkspaceImportBusy(false);
     }
@@ -1214,10 +1216,10 @@ export function AgentCatalog({
       setWorkspaceImportScan(null);
       setWorkspaceImportSelected([]);
       setWorkspaceImportDirectory(null);
-      showToast(tl("Workspace importado com sucesso."), "success");
+      showToast(t("generated.controlPlane.workspace_importado_com_sucesso_0274a3e3"), "success");
       router.refresh();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : tl("Erro ao importar workspace."), "error");
+      showToast(error instanceof Error ? error.message : t("generated.controlPlane.erro_ao_importar_workspace_5e55fef4"), "error");
     } finally {
       setWorkspaceImportBusy(false);
     }
@@ -1231,9 +1233,9 @@ export function AgentCatalog({
         body: JSON.stringify({}),
       });
       await refreshWorkspaces();
-      showToast(tl("Scan atualizado."), "success");
+      showToast(t("generated.controlPlane.scan_atualizado_36a0c8e8"), "success");
     } catch (error) {
-      showToast(error instanceof Error ? error.message : tl("Erro ao atualizar scan."), "error");
+      showToast(error instanceof Error ? error.message : t("generated.controlPlane.erro_ao_atualizar_scan_c8b3f2f1"), "error");
     } finally {
       setOrganizationBusy(false);
     }
@@ -1251,24 +1253,24 @@ export function AgentCatalog({
     return [
       {
         key: "importable",
-        title: tl("Importable"),
+        title: t("generated.controlPlane.importable_4901ec5a"),
         tone: "success",
         sources: sortWorkspaceSources(groups.importable),
       },
       {
         key: "review",
-        title: tl("Review required"),
+        title: t("generated.controlPlane.review_required_b12b32fe"),
         tone: "warning",
         sources: sortWorkspaceSources(groups.review),
       },
       {
         key: "blocked",
-        title: tl("Blocked"),
+        title: t("generated.controlPlane.blocked_7c1c0fb3"),
         tone: "danger",
         sources: sortWorkspaceSources(groups.blocked),
       },
     ];
-  }, [tl, workspaceImportScan]);
+  }, [t, tl, workspaceImportScan]);
 
   const workspaceImportPreview = useMemo(
     () => buildWorkspaceImportPreview(workspaceImportScan, workspaceImportSelected),
@@ -1288,15 +1290,15 @@ export function AgentCatalog({
 
   function getLaneTargetLabel(lane: BoardLane) {
     if (!lane.workspaceId) {
-        return tl("Sem workspace");
+        return t("generated.controlPlane.sem_workspace_ebf8903c");
     }
 
     const workspace =
       workspaceTree.items.find((item) => item.id === lane.workspaceId) ?? null;
-    const workspaceName = workspace?.name ?? tl("Workspace");
+    const workspaceName = workspace?.name ?? t("generated.controlPlane.workspace_85a7b6fe");
 
     if (!lane.squadId) {
-      return `${workspaceName} / ${tl("Sem squad")}`;
+      return `${workspaceName} / ${t("generated.controlPlane.sem_squad_c3ac4221")}`;
     }
 
     return `${workspaceName} / ${lane.title}`;
@@ -1356,7 +1358,7 @@ export function AgentCatalog({
   async function handleSubmitOrganizationForm() {
     if (!organizationForm) return;
     if (!organizationForm.name.trim()) {
-      showToast(tl("O nome e obrigatorio."), "error");
+      showToast(t("generated.controlPlane.o_nome_e_obrigatorio_50f257b1"), "error");
       return;
     }
 
@@ -1378,8 +1380,8 @@ export function AgentCatalog({
         });
         showToast(
           organizationForm.mode === "create"
-            ? tl("Workspace criado com sucesso.")
-            : tl("Workspace atualizado com sucesso."),
+            ? t("generated.controlPlane.workspace_criado_com_sucesso_8dae8770")
+            : t("generated.controlPlane.workspace_atualizado_com_sucesso_f1146859"),
           "success",
         );
       } else {
@@ -1398,8 +1400,8 @@ export function AgentCatalog({
         });
         showToast(
           organizationForm.mode === "create"
-            ? tl("Squad criada com sucesso.")
-            : tl("Squad atualizada com sucesso."),
+            ? t("generated.controlPlane.squad_criada_com_sucesso_3b302cbb")
+            : t("generated.controlPlane.squad_atualizada_com_sucesso_8a916562"),
           "success",
         );
       }
@@ -1409,7 +1411,7 @@ export function AgentCatalog({
       router.refresh();
     } catch (error) {
       showToast(
-        error instanceof Error ? error.message : tl("Erro ao salvar organizacao."),
+        error instanceof Error ? error.message : t("generated.controlPlane.erro_ao_salvar_organizacao_9246a3a6"),
         "error",
       );
     } finally {
@@ -1440,7 +1442,7 @@ export function AgentCatalog({
               : agent,
           ),
         );
-        showToast(tl("Workspace removido com sucesso."), "success");
+        showToast(t("generated.controlPlane.workspace_removido_com_sucesso_e68163f9"), "success");
       } else {
         if (deleteTarget.kind === "squad") {
           await requestJson(
@@ -1461,7 +1463,7 @@ export function AgentCatalog({
                 : agent,
             ),
           );
-          showToast(tl("Squad removida com sucesso."), "success");
+          showToast(t("generated.controlPlane.squad_removida_com_sucesso_be1399ca"), "success");
         } else {
           await requestJson(`/api/control-plane/agents/${deleteTarget.id}`, {
             method: "DELETE",
@@ -1469,7 +1471,7 @@ export function AgentCatalog({
           setCatalogAgents((current) =>
             current.filter((agent) => agent.id !== deleteTarget.id),
           );
-          showToast(tl("Agente removido com sucesso."), "success");
+          showToast(t("generated.controlPlane.agente_removido_com_sucesso_d391a2ed"), "success");
         }
       }
       await refreshWorkspaces();
@@ -1477,7 +1479,7 @@ export function AgentCatalog({
       router.refresh();
     } catch (error) {
       showToast(
-        error instanceof Error ? error.message : tl("Erro ao remover organizacao."),
+        error instanceof Error ? error.message : t("generated.controlPlane.erro_ao_remover_organizacao_ac51844a"),
         "error",
       );
     } finally {
@@ -1635,13 +1637,13 @@ export function AgentCatalog({
     if (failedMoves.size === 0) {
       showToast(
         moveIds.length === 1
-          ? tl("Agente movido para {{target}}.", { target: targetLabel })
-          : tl("{{count}} agentes movidos para {{target}}.", { count: moveIds.length, target: targetLabel }),
+          ? t("generated.controlPlane.agente_movido_para_target_e9f839e6", { target: targetLabel })
+          : t("generated.controlPlane.count_agentes_movidos_para_target_54cbfa0a", { count: moveIds.length, target: targetLabel }),
         "success",
       );
     } else if (successMap.size > 0) {
       showToast(
-        tl("{{moved}} agentes movidos e {{failed}} falharam.", {
+        t("generated.controlPlane.moved_agentes_movidos_e_failed_falharam_a9b5e38c", {
           moved: successMap.size,
           failed: failedMoves.size,
         }),
@@ -1652,7 +1654,7 @@ export function AgentCatalog({
       showToast(
         firstFailure?.error instanceof Error
           ? firstFailure.error.message
-          : tl("Nao foi possivel mover os agentes selecionados."),
+          : t("generated.controlPlane.nao_foi_possivel_mover_os_agentes_selecionad_2f3d82b5"),
         "error",
       );
     }
@@ -1780,7 +1782,7 @@ export function AgentCatalog({
 
   async function handleDuplicateAgent(agent: ControlPlaneAgentSummary) {
     const cloneId = generateDuplicateBotId(agent.id);
-    const cloneDisplayName = `${agent.display_name} (${tl("Copia")})`;
+    const cloneDisplayName = `${agent.display_name} (${t("generated.controlPlane.copia_2624990d")})`;
     setDuplicatingBotId(agent.id);
     try {
       const duplicated = (await requestJson(`/api/control-plane/agents/${agent.id}/clone`, {
@@ -1803,11 +1805,11 @@ export function AgentCatalog({
 
       setCatalogAgents((current) => [...current, duplicatedAgent]);
       await refreshWorkspaces();
-      showToast(tl("Duplicata criada: {{id}}", { id: cloneId }), "success");
+      showToast(t("generated.controlPlane.duplicata_criada_id_f23c956e", { id: cloneId }), "success");
       router.refresh();
     } catch (error) {
       showToast(
-        error instanceof Error ? error.message : tl("Erro ao duplicar agente."),
+        error instanceof Error ? error.message : t("generated.controlPlane.erro_ao_duplicar_agente_68ed6819"),
         "error",
       );
     } finally {
@@ -1824,11 +1826,11 @@ export function AgentCatalog({
               className="w-full"
               value={search}
               onChange={setSearch}
-              placeholder={tl("Buscar por nome, ID, workspace ou squad...")}
-              ariaLabel={tl("Buscar bots por nome, ID, workspace ou squad")}
+              placeholder={t("generated.controlPlane.buscar_por_nome_id_workspace_ou_squad_7e82d912")}
+              ariaLabel={t("generated.controlPlane.buscar_bots_por_nome_id_workspace_ou_squad_7696e5da")}
               loading={searchState.isSearching}
-              loadingLabel={tl("Buscando agentes")}
-              clearLabel={tl("Limpar busca")}
+              loadingLabel={t("generated.controlPlane.buscando_agentes_d548a6fa")}
+              clearLabel={t("generated.controlPlane.limpar_busca_0bb288dc")}
             />
           </div>
 
@@ -1846,14 +1848,14 @@ export function AgentCatalog({
                   title={`${activeSection.workspace.root_path} · ${activeSection.workspace.scan_status ?? "not_scanned"}`}
                 >
                   <FolderSearch className="h-3.5 w-3.5" />
-                  {workspaceRootStatusLabel(activeSection.workspace, tl)}
+                  {workspaceRootStatusLabel(activeSection.workspace, t)}
                 </span>
               ) : null}
               {activeSection.workspace.root_path ? (
                 <ActionButton
                   type="button"
                   size="icon"
-                  aria-label={tl("Reescanear workspace {{workspace}}", { workspace: activeSection.workspace.name })}
+                  aria-label={t("generated.controlPlane.reescanear_workspace_workspace_33ca1e27", { workspace: activeSection.workspace.name })}
                   disabled={organizationBusy}
                   onClick={() => void handleWorkspaceRescan(activeSection.workspace!)}
                 >
@@ -1863,7 +1865,7 @@ export function AgentCatalog({
               <ActionButton
                 type="button"
                 size="icon"
-                aria-label={tl("Configurar system prompt do espaco de trabalho {{workspace}}", { workspace: activeSection.workspace.name })}
+                aria-label={t("generated.controlPlane.configurar_system_prompt_do_espaco_de_trabal_58208d1d", { workspace: activeSection.workspace.name })}
                 onClick={() =>
                   setWorkspaceSpecTarget({
                     id: activeSection.workspace!.id,
@@ -1876,7 +1878,7 @@ export function AgentCatalog({
               <ActionButton
                 type="button"
                 size="icon"
-                aria-label={tl("Editar workspace {{workspace}}", { workspace: activeSection.workspace.name })}
+                aria-label={t("generated.controlPlane.editar_workspace_workspace_950f9952", { workspace: activeSection.workspace.name })}
                 onClick={() =>
                   openWorkspaceForm("edit", activeSection.workspace!)
                 }
@@ -1886,7 +1888,7 @@ export function AgentCatalog({
               <ActionButton
                 type="button"
                 size="icon"
-                aria-label={tl("Remover workspace {{workspace}}", { workspace: activeSection.workspace.name })}
+                aria-label={t("generated.controlPlane.remover_workspace_workspace_6f03d5c1", { workspace: activeSection.workspace.name })}
                 onClick={() =>
                   setDeleteTarget({
                     kind: "workspace",
@@ -1937,25 +1939,25 @@ export function AgentCatalog({
 
       <PageMetricStrip {...tourAnchor("catalog.metrics")}>
         <PageMetricStripItem
-          label={tl("Bots")}
+          label={t("generated.controlPlane.bots_b2016c98")}
           value={metrics.totalAgents}
-          hint={tl("Total no catálogo")}
+          hint={t("generated.controlPlane.total_no_catalogo_fbfde326")}
         />
         <PageMetricStripItem
-          label={tl("Active")}
+          label={t("generated.controlPlane.active_a9eae25d")}
           value={metrics.active}
           tone={metrics.active > 0 ? "accent" : "neutral"}
-          hint={tl("Em execução agora")}
+          hint={t("generated.controlPlane.em_execucao_agora_f43cfe01")}
         />
         <PageMetricStripItem
-          label={tl("Workspaces")}
+          label={t("generated.controlPlane.workspaces_de6b0823")}
           value={metrics.workspaces}
-          hint={tl("Ambientes configurados")}
+          hint={t("generated.controlPlane.ambientes_configurados_d6f57b6d")}
         />
         <PageMetricStripItem
-          label={tl("Squads")}
+          label={t("generated.controlPlane.squads_bb07d680")}
           value={metrics.squads}
-          hint={tl("Grupos dentro de workspaces")}
+          hint={t("generated.controlPlane.grupos_dentro_de_workspaces_925fb085")}
         />
       </PageMetricStrip>
 
@@ -1985,25 +1987,25 @@ export function AgentCatalog({
                 <p className="text-sm font-medium tracking-[-0.02em] text-[var(--text-primary)]">
                   {moveFeedback
                     .phase === "moving"
-                    ? tl("Movendo {{count}} agente(s) para {{target}}", {
+                    ? t("generated.controlPlane.movendo_count_agente_s_para_target_61e712b6", {
                         count: moveFeedback.total,
                         target: moveFeedback.targetLabel,
                       })
                     : moveFeedback.failed > 0
-                      ? tl("{{done}} concluido(s) · {{failed}} falha(s)", {
+                      ? t("generated.controlPlane.done_concluido_s_failed_falha_s_0057d177", {
                           done: moveFeedback.total - moveFeedback.failed,
                           failed: moveFeedback.failed,
                         })
-                      : tl("{{count}} agente(s) sincronizado(s)", { count: moveFeedback.total })}
+                      : t("generated.controlPlane.count_agente_s_sincronizado_s_f79194ae", { count: moveFeedback.total })}
                 </p>
                 <p className="text-xs text-[var(--text-tertiary)]">
                   {moveFeedback
                     .phase === "moving"
-                    ? tl("{{done}} de {{total}} atualizados em background. Você pode continuar navegando normalmente.", {
+                    ? t("generated.controlPlane.done_de_total_atualizados_em_background_voce_cd4c30bd", {
                         done: moveFeedback.completed,
                         total: moveFeedback.total,
                       })
-                    : tl("Destino: {{target}}", { target: moveFeedback.targetLabel })}
+                    : t("generated.controlPlane.destino_target_890b77a8", { target: moveFeedback.targetLabel })}
                 </p>
               </div>
             </div>
@@ -2064,8 +2066,8 @@ export function AgentCatalog({
                         <div className="agent-board-unassigned-empty">
                           <p className="agent-board-empty__title">
                             {searchQuery
-                              ? tl("Nenhum agente corresponde a esta busca.")
-                              : tl("Sem agentes fora de workspace.")}
+                              ? t("generated.controlPlane.nenhum_agente_corresponde_a_esta_busca_f7758597")
+                              : t("generated.controlPlane.sem_agentes_fora_de_workspace_d603cc2d")}
                           </p>
                         </div>
                       )}
@@ -2082,7 +2084,7 @@ export function AgentCatalog({
                       type="button"
                       size="icon"
                       className="agent-board-lane-nav agent-board-lane-nav--prev"
-                      aria-label={tl("Mostrar squads anteriores de {{section}}", { section: activeSection.title })}
+                      aria-label={t("generated.controlPlane.mostrar_squads_anteriores_de_section_2360dfc8", { section: activeSection.title })}
                       onClick={() => scrollLaneRail(activeSection.key, -1)}
                     >
                       <ChevronLeft className="h-4 w-4" strokeWidth={1.8} aria-hidden />
@@ -2091,7 +2093,7 @@ export function AgentCatalog({
                       type="button"
                       size="icon"
                       className="agent-board-lane-nav agent-board-lane-nav--next"
-                      aria-label={tl("Mostrar mais squads de {{section}}", { section: activeSection.title })}
+                      aria-label={t("generated.controlPlane.mostrar_mais_squads_de_section_3f8efbcd", { section: activeSection.title })}
                       onClick={() => scrollLaneRail(activeSection.key, 1)}
                     >
                       <ChevronRight className="h-4 w-4" strokeWidth={1.8} aria-hidden />
@@ -2174,7 +2176,7 @@ export function AgentCatalog({
                                   type="button"
                                   size="icon"
                                   className="agent-board-lane__action"
-                                  aria-label={tl("Configurar system prompt do time {{squad}}", { squad: lane.squad.name })}
+                                  aria-label={t("generated.controlPlane.configurar_system_prompt_do_time_squad_67644ad3", { squad: lane.squad.name })}
                                   onClick={() =>
                                     setSquadSpecTarget({
                                       workspaceId: activeSection.workspace!.id,
@@ -2189,7 +2191,7 @@ export function AgentCatalog({
                                   type="button"
                                   size="icon"
                                   className="agent-board-lane__action"
-                                  aria-label={tl("Editar squad {{squad}}", { squad: lane.squad.name })}
+                                  aria-label={t("generated.controlPlane.editar_squad_squad_83d9984e", { squad: lane.squad.name })}
                                   onClick={() =>
                                     openSquadForm(
                                       activeSection.workspace!,
@@ -2204,7 +2206,7 @@ export function AgentCatalog({
                                   type="button"
                                   size="icon"
                                   className="agent-board-lane__action agent-board-lane__action--danger"
-                                  aria-label={tl("Remover squad {{squad}}", { squad: lane.squad.name })}
+                                  aria-label={t("generated.controlPlane.remover_squad_squad_4ded9258", { squad: lane.squad.name })}
                                   onClick={() =>
                                     setDeleteTarget({
                                       kind: "squad",
@@ -2239,7 +2241,7 @@ export function AgentCatalog({
                           ) : lane.isPlaceholder && activeSection.workspace ? (
                               <div className="agent-board-slot flex min-h-0 flex-1 flex-col items-center justify-center rounded-[0.5rem] px-6 py-8 text-center" {...tourAnchor("catalog.placeholder-lane")}>
                               <p className="agent-board-empty__title">
-                                {tl("Sem squads ainda")}
+                                {t("generated.controlPlane.sem_squads_ainda_e8486823")}
                               </p>
                               <ActionButton
                                 type="button"
@@ -2249,15 +2251,15 @@ export function AgentCatalog({
                                 }
                               >
                                 <Plus className="h-4 w-4" />
-                                {tl("Adicionar squad")}
+                                {t("generated.controlPlane.adicionar_squad_eed57fc9")}
                               </ActionButton>
                             </div>
                           ) : (
                             <div className="agent-board-empty flex min-h-0 flex-1 flex-col items-center justify-center rounded-[0.5rem] px-6 py-8 text-center" {...tourAnchor("catalog.empty-lane")}>
                               <p className="agent-board-empty__title">
                                 {searchQuery
-                                  ? tl("Nenhum agente corresponde a esta busca.")
-                                  : tl("Sem agentes neste squad.")}
+                                  ? t("generated.controlPlane.nenhum_agente_corresponde_a_esta_busca_f7758597")
+                                  : t("generated.controlPlane.sem_agentes_neste_squad_43b9af8d")}
                               </p>
                             </div>
                           )}
@@ -2274,7 +2276,7 @@ export function AgentCatalog({
         <div className="min-h-[220px] px-6 py-10" {...tourAnchor("catalog.empty")}>
           <div className="agent-board-global-empty">
             <p className="agent-board-empty__title">
-              {tl("Nenhum agente encontrado.")}
+              {t("generated.controlPlane.nenhum_agente_encontrado_c06e2249")}
             </p>
           </div>
         </div>
@@ -2298,22 +2300,22 @@ export function AgentCatalog({
                 >
                   <div className="flex items-start justify-between gap-4">
                     <div className="space-y-2">
-                      <p className="eyebrow">{tl("Workspace")}</p>
+                      <p className="eyebrow">{t("generated.controlPlane.workspace_85a7b6fe")}</p>
                       <h3 className="text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
-                        {tl("Import from folder")}
+                        {t("generated.controlPlane.import_from_folder_fd1e100e")}
                       </h3>
                       <p className="text-sm text-[var(--text-tertiary)]">
-                        {tl("Detecte instrucoes e configuracoes locais antes de aplicar qualquer import.")}
+                        {t("generated.controlPlane.detecte_instrucoes_e_configuracoes_locais_an_733cba5f")}
                       </p>
                     </div>
                     <button
                       type="button"
                       className="agent-board-inline-action"
-                      aria-label={tl("Fechar importacao")}
+                      aria-label={t("generated.controlPlane.fechar_importacao_6aae5b5c")}
                       onClick={() => setWorkspaceImportOpen(false)}
                       disabled={workspaceImportBusy}
                     >
-                      {tl("Fechar")}
+                      {t("generated.controlPlane.fechar_c6eec751")}
                     </button>
                   </div>
 
@@ -2321,7 +2323,7 @@ export function AgentCatalog({
                     <div className="flex flex-col gap-3 sm:flex-row">
                       <div className="min-w-0 flex-1">
                         <FormInput
-                          label={tl("Folder path")}
+                          label={t("generated.controlPlane.folder_path_89cedc8a")}
                           value={workspaceImportPath}
                           onChange={(event) => setWorkspaceImportPath(event.target.value)}
                           placeholder="/workspace/project"
@@ -2333,7 +2335,7 @@ export function AgentCatalog({
                           size="icon"
                           onClick={() => void handleWorkspaceImportBrowse(workspaceImportPath)}
                           disabled={workspaceImportDirectoryBusy || !workspaceImportPath.trim()}
-                          aria-label={tl("Browse folder")}
+                          aria-label={t("generated.controlPlane.browse_folder_ed3629e3")}
                         >
                           {workspaceImportDirectoryBusy ? (
                             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
@@ -2345,14 +2347,14 @@ export function AgentCatalog({
                           type="button"
                           onClick={() => void handleWorkspaceImportScan()}
                           disabled={workspaceImportBusy || !workspaceImportPath.trim()}
-                          aria-label={workspaceImportBusy ? tl("Escaneando pasta") : undefined}
+                          aria-label={workspaceImportBusy ? t("generated.controlPlane.escaneando_pasta_3d9803cf") : undefined}
                         >
                           {workspaceImportBusy ? (
                             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                           ) : (
                             <>
                               <FolderSearch className="h-3.5 w-3.5" />
-                              <span>{tl("Scan")}</span>
+                              <span>{t("generated.controlPlane.scan_e37b96bf")}</span>
                             </>
                           )}
                         </ActionButton>
@@ -2388,7 +2390,7 @@ export function AgentCatalog({
                               <ActionButton
                                 type="button"
                                 size="icon"
-                                aria-label={tl("Parent folder")}
+                                aria-label={t("generated.controlPlane.parent_folder_e5d51c27")}
                                 disabled={workspaceImportDirectoryBusy}
                                 onClick={() =>
                                   void handleWorkspaceImportBrowse(workspaceImportDirectory.parent ?? "")
@@ -2400,7 +2402,7 @@ export function AgentCatalog({
                             <ActionButton
                               type="button"
                               size="icon"
-                              aria-label={tl("Refresh folder")}
+                              aria-label={t("generated.controlPlane.refresh_folder_14ff012b")}
                               disabled={workspaceImportDirectoryBusy}
                               onClick={() =>
                                 void handleWorkspaceImportBrowse(workspaceImportDirectory.path)
@@ -2438,7 +2440,7 @@ export function AgentCatalog({
                             ))
                           ) : (
                             <p className="px-2 py-3 text-xs text-[var(--text-tertiary)]">
-                              {tl("Nenhuma pasta visivel.")}
+                              {t("generated.controlPlane.nenhuma_pasta_visivel_c9d6635b")}
                             </p>
                           )}
                         </div>
@@ -2450,7 +2452,7 @@ export function AgentCatalog({
                     <div className="mt-5 space-y-4">
                       <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]">
                         <span className="rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-2 py-1">
-                          {workspaceImportScan.summary.total_sources} {tl("sources")}
+                          {workspaceImportScan.summary.total_sources} {t("generated.controlPlane.sources_2f0be9b3")}
                         </span>
                         {Object.entries(workspaceImportScan.summary.by_tool ?? {}).map(([tool, count]) => (
                           <span
@@ -2461,13 +2463,13 @@ export function AgentCatalog({
                           </span>
                         ))}
                         <span className="rounded-[var(--radius-chip)] bg-[var(--tone-success-bg)] px-2 py-1 text-[var(--tone-success-text)]">
-                          {workspaceImportScan.summary.importable ?? 0} {tl("importable")}
+                          {workspaceImportScan.summary.importable ?? 0} {t("generated.controlPlane.importable_a750c771")}
                         </span>
                         <span className="rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-2 py-1 text-[var(--tone-warning-text)]">
-                          {workspaceImportScan.summary.review_required ?? 0} {tl("review")}
+                          {workspaceImportScan.summary.review_required ?? 0} {t("generated.controlPlane.review_a0e0fd42")}
                         </span>
                         <span className="rounded-[var(--radius-chip)] bg-[var(--tone-danger-bg)] px-2 py-1 text-[var(--tone-danger-text)]">
-                          {workspaceImportScan.summary.blocked ?? 0} {tl("blocked")}
+                          {workspaceImportScan.summary.blocked ?? 0} {t("generated.controlPlane.blocked_11f684aa")}
                         </span>
                       </div>
 
@@ -2577,20 +2579,20 @@ export function AgentCatalog({
                       onClick={() => setWorkspaceImportOpen(false)}
                       disabled={workspaceImportBusy}
                     >
-                      {tl("Cancelar")}
+                      {t("generated.controlPlane.cancelar_091200fb")}
                     </ActionButton>
                     <ActionButton
                       type="button"
                       onClick={() => void handleWorkspaceImportApply()}
                       disabled={workspaceImportBusy || !workspaceImportScan || workspaceImportSelected.length === 0}
-                      aria-label={workspaceImportBusy ? tl("Importando workspace") : undefined}
+                      aria-label={workspaceImportBusy ? t("generated.controlPlane.importando_workspace_9b826e8b") : undefined}
                     >
                       {workspaceImportBusy ? (
                         <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
                       ) : (
                         <>
                         <CheckCheck className="h-3.5 w-3.5" />
-                        <span>{tl("Import")}</span>
+                        <span>{t("generated.controlPlane.import_d140a291")}</span>
                         </>
                       )}
                     </ActionButton>
@@ -2622,30 +2624,30 @@ export function AgentCatalog({
                     <div className="space-y-2">
                       <p className="eyebrow">
                         {renderedOrganizationForm.kind === "workspace"
-                          ? tl("Workspace")
-                          : tl("Squad")}
+                          ? t("generated.controlPlane.workspace_85a7b6fe")
+                          : t("generated.controlPlane.squad_927b7ee0")}
                       </p>
                       <h3 className="text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
                         {renderedOrganizationForm.mode === "create"
                           ? renderedOrganizationForm.kind === "workspace"
-                            ? tl("Criar novo workspace")
-                            : tl("Criar squad em {{workspace}}", { workspace: renderedOrganizationForm.workspaceName })
+                            ? t("generated.controlPlane.criar_novo_workspace_cf57456c")
+                            : t("generated.controlPlane.criar_squad_em_workspace_fc54aeb1", { workspace: renderedOrganizationForm.workspaceName })
                           : renderedOrganizationForm.kind === "workspace"
-                            ? tl("Editar workspace")
-                            : tl("Editar squad")}
+                            ? t("generated.controlPlane.editar_workspace_9784d8c3")
+                            : t("generated.controlPlane.editar_squad_ca51c651")}
                       </h3>
                       <p className="text-sm text-[var(--text-tertiary)]">
-                        {tl("Defina nome, descricao curta e a cor de apoio visual desta organizacao.")}
+                        {t("generated.controlPlane.defina_nome_descricao_curta_e_a_cor_de_apoio_8c87cb87")}
                       </p>
                     </div>
                     <button
                       type="button"
                       className="agent-board-inline-action"
-                      aria-label={tl("Fechar formulario")}
+                      aria-label={t("generated.controlPlane.fechar_formulario_2b0e0ec5")}
                       onClick={() => setOrganizationForm(null)}
                       disabled={organizationBusy}
                     >
-                      {tl("Fechar")}
+                      {t("generated.controlPlane.fechar_c6eec751")}
                     </button>
                   </div>
 
@@ -2653,8 +2655,8 @@ export function AgentCatalog({
                     <FormInput
                       label={
                         renderedOrganizationForm.kind === "workspace"
-                          ? tl("Nome do workspace")
-                          : tl("Nome da squad")
+                          ? t("generated.controlPlane.nome_do_workspace_f5a0827a")
+                          : t("generated.controlPlane.nome_da_squad_373b9e4a")
                       }
                       value={renderedOrganizationForm.name}
                       onChange={(event) =>
@@ -2666,12 +2668,12 @@ export function AgentCatalog({
                       }
                       placeholder={
                         renderedOrganizationForm.kind === "workspace"
-                          ? tl("Ex.: Produto")
-                          : tl("Ex.: Plataforma")
+                          ? t("generated.controlPlane.ex_produto_88de489d")
+                          : t("generated.controlPlane.ex_plataforma_2fec9dc2")
                       }
                     />
                     <FormInput
-                      label={tl("Descricao")}
+                      label={t("generated.controlPlane.descricao_733bceec")}
                       value={renderedOrganizationForm.description}
                       onChange={(event) =>
                         setOrganizationForm((current) =>
@@ -2680,11 +2682,11 @@ export function AgentCatalog({
                             : current,
                         )
                       }
-                      placeholder={tl("Descricao curta opcional")}
+                      placeholder={t("generated.controlPlane.descricao_curta_opcional_4b372e5d")}
                     />
                     {renderedOrganizationForm.kind === "workspace" ? (
                       <FormInput
-                        label={tl("Root path")}
+                        label={t("generated.controlPlane.root_path_e432b7c2")}
                         value={renderedOrganizationForm.rootPath ?? ""}
                         onChange={(event) =>
                           setOrganizationForm((current) =>
@@ -2704,16 +2706,16 @@ export function AgentCatalog({
                       onClick={() => setOrganizationForm(null)}
                       disabled={organizationBusy}
                     >
-                      {tl("Cancelar")}
+                      {t("generated.controlPlane.cancelar_091200fb")}
                     </ActionButton>
                     <ActionButton
                       type="button"
                       loading={organizationBusy}
                       onClick={() => void handleSubmitOrganizationForm()}
                       disabled={organizationBusy}
-                      aria-label={organizationBusy ? tl("Salvando...") : undefined}
+                      aria-label={organizationBusy ? t("generated.controlPlane.salvando_b58cece2") : undefined}
                     >
-                      {renderedOrganizationForm.mode === "create" ? tl("Criar") : tl("Salvar")}
+                      {renderedOrganizationForm.mode === "create" ? t("generated.controlPlane.criar_93c27e0c") : t("generated.controlPlane.salvar_94c457df")}
                     </ActionButton>
                   </div>
                 </div>
@@ -2727,19 +2729,19 @@ export function AgentCatalog({
         open={deleteTarget !== null}
         title={
           deleteTarget?.kind === "workspace"
-            ? tl("Remover workspace")
+            ? t("generated.controlPlane.remover_workspace_74d3544f")
             : deleteTarget?.kind === "squad"
-              ? tl("Remover squad")
-              : tl("Remover agente")
+              ? t("generated.controlPlane.remover_squad_71fd6146")
+              : t("generated.controlPlane.remover_agente_952bb8b7")
         }
         message={
           deleteTarget?.kind === "workspace"
-            ? tl('Ao remover "{{name}}", os agents vinculados voltam para Sem workspace.', { name: deleteTarget.name })
+            ? t("generated.controlPlane.ao_remover_name_os_agents_vinculados_voltam__0ad37b5c", { name: deleteTarget.name })
             : deleteTarget?.kind === "squad"
-              ? tl('Ao remover "{{name}}", os agents vinculados continuam no workspace atual e voltam para Sem squad.', { name: deleteTarget?.name })
-              : tl('Tem certeza que deseja remover "{{name}}"? Todas as configuracoes, documentos e versoes serao permanentemente excluidos. Esta acao nao pode ser desfeita.', { name: deleteTarget?.name })
+              ? t("generated.controlPlane.ao_remover_name_os_agents_vinculados_continu_fa76fbd2", { name: deleteTarget?.name })
+              : t("generated.controlPlane.tem_certeza_que_deseja_remover_name_todas_as_5e365cce", { name: deleteTarget?.name })
         }
-        confirmLabel={tl("Remover")}
+        confirmLabel={t("generated.controlPlane.remover_5465770e")}
         onCancel={() => setDeleteTarget(null)}
         onConfirm={() => void handleDeleteTarget()}
       />

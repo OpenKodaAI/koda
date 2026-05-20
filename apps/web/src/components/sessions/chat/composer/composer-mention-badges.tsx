@@ -46,10 +46,7 @@ export function ComposerMentionBadges({ mentions, onRemove }: ComposerMentionBad
             <button
               type="button"
               onClick={() => onRemove(mention)}
-              aria-label={t("chat.composer.mention.remove", {
-                defaultValue: "Remove {{label}}",
-                label: mention.label,
-              })}
+              aria-label={t("chat.composer.mention.remove", { label: mention.label })}
               className="composer-mention-badge__remove"
             >
               <X className="composer-mention-badge__x" strokeWidth={2} aria-hidden />

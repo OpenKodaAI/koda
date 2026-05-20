@@ -9,6 +9,11 @@ Telegram messages are evaluated by the channel gateway before enqueue. Unknown,
 blocked, or revoked identities do not create tasks. Approved identities keep
 using the existing runtime path.
 
+Slack and Discord adapters follow the same contract through `ChannelManager`.
+The adapters normalize platform events; `ChannelManager` evaluates
+`channel_gateway.v1` and only then calls the runtime callback. Adapter code must
+not duplicate allow/block/revoke policy.
+
 Legacy `ALLOWED_USER_IDS` remains supported, but an empty value is fail-closed.
 It does not mean "allow everyone".
 
@@ -53,13 +58,24 @@ routing. Revoked identities deny before enqueue and override legacy
 Focused checks:
 
 ```bash
-pytest tests/test_channels/test_gateway.py tests/test_control_plane_onboarding_api.py
+uv run python -m pytest \
+  tests/test_channels/test_gateway.py \
+  tests/test_channels/test_manager.py \
+  tests/test_channels/test_channel_gateway_smoke.py \
+  tests/test_control_plane_onboarding_api.py
 pnpm --filter koda-web exec vitest run \
   src/lib/contracts/channel-gateway.test.ts \
   src/components/control-plane/editor/channel-gateway-mini-panel.test.tsx
 ```
 
-Operational smoke:
+Offline operational smoke:
+
+```bash
+uv run python scripts/channel_gateway_smoke.py \
+  --input tests/fixtures/channels/channel_gateway_smoke.v1.json
+```
+
+Manual live Telegram smoke when credentials are available:
 
 1. Clear `ALLOWED_USER_IDS`.
 2. Send a Telegram message from an unknown sender.
@@ -67,6 +83,10 @@ Operational smoke:
 4. Approve the sender.
 5. Send another message and confirm it follows the normal task path.
 6. Revoke the identity and confirm the next message is denied.
+
+Slack/Discord live E2E requires `SLACK_*` or `DISCORD_*` credentials and should
+be recorded as blocked when those secrets are absent; the contract tests still
+must pass locally.
 
 ## Troubleshooting
 

@@ -23,7 +23,7 @@ export function CoreGovernancePanel({
   coreCapabilities,
 }: CoreGovernancePanelProps) {
   const [expanded, setExpanded] = useState(false);
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   const toolsJson = prettyJson(coreTools);
   const providersJson = prettyJson(coreProviders);
@@ -44,7 +44,7 @@ export function CoreGovernancePanel({
           className="h-3.5 w-3.5 transition-transform duration-200"
           style={{ transform: expanded ? "rotate(90deg)" : "rotate(0deg)" }}
         />
-        {tl("Governanca do sistema")}
+        {t("generated.controlPlane.governanca_do_sistema_f9288f00")}
       </button>
 
       <AnimatePresence initial={false}>
@@ -60,9 +60,9 @@ export function CoreGovernancePanel({
               {/* Core tools */}
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
-                  <span className="eyebrow">{tl("Core tools")}</span>
+                  <span className="eyebrow">{t("generated.controlPlane.core_tools_b3b00936")}</span>
                   <span className="chip text-[10px]">
-                    {tl("{{count}} item(s)", { count: coreTools.items.length })}
+                    {t("generated.controlPlane.count_item_s_6ee20be0", { count: coreTools.items.length })}
                   </span>
                 </div>
                 <textarea
@@ -75,7 +75,7 @@ export function CoreGovernancePanel({
 
               {/* Providers */}
               <div className="space-y-2">
-                <span className="eyebrow">{tl("Providers")}</span>
+                <span className="eyebrow">{t("generated.controlPlane.providers_371bc91d")}</span>
                 <textarea
                   className="field-shell min-h-[260px] font-mono text-sm leading-relaxed"
                   value={providersJson}
@@ -86,7 +86,7 @@ export function CoreGovernancePanel({
 
               {/* Policies & Capabilities */}
               <div className="space-y-2">
-                <span className="eyebrow">{tl("Policies & capabilities")}</span>
+                <span className="eyebrow">{t("generated.controlPlane.policies_capabilities_c4cc0317")}</span>
                 <textarea
                   className="field-shell min-h-[260px] font-mono text-sm leading-relaxed"
                   value={policiesAndCapabilities}

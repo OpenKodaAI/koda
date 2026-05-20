@@ -2,8 +2,12 @@
 
 from unittest.mock import AsyncMock, patch
 
+import pytest
+
+from koda.channels import gateway
 from koda.channels.base import ChannelAdapter
 from koda.channels.manager import ChannelManager, detect_configured_channels
+from koda.channels.types import ChannelIdentity, IncomingMessage
 
 
 class MockAdapter(ChannelAdapter):
@@ -46,6 +50,44 @@ class MockAdapterB(MockAdapter):
     """Second mock adapter for multi-channel tests."""
 
     channel_type = "mock_b"
+
+
+class FakeWorkerAdapter(MockAdapter):
+    """SDK-free adapter used to exercise manager/gateway contracts."""
+
+    channel_type = "fake"
+
+    async def emit(self, message: IncomingMessage) -> None:
+        await self._dispatch_inbound(message)
+
+
+class FakeSlackAdapter(FakeWorkerAdapter):
+    channel_type = "slack"
+
+
+class FakeDiscordAdapter(FakeWorkerAdapter):
+    channel_type = "discord"
+
+
+def _incoming(channel_type: str, text: str = "hello") -> IncomingMessage:
+    return IncomingMessage(
+        id=f"{channel_type}-msg-1",
+        channel=ChannelIdentity(
+            channel_type=channel_type,
+            channel_id=f"{channel_type}-room",
+            user_id=f"{channel_type}-user",
+            user_display_name="Worker User",
+            is_group=True,
+        ),
+        text=text,
+        timestamp=1.0,
+    )
+
+
+def _isolate_gateway(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(gateway, "STATE_ROOT_DIR", tmp_path)
+    monkeypatch.setattr(gateway, "_primary_backend", lambda _agent_id: None)
+    monkeypatch.setattr(gateway, "_emit_observability", lambda *_args, **_kwargs: None)
 
 
 # detect_configured_channels
@@ -139,7 +181,8 @@ class TestChannelManager:
         mgr.set_message_callback(callback)
 
         assert mgr._message_callback is callback
-        assert adapter._on_message is callback
+        assert adapter._on_message.__self__ is mgr
+        assert adapter._on_message.__func__ is ChannelManager._dispatch_allowed_message
 
     async def test_initialize_discovers_and_creates_adapters(self):
         registry = {"mock": MockAdapter}
@@ -187,10 +230,11 @@ class TestChannelManager:
             ),
         ):
             mgr = self._make_manager()
-            mgr._message_callback = callback
+            mgr.set_message_callback(callback)
             await mgr.initialize({"AGENT_TOKEN": "tok"})
 
-        assert mgr._adapters["mock"]._on_message is callback
+        assert mgr._adapters["mock"]._on_message.__self__ is mgr
+        assert mgr._adapters["mock"]._on_message.__func__ is ChannelManager._dispatch_allowed_message
 
     async def test_start_all_calls_start_on_all_adapters(self):
         mgr = self._make_manager()
@@ -267,3 +311,83 @@ class TestChannelManager:
         # Mutating the copy should not affect the manager
         copy["injected"] = MockAdapter()
         assert "injected" not in mgr._adapters
+
+
+@pytest.mark.parametrize(
+    ("channel_type", "adapter_cls"),
+    [("slack", FakeSlackAdapter), ("discord", FakeDiscordAdapter)],
+)
+class TestChannelManagerGatewayContracts:
+    @staticmethod
+    def _manager_with_adapter(channel_type, adapter_cls):
+        manager = ChannelManager(agent_id="ATLAS", legacy_allowed_user_ids=set())
+        adapter = adapter_cls()
+        manager._adapters[channel_type] = adapter
+        callback = AsyncMock()
+        manager.set_message_callback(callback)
+        return manager, adapter, callback
+
+    async def test_unknown_sender_is_queued_without_callback(self, channel_type, adapter_cls, tmp_path, monkeypatch):
+        _isolate_gateway(monkeypatch, tmp_path)
+        _manager, adapter, callback = self._manager_with_adapter(channel_type, adapter_cls)
+
+        await adapter.emit(_incoming(channel_type))
+
+        callback.assert_not_awaited()
+        state = gateway.gateway_state("ATLAS")
+        assert state["schema_version"] == gateway.CHANNEL_GATEWAY_SCHEMA_VERSION
+        assert state["unknown_senders"][0]["channel_type"] == channel_type
+        assert state["summary"]["pending"] == 1
+
+    async def test_approved_sender_reaches_callback(self, channel_type, adapter_cls, tmp_path, monkeypatch):
+        _isolate_gateway(monkeypatch, tmp_path)
+        _manager, adapter, callback = self._manager_with_adapter(channel_type, adapter_cls)
+        first = _incoming(channel_type)
+        await adapter.emit(first)
+        gateway.approve_identity("ATLAS", gateway.identity_id_for("ATLAS", first.channel), approved_by="owner")
+
+        second = _incoming(channel_type, text="approved task")
+        await adapter.emit(second)
+
+        callback.assert_awaited_once_with(second)
+
+    async def test_blocked_sender_does_not_reach_callback(self, channel_type, adapter_cls, tmp_path, monkeypatch):
+        _isolate_gateway(monkeypatch, tmp_path)
+        _manager, adapter, callback = self._manager_with_adapter(channel_type, adapter_cls)
+        first = _incoming(channel_type)
+        await adapter.emit(first)
+        gateway.block_identity("ATLAS", gateway.identity_id_for("ATLAS", first.channel), blocked_by="owner")
+
+        await adapter.emit(_incoming(channel_type, text="blocked task"))
+
+        callback.assert_not_awaited()
+
+    async def test_revoked_sender_does_not_reach_callback(self, channel_type, adapter_cls, tmp_path, monkeypatch):
+        _isolate_gateway(monkeypatch, tmp_path)
+        _manager, adapter, callback = self._manager_with_adapter(channel_type, adapter_cls)
+        first = _incoming(channel_type)
+        await adapter.emit(first)
+        identity_id = gateway.identity_id_for("ATLAS", first.channel)
+        gateway.approve_identity("ATLAS", identity_id, approved_by="owner")
+        gateway.revoke_identity("ATLAS", identity_id, revoked_by="owner")
+
+        await adapter.emit(_incoming(channel_type, text="revoked task"))
+
+        callback.assert_not_awaited()
+
+    async def test_pairing_code_pairs_without_enqueuing_code_text(
+        self, channel_type, adapter_cls, tmp_path, monkeypatch
+    ):
+        _isolate_gateway(monkeypatch, tmp_path)
+        monkeypatch.setattr(gateway.secrets, "token_urlsafe", lambda _length: "ABC12345")
+        _manager, adapter, callback = self._manager_with_adapter(channel_type, adapter_cls)
+        code = gateway.create_pairing_code("ATLAS", channel_type=channel_type, created_by="owner")
+
+        await adapter.emit(_incoming(channel_type, text=code["code"]))
+        callback.assert_not_awaited()
+
+        task = _incoming(channel_type, text="paired task")
+        await adapter.emit(task)
+
+        callback.assert_awaited_once_with(task)
+        assert gateway.list_pairing_codes("ATLAS") == []

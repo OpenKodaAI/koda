@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { translate } from "@/lib/i18n";
 import {
   Check,
   Clock,
@@ -51,25 +52,25 @@ interface CronTableProps {
 
 function getLifecycleAction(job: CronJob): {
   action: ScheduleLifecycleAction | null;
-  label: string;
+  labelKey: string;
   disabled: boolean;
   icon: LucideIcon;
 } {
   switch (job.status) {
     case "active":
-      return { action: "pause", label: "Pause", disabled: false, icon: Pause };
+      return { action: "pause", labelKey: "schedules.table.lifecycle.pause", disabled: false, icon: Pause };
     case "paused":
-      return { action: "resume", label: "Resume", disabled: false, icon: RotateCcw };
+      return { action: "resume", labelKey: "schedules.table.lifecycle.resume", disabled: false, icon: RotateCcw };
     case "validated":
-      return { action: "resume", label: "Activate", disabled: false, icon: Play };
+      return { action: "resume", labelKey: "schedules.table.lifecycle.activate", disabled: false, icon: Play };
     case "failed_open":
-      return { action: "resume", label: "Resume", disabled: false, icon: RotateCcw };
+      return { action: "resume", labelKey: "schedules.table.lifecycle.resume", disabled: false, icon: RotateCcw };
     case "validation_pending":
-      return { action: null, label: "Validation pending", disabled: true, icon: Clock };
+      return { action: null, labelKey: "schedules.table.lifecycle.validationPending", disabled: true, icon: Clock };
     default:
       return {
         action: job.enabled === 1 ? "pause" : "resume",
-        label: job.enabled === 1 ? "Pause" : "Activate",
+        labelKey: job.enabled === 1 ? "schedules.table.lifecycle.pause" : "schedules.table.lifecycle.activate",
         disabled: false,
         icon: job.enabled === 1 ? Pause : Play,
       };
@@ -95,8 +96,8 @@ function getRoutineSummary(job: CronJob): string {
   );
 }
 
-function formatScheduleTimestamp(value: string | null | undefined): string {
-  if (!value) return "pending";
+function formatScheduleTimestamp(value: string | null | undefined, pendingLabel: string): string {
+  if (!value) return pendingLabel;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
 
@@ -130,7 +131,7 @@ export function CronTable({
         />
         <p className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
           {t("schedules.table.noRoutine", {
-            bot: t("common.agents", { defaultValue: "agents" }),
+            bot: t("common.agents", undefined),
           })}
         </p>
         <p className="m-0 text-[0.75rem] text-[var(--text-tertiary)]">
@@ -157,7 +158,7 @@ export function CronTable({
             role="row"
           >
             <span className={headerClass} role="columnheader">
-              {t("common.agent", { defaultValue: "Agent" })}
+              {t("common.agent", undefined)}
             </span>
             <span className={headerClass} role="columnheader">
               {t("schedules.table.routine")}
@@ -178,7 +179,7 @@ export function CronTable({
               )}
               role="columnheader"
             >
-              {t("common.actions", { defaultValue: "Actions" })}
+              {t("common.actions", undefined)}
             </span>
           </div>
 
@@ -389,9 +390,9 @@ function ScheduleMobileRow({
           </span>
         </span>
         <span className="min-w-0">
-          {t("schedules.table.nextRun", { defaultValue: "Next run" })}:{" "}
+          {t("schedules.table.nextRun", undefined)}:{" "}
           <span className="text-[var(--text-secondary)]">
-            {formatScheduleTimestamp(job.next_run_at)}
+            {formatScheduleTimestamp(job.next_run_at, t("schedules.table.lifecycle.validationPending"))}
           </span>
         </span>
         <span className="col-span-2 min-w-0 truncate" title={job.work_dir ?? undefined}>
@@ -445,11 +446,12 @@ function JobActions({
   const executionsState = actionStates?.executions ?? "idle";
   const runState = actionStates?.run ?? "idle";
   const lifecycleState = actionStates?.lifecycle ?? "idle";
+  const lifecycleLabel = t(lifecycle.labelKey);
 
   return (
     <div className={cn("flex gap-1", compact ? "justify-end" : "flex-wrap")}>
       <ActionButton
-        label="Inspect"
+        label={translate("generated.routines.inspect_c1903784")}
         onClick={() => onInspect?.(job)}
         disabled={busy}
         state={inspectState}
@@ -457,7 +459,7 @@ function JobActions({
         <Clock className="icon-xs" strokeWidth={1.75} aria-hidden />
       </ActionButton>
       <ActionButton
-        label="Edit"
+        label={translate("generated.routines.edit_defc6638")}
         onClick={() => onEdit?.(job)}
         disabled={busy}
         state={editState}
@@ -465,7 +467,7 @@ function JobActions({
         <Pencil className="icon-xs" strokeWidth={1.75} aria-hidden />
       </ActionButton>
       <ActionButton
-        label={t("schedules.table.executionsAction", { defaultValue: "Executions" })}
+        label={t("schedules.table.executionsAction", undefined)}
         onClick={() => onExecutions?.(job)}
         disabled={busy}
         state={executionsState}
@@ -473,7 +475,7 @@ function JobActions({
         <History className="icon-xs" strokeWidth={1.75} aria-hidden />
       </ActionButton>
       <ActionButton
-        label="Run now"
+        label={translate("generated.routines.run_now_b3f41c3b")}
         onClick={() => onRun?.(job)}
         disabled={busy}
         state={runState}
@@ -481,7 +483,7 @@ function JobActions({
         <Play className="icon-xs" strokeWidth={1.75} aria-hidden />
       </ActionButton>
       <ActionButton
-        label={lifecycle.label}
+        label={lifecycleLabel}
         onClick={() => lifecycle.action && onLifecycleAction?.(job, lifecycle.action)}
         disabled={busy || lifecycle.disabled}
         state={lifecycleState}
@@ -505,6 +507,7 @@ function ActionButton({
   state?: ScheduleTableActionState;
   children: ReactNode;
 }) {
+  const { t } = useAppI18n();
   const isPending = state === "pending";
   const isResolved = state === "success" || state === "error";
 
@@ -539,7 +542,11 @@ function ActionButton({
           ) : (
             children
           )}
-          {isResolved ? <span className="sr-only">{state}</span> : null}
+          {isResolved ? (
+            <span className="sr-only">
+              {state === "success" ? t("common.resolved") : t("common.failed")}
+            </span>
+          ) : null}
         </button>
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
@@ -565,16 +572,16 @@ function StatusBadge({ status }: { status?: string | null }) {
       break;
     case "validation_pending":
       tone = "warning";
-      label = "Validating";
+      label = t("schedules.table.statuses.validating");
       pulse = true;
       break;
     case "validated":
       tone = "info";
-      label = "Validated";
+      label = t("schedules.table.statuses.validated");
       break;
     case "failed_open":
       tone = "danger";
-      label = "Failed open";
+      label = t("schedules.table.statuses.failedOpen");
       break;
   }
 

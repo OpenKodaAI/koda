@@ -38,32 +38,32 @@ const PROMPT_BLOCKS: Array<{
 }> = [
   {
     id: "instructions_md",
-    label: "Instruções",
-    description: "Como o agente deve processar solicitações, quando escalar, critérios de sucesso.",
+    label: "controlPlane.instructionBlocks.instructions.label",
+    description: "controlPlane.instructionBlocks.instructions.description",
     minHeight: "280px",
   },
   {
     id: "system_prompt_md",
-    label: "System Prompt",
-    description: "Diretriz central passada ao LLM antes de qualquer mensagem.",
+    label: "controlPlane.instructionBlocks.systemPrompt.label",
+    description: "controlPlane.instructionBlocks.systemPrompt.description",
     minHeight: "260px",
   },
   {
     id: "rules_md",
-    label: "Regras",
-    description: "Regras invioláveis, guardrails de segurança e limites.",
+    label: "controlPlane.instructionBlocks.rules.label",
+    description: "controlPlane.instructionBlocks.rules.description",
     minHeight: "220px",
   },
   {
     id: "identity_md",
-    label: "Identidade",
-    description: "Nome, papel profissional e contexto básico do agente.",
+    label: "controlPlane.instructionBlocks.identity.label",
+    description: "controlPlane.instructionBlocks.identity.description",
     minHeight: "220px",
   },
   {
     id: "soul_md",
-    label: "Soul",
-    description: "Personalidade, tom e valores do agente em prosa livre.",
+    label: "controlPlane.instructionBlocks.soul.label",
+    description: "controlPlane.instructionBlocks.soul.description",
     minHeight: "220px",
   },
 ];
@@ -75,7 +75,7 @@ export function TabInstrucoes() {
     updateDocument,
     updateAgentSpecField,
   } = useAgentEditor();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   const [innerTab, setInnerTab] = useState<InnerTab>("prompts");
   const [activePromptBlock, setActivePromptBlock] = useState<
@@ -152,8 +152,8 @@ export function TabInstrucoes() {
   }
 
   const innerTabs: SoftTabItem[] = [
-    { id: "prompts", label: tl("Prompts"), icon: <Wand2 size={13} /> },
-    { id: "politicas", label: tl("Politicas"), icon: <ShieldAlert size={13} /> },
+    { id: "prompts", label: t("generated.controlPlane.prompts_ba404b40"), icon: <Wand2 size={13} /> },
+    { id: "politicas", label: t("generated.controlPlane.politicas_138a663e"), icon: <ShieldAlert size={13} /> },
   ];
 
   const activeBlock =
@@ -166,12 +166,12 @@ export function TabInstrucoes() {
           items={innerTabs}
           value={innerTab}
           onChange={(id) => setInnerTab(id as InnerTab)}
-          ariaLabel={tl("Secoes de instrucoes")}
+          ariaLabel={t("generated.controlPlane.secoes_de_instrucoes_4bcc394c")}
         />
         <span className="text-xs text-[var(--text-quaternary)]">
           {innerTab === "prompts"
-            ? tl("Blocos markdown enviados ao modelo")
-            : tl("Limites, autonomia e execucao")}
+            ? t("generated.controlPlane.blocos_markdown_enviados_ao_modelo_f0be0ee7")
+            : t("generated.controlPlane.limites_autonomia_e_execucao_67dbe4f9")}
         </span>
       </div>
 
@@ -187,7 +187,7 @@ export function TabInstrucoes() {
               onChange={(id) =>
                 setActivePromptBlock(id as (typeof PROMPT_BLOCKS)[number]["id"])
               }
-              ariaLabel={tl("Bloco de prompt ativo")}
+              ariaLabel={t("generated.controlPlane.bloco_de_prompt_ativo_fcbaa58e")}
             />
             <span className="text-xs text-[var(--text-quaternary)]">
               {tl(activeBlock.description)}
@@ -206,65 +206,65 @@ export function TabInstrucoes() {
 
       {innerTab === "politicas" && (
         <>
-          <PolicyCard title={tl("Formato de resposta")} icon={FileText} variant="flat" defaultOpen>
+          <PolicyCard title={t("generated.controlPlane.formato_de_resposta_15a4d767")} icon={FileText} variant="flat" defaultOpen>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <FormSelect
-                label={tl("Idioma")}
+                label={t("generated.controlPlane.idioma_1bc8a0e5")}
                 value={responsePolicy.language}
                 onChange={(event) =>
                   updateResponsePolicy({ language: event.target.value })
                 }
                 options={[
-                  { value: "pt-BR", label: tl("Portugues (Brasil)") },
-                  { value: "en-US", label: tl("English (US)") },
-                  { value: "es-ES", label: tl("Espanhol") },
+                  { value: "pt-BR", label: t("generated.controlPlane.portugues_brasil_c608f345") },
+                  { value: "en-US", label: t("generated.controlPlane.english_us_773cba0f") },
+                  { value: "es-ES", label: t("generated.controlPlane.espanhol_d8623f06") },
                 ]}
               />
               <FormSelect
-                label={tl("Formato")}
+                label={t("generated.controlPlane.formato_b4b0117b")}
                 value={responsePolicy.format}
                 onChange={(event) =>
                   updateResponsePolicy({ format: event.target.value })
                 }
                 options={[
-                  { value: "markdown", label: tl("Markdown") },
-                  { value: "plain_text", label: tl("Texto simples") },
-                  { value: "structured", label: tl("Estruturado") },
+                  { value: "markdown", label: t("generated.controlPlane.markdown_718e1b2b") },
+                  { value: "plain_text", label: t("generated.controlPlane.texto_simples_fb771131") },
+                  { value: "structured", label: t("generated.controlPlane.estruturado_c2995d50") },
                 ]}
               />
               <FormSelect
-                label={tl("Concisao")}
+                label={t("generated.controlPlane.concisao_292cdd70")}
                 value={responsePolicy.conciseness}
                 onChange={(event) =>
                   updateResponsePolicy({ conciseness: event.target.value })
                 }
                 options={[
-                  { value: "succinct", label: tl("Enxuto") },
-                  { value: "balanced", label: tl("Equilibrado") },
-                  { value: "detailed", label: tl("Detalhado") },
+                  { value: "succinct", label: t("generated.controlPlane.enxuto_84f7e566") },
+                  { value: "balanced", label: t("generated.controlPlane.equilibrado_355b4eda") },
+                  { value: "detailed", label: t("generated.controlPlane.detalhado_a58ae353") },
                 ]}
               />
             </div>
             <FormInput
-              label={tl("Quality bar")}
+              label={t("generated.controlPlane.quality_bar_545f87d9")}
               value={responsePolicy.quality_bar}
               onChange={(event) =>
                 updateResponsePolicy({ quality_bar: event.target.value })
               }
-              placeholder={tl("Ex: profissional, rastreavel, sem invencao")}
+              placeholder={t("generated.controlPlane.ex_profissional_rastreavel_sem_invencao_2cada97e")}
             />
           </PolicyCard>
 
           <PolicyCard
-            title={tl("Autonomia e aprovacao")}
-            description={tl("Guardrails aplicados pelo runtime antes de executar tools — nao e texto no prompt.")}
+            title={t("generated.controlPlane.autonomia_e_aprovacao_0afae868")}
+            description={t("generated.controlPlane.guardrails_aplicados_pelo_runtime_antes_de_e_d0ef1019")}
             icon={ShieldAlert}
             variant="flat"
             defaultOpen
           >
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <FormSelect
-                label={tl("Modo de aprovacao")}
+                label={t("generated.controlPlane.modo_de_aprovacao_108bd735")}
                 value={autonomyPolicy.default_approval_mode}
                 onChange={(event) =>
                   updateAutonomyPolicy({
@@ -272,14 +272,14 @@ export function TabInstrucoes() {
                   })
                 }
                 options={[
-                  { value: "read_only", label: tl("Somente leitura"), description: tl("Agente nao executa acoes de escrita") },
-                  { value: "guarded", label: tl("Protegido"), description: tl("Acoes de escrita requerem confirmacao") },
-                  { value: "supervised", label: tl("Supervisionado"), description: tl("Agente pede aprovacao antes de executar") },
-                  { value: "escalation_required", label: tl("Escalacao obrigatoria"), description: tl("Todas as acoes devem ser escaladas") },
+                  { value: "read_only", label: t("generated.controlPlane.somente_leitura_0f78d76a"), description: t("generated.controlPlane.agente_nao_executa_acoes_de_escrita_d2898881") },
+                  { value: "guarded", label: t("generated.controlPlane.protegido_88789311"), description: t("generated.controlPlane.acoes_de_escrita_requerem_confirmacao_0dc05a33") },
+                  { value: "supervised", label: t("generated.controlPlane.supervisionado_98065139"), description: t("generated.controlPlane.agente_pede_aprovacao_antes_de_executar_9c138356") },
+                  { value: "escalation_required", label: t("generated.controlPlane.escalacao_obrigatoria_f4ae367e"), description: t("generated.controlPlane.todas_as_acoes_devem_ser_escaladas_321feb09") },
                 ]}
               />
               <FormSelect
-                label={tl("Nivel de autonomia")}
+                label={t("generated.controlPlane.nivel_de_autonomia_514adb97")}
                 value={autonomyPolicy.default_autonomy_tier}
                 onChange={(event) =>
                   updateAutonomyPolicy({
@@ -287,9 +287,9 @@ export function TabInstrucoes() {
                   })
                 }
                 options={[
-                  { value: "t0", label: "T0 — " + tl("Minima"), description: tl("Sem acoes autonomas") },
-                  { value: "t1", label: "T1 — " + tl("Moderada"), description: tl("Acoes de leitura livres") },
-                  { value: "t2", label: "T2 — " + tl("Ampla"), description: tl("Execucao autonoma com guardrails") },
+                  { value: "t0", label: "T0 — " + t("generated.controlPlane.minima_6ff54321"), description: t("generated.controlPlane.sem_acoes_autonomas_1f5759f6") },
+                  { value: "t1", label: "T1 — " + t("generated.controlPlane.moderada_eded54a8"), description: t("generated.controlPlane.acoes_de_leitura_livres_0e837db1") },
+                  { value: "t2", label: "T2 — " + t("generated.controlPlane.ampla_5afb3c7d"), description: t("generated.controlPlane.execucao_autonoma_com_guardrails_d40c3b1d") },
                 ]}
               />
             </div>
@@ -307,159 +307,159 @@ export function TabInstrucoes() {
             className="overflow-hidden"
           >
             <div className="glass-card p-6 flex flex-col gap-6">
-              <SectionCollapsible title={tl("Campos avancados")}>
+              <SectionCollapsible title={t("generated.controlPlane.campos_avancados_d4c87707")}>
                 <div className="flex flex-col gap-6 pt-2">
                   <ListEditorField
-                    label={tl("Outcomes principais")}
+                    label={t("generated.controlPlane.outcomes_principais_fa46d564")}
                     items={missionProfile.primary_outcomes}
                     onChange={(items) =>
                       updateMissionProfile({ primary_outcomes: items })
                     }
-                    placeholder={tl("Ex: reduzir tempo de triagem")}
+                    placeholder={t("generated.controlPlane.ex_reduzir_tempo_de_triagem_44f33c25")}
                   />
                   <ListEditorField
-                    label={tl("Success metrics")}
-                    description={tl("Indicadores usados para medir se o agente esta gerando valor com qualidade.")}
+                    label={t("generated.controlPlane.success_metrics_7e2bf38d")}
+                    description={t("generated.controlPlane.indicadores_usados_para_medir_se_o_agente_es_4929e9f4")}
                     items={missionProfile.kpis}
                     onChange={(items) => updateMissionProfile({ kpis: items })}
-                    placeholder={tl("Ex: acuracia, lead time, cobertura de fontes")}
+                    placeholder={t("generated.controlPlane.ex_acuracia_lead_time_cobertura_de_fontes_4d31cd23")}
                   />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <FormInput
-                      label={tl("Politica de citacao")}
+                      label={t("generated.controlPlane.politica_de_citacao_704d9a58")}
                       value={responsePolicy.citation_policy}
                       onChange={(event) =>
                         updateResponsePolicy({ citation_policy: event.target.value })
                       }
-                      placeholder={tl("Ex: citar label e data quando grounded")}
+                      placeholder={t("generated.controlPlane.ex_citar_label_e_data_quando_grounded_76a22d7c")}
                     />
                     <FormInput
-                      label={tl("Politica de fontes")}
+                      label={t("generated.controlPlane.politica_de_fontes_5c9ba4d3")}
                       value={responsePolicy.source_policy}
                       onChange={(event) =>
                         updateResponsePolicy({ source_policy: event.target.value })
                       }
-                      placeholder={tl("Ex: preferir knowledge canonico e runbooks")}
+                      placeholder={t("generated.controlPlane.ex_preferir_knowledge_canonico_e_runbooks_989b24a3")}
                     />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <ListEditorField
-                      label={tl("Workflow padrao")}
+                      label={t("generated.controlPlane.workflow_padrao_fd4702f7")}
                       items={operatingInstructions.default_workflow}
                       onChange={(items) =>
                         updateOperatingInstructions({ default_workflow: items })
                       }
-                      placeholder={tl("Ex: entender, buscar grounding, agir, verificar")}
+                      placeholder={t("generated.controlPlane.ex_entender_buscar_grounding_agir_verificar_efc75c73")}
                     />
                     <ListEditorField
-                      label={tl("Heuristicas de execucao")}
+                      label={t("generated.controlPlane.heuristicas_de_execucao_6f902a60")}
                       items={operatingInstructions.execution_heuristics}
                       onChange={(items) =>
                         updateOperatingInstructions({ execution_heuristics: items })
                       }
-                      placeholder={tl("Ex: usar modelo menor para triagem")}
+                      placeholder={t("generated.controlPlane.ex_usar_modelo_menor_para_triagem_b9311764")}
                     />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <ListEditorField
-                      label={tl("Criterios de sucesso")}
+                      label={t("generated.controlPlane.criterios_de_sucesso_75be6ba3")}
                       items={operatingInstructions.success_criteria}
                       onChange={(items) =>
                         updateOperatingInstructions({ success_criteria: items })
                       }
-                      placeholder={tl("Ex: resposta correta, segura e verificavel")}
+                      placeholder={t("generated.controlPlane.ex_resposta_correta_segura_e_verificavel_b6afecd0")}
                     />
                     <ListEditorField
-                      label={tl("Expectativas de handoff")}
+                      label={t("generated.controlPlane.expectativas_de_handoff_cbe57fe5")}
                       items={operatingInstructions.handoff_expectations}
                       onChange={(items) =>
                         updateOperatingInstructions({ handoff_expectations: items })
                       }
-                      placeholder={tl("Ex: escalar com contexto e proxima acao sugerida")}
+                      placeholder={t("generated.controlPlane.ex_escalar_com_contexto_e_proxima_acao_suger_f3fc665a")}
                     />
                   </div>
                   <ListEditorField
-                    label={tl("Requisitos de aprovacao")}
+                    label={t("generated.controlPlane.requisitos_de_aprovacao_28c6e8b2")}
                     items={hardRules.approval_requirements}
                     onChange={(items) =>
                       updateHardRules({ approval_requirements: items })
                     }
-                    placeholder={tl("Ex: producao exige confirmacao humana")}
+                    placeholder={t("generated.controlPlane.ex_producao_exige_confirmacao_humana_c46cd54e")}
                   />
                   <ListEditorField
-                    label={tl("Regras inviolaveis (legado)")}
-                    description={tl("Conteudo redundante com rules_md — prefira o bloco de prompt.")}
+                    label={t("generated.controlPlane.regras_inviolaveis_legado_7db0714d")}
+                    description={t("generated.controlPlane.conteudo_redundante_com_rules_md_prefira_o_b_794e8aa8")}
                     items={hardRules.non_negotiables}
                     onChange={(items) =>
                       updateHardRules({ non_negotiables: items })
                     }
-                    placeholder={tl("Ex: nao inventar fatos")}
+                    placeholder={t("generated.controlPlane.ex_nao_inventar_fatos_faa9fc09")}
                   />
                   <ListEditorField
-                    label={tl("Acoes proibidas (legado)")}
-                    description={tl("Conteudo redundante com rules_md — prefira o bloco de prompt.")}
+                    label={t("generated.controlPlane.acoes_proibidas_legado_74f1a447")}
+                    description={t("generated.controlPlane.conteudo_redundante_com_rules_md_prefira_o_b_794e8aa8")}
                     items={hardRules.forbidden_actions}
                     onChange={(items) =>
                       updateHardRules({ forbidden_actions: items })
                     }
-                    placeholder={tl("Ex: deploy sem aprovacao explicita")}
+                    placeholder={t("generated.controlPlane.ex_deploy_sem_aprovacao_explicita_b03285e7")}
                   />
                   <ListEditorField
-                    label={tl("Regras de seguranca (legado)")}
-                    description={tl("Conteudo redundante com rules_md — prefira o bloco de prompt.")}
+                    label={t("generated.controlPlane.regras_de_seguranca_legado_c2205a39")}
+                    description={t("generated.controlPlane.conteudo_redundante_com_rules_md_prefira_o_b_794e8aa8")}
                     items={hardRules.security_rules}
                     onChange={(items) =>
                       updateHardRules({ security_rules: items })
                     }
-                    placeholder={tl("Ex: nao expor segredos ou PII")}
+                    placeholder={t("generated.controlPlane.ex_nao_expor_segredos_ou_pii_06252b4f")}
                   />
                 </div>
               </SectionCollapsible>
 
-              <SectionCollapsible title={tl("Overrides avancados de prompt e autonomia")}>
+              <SectionCollapsible title={t("generated.controlPlane.overrides_avancados_de_prompt_e_autonomia_709e6550")}>
                 <div className="flex flex-col gap-6 pt-2">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <FormInput
-                      label={tl("Funcao profissional")}
-                      description={tl("Campo legado. Prefira descrever o papel em identity_md ou soul_md.")}
+                      label={t("generated.controlPlane.funcao_profissional_95a3e77b")}
+                      description={t("generated.controlPlane.campo_legado_prefira_descrever_o_papel_em_id_b4da655f")}
                       value={missionProfile.role}
                       onChange={(event) =>
                         updateMissionProfile({ role: event.target.value })
                       }
-                      placeholder={tl("Ex: SRE autonomo supervisionado")}
+                      placeholder={t("generated.controlPlane.ex_sre_autonomo_supervisionado_447f36e1")}
                     />
                     <FormInput
-                      label={tl("Persona")}
+                      label={t("generated.controlPlane.persona_45d338e4")}
                       value={interactionStyle.persona}
                       onChange={(event) =>
                         updateInteractionStyle({ persona: event.target.value })
                       }
-                      placeholder={tl("Ex: funcionario tecnico confiavel")}
+                      placeholder={t("generated.controlPlane.ex_funcionario_tecnico_confiavel_02d336db")}
                     />
                   </div>
                   <MarkdownEditorField
-                    label={tl("Audiencia e contexto (legado)")}
+                    label={t("generated.controlPlane.audiencia_e_contexto_legado_6ba304d8")}
                     value={missionProfile.audience}
                     onChange={(value) => updateMissionProfile({ audience: value })}
                     minHeight="160px"
-                    placeholder={tl("Descreva o publico, o tipo de tarefa, restricoes operacionais, canais atendidos e qualquer contexto importante em Markdown.")}
+                    placeholder={t("generated.controlPlane.descreva_o_publico_o_tipo_de_tarefa_restrico_38d51ab0")}
                   />
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                     <FormSelect
-                      label={tl("Tom")}
+                      label={t("generated.controlPlane.tom_11494f87")}
                       value={interactionStyle.tone}
                       onChange={(event) =>
                         updateInteractionStyle({ tone: event.target.value })
                       }
                       options={[
-                        { value: "profissional", label: tl("Profissional") },
-                        { value: "calmo", label: tl("Calmo") },
-                        { value: "direto", label: tl("Direto") },
-                        { value: "colaborativo", label: tl("Colaborativo") },
+                        { value: "profissional", label: t("generated.controlPlane.profissional_df864169") },
+                        { value: "calmo", label: t("generated.controlPlane.calmo_2768b8d5") },
+                        { value: "direto", label: t("generated.controlPlane.direto_e8d58457") },
+                        { value: "colaborativo", label: t("generated.controlPlane.colaborativo_63af6e00") },
                       ]}
                     />
                     <FormSelect
-                      label={tl("Modo de colaboracao")}
+                      label={t("generated.controlPlane.modo_de_colaboracao_86d0fec7")}
                       value={interactionStyle.collaboration_style}
                       onChange={(event) =>
                         updateInteractionStyle({
@@ -467,58 +467,58 @@ export function TabInstrucoes() {
                         })
                       }
                       options={[
-                        { value: "colaborativo", label: tl("Colaborativo") },
-                        { value: "executor", label: tl("Executor") },
-                        { value: "consultivo", label: tl("Consultivo") },
-                        { value: "investigativo", label: tl("Investigativo") },
+                        { value: "colaborativo", label: t("generated.controlPlane.colaborativo_63af6e00") },
+                        { value: "executor", label: t("generated.controlPlane.executor_52c5a39f") },
+                        { value: "consultivo", label: t("generated.controlPlane.consultivo_a45ca9f4") },
+                        { value: "investigativo", label: t("generated.controlPlane.investigativo_bdcf7850") },
                       ]}
                     />
                     <FormInput
-                      label={tl("Estilo de escalacao")}
+                      label={t("generated.controlPlane.estilo_de_escalacao_e8248803")}
                       value={interactionStyle.escalation_style}
                       onChange={(event) =>
                         updateInteractionStyle({ escalation_style: event.target.value })
                       }
-                      placeholder={tl("Ex: escalar com contexto e proposta")}
+                      placeholder={t("generated.controlPlane.ex_escalar_com_contexto_e_proposta_039114d3")}
                     />
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <ListEditorField
-                      label={tl("Valores")}
+                      label={t("generated.controlPlane.valores_f21528b8")}
                       items={interactionStyle.values}
                       onChange={(items) => updateInteractionStyle({ values: items })}
-                      placeholder={tl("Ex: honestidade, grounding, ownership")}
+                      placeholder={t("generated.controlPlane.ex_honestidade_grounding_ownership_af00b0ff")}
                     />
                     <div className="flex flex-col gap-4">
                       <FormInput
-                        label={tl("Estilo de escrita")}
+                        label={t("generated.controlPlane.estilo_de_escrita_30c62094")}
                         value={interactionStyle.writing_style}
                         onChange={(event) =>
                           updateInteractionStyle({ writing_style: event.target.value })
                         }
-                        placeholder={tl("Ex: conciso, objetivo e rastreavel")}
+                        placeholder={t("generated.controlPlane.ex_conciso_objetivo_e_rastreavel_1e0c183e")}
                       />
                       <ListEditorField
-                        label={tl("Responsibility limits (legacy)")}
+                        label={t("generated.controlPlane.responsibility_limits_legacy_b1df31a1")}
                         items={missionProfile.responsibility_limits}
                         onChange={(items) =>
                           updateMissionProfile({ responsibility_limits: items })
                         }
-                        placeholder={tl("Ex: nao aprovar deploy em producao")}
+                        placeholder={t("generated.controlPlane.ex_nao_aprovar_deploy_em_producao_3b56a804")}
                       />
                     </div>
                   </div>
                   <JsonEditorField
-                    label={tl("Autonomy Policy JSON")}
-                    description={tl("Schema canonico completo de autonomia, incluindo task_overrides.")}
+                    label={t("generated.controlPlane.autonomy_policy_json_7a22dcef")}
+                    description={t("generated.controlPlane.schema_canonico_completo_de_autonomia_inclui_179881e3")}
                     value={state.autonomyPolicyJson}
                     onChange={(value) =>
                       updateAgentSpecField("autonomyPolicyJson", value)
                     }
                   />
                   <JsonEditorField
-                    label={tl("Execution Policy JSON")}
-                    description={tl("Politica central de execucao e fator humano. Use este campo para regras por tool, integration e action.")}
+                    label={t("generated.controlPlane.execution_policy_json_6d98304c")}
+                    description={t("generated.controlPlane.politica_central_de_execucao_e_fator_humano__90084388")}
                     value={state.executionPolicyJson}
                     onChange={(value) =>
                       updateAgentSpecField("executionPolicyJson", value)

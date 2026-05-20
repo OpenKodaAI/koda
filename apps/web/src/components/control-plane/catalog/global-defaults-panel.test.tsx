@@ -19,11 +19,21 @@ vi.mock("@/hooks/use-toast", () => ({
   }),
 }));
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    tl: (value: string) => value,
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 describe("GlobalDefaultsPanel", () => {
   beforeEach(() => {
@@ -51,8 +61,8 @@ describe("GlobalDefaultsPanel", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: /Defaults globais/i }));
-    await user.click(screen.getByRole("button", { name: "Salvar defaults" }));
+    await user.click(screen.getByRole("button", { name: /Defaults globais|Padr.es globais/i }));
+    await user.click(screen.getByRole("button", { name: /Salvar defaults|Salvar padr.es/i }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith(

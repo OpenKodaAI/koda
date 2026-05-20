@@ -32,7 +32,7 @@ export function MarkdownEditorField({
   className,
 }: MarkdownEditorFieldProps) {
   const [mode, setMode] = useState<"edit" | "preview">("edit");
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const editorId = useId();
   const characterCount = useMemo(() => value.length, [value]);
 
@@ -47,14 +47,14 @@ export function MarkdownEditorField({
         <div
           className="absolute right-2 top-2 z-10 inline-flex items-center gap-0.5 rounded-[6px] bg-[var(--panel-soft)] p-0.5 shadow-[0_1px_8px_rgba(0,0,0,0.16)]"
           role="tablist"
-          aria-label={tl("Modo do editor Markdown")}
+          aria-label={t("generated.controlPlane.modo_do_editor_markdown_d9321038")}
         >
           <button
             type="button"
             id={`${editorId}-preview-tab`}
             role="tab"
             onClick={() => setMode("preview")}
-            aria-label={tl("Preview")}
+            aria-label={t("generated.controlPlane.preview_2f5eedc0")}
             aria-selected={mode === "preview"}
             aria-controls={`${editorId}-preview-panel`}
             className={cn(
@@ -62,14 +62,14 @@ export function MarkdownEditorField({
               mode === "preview" && activeModeTabClass,
             )}
           >
-            {tl("Preview")}
+            {t("generated.controlPlane.preview_2f5eedc0")}
           </button>
           <button
             type="button"
             id={`${editorId}-markdown-tab`}
             role="tab"
             onClick={() => setMode("edit")}
-            aria-label={tl("Markdown")}
+            aria-label={t("generated.controlPlane.markdown_718e1b2b")}
             aria-selected={mode === "edit"}
             aria-controls={`${editorId}-markdown-panel`}
             className={cn(
@@ -77,7 +77,7 @@ export function MarkdownEditorField({
               mode === "edit" && activeModeTabClass,
             )}
           >
-            {tl("Markdown")}
+            {t("generated.controlPlane.markdown_718e1b2b")}
           </button>
         </div>
 
@@ -93,7 +93,7 @@ export function MarkdownEditorField({
             placeholder={
               placeholder
                 ? tl(placeholder)
-                : tl("Escreva em Markdown com instruções, critérios, exemplos e contexto útil para o agente.")
+                : t("generated.controlPlane.escreva_em_markdown_com_instrucoes_criterios_05f27064")
             }
           />
         ) : (
@@ -110,7 +110,7 @@ export function MarkdownEditorField({
               </ReactMarkdown>
             ) : (
               <p className="text-sm italic text-[var(--text-quaternary)]">
-                {tl("Nenhum conteudo para visualizar")}
+                {t("generated.controlPlane.nenhum_conteudo_para_visualizar_b4c7dc4c")}
               </p>
             )}
           </div>
@@ -119,7 +119,7 @@ export function MarkdownEditorField({
 
       <div className="flex justify-end px-1">
         <span className="tabular-nums text-[10px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-          {characterCount} {tl("caracteres")}
+          {characterCount} {t("generated.controlPlane.caracteres_e7774181")}
         </span>
       </div>
     </div>

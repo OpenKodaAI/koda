@@ -43,7 +43,7 @@ export function ConnectIntegrationModal({
   onSubmitJson,
   onClose,
 }: ConnectIntegrationModalProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const presence = useAnimatedPresence(open, null, { duration: 200 });
   const panelRef = useRef<ConnectIntegrationPanelHandle | null>(null);
 
@@ -88,7 +88,7 @@ export function ConnectIntegrationModal({
             type="button"
             onClick={onClose}
             className="app-surface-close"
-            aria-label={tl("Fechar modal")}
+            aria-label={t("generated.controlPlane.fechar_modal_1b5b2901")}
           >
             <X className="h-4 w-4" />
           </button>
@@ -101,7 +101,7 @@ export function ConnectIntegrationModal({
               id="connect-integration-modal-title"
               className="text-base font-semibold text-[var(--text-primary)]"
             >
-              {tl("Conectar a {{name}}", { name: entry.label })}
+              {t("generated.controlPlane.conectar_a_name_42977fa1", { name: entry.label })}
             </h3>
           </div>
 
@@ -121,7 +121,7 @@ export function ConnectIntegrationModal({
               onClick={onClose}
               className="rounded-lg border border-[var(--border-subtle)] px-4 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
             >
-              {tl("Cancelar")}
+              {t("generated.controlPlane.cancelar_091200fb")}
             </button>
             <button
               type="button"
@@ -133,7 +133,7 @@ export function ConnectIntegrationModal({
                 border: "1px solid var(--interactive-active-border)",
               }}
             >
-              {tl("Conectar")}
+              {t("generated.controlPlane.conectar_a587e076")}
             </button>
           </div>
         </div>

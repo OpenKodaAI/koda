@@ -3375,6 +3375,12 @@ async def cmd_memory(update: Update, context: BotContext) -> None:
             f"useful {snapshot['utility']['useful']} | noise {snapshot['utility']['noise']} | "
             f"misleading {snapshot['utility']['misleading']}"
         )
+        safety = snapshot.get("safety", {})
+        lines.append(
+            "Safety: "
+            f"blocked {safety.get('blocked_total', 0)} | injection {safety.get('prompt_injection', 0)} | "
+            f"secrets {safety.get('credential_leakage', 0)}"
+        )
         lines.append(
             "Runbooks: "
             f"approved {snapshot['runbooks']['approved']} | review {snapshot['runbooks']['needs_review']} | "

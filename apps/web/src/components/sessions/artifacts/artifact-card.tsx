@@ -48,7 +48,7 @@ export function ArtifactCard({ artifact, onOpen, className }: ArtifactCardProps)
         onClick={() => void downloader.download(artifact)}
         disabled={downloader.isDownloading}
         aria-busy={downloader.isDownloading}
-        aria-label={t("sessions.artifacts.download", { defaultValue: "Download" })}
+        aria-label={t("sessions.artifacts.download", undefined)}
         className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-60"
       >
         <Download className="icon-xs" strokeWidth={1.75} aria-hidden />

@@ -473,7 +473,7 @@ describe("AgentCatalog organization board", () => {
     renderCatalog();
 
     // Workspace selector trigger is rendered with the active workspace name
-    const selectorTrigger = screen.getByRole("button", { name: /Selecionar espa/i });
+    const selectorTrigger = screen.getByRole("button", { name: /Selecione o espa/i });
     expect(selectorTrigger).toBeInTheDocument();
     expect(selectorTrigger).toHaveTextContent(/Produto/i);
 
@@ -491,7 +491,7 @@ describe("AgentCatalog organization board", () => {
     await user.click(document.body);
 
     await user.type(
-      screen.getByLabelText(/Buscar agentes por nome, ID/i),
+      screen.getByLabelText(/Pesquise agentes por nome, ID|Buscar agentes por nome, ID/i),
       "solo",
     );
 
@@ -546,7 +546,7 @@ describe("AgentCatalog organization board", () => {
     await user.click(screen.getByRole("menuitem", { name: /Import from folder|Importar/i }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: /Import from folder/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: /Importar da pasta|Import from folder/i })).toBeInTheDocument();
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith(
         "/api/control-plane/workspaces/directory-roots",
@@ -554,8 +554,8 @@ describe("AgentCatalog organization board", () => {
       );
     });
     expect(await within(dialog).findByText("tmp")).toBeInTheDocument();
-    await user.type(within(dialog).getByLabelText(/Folder path/i), "/tmp/sample-repo");
-    await user.click(within(dialog).getByRole("button", { name: /Scan/i }));
+    await user.type(within(dialog).getByLabelText(/Caminho da pasta|Folder path/i), "/tmp/sample-repo");
+    await user.click(within(dialog).getByRole("button", { name: /Digitalizar|Scan/i }));
 
     await waitFor(() => {
       expect(within(dialog).getByText("AGENTS.md")).toBeInTheDocument();
@@ -571,7 +571,7 @@ describe("AgentCatalog organization board", () => {
     expect(within(dialog).getByText(/src_agents/i)).toBeInTheDocument();
     expect(within(dialog).getAllByText(/Use tests/i).length).toBeGreaterThan(0);
 
-    await user.click(within(dialog).getByRole("button", { name: /^Import$/i }));
+    await user.click(within(dialog).getByRole("button", { name: /^Importar$|^Import$/i }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -621,7 +621,7 @@ describe("AgentCatalog organization board", () => {
     await user.click(await screen.findByRole("menuitem", { name: /Import from folder|Importar/i }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: /Import from folder/i })).toBeInTheDocument();
+    expect(within(dialog).getByRole("heading", { name: /Importar da pasta|Import from folder/i })).toBeInTheDocument();
     expect(await within(dialog).findByText("Produto")).toBeInTheDocument();
   });
 
@@ -633,7 +633,7 @@ describe("AgentCatalog organization board", () => {
     fireEvent.dragStart(screen.getByTestId("agent-card-ATLAS"), { dataTransfer });
 
     // Switch to Operacoes workspace via the selector dropdown
-    await user.click(screen.getByRole("button", { name: /Selecionar espa/i }));
+    await user.click(screen.getByRole("button", { name: /Selecione o espa/i }));
     await waitFor(() => {
       expect(screen.getByRole("option", { name: /Operacoes/i })).toBeInTheDocument();
     });

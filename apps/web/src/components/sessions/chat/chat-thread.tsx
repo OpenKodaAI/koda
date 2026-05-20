@@ -238,7 +238,7 @@ function ChatThreadImpl({
 
   const hasConversation = items.length > 0;
   const showNewIndicator = showJumpToBottom && hasConversation;
-  const loadingLabel = t("chat.thread.loading", { defaultValue: "Loading conversation" });
+  const loadingLabel = t("chat.thread.loading", undefined);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-[var(--canvas)]">
@@ -283,7 +283,7 @@ function ChatThreadImpl({
               <MessageSquareText className="icon-md" strokeWidth={1.75} />
             </span>
             <p className="m-0 text-[var(--font-size-md)] font-medium text-[var(--text-primary)]">
-              {t("chat.thread.errorGeneric", { defaultValue: "Something went wrong." })}
+              {t("chat.thread.errorGeneric", undefined)}
             </p>
             <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">{error}</p>
           </div>
@@ -292,18 +292,15 @@ function ChatThreadImpl({
             <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
               {emptyEyebrow ??
                 agentLabel ??
-                t("sessions.thread.newChatEyebrow", { defaultValue: "New conversation" })}
+                t("sessions.thread.newChatEyebrow", undefined)}
             </p>
             <h1 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
               {emptyTitle ??
-                t("sessions.thread.heroTitle", { defaultValue: "What could we build today?" })}
+                t("sessions.thread.heroTitle", undefined)}
             </h1>
             <p className="m-0 max-w-[480px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
               {emptyDescription ??
-                t("sessions.thread.heroHelper", {
-                  defaultValue:
-                    "Describe a task. Your agent responds with reasoning, tool calls, and artifacts.",
-                })}
+                t("sessions.thread.heroHelper", undefined)}
             </p>
           </div>
         ) : (
@@ -323,9 +320,7 @@ function ChatThreadImpl({
               <div className="flex justify-center">
                 <LoaderCircle
                   className="h-4 w-4 animate-spin text-[var(--text-tertiary)]"
-                  aria-label={t("sessions.thread.loadingOlder", {
-                    defaultValue: "Loading older messages",
-                  })}
+                  aria-label={t("sessions.thread.loadingOlder", undefined)}
                   strokeWidth={1.75}
                 />
               </div>
@@ -417,7 +412,7 @@ function ChatThreadImpl({
           >
             <ArrowDown className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
             <span className="sr-only">
-              {t("chat.thread.newMessages", { defaultValue: "New messages" })}
+              {t("chat.thread.newMessages", undefined)}
             </span>
           </button>
         </div>

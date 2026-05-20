@@ -12,6 +12,8 @@ Required fields:
 
 - `policy_id`, `schema_version`, `agent_id`, `session_id?`, `task_id?`.
 - `source`, `fingerprint`, `created_at`.
+- `channel`: `channel_type`, `is_group`, `remote_session`,
+  `identity_status`, and any explicit remote-policy grant.
 - `filesystem`: read roots, write roots, denied roots, denied mount patterns.
 - `environment`: allowed env keys, denied env patterns, redacted keys.
 - `network`: egress mode, allowed domains/CIDRs, private-network rule.
@@ -36,6 +38,9 @@ Hard denies:
   write
 - unknown sandbox profile where the requested action is mutating, networked, or
   code-executing
+- remote or group channel context whose identity is not explicitly allowed
+- remote or group channel context attempting write, network, secret, destructive,
+  code, unknown MCP, skill, or channel actions without an explicit remote policy
 
 The denial response uses the shared error envelope with category
 `policy_denied` and includes `run_graph_node_id` when available.
@@ -49,7 +54,7 @@ Doctor responses are machine-readable:
 - `checks`: id, title, status, severity, scope, message, user_action, evidence
 - `effective_policy`: includes `policy_version: sandbox_policy.v1`,
   isolation kind, risk class, network mode, mounts, env keys, decision, and
-  allowed flag
+  allowed flag, plus safe channel context fields
 - `degraded_components`
 - `warnings`
 - `generated_at`
@@ -66,6 +71,7 @@ Required checks:
 - env secret exposure posture
 - forbidden mounts
 - egress/private-network policy
+- remote/channel identity and unsafe remote default
 - browser private-network/cookie posture
 - approval/grant health
 
@@ -94,7 +100,10 @@ runtime room views can render the card without product mocks.
 - Deny tests for forbidden mount, secret env, private egress, native isolation
   high-risk MCP, unknown sandbox profile, and code execution without hard
   isolation.
+- Channel deny tests for untrusted remote/group identities and unsafe remote
+  actions without `explicit_remote_policy`.
 - Doctor tests for pass, warning, fail, and degraded runtime dependency states.
+- Doctor tests must show remote/channel failures under `scope: "channel"`.
 - RunGraph/audit tests for sandbox deny and degraded doctor outcomes.
 - Docs must include rollback: disable the new gate only by restoring the prior
   policy config and leaving audit/runtime traces intact.

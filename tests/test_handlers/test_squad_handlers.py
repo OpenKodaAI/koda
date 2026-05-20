@@ -882,3 +882,23 @@ async def test_inbound_skips_when_disabled(monkeypatch: pytest.MonkeyPatch) -> N
     ):
         await route_squad_supergroup_message(update, ctx)
     mock_binding.get_for_chat.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_inbound_auth_failure_denies_before_squad_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("koda.handlers.squad_handlers.auth_check", lambda update: False)
+    update = _make_inbound_update(text="@FE please check this")
+    ctx = _make_context()
+    ctx.application = MagicMock()
+    mock_binding = AsyncMock()
+    mock_thread_store = AsyncMock()
+    mock_enqueue = AsyncMock()
+    with (
+        patch("koda.squads.get_telegram_binding_service", return_value=mock_binding),
+        patch("koda.squads.get_squad_thread_store", return_value=mock_thread_store),
+        patch("koda.services.queue_manager.enqueue_squad_agent_task", mock_enqueue),
+    ):
+        await route_squad_supergroup_message(update, ctx)
+    mock_binding.get_for_chat.assert_not_called()
+    mock_thread_store.find_by_telegram_topic.assert_not_called()
+    mock_enqueue.assert_not_awaited()

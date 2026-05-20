@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from koda.skills._runtime import is_skill_allowed_by_policy
+
 # Regex helpers
 
 _WHEN_TO_USE_RE = re.compile(r"<when_to_use>\s*(.*?)\s*</when_to_use>", re.DOTALL)
@@ -37,6 +39,7 @@ class SkillDefinition:
     max_token_budget: int = 2000
     model_hints: dict[str, Any] = field(default_factory=dict)
     source_path: Path | None = None
+    source_package_id: str = ""
     last_modified: float = 0.0
     frontmatter_present: bool = False
     instruction: str = ""
@@ -98,27 +101,6 @@ def _is_skill_enabled(raw: dict[str, Any]) -> bool:
     return str(value).strip().lower() not in {"0", "false", "no", "off"}
 
 
-def _skill_allowed_by_policy(skill_id: str, policy: dict[str, Any] | None) -> bool:
-    if not policy:
-        return True
-    if not policy.get("enabled", True):
-        return False
-
-    enabled = policy.get("enabled_skills")
-    if isinstance(enabled, list | tuple | set):
-        allowed = {str(item).strip() for item in enabled if str(item).strip()}
-        if allowed and skill_id not in allowed:
-            return False
-
-    disabled = policy.get("disabled_skills")
-    if isinstance(disabled, list | tuple | set):
-        blocked = {str(item).strip() for item in disabled if str(item).strip()}
-        if skill_id in blocked:
-            return False
-
-    return True
-
-
 def _build_skill_from_dict(raw: dict[str, Any]) -> SkillDefinition:
     """Build a SkillDefinition from a control-plane custom skill dict."""
     skill_id = str(raw.get("id", "")).strip()
@@ -167,6 +149,7 @@ def _build_skill_from_dict(raw: dict[str, Any]) -> SkillDefinition:
         max_token_budget=_coerce_int(raw.get("max_token_budget", 2500), 2500),
         model_hints=raw.get("model_hints", {}) if isinstance(raw.get("model_hints"), dict) else {},
         source_path=None,
+        source_package_id=str(raw.get("source_package_id") or "").strip(),
         last_modified=0.0,
         frontmatter_present=False,
         instruction=instruction,
@@ -229,7 +212,7 @@ def build_skill_registry_from_custom_skills(
         if not isinstance(raw, dict) or not _is_skill_enabled(raw):
             continue
         skill = _build_skill_from_dict(raw)
-        if skill.id and skill.full_content.strip() and _skill_allowed_by_policy(skill.id, skill_policy):
+        if skill.id and skill.full_content.strip() and is_skill_allowed_by_policy(raw, skill_policy):
             skills[skill.id] = skill
     return SkillRegistry(skills)
 

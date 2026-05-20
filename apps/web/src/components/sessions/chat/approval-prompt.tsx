@@ -134,7 +134,7 @@ export function ApprovalPrompt({
   originalParams,
   onResolved,
 }: ApprovalPromptProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { submit, isPending, error } = useApprovalAction({ agentId, sessionId });
   const [rationale, setRationale] = useState("");
   const [responseText, setResponseText] = useState("");
@@ -192,7 +192,7 @@ export function ApprovalPrompt({
   async function handleRespond() {
     const trimmedResponse = responseText.trim();
     if (!trimmedResponse) {
-      setLocalError(tl("Add response text before responding."));
+      setLocalError(t("generated.sessions.add_response_text_before_responding_e7f533b5"));
       return;
     }
     await resolve("respond", { responseText: trimmedResponse });
@@ -200,11 +200,11 @@ export function ApprovalPrompt({
 
   async function handleEdit() {
     if (!hasParamEditor) {
-      setLocalError(tl("No editable parameters were provided for this approval."));
+      setLocalError(t("generated.sessions.no_editable_parameters_were_provided_for_thi_d12e9209"));
       return;
     }
     if (jsonValidationError) {
-      setLocalError(tl("Fix invalid JSON before submitting edited parameters."));
+      setLocalError(t("generated.sessions.fix_invalid_json_before_submitting_edited_pa_484a6a78"));
       return;
     }
     const parsed = parseJsonObject(editedParamsText);
@@ -213,7 +213,7 @@ export function ApprovalPrompt({
       return;
     }
     if (stringifyJson(parsed.value) === originalParamsText) {
-      setLocalError(tl("Change at least one parameter, or approve without edits."));
+      setLocalError(t("generated.sessions.change_at_least_one_parameter_or_approve_wit_f96e39d7"));
       return;
     }
     await resolve("edit", { editedParams: parsed.value });
@@ -223,14 +223,14 @@ export function ApprovalPrompt({
     await resolve("approve");
   }
 
-  const displayedError = localError ?? (error ? `${error}. ${tl("Review the approval details and try again.")}` : null);
+  const displayedError = localError ?? (error ? `${error}. ${t("generated.sessions.review_the_approval_details_and_try_again_01e00519")}` : null);
 
   return (
     <div className="mt-2 flex flex-col gap-3 rounded-[var(--radius-panel)] border border-[color:var(--tone-warning-border)] bg-[color:var(--tone-warning-bg)] px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <StatusDot tone="warning" pulse />
         <span className="text-[var(--font-size-sm)] font-medium text-[var(--tone-warning-text)]">
-          {tl("Approval required")}
+          {t("generated.sessions.approval_required_c1a6f49c")}
         </span>
         {toolName ? (
           <span className="truncate font-mono text-[12px] text-[var(--text-tertiary)]">
@@ -257,11 +257,11 @@ export function ApprovalPrompt({
         <section className="flex flex-col gap-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--divider-hair)] bg-[var(--panel-soft)] p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-              {tl("Parameters")}
+              {t("generated.sessions.parameters_bb95e589")}
             </span>
             {effectiveSchema ? (
               <span className="rounded-[var(--radius-chip)] bg-[var(--tone-info-bg)] px-2 py-0.5 text-[11px] text-[var(--tone-info-text)]">
-                {tl("Schema available")}
+                {t("generated.sessions.schema_available_b3403497")}
               </span>
             ) : null}
           </div>
@@ -274,14 +274,14 @@ export function ApprovalPrompt({
             }}
             onValidate={handleJsonValidate}
             rows={6}
-            ariaLabel={tl("Edited parameters JSON")}
+            ariaLabel={t("generated.sessions.edited_parameters_json_422e304d")}
             readOnly={isPending}
           />
 
           {effectiveSchema ? (
             <details className="rounded-[var(--radius-chip)] border border-[color:var(--divider-hair)] bg-[var(--panel)] px-3 py-2">
               <summary className="cursor-pointer text-[12px] text-[var(--text-tertiary)]">
-                {tl("Schema")}
+                {t("generated.sessions.schema_d57f85f4")}
               </summary>
               <pre className="m-0 mt-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-[var(--text-secondary)]">
                 {stringifyJson(effectiveSchema)}
@@ -290,15 +290,15 @@ export function ApprovalPrompt({
           ) : null}
 
           <div
-            aria-label={tl("Parameter diff")}
+            aria-label={t("generated.sessions.parameter_diff_55849f7f")}
             className="rounded-[var(--radius-chip)] border border-[color:var(--divider-hair)] bg-[var(--panel)]"
           >
             <div className="border-b border-[color:var(--divider-hair)] px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-              {tl("Parameter diff")}
+              {t("generated.sessions.parameter_diff_55849f7f")}
             </div>
             {diffRows.length === 0 ? (
               <p className="m-0 px-3 py-2 text-[12px] text-[var(--text-tertiary)]">
-                {tl("No parameter changes")}
+                {t("generated.sessions.no_parameter_changes_c0f8c6a2")}
               </p>
             ) : (
               <pre className="m-0 max-h-40 overflow-auto py-1 font-mono text-[11px] leading-[1.45]">
@@ -335,11 +335,11 @@ export function ApprovalPrompt({
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-            {tl("Rationale")}
+            {t("generated.sessions.rationale_b8450b4b")}
           </span>
           <Textarea
             className="min-h-[56px] resize-none"
-            placeholder={tl("Optional rationale")}
+            placeholder={t("generated.sessions.optional_rationale_5afe0d45")}
             rows={2}
             maxLength={500}
             value={rationale}
@@ -349,11 +349,11 @@ export function ApprovalPrompt({
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
-            {tl("Response")}
+            {t("generated.sessions.response_5b0d921c")}
           </span>
           <Textarea
             className="min-h-[56px] resize-none"
-            placeholder={tl("Response text for Respond")}
+            placeholder={t("generated.sessions.response_text_for_respond_1cec3c25")}
             rows={2}
             maxLength={10_000}
             value={responseText}
@@ -380,7 +380,7 @@ export function ApprovalPrompt({
           onClick={handleReject}
         >
           <X strokeWidth={1.75} className="icon-sm" />
-          {tl("Reject")}
+          {t("generated.sessions.reject_d546cfdf")}
         </Button>
         <Button
           variant="secondary"
@@ -389,7 +389,7 @@ export function ApprovalPrompt({
           onClick={handleRespond}
         >
           <MessageSquareReply strokeWidth={1.75} className="icon-sm" />
-          {tl("Respond")}
+          {t("generated.sessions.respond_c3a6b1f7")}
         </Button>
         <Button
           variant="outline"
@@ -398,7 +398,7 @@ export function ApprovalPrompt({
           onClick={handleEdit}
         >
           <PencilLine strokeWidth={1.75} className="icon-sm" />
-          {tl("Edit")}
+          {t("generated.sessions.edit_ad5e46b8")}
         </Button>
         <Button
           variant="accent"
@@ -407,12 +407,12 @@ export function ApprovalPrompt({
           onClick={handleApprove}
         >
           <Check strokeWidth={1.75} className="icon-sm" />
-          {tl("Approve")}
+          {t("generated.sessions.approve_9b47d928")}
         </Button>
       </div>
       <p className="m-0 flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">
         <AlertTriangle strokeWidth={1.5} className="icon-xs" />
-        {tl("Runtime pauses until you answer.")}
+        {t("generated.sessions.runtime_pauses_until_you_answer_0c0a64a4")}
       </p>
     </div>
   );

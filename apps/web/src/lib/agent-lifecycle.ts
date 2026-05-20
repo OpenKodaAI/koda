@@ -27,10 +27,11 @@ export type AgentLifecycleId =
 
 export interface AgentLifecycleState {
   id: AgentLifecycleId;
-  /** Short label for badges/headers ("Ativo", "Publicado · Pausado" etc). */
-  label: string;
-  /** Long-form explanation displayed under the status badge. */
-  description: string;
+  /** Short translated label key for badges/headers. */
+  labelKey: string;
+  /** Long-form translated explanation key displayed under the status badge. */
+  descriptionKey: string;
+  descriptionOptions?: Record<string, string | number>;
   tone: AgentLifecycleTone;
   /** Whether the StatusDot should pulse (warns the operator). */
   pulse: boolean;
@@ -64,9 +65,8 @@ export function getAgentLifecycleState(
   if (dirty && (applied !== null || desired !== null)) {
     return {
       id: "draft_pending_publish",
-      label: "Alterações não publicadas",
-      description:
-        "Há mudanças no editor que ainda não foram publicadas. Salve e publique para aplicá-las ao runtime.",
+      labelKey: "controlPlane.agentLifecycle.draftPendingPublish.label",
+      descriptionKey: "controlPlane.agentLifecycle.draftPendingPublish.description",
       tone: "warning",
       pulse: true,
       toggle: status === "active" ? "pause" : "activate",
@@ -77,9 +77,8 @@ export function getAgentLifecycleState(
   if (dirty && applied === null && desired === null) {
     return {
       id: "draft_unsaved",
-      label: "Rascunho não publicado",
-      description:
-        "Configuração inicial em andamento. Publique pela primeira vez para tornar o agente operável.",
+      labelKey: "controlPlane.agentLifecycle.draftUnsaved.label",
+      descriptionKey: "controlPlane.agentLifecycle.draftUnsaved.description",
       tone: "warning",
       pulse: true,
       toggle: "none",
@@ -90,9 +89,8 @@ export function getAgentLifecycleState(
   if (!dirty && applied === null && desired === null) {
     return {
       id: "never_configured",
-      label: "Nunca publicado",
-      description:
-        "O agente foi criado mas ainda não tem nenhuma versão publicada. Configure e publique para ativar.",
+      labelKey: "controlPlane.agentLifecycle.neverConfigured.label",
+      descriptionKey: "controlPlane.agentLifecycle.neverConfigured.description",
       tone: "neutral",
       pulse: false,
       toggle: "none",
@@ -104,9 +102,8 @@ export function getAgentLifecycleState(
   if (!dirty && applied === null && desired !== null) {
     return {
       id: "awaiting_activation",
-      label: "Publicado, aguardando ativação",
-      description:
-        "Versão publicada mas o runtime ainda não foi inicializado. Clique em Ativar para colocar o agente para rodar.",
+      labelKey: "controlPlane.agentLifecycle.awaitingActivation.label",
+      descriptionKey: "controlPlane.agentLifecycle.awaitingActivation.description",
       tone: "info",
       pulse: true,
       toggle: "activate",
@@ -117,8 +114,9 @@ export function getAgentLifecycleState(
   if (!dirty && applied !== null && desired !== null && applied < desired) {
     return {
       id: "update_pending",
-      label: "Atualização pendente",
-      description: `Runtime rodando a v${applied}, mas a v${desired} já foi publicada e aguarda aplicação.`,
+      labelKey: "controlPlane.agentLifecycle.updatePending.label",
+      descriptionKey: "controlPlane.agentLifecycle.updatePending.description",
+      descriptionOptions: { applied, desired },
       tone: "warning",
       pulse: true,
       toggle: status === "active" ? "pause" : "activate",
@@ -134,8 +132,9 @@ export function getAgentLifecycleState(
   ) {
     return {
       id: "published_active",
-      label: "Ativo",
-      description: `Runtime rodando v${applied} normalmente. Mensagens são processadas.`,
+      labelKey: "controlPlane.agentLifecycle.publishedActive.label",
+      descriptionKey: "controlPlane.agentLifecycle.publishedActive.description",
+      descriptionOptions: { applied },
       tone: "success",
       pulse: false,
       toggle: "pause",
@@ -151,8 +150,9 @@ export function getAgentLifecycleState(
   ) {
     return {
       id: "published_paused",
-      label: "Publicado · Pausado",
-      description: `Versão v${applied} publicada mas o runtime está pausado. Mensagens não são processadas.`,
+      labelKey: "controlPlane.agentLifecycle.publishedPaused.label",
+      descriptionKey: "controlPlane.agentLifecycle.publishedPaused.description",
+      descriptionOptions: { applied },
       tone: "info",
       pulse: false,
       toggle: "activate",
@@ -161,9 +161,11 @@ export function getAgentLifecycleState(
 
   return {
     id: "unknown",
-    label: status ? `Status: ${status}` : "Estado desconhecido",
-    description:
-      "Estado não previsto pelo wizard de publicação. Consulte os logs do control-plane se persistir.",
+    labelKey: status
+      ? "controlPlane.agentLifecycle.unknown.label"
+      : "controlPlane.agentLifecycle.unknown.labelFallback",
+    descriptionKey: "controlPlane.agentLifecycle.unknown.description",
+    descriptionOptions: status ? { status } : undefined,
     tone: "neutral",
     pulse: false,
     toggle: "none",

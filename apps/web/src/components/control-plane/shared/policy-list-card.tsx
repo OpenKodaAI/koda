@@ -81,7 +81,7 @@ export function PolicyListCard({
               {!readOnly ? (
                 <button
                   type="button"
-                  aria-label={t("controlPlane.policy.remove", { defaultValue: "Remove" })}
+                  aria-label={t("controlPlane.policy.remove", undefined)}
                   onClick={() => remove(index)}
                   className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
                 >
@@ -93,7 +93,7 @@ export function PolicyListCard({
         </ul>
       ) : (
         <p className="mt-3 text-[0.75rem] text-[var(--text-quaternary)]">
-          {emptyLabel ?? t("controlPlane.policy.empty", { defaultValue: "Nothing defined yet." })}
+          {emptyLabel ?? t("controlPlane.policy.empty", undefined)}
         </p>
       )}
 
@@ -106,16 +106,14 @@ export function PolicyListCard({
             onKeyDown={handleKeyDown}
             placeholder={
               placeholder ??
-              t("controlPlane.policy.addPlaceholder", {
-                defaultValue: "Add new rule…",
-              })
+              t("controlPlane.policy.addPlaceholder", undefined)
             }
           />
           <button
             type="button"
             onClick={commit}
             disabled={!draft.trim()}
-            aria-label={t("controlPlane.policy.add", { defaultValue: "Add" })}
+            aria-label={t("controlPlane.policy.add", undefined)}
             className={cn(
               "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border transition-colors",
               draft.trim()

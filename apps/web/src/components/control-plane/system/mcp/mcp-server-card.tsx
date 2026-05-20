@@ -83,7 +83,7 @@ export function McpServerCard({
         <AnimatedSwitch
           checked={server.enabled}
           onChange={onToggle}
-          ariaLabel={`${tl("Ativar")} ${server.display_name}`}
+          ariaLabel={`${t("generated.controlPlane.ativar_db54d834")} ${server.display_name}`}
         />
       </div>
 
@@ -100,19 +100,19 @@ export function McpServerCard({
           type="button"
           onClick={onEdit}
           className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
-          aria-label={`${tl("Editar")} ${server.display_name}`}
+          aria-label={`${t("generated.controlPlane.editar_28e2e08e")} ${server.display_name}`}
         >
           <Pencil size={12} />
-          {tl("Editar")}
+          {t("generated.controlPlane.editar_28e2e08e")}
         </button>
         <button
           type="button"
           onClick={onDelete}
           className="inline-flex items-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-xs text-[var(--tone-danger-text)] transition-colors hover:border-[var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)]"
-          aria-label={`${tl("Remover")} ${server.display_name}`}
+          aria-label={`${t("generated.controlPlane.remover_5465770e")} ${server.display_name}`}
         >
           <Trash2 size={12} />
-          {tl("Remover")}
+          {t("generated.controlPlane.remover_5465770e")}
         </button>
       </div>
     </motion.div>

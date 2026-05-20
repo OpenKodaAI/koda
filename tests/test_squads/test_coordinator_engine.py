@@ -141,6 +141,37 @@ class _StaticPlanner:
         )
 
 
+class _HandoffPlanner:
+    async def plan(self, planner_input: CoordinationPlannerInput) -> CoordinationDecision:
+        return CoordinationDecision(
+            mode="handoff",
+            confidence=0.86,
+            reasoning_summary="Consult implementation and QA before final synthesis.",
+            tasks=[
+                CoordinationTask(
+                    key="build",
+                    title="Build",
+                    agent_id="FE",
+                    kind="frontend",
+                    objective="Build the artifact",
+                    acceptance_criteria=["visible task_result"],
+                    context_refs=["msg-99"],
+                ),
+                CoordinationTask(
+                    key="review",
+                    title="Review",
+                    agent_id="QA",
+                    kind="review",
+                    objective="Review the artifact",
+                    acceptance_criteria=["visible review reply"],
+                    context_refs=["msg-99"],
+                ),
+            ],
+            selected_agents=["FE", "QA"],
+            final_response_strategy="coordinator_synthesis_after_all_task_results",
+        )
+
+
 def _planner_input() -> CoordinationPlannerInput:
     return CoordinationPlannerInput(
         text="Build the launch page",
@@ -435,4 +466,46 @@ async def test_engine_persists_task_request_and_dispatches() -> None:
     assert thread_store.post_thread_message.await_args_list[0].kwargs["message_type"] == "system_event"
     assert all(
         call.kwargs["message_type"] == "task_request" for call in thread_store.post_thread_message.await_args_list[1:]
+    )
+
+
+@pytest.mark.asyncio
+async def test_engine_handoff_mode_persists_visible_handoff_event_and_tasks() -> None:
+    thread_store = AsyncMock()
+    thread_store.post_thread_message = AsyncMock(side_effect=[10, 11, 12, 13])
+    thread_store.notify_event = AsyncMock()
+    task_store = AsyncMock()
+    task_store.create_task = AsyncMock(
+        side_effect=[
+            _task_descriptor("00000000-0000-0000-0000-000000000301", agent_id="FE", kind="frontend"),
+            _task_descriptor("00000000-0000-0000-0000-000000000302", agent_id="QA", kind="review"),
+        ]
+    )
+    dispatch = AsyncMock(side_effect=[1001, 1002])
+    engine = SquadCoordinatorEngine(thread_store=thread_store, task_store=task_store, planner=_HandoffPlanner())
+
+    execution = await engine.coordinate_user_input(
+        text="Handoff implementation to FE and QA before synthesis",
+        thread=_thread(),
+        participants=[_participant("PM", "coordinator"), _participant("FE"), _participant("QA")],
+        coordinator_agent_id="PM",
+        capability_hints={},
+        semantic_result=_semantic_result("FE", "QA"),
+        dispatch=dispatch,
+        parent_message_id="msg-99",
+    )
+
+    assert execution.coordinated is True
+    assert "msg-11" in execution.message_ids
+    handoff_call = thread_store.post_thread_message.await_args_list[1].kwargs
+    assert handoff_call["message_type"] == "system_event"
+    assert handoff_call["metadata"]["schema_version"] == "handoff_event.v1"
+    payload = handoff_call["metadata"]["payload"]
+    assert payload["destination_agent_ids"] == ["FE", "QA"]
+    assert payload["handoff_kind"] == "parallel_consult"
+    assert payload["status"] == "requested"
+    assert payload["parent_message_id"] == "msg-99"
+    assert all(
+        call.kwargs["metadata"]["handoff_correlation_id"] == payload["correlation_id"]
+        for call in task_store.create_task.await_args_list
     )

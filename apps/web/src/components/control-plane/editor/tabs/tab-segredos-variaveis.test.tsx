@@ -220,7 +220,7 @@ describe("TabSegredosVariaveis", () => {
     });
     await user.type(screen.getByPlaceholderText("API_KEY"), "TEAM_CONTEXT");
     await user.type(
-      screen.getByPlaceholderText(/Ex\..*squad-platform|plataforma-esquadr/i),
+      screen.getByPlaceholderText(/squad-platform/i),
       "squad-platform",
     );
     await user.click(screen.getByRole("button", { name: "Adicionar" }));
@@ -269,7 +269,7 @@ describe("TabSegredosVariaveis", () => {
     const secretInput = screen.getByPlaceholderText("Novo valor") as HTMLInputElement;
     expect(secretInput.type).toBe("password");
     await user.type(secretInput, "new-secret-value");
-    await user.click(screen.getByRole("button", { name: /Visualizar valor|Valor de exibição/i }));
+    await user.click(screen.getByRole("button", { name: /Ver valor|Visualizar valor|Valor de exibição/i }));
     expect(secretInput.type).toBe("text");
     await user.click(screen.getByRole("button", { name: /^Salvar$/i }));
 

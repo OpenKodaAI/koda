@@ -14,9 +14,12 @@ Runbooks for self-hosting Koda after the local or VPS stack is installed.
 | [Skills and plugins](skills-plugin-runbook.md) | Before scanning, installing, uninstalling, rolling back, or troubleshooting local skill packages |
 | [Workspace directory import](workspace-directory-import-runbook.md) | Before importing Codex, Claude, Cursor, MCP, or skill config from a local project folder |
 | [Evals and release quality](evals-release-runbook.md) | Before creating evals from runs, exporting trajectories, or closing release-quality gates |
+| [Improvement proposals](improvement-proposal-runbook.md) | Before approving, validating, applying, or rolling back self-improvement proposals |
+| [Memory governance](memory-governance-runbook.md) | Before changing memory scanners, namespaces, recall explanations, or utility feedback |
 | [Channel gateway](channel-gateway-runbook.md) | Before connecting Telegram, approving senders, debugging identity denials, or rotating channel access |
 | [Onboarding readiness](onboarding-readiness-runbook.md) | Before claiming clean-install readiness, first-use UX completeness, or OSS setup maturity |
 | [Thread replies](thread-replies-runbook.md) | Before enabling reply obligations, agent follow-ups, coordinator synthesis, or room reply troubleshooting |
+| [Quality cockpit](quality-cockpit-runbook.md) | Before converting quality failures into proposals or claiming P4/P5 quality dashboard coverage |
 | [Backup and restore](backup-restore.md) | Before production and during recovery drills |
 | [Upgrade](upgrade.md) | Every release |
 | [Hardening](hardening.md) | Before exposing the dashboard beyond yourself |

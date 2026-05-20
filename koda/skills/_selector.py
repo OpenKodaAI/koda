@@ -9,6 +9,7 @@ from typing import Any
 
 from koda.skills._index import SkillEmbeddingIndex
 from koda.skills._registry import SkillDefinition, SkillRegistry
+from koda.skills._runtime import is_skill_allowed_by_policy
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,7 @@ class SkillSelector:
         matches = self._resolve_conflicts(matches)
 
         # 7. Dependency expansion
-        matches = self._expand_dependencies(matches, all_skills)
+        matches = self._expand_dependencies(matches, all_skills, agent_skill_policy)
 
         # 8. Sort descending by composite_score, cap to max_skills
         matches.sort(key=lambda m: m.composite_score, reverse=True)
@@ -101,13 +102,18 @@ class SkillSelector:
             effective_max = int(agent_skill_policy["max_skills"])
         return matches[:effective_max]
 
-    def select_by_name_or_query(self, input_text: str) -> SkillMatch | None:
+    def select_by_name_or_query(
+        self,
+        input_text: str,
+        *,
+        agent_skill_policy: dict[str, Any] | None = None,
+    ) -> SkillMatch | None:
         """Resolve a single skill by name, alias, or semantic query."""
         # Try alias resolution first
         skill_id = self._registry.resolve_alias(input_text.lower().strip())
         if skill_id:
             skill = self._registry.get(skill_id)
-            if skill:
+            if skill and is_skill_allowed_by_policy(_skill_policy_payload(skill), agent_skill_policy):
                 return SkillMatch(
                     skill=skill,
                     semantic_score=1.0,
@@ -119,7 +125,7 @@ class SkillSelector:
 
         # Try canonical ID
         skill = self._registry.get(input_text.lower().strip().replace(" ", "-"))
-        if skill:
+        if skill and is_skill_allowed_by_policy(_skill_policy_payload(skill), agent_skill_policy):
             return SkillMatch(
                 skill=skill,
                 semantic_score=1.0,
@@ -130,7 +136,7 @@ class SkillSelector:
             )
 
         # Fall back to full selection with max_skills=1
-        matches = self.select(input_text, max_skills=1)
+        matches = self.select(input_text, max_skills=1, agent_skill_policy=agent_skill_policy)
         return matches[0] if matches else None
 
     # ------------------------------------------------------------------
@@ -232,24 +238,7 @@ class SkillSelector:
         policy: dict[str, Any] | None,
         default_max: int,
     ) -> list[SkillMatch]:
-        if policy is None:
-            return matches
-
-        if not policy.get("enabled", True):
-            return []
-
-        enabled_skills: list[str] | None = policy.get("enabled_skills")
-        disabled_skills: list[str] | None = policy.get("disabled_skills")
-
-        if enabled_skills is not None:
-            allowed = set(enabled_skills)
-            matches = [m for m in matches if m.skill.id in allowed]
-
-        if disabled_skills is not None:
-            blocked = set(disabled_skills)
-            matches = [m for m in matches if m.skill.id not in blocked]
-
-        return matches
+        return [m for m in matches if is_skill_allowed_by_policy(_skill_policy_payload(m.skill), policy)]
 
     @staticmethod
     def _resolve_conflicts(matches: list[SkillMatch]) -> list[SkillMatch]:
@@ -276,6 +265,7 @@ class SkillSelector:
         self,
         matches: list[SkillMatch],
         all_skills: dict[str, SkillDefinition],
+        policy: dict[str, Any] | None,
     ) -> list[SkillMatch]:
         selected_ids = {m.skill.id for m in matches}
         extra: list[SkillMatch] = []
@@ -288,6 +278,8 @@ class SkillSelector:
                 if dep is None:
                     dep = self._registry.get(req_id)
                 if dep is None:
+                    continue
+                if not is_skill_allowed_by_policy(_skill_policy_payload(dep), policy):
                     continue
                 extra.append(
                     SkillMatch(
@@ -313,6 +305,13 @@ class _CandidateInfo:
     trigger_matched: bool = False
     alias_matched: bool = False
     alias_label: str = ""
+
+
+def _skill_policy_payload(skill: SkillDefinition) -> dict[str, str]:
+    payload = {"id": skill.id}
+    if skill.source_package_id:
+        payload["source_package_id"] = skill.source_package_id
+    return payload
 
 
 # Module-level singleton

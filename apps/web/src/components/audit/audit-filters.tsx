@@ -17,7 +17,7 @@ interface AuditFiltersProps {
 }
 
 export function AuditFilters({ eventTypes, selectedType, onTypeChange }: AuditFiltersProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
@@ -25,7 +25,7 @@ export function AuditFilters({ eventTypes, selectedType, onTypeChange }: AuditFi
         htmlFor="event-type-filter"
         className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]"
       >
-        {tl("Evento")}
+        {t("generated.executions.evento_e4a03401")}
       </label>
       <Select
         value={selectedType === "" ? SELECT_ALL_VALUE : selectedType}
@@ -35,7 +35,7 @@ export function AuditFilters({ eventTypes, selectedType, onTypeChange }: AuditFi
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={SELECT_ALL_VALUE}>{tl("Todos os eventos")}</SelectItem>
+          <SelectItem value={SELECT_ALL_VALUE}>{t("generated.executions.todos_os_eventos_39ae9864")}</SelectItem>
           {eventTypes.map((type) => (
             <SelectItem key={type} value={type}>
               {type}

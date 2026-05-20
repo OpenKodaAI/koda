@@ -693,6 +693,7 @@ class QueryContext:
     is_child_run: bool = False
     child_run_id: str | None = None
     parent_task_id: int | None = None
+    child_context_policy: dict[str, Any] = field(default_factory=dict)
     child_toolset: str | None = None
     context_governance: dict[str, Any] | None = None
 
@@ -933,8 +934,24 @@ def _build_execution_trace_payload(
                     "source_query_id": explanation.source_query_id,
                     "source_task_id": explanation.source_task_id,
                     "source_episode_id": explanation.source_episode_id,
+                    "namespace_kind": getattr(explanation, "namespace_kind", "agent"),
+                    "namespace_key": getattr(explanation, "namespace_key", ""),
+                    "sensitivity": getattr(explanation, "sensitivity", "normal"),
                 }
                 for explanation in (getattr(ctx.memory_resolution, "explanations", []) if ctx else [])
+            ],
+            "memory_discards": [
+                {
+                    "memory_id": discard.memory_id,
+                    "reason": discard.reason,
+                    "layer": discard.layer,
+                    "retrieval_source": discard.retrieval_source,
+                    "score": discard.score,
+                    "namespace_kind": getattr(discard, "namespace_kind", "agent"),
+                    "namespace_key": getattr(discard, "namespace_key", ""),
+                    "sensitivity": getattr(discard, "sensitivity", "normal"),
+                }
+                for discard in (getattr(ctx.memory_resolution, "discarded", []) if ctx else [])
             ],
             "task_kind": ctx.task_kind if ctx else "general",
             "ungrounded_operationally": bool(ctx.ungrounded_operationally) if ctx else False,
@@ -1342,6 +1359,14 @@ async def _record_procedural_memory(
 ) -> None:
     """Persist a best-effort procedural memory from the task outcome."""
     if ctx is None or run_result is None or ctx.dry_run:
+        return
+    if ctx.is_child_run and not bool((ctx.child_context_policy or {}).get("allow_memory_writes", False)):
+        try:
+            from koda.memory.quality import record_memory_quality_counter
+
+            record_memory_quality_counter(ctx.executing_agent_id or AGENT_ID, "memory_write", "denied", "child_run")
+        except Exception:
+            log.debug("child_run_memory_write_counter_failed", exc_info=True)
         return
     try:
         from koda.memory import get_memory_manager
@@ -2944,7 +2969,12 @@ async def _prepare_query_context(
     try:
         from koda.memory.config import MEMORY_ENABLED
 
-        if MEMORY_ENABLED:
+        child_policy = item.child_context_policy if isinstance(item.child_context_policy, dict) else {}
+        memory_recall_allowed = not item.is_child_run or bool(child_policy.get("include_memory", False))
+        include_sensitive_memory = bool(
+            child_policy.get("include_sensitive_memory", False) or child_policy.get("include_sensitive", False)
+        )
+        if MEMORY_ENABLED and memory_recall_allowed:
             from koda.memory import get_memory_manager
 
             mm = get_memory_manager()
@@ -2963,6 +2993,7 @@ async def _prepare_query_context(
                 source_query_id=context.user_data.get("last_query_id"),
                 source_task_id=task_id,
                 source_episode_id=context.user_data.get("last_execution_episode_id"),
+                include_sensitive=include_sensitive_memory,
             )
             if not inspect.isawaitable(pre_query_result):
                 fallback_callable = getattr(mm, "pre_query", None)
@@ -2980,8 +3011,11 @@ async def _prepare_query_context(
                     source_query_id=context.user_data.get("last_query_id"),
                     source_task_id=task_id,
                     source_episode_id=context.user_data.get("last_execution_episode_id"),
+                    include_sensitive=include_sensitive_memory,
                 )
             memory_task = asyncio.create_task(pre_query_result)
+        elif MEMORY_ENABLED and item.is_child_run:
+            log.info("child_run_memory_recall_fenced", child_run_id=item.child_run_id)
     except Exception:
         log.exception("memory_recall_setup_error")
 
@@ -3301,7 +3335,25 @@ async def _prepare_query_context(
     # Agent tools prompt
     from koda.services.tool_prompt import build_agent_tools_prompt
 
-    agent_tools_section = build_agent_tools_prompt()
+    _runtime_agent_spec_for_tools: dict[str, Any] = {}
+    try:
+        from koda.skills._runtime import get_runtime_agent_spec
+
+        _runtime_agent_spec_for_tools = get_runtime_agent_spec()
+    except Exception:
+        _runtime_agent_spec_for_tools = {}
+    agent_tools_section = build_agent_tools_prompt(
+        tool_policy=(
+            _runtime_agent_spec_for_tools.get("tool_policy")
+            if isinstance(_runtime_agent_spec_for_tools.get("tool_policy"), dict)
+            else None
+        ),
+        skill_policy=(
+            _runtime_agent_spec_for_tools.get("skill_policy")
+            if isinstance(_runtime_agent_spec_for_tools.get("skill_policy"), dict)
+            else None
+        ),
+    )
     if agent_tools_section:
         _append_prompt_segment(
             prompt_segments,
@@ -3581,10 +3633,39 @@ async def _prepare_query_context(
     system_prompt = str(prompt_budget.get("compiled_prompt") or DEFAULT_SYSTEM_PROMPT)
     context_governance: dict[str, Any] | None = None
     try:
-        from koda.services.context_governance import govern_prompt_budget
+        from koda.services.context_governance import append_memory_resolution_blocks, govern_prompt_budget
 
-        context_governance = govern_prompt_budget(
-            prompt_budget, item.child_context_policy if item.is_child_run else None
+        runtime_context_policy = (
+            item.child_context_policy
+            if item.is_child_run
+            else {
+                "mode": "runtime",
+                "allow_categories": [
+                    "base",
+                    "runtime_rules",
+                    "tool_contracts",
+                    "memory",
+                    "authoritative_knowledge",
+                    "supporting_knowledge",
+                    "cache_hints",
+                    "scripts_assets",
+                    "artifact",
+                    "artifacts",
+                    "runtime_context",
+                ],
+                "deny_categories": ["secrets", "pending_approval"],
+                "include_memory": True,
+                "include_artifacts": True,
+                "include_squad_context": True,
+                "review_on_sensitive": True,
+            }
+        )
+
+        context_governance = govern_prompt_budget(prompt_budget, runtime_context_policy)
+        context_governance = append_memory_resolution_blocks(
+            context_governance,
+            memory_resolution,
+            runtime_context_policy,
         )
         if task_id is not None:
             try:
@@ -3669,6 +3750,7 @@ async def _prepare_query_context(
         is_child_run=item.is_child_run,
         child_run_id=item.child_run_id,
         parent_task_id=item.parent_task_id,
+        child_context_policy=dict(item.child_context_policy or {}),
         child_toolset=item.child_toolset,
         context_governance=context_governance,
     )
@@ -3862,7 +3944,9 @@ def _native_tool_schemas_for_runtime() -> list[dict[str, Any]]:
 
     try:
         from koda import config as _config
+        from koda.agent_contract import normalize_string_list
         from koda.services.tool_registry import build_openai_tool_schemas_for_runtime
+        from koda.skills._runtime import get_runtime_agent_spec, get_runtime_skill_policy
 
         feature_flags = {
             "browser": bool(getattr(_config, "BROWSER_FEATURES_ENABLED", False)),
@@ -3877,7 +3961,14 @@ def _native_tool_schemas_for_runtime() -> list[dict[str, Any]]:
             "snapshots": bool(getattr(_config, "SNAPSHOT_ENABLED", False)),
             "webhooks": bool(getattr(_config, "WEBHOOK_ENABLED", False)),
         }
-        return build_openai_tool_schemas_for_runtime(feature_flags=feature_flags)
+        agent_spec = get_runtime_agent_spec()
+        tool_policy = agent_spec.get("tool_policy") if isinstance(agent_spec.get("tool_policy"), dict) else {}
+        allowed_tool_ids = normalize_string_list(tool_policy.get("allowed_tool_ids")) if tool_policy else []
+        return build_openai_tool_schemas_for_runtime(
+            feature_flags=feature_flags,
+            allowed_tool_ids=allowed_tool_ids or None,
+            skill_policy=get_runtime_skill_policy(agent_spec),
+        )
     except Exception:
         return []
 
@@ -4544,6 +4635,12 @@ async def _run_agent_loop(
                     delegation_request_id=ctx.delegation_request_id,
                     delegation_origin_agent_id=ctx.delegation_origin_agent_id,
                     telegram_message_thread_id=ctx.telegram_message_thread_id,
+                    is_child_run=ctx.is_child_run,
+                    child_run_id=ctx.child_run_id,
+                    parent_task_id=ctx.parent_task_id,
+                    child_context_policy=dict(ctx.child_context_policy or {}),
+                    child_toolset=ctx.child_toolset,
+                    context_governance=ctx.context_governance,
                 )
                 resume_item = QueueItem(
                     chat_id=chat_id,
@@ -5211,6 +5308,12 @@ async def _run_agent_loop(
             delegation_request_id=ctx.delegation_request_id,
             delegation_origin_agent_id=ctx.delegation_origin_agent_id,
             telegram_message_thread_id=ctx.telegram_message_thread_id,
+            is_child_run=ctx.is_child_run,
+            child_run_id=ctx.child_run_id,
+            parent_task_id=ctx.parent_task_id,
+            child_context_policy=dict(ctx.child_context_policy or {}),
+            child_toolset=ctx.child_toolset,
+            context_governance=ctx.context_governance,
         )
         resume_item = QueueItem(
             chat_id=chat_id,
@@ -6699,7 +6802,13 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
     if not ctx.squad_thread_id or not ctx.squad_task_id:
         return
     try:
-        from koda.squads import dispatch_squad_turn, get_squad_task_store, get_squad_thread_store
+        from koda.squads import (
+            dispatch_squad_turn,
+            evaluate_synthesis_readiness,
+            get_squad_task_store,
+            get_squad_thread_store,
+            synthesis_gate_metric,
+        )
 
         thread_store = get_squad_thread_store()
         task_store = get_squad_task_store()
@@ -6723,6 +6832,8 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             if attempt < 3:
                 await asyncio.sleep(0.5)
         if open_tasks:
+            readiness = evaluate_synthesis_readiness(tasks=open_tasks)
+            synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
             return
         synthesis_parent_id = ctx.parent_message_id
         synthesis_idempotency_key = (
@@ -6730,6 +6841,9 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         )
         visible_results: list[str] = []
         confirmed_results: list[str] = []
+        result_messages: list[dict[str, Any]] = []
+        handoff_events: list[dict[str, Any]] = []
+        declared_timeouts: list[dict[str, Any]] = []
         with contextlib.suppress(Exception):
             history = await thread_store.thread_history(thread_id=ctx.squad_thread_id, limit=120)
             for message in history:
@@ -6737,6 +6851,22 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                 metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
                 if metadata.get("idempotency_key") == synthesis_idempotency_key:
                     return
+                raw_payload = metadata.get("payload")
+                payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
+                if payload.get("schema_version") == "handoff_event.v1" and payload.get("parent_message_id") in {
+                    ctx.parent_message_id,
+                    squad_message_id,
+                }:
+                    handoff_events.append({"payload": payload})
+                    if str(payload.get("status") or "").lower() in {"timed_out", "declined", "failed"}:
+                        declared_timeouts.append(
+                            {
+                                "kind": "handoff_event",
+                                "id": payload.get("handoff_id"),
+                                "status": payload.get("status"),
+                                "agent_ids": payload.get("destination_agent_ids") or [],
+                            }
+                        )
             for message in reversed(history):
                 if message.get("type") != "task_result":
                     continue
@@ -6750,27 +6880,53 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                 agent = str(message.get("from") or "agent").strip() or "agent"
                 content = str(message.get("content") or "").strip()
                 if content:
+                    result_messages.append(message)
                     visible_results.append(f"{agent} / {task_id}:\n{content[:1500]}")
                     first_line = next((line.strip() for line in content.splitlines() if line.strip()), "")
                     if first_line:
                         confirmed_results.append(f"- {agent} / {task_id}: {first_line[:500]}")
         if not any(ctx.squad_task_id and f"/ {ctx.squad_task_id}:" in item for item in visible_results):
             visible_results.append(f"{executing_agent} / {ctx.squad_task_id}:\n{response_text[:1500]}")
+            result_messages.append(
+                {
+                    "type": "task_result",
+                    "id": squad_message_id or ctx.squad_task_id,
+                    "from": executing_agent,
+                    "metadata": {"squad_task_id": ctx.squad_task_id},
+                }
+            )
             first_line = next((line.strip() for line in response_text.splitlines() if line.strip()), "")
             if first_line:
                 confirmed_results.append(f"- {executing_agent} / {ctx.squad_task_id}: {first_line[:500]}")
+        readiness = evaluate_synthesis_readiness(
+            handoff_events=handoff_events,
+            result_messages=result_messages,
+            declared_timeouts=declared_timeouts,
+        )
+        synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
+        if not readiness.ready:
+            return
         visible_results_block = "\n\n".join(visible_results)
         confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
+        timeout_block = ""
+        if declared_timeouts:
+            timeout_lines = [
+                "- " + ", ".join(str(agent) for agent in item.get("agent_ids") or []) + f": {item.get('status')}"
+                for item in declared_timeouts
+            ]
+            timeout_block = "\n\nTimeouts/bloqueios declarados:\n" + "\n".join(timeout_lines)
         synthesis_query = (
             "Todos os task_result abertos deste ciclo já foram recebidos. "
             "Sintetize a entrega final para o usuário usando obrigatoriamente todos os resultados visíveis abaixo. "
             "Não use apenas o último resultado e declare divergências ou lacunas se houver. "
+            "Se houver handoff recusado, falho ou expirado, declare explicitamente os agentes afetados. "
             "Preserve literalmente marcadores, IDs, labels de aceite e tokens de verificação presentes nos resultados; "
             "não os traduza, normalize ou parafraseie. "
             "Formato obrigatório da resposta final: comece com a seção 'Resultados confirmados:' e copie "
             "literalmente cada linha confirmada abaixo antes da síntese profissional.\n\n"
             f"Resultados confirmados:\n{confirmed_results_block}\n\n"
             f"Resultados visíveis deste ciclo:\n{visible_results_block}"
+            f"{timeout_block}"
         )
         await dispatch_squad_turn(
             target_agent_id=thread.coordinator_agent_id,
@@ -6827,9 +6983,11 @@ async def _maybe_enqueue_squad_reply_synthesis(
     try:
         from koda.squads import (
             dispatch_squad_turn,
+            evaluate_synthesis_readiness,
             get_squad_thread_store,
             get_thread_reply_service,
             message_ref_to_id,
+            synthesis_gate_metric,
         )
 
         thread_store = get_squad_thread_store()
@@ -6861,7 +7019,21 @@ async def _maybe_enqueue_squad_reply_synthesis(
                 status="open",
             )
             if open_items:
+                readiness = evaluate_synthesis_readiness(reply_obligations=open_items)
+                synthesis_gate_metric(gate="reply_cycle", result=readiness)
                 return
+        readiness = evaluate_synthesis_readiness(
+            result_messages=[
+                {
+                    "type": "agent_reply",
+                    "id": squad_message_id or ctx.delegation_request_id,
+                    "from": executing_agent,
+                }
+            ]
+        )
+        synthesis_gate_metric(gate="reply_cycle", result=readiness)
+        if not readiness.ready:
+            return
         synthesis_query = (
             "As obrigações de reply deste ciclo foram respondidas. "
             "Sintetize a resposta final para o usuário usando apenas as mensagens visíveis da thread, "
@@ -7123,6 +7295,23 @@ async def _post_process(
                 from koda.memory.extraction_supervisor import get_memory_extraction_supervisor
 
                 async def _extract_memory() -> None:
+                    if (
+                        ctx
+                        and ctx.is_child_run
+                        and not bool((ctx.child_context_policy or {}).get("allow_memory_writes"))
+                    ):
+                        try:
+                            from koda.memory.quality import record_memory_quality_counter
+
+                            record_memory_quality_counter(
+                                ctx.executing_agent_id or AGENT_ID,
+                                "memory_write",
+                                "denied",
+                                "child_run",
+                            )
+                        except Exception:
+                            log.debug("child_run_memory_write_counter_failed", exc_info=True)
+                        return
                     mm = get_memory_manager()
                     knowledge_ctx = getattr(ctx, "knowledge_query_context", None)
                     await mm.post_query(

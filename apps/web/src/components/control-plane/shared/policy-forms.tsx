@@ -51,22 +51,22 @@ export function MemoryPolicyForm({
   onChange: (next: MemoryPolicyData) => void;
   providerOptions: Array<{ value: string; label: string }>;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap gap-3">
         <div className="min-w-[240px] flex-1">
           <ToggleCard
-            label={tl("Memória habilitada")}
+            label={t("generated.controlPlane.memoria_habilitada_72a98e34")}
             checked={policy.enabled}
             onChange={(checked) => onChange({ ...policy, enabled: checked })}
           />
         </div>
         <div className="min-w-[240px] flex-1">
           <ToggleCard
-            label={tl("Memória proativa")}
-            description={tl("Permite sugerir contexto útil antes de ser solicitado.")}
+            label={t("generated.controlPlane.memoria_proativa_4cb243f6")}
+            description={t("generated.controlPlane.permite_sugerir_contexto_util_antes_de_ser_s_c6c77ec1")}
             checked={policy.proactive_enabled}
             onChange={(checked) =>
               onChange({ ...policy, proactive_enabled: checked })
@@ -75,8 +75,8 @@ export function MemoryPolicyForm({
         </div>
         <div className="min-w-[240px] flex-1">
           <ToggleCard
-            label={tl("Memória procedural")}
-            description={tl("Aprende procedimentos e padrões úteis ao longo do uso.")}
+            label={t("generated.controlPlane.memoria_procedural_ea2e2174")}
+            description={t("generated.controlPlane.aprende_procedimentos_e_padroes_uteis_ao_lon_493f493b")}
             checked={policy.procedural_enabled}
             onChange={(checked) =>
               onChange({ ...policy, procedural_enabled: checked })
@@ -85,8 +85,8 @@ export function MemoryPolicyForm({
         </div>
         <div className="min-w-[240px] flex-1">
           <ToggleCard
-            label={tl("Auto manutenção")}
-            description={tl("Mantém a memória limpa e operacional ao longo do tempo.")}
+            label={t("generated.controlPlane.auto_manutencao_ec0220d2")}
+            description={t("generated.controlPlane.mantem_a_memoria_limpa_e_operacional_ao_long_dc0fd339")}
             checked={policy.maintenance_enabled}
             onChange={(checked) =>
               onChange({ ...policy, maintenance_enabled: checked })
@@ -97,19 +97,19 @@ export function MemoryPolicyForm({
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <FormSelect
-          label={tl("Postura de risco")}
+          label={t("generated.controlPlane.postura_de_risco_6cba15f2")}
           value={policy.risk_posture}
           onChange={(event) =>
             onChange({ ...policy, risk_posture: event.target.value })
           }
           options={[
-            { value: "conservative", label: tl("Conservadora") },
-            { value: "balanced", label: tl("Equilibrada") },
-            { value: "aggressive", label: tl("Agressiva") },
+            { value: "conservative", label: t("generated.controlPlane.conservadora_65d653e2") },
+            { value: "balanced", label: t("generated.controlPlane.equilibrada_50b6b2cb") },
+            { value: "aggressive", label: t("generated.controlPlane.agressiva_07421904") },
           ]}
         />
         <FormSelect
-          label={tl("Densidade de memória")}
+          label={t("generated.controlPlane.densidade_de_memoria_3681ba63")}
           value={policy.memory_density_target}
           onChange={(event) =>
             onChange({
@@ -118,13 +118,13 @@ export function MemoryPolicyForm({
             })
           }
           options={[
-            { value: "sparse", label: tl("Esparsa") },
-            { value: "focused", label: tl("Focada") },
-            { value: "dense", label: tl("Densa") },
+            { value: "sparse", label: t("generated.controlPlane.esparsa_c8b19ab7") },
+            { value: "focused", label: t("generated.controlPlane.focada_da0681f7") },
+            { value: "dense", label: t("generated.controlPlane.densa_ddc78dfd") },
           ]}
         />
         <FormInput
-          label={tl("Memórias por vez")}
+          label={t("generated.controlPlane.memorias_por_vez_d776eebc")}
           type="number"
           min="1"
           step="1"
@@ -137,7 +137,7 @@ export function MemoryPolicyForm({
           }
         />
         <FormInput
-          label={tl("Contexto de memória")}
+          label={t("generated.controlPlane.contexto_de_memoria_2f83edf7")}
           type="number"
           min="256"
           step="128"
@@ -154,13 +154,13 @@ export function MemoryPolicyForm({
         />
       </div>
 
-      <SectionCollapsible title={tl("Como o agente aprende e o que vale guardar")}>
+      <SectionCollapsible title={t("generated.controlPlane.como_o_agente_aprende_e_o_que_vale_guardar_91a96adf")}>
         <div className="flex flex-col gap-5 pt-2">
           <div className="flex flex-wrap gap-3">
             <div className="min-w-[240px] flex-1">
               <ToggleCard
-                label={tl("Digest de memória")}
-                description={tl("Consolida aprendizados recorrentes em resumos úteis.")}
+                label={t("generated.controlPlane.digest_de_memoria_9f016b69")}
+                description={t("generated.controlPlane.consolida_aprendizados_recorrentes_em_resumo_3a69b830")}
                 checked={policy.digest_enabled}
                 onChange={(checked) =>
                   onChange({ ...policy, digest_enabled: checked })
@@ -169,8 +169,8 @@ export function MemoryPolicyForm({
             </div>
             <div className="min-w-[240px] flex-1">
               <ToggleCard
-                label={tl("Revisar padrões")}
-                description={tl("Exige revisão antes de promover padrões observados.")}
+                label={t("generated.controlPlane.revisar_padroes_13888064")}
+                description={t("generated.controlPlane.exige_revisao_antes_de_promover_padroes_obse_6eb4fd67")}
                 checked={policy.observed_pattern_requires_review}
                 onChange={(checked) =>
                   onChange({
@@ -184,7 +184,7 @@ export function MemoryPolicyForm({
 
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <FormInput
-              label={tl("Itens por extração")}
+              label={t("generated.controlPlane.itens_por_extracao_3eb04941")}
               type="number"
               min="1"
               step="1"
@@ -200,7 +200,7 @@ export function MemoryPolicyForm({
               }
             />
             <FormInput
-              label={tl("Máximo por usuário")}
+              label={t("generated.controlPlane.maximo_por_usuario_dabe66fc")}
               type="number"
               min="1"
               step="1"
@@ -216,48 +216,48 @@ export function MemoryPolicyForm({
               }
             />
             <FormSelect
-              label={tl("Provider de extração")}
-              description={tl("Provider usado para extrair aprendizados do turno.")}
+              label={t("generated.controlPlane.provider_de_extracao_8a7ea8b4")}
+              description={t("generated.controlPlane.provider_usado_para_extrair_aprendizados_do__0f632bc7")}
               value={policy.extraction_provider}
               onChange={(event) =>
                 onChange({ ...policy, extraction_provider: event.target.value })
               }
               options={[
-                { value: "", label: tl("Herdar do padrão global") },
+                { value: "", label: t("generated.controlPlane.herdar_do_padrao_global_199d99a8") },
                 ...providerOptions,
               ]}
             />
             <FormInput
-              label={tl("Modelo de extração")}
-              description={tl("Modelo específico usado para extrair memória, se quiser fixar um.")}
+              label={t("generated.controlPlane.modelo_de_extracao_03028047")}
+              description={t("generated.controlPlane.modelo_especifico_usado_para_extrair_memoria_88df10a6")}
               value={policy.extraction_model}
               onChange={(event) =>
                 onChange({ ...policy, extraction_model: event.target.value })
               }
-              placeholder={tl("Ex: claude-sonnet-4-6")}
+              placeholder={t("generated.controlPlane.ex_claude_sonnet_4_6_48d6d69e")}
             />
           </div>
 
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
             <TagInputField
-              label={tl("Domínios de foco")}
-              description={tl("Temas nos quais o agente deve investir mais retenção.")}
+              label={t("generated.controlPlane.dominios_de_foco_80ab825d")}
+              description={t("generated.controlPlane.temas_nos_quais_o_agente_deve_investir_mais__46247ffb")}
               values={policy.focus_domains}
               onChange={(values) => onChange({ ...policy, focus_domains: values })}
-              placeholder={tl("Ex: incidentes")}
+              placeholder={t("generated.controlPlane.ex_incidentes_a0a0fe97")}
             />
             <TagInputField
-              label={tl("Camadas preferidas")}
-              description={tl("Camadas de memória com mais peso quando houver empate.")}
+              label={t("generated.controlPlane.camadas_preferidas_cf8d364a")}
+              description={t("generated.controlPlane.camadas_de_memoria_com_mais_peso_quando_houv_4886567e")}
               values={policy.preferred_layers}
               onChange={(values) =>
                 onChange({ ...policy, preferred_layers: values })
               }
-              placeholder={tl("Ex: procedural")}
+              placeholder={t("generated.controlPlane.ex_procedural_84640812")}
             />
             <TagInputField
-              label={tl("Camadas proibidas para ações")}
-              description={tl("Camadas que não devem sustentar ações sensíveis sozinhas.")}
+              label={t("generated.controlPlane.camadas_proibidas_para_acoes_600c854c")}
+              description={t("generated.controlPlane.camadas_que_nao_devem_sustentar_acoes_sensiv_4dee8a9d")}
               values={policy.forbidden_layers_for_actions}
               onChange={(values) =>
                 onChange({
@@ -265,16 +265,16 @@ export function MemoryPolicyForm({
                   forbidden_layers_for_actions: values,
                 })
               }
-              placeholder={tl("Ex: proactive")}
+              placeholder={t("generated.controlPlane.ex_proactive_6f631fc9")}
             />
           </div>
         </div>
       </SectionCollapsible>
 
-      <SectionCollapsible title={tl("Ajustes avançados de ranking e recall")}>
+      <SectionCollapsible title={t("generated.controlPlane.ajustes_avancados_de_ranking_e_recall_aa97be4f")}>
         <div className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-2 xl:grid-cols-3">
           <FormInput
-            label={tl("Similaridade mínima")}
+            label={t("generated.controlPlane.similaridade_minima_03023546")}
             type="number"
             min="0"
             max="1"
@@ -291,7 +291,7 @@ export function MemoryPolicyForm({
             }
           />
           <FormInput
-            label={tl("Timeout de recall")}
+            label={t("generated.controlPlane.timeout_de_recall_0707b75b")}
             type="number"
             min="0.1"
             step="0.1"
@@ -307,7 +307,7 @@ export function MemoryPolicyForm({
             }
           />
           <FormInput
-            label={tl("Recall procedural")}
+            label={t("generated.controlPlane.recall_procedural_e2d14723")}
             type="number"
             min="1"
             step="1"
@@ -323,8 +323,8 @@ export function MemoryPolicyForm({
             }
           />
           <FormInput
-            label={tl("Deduplicação semântica")}
-            description={tl("Threshold para evitar memórias semanticamente duplicadas.")}
+            label={t("generated.controlPlane.deduplicacao_semantica_0b49be65")}
+            description={t("generated.controlPlane.threshold_para_evitar_memorias_semanticament_7501a226")}
             type="number"
             min="0"
             max="1"
@@ -341,8 +341,8 @@ export function MemoryPolicyForm({
             }
           />
           <FormInput
-            label={tl("Half-life (dias)")}
-            description={tl("Peso de recência aplicado no ranking de recall.")}
+            label={t("generated.controlPlane.half_life_dias_4cc40641")}
+            description={t("generated.controlPlane.peso_de_recencia_aplicado_no_ranking_de_reca_f0cce4c3")}
             type="number"
             min="1"
             step="1"
@@ -358,8 +358,8 @@ export function MemoryPolicyForm({
             }
           />
           <FormInput
-            label={tl("Promoção após sucessos")}
-            description={tl("Mínimo de sucessos verificados para promover um padrão.")}
+            label={t("generated.controlPlane.promocao_apos_sucessos_e2168c27")}
+            description={t("generated.controlPlane.minimo_de_sucessos_verificados_para_promover_0d49557a")}
             type="number"
             min="1"
             step="1"
@@ -389,22 +389,22 @@ export function KnowledgePolicyForm({
   onChange: (next: KnowledgePolicyData) => void;
   layerOptions: Array<{ value: string; label: string }>;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-wrap gap-3">
         <div className="min-w-[240px] flex-1">
           <ToggleCard
-            label={tl("Grounding habilitado")}
+            label={t("generated.controlPlane.grounding_habilitado_bbc5f800")}
             checked={policy.enabled}
             onChange={(checked) => onChange({ ...policy, enabled: checked })}
           />
         </div>
         <div className="min-w-[240px] flex-1">
           <ToggleCard
-            label={tl("Exigir owner")}
-            description={tl("Bloqueia fontes críticas sem dono definido.")}
+            label={t("generated.controlPlane.exigir_owner_6ecbd756")}
+            description={t("generated.controlPlane.bloqueia_fontes_criticas_sem_dono_definido_e145befb")}
             checked={policy.require_owner_provenance}
             onChange={(checked) =>
               onChange({
@@ -416,8 +416,8 @@ export function KnowledgePolicyForm({
         </div>
         <div className="min-w-[240px] flex-1">
           <ToggleCard
-            label={tl("Exigir freshness")}
-            description={tl("Bloqueia fontes críticas sem janela de frescor definida.")}
+            label={t("generated.controlPlane.exigir_freshness_a9131edb")}
+            description={t("generated.controlPlane.bloqueia_fontes_criticas_sem_janela_de_fresc_e82b4d68")}
             checked={policy.require_freshness_provenance}
             onChange={(checked) =>
               onChange({
@@ -430,8 +430,8 @@ export function KnowledgePolicyForm({
       </div>
 
       <CheckboxGroupField
-        label={tl("Camadas permitidas")}
-        description={tl("Escolha em quais camadas o agente pode se apoiar. Se estiver em dúvida, mantenha as camadas mais fortes marcadas.")}
+        label={t("generated.controlPlane.camadas_permitidas_568c3c57")}
+        description={t("generated.controlPlane.escolha_em_quais_camadas_o_agente_pode_se_ap_ed5e3cc1")}
         options={layerOptions}
         selected={policy.allowed_layers}
         onChange={(selected) =>
@@ -441,7 +441,7 @@ export function KnowledgePolicyForm({
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
         <FormInput
-          label={tl("Trechos por busca")}
+          label={t("generated.controlPlane.trechos_por_busca_02dccb85")}
           type="number"
           min="1"
           step="1"
@@ -457,7 +457,7 @@ export function KnowledgePolicyForm({
           }
         />
         <FormInput
-          label={tl("Contexto de conhecimento")}
+          label={t("generated.controlPlane.contexto_de_conhecimento_4d80778d")}
           type="number"
           min="256"
           step="128"
@@ -473,7 +473,7 @@ export function KnowledgePolicyForm({
           }
         />
         <FormInput
-          label={tl("Idade máxima (dias)")}
+          label={t("generated.controlPlane.idade_maxima_dias_3ee1c668")}
           type="number"
           min="1"
           step="1"
@@ -492,27 +492,27 @@ export function KnowledgePolicyForm({
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
         <TagInputField
-          label={tl("Arquivos globais incluídos")}
-          description={tl("Arquivos globais que podem entrar na indexação semântica.")}
+          label={t("generated.controlPlane.arquivos_globais_incluidos_db1f7ed0")}
+          description={t("generated.controlPlane.arquivos_globais_que_podem_entrar_na_indexac_0a26acf1")}
           values={policy.source_globs}
           onChange={(values) => onChange({ ...policy, source_globs: values })}
-          placeholder={tl("Ex: docs/**/*.md")}
+          placeholder={t("generated.controlPlane.ex_docs_md_1a7d15bc")}
         />
         <TagInputField
-          label={tl("Arquivos do workspace incluídos")}
-          description={tl("Arquivos dinâmicos elegíveis dentro do workspace do agente.")}
+          label={t("generated.controlPlane.arquivos_do_workspace_incluidos_ea401b75")}
+          description={t("generated.controlPlane.arquivos_dinamicos_elegiveis_dentro_do_works_66582270")}
           values={policy.workspace_source_globs}
           onChange={(values) =>
             onChange({ ...policy, workspace_source_globs: values })
           }
-          placeholder={tl("Ex: README.md")}
+          placeholder={t("generated.controlPlane.ex_readme_md_cc7da155")}
         />
       </div>
 
-      <SectionCollapsible title={tl("Ajustes avançados de recuperação")}>
+      <SectionCollapsible title={t("generated.controlPlane.ajustes_avancados_de_recuperacao_4141992c")}>
         <div className="grid grid-cols-1 gap-4 pt-2 md:grid-cols-2 xl:grid-cols-4">
           <FormInput
-            label={tl("Similaridade mínima")}
+            label={t("generated.controlPlane.similaridade_minima_03023546")}
             type="number"
             min="0"
             max="1"
@@ -529,8 +529,8 @@ export function KnowledgePolicyForm({
             }
           />
           <FormInput
-            label={tl("Timeout de recuperação")}
-            description={tl("Tempo máximo de recuperação antes de degradar.")}
+            label={t("generated.controlPlane.timeout_de_recuperacao_f32cb1fd")}
+            description={t("generated.controlPlane.tempo_maximo_de_recuperacao_antes_de_degrada_d840a6f1")}
             type="number"
             min="0.1"
             step="0.1"
@@ -546,8 +546,8 @@ export function KnowledgePolicyForm({
             }
           />
           <FormInput
-            label={tl("Arquivos do workspace")}
-            description={tl("Máximo de arquivos dinâmicos avaliados por busca.")}
+            label={t("generated.controlPlane.arquivos_do_workspace_3f43ffea")}
+            description={t("generated.controlPlane.maximo_de_arquivos_dinamicos_avaliados_por_b_ff7835d7")}
             type="number"
             min="0"
             step="1"
@@ -563,8 +563,8 @@ export function KnowledgePolicyForm({
             }
           />
           <FormInput
-            label={tl("Padrões observados")}
-            description={tl("Limite de padrões semânticos fracos no grounding.")}
+            label={t("generated.controlPlane.padroes_observados_e3a11106")}
+            description={t("generated.controlPlane.limite_de_padroes_semanticos_fracos_no_groun_2ee0e1f6")}
             type="number"
             min="0"
             step="1"
@@ -580,8 +580,8 @@ export function KnowledgePolicyForm({
             }
           />
           <FormInput
-            label={tl("Modo de promoção")}
-            description={tl("Hoje a promoção continua governada por fila de revisão.")}
+            label={t("generated.controlPlane.modo_de_promocao_ff0cd1b9")}
+            description={t("generated.controlPlane.hoje_a_promocao_continua_governada_por_fila__f81977b2")}
             value={policy.promotion_mode}
             readOnly
             disabled
@@ -601,7 +601,7 @@ export function MemoryPolicyFormSimple({
   policy: MemoryPolicyData;
   onChange: (next: MemoryPolicyData) => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   function handleToggle(enabled: boolean) {
     const next = { ...policy, enabled };
@@ -617,8 +617,8 @@ export function MemoryPolicyFormSimple({
 
   return (
     <ToggleCard
-      label={tl("Memória habilitada")}
-      description={tl("O agente retém e usa aprendizados entre conversas.")}
+      label={t("generated.controlPlane.memoria_habilitada_72a98e34")}
+      description={t("generated.controlPlane.o_agente_retem_e_usa_aprendizados_entre_conv_1b50cb8f")}
       checked={policy.enabled}
       onChange={handleToggle}
     />
@@ -638,7 +638,7 @@ export function KnowledgePolicyFormSimple({
   onMemoryChange: (next: MemoryPolicyData) => void;
   providerOptions: Array<{ value: string; label: string }>;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   function handleToggle(enabled: boolean) {
     const next = { ...policy, enabled };
@@ -652,32 +652,32 @@ export function KnowledgePolicyFormSimple({
   return (
     <div className="flex flex-col gap-5">
       <ToggleCard
-        label={tl("Grounding habilitado")}
-        description={tl("O agente busca fontes verificadas antes de responder.")}
+        label={t("generated.controlPlane.grounding_habilitado_bbc5f800")}
+        description={t("generated.controlPlane.o_agente_busca_fontes_verificadas_antes_de_r_72c30f84")}
         checked={policy.enabled}
         onChange={handleToggle}
       />
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <FormSelect
-          label={tl("Provider de extração")}
-          description={tl("Provider usado para extrair aprendizados.")}
+          label={t("generated.controlPlane.provider_de_extracao_8a7ea8b4")}
+          description={t("generated.controlPlane.provider_usado_para_extrair_aprendizados_ab6185d4")}
           value={memoryPolicy.extraction_provider}
           onChange={(event) =>
             onMemoryChange({ ...memoryPolicy, extraction_provider: event.target.value })
           }
           options={[
-            { value: "", label: tl("Herdar do padrão global") },
+            { value: "", label: t("generated.controlPlane.herdar_do_padrao_global_199d99a8") },
             ...providerOptions,
           ]}
         />
         <FormInput
-          label={tl("Modelo de extração")}
-          description={tl("Modelo usado para extrair memória.")}
+          label={t("generated.controlPlane.modelo_de_extracao_03028047")}
+          description={t("generated.controlPlane.modelo_usado_para_extrair_memoria_47845826")}
           value={memoryPolicy.extraction_model}
           onChange={(event) =>
             onMemoryChange({ ...memoryPolicy, extraction_model: event.target.value })
           }
-          placeholder={tl("Ex: claude-sonnet-4-6")}
+          placeholder={t("generated.controlPlane.ex_claude_sonnet_4_6_48d6d69e")}
         />
       </div>
     </div>
@@ -695,12 +695,12 @@ export function AutonomyPolicyForm({
   approvalOptions: Array<{ value: string; label: string }>;
   tierOptions: Array<{ value: string; label: string }>;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
       <FormSelect
-        label={tl("Approval mode padrão")}
-        description={tl("Nível de contenção padrão para execuções do agente.")}
+        label={t("generated.controlPlane.approval_mode_padrao_f9190465")}
+        description={t("generated.controlPlane.nivel_de_contencao_padrao_para_execucoes_do__6120d5e2")}
         value={policy.default_approval_mode}
         onChange={(event) =>
           onChange({
@@ -711,8 +711,8 @@ export function AutonomyPolicyForm({
         options={approvalOptions}
       />
       <FormSelect
-        label={tl("Autonomy tier padrão")}
-        description={tl("Envelope de autonomia padrão para tarefas complexas.")}
+        label={t("generated.controlPlane.autonomy_tier_padrao_2be664e9")}
+        description={t("generated.controlPlane.envelope_de_autonomia_padrao_para_tarefas_co_699f7c91")}
         value={policy.default_autonomy_tier}
         onChange={(event) =>
           onChange({

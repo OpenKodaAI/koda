@@ -25,6 +25,8 @@ import { RuntimeFilesPanel } from "@/components/runtime/runtime-files-panel";
 import {
   ChildRunsPanel,
   ContextGovernancePanel,
+  HandoffTimelinePanel,
+  RouteExplanationPanel,
   RunGraphSummaryPanel,
   RunGraphViewer,
   RunReplayPanel,
@@ -44,6 +46,7 @@ import { useRuntimeTask } from "@/hooks/use-runtime-task";
 import { useToast } from "@/hooks/use-toast";
 import { translate } from "@/lib/i18n";
 import { getAgentLabel } from "@/lib/agent-constants";
+import { parseReleaseQuality } from "@/lib/contracts/evals";
 import { parseRunGraphSnapshot, parseRunReplayPlan } from "@/lib/contracts/run-graph";
 import { parseContextGovernancePayload } from "@/lib/contracts/phase3-runtime";
 import { parseSandboxDoctorResult } from "@/lib/contracts/sandbox-doctor";
@@ -98,10 +101,10 @@ function toneToDot(tone: SemanticTone): StatusDotTone {
 }
 
 function TerminalPanelLoading() {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <div className="flex min-h-[360px] items-center justify-center bg-[var(--terminal-background)] text-[0.8125rem] text-[var(--text-tertiary)]">
-      {tl("Preparando terminal...")}
+      {t("generated.runtime.preparando_terminal_892fc854")}
     </div>
   );
 }
@@ -177,7 +180,7 @@ function RuntimeTaskHeader({
             >
               <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
             </Link>
-            <span className="font-medium text-[var(--text-secondary)]">Task #{taskId}</span>
+            <span className="font-medium text-[var(--text-secondary)]">{translate("generated.runtime.task_10323a33")}{taskId}</span>
             <span className="text-[var(--text-quaternary)]">/</span>
             <span className="truncate">{getAgentLabel(agentId)}</span>
             <span className="text-[var(--text-quaternary)]">/</span>
@@ -381,7 +384,7 @@ function RuntimeStatFooter({ stats }: { stats: RuntimeStageStat[] }) {
 }
 
 export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { showToast } = useToast();
   const warningToastKeysRef = useRef<Set<string>>(new Set());
   const { bundle, loading, error, connected, mutate, fetchResource, refresh } =
@@ -402,6 +405,10 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
   const runReplay = useMemo(
     () => parseRunReplayPlan(bundle?.run_replay ?? null) ?? runGraph?.replay ?? null,
     [bundle?.run_replay, runGraph],
+  );
+  const releaseQuality = useMemo(
+    () => parseReleaseQuality((bundle as { release_quality?: unknown } | null | undefined)?.release_quality ?? null),
+    [bundle],
   );
   const sandboxDoctor = useMemo(
     () => parseSandboxDoctorResult(bundle?.sandbox_doctor ?? null),
@@ -757,7 +764,7 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                 />
               </SharedDetailGrid>
 
-              <SharedDetailBlock title="Source root" monospace>
+              <SharedDetailBlock title={translate("generated.runtime.source_root_419163c0")} monospace>
                 {sourceRootPath || "—"}
               </SharedDetailBlock>
 
@@ -768,10 +775,7 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                 >
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   <span>
-                    {t("runtime.room.sourceRootMissing", {
-                      defaultValue:
-                        "Source root is unavailable. The task workspace remains available.",
-                    })}
+                    {t("runtime.room.sourceRootMissing", undefined)}
                   </span>
                 </div>
               ) : null}
@@ -806,9 +810,12 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
               <RunGraphSummaryPanel
                 graph={runGraph}
                 replay={runReplay}
+                releaseQuality={releaseQuality}
                 runtimeHref={`/runtime/${agentId}/tasks/${taskId}`}
               />
               <RunGraphViewer graph={runGraph} />
+              <RouteExplanationPanel graph={runGraph} />
+              <HandoffTimelinePanel graph={runGraph} />
               <ChildRunsPanel
                 agentId={agentId}
                 childRuns={childRuns}
@@ -874,7 +881,7 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                   value={formatPercent(latestResource?.cpu_percent)}
                 />
                 <SharedDetailDatum
-                  label={tl("RSS")}
+                  label={t("generated.runtime.rss_d80e882b")}
                   value={formatBytes(
                     latestResource?.rss_kb != null
                       ? latestResource.rss_kb * 1024
@@ -1119,7 +1126,7 @@ function RuntimeEventLogRow({ event }: { event: RuntimeEvent }) {
           {getRuntimeLabel(event.severity || "info")}
         </span>
         <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
-          seq {event.seq}
+          {translate("generated.runtime.seq_bb6e6e40")}{event.seq}
         </span>
         {event.phase ? (
           <span className="text-[0.6875rem] text-[var(--text-quaternary)]">

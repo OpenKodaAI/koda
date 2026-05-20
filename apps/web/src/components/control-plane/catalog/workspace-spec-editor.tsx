@@ -20,7 +20,7 @@ export function WorkspaceSpecEditor({
   open,
   onClose,
 }: WorkspaceSpecEditorProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { showToast } = useToast();
   const [promptValue, setPromptValue] = useState("");
   const [loading, setLoading] = useState(false);
@@ -53,11 +53,11 @@ export function WorkspaceSpecEditor({
           },
         }),
       });
-      showToast(tl("System prompt do espaco de trabalho salvo com sucesso."), "success");
+      showToast(t("generated.controlPlane.system_prompt_do_espaco_de_trabalho_salvo_co_1c8c5a96"), "success");
       onClose();
     } catch (err) {
       showToast(
-        err instanceof Error ? err.message : tl("Erro ao salvar o system prompt do espaco de trabalho."),
+        err instanceof Error ? err.message : t("generated.controlPlane.erro_ao_salvar_o_system_prompt_do_espaco_de__efb39d2d"),
         "error",
       );
     } finally {
@@ -71,21 +71,12 @@ export function WorkspaceSpecEditor({
       loading={loading}
       saving={saving}
       icon={<Shield size={18} />}
-      title={tl("System prompt do espaco de trabalho")}
+      title={t("generated.controlPlane.system_prompt_do_espaco_de_trabalho_c13ea4d3")}
       subtitle={workspaceName}
-      description={tl("Defina o contexto e as regras que devem orientar todos os times e agentes deste espaco.")}
-      fieldLabel={tl("System prompt")}
+      description={t("generated.controlPlane.defina_o_contexto_e_as_regras_que_devem_orie_d6280bca")}
+      fieldLabel={t("generated.controlPlane.system_prompt_0bbdbb67")}
       value={promptValue}
-      placeholder={tl(`Ex.:
-# Contexto
-Produto B2B para operacoes financeiras.
-
-# Regras
-- Priorizar rastreabilidade e precisao.
-- Nunca assumir dados nao confirmados.
-
-# Qualidade esperada
-Entregar respostas objetivas, com contexto suficiente para execucao segura.`)}
+      placeholder={t("generated.controlPlane.ex_contexto_produto_b2b_para_operacoes_finan_a47669c6")}
       onChange={setPromptValue}
       onClose={onClose}
       onSave={() => void handleSave()}

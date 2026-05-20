@@ -24,15 +24,6 @@ import {
   integrationCardRootClassName,
 } from "./integration-card-presentation";
 
-/*  Category labels for provider types                                 */
-
-const PROVIDER_CATEGORY_LABELS: Record<string, string> = {
-  general: "LLM",
-  voice: "Voz",
-  transcription: "Transcrições",
-  media: "Mídia",
-};
-
 /*  Transition variants                                                */
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -62,9 +53,9 @@ function ProviderCard({
   connection: { connection_status: string; verified: boolean; configured: boolean } | undefined;
   onClick: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const label = providerLabel(provider.id);
-  const description = providerDescription(provider.id, provider.category);
+  const description = providerDescription(provider.id, provider.category, t);
 
   const isVerified = connection?.verified ?? false;
   const isConfigured = connection?.configured ?? false;
@@ -78,12 +69,12 @@ function ProviderCard({
       type="button"
       onClick={onClick}
       className={integrationCardRootClassName(status)}
-      aria-label={`${label} — ${status === "connected" ? tl("Conectado") : status === "pending" ? tl("Pendente") : tl("Desconectado")}`}
+      aria-label={`${label} — ${status === "connected" ? t("generated.controlPlane.conectado_e04915ac") : status === "pending" ? t("generated.controlPlane.pendente_e3354bca") : t("generated.controlPlane.desconectado_c3597850")}`}
     >
       <ProviderLogo providerId={provider.id} title={label} active={isVerified} accented />
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{label}</div>
-        <div className="mt-0.5 truncate text-xs text-[var(--text-quaternary)]">{tl(description)}</div>
+        <div className="mt-0.5 truncate text-xs text-[var(--text-quaternary)]">{description}</div>
       </div>
       <div className="flex shrink-0 items-center">
         <IntegrationCardStatusIndicator status={status} />
@@ -94,22 +85,17 @@ function ProviderCard({
 
 /*  Provider detail view (matches integration detail layout)           */
 
-const PROVIDER_CATEGORY_DISPLAY: Record<string, string> = {
-  general: "LLM",
-  voice: "Voz",
-  transcription: "Transcrições",
-  media: "Mídia",
-};
+function providerCategoryLabel(category: string, t: (key: string) => string) {
+  const key = `controlPlane.providerGrid.categories.${category}`;
+  const label = t(key);
+  return label === key ? category : label;
+}
 
-const PROVIDER_HIGHLIGHT_COPY: Record<string, string> = {
-  claude: "Anthropic para raciocínio profundo, revisão de código e fluxos oficiais do Claude Code.",
-  codex: "OpenAI para tarefas agentic, execução assistida e modelos GPT com API key ou login oficial.",
-  gemini: "Google Gemini para geração multimodal, AI Studio e autenticação oficial via Gemini CLI.",
-  elevenlabs: "ElevenLabs para síntese de voz premium com catálogo gerenciado e idioma padrão por agent.",
-  ollama: "Ollama para modelos locais ou remotos com descoberta real do catálogo no endpoint configurado.",
-  kokoro: "Kokoro entrega TTS local com vozes sob demanda e operação otimizada para ambientes self-hosted.",
-  whispercpp: "Whisper.cpp mantém transcrição local com runtime leve para ambientes controlados.",
-};
+function providerHighlightCopy(providerId: string, fallback: string, t: (key: string) => string) {
+  const key = `controlPlane.providerGrid.highlights.${providerId}`;
+  const copy = t(key);
+  return copy === key ? fallback : copy;
+}
 
 function ProviderDetailView({
   provider,
@@ -118,13 +104,13 @@ function ProviderDetailView({
   provider: ProviderOption;
   onBack: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const ui = useProviderConnectionUi(provider, true);
 
   const label = providerLabel(provider.id);
-  const description = providerDescription(provider.id, provider.category);
+  const description = providerDescription(provider.id, provider.category, t);
   const accentRaw = PROVIDER_ACCENTS[provider.id] || "255 255 255";
-  const highlightDescription = PROVIDER_HIGHLIGHT_COPY[provider.id] || description;
+  const highlightDescription = providerHighlightCopy(provider.id, description, t);
 
   return (
     <div className="space-y-6">
@@ -136,7 +122,7 @@ function ProviderDetailView({
       >
         <ArrowLeft size={14} />
         <span>
-          {tl("Provedores AI")}
+          {t("generated.controlPlane.provedores_ai_cd03be96")}
           <span className="mx-1.5 text-[var(--text-quaternary)]">/</span>
           <span className="text-[var(--text-primary)]">{label}</span>
         </span>
@@ -155,7 +141,7 @@ function ProviderDetailView({
             <h2 className="text-lg font-bold tracking-[-0.03em] text-[var(--text-primary)]">
               {label}
             </h2>
-            <p className="mt-0.5 text-sm text-[var(--text-tertiary)]">{tl(description)}</p>
+            <p className="mt-0.5 text-sm text-[var(--text-tertiary)]">{description}</p>
           </div>
         </div>
 
@@ -167,7 +153,7 @@ function ProviderDetailView({
               size="sm"
               loading={ui.actionLoading}
               status={ui.actionStatus}
-              loadingLabel={tl(ui.actionLoadingLabel)}
+              loadingLabel={ui.actionLoadingLabel}
               onClick={ui.handleActionClick}
               disabled={ui.actionDisabled}
               icon={ui.actionIcon}
@@ -176,7 +162,7 @@ function ProviderDetailView({
                 ui.shouldShowDisconnect && "text-[var(--text-secondary)]",
               )}
             >
-              {tl(ui.actionLabel)}
+              {ui.actionLabel}
             </AsyncActionButton>
           ) : null}
         </div>
@@ -212,7 +198,7 @@ function ProviderDetailView({
               <span className="text-sm font-semibold text-[var(--icon-primary)]">{label.slice(0, 1)}</span>
             )}
             <span className="text-sm text-[var(--text-primary)]">
-              {tl(highlightDescription)}
+              {highlightDescription}
             </span>
           </div>
         </div>
@@ -220,7 +206,7 @@ function ProviderDetailView({
 
       <section
         className="rounded-[26px] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-5 py-4"
-        aria-label={tl("Autenticação de {{provider}}", { provider: label })}
+        aria-label={t("generated.controlPlane.autenticacao_de_provider_52981efb", { provider: label })}
       >
         <ProviderAuthPanel
           provider={provider}
@@ -231,13 +217,13 @@ function ProviderDetailView({
       {/* Info table */}
       <div>
         <span className="eyebrow mb-2 block text-[var(--text-quaternary)]">
-          {tl("Informações")}
+          {t("generated.controlPlane.informacoes_62821400")}
         </span>
         <div className="overflow-hidden rounded-lg border border-[var(--border-subtle)]">
           {[
-            { id: "category", label: tl("Categoria"), value: tl(PROVIDER_CATEGORY_DISPLAY[provider.category] ?? provider.category) },
-            { id: "vendor", label: tl("Desenvolvedor"), value: provider.vendor || label },
-            { id: "type", label: tl("Tipo"), value: tl("Provedor de IA") },
+            { id: "category", label: t("generated.controlPlane.categoria_d4679e28"), value: providerCategoryLabel(provider.category, t) },
+            { id: "vendor", label: t("generated.controlPlane.desenvolvedor_430184b8"), value: provider.vendor || label },
+            { id: "type", label: t("generated.controlPlane.tipo_50772377"), value: t("generated.controlPlane.provedor_de_ia_55ac60c6") },
           ].map((row, i, arr) => (
             <div
               key={row.id}
@@ -265,7 +251,7 @@ function ProviderListView({
   onSelect: (providerId: string) => void;
 }) {
   const { providerOptions, providerConnections } = useSystemSettings();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const [search, setSearch] = useState("");
 
   const visibleProviders = useMemo(() => {
@@ -303,10 +289,10 @@ function ProviderListView({
     <motion.div {...viewOut}>
       <div className="integration-marketplace-hero">
         <h1 className="text-xl font-bold tracking-[-0.04em] text-[var(--text-primary)] sm:text-2xl">
-          {tl("Conecte seus provedores")}
+          {t("generated.controlPlane.conecte_seus_provedores_ae92d64b")}
         </h1>
         <p className="mt-1.5 text-sm text-[var(--text-tertiary)]">
-          {tl("Configure os provedores de IA para modelos de linguagem, voz, transcrição e mídia.")}
+          {t("generated.controlPlane.configure_os_provedores_de_ia_para_modelos_d_46847e7c")}
         </p>
         <div className="mt-4">
           <div className="relative w-full max-w-sm">
@@ -318,9 +304,9 @@ function ProviderListView({
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder={tl("Buscar provedores...")}
+              placeholder={t("generated.controlPlane.buscar_provedores_b7908add")}
               className="field-shell pl-9 pr-3 text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
-              aria-label={tl("Buscar provedores")}
+              aria-label={t("generated.controlPlane.buscar_provedores_75d559f1")}
             />
           </div>
         </div>
@@ -328,14 +314,14 @@ function ProviderListView({
 
       {grouped.length === 0 ? (
         <div className="py-12 text-center text-sm text-[var(--text-quaternary)]">
-          {tl("Nenhum provedor encontrado.")}
+          {t("generated.controlPlane.nenhum_provedor_encontrado_3e744236")}
         </div>
       ) : (
         <div className="mt-4 space-y-4">
           {grouped.map(({ category, entries }) => (
             <div key={category}>
               <span className="eyebrow mb-2 block text-[var(--text-quaternary)]">
-                {tl(PROVIDER_CATEGORY_LABELS[category] ?? category)}
+                {providerCategoryLabel(category, t)}
               </span>
               <div className="grid grid-cols-2 gap-2">
                 {entries.map((provider) => {

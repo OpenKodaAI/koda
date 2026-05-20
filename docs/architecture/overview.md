@@ -84,3 +84,5 @@ For Phase 6 channel identity and first-run readiness, continue with
 For operational replies and multi-agent coordination inside squad rooms,
 continue with
 [Thread Replies And Agent Coordination](thread-replies-agent-coordination.md).
+For handoff events, route explanations, and synthesis gating, continue with
+[Handoffs, Route Quality, And Synthesis Readiness](handoffs-squad-intelligence.md).

@@ -56,7 +56,7 @@ export function ToolGroupSection({
   onToolPolicyChange,
   defaultExpanded = false,
 }: ToolGroupSectionProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const [expanded, setExpanded] = useState(defaultExpanded);
 
   function handleSelectChange(val: GroupPolicy) {
@@ -107,7 +107,7 @@ export function ToolGroupSection({
             sizeVariant="sm"
             onClick={(e) => e.stopPropagation()}
             className="w-auto shrink-0 whitespace-nowrap text-[var(--text-secondary)]"
-            title={tl("Politica do grupo")}
+            title={t("generated.controlPlane.politica_do_grupo_be950a8e")}
           >
             <SelectValue />
           </SelectTrigger>

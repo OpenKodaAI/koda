@@ -1,5 +1,6 @@
 "use client";
 
+import { translate } from "@/lib/i18n";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -57,14 +58,12 @@ export function SandboxDoctorPanel({ result, className }: SandboxDoctorPanelProp
         <div className="flex items-center gap-2">
           <StatusDot tone="neutral" />
           <h3 className="m-0 text-[0.875rem] font-medium text-[var(--text-primary)]">
-            Sandbox doctor unavailable
-          </h3>
+            {translate("generated.runtime.sandbox_doctor_unavailable_894149c1")}</h3>
         </div>
         <div className="flex min-h-[118px] flex-col items-center justify-center gap-2 py-5 text-center">
           <Stethoscope className="h-4 w-4 text-[var(--text-quaternary)]" strokeWidth={1.75} />
           <p className="m-0 max-w-md text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
-            No sandbox_doctor.v1 result is published for this task.
-          </p>
+            {translate("generated.runtime.no_sandbox_doctor_v1_result_is_published_for_524cf81a")}</p>
         </div>
       </section>
     );
@@ -83,11 +82,10 @@ export function SandboxDoctorPanel({ result, className }: SandboxDoctorPanelProp
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-            sandbox_doctor.v1
-          </p>
+            {translate("generated.runtime.sandbox_doctor_v1_f69ac165")}</p>
           <h3 className="m-0 mt-1 flex items-center gap-2 text-[0.875rem] font-medium text-[var(--text-primary)]">
             <StatusDot tone={tone} />
-            Sandbox doctor {result.status}
+            {translate("generated.runtime.sandbox_doctor_cba777ca")} {result.status}
           </h3>
           {result.generated_at ? (
             <p className="m-0 mt-1 text-[0.72rem] text-[var(--text-tertiary)]">
@@ -97,22 +95,21 @@ export function SandboxDoctorPanel({ result, className }: SandboxDoctorPanelProp
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]">
           <StatusDot tone={tone} />
-          {result.checks.length} checks
-        </span>
+          {result.checks.length} {translate("generated.runtime.checks_0912fac7")}</span>
       </div>
 
       {policy ? (
         <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <PolicyDatum label="Network" value={policy.network_mode ?? "—"} />
-          <PolicyDatum label="Shell" value={policy.shell_mode ?? "—"} />
-          <PolicyDatum label="Browser" value={policy.browser_mode ?? "—"} />
+          <PolicyDatum label={translate("generated.runtime.network_330b9529")} value={policy.network_mode ?? "—"} />
+          <PolicyDatum label={translate("generated.runtime.shell_09982404")} value={policy.shell_mode ?? "—"} />
+          <PolicyDatum label={translate("generated.runtime.browser_c68dcf82")} value={policy.browser_mode ?? "—"} />
           <PolicyDatum label="TTL" value={policy.ttl_seconds ? `${policy.ttl_seconds}s` : "—"} />
         </dl>
       ) : null}
 
       {result.degraded_components.length > 0 ? (
         <div className="mt-3 rounded-[var(--radius-panel-sm)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-[0.75rem] text-[var(--tone-warning-text)]">
-          Degraded: {result.degraded_components.join(", ")}
+          {translate("generated.runtime.degraded_0e6a3544")} {result.degraded_components.join(", ")}
         </div>
       ) : null}
 

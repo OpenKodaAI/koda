@@ -31,7 +31,7 @@ async function postJson(path: string, init: RequestInit = {}) {
 export function useCreateAgent() {
   const router = useRouter();
   const { showToast } = useToast();
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { agents } = useAgentCatalog();
   const [creating, setCreating] = useState(false);
 
@@ -51,7 +51,7 @@ export function useCreateAgent() {
       .map((agent) => Number((agent as { runtime_endpoint?: { health_port?: number } }).runtime_endpoint?.health_port ?? 0))
       .filter((value) => Number.isInteger(value) && value > 0);
     const healthPort = Math.max(8079, ...ports) + 1;
-    const displayName = tl("Novo agente");
+    const displayName = t("generated.controlPlane.novo_agente_5f265c7c");
 
     try {
       await postJson("/api/control-plane/agents", {
@@ -77,12 +77,12 @@ export function useCreateAgent() {
       router.push(`/control-plane/agents/${agentId}`);
     } catch (err) {
       showToast(
-        err instanceof Error ? err.message : tl("Erro ao criar agente."),
+        err instanceof Error ? err.message : t("generated.controlPlane.erro_ao_criar_agente_f12f4af5"),
         "error",
       );
       setCreating(false);
     }
-  }, [agents, creating, router, showToast, tl]);
+  }, [agents, creating, router, showToast, t]);
 
   return { creating, createAgent };
 }

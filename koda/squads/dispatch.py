@@ -9,11 +9,15 @@ from typing import Any
 
 from koda.logging_config import get_logger
 from koda.squads.delivery import (
+    HANDOFF_EVENT_SCHEMA_VERSION,
     SQUAD_DELIVERY_SCHEMA_VERSION,
+    build_handoff_event,
     build_route_decision,
     delivery_metric,
     delivery_status_for_source,
+    handoff_metric,
     normalize_delivery_intent,
+    route_quality_metric,
 )
 
 log = get_logger(__name__)
@@ -141,6 +145,9 @@ async def record_squad_routing_decision(
         semantic_result=semantic_result,
         member_profiles=member_profiles,
         final_response_strategy=str(raw_metadata.get("final_response_strategy") or ""),
+        required_tools=raw_metadata.get("required_tools") or raw_metadata.get("required_tool_ids") or (),
+        required_skills=raw_metadata.get("required_skills") or raw_metadata.get("required_skill_ids") or (),
+        min_confidence_for_route=raw_metadata.get("min_confidence_for_route"),
     )
     payload = {
         "schema_version": SQUAD_DELIVERY_SCHEMA_VERSION,
@@ -173,9 +180,103 @@ async def record_squad_routing_decision(
             )
         )
         delivery_metric(event_type="routing_decision", status=delivery_status, source=source)
+        route_quality_metric(
+            source=source,
+            status=route_decision.status,
+            confidence_band=_confidence_band(route_decision.confidence),
+        )
         return message_id
     except Exception:
         log.exception("squad_routing_decision_persist_failed", thread_id=thread_id, source=source, targets=targets)
+        return None
+
+
+async def record_squad_handoff_event(
+    thread_store: Any,
+    *,
+    thread_id: str,
+    source_agent_id: str,
+    destination_agent_ids: list[str],
+    reason: str,
+    handoff_kind: str = "consult",
+    context_policy: dict[str, Any] | None = None,
+    deadline: str | None = None,
+    return_criteria: list[str] | None = None,
+    status: str = "requested",
+    parent_message_id: str | None = None,
+    correlation_id: str | None = None,
+) -> int | None:
+    event_id_seed = {
+        "thread_id": thread_id,
+        "source_agent_id": source_agent_id,
+        "destination_agent_ids": destination_agent_ids,
+        "reason": reason,
+        "handoff_kind": handoff_kind,
+        "parent_message_id": parent_message_id,
+        "correlation_id": correlation_id,
+    }
+    handoff_id = (
+        "handoff-"
+        + hashlib.sha256(
+            repr(sorted(event_id_seed.items())).encode("utf-8"),
+            usedforsecurity=False,
+        ).hexdigest()[:24]
+    )
+    run_graph_node_id = f"handoff_event:{handoff_id}"
+    event = build_handoff_event(
+        handoff_id=handoff_id,
+        thread_id=thread_id,
+        source_agent_id=source_agent_id,
+        destination_agent_ids=destination_agent_ids,
+        reason=reason,
+        handoff_kind=handoff_kind,
+        context_policy=context_policy,
+        deadline=deadline,
+        return_criteria=return_criteria,
+        status=status,
+        run_graph_node_id=run_graph_node_id,
+        correlation_id=correlation_id,
+        parent_message_id=parent_message_id,
+    )
+    payload = event.to_dict()
+    try:
+        message_id = int(
+            await thread_store.post_thread_message(
+                thread_id=thread_id,
+                from_agent=source_agent_id,
+                content=(
+                    f"[handoff_event] {payload['handoff_kind']} "
+                    f"{source_agent_id} -> {', '.join(payload['destination_agent_ids'])}: {reason}"
+                ),
+                message_type="system_event",
+                metadata={
+                    "event_type": "handoff_event",
+                    "schema_version": HANDOFF_EVENT_SCHEMA_VERSION,
+                    "delivery_status": "waiting_for_replies",
+                    "delivery_intent": "execution",
+                    "parent_message_id": parent_message_id,
+                    "correlation_id": payload.get("correlation_id"),
+                    "payload": payload,
+                    "handoff_event": payload,
+                },
+                to_agent_ids=payload["destination_agent_ids"],
+                correlation_id=payload.get("correlation_id"),
+                in_reply_to=parent_message_id,
+            )
+        )
+        handoff_metric(
+            event_type="handoff_event",
+            status=str(payload["status"]),
+            handoff_kind=str(payload["handoff_kind"]),
+        )
+        return message_id
+    except Exception:
+        log.exception(
+            "squad_handoff_event_persist_failed",
+            thread_id=thread_id,
+            source_agent_id=source_agent_id,
+            destination_agent_ids=destination_agent_ids,
+        )
         return None
 
 
@@ -278,6 +379,20 @@ def _dashboard_actor_ids(thread_id: str) -> tuple[int, int]:
     user_id = int(digest[:8], 16) % 2_000_000_000
     user_id = max(100_000, user_id)
     return user_id, -user_id
+
+
+def _confidence_band(value: float) -> str:
+    try:
+        confidence = float(value)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    if confidence >= 0.8:
+        return "high"
+    if confidence >= 0.5:
+        return "medium"
+    if confidence > 0:
+        return "low"
+    return "none"
 
 
 def _runtime_application_or_none() -> Any | None:

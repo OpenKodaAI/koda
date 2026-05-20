@@ -105,9 +105,7 @@ export function RoomPhotoEditor({
       setError(null);
       if (!file.type.startsWith("image/")) {
         setError(
-          t("sessions.room.photo.invalidType", {
-            defaultValue: "That file isn't an image.",
-          }),
+          t("sessions.room.photo.invalidType", undefined),
         );
         return;
       }
@@ -129,9 +127,7 @@ export function RoomPhotoEditor({
         });
       } catch {
         setError(
-          t("sessions.room.photo.decodeFailed", {
-            defaultValue: "Could not read this image.",
-          }),
+          t("sessions.room.photo.decodeFailed", undefined),
         );
       }
     },
@@ -315,14 +311,10 @@ export function RoomPhotoEditor({
           disabled={busy || removing}
           aria-label={
             isCropping
-              ? t("sessions.room.photo.crop", { defaultValue: "Adjust photo" })
+              ? t("sessions.room.photo.crop", undefined)
               : currentPhotoUrl
-                ? t("sessions.room.photo.replace", {
-                    defaultValue: "Replace photo",
-                  })
-                : t("sessions.room.photo.pick", {
-                    defaultValue: "Choose photo",
-                  })
+                ? t("sessions.room.photo.replace", undefined)
+                : t("sessions.room.photo.pick", undefined)
           }
           className={cn(
             "group relative flex h-full w-full items-center justify-center overflow-hidden rounded-full border-0 p-0 outline-none",
@@ -389,9 +381,7 @@ export function RoomPhotoEditor({
             type="button"
             onClick={(event) => void handleRemove(event)}
             disabled={removing}
-            aria-label={t("sessions.room.photo.remove", {
-              defaultValue: "Remove photo",
-            })}
+            aria-label={t("sessions.room.photo.remove", undefined)}
             className={cn(
               "flex h-6 w-6 items-center justify-center rounded-full",
               "border border-[color:var(--border-strong)] bg-[var(--panel-strong)] text-[var(--text-tertiary)]",
@@ -427,7 +417,7 @@ export function RoomPhotoEditor({
             step={0.01}
             value={zoom}
             onChange={handleZoomChange}
-            aria-label={t("sessions.room.photo.zoom", { defaultValue: "Zoom" })}
+            aria-label={t("sessions.room.photo.zoom", undefined)}
             className="ui-slider w-full max-w-[20rem]"
             style={{
               // Inline height + background overrides the global
@@ -448,7 +438,7 @@ export function RoomPhotoEditor({
               className="flex-1"
             >
               <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
-              {t("sessions.room.photo.reset", { defaultValue: "Reset" })}
+              {t("sessions.room.photo.reset", undefined)}
             </Button>
             <Button
               type="button"
@@ -458,7 +448,7 @@ export function RoomPhotoEditor({
               disabled={busy}
               className="flex-1"
             >
-              {t("common.cancel", { defaultValue: "Cancel" })}
+              {t("common.cancel", undefined)}
             </Button>
             <Button
               type="button"
@@ -474,12 +464,8 @@ export function RoomPhotoEditor({
                 <Upload className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
               )}
               {busy
-                ? t("sessions.room.photo.uploading", {
-                    defaultValue: "Uploading…",
-                  })
-                : t("sessions.room.photo.upload", {
-                    defaultValue: "Upload",
-                  })}
+                ? t("sessions.room.photo.uploading", undefined)
+                : t("sessions.room.photo.upload", undefined)}
             </Button>
           </div>
         </>

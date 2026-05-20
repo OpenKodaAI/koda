@@ -18,18 +18,21 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ refresh: vi.fn() }),
 }));
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    t: (key: string, options?: Record<string, unknown>) =>
-      typeof options?.defaultValue === "string" ? options.defaultValue : key,
-    tl: (value: string) => value,
-    i18n: { t: (key: string, options?: Record<string, unknown>) =>
-      typeof options?.defaultValue === "string" ? options.defaultValue : key },
-    language: "en-US",
-    setLanguage: vi.fn(),
-    options: [],
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 function makeAgent(overrides: Partial<ControlPlaneAgent> = {}): ControlPlaneAgent {
   return {
@@ -176,32 +179,32 @@ describe("TabInstrucoes", () => {
     renderTab(makeAgent());
 
     // Default sub-tab is "Prompts"; switch to "Politicas" to reach response + autonomy
-    await user.click(screen.getByRole("tab", { name: /politicas/i }));
+    await user.click(screen.getByRole("tab", { name: /pol.ticas/i }));
     expect(screen.getByText(/formato de resposta/i)).toBeInTheDocument();
-    expect(screen.getByText(/autonomia e aprovacao/i)).toBeInTheDocument();
+    expect(screen.getByText(/autonomia e aprova/i)).toBeInTheDocument();
     expect(screen.queryByLabelText(/execution policy json/i)).not.toBeInTheDocument();
 
     // Legacy personality/mission/hard-rules list fields are hidden outside dev mode
     expect(screen.queryByLabelText(/persona/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/responsibility limits/i)).not.toBeInTheDocument();
-    expect(screen.queryByLabelText(/modo de colaboracao|collaboration/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/responsibility limits|limites de responsabilidade/i)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/modo de colabora..o|collaboration/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/regras inviolaveis/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/acoes proibidas/i)).not.toBeInTheDocument();
     expect(screen.queryByLabelText(/regras de seguranca/i)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /toggle developer/i }));
-    await user.click(screen.getByRole("button", { name: /campos avancados/i }));
-    await user.click(screen.getByRole("button", { name: /overrides avancados de prompt e autonomia|derived prompts/i }));
+    await user.click(screen.getByRole("button", { name: /campos avan[cç]ados/i }));
+    await user.click(screen.getByRole("button", { name: /substitui[cç][oõ]es avan[cç]adas de prompt e autonomia|overrides avan[cç]ados de prompt e autonomia|derived prompts/i }));
 
     expect(screen.getByLabelText(/persona/i)).toBeInTheDocument();
-    expect(screen.getByText(/responsibility limits/i)).toBeInTheDocument();
-    expect(screen.getByText(/execution policy json/i)).toBeInTheDocument();
+    expect(screen.getByText(/responsibility limits|limites de responsabilidade/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/execution policy json|pol.tica de execu..o json/i)).toBeInTheDocument();
     // Legacy mission/interaction fields now live inside developer mode
-    expect(screen.getByLabelText(/modo de colaboracao|collaboration/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/funcao profissional|legacy role/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/modo de colabora..o|collaboration/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/papel profissional|fun..o profissional|professional role|legacy role/i)).toBeInTheDocument();
     // Legacy hard_rules list editors also move into developer mode
-    expect(screen.getByLabelText(/regras inviolaveis \(legado\)/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/acoes proibidas \(legado\)/i)).toBeInTheDocument();
-    expect(screen.getByLabelText(/regras de seguranca \(legado\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/regras n.o negoci.veis \(legado\)|non-negotiable rules/i)).toBeInTheDocument();
+    expect(screen.getByText(/a..es proibidas \(legado\)|forbidden actions/i)).toBeInTheDocument();
+    expect(screen.getByText(/regras de seguran.a \(herdadas\)|security rules/i)).toBeInTheDocument();
   }, 10000);
 });

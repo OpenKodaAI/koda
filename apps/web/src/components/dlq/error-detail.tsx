@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import { X, CheckCircle2, XCircle, Clock, AlertTriangle, Copy } from "lucide-react";
 import type { DLQEntry } from "@/lib/types";
 import { cn, formatDateTime, truncateText } from "@/lib/utils";
+import { translate } from "@/lib/i18n";
 import {
   getSemanticIconStyle,
   getSemanticStyle,
@@ -154,8 +155,8 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
               <div className="flex items-start gap-3 pr-12 sm:pr-14">
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="app-card-row__eyebrow">DLQ #{renderedEntry.id}</span>
-                    <span className="font-mono text-xs text-[var(--text-tertiary)]">Task #{renderedEntry.task_id}</span>
+                    <span className="app-card-row__eyebrow">{translate("generated.executions.dlq_ddb953bb")}{renderedEntry.id}</span>
+                    <span className="font-mono text-xs text-[var(--text-tertiary)]">{translate("generated.executions.task_1070b13b")}{renderedEntry.task_id}</span>
                     {renderedEntry.bot_id && (
                       <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
                         {renderedEntry.bot_id}
@@ -226,7 +227,7 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
                         {renderedEntry.error_class}
                       </span>
                     ) : (
-                      <span className="text-subtle">&mdash;</span>
+                      <span className="text-subtle">{translate("generated.executions.mdash_e8740f1f")}</span>
                     )}
                   </DetailRow>
                   <DetailRow

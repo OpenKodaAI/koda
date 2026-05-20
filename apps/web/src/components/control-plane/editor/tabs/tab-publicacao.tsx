@@ -27,7 +27,7 @@ const SECTION_LABELS: Record<string, string> = {
 export function TabPublicacao() {
   const { state, updateField } = useAgentEditor();
   const { showToast } = useToast();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const router = useRouter();
   const { runAction, isPending } = useAsyncAction();
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -47,7 +47,7 @@ export function TabPublicacao() {
 
   async function handleClone() {
     if (!state.cloneDisplayName.trim()) {
-      showToast(tl("Nome do clone e obrigatorio."), "warning");
+      showToast(t("generated.controlPlane.nome_do_clone_e_obrigatorio_350c2e21"), "warning");
       return;
     }
     const cloneId =
@@ -73,8 +73,8 @@ export function TabPublicacao() {
         router.push(`/control-plane/agents/${cloneId}`);
       },
       {
-        successMessage: tl("Bot clonado com sucesso."),
-        errorMessage: tl("Erro ao clonar."),
+        successMessage: t("generated.controlPlane.bot_clonado_com_sucesso_0862a4f1"),
+        errorMessage: t("generated.controlPlane.erro_ao_clonar_60fe99e8"),
       },
     );
   }
@@ -90,8 +90,8 @@ export function TabPublicacao() {
         router.push("/control-plane");
       },
       {
-        successMessage: tl("Bot removido."),
-        errorMessage: tl("Erro ao remover bot."),
+        successMessage: t("generated.controlPlane.bot_removido_aff4af6d"),
+        errorMessage: t("generated.controlPlane.erro_ao_remover_bot_5cd215a5"),
       },
     );
   }
@@ -99,31 +99,31 @@ export function TabPublicacao() {
   return (
     <div className="flex flex-col gap-8">
       <section className="flex flex-col gap-4">
-        <span className="eyebrow">{tl("Status do agente")}</span>
+        <span className="eyebrow">{t("generated.controlPlane.status_do_agente_e4db87fa")}</span>
 
         <div className="flex flex-col gap-1.5">
           <span className="inline-flex items-center gap-2">
             <StatusDot tone={lifecycle.tone} pulse={lifecycle.pulse} />
             <span className="text-sm font-medium text-[var(--text-primary)]">
-              {tl(lifecycle.label)}
+              {t(lifecycle.labelKey, lifecycle.descriptionOptions)}
             </span>
           </span>
           <p className="max-w-xl text-xs leading-relaxed text-[var(--text-tertiary)]">
-            {tl(lifecycle.description)}
+            {t(lifecycle.descriptionKey, lifecycle.descriptionOptions)}
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-[var(--text-tertiary)]">
           <span className="inline-flex items-center gap-1.5">
-            <span className="text-[var(--text-quaternary)]">{tl("Versão aplicada")}</span>
+            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.versao_aplicada_ffebc9f4")}</span>
             <span className="tabular-nums text-[var(--text-secondary)]">
               {state.agent.applied_version ?? "—"}
             </span>
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="text-[var(--text-quaternary)]">{tl("Versão desejada")}</span>
+            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.versao_desejada_3db461e6")}</span>
             <span className="tabular-nums text-[var(--text-secondary)]">
-              {state.agent.desired_version ?? tl("Rascunho")}
+              {state.agent.desired_version ?? t("generated.controlPlane.rascunho_1e888028")}
             </span>
           </span>
         </div>
@@ -131,7 +131,7 @@ export function TabPublicacao() {
         {hasPendingChanges ? (
           <InlineAlert tone="warning">
             <span className="text-[var(--text-secondary)]">
-              {tl("Alterações pendentes em")}: {" "}
+              {t("generated.controlPlane.alteracoes_pendentes_em_0ababa4f")}: {" "}
               {dirtyKeys
                 .map((key) => tl(SECTION_LABELS[key] ?? key))
                 .join(" · ")}
@@ -143,18 +143,18 @@ export function TabPublicacao() {
       <div className="border-t border-[color:var(--divider-hair)]" />
 
       <PolicyCard
-        title={tl("Clonar agente")}
-        description={tl("Cria uma copia com configuracao identica.")}
+        title={t("generated.controlPlane.clonar_agente_56a117f8")}
+        description={t("generated.controlPlane.cria_uma_copia_com_configuracao_identica_eb5d12fb")}
         icon={Copy}
         variant="flat"
       >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
           <div className="flex-1">
             <FormInput
-              label={tl("Nome do clone")}
+              label={t("generated.controlPlane.nome_do_clone_338024be")}
               value={state.cloneDisplayName}
               onChange={(e) => updateField("cloneDisplayName", e.target.value)}
-              placeholder={tl("Copia de...")}
+              placeholder={t("generated.controlPlane.copia_de_8d4e6578")}
             />
           </div>
           <AsyncActionButton
@@ -163,10 +163,10 @@ export function TabPublicacao() {
             size="sm"
             disabled={!state.cloneDisplayName.trim()}
             loading={isPending("clone")}
-            loadingLabel={tl("Clonando")}
+            loadingLabel={t("generated.controlPlane.clonando_adac72ae")}
             onClick={handleClone}
           >
-            {tl("Clonar")}
+            {t("generated.controlPlane.clonar_23373a96")}
           </AsyncActionButton>
         </div>
       </PolicyCard>
@@ -175,32 +175,32 @@ export function TabPublicacao() {
 
       <div className="flex items-center justify-between">
         <span className="text-xs text-[var(--text-quaternary)]">
-          {tl("Remove este agente e todos os dados associados.")}
+          {t("generated.controlPlane.remove_este_agente_e_todos_os_dados_associad_0b087473")}
         </span>
         <button
           type="button"
           onClick={() => setShowDeleteDialog(true)}
           disabled={isPending("delete")}
-          aria-label={isPending("delete") ? tl("Removendo...") : undefined}
+          aria-label={isPending("delete") ? t("generated.controlPlane.removendo_ba1bef53") : undefined}
           aria-busy={isPending("delete") || undefined}
           className="inline-flex min-h-5 min-w-24 items-center justify-center text-xs text-[var(--text-quaternary)] transition-colors hover:text-[var(--tone-danger-text)] disabled:opacity-50"
         >
           {isPending("delete") ? (
             <InlineSpinner className="h-3.5 w-3.5" />
           ) : (
-            tl("Remover agente")
+            t("generated.controlPlane.remover_agente_952bb8b7")
           )}
         </button>
       </div>
 
       <ConfirmationDialog
         open={showDeleteDialog}
-        title={tl("Remover agente")}
-        message={tl(
-          'Tem certeza que deseja remover "{{name}}"? Todas as configuracoes, documentos e versoes serao permanentemente excluidos. Esta acao nao pode ser desfeita.',
+        title={t("generated.controlPlane.remover_agente_952bb8b7")}
+        message={t(
+          "generated.controlPlane.tem_certeza_que_deseja_remover_name_todas_as_5e365cce",
           { name: state.displayName || agentId },
         )}
-        confirmLabel={tl("Remover")}
+        confirmLabel={t("generated.controlPlane.remover_5465770e")}
         onConfirm={handleDelete}
         onCancel={() => setShowDeleteDialog(false)}
       />

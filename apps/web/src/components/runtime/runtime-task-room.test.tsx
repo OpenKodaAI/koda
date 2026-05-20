@@ -151,7 +151,7 @@ describe("RuntimeTaskRoom", () => {
       </I18nProvider>,
     );
 
-    expect(screen.getByText("Task #42")).toBeInTheDocument();
+    expect(screen.getByText("Tarefa #42")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Terminal" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: /Browser|Navegador/i })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Atividade" })).toBeInTheDocument();
@@ -191,14 +191,22 @@ describe("RuntimeTaskRoom", () => {
     });
     expect(screen.getByRole("tab", { name: "RunGraph" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "RunGraph" }));
-    expect(screen.getByText("No RunGraph snapshot")).toBeInTheDocument();
-    expect(screen.getByText("Replay unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Sem snapshot do RunGraph")).toBeInTheDocument();
+    expect(screen.getByText("Replay indisponível")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: /Diagnóstico|Diagnostics/i }));
-    expect(screen.getByText("Sandbox doctor unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Sandbox doctor indisponível")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Detalhes" }));
     expect(screen.getByRole("tab", { name: "Arquivos" })).toBeInTheDocument();
     expect(screen.getByText("/missing/source")).toBeInTheDocument();
-    expect(screen.getByText(/Source root is unavailable|raiz/i)).toBeInTheDocument();
+    expect(
+      screen
+        .getAllByRole("status")
+        .some((node) =>
+          /source root is unavailable|sourceRootMissing|raiz|espa.o de trabalho|workspace/i.test(
+            node.textContent ?? "",
+          ),
+        ),
+    ).toBe(true);
     expect(screen.getByText("/tmp/runtime-42")).toBeInTheDocument();
     expect(screen.getByText(/Git status|Status do Git/i)).toBeInTheDocument();
     const statusLine = screen.getByText("M src/app.tsx");

@@ -97,7 +97,7 @@ export const ConnectIntegrationPanel = forwardRef<
   { entry, oauthStatus, onSubmitForm, onSubmitJson },
   ref,
 ) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   const profile = useMemo(
     () => entry.connectionProfile ?? { strategy: "none" as const },
@@ -143,7 +143,7 @@ export const ConnectIntegrationPanel = forwardRef<
       if (field.required === false) continue;
       const state = formState[field.key];
       if (!state || !state.value.trim()) {
-        return tl("Preencha {{label}}.", { label: field.label || field.key });
+        return t("generated.controlPlane.preencha_label_78308d37", { label: field.label || field.key });
       }
     }
     return null;
@@ -166,7 +166,7 @@ export const ConnectIntegrationPanel = forwardRef<
       }
       await onSubmitForm(envValues);
     } catch (err) {
-      setError(err instanceof Error ? err.message : tl("Falha ao conectar."));
+      setError(err instanceof Error ? err.message : t("generated.controlPlane.falha_ao_conectar_df4915d5"));
     } finally {
       setSubmitting(false);
     }
@@ -179,7 +179,7 @@ export const ConnectIntegrationPanel = forwardRef<
     try {
       await onSubmitJson(jsonRaw);
     } catch (err) {
-      setError(err instanceof Error ? err.message : tl("Falha ao importar JSON."));
+      setError(err instanceof Error ? err.message : t("generated.controlPlane.falha_ao_importar_json_b1f012b0"));
     } finally {
       setSubmitting(false);
     }
@@ -197,13 +197,13 @@ export const ConnectIntegrationPanel = forwardRef<
   // ---------- Status copy: every state has a clear lead ----------
   const statusMessage = oauthSupported
     ? requiresFields
-      ? tl("Use o botão Conectar acima para autorizar via OAuth, ou preencha credenciais manuais abaixo.")
-      : tl("Use o botão Conectar acima para autorizar via OAuth.")
+      ? t("generated.controlPlane.use_o_botao_conectar_acima_para_autorizar_vi_c1f10d98")
+      : t("generated.controlPlane.use_o_botao_conectar_acima_para_autorizar_vi_b5072f8c")
     : isOAuthOnly
-      ? tl("Esta integração só conecta via OAuth — botão Conectar acima.")
+      ? t("generated.controlPlane.esta_integracao_so_conecta_via_oauth_botao_c_a5ca610d")
       : isNoneStrategy && !requiresFields
-        ? tl("Esta integração não requer credenciais. Clique em Conectar acima para iniciar e descobrir as capacidades.")
-        : tl("Preencha os campos abaixo e clique em Conectar acima.");
+        ? t("generated.controlPlane.esta_integracao_nao_requer_credenciais_cliqu_a68851d5")
+        : t("generated.controlPlane.preencha_os_campos_abaixo_e_clique_em_conect_7bb99844");
 
   return (
     <div className="flex flex-col gap-3">
@@ -223,7 +223,7 @@ export const ConnectIntegrationPanel = forwardRef<
               onClick={() => setShowAdvanced((prev) => !prev)}
               className="flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
             >
-              <span>{tl("Credenciais manuais")}</span>
+              <span>{t("generated.controlPlane.credenciais_manuais_8d6b692a")}</span>
               {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
             </button>
           ) : null}
@@ -250,7 +250,7 @@ export const ConnectIntegrationPanel = forwardRef<
             onClick={() => setShowJson((prev) => !prev)}
             className="flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
           >
-            <span>{tl("JSON")}</span>
+            <span>{t("generated.controlPlane.json_7106b990")}</span>
             {showJson ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           </button>
           {showJson ? (
@@ -268,7 +268,7 @@ export const ConnectIntegrationPanel = forwardRef<
                 className="inline-flex h-9 items-center justify-center gap-2 self-start rounded-lg border border-[var(--border-subtle)] px-4 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-60"
               >
                 {submitting ? <Loader2 size={13} className="animate-spin" /> : null}
-                {tl("Aplicar")}
+                {t("generated.controlPlane.aplicar_f2badfb2")}
               </button>
             </div>
           ) : null}
@@ -285,7 +285,7 @@ export const ConnectIntegrationPanel = forwardRef<
           className="inline-flex items-center gap-1.5 self-start text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
         >
           <ExternalLink size={11} />
-          {tl("Documentação")}
+          {t("generated.controlPlane.documentacao_9db82914")}
         </a>
       ) : null}
     </div>
@@ -303,7 +303,7 @@ function FieldRow({
   state: { value: string; clear: boolean };
   onChange: (value: string) => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const isPassword = field.input_type === "password";
   const isSwitch = field.input_type === "switch";
   const isTextarea = field.input_type === "textarea";
@@ -318,7 +318,7 @@ function FieldRow({
             checked={state.value === "true"}
             onChange={(event) => onChange(event.target.checked ? "true" : "false")}
           />
-          <span className="text-xs">{tl("Ativado")}</span>
+          <span className="text-xs">{t("generated.controlPlane.ativado_20975d23")}</span>
         </label>
       ) : isPassword ? (
         <SecretInput

@@ -132,12 +132,12 @@ export function groupCommands(
     "recents",
   ];
   const headings: Record<CommandCategory, string> = {
-    approvals: t("commandBar.groups.approvals", { defaultValue: "Aprovações" }),
+    approvals: t("commandBar.groups.approvals", undefined),
     agents: t("commandBar.groups.agents"),
     pages: t("commandBar.groups.pages"),
     actions: t("commandBar.groups.actions"),
-    skills: t("commandBar.groups.skills", { defaultValue: "Skills" }),
-    tools: t("commandBar.groups.tools", { defaultValue: "Tools" }),
+    skills: t("commandBar.groups.skills", undefined),
+    tools: t("commandBar.groups.tools", undefined),
     recents: t("commandBar.groups.recents"),
   };
 

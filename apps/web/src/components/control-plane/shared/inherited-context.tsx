@@ -14,7 +14,7 @@ interface InheritedContextProps {
 }
 
 export function InheritedContext({ source, children }: InheritedContextProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   const borderColor =
     source === "workspace"
@@ -23,8 +23,8 @@ export function InheritedContext({ source, children }: InheritedContextProps) {
 
   const label =
     source === "workspace"
-      ? tl("Herdado do workspace")
-      : tl("Herdado do squad");
+      ? t("generated.controlPlane.herdado_do_workspace_c6d48c1a")
+      : t("generated.controlPlane.herdado_do_squad_8330a5bf");
 
   return (
     <div className={`text-xs text-[var(--text-quaternary)] border-l-2 ${borderColor} pl-2 mb-2`}>

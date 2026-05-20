@@ -1,0 +1,327 @@
+{
+  "schema_version": "squad_smoke.v1",
+  "case_id": "KAT-001-recurring-squad-smoke",
+  "scenario": {
+    "room": {
+      "workspace_id": "p0-evidence",
+      "squad_id": "build",
+      "coordinator_agent_id": "PM",
+      "participants": ["PM", "FE", "QA"]
+    },
+    "explicit_mention": {
+      "message_id": "msg-1",
+      "text": "@FE review the launch flow and return implementation evidence.",
+      "target_agent_id": "FE",
+      "route_source": "explicit_mention"
+    },
+    "reply_cycles": [
+      {
+        "target_agent_id": "FE",
+        "source_message_id": "msg-1",
+        "reply_message_id": "msg-2",
+        "in_reply_to": "msg-1",
+        "status": "answered"
+      },
+      {
+        "target_agent_id": "QA",
+        "source_message_id": "msg-1",
+        "status": "timed_out"
+      }
+    ],
+    "task_result": {
+      "squad_task_id": "task-kat-001-fe",
+      "child_run_id": "child-kat-001-fe",
+      "status": "completed"
+    },
+    "synthesis": {
+      "message_id": "msg-3",
+      "strategy": "coordinator_synthesis_after_all_task_results",
+      "waited_for_obligations": true,
+      "timeout_declared": true,
+      "timed_out_agent_ids": ["QA"]
+    }
+  },
+  "delivery": {
+    "schema_version": "squad_delivery.v1",
+    "route_decision": {
+      "schema_version": "squad_delivery.v1",
+      "source": "explicit_mention",
+      "targets": ["FE"],
+      "status": "routed",
+      "delivery_intent": "execution",
+      "confidence": 1.0,
+      "reason": "explicit @FE mention",
+      "coordinator_agent_id": "PM",
+      "explicit_mentions": ["FE"],
+      "final_response_strategy": "coordinator_synthesis_after_all_task_results"
+    },
+    "events": [
+      {
+        "schema_version": "squad_delivery.v1",
+        "event_type": "reply_obligation",
+        "status": "open",
+        "source": "reply_obligation",
+        "targets": ["FE", "QA"],
+        "delivery_intent": "execution",
+        "thread_id": "thread-kat-001",
+        "squad_id": "build",
+        "payload": {
+          "source_message_id": "msg-1",
+          "obligation_ids": ["obl-fe", "obl-qa"]
+        }
+      },
+      {
+        "schema_version": "squad_delivery.v1",
+        "event_type": "squad_reply",
+        "status": "answered",
+        "source": "squad_reply",
+        "targets": ["PM"],
+        "delivery_intent": "execution",
+        "thread_id": "thread-kat-001",
+        "squad_id": "build",
+        "payload": {
+          "from_agent_id": "FE",
+          "in_reply_to": "msg-1",
+          "reply_message_id": "msg-2",
+          "resolved_obligation_id": "obl-fe"
+        }
+      },
+      {
+        "schema_version": "squad_delivery.v1",
+        "event_type": "child_run_completed",
+        "status": "completed",
+        "source": "coordinator_engine",
+        "targets": ["FE"],
+        "delivery_intent": "execution",
+        "thread_id": "thread-kat-001",
+        "squad_id": "build",
+        "payload": {
+          "child_run_id": "child-kat-001-fe",
+          "squad_task_id": "task-kat-001-fe"
+        }
+      },
+      {
+        "schema_version": "squad_delivery.v1",
+        "event_type": "partial_timeout",
+        "status": "timed_out",
+        "source": "coordinator_engine",
+        "targets": ["QA"],
+        "delivery_intent": "execution",
+        "thread_id": "thread-kat-001",
+        "squad_id": "build",
+        "payload": {
+          "partial": true,
+          "timed_out_agent_ids": ["QA"],
+          "timed_out_obligation_ids": ["obl-qa"]
+        }
+      },
+      {
+        "schema_version": "squad_delivery.v1",
+        "event_type": "coordinator_synthesis",
+        "status": "completed",
+        "source": "coordinator_engine",
+        "targets": ["PM"],
+        "delivery_intent": "synthesis",
+        "thread_id": "thread-kat-001",
+        "squad_id": "build",
+        "payload": {
+          "waited_for_obligations": true,
+          "timeout_declared": true,
+          "timed_out_agent_ids": ["QA"],
+          "used_message_ids": ["msg-2"],
+          "used_child_run_ids": ["child-kat-001-fe"]
+        }
+      }
+    ]
+  },
+  "run_graph": {
+    "schema_version": "run_graph.v1",
+    "scenario": "squad",
+    "graph_id": "run:PM:9001:attempt:1",
+    "agent_id": "PM",
+    "task_id": 9001,
+    "attempt": 1,
+    "nodes": [
+      {
+        "schema_version": "run_graph.v1",
+        "node_id": "model:1",
+        "graph_id": "run:PM:9001:attempt:1",
+        "agent_id": "PM",
+        "task_id": 9001,
+        "attempt": 1,
+        "node_type": "model_call",
+        "status": "completed",
+        "ordinal": 1,
+        "summary": "Coordinator received @FE request"
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "node_id": "agent-request:2",
+        "graph_id": "run:PM:9001:attempt:1",
+        "agent_id": "PM",
+        "task_id": 9001,
+        "attempt": 1,
+        "node_type": "agent_request",
+        "status": "completed",
+        "ordinal": 2,
+        "summary": "Routed explicit mention to FE",
+        "payload": {
+          "schema_version": "squad_delivery.v1",
+          "targets": ["FE"],
+          "route_source": "explicit_mention"
+        }
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "node_id": "reply-obligation:3",
+        "graph_id": "run:PM:9001:attempt:1",
+        "agent_id": "PM",
+        "task_id": 9001,
+        "attempt": 1,
+        "node_type": "reply_obligation",
+        "status": "completed",
+        "ordinal": 3,
+        "summary": "FE and QA owe visible thread replies"
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "node_id": "squad-reply:4",
+        "graph_id": "run:PM:9001:attempt:1",
+        "agent_id": "FE",
+        "task_id": 9001,
+        "attempt": 1,
+        "node_type": "squad_reply",
+        "status": "completed",
+        "ordinal": 4,
+        "summary": "FE replied in thread with in_reply_to evidence",
+        "refs": {
+          "message_id": "msg-2",
+          "in_reply_to": "msg-1"
+        }
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "node_id": "child-run:5",
+        "graph_id": "run:PM:9001:attempt:1",
+        "agent_id": "PM",
+        "task_id": 9001,
+        "attempt": 1,
+        "node_type": "child_run",
+        "status": "completed",
+        "ordinal": 5,
+        "summary": "FE child run returned task result",
+        "refs": {
+          "child_run_id": "child-kat-001-fe",
+          "squad_task_id": "task-kat-001-fe"
+        }
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "node_id": "dependency-timeout:6",
+        "graph_id": "run:PM:9001:attempt:1",
+        "agent_id": "PM",
+        "task_id": 9001,
+        "attempt": 1,
+        "node_type": "dependency_call",
+        "status": "degraded",
+        "ordinal": 6,
+        "summary": "QA partial timeout recorded",
+        "payload": {
+          "event_type": "partial_timeout",
+          "timed_out_agent_ids": ["QA"]
+        }
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "node_id": "synthesis:7",
+        "graph_id": "run:PM:9001:attempt:1",
+        "agent_id": "PM",
+        "task_id": 9001,
+        "attempt": 1,
+        "node_type": "coordinator_synthesis",
+        "status": "completed",
+        "ordinal": 7,
+        "summary": "Coordinator synthesized completed FE evidence and declared QA timeout"
+      }
+    ],
+    "edges": [
+      {
+        "schema_version": "run_graph.v1",
+        "edge_id": "edge:1",
+        "graph_id": "run:PM:9001:attempt:1",
+        "from_node_id": "model:1",
+        "to_node_id": "agent-request:2",
+        "edge_type": "emits",
+        "ordinal": 1
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "edge_id": "edge:2",
+        "graph_id": "run:PM:9001:attempt:1",
+        "from_node_id": "agent-request:2",
+        "to_node_id": "reply-obligation:3",
+        "edge_type": "produces",
+        "ordinal": 2
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "edge_id": "edge:3",
+        "graph_id": "run:PM:9001:attempt:1",
+        "from_node_id": "reply-obligation:3",
+        "to_node_id": "squad-reply:4",
+        "edge_type": "produces",
+        "ordinal": 3
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "edge_id": "edge:4",
+        "graph_id": "run:PM:9001:attempt:1",
+        "from_node_id": "reply-obligation:3",
+        "to_node_id": "child-run:5",
+        "edge_type": "child_run",
+        "ordinal": 4
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "edge_id": "edge:5",
+        "graph_id": "run:PM:9001:attempt:1",
+        "from_node_id": "agent-request:2",
+        "to_node_id": "dependency-timeout:6",
+        "edge_type": "fails_to",
+        "ordinal": 5
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "edge_id": "edge:6",
+        "graph_id": "run:PM:9001:attempt:1",
+        "from_node_id": "squad-reply:4",
+        "to_node_id": "synthesis:7",
+        "edge_type": "produces",
+        "ordinal": 6
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "edge_id": "edge:7",
+        "graph_id": "run:PM:9001:attempt:1",
+        "from_node_id": "child-run:5",
+        "to_node_id": "synthesis:7",
+        "edge_type": "produces",
+        "ordinal": 7
+      },
+      {
+        "schema_version": "run_graph.v1",
+        "edge_id": "edge:8",
+        "graph_id": "run:PM:9001:attempt:1",
+        "from_node_id": "dependency-timeout:6",
+        "to_node_id": "synthesis:7",
+        "edge_type": "produces",
+        "ordinal": 8
+      }
+    ],
+    "summary": {
+      "status": "completed",
+      "node_count": 7,
+      "edge_count": 8
+    }
+  }
+}

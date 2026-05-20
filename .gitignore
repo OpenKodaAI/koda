@@ -26,6 +26,7 @@ agent_history*.db
 agent_history*.db-wal
 agent_history*.db-shm
 tmp_images*/
+artifacts/
 artifact_cache*/
 runtime_*/
 runtime_smoke/
@@ -56,10 +57,18 @@ logs/
 *.sqlite3
 *.sqlite
 models/
+!apps/web/src/app/control-plane/system/models/
+!apps/web/src/app/control-plane/system/models/page.tsx
 agent_memory_*/
 rust/target/
 target/
 downloads/
+proto/rpc_gateway/
+rust/koda-rpc-gateway/
+koda/internal_rpc/generated/rpc_gateway/
+tests/bench/baselines/
+tests/data/
+tests/fixtures/audio/
 
 # Credentials and secrets
 google/

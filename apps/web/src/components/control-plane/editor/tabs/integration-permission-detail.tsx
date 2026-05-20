@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Check, Loader2, RefreshCw } from "lucide-react";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { ConnectIntegrationModal } from "./integrations/connect-integration-modal";
+import { translate } from "@/lib/i18n";
 import {
   getIntegrationAccent,
   renderIntegrationLogo,
@@ -189,7 +190,7 @@ export function IntegrationPermissionDetail({
   sharedEnvOptions = [],
   secretOptions = [],
 }: IntegrationPermissionDetailProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const [evaluatedAt, setEvaluatedAt] = useState(() => Date.now());
   const coreGrant = entry.kind === "core" ? entry.coreGrant ?? {} : null;
   const [connectModalOpen, setConnectModalOpen] = useState(false);
@@ -250,7 +251,7 @@ export function IntegrationPermissionDetail({
       >
         <ArrowLeft size={16} />
         <span>
-          {tl("Integracoes")}
+          {t("generated.controlPlane.integracoes_fe756444")}
           <span className="mx-1 text-[var(--text-quaternary)]">/</span>
           <span className="text-[var(--text-primary)]">{entry.label}</span>
         </span>
@@ -272,7 +273,7 @@ export function IntegrationPermissionDetail({
           {(entry.kind === "mcp" && entry.mcpConnection) ||
           (entry.kind === "core" && entry.coreConnection?.connected) ? (
             <span
-              aria-label={tl("Conectado")}
+              aria-label={t("generated.controlPlane.conectado_e04915ac")}
               className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg-strong)] text-[var(--tone-success-text)] shadow-[0_0_0_2px_var(--canvas)]"
             >
               <Check size={12} strokeWidth={2.5} />
@@ -286,7 +287,7 @@ export function IntegrationPermissionDetail({
               {entry.label}
             </span>
             <span className="rounded-md border border-[var(--border-subtle)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-quaternary)]">
-              {entry.kind === "mcp" ? "MCP" : tl("Core")}
+              {entry.kind === "mcp" ? "MCP" : t("generated.controlPlane.core_db195f1f")}
             </span>
           </div>
         </div>
@@ -299,7 +300,7 @@ export function IntegrationPermissionDetail({
               onClick={onDisconnect}
               className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
             >
-              {tl("Desconectar")}
+              {t("generated.controlPlane.desconectar_d1a164af")}
             </button>
           ) : oauthSupported && onConnectOAuth ? (
             <button
@@ -309,7 +310,7 @@ export function IntegrationPermissionDetail({
               className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] disabled:opacity-60"
             >
               {isOAuthLoading ? <Loader2 size={11} className="animate-spin" /> : null}
-              {tl("Conectar")}
+              {t("generated.controlPlane.conectar_a587e076")}
             </button>
           ) : (
             <button
@@ -317,7 +318,7 @@ export function IntegrationPermissionDetail({
               onClick={() => setConnectModalOpen(true)}
               className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
             >
-              {tl("Conectar")}
+              {t("generated.controlPlane.conectar_a587e076")}
             </button>
           )
         ) : entry.coreConnection?.connected ? (
@@ -326,7 +327,7 @@ export function IntegrationPermissionDetail({
             onClick={onDisconnectCore}
             className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
           >
-            {tl("Desconectar")}
+            {t("generated.controlPlane.desconectar_d1a164af")}
           </button>
         ) : (
           <button
@@ -334,7 +335,7 @@ export function IntegrationPermissionDetail({
             onClick={() => setConnectModalOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
           >
-            {tl("Conectar")}
+            {t("generated.controlPlane.conectar_a587e076")}
           </button>
         )}
       </div>
@@ -360,7 +361,7 @@ export function IntegrationPermissionDetail({
             }}
           />
           <span className="text-[var(--text-secondary)]">
-            {oauthStatus.account_label || tl("OAuth conectado")}
+            {oauthStatus.account_label || t("generated.controlPlane.oauth_conectado_3a49aa03")}
           </span>
           {isTokenExpiring && (
             <button
@@ -368,7 +369,7 @@ export function IntegrationPermissionDetail({
               onClick={onConnectOAuth}
               className="ml-auto text-[10px] font-medium text-[var(--tone-warning-text)] underline"
             >
-              {tl("Reconectar")}
+              {t("generated.controlPlane.reconectar_5843f2c2")}
             </button>
           )}
         </div>
@@ -378,14 +379,11 @@ export function IntegrationPermissionDetail({
         <div className="flex flex-col gap-1.5">
           <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-tertiary)]">
             <span>
-              {entry.mcpCapabilitySummary?.tool_count ?? entry.mcpSummary?.total ?? entry.mcpTools?.length ?? 0} tools
-            </span>
+              {entry.mcpCapabilitySummary?.tool_count ?? entry.mcpSummary?.total ?? entry.mcpTools?.length ?? 0} {translate("generated.controlPlane.tools_c8224289")}</span>
             <span>
-              {entry.mcpCapabilitySummary?.resource_count ?? entry.mcpResources?.length ?? 0} resources
-            </span>
+              {entry.mcpCapabilitySummary?.resource_count ?? entry.mcpResources?.length ?? 0} {translate("generated.controlPlane.resources_10d4a2a5")}</span>
             <span>
-              {entry.mcpCapabilitySummary?.prompt_count ?? entry.mcpPrompts?.length ?? 0} prompts
-            </span>
+              {entry.mcpCapabilitySummary?.prompt_count ?? entry.mcpPrompts?.length ?? 0} {translate("generated.controlPlane.prompts_802b4291")}</span>
             {onDiscoverTools ? (
               <button
                 type="button"
@@ -394,7 +392,7 @@ export function IntegrationPermissionDetail({
                 className="ml-auto inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-60"
               >
                 <RefreshCw size={11} className={isDiscovering ? "animate-spin" : ""} />
-                {tl("Re-descobrir")}
+                {t("generated.controlPlane.re_descobrir_c5febe99")}
               </button>
             ) : null}
             {entry.isCustom && onRemoveCustomServer ? (
@@ -403,7 +401,7 @@ export function IntegrationPermissionDetail({
                 onClick={onRemoveCustomServer}
                 className="inline-flex items-center gap-1 rounded-lg border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-2 py-1 text-[11px] text-[var(--tone-danger-text)] transition-colors hover:bg-[var(--tone-danger-bg-strong)]"
               >
-                {tl("Remover")}
+                {t("generated.controlPlane.remover_5465770e")}
               </button>
             ) : null}
           </div>
@@ -429,7 +427,7 @@ export function IntegrationPermissionDetail({
                     onClick={onImportDefault}
                     className="ml-auto rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
                   >
-                    {tl("Importar padrão")}
+                    {t("generated.controlPlane.importar_padrao_53349722")}
                   </button>
                 ) : null}
                 {onConnectCore ? (
@@ -438,7 +436,7 @@ export function IntegrationPermissionDetail({
                     onClick={onConnectCore}
                     className="rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
                   >
-                    {tl("Editar")}
+                    {t("generated.controlPlane.editar_28e2e08e")}
                   </button>
                 ) : null}
               </div>
@@ -447,7 +445,7 @@ export function IntegrationPermissionDetail({
 
           {!coreConnection?.connected && coreDefaultConnection?.connected ? (
             <p className="text-xs text-[var(--text-tertiary)]">
-              {tl("Há um padrão do sistema disponível para importar.")}
+              {t("generated.controlPlane.ha_um_padrao_do_sistema_disponivel_para_impo_3e678c07")}
             </p>
           ) : null}
 
@@ -460,9 +458,9 @@ export function IntegrationPermissionDetail({
 
       {/* 4. Tool permissions header */}
       <div className="flex flex-col gap-1">
-        <span className="eyebrow">{tl("Permissoes de ferramentas")}</span>
+        <span className="eyebrow">{t("generated.controlPlane.permissoes_de_ferramentas_a6f3858e")}</span>
         <span className="text-xs text-[var(--text-quaternary)]">
-          {tl("Escolha quando o agente pode executar cada ferramenta.")}
+          {t("generated.controlPlane.escolha_quando_o_agente_pode_executar_cada_f_64275c47")}
         </span>
       </div>
 
@@ -477,15 +475,15 @@ export function IntegrationPermissionDetail({
           {entry.kind === "core" && (sharedEnvOptions.length > 0 || secretOptions.length > 0) ? (
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <CompactGrantToggle
-                title={tl("Shared env por integração")}
-                description={tl("Disponível apenas para execuções desta integração.")}
+                title={t("generated.controlPlane.shared_env_por_integracao_e4ece701")}
+                description={t("generated.controlPlane.disponivel_apenas_para_execucoes_desta_integ_f7d1cfff")}
                 options={sharedEnvOptions}
                 selected={coreGrant.shared_env_keys ?? []}
                 onToggle={(value) => toggleGrantListValue("shared_env_keys", value)}
               />
               <CompactGrantToggle
-                title={tl("Secrets por integração")}
-                description={tl("Reduz a exposição sensível ao escopo mínimo necessário.")}
+                title={t("generated.controlPlane.secrets_por_integracao_02933367")}
+                description={t("generated.controlPlane.reduz_a_exposicao_sensivel_ao_escopo_minimo__6fc2406c")}
                 options={secretOptions}
                 selected={coreGrant.secret_keys ?? []}
                 onToggle={(value) => toggleGrantListValue("secret_keys", value)}
@@ -506,7 +504,7 @@ export function IntegrationPermissionDetail({
                 className="animate-spin text-[var(--text-tertiary)]"
               />
               <span className="text-sm text-[var(--text-tertiary)]">
-                {tl("Descobrindo ferramentas...")}
+                {t("generated.controlPlane.descobrindo_ferramentas_56130d2f")}
               </span>
             </div>
           )}
@@ -515,7 +513,7 @@ export function IntegrationPermissionDetail({
           {!isDiscovering && !hasMcpTools && entry.mcpConnection && (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-6 text-center">
               <p className="text-sm text-[var(--text-quaternary)]">
-                {tl("Nenhuma ferramenta descoberta")}
+                {t("generated.controlPlane.nenhuma_ferramenta_descoberta_6a540f4c")}
               </p>
               {onDiscoverTools && (
                 <button
@@ -528,7 +526,7 @@ export function IntegrationPermissionDetail({
                   )}
                 >
                   <RefreshCw size={12} />
-                  {tl("Descobrir ferramentas")}
+                  {t("generated.controlPlane.descobrir_ferramentas_5dcda01f")}
                 </button>
               )}
             </div>
@@ -539,7 +537,7 @@ export function IntegrationPermissionDetail({
             <div className="flex flex-col gap-2">
               {mcpGroups.readOnly.length > 0 && (
                 <ToolGroupSection
-                  label={tl("Ferramentas somente leitura")}
+                  label={t("generated.controlPlane.ferramentas_somente_leitura_6ed0fe78")}
                   count={mcpGroups.readOnly.length}
                   tools={mcpGroups.readOnly}
                   groupPolicy={computeGroupPolicy(mcpGroups.readOnly)}
@@ -552,7 +550,7 @@ export function IntegrationPermissionDetail({
               )}
               {mcpGroups.interactive.length > 0 && (
                 <ToolGroupSection
-                  label={tl("Ferramentas interativas")}
+                  label={t("generated.controlPlane.ferramentas_interativas_7b9fa7d6")}
                   count={mcpGroups.interactive.length}
                   tools={mcpGroups.interactive}
                   groupPolicy={computeGroupPolicy(mcpGroups.interactive)}
@@ -565,7 +563,7 @@ export function IntegrationPermissionDetail({
               )}
               {mcpGroups.destructive.length > 0 && (
                 <ToolGroupSection
-                  label={tl("Ferramentas destrutivas")}
+                  label={t("generated.controlPlane.ferramentas_destrutivas_833b2209")}
                   count={mcpGroups.destructive.length}
                   tools={mcpGroups.destructive}
                   groupPolicy={computeGroupPolicy(mcpGroups.destructive)}
@@ -582,7 +580,7 @@ export function IntegrationPermissionDetail({
           {/* Resources */}
           {!isDiscovering && (entry.mcpResources?.length ?? 0) > 0 && (
             <ToolGroupSection
-              label="Resources"
+              label={translate("generated.controlPlane.resources_9d1ce9e5")}
               count={entry.mcpResources?.length ?? 0}
               tools={buildMcpResourceItems(entry)}
               groupPolicy={computeGroupPolicy(buildMcpResourceItems(entry))}
@@ -601,7 +599,7 @@ export function IntegrationPermissionDetail({
           {/* Prompts */}
           {!isDiscovering && (entry.mcpPrompts?.length ?? 0) > 0 && (
             <ToolGroupSection
-              label="Prompts"
+              label={translate("generated.controlPlane.prompts_ba404b40")}
               count={entry.mcpPrompts?.length ?? 0}
               tools={buildMcpPromptItems(entry)}
               groupPolicy={computeGroupPolicy(buildMcpPromptItems(entry))}
@@ -624,7 +622,7 @@ export function IntegrationPermissionDetail({
         <>
           {hasCoreCapabilities && coreTools ? (
             <ToolGroupSection
-              label="Capacidades"
+              label={translate("generated.controlPlane.capacidades_b25953ef")}
               count={coreTools.length}
               tools={coreTools}
               groupPolicy={computeGroupPolicy(coreTools)}
@@ -638,8 +636,8 @@ export function IntegrationPermissionDetail({
             <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-6 text-center">
               <p className="text-sm text-[var(--text-quaternary)]">
                 {entry.coreGrant?.enabled
-                  ? tl("Integracao habilitada. Sem capacidades granulares configuradas.")
-                  : tl("Integracao desabilitada.")}
+                  ? t("generated.controlPlane.integracao_habilitada_sem_capacidades_granul_690b872d")
+                  : t("generated.controlPlane.integracao_desabilitada_07c05c3d")}
               </p>
             </div>
           )}

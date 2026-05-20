@@ -24,7 +24,7 @@ export function TabConhecimento() {
     updateDocument,
     updateAgentSpecField,
   } = useAgentEditor();
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   const memoryPolicy = useMemo(
     () => parseMemoryPolicy(state.memoryPolicyJson),
@@ -109,32 +109,32 @@ export function TabConhecimento() {
   return (
     <div className="flex flex-col gap-6">
       <PolicyCard
-        title={tl("Conhecimento")}
+        title={t("generated.controlPlane.conhecimento_d1f8a9d1")}
         icon={BookOpen}
         dirty={state.dirty.agentSpec}
         defaultOpen
         variant="flat"
       >
         <ToggleField
-          label={tl("Conhecimento ativo")}
-          description={tl("Habilita memoria persistente e grounding automatico de conhecimento para este agente.")}
+          label={t("generated.controlPlane.conhecimento_ativo_d7bd2014")}
+          description={t("generated.controlPlane.habilita_memoria_persistente_e_grounding_aut_8c1c2db9")}
           checked={knowledgeEnabled}
           onChange={handleToggleKnowledge}
         />
 
         <ModelSelector
-          label={tl("Modelo de extracao")}
-          description={tl("Modelo usado para extrair aprendizados e memoria de cada turno.")}
+          label={t("generated.controlPlane.modelo_de_extracao_19567fe2")}
+          description={t("generated.controlPlane.modelo_usado_para_extrair_aprendizados_e_mem_466753f8")}
           value={currentExtractionValue}
           onChange={handleExtractionModelChange}
           providers={providerEntries}
           enabledProviders={enabledProviders}
-          emptyLabel={tl("Herdar do modelo principal")}
+          emptyLabel={t("generated.controlPlane.herdar_do_modelo_principal_16253e7c")}
         />
 
         <MarkdownEditorField
-          label={tl("Prompt de extracao")}
-          description={tl("Instrucoes para guiar a extracao de memoria e aprendizados do agente.")}
+          label={t("generated.controlPlane.prompt_de_extracao_94182bf9")}
+          description={t("generated.controlPlane.instrucoes_para_guiar_a_extracao_de_memoria__e137f6b7")}
           value={state.documents.memory_extraction_prompt_md ?? ""}
           onChange={(value) => updateDocument("memory_extraction_prompt_md", value)}
           minHeight="220px"

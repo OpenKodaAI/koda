@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from koda.agent_contract import resolve_feature_filtered_tools, summarize_integration_grants
+from koda.agent_contract import normalize_string_list, resolve_feature_filtered_tools, summarize_integration_grants
 from koda.config import (
     AGENT_ALLOWED_TOOLS,
     AGENT_EXECUTION_POLICY,
@@ -303,6 +303,7 @@ def build_agent_tools_prompt(
     tool_policy: dict[str, Any] | None = None,
     execution_policy: dict[str, Any] | None = None,
     resource_access_policy: dict[str, Any] | None = None,
+    skill_policy: dict[str, Any] | None = None,
     feature_flags: dict[str, bool] | None = None,
 ) -> str:
     """Generate the <agent_tools> section of the system prompt based on feature flags."""
@@ -414,10 +415,14 @@ The runtime can block low-confidence writes if the plan or sources are missing.
             )
         )
 
-    registry_allowed_ids = allowed_tool_ids if has_tool_subset else available_tool_ids
+    raw_allowed_tool_ids = normalize_string_list(tool_policy.get("allowed_tool_ids")) if tool_policy else []
+    registry_allowed_ids = sorted(
+        {*(allowed_tool_ids if has_tool_subset else available_tool_ids), *raw_allowed_tool_ids}
+    )
     registry_entries = get_default_tool_registry(
         feature_flags=resolved_feature_flags,
         allowed_tool_ids=registry_allowed_ids,
+        skill_policy=skill_policy,
     ).export_xml_prompt_entries()
     if registry_entries:
         sections.append(

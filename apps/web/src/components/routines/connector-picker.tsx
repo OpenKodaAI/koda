@@ -66,10 +66,7 @@ export function ConnectorPicker({ agentId, value, onChange, disabled = false }: 
               <span>{connector.label}</span>
               <button
                 type="button"
-                aria-label={t("routines.editor.connectors.remove", {
-                  defaultValue: "Remove {{label}}",
-                  label: connector.label,
-                })}
+                aria-label={t("routines.editor.connectors.remove", { label: connector.label })}
                 onClick={() => removeConnector(connector.id)}
                 disabled={disabled}
                 className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"

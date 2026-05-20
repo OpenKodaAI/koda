@@ -799,9 +799,7 @@ function SessionsPageContent() {
         `/agents/${targetBotId}/sessions/${encodeURIComponent(session.session_id)}`,
         {
           method: "DELETE",
-          fallbackError: t("sessions.delete.failed", {
-            defaultValue: "Could not delete this conversation.",
-          }),
+          fallbackError: t("sessions.delete.failed", undefined),
         },
       );
       if (selectedSessionId === session.session_id) {
@@ -814,9 +812,7 @@ function SessionsPageContent() {
       const message =
         error instanceof Error && error.message.trim()
           ? error.message
-          : t("sessions.delete.failed", {
-              defaultValue: "Could not delete this conversation.",
-            });
+          : t("sessions.delete.failed", undefined);
       showToast(message, "error");
     } finally {
       setDeleteSubmitting(false);
@@ -1000,9 +996,7 @@ function SessionsPageContent() {
         case "summarize": {
           const prompt =
             (action.payload?.prompt as string | undefined) ??
-            t("chat.composer.summarizePrompt", {
-              defaultValue: "Summarize this conversation so far.",
-            });
+            t("chat.composer.summarizePrompt", undefined);
           void sendMessage(prompt);
           return;
         }
@@ -1028,8 +1022,8 @@ function SessionsPageContent() {
   const resolvedTitle = selectedSummary
     ? resolveSessionTitle(selectedSummary)
     : isNewChatMode
-      ? t("chat.thread.empty", { defaultValue: "Start a conversation" })
-      : t("chat.thread.empty", { defaultValue: "Start a conversation" });
+      ? t("chat.thread.empty", undefined)
+      : t("chat.thread.empty", undefined);
 
   const effectiveAgentLabel = useMemo(() => {
     if (!effectiveBotId) return null;
@@ -1191,9 +1185,7 @@ function SessionsPageContent() {
                 busy={composerSubmitting}
                 helper={
                   composerDisabled
-                    ? t("sessions.composer.selectAgentToStart", {
-                        defaultValue: "Select a specific agent to start a chat.",
-                      })
+                    ? t("sessions.composer.selectAgentToStart", undefined)
                     : null
                 }
                 error={composerError}
@@ -1222,7 +1214,7 @@ function SessionsPageContent() {
         <>
           <button
             type="button"
-            aria-label={t("chat.rail.close", { defaultValue: "Close" })}
+            aria-label={t("chat.rail.close", undefined)}
             onClick={() => setMobileRailOpen(false)}
             className={cn(
               "app-overlay-backdrop !z-[48] cursor-default border-0 md:hidden",
@@ -1238,7 +1230,7 @@ function SessionsPageContent() {
             )}
             role="dialog"
             aria-modal="true"
-            aria-label={t("chat.rail.title", { defaultValue: "Conversations" })}
+            aria-label={t("chat.rail.title", undefined)}
           >
             <SessionRail
               sessions={sessions}
@@ -1277,16 +1269,11 @@ function SessionsPageContent() {
 
       <ConfirmationDialog
         open={Boolean(pendingDeleteSession)}
-        title={t("sessions.delete.title", {
-          defaultValue: "Delete this conversation?",
-        })}
-        message={t("sessions.delete.message", {
-          defaultValue:
-            "This permanently removes the conversation and its execution history. This action cannot be undone.",
-        })}
-        confirmLabel={t("sessions.delete.confirm", { defaultValue: "Delete" })}
+        title={t("sessions.delete.title", undefined)}
+        message={t("sessions.delete.message", undefined)}
+        confirmLabel={t("sessions.delete.confirm", undefined)}
         confirmBusy={deleteSubmitting}
-        confirmBusyLabel={t("sessions.delete.deleting", { defaultValue: "Deleting…" })}
+        confirmBusyLabel={t("sessions.delete.deleting", undefined)}
         onConfirm={() => void handleConfirmDeleteSession()}
         onCancel={() => {
           if (deleteSubmitting) return;

@@ -111,7 +111,7 @@ export function AnimatedColorPicker({
   disabled,
   presets = DEFAULT_PRESETS,
 }: AnimatedColorPickerProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const rootRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -315,7 +315,7 @@ export function AnimatedColorPicker({
         <button
           ref={triggerRef}
           type="button"
-          aria-label={tl("Abrir seletor de cor")}
+          aria-label={t("generated.controlPlane.abrir_seletor_de_cor_01fb4584")}
           aria-expanded={open}
           aria-haspopup="dialog"
           disabled={disabled}
@@ -369,7 +369,7 @@ export function AnimatedColorPicker({
                   <div
                     ref={panelRef}
                     role="dialog"
-                    aria-label={tl("Painel de cor")}
+                    aria-label={t("generated.controlPlane.painel_de_cor_1d09b9ff")}
                     className="app-floating-panel app-floating-anim z-[90] overflow-hidden rounded-[0.8rem] p-3"
                     style={{
                       position: "fixed",
@@ -413,7 +413,7 @@ export function AnimatedColorPicker({
                                 syncFromHex(hexInput);
                               }
                             }}
-                            aria-label={tl("Hex color")}
+                            aria-label={t("generated.controlPlane.hex_color_a5e6ed0f")}
                             maxLength={7}
                             inputMode="text"
                             className={cn(
@@ -435,7 +435,7 @@ export function AnimatedColorPicker({
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
                             <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                              {tl("Tom")}
+                              {t("generated.controlPlane.tom_11494f87")}
                             </span>
                             <span className="text-[11px] text-[var(--text-quaternary)]">
                               {hue}°
@@ -456,7 +456,7 @@ export function AnimatedColorPicker({
                                 ),
                               );
                             }}
-                            aria-label={tl("Ajustar tom")}
+                            aria-label={t("generated.controlPlane.ajustar_tom_b6d266a7")}
                             className="agent-board-color-slider ui-slider"
                             style={{
                               background: `linear-gradient(90deg, ${hueGradient.join(",")})`,
@@ -468,7 +468,7 @@ export function AnimatedColorPicker({
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
                             <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                              {tl("Saturação")}
+                              {t("generated.controlPlane.saturacao_82813d11")}
                             </span>
                             <span className="text-[11px] text-[var(--text-quaternary)]">
                               {saturation}%
@@ -489,7 +489,7 @@ export function AnimatedColorPicker({
                                 ),
                               );
                             }}
-                            aria-label={tl("Ajustar saturacao")}
+                            aria-label={t("generated.controlPlane.ajustar_saturacao_3da66a68")}
                             className="agent-board-color-slider ui-slider"
                             style={{ background: saturationGradient }}
                             disabled={disabled}
@@ -499,7 +499,7 @@ export function AnimatedColorPicker({
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
                             <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                              {tl("Luminosidade")}
+                              {t("generated.controlPlane.luminosidade_108bafca")}
                             </span>
                             <span className="text-[11px] text-[var(--text-quaternary)]">
                               {lightness}%
@@ -520,7 +520,7 @@ export function AnimatedColorPicker({
                                 ),
                               );
                             }}
-                            aria-label={tl("Ajustar luminosidade")}
+                            aria-label={t("generated.controlPlane.ajustar_luminosidade_88b92298")}
                             className="agent-board-color-slider ui-slider"
                             style={{ background: lightnessGradient }}
                             disabled={disabled}
@@ -530,7 +530,7 @@ export function AnimatedColorPicker({
 
                       <div className="space-y-1.5">
                         <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
-                          {tl("Paleta rápida")}
+                          {t("generated.controlPlane.paleta_rapida_210b94fd")}
                         </p>
                         <div className="grid grid-cols-8 gap-2">
                           {presets.map((preset) => {
@@ -553,7 +553,7 @@ export function AnimatedColorPicker({
                                     : "none",
                                 }}
                                 onClick={() => syncFromHex(preset)}
-                                aria-label={`${tl("Cor")} ${preset}`}
+                                aria-label={`${t("generated.controlPlane.cor_a63c4fed")} ${preset}`}
                                 disabled={disabled}
                               />
                             );
@@ -563,7 +563,7 @@ export function AnimatedColorPicker({
 
                       {!hasValidInput ? (
                         <p className="text-xs text-[var(--tone-danger-text)]">
-                          {tl("Use o formato hexadecimal #RRGGBB.")}
+                          {t("generated.controlPlane.use_o_formato_hexadecimal_rrggbb_a3f2266c")}
                         </p>
                       ) : null}
                     </div>

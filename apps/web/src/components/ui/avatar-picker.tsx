@@ -2,13 +2,12 @@
 
 import { useId, useMemo, useSyncExternalStore } from "react";
 import { Check } from "lucide-react";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 import { safeLocalStorageGet, safeLocalStorageSet } from "@/lib/browser-storage";
 import { cn } from "@/lib/utils";
 
 export interface AvatarOption {
   id: string;
-  label: string;
-  alt: string;
   colors: {
     base: string;
     accent: string;
@@ -29,71 +28,51 @@ export interface AvatarOption {
 export const avatarOptions: AvatarOption[] = [
   {
     id: "ember",
-    label: "Ember",
-    alt: "Warm animated avatar",
     colors: { base: "#D97757", accent: "#F4B27A", ink: "#24110B" },
     face: { eyes: "round", mouth: "grin", detail: "freckles", gaze: [0.45, -0.1], bob: "4.8s", glance: "6.4s", blink: "5.2s", delay: "0.2s" },
   },
   {
     id: "harbor",
-    label: "Harbor",
-    alt: "Teal animated avatar",
     colors: { base: "#2A9D8F", accent: "#8EDAD0", ink: "#061C1A" },
     face: { eyes: "soft", mouth: "smile", detail: "cheeks", gaze: [-0.5, 0.1], bob: "5.4s", glance: "7.1s", blink: "4.9s", delay: "1.1s" },
   },
   {
     id: "graphite",
-    label: "Graphite",
-    alt: "Graphite animated avatar",
     colors: { base: "#2A2A2A", accent: "#B8B8B8", ink: "#F5F5F5" },
     face: { eyes: "sleepy", mouth: "calm", detail: "brows", gaze: [0.3, 0.2], bob: "6.2s", glance: "8.2s", blink: "6.6s", delay: "0.7s" },
   },
   {
     id: "sage",
-    label: "Sage",
-    alt: "Sage animated avatar",
     colors: { base: "#8FAE7E", accent: "#DCE9C8", ink: "#182114" },
     face: { eyes: "round", mouth: "calm", detail: "mole", gaze: [-0.3, -0.15], bob: "5.8s", glance: "7.8s", blink: "5.8s", delay: "1.7s" },
   },
   {
     id: "cobalt",
-    label: "Cobalt",
-    alt: "Cobalt animated avatar",
     colors: { base: "#4A6FA5", accent: "#BFD2F2", ink: "#081424" },
     face: { eyes: "glasses", mouth: "smirk", detail: "brows", gaze: [0.55, 0], bob: "5.1s", glance: "6.8s", blink: "5.6s", delay: "0.5s" },
   },
   {
     id: "rosewood",
-    label: "Rosewood",
-    alt: "Rosewood animated avatar",
     colors: { base: "#9C496A", accent: "#F0B7C8", ink: "#260B15" },
     face: { eyes: "wink", mouth: "smirk", detail: "cheeks", gaze: [0.35, -0.05], bob: "4.9s", glance: "6.1s", blink: "4.7s", delay: "1.3s" },
   },
   {
     id: "ochre",
-    label: "Ochre",
-    alt: "Ochre animated avatar",
     colors: { base: "#B98535", accent: "#F0D08A", ink: "#221508" },
     face: { eyes: "round", mouth: "oh", detail: "spark", gaze: [-0.45, -0.2], bob: "4.7s", glance: "5.9s", blink: "4.6s", delay: "0.9s" },
   },
   {
     id: "violet",
-    label: "Violet",
-    alt: "Violet animated avatar",
     colors: { base: "#6E5BA8", accent: "#C9BDF1", ink: "#160E2D" },
     face: { eyes: "soft", mouth: "grin", detail: "freckles", gaze: [0.2, 0.25], bob: "5.3s", glance: "7.4s", blink: "5.1s", delay: "1.9s" },
   },
   {
     id: "slate",
-    label: "Slate",
-    alt: "Slate animated avatar",
     colors: { base: "#64748B", accent: "#D1DAE6", ink: "#0F172A" },
     face: { eyes: "sleepy", mouth: "smile", detail: "none", gaze: [-0.25, 0.1], bob: "6.6s", glance: "8.6s", blink: "6.9s", delay: "1.4s" },
   },
   {
     id: "mint",
-    label: "Mint",
-    alt: "Mint animated avatar",
     colors: { base: "#5AA88F", accent: "#C9F0DF", ink: "#09241C" },
     face: { eyes: "round", mouth: "smile", detail: "spark", gaze: [0.4, -0.25], bob: "4.6s", glance: "6.2s", blink: "4.8s", delay: "0.1s" },
   },
@@ -113,6 +92,18 @@ export const OPERATOR_AVATAR_CHANGED_EVENT = "koda:operator-avatar-changed";
 
 export function getAvatarOption(avatarId: string | null | undefined) {
   return avatarOptions.find((avatar) => avatar.id === avatarId) ?? avatarOptions[0];
+}
+
+function avatarOptionKey(avatar: AvatarOption, field: "label" | "alt") {
+  return `ui.avatarPicker.options.${avatar.id}.${field}`;
+}
+
+export function getAvatarOptionLabel(avatar: AvatarOption, t: (key: string) => string) {
+  return t(avatarOptionKey(avatar, "label"));
+}
+
+function avatarAlt(avatar: AvatarOption, t: (key: string) => string) {
+  return t(avatarOptionKey(avatar, "alt"));
 }
 
 export function readStoredOperatorAvatar() {
@@ -362,10 +353,12 @@ function OperatorAvatarSvg({
   avatar,
   size = 40,
   className,
+  alt,
 }: {
   avatar: AvatarOption;
   size?: number;
   className?: string;
+  alt?: string;
 }) {
   const instanceId = useId().replace(/:/g, "");
   const maskId = `avatar-mask-${avatar.id}-${instanceId}`;
@@ -379,7 +372,7 @@ function OperatorAvatarSvg({
       xmlns="http://www.w3.org/2000/svg"
       width={size}
       height={size}
-      aria-label={avatar.alt}
+      aria-label={alt ?? avatar.id}
       className={className}
     >
       <style>{avatarMotionStyles(scope, avatar.face)}</style>
@@ -429,47 +422,60 @@ export function OperatorAvatar({
   size?: number;
   className?: string;
 }) {
-  return <OperatorAvatarSvg avatar={getAvatarOption(avatarId)} size={size} className={className} />;
+  const { t } = useAppI18n();
+  const avatar = getAvatarOption(avatarId);
+  return (
+    <OperatorAvatarSvg
+      avatar={avatar}
+      alt={avatarAlt(avatar, t)}
+      size={size}
+      className={className}
+    />
+  );
 }
 
 export function AvatarPicker({
   value,
   onChange,
-  displayName = "Me",
-  subtitle = "Select your avatar",
+  displayName,
+  subtitle,
   className,
   showPreview = true,
 }: AvatarPickerProps) {
+  const { t } = useAppI18n();
   const selectedAvatar = useMemo(() => getAvatarOption(value), [value]);
+  const selectedAvatarLabel = getAvatarOptionLabel(selectedAvatar, t);
+  const radiogroupLabel = subtitle ?? t("ui.avatarPicker.subtitle");
 
   return (
     <section className={cn("flex min-w-0 flex-col gap-4", className)}>
       {showPreview ? (
         <div className="flex min-w-0 items-center gap-3">
           <span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full border border-[var(--border-subtle)] bg-[var(--panel-soft)]">
-            <OperatorAvatarSvg avatar={selectedAvatar} size={64} />
+            <OperatorAvatarSvg avatar={selectedAvatar} alt={avatarAlt(selectedAvatar, t)} size={64} />
           </span>
           <div className="min-w-0">
             <h2 className="m-0 truncate text-[1rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
-              {displayName}
+              {displayName ?? t("ui.avatarPicker.me")}
             </h2>
             <p className="m-0 mt-1 truncate text-[0.75rem] text-[var(--text-tertiary)]">
-              {selectedAvatar.label}
+              {selectedAvatarLabel}
             </p>
           </div>
         </div>
       ) : null}
 
-      <div className="grid grid-cols-5 gap-2" role="radiogroup" aria-label={subtitle}>
+      <div className="grid grid-cols-5 gap-2" role="radiogroup" aria-label={radiogroupLabel}>
         {avatarOptions.map((avatar) => {
           const selected = selectedAvatar.id === avatar.id;
+          const label = getAvatarOptionLabel(avatar, t);
           return (
             <button
               key={avatar.id}
               type="button"
               role="radio"
               aria-checked={selected}
-              aria-label={`Select ${avatar.label}`}
+              aria-label={t("ui.avatarPicker.selectOption", { label })}
               onClick={() => onChange?.(avatar.id)}
               className={cn(
                 "relative flex h-10 w-full items-center justify-center overflow-hidden rounded-[var(--radius-panel-sm)] border bg-[var(--panel-soft)] transition-[border-color,background-color] duration-[120ms]",
@@ -478,7 +484,7 @@ export function AvatarPicker({
                   : "border-[var(--border-subtle)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]",
               )}
             >
-              <OperatorAvatarSvg avatar={avatar} size={28} />
+              <OperatorAvatarSvg avatar={avatar} alt={avatarAlt(avatar, t)} size={28} />
               {selected ? (
                 <span className="absolute right-0.5 top-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--text-primary)] text-[var(--canvas)]">
                   <Check className="h-3 w-3" strokeWidth={2} aria-hidden="true" />

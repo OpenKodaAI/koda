@@ -17,34 +17,25 @@ export function ExecutionsShell({ children }: { children: ReactNode }) {
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <PageSectionHeader
           compact
-          title={t("executions.shell.title", { defaultValue: "Executions" })}
-          description={t("executions.shell.description", {
-            defaultValue:
-              "Live runs and recovery — inspect tasks or jump to the dead-letter queue.",
-          })}
+          title={t("executions.shell.title", undefined)}
+          description={t("executions.shell.description", undefined)}
         />
         <SoftTabs
           items={[
             {
               id: "executions",
-              label: t("executions.shell.tabs.executions", {
-                defaultValue: "Executions",
-              }),
+              label: t("executions.shell.tabs.executions", undefined),
             },
             {
               id: "dlq",
-              label: t("executions.shell.tabs.dlq", {
-                defaultValue: "Dead letter queue",
-              }),
+              label: t("executions.shell.tabs.dlq", undefined),
             },
           ]}
           value={value}
           onChange={(id) =>
             router.push(id === "dlq" ? "/executions/dlq" : "/executions")
           }
-          ariaLabel={t("executions.shell.tabs.ariaLabel", {
-            defaultValue: "Executions tabs",
-          })}
+          ariaLabel={t("executions.shell.tabs.ariaLabel", undefined)}
         />
       </div>
       {children}

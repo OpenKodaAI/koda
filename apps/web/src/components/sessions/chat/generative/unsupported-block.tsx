@@ -2,6 +2,7 @@
 
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { InlineAlert } from "@/components/ui/inline-alert";
+import { translate } from "@/lib/i18n";
 
 export interface UnsupportedBlockProps {
   blockType?: string;
@@ -18,12 +19,10 @@ export function UnsupportedBlock({ blockType, raw }: UnsupportedBlockProps) {
   return (
     <InlineAlert tone="warning">
       <p className="m-0 font-medium">
-        {t("chat.blocks.unsupported.title", { defaultValue: "Unsupported block" })}
+        {t("chat.blocks.unsupported.title", undefined)}
       </p>
       <p className="m-0 mt-0.5 text-[0.8125rem] opacity-90">
-        {t("chat.blocks.unsupported.body", {
-          defaultValue: "This message includes content this client can’t render yet.",
-        })}
+        {t("chat.blocks.unsupported.body", undefined)}
         {blockType ? (
           <>
             {" "}
@@ -36,8 +35,7 @@ export function UnsupportedBlock({ blockType, raw }: UnsupportedBlockProps) {
       {isDev && raw !== undefined ? (
         <details className="mt-2 text-[0.6875rem]">
           <summary className="cursor-pointer text-[var(--text-tertiary)]">
-            Raw payload
-          </summary>
+            {translate("generated.sessions.raw_payload_a6211760")}</summary>
           <pre className="mt-1 max-h-48 overflow-auto rounded-[var(--radius-chip)] bg-[var(--panel-strong)] p-2 text-[var(--text-secondary)] whitespace-pre-wrap break-all">
             {JSON.stringify(raw, null, 2)}
           </pre>

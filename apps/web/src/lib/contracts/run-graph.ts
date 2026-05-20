@@ -49,7 +49,7 @@ export const operationalErrorEnvelopeSchema = z
   })
   .passthrough();
 
-export const runGraphNodeTypeSchema = z.enum([
+const runGraphNodeTypeValues = [
   "queue_wait",
   "lease_acquire",
   "lease_renew",
@@ -74,13 +74,22 @@ export const runGraphNodeTypeSchema = z.enum([
   "agent_request",
   "agent_followup",
   "reply_obligation",
+  "handoff_event",
   "coordinator_synthesis",
   "artifact",
   "cost",
   "context_block",
   "checkpoint",
   "runtime_event",
-]);
+] as const;
+
+export type RunGraphNodeType = (typeof runGraphNodeTypeValues)[number];
+
+export const runGraphNodeTypeSchema = z.custom<RunGraphNodeType>(
+  (value) => typeof value === "string" && [...runGraphNodeTypeValues].includes(value as RunGraphNodeType),
+  "Invalid RunGraph node type.",
+) as unknown as z.ZodType<RunGraphNodeType> & { options: typeof runGraphNodeTypeValues };
+runGraphNodeTypeSchema.options = runGraphNodeTypeValues;
 
 export const runGraphRedactionSummarySchema = z
   .object({
@@ -170,7 +179,6 @@ export type OperationalRunState = z.infer<typeof operationalRunStateSchema>;
 export type LegacyRuntimeTaskState = z.infer<typeof legacyRuntimeTaskStateSchema>;
 export type OperationalErrorCategory = z.infer<typeof operationalErrorCategorySchema>;
 export type OperationalErrorEnvelope = z.infer<typeof operationalErrorEnvelopeSchema>;
-export type RunGraphNodeType = z.infer<typeof runGraphNodeTypeSchema>;
 export type RunGraphNode = z.infer<typeof runGraphNodeSchema>;
 export type RunGraphSnapshot = z.infer<typeof runGraphSnapshotSchema>;
 export type RunReplayPlan = z.infer<typeof runReplayPlanSchema>;

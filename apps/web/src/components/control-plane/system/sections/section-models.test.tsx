@@ -10,16 +10,27 @@ import {
   providerDescription,
   providerLabel,
 } from "@/components/control-plane/system/sections/section-models";
+import { translateForLanguage } from "@/lib/i18n";
 
 vi.mock("next/image", () => ({
   default: (props: ImgHTMLAttributes<HTMLImageElement>) => <img {...props} alt={props.alt || ""} />,
 }));
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    tl: (value: string) => value,
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 const useSystemSettingsMock = vi.fn();
 const clipboardWriteTextMock = vi.fn();
@@ -157,7 +168,7 @@ describe("isSelectableProvider", () => {
 describe("provider copy", () => {
   it("labels OpenRouter and describes its routed catalog", () => {
     expect(providerLabel("openrouter")).toBe("OpenRouter");
-    expect(providerDescription("openrouter", "general")).toContain("catálogo dinâmico");
+    expect(providerDescription("openrouter", "general", (key, options) => translateForLanguage("pt-BR", key, options))).toContain("catálogo dinâmico");
   });
 });
 
@@ -792,7 +803,7 @@ describe("ProviderAccordionItem", () => {
       />,
     );
 
-    expect(screen.getByText("Authentication Code")).toBeInTheDocument();
+    expect(screen.getByText("Código de autenticação")).toBeInTheDocument();
     expect(screen.getByPlaceholderText("Cole o código de autenticação")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Abrir página de autorização" })).toHaveAttribute(
       "href",

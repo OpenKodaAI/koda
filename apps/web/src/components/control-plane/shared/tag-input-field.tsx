@@ -23,7 +23,7 @@ export function TagInputField({
   placeholder = "Digite e pressione Enter...",
   maxTags,
 }: TagInputFieldProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const [input, setInput] = useState("");
 
   const addTag = useCallback(
@@ -78,7 +78,7 @@ export function TagInputField({
       <div className="rounded-[22px] border border-[var(--border-subtle)] bg-[var(--surface-canvas)] p-4 shadow-[0_12px_32px_rgba(0,0,0,0.06)]">
         <div className="mb-3 flex items-center justify-between gap-3">
           <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
-            {tl("Etiquetas curtas")}
+            {t("generated.controlPlane.etiquetas_curtas_d7969da7")}
           </span>
           <button
             type="button"
@@ -87,7 +87,7 @@ export function TagInputField({
             disabled={isFull}
           >
             <ClipboardPaste size={13} />
-            {tl("Colar")}
+            {t("generated.controlPlane.colar_86bd35ed")}
           </button>
         </div>
 
@@ -116,7 +116,7 @@ export function TagInputField({
                     removeTag(index);
                   }}
                   className="rounded-full p-1 transition-colors hover:bg-[var(--surface-hover-strong)] hover:text-[var(--tone-danger-text)]"
-                  aria-label={`${tl("Remover")} ${tag}`}
+                  aria-label={`${t("generated.controlPlane.remover_5465770e")} ${tag}`}
                 >
                   <X size={10} />
                 </button>
@@ -131,15 +131,15 @@ export function TagInputField({
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
               className="min-w-[180px] flex-1 bg-transparent border-none outline-none text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
-              placeholder={values.length === 0 ? tl(placeholder) : tl("Digite e pressione Enter")}
+              placeholder={values.length === 0 ? tl(placeholder) : t("generated.controlPlane.digite_e_pressione_enter_a2bf9a1f")}
             />
           ) : null}
         </div>
 
         <span className="mt-3 block text-[11px] text-[var(--text-quaternary)]">
           {isFull
-            ? tl("Limite de {{count}} itens atingido", { count: maxTags ?? 0 })
-            : tl("Pressione Enter para adicionar ou cole varios itens separados por virgula ou linha")}
+            ? t("generated.controlPlane.limite_de_count_itens_atingido_5489a1a8", { count: maxTags ?? 0 })
+            : t("generated.controlPlane.pressione_enter_para_adicionar_ou_cole_vario_e2accc2a")}
           {values.length > 0 && !isFull
             ? ` · ${values.length} ${tl(values.length !== 1 ? "itens" : "item")}`
             : ""}

@@ -4,6 +4,7 @@ import { Fragment, type ReactNode } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { translate } from "@/lib/i18n";
 
 interface BreadcrumbItem {
   label: string;
@@ -40,7 +41,7 @@ export function EntityHeader({
     >
       {breadcrumb.length > 0 ? (
         <nav
-          aria-label="Breadcrumb"
+          aria-label={translate("generated.controlPlane.breadcrumb_b2115b87")}
           className="flex flex-wrap items-center gap-1 text-[0.75rem] text-[var(--text-tertiary)]"
         >
           {breadcrumb.map((item, index) => (

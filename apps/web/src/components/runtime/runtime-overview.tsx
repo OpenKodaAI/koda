@@ -11,6 +11,7 @@ import { resolveAgentSelection } from "@/lib/agent-selection";
 import { useRuntimeOverview } from "@/hooks/use-runtime-overview";
 import { useRuntimeRooms } from "@/hooks/use-runtime-rooms";
 import { getAgentColor, getAgentLabel } from "@/lib/agent-constants";
+import { translate } from "@/lib/i18n";
 import {
   getRuntimeRowSummary,
   type RuntimeRoomFilter,
@@ -131,8 +132,8 @@ function LiveRow({ row }: { row: RuntimeRoomRow }) {
   const isLive = phaseTone === "info" || phaseTone === "warning";
   const sourceLabel =
     row.source === "environment"
-      ? t("runtime.overview.sources.environment", { defaultValue: "Runtime" })
-      : t("runtime.overview.sources.queue", { defaultValue: "Queue" });
+      ? t("runtime.overview.sources.environment", undefined)
+      : t("runtime.overview.sources.queue", undefined);
 
   return (
     <Link
@@ -371,7 +372,7 @@ export function RuntimeOverviewScreen({
         <div className="min-w-0">
           <p className="eyebrow">{t("runtime.overview.title")}</p>
           <h1 className="m-0 mt-1 text-[1.375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
-            {t("runtime.controlCard.title", { defaultValue: "Runtime operations" })}
+            {t("runtime.controlCard.title", undefined)}
           </h1>
         </div>
 
@@ -394,8 +395,8 @@ export function RuntimeOverviewScreen({
               onChange={setSearch}
               placeholder={t("runtime.overview.searchPlaceholder")}
               loading={searchLoading}
-              loadingLabel={t("runtime.overview.searching", { defaultValue: "Searching runtime" })}
-              clearLabel={t("common.clear", { defaultValue: "Clear" })}
+              loadingLabel={t("runtime.overview.searching", undefined)}
+              clearLabel={t("common.clear", undefined)}
             />
           </div>
 
@@ -443,7 +444,7 @@ export function RuntimeOverviewScreen({
         <section className="overflow-hidden rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel)]">
           <header className="flex items-baseline justify-between gap-3 border-b border-[var(--divider-hair)] px-3 py-2.5">
             <div className="min-w-0">
-              <p className="eyebrow truncate">runtime</p>
+              <p className="eyebrow truncate">{translate("generated.runtime.runtime_5359aeee")}</p>
               <h3 className="m-0 mt-1 truncate text-[var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
                 {t("runtime.overview.liveExecutions")}
               </h3>
@@ -463,19 +464,19 @@ export function RuntimeOverviewScreen({
                   )}
                 >
                   <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                    {t("runtime.overview.table.agent", { defaultValue: "Agent" })}
+                    {t("runtime.overview.table.agent", undefined)}
                   </span>
                   <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                    {t("runtime.overview.table.task", { defaultValue: "Task" })}
+                    {t("runtime.overview.table.task", undefined)}
                   </span>
                   <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
                     {t("common.status")}
                   </span>
                   <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                    {t("runtime.overview.table.source", { defaultValue: "Source" })}
+                    {t("runtime.overview.table.source", undefined)}
                   </span>
                   <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                    {t("runtime.overview.table.summary", { defaultValue: "Summary" })}
+                    {t("runtime.overview.table.summary", undefined)}
                   </span>
                   <span
                     className={cn(
@@ -483,7 +484,7 @@ export function RuntimeOverviewScreen({
                       "z-20 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]",
                     )}
                   >
-                    {t("runtime.overview.table.updated", { defaultValue: "Updated" })}
+                    {t("runtime.overview.table.updated", undefined)}
                   </span>
                 </div>
 
@@ -508,7 +509,7 @@ export function RuntimeOverviewScreen({
                     hasMore={Boolean(runtimeRoomsQuery.hasNextPage)}
                     loading={runtimeRoomsQuery.isFetchingNextPage}
                     onLoadMore={loadMoreRuntimeRooms}
-                    label={t("common.loadMore", { defaultValue: "Load more" })}
+                    label={t("common.loadMore", undefined)}
                   />
                 </div>
               </div>

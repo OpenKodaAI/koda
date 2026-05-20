@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { requestJson } from "@/lib/http-client";
+import { translate } from "@/lib/i18n";
 
 type OAuthCallbackResponse = {
   success: boolean;
@@ -172,8 +173,7 @@ export default function OAuthCallbackPage() {
           onClick={() => window.close()}
           className="mt-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
         >
-          Fechar
-        </button>
+          {translate("generated.routes.fechar_a2a3b736")}</button>
       </div>
     </div>
   );

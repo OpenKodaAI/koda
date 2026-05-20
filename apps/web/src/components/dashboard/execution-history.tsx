@@ -106,7 +106,7 @@ function ExecutionHistoryComponent({
   onSelectAgent,
   className,
 }: ExecutionHistoryProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const rows = useMemo<Row[]>(() => {
     const agentById = new Map(entries.map((entry) => [entry.agent.id, entry.agent]));
     if (executions) {
@@ -168,7 +168,7 @@ function ExecutionHistoryComponent({
     <ul
       className={cn("flex w-full flex-col", className)}
       role="list"
-      aria-label={tl("Execution history")}
+      aria-label={t("generated.dashboard.execution_history_08553b0b")}
     >
       {rows.map(({ agent, task, status }, index) => {
         const query = truncateText(task.query_text?.trim() || strings.noMessage, 96);

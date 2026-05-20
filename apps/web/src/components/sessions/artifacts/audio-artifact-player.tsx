@@ -54,12 +54,12 @@ export function AudioArtifactPlayer({
     [activityAt, agentId, artifact],
   );
   const progress = duration > 0 ? Math.min(1, Math.max(0, currentTime / duration)) : 0;
-  const label = artifact.label?.trim() || t("sessions.artifacts.audio", { defaultValue: "Audio" });
+  const label = artifact.label?.trim() || t("sessions.artifacts.audio", undefined);
 
   const togglePlayback = async () => {
     const audio = audioRef.current;
     if (!audio || !audioUrl) {
-      setError(t("sessions.artifacts.audioUnavailable", { defaultValue: "Audio unavailable." }));
+      setError(t("sessions.artifacts.audioUnavailable", undefined));
       return;
     }
     try {
@@ -73,7 +73,7 @@ export function AudioArtifactPlayer({
       setError(null);
     } catch {
       setPlaying(false);
-      setError(t("sessions.artifacts.audioLoadError", { defaultValue: "Could not play audio." }));
+      setError(t("sessions.artifacts.audioLoadError", undefined));
     }
   };
 
@@ -104,7 +104,7 @@ export function AudioArtifactPlayer({
           onPlay={() => setPlaying(true)}
           onError={() => {
             setPlaying(false);
-            setError(t("sessions.artifacts.audioLoadError", { defaultValue: "Could not play audio." }));
+            setError(t("sessions.artifacts.audioLoadError", undefined));
           }}
         />
       ) : null}
@@ -113,8 +113,8 @@ export function AudioArtifactPlayer({
         onClick={() => void togglePlayback()}
         aria-label={
           playing
-            ? t("sessions.artifacts.pauseAudio", { defaultValue: "Pause audio" })
-            : t("sessions.artifacts.playAudio", { defaultValue: "Play audio" })
+            ? t("sessions.artifacts.pauseAudio", undefined)
+            : t("sessions.artifacts.playAudio", undefined)
         }
         className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--text-primary)] text-[var(--canvas)] transition-colors hover:bg-[var(--text-secondary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text-tertiary)]"
       >
@@ -151,7 +151,7 @@ export function AudioArtifactPlayer({
             type="button"
             onClick={() => void downloader.download(artifactDetail)}
             disabled={downloader.isDownloading}
-            aria-label={t("sessions.artifacts.downloadAudio", { defaultValue: "Download audio" })}
+            aria-label={t("sessions.artifacts.downloadAudio", undefined)}
             className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60"
           >
             <Download className="h-3 w-3" strokeWidth={1.75} aria-hidden />

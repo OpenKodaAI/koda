@@ -19,7 +19,7 @@ Phase 5 covers:
 - `trajectory_export.v1`: redacted JSONL evidence for replay, debugging, and
   release handoff.
 - `release_quality.v1`: a release gate summary that combines smoke status,
-  eval status, redaction status, and regression groups.
+  eval status, redaction status, RunGraph completeness, and regression groups.
 
 Phase 5 does not add channel gateway behavior, onboarding flows, marketplace
 publishing, or real-provider evals. The default eval path is offline replay or
@@ -131,8 +131,8 @@ Required fields:
 - `schema_version`: `release_quality.v1`
 - `release_quality_id`, `generated_at`, `version?`, `commit_sha?`
 - `status`: `passed`, `failed`, `blocked`, or `unknown`
-- `gates`: smoke, eval suite, trajectory export redaction, security deny,
-  docs, and residual E2E blocker status
+- `gates`: smoke, eval suite, trajectory export redaction, RunGraph
+  completeness, security deny, docs, and residual E2E blocker status
 - `latest_eval_run`: run id, suite id, score, threshold, failures, warnings
 - `failure_groups`: top failing tools, providers, policies, assertions, and
   runtime states
@@ -143,6 +143,23 @@ The release gate is `blocked` when authenticated browser E2E or Browser MCP
 infrastructure is unavailable. A blocked E2E gate may be accepted only as a
 documented residual blocker when the mocked Playwright/API smoke, eval suite,
 redaction tests, and release smoke script pass.
+
+`run_graph_completeness` fails when a required `run_graph.v1` node family is
+missing. Squad flows must show the request, reply obligation, child run or task
+result, coordinator synthesis, and timeout/dependency evidence when applicable.
+The gate also checks dangling edge endpoints, disconnected required nodes, and
+a causal path from completed evidence or timeout into synthesis. Historical
+partial traces may be accepted only with explicit missing-data warnings.
+
+`squad_golden_quality` compares `single_agent` and `squad` variants from the
+same `eval_case.v1`. A passing squad golden case must beat the single-agent
+baseline by the configured delta, resolve every quality claim to RunGraph or
+delivery evidence, keep provider calls at zero, and report cost/time deltas
+when those values are available.
+
+Failed eval cases may create `improvement_proposal.v1` records. Those records
+are review-only at creation time and do not activate any memory, skill, prompt,
+routing, tool policy, eval, or docs change.
 
 ## Control-Plane API
 
@@ -212,6 +229,7 @@ Phase 5 emits or reconstructs these event concepts:
 | `trajectory_export.denied` | warning | agent, requested source, redaction rule | audit table and metrics |
 | `release_quality.generated` | info | agent, release quality id, suite/version | release-quality row |
 | `release_quality.failed` | warning | agent, gate, failure group | release-quality row and metrics |
+| `improvement_proposal.created_from_eval_failure` | warning | agent, eval run, case, proposal | proposal row, audit table and metrics |
 
 RunGraph links are references, not new runtime dependencies. Eval case creation
 links to source graph nodes; eval runs may produce `runtime_event` or

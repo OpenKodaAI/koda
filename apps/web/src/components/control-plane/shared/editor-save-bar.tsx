@@ -28,15 +28,9 @@ export function EditorSaveBar({
   const { t } = useAppI18n();
   const label = dirty
     ? typeof changeCount === "number" && changeCount !== 1
-      ? t("controlPlane.saveBar.dirtyMany", {
-          defaultValue: "{{n}} unsaved changes",
-          n: changeCount,
-        })
-      : t("controlPlane.saveBar.dirty", {
-          defaultValue: "1 unsaved change",
-          n: changeCount ?? 1,
-        })
-    : t("controlPlane.saveBar.saved", { defaultValue: "All changes saved" });
+      ? t("controlPlane.saveBar.dirtyMany", { n: changeCount })
+      : t("controlPlane.saveBar.dirty", { n: changeCount ?? 1 })
+    : t("controlPlane.saveBar.saved", undefined);
 
   return (
     <div
@@ -61,7 +55,7 @@ export function EditorSaveBar({
             onClick={onDiscard}
             disabled={!dirty || saving}
           >
-            {t("controlPlane.saveBar.discard", { defaultValue: "Discard" })}
+            {t("controlPlane.saveBar.discard", undefined)}
           </Button>
         ) : null}
         <Button
@@ -74,7 +68,7 @@ export function EditorSaveBar({
           {saving ? (
             <Loader2 className="icon-sm animate-spin" strokeWidth={1.75} aria-hidden />
           ) : null}
-          {t("controlPlane.saveBar.save", { defaultValue: "Save" })}
+          {t("controlPlane.saveBar.save", undefined)}
         </Button>
       </div>
     </div>

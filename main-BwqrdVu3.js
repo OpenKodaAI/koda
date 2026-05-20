@@ -32,7 +32,7 @@ const e=require(`./app-session-O7kcZj7R.js`),t=require(`./workspace-root-drop-ha
   - Valid: \`::inbox-item{title="Sample title" summary="Place description here"}\`
   - Invalid: \`::inbox-item{title="Sample title",summary="Place description here"}\`
 - When referring to files, use full absolute filesystem links in Markdown (not relative paths).
-  - Valid: [\`/Users/alice/project/src/main.ts\`](/Users/alice/project/src/main.ts)
+  - Valid: [\`/workspace/project/src/main.ts\`](/workspace/project/src/main.ts)
   - Invalid: \`src/main.ts\` or \`[main](src/main.ts)\`
 - Try not to ask the user for more input if possible to infer.
 - If a PR is opened by the automation, add the \`codex-automation\` label when available alongside the normal \`codex\` label.

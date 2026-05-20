@@ -41,9 +41,27 @@ permissions return `review_required`. Review does not bypass ExecutionPolicy or
 approval. It only allows package install to proceed when local operator policy
 accepts the risk.
 
+P3 requires `review_required` installs to include both `review_accepted=true`
+and a non-empty `review_note`. The note is recorded with install audit metadata
+and trust summary; it does not weaken scanner findings, ExecutionPolicy, or
+per-agent skill/package allowlists.
+
+Imported or legacy locks with `decision=review_required` but no preserved
+`operator_review.accepted` evidence stay `blocked` and cannot become
+`recommended`.
+
 ## Audit And Observability
 
 Every scan/install/uninstall/rollback emits audit events. Runtime use of
 package tools continues through ToolRegistry, ExecutionPolicy, approvals,
 RunGraph, and metrics. The frontend renders backend findings and must not
 reclassify risk locally.
+
+Package tool execution is gated twice: prompt/native schema exposure requires
+`skill_policy.enabled_skill_packages` and `tool_policy.allowed_tool_ids`, and
+direct dynamic handler calls are denied by the dispatcher unless the same
+runtime policy allows the package and tool.
+
+Recommendation is evidence-backed. A package with no skill eval evidence is
+`unreviewed`; failed required evals produce `eval_failed`; only passing required
+offline `skill_eval.v1` checks can produce `recommended`.

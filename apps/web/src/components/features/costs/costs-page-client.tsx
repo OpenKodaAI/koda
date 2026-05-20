@@ -51,7 +51,7 @@ const TASK_TYPE_COLORS = [
 
 function buildModelItems(
   insights: CostInsightsResponse | null,
-  tl: (value: string, options?: Record<string, unknown>) => string
+  t: (value: string, options?: Record<string, unknown>) => string
 ): CostBreakdownItem[] {
   return (
     insights?.by_model?.map((entry, index) => ({
@@ -60,7 +60,7 @@ function buildModelItems(
       value: entry.cost_usd,
       share: entry.share_pct,
       color: MODEL_COLORS[index % MODEL_COLORS.length],
-      meta: tl("{{queries}} consultas · {{executions}} execuções", {
+      meta: t("generated.costs.queries_consultas_executions_execucoes_66e0ee96", {
         queries: entry.query_count,
         executions: entry.execution_count,
       }),
@@ -70,7 +70,7 @@ function buildModelItems(
 
 function buildAgentItems(
   insights: CostInsightsResponse | null,
-  tl: (value: string, options?: Record<string, unknown>) => string
+  t: (value: string, options?: Record<string, unknown>) => string
 ): CostBreakdownItem[] {
   return (
     insights?.by_agent?.map((entry) => ({
@@ -79,7 +79,7 @@ function buildAgentItems(
       value: entry.cost_usd,
       share: entry.share_pct,
       color: getAgentColor(entry.agent_id),
-      meta: tl("{{resolved}} resolvidas · {{cost}}/conv.", {
+      meta: t("generated.costs.resolved_resolvidas_cost_conv_a0e3aabd", {
         resolved: entry.resolved_conversations,
         cost: formatCost(entry.avg_cost_per_resolved_conversation),
       }),
@@ -89,7 +89,7 @@ function buildAgentItems(
 
 function buildTaskItems(
   insights: CostInsightsResponse | null,
-  tl: (value: string, options?: Record<string, unknown>) => string
+  t: (value: string, options?: Record<string, unknown>) => string
 ): CostBreakdownItem[] {
   return (
     insights?.by_task_type?.map((entry, index) => ({
@@ -98,7 +98,7 @@ function buildTaskItems(
       value: entry.cost_usd,
       share: entry.share_pct,
       color: TASK_TYPE_COLORS[index % TASK_TYPE_COLORS.length],
-      meta: tl("{{count}} eventos · {{cost}} méd.", {
+      meta: t("generated.costs.count_eventos_cost_med_b2106de8", {
         count: entry.count,
         cost: formatCost(entry.avg_cost_usd),
       }),
@@ -107,7 +107,7 @@ function buildTaskItems(
 }
 
 export default function CostsPage() {
-  const { t, tl, language } = useAppI18n();
+  const { t, language } = useAppI18n();
   const { agents } = useAgentCatalog();
   const [selectedBotIds, setSelectedBotIds] = useState<string[]>([]);
   const [period, setPeriod] = useState<(typeof PERIOD_VALUES)[number]>("30d");
@@ -156,7 +156,7 @@ export default function CostsPage() {
             taskType: taskTypeFilter !== "all" ? taskTypeFilter : null,
             lang: language,
           },
-          fallbackError: t("costs.page.loadError", { defaultValue: "Could not load costs." }),
+          fallbackError: t("costs.page.loadError", undefined),
         },
       ),
   });
@@ -185,9 +185,9 @@ export default function CostsPage() {
       : taskTypeFilter;
 
   const overview = insights?.overview;
-  const byAgentItems = useMemo(() => buildAgentItems(insights, tl), [insights, tl]);
-  const byModelItems = useMemo(() => buildModelItems(insights, tl), [insights, tl]);
-  const byTaskItems = useMemo(() => buildTaskItems(insights, tl), [insights, tl]);
+  const byAgentItems = useMemo(() => buildAgentItems(insights, t), [insights, t]);
+  const byModelItems = useMemo(() => buildModelItems(insights, t), [insights, t]);
+  const byTaskItems = useMemo(() => buildTaskItems(insights, t), [insights, t]);
 
   const allocationItems = useMemo(() => {
     if (allocationMode === "agent") return byAgentItems;
@@ -209,7 +209,7 @@ export default function CostsPage() {
   if (stableInsightsQuery.showBlockingError && error) {
     return (
       <ErrorState
-        title={t("costs.page.unavailable", { defaultValue: "Costs unavailable" })}
+        title={t("costs.page.unavailable", undefined)}
         description={error}
         onRetry={() => {
           void insightsQuery.refetch();
@@ -245,7 +245,7 @@ export default function CostsPage() {
               items={periodOptions.map((option) => ({ id: option.value, label: option.label }))}
               value={period}
               onChange={(id) => setPeriod(id as (typeof PERIOD_VALUES)[number])}
-              ariaLabel={t("costs.filters.period", { defaultValue: "Period" })}
+              ariaLabel={t("costs.filters.period", undefined)}
               className="w-fit"
             />
           </div>
@@ -307,7 +307,7 @@ export default function CostsPage() {
           items={allocationItems}
           mode={allocationMode}
           onModeChange={setAllocationMode}
-          totalLabel={t("costs.page.shareInPeriod", { defaultValue: "Share in period" })}
+          totalLabel={t("costs.page.shareInPeriod", undefined)}
           rangeStartLabel={allocationRange.start ?? undefined}
           rangeEndLabel={allocationRange.end ?? undefined}
           compact
@@ -318,12 +318,10 @@ export default function CostsPage() {
         <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[var(--divider-hair)] pb-2.5">
           <div className="min-w-0">
             <p className="eyebrow truncate">
-              {t("costs.page.distributionEyebrow", { defaultValue: "Distribution" })}
+              {t("costs.page.distributionEyebrow", undefined)}
             </p>
             <h3 className="mt-1 truncate text-[var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
-              {t("costs.page.distributionTitle", {
-                defaultValue: "Agents, models and task types",
-              })}
+              {t("costs.page.distributionTitle", undefined)}
             </h3>
           </div>
           <span className="shrink-0 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
@@ -333,15 +331,15 @@ export default function CostsPage() {
 
         <div className="mt-2.5 grid gap-4 xl:grid-cols-3">
           <CostBreakdownCard
-            title={t("costs.page.breakdowns.byAgentTitle", { defaultValue: "Distribution by agent" })}
+            title={t("costs.page.breakdowns.byAgentTitle", undefined)}
             items={byAgentItems}
           />
           <CostBreakdownCard
-            title={t("costs.page.breakdowns.byModelTitle", { defaultValue: "Distribution by model" })}
+            title={t("costs.page.breakdowns.byModelTitle", undefined)}
             items={byModelItems}
           />
           <CostBreakdownCard
-            title={t("costs.page.breakdowns.byTaskTitle", { defaultValue: "Distribution by task type" })}
+            title={t("costs.page.breakdowns.byTaskTitle", undefined)}
             items={byTaskItems}
           />
         </div>

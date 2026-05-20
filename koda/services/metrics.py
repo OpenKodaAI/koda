@@ -140,6 +140,67 @@ SQUAD_DELIVERY_EVENTS = Counter(
     ["event_type", "status", "source"],
 )
 
+SQUAD_HANDOFF_EVENTS = Counter(
+    "koda_squad_handoff_events_total",
+    "Squad handoff_event.v1 lifecycle events",
+    ["event_type", "status", "handoff_kind"],
+)
+
+SQUAD_ROUTE_QUALITY = Counter(
+    "koda_squad_route_quality_total",
+    "Squad route quality decisions by confidence band",
+    ["source", "status", "confidence_band"],
+)
+
+SQUAD_SYNTHESIS_GATE = Counter(
+    "koda_squad_synthesis_gate_total",
+    "Squad final synthesis readiness decisions",
+    ["gate", "status", "reason"],
+)
+
+QUALITY_COCKPIT_FAILURES = Counter(
+    "koda_quality_cockpit_failures_total",
+    "Quality cockpit failure groups",
+    ["dimension", "category", "status"],
+)
+
+RUN_GRAPH_COMPLETENESS_GATES = Counter(
+    "koda_run_graph_completeness_gates_total",
+    "RunGraph completeness gate evaluations",
+    ["agent_id", "scenario", "status", "failure_category"],
+)
+
+ROUTE_OUTCOME_EVENTS = Counter(
+    "koda_route_outcomes_total",
+    "Route outcome v1 observations used for bounded routing quality history",
+    ["agent_id", "route_source", "status", "timeout"],
+)
+
+SKILL_PACKAGE_EVENTS = Counter(
+    "koda_skill_package_events_total",
+    "Skill package scanner, install, eval, and rollback events",
+    ["agent_id", "event", "decision", "recommendation_status"],
+)
+
+RELEASE_BLOCKERS = Gauge(
+    "koda_release_blockers",
+    "Current release blocker view derived from release_quality.v1",
+    ["agent_id", "gate_id", "severity", "status"],
+)
+
+OPS_BENCHMARK_RUNS = Counter(
+    "koda_ops_benchmark_runs_total",
+    "Ops benchmark executions by mode and status",
+    ["mode", "status"],
+)
+
+OPS_BENCHMARK_DURATION = Histogram(
+    "koda_ops_benchmark_duration_seconds",
+    "Ops benchmark wall-clock duration",
+    ["mode"],
+    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60),
+)
+
 WORKSPACE_IMPORT_SCANS_TOTAL = Counter(
     "koda_workspace_import_scans_total",
     "Workspace directory import scans",
@@ -316,6 +377,12 @@ MEMORY_CONFLICT_RESOLUTIONS = Counter(
     ["agent_id", "outcome"],
 )
 
+MEMORY_SAFETY_BLOCKS = Counter(
+    "koda_memory_safety_blocks_total",
+    "Memory governance scanner blocks by category",
+    ["agent_id", "category"],
+)
+
 MEMORY_EMBEDDING_REPAIRS = Counter(
     "koda_memory_embedding_repairs_total",
     "Embedding repair attempts and successes",
@@ -395,6 +462,12 @@ RELEASE_QUALITY_GATES = Counter(
     "koda_release_quality_gates_total",
     "Phase 5 release quality gate evaluations",
     ["agent_id", "status"],
+)
+
+IMPROVEMENT_PROPOSAL_EVENTS = Counter(
+    "koda_improvement_proposal_events_total",
+    "Self-improvement proposal lifecycle events",
+    ["agent_id", "event", "status", "proposal_type"],
 )
 
 CHANNEL_GATEWAY_EVENTS = Counter(

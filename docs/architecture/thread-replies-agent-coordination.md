@@ -69,3 +69,24 @@ RunGraph-compatible node types:
 - `agent_followup`
 - `reply_obligation`
 - `coordinator_synthesis`
+
+The recurring squad smoke fixture validates mention routing, reply obligation,
+child run or task result, coordinator synthesis, partial timeout, and RunGraph
+completeness evidence.
+
+## Handoffs And Synthesis Gate
+
+P4/P5 adds `handoff_event.v1` without changing the canonical storage model:
+handoffs are transcript-visible `squad_messages` `system_event` rows. They can
+target one destination or multiple destinations for parallel consult, and they
+carry reason, context policy, deadline, return criteria, status, correlation id,
+and RunGraph node id.
+
+Coordinator synthesis now passes through `synthesis_readiness.v1`. The gate
+blocks final synthesis while room tasks, reply obligations, child runs, or
+handoffs are still open. Terminal declined, failed, cancelled, or timed-out work
+is allowed only when the final response explicitly declares the affected
+agents/work items.
+
+See [Handoffs, Route Quality, And Synthesis Readiness](handoffs-squad-intelligence.md)
+for the full P4/P5 contract.

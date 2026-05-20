@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
+import { translate } from "@/lib/i18n";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -162,7 +163,7 @@ export function AnimatedCardStatusList({
               className="button-shell button-shell--secondary button-shell--sm mt-0.5 h-8 w-8 p-0"
               whileHover={shouldReduceMotion ? undefined : { y: -1 }}
               whileTap={shouldReduceMotion ? undefined : { scale: 0.98 }}
-              aria-label="Back"
+              aria-label={translate("generated.ui.back_16934109")}
             >
               <ChevronLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
             </motion.button>
@@ -191,7 +192,7 @@ export function AnimatedCardStatusList({
               className="button-shell button-shell--secondary button-shell--sm mt-0.5 h-8 w-8 p-0"
               whileHover={shouldReduceMotion ? undefined : { y: -1 }}
               whileTap={shouldReduceMotion ? undefined : { scale: 0.98 }}
-              aria-label="Add card"
+              aria-label={translate("generated.ui.add_card_d668d77d")}
             >
               <Plus className="h-3.5 w-3.5" strokeWidth={1.75} />
             </motion.button>

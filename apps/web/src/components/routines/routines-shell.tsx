@@ -11,11 +11,8 @@ export function RoutinesShell({ children }: { children: ReactNode }) {
     <div className="space-y-4">
       <PageSectionHeader
         compact
-        title={t("routines.title", { defaultValue: "Routines" })}
-        description={t("routines.description", {
-          defaultValue:
-            "Schedules and recurring jobs by agent. Manage cadence, scope and coverage.",
-        })}
+        title={t("routines.title", undefined)}
+        description={t("routines.description", undefined)}
       />
       {children}
     </div>

@@ -61,6 +61,7 @@ Preserve these current defaults unless a later phase changes them deliberately:
 | Error feedback | `queued`, `running`, `retrying`, `stalled`, `degraded`, `failed`, `cancelled`, `completed`. | UI/component/E2E assertion that state, cause, and next action are visible. |
 | Security / deny | Non-idempotent write retry, unsafe mount, secret exposure, policy denied tool, unknown-risk MCP. | Fail-closed tests with audit/metric assertion. |
 | Observability / replay | Queue wait, lease, dependency call, breaker, retry, DLQ, cancellation, cleanup, user-facing error. | Audit/metric/RunGraph-node declaration and snapshot or integration assertion. |
+| P6 ops benchmark | Queue/runtime/channel quick path, timeout, DLQ, backpressure, cleanup. | `ops_benchmark.v1` JSON from `scripts/ops_benchmark.py`; full mode is opt-in with `KODA_OPS_BENCH_FULL=1`. |
 
 ## Required Commands
 
@@ -69,11 +70,27 @@ Focused Phase 0 and resilience checks:
 ```bash
 pytest tests/test_services/test_queue_manager_lease.py \
   tests/test_services/test_queue_resilience.py \
+  tests/test_services/test_queue_ops_benchmark.py \
   tests/test_services/test_resilience.py \
   tests/test_services/test_global_semaphore.py \
   tests/test_services/runtime/test_recovery_manager.py \
   tests/test_services/runtime/test_events_broker.py
 ```
+
+P6 quick benchmark:
+
+```bash
+uv run python scripts/ops_benchmark.py --json
+```
+
+Full deterministic benchmark:
+
+```bash
+KODA_OPS_BENCH_FULL=1 uv run python scripts/ops_benchmark.py --json
+```
+
+Quick mode is the default CI gate. Full mode is opt-in and should be used before
+claiming load/fault robustness for a release train.
 
 Phase closeout checks for broad changes:
 

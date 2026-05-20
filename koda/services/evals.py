@@ -14,11 +14,13 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
+from koda.services.run_graph import verify_run_graph_completeness
 from koda.services.runtime.redaction import redact_value
 
 EVAL_CASE_SCHEMA_VERSION = "eval_case.v1"
 EVAL_RUN_SCHEMA_VERSION = "eval_run.v1"
 TRAJECTORY_EXPORT_SCHEMA_VERSION = "trajectory_export.v1"
+TRAJECTORY_EXPORT_MANIFEST_SCHEMA_VERSION = "trajectory_export_manifest.v1"
 RELEASE_QUALITY_SCHEMA_VERSION = "release_quality.v1"
 OFFLINE_REPLAY_STRATEGY = "offline_replay"
 
@@ -84,6 +86,15 @@ def _fallback_redact(value: Any, *, key_hint: str = "") -> Any:
 
 def _metric(value: float) -> float:
     return max(0.0, min(1.0, float(value or 0.0)))
+
+
+def _number_or_none(value: Any) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _node_tool_ids(run_graph: Mapping[str, Any]) -> list[str]:
@@ -167,6 +178,12 @@ def build_eval_case_from_run(
         "source_agent_id": agent_id.upper(),
         "source_status": str(execution.get("status") or ""),
         "source_run_graph_id": graph_payload.get("graph_id") or graph_payload.get("run_id"),
+        "source_run_graph_node_ids": compact_strings(
+            [
+                as_record(node).get("id") or as_record(node).get("node_id")
+                for node in as_list(graph_payload.get("nodes"))
+            ]
+        ),
         "source_replay_mode": replay_payload.get("replay_mode") or replay_payload.get("mode") or "offline",
         "source_tool_ids": source_tools,
         "source_policy_codes": source_policy_codes,
@@ -292,8 +309,138 @@ def evaluate_case_offline(case: Mapping[str, Any]) -> OfflineEvalResult:
             "strategy": OFFLINE_REPLAY_STRATEGY,
             "source_task_id": case.get("source_task_id"),
             "source_run_graph_id": metadata.get("source_run_graph_id"),
+            "source_run_graph_node_ids": compact_strings(metadata.get("source_run_graph_node_ids") or []),
         },
     )
+
+
+def compare_eval_quality_variants(case: Mapping[str, Any]) -> dict[str, Any]:
+    """Compare fixture-backed single-agent and squad variants deterministically."""
+
+    metadata = as_record(case.get("metadata"))
+    expected_terms = set(
+        compact_strings(as_list(metadata.get("expected_quality_terms") or case.get("expected_quality_terms")))
+    )
+    thresholds = as_record(metadata.get("thresholds") or case.get("thresholds"))
+    squad_min_quality = float(thresholds.get("squad_min_quality_score") or _MIN_PASS_SCORE)
+    min_quality_delta = float(thresholds.get("min_quality_delta") or 0.25)
+    variants = [as_record(item) for item in as_list(metadata.get("quality_variants") or case.get("quality_variants"))]
+    results: list[dict[str, Any]] = []
+    for variant in variants:
+        variant_id = str(variant.get("id") or variant.get("variant_id") or "")
+        kind = str(variant.get("kind") or variant_id)
+        observed_terms = set(
+            compact_strings(as_list(variant.get("observed_quality_terms") or variant.get("quality_terms")))
+        )
+        covered_terms = expected_terms & observed_terms
+        coverage_score = 1.0 if not expected_terms else len(covered_terms) / len(expected_terms)
+        evidence_refs = as_record(variant.get("evidence_refs"))
+        run_graph = as_record(variant.get("run_graph"))
+        nodes = [as_record(item) for item in as_list(run_graph.get("nodes"))]
+        node_ids = {
+            str(node.get("node_id") or node.get("id") or "") for node in nodes if node.get("node_id") or node.get("id")
+        }
+        event_ids = {
+            str(event.get("event_id") or f"event:{event.get('event_type')}")
+            for event in (as_record(item) for item in as_list(variant.get("delivery_events")))
+            if event.get("event_id") or event.get("event_type")
+        }
+        valid_refs = node_ids | event_ids
+        resolved_terms: list[str] = []
+        missing_evidence_terms: list[str] = []
+        for term in sorted(covered_terms):
+            refs = compact_strings(as_list(evidence_refs.get(term)))
+            if refs and all(ref in valid_refs for ref in refs):
+                resolved_terms.append(term)
+            else:
+                missing_evidence_terms.append(term)
+        evidence_score = 1.0 if not covered_terms else len(resolved_terms) / len(covered_terms)
+        requires_partial_timeout = "partial_timeout_disclosed" in observed_terms
+        graph_report = verify_run_graph_completeness(
+            run_graph,
+            scenario="squad" if kind == "squad" else "single_agent",
+            requires_partial_timeout=requires_partial_timeout,
+            require_synthesis_path=kind == "squad",
+        )
+        synthesis_score = 1.0 if graph_report.get("status") == "passed" else 0.0
+        quality_score = _metric((coverage_score * 0.55) + (evidence_score * 0.30) + (synthesis_score * 0.15))
+        provider_calls = int(variant.get("provider_calls") or 0)
+        variant_status = (
+            "passed"
+            if quality_score >= _MIN_PASS_SCORE and provider_calls == 0 and not missing_evidence_terms
+            else "failed"
+        )
+        if graph_report.get("status") != "passed":
+            variant_status = "failed"
+        results.append(
+            {
+                "id": variant_id,
+                "kind": kind,
+                "status": variant_status,
+                "coverage_score": _metric(coverage_score),
+                "evidence_score": _metric(evidence_score),
+                "synthesis_score": _metric(synthesis_score),
+                "quality_score": _metric(quality_score),
+                "observed_quality_terms": sorted(observed_terms),
+                "missing_quality_terms": sorted(expected_terms - observed_terms),
+                "missing_evidence_terms": missing_evidence_terms,
+                "run_graph_id": variant.get("run_graph_id") or "",
+                "run_graph_completeness": graph_report,
+                "cost_usd": _number_or_none(variant.get("cost_usd")),
+                "duration_ms": _number_or_none(variant.get("duration_ms")),
+                "provider_calls": provider_calls,
+            }
+        )
+
+    winner = max(results, key=lambda item: (float(item["quality_score"]), str(item["id"])), default=None)
+    by_id = {str(item["id"]): item for item in results}
+    squad = by_id.get("squad")
+    single = by_id.get("single_agent")
+    quality_delta = (
+        _metric(float(squad["quality_score"]) - float(single["quality_score"]))
+        if squad is not None and single is not None
+        else 0.0
+    )
+    cost_delta_usd = None
+    duration_delta_ms = None
+    if squad is not None and single is not None:
+        squad_cost = _number_or_none(squad.get("cost_usd"))
+        single_cost = _number_or_none(single.get("cost_usd"))
+        if squad_cost is not None and single_cost is not None:
+            cost_delta_usd = round(squad_cost - single_cost, 6)
+        squad_duration = _number_or_none(squad.get("duration_ms"))
+        single_duration = _number_or_none(single.get("duration_ms"))
+        if squad_duration is not None and single_duration is not None:
+            duration_delta_ms = round(squad_duration - single_duration, 3)
+    status = (
+        "passed"
+        if squad is not None
+        and single is not None
+        and winner is not None
+        and winner["id"] == "squad"
+        and quality_delta >= min_quality_delta
+        and float(squad.get("quality_score") or 0.0) >= squad_min_quality
+        and str(squad.get("status") or "") == "passed"
+        and int(squad.get("provider_calls") or 0) == 0
+        and int(single.get("provider_calls") or 0) == 0
+        else "failed"
+    )
+    return {
+        "schema_version": EVAL_RUN_SCHEMA_VERSION,
+        "case_key": str(case.get("case_key") or ""),
+        "status": status,
+        "winner": winner["id"] if winner else "",
+        "quality_delta": quality_delta,
+        "thresholds": {
+            "squad_min_quality_score": _metric(squad_min_quality),
+            "min_quality_delta": _metric(min_quality_delta),
+        },
+        "cost_delta_usd": cost_delta_usd,
+        "duration_delta_ms": duration_delta_ms,
+        "expected_quality_terms": sorted(expected_terms),
+        "variants": results,
+        "metadata": {"strategy": "fixture_golden_quality_comparison"},
+    }
 
 
 def build_eval_run_batch(
@@ -404,6 +551,38 @@ def build_trajectory_export(
             }
         )
     jsonl = "\n".join(canonical_json(line) for line in lines) + "\n"
+    warnings = _trajectory_export_warnings(
+        lines=lines,
+        graph_payload=graph_payload,
+        replay_payload=replay_payload,
+    )
+    validation_status = "blocked" if _contains_raw_sensitive_marker(jsonl) else ("warning" if warnings else "passed")
+    manifest = {
+        "schema_version": TRAJECTORY_EXPORT_MANIFEST_SCHEMA_VERSION,
+        "export_id": export_id,
+        "agent_id": agent_id.upper(),
+        "source_refs": {
+            "task_id": int(task_id),
+            "run_graph_id": graph_payload.get("graph_id") or graph_payload.get("run_id") or "",
+            "replay_id": replay_payload.get("replay_id") or replay_payload.get("run_id") or "",
+        },
+        "run_graph_refs": compact_strings(
+            [
+                as_record(node).get("node_id") or as_record(node).get("id")
+                for node in as_list(graph_payload.get("nodes"))
+            ]
+        ),
+        "redaction_summary": {
+            "redaction_applied": True,
+            "provider_calls_disabled": True,
+            "raw_prompt_included": False,
+            "raw_secret_count": 0 if validation_status != "blocked" else 1,
+        },
+        "validation_status": validation_status,
+        "missing_data_warnings": warnings,
+        "record_count": len(lines),
+        "package_hash": stable_digest(jsonl, length=32),
+    }
     return {
         "schema_version": TRAJECTORY_EXPORT_SCHEMA_VERSION,
         "export_id": export_id,
@@ -414,10 +593,35 @@ def build_trajectory_export(
         "provider_calls_disabled": True,
         "redaction_applied": True,
         "record_count": len(lines),
-        "package_hash": stable_digest(jsonl, length=32),
+        "package_hash": manifest["package_hash"],
+        "manifest": manifest,
+        "validation_status": validation_status,
+        "warnings": warnings,
         "jsonl": jsonl,
         "records": lines,
     }
+
+
+def _trajectory_export_warnings(
+    *,
+    lines: list[dict[str, Any]],
+    graph_payload: Mapping[str, Any],
+    replay_payload: Mapping[str, Any],
+) -> list[str]:
+    warnings: list[str] = []
+    if not as_list(graph_payload.get("nodes")):
+        warnings.append("missing_run_graph_nodes")
+    if not as_list(replay_payload.get("steps")):
+        warnings.append("missing_replay_steps")
+    if len(lines) <= 2:
+        warnings.append("minimal_export_bundle")
+    return warnings
+
+
+def _contains_raw_sensitive_marker(value: str) -> bool:
+    lowered = value.lower()
+    markers = ("sk-live-", "bearer ", "api_key=", "password=", "secret=", "token=")
+    return any(marker in lowered for marker in markers)
 
 
 def build_release_quality_report(
@@ -426,6 +630,9 @@ def build_release_quality_report(
     latest_run: Mapping[str, Any] | None,
     recent_runs: list[Mapping[str, Any]],
     trajectory_exports: list[Mapping[str, Any]] | None = None,
+    run_graphs: Iterable[Mapping[str, Any]] | None = None,
+    golden_eval_comparisons: Iterable[Mapping[str, Any]] | None = None,
+    require_run_graphs: bool = False,
 ) -> dict[str, Any]:
     latest = as_record(latest_run)
     recent = [as_record(item) for item in recent_runs]
@@ -441,10 +648,56 @@ def build_release_quality_report(
     latest_score = float(latest.get("score") or as_record(latest.get("metrics")).get("task_success_proxy") or 0.0)
     eval_ok = latest_status == "passed" or latest_score >= _MIN_PASS_SCORE
     export_ok = any(bool(item.get("redaction_applied", True)) for item in exports) if exports else True
-    status = "passed" if eval_ok and export_ok else "failed"
+    graph_reports = []
+    for item in run_graphs or []:
+        graph = as_record(item)
+        scenario = str(graph.get("scenario") or as_record(graph.get("metadata")).get("scenario") or "")
+        graph_reports.append(
+            verify_run_graph_completeness(
+                graph,
+                scenario=scenario or None,
+                requires_partial_timeout=None,
+                require_synthesis_path=True if scenario == "squad" else None,
+            )
+        )
+    graph_missing = require_run_graphs and not graph_reports
+    graph_ok = (not graph_missing) and (
+        all(report.get("status") == "passed" for report in graph_reports) if graph_reports else True
+    )
+    golden_comparisons = [as_record(item) for item in golden_eval_comparisons or []]
+    golden_ok = all(str(item.get("status") or "") == "passed" for item in golden_comparisons)
+    status = "passed" if eval_ok and export_ok and graph_ok and golden_ok else "failed"
     gates: dict[str, dict[str, Any]] = {
         "offline_eval": {"status": "passed" if eval_ok else "failed", "threshold": _MIN_PASS_SCORE},
         "trajectory_export_redaction": {"status": "passed" if export_ok else "failed"},
+        "run_graph_completeness": {
+            "status": "passed" if graph_ok else "failed",
+            "checked_graphs": len(graph_reports),
+            "failures": (
+                [
+                    {
+                        "category": "missing_run_graph",
+                        "message": "Release quality requires at least one RunGraph for active/golden suites.",
+                    }
+                ]
+                if graph_missing
+                else [failure for report in graph_reports for failure in as_list(report.get("failures"))][:20]
+            ),
+        },
+        "squad_golden_quality": {
+            "status": "passed" if golden_ok else "failed",
+            "checked_cases": len(golden_comparisons),
+            "failures": [
+                {
+                    "category": "squad_golden_quality",
+                    "case_key": item.get("case_key"),
+                    "winner": item.get("winner"),
+                    "quality_delta": item.get("quality_delta"),
+                }
+                for item in golden_comparisons
+                if str(item.get("status") or "") != "passed"
+            ][:20],
+        },
         "provider_calls_disabled": {"status": "passed"},
         "browser_authenticated_e2e": {
             "status": "blocked",
@@ -483,7 +736,9 @@ def build_release_quality_report(
                     "record_count": item.get("record_count"),
                 }
                 for item in exports[:10]
-            ]
+            ],
+            "run_graph_completeness": graph_reports,
+            "squad_golden_quality": golden_comparisons,
         },
         "residual_risks": ["Authenticated dashboard E2E depends on local Browser/auth infrastructure."],
     }

@@ -73,7 +73,7 @@ function CapabilityRow({
   iconKey: string;
   index: number;
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const Icon = CAPABILITY_ICONS[iconKey];
 
   return (
@@ -103,7 +103,7 @@ function CapabilityRow({
       </div>
       <span
         className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]"
-        aria-label={`${tl(label)} — ${tl("Incluído")}`}
+        aria-label={`${tl(label)} — ${t("generated.controlPlane.incluido_da69d9db")}`}
       >
         <Check size={12} />
       </span>
@@ -184,7 +184,7 @@ export function IntegrationDetailView({
     isIntegrationActionPending,
     integrationActionStatus,
   } = useSystemSettings();
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   const logo = renderIntegrationLogo(entry.logoKey, "h-8 w-8 object-contain");
   const bannerLogo = renderIntegrationLogo(entry.logoKey, "h-4 w-4 object-contain");
@@ -220,42 +220,42 @@ export function IntegrationDetailView({
 
   const connectionBadge = isCoreEntry
     ? connection?.connection_status === "verified"
-      ? { label: tl("Verificada"), tone: "verified" as const }
+      ? { label: t("generated.controlPlane.verificada_b357beca"), tone: "verified" as const }
       : connection?.connection_status === "degraded"
-        ? { label: tl("Degradada"), tone: "warning" as const }
+        ? { label: t("generated.controlPlane.degradada_142d8ead"), tone: "warning" as const }
         : connection?.connection_status === "auth_expired"
-          ? { label: tl("Auth expirada"), tone: "warning" as const }
+          ? { label: t("generated.controlPlane.auth_expirada_d303d113"), tone: "warning" as const }
           : connection?.connection_status === "configured"
-            ? { label: tl("Configurada"), tone: "warning" as const }
-            : { label: tl("Nao configurada"), tone: "neutral" as const }
+            ? { label: t("generated.controlPlane.configurada_df5188a8"), tone: "warning" as const }
+            : { label: t("generated.controlPlane.nao_configurada_50a5db79"), tone: "neutral" as const }
     : entry.status === "connected"
-      ? { label: tl("Ativo no catálogo"), tone: "verified" as const }
+      ? { label: t("generated.controlPlane.ativo_no_catalogo_e7324d60"), tone: "verified" as const }
       : entry.status === "pending"
-        ? { label: tl("Desativado no catálogo"), tone: "warning" as const }
-        : { label: tl("Ainda não adicionado"), tone: "neutral" as const };
+        ? { label: t("generated.controlPlane.desativado_no_catalogo_cb484f86"), tone: "warning" as const }
+        : { label: t("generated.controlPlane.ainda_nao_adicionado_49a891f9"), tone: "neutral" as const };
 
   const availabilityLabel =
     isCoreEntry && entry.key === "browser"
       ? systemEnabled
-        ? tl("Gerenciada internamente")
-        : tl("Gerenciamento interno desativado")
+        ? t("generated.controlPlane.gerenciada_internamente_80c9f504")
+        : t("generated.controlPlane.gerenciamento_interno_desativado_8d02a69d")
       : isCoreEntry
         ? systemEnabled
-          ? tl("Ativa no sistema")
-          : tl("Desativada no sistema")
+          ? t("generated.controlPlane.ativa_no_sistema_c3a71821")
+          : t("generated.controlPlane.desativada_no_sistema_1ee1b56d")
         : mcpEntry?.origin === "custom"
-          ? tl("Servidor custom")
-          : tl("Servidor curado");
+          ? t("generated.controlPlane.servidor_custom_0aea2e6d")
+          : t("generated.controlPlane.servidor_curado_20357cf4");
 
   const metadataRows: Array<{ id: string; label: string; value: React.ReactNode }> = [
     {
       id: "category",
-      label: tl("Categoria"),
+      label: t("generated.controlPlane.categoria_d4679e28"),
       value: tl(UNIFIED_CATEGORY_LABELS[entry.category]),
     },
     {
       id: "type",
-      label: tl("Tipo"),
+      label: t("generated.controlPlane.tipo_50772377"),
       value: tl(entry.metadata.type),
     },
   ];
@@ -263,28 +263,28 @@ export function IntegrationDetailView({
   if (isCoreEntry && connection) {
     metadataRows.push({
       id: "auth-method",
-      label: tl("Auth mode"),
-      value: connection.auth_method || connection.auth_mode || tl("Não definido"),
+      label: t("generated.controlPlane.auth_mode_1eee1b22"),
+      value: connection.auth_method || connection.auth_mode || t("generated.controlPlane.nao_definido_6d56afe4"),
     });
     metadataRows.push({
       id: "source-origin",
-      label: tl("Origem da conexão"),
+      label: t("generated.controlPlane.origem_da_conexao_a0f8a86e"),
       value:
         connection.source_origin === "system_default"
-          ? tl("Default do sistema")
+          ? t("generated.controlPlane.default_do_sistema_dcf3cdc9")
           : connection.source_origin === "local_session"
-            ? tl("Sessão local desta máquina")
-            : tl("Binding explícito"),
+            ? t("generated.controlPlane.sessao_local_desta_maquina_b2dc5c38")
+            : t("generated.controlPlane.binding_explicito_bc7f6172"),
     });
     metadataRows.push({
       id: "account-label",
-      label: tl("Conta conectada"),
-      value: connection.account_label || tl("Não identificada"),
+      label: t("generated.controlPlane.conta_conectada_cb761484"),
+      value: connection.account_label || t("generated.controlPlane.nao_identificada_3eaa7a48"),
     });
     if (connection.expires_at) {
       metadataRows.push({
         id: "expires-at",
-        label: tl("Expira em"),
+        label: t("generated.controlPlane.expira_em_053d8009"),
         value: connection.expires_at,
       });
     }
@@ -293,7 +293,7 @@ export function IntegrationDetailView({
   if (entry.metadata.developer) {
     metadataRows.push({
       id: "developer",
-      label: tl("Desenvolvedor"),
+      label: t("generated.controlPlane.desenvolvedor_430184b8"),
       value: entry.metadata.developer,
     });
   }
@@ -301,7 +301,7 @@ export function IntegrationDetailView({
   if (!isCoreEntry && entry.metadata.transport) {
     metadataRows.push({
       id: "transport",
-      label: tl("Transporte"),
+      label: t("generated.controlPlane.transporte_a6e18c12"),
       value: entry.metadata.transport,
     });
   }
@@ -309,15 +309,15 @@ export function IntegrationDetailView({
   if (!isCoreEntry && entry.metadata.origin) {
     metadataRows.push({
       id: "origin",
-      label: tl("Origem"),
-      value: entry.metadata.origin === "curated" ? tl("Curado") : tl("Custom"),
+      label: t("generated.controlPlane.origem_b7c29d8a"),
+      value: entry.metadata.origin === "curated" ? t("generated.controlPlane.curado_657db740") : t("generated.controlPlane.custom_1995fb7d"),
     });
   }
 
   if (!isCoreEntry && entry.metadata.serverKey) {
     metadataRows.push({
       id: "server-key",
-      label: tl("Chave do servidor"),
+      label: t("generated.controlPlane.chave_do_servidor_b0f9c83a"),
       value: <span className="font-mono text-xs">{entry.metadata.serverKey}</span>,
     });
   }
@@ -325,7 +325,7 @@ export function IntegrationDetailView({
   if (entry.metadata.documentationUrl) {
     metadataRows.push({
       id: "docs",
-      label: tl("Documentação"),
+      label: t("generated.controlPlane.documentacao_9db82914"),
       value: (
         <a
           href={entry.metadata.documentationUrl}
@@ -333,7 +333,7 @@ export function IntegrationDetailView({
           rel="noopener noreferrer"
           className="inline-flex items-center gap-1.5 text-sm text-[var(--tone-info-dot)] transition-colors hover:text-[var(--tone-info-text)]"
         >
-          {tl("Abrir documentação")}
+          {t("generated.controlPlane.abrir_documentacao_f6e366c9")}
           <ExternalLink size={12} />
         </a>
       ),
@@ -349,7 +349,7 @@ export function IntegrationDetailView({
       >
         <ArrowLeft size={14} />
         <span>
-          {tl("Integrações")}
+          {t("generated.controlPlane.integracoes_012889d2")}
           <span className="mx-1.5 text-[var(--text-quaternary)]">/</span>
           <span className="text-[var(--text-primary)]">{entry.label}</span>
         </span>
@@ -382,7 +382,7 @@ export function IntegrationDetailView({
           {isCoreEntry &&
           entry.status !== "disabled" &&
           connection?.connection_status !== "verified" ? (
-            <StatusBadge label={tl("Precisa de validacao")} tone="warning" />
+            <StatusBadge label={t("generated.controlPlane.precisa_de_validacao_47d43f6d")} tone="warning" />
           ) : null}
         </div>
       </div>
@@ -408,28 +408,28 @@ export function IntegrationDetailView({
         className="rounded-[26px] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-5 py-4"
         aria-label={
           isCoreEntry
-            ? tl("Conexão de {{integration}}", { integration: entry.label })
-            : tl("Catálogo MCP de {{integration}}", { integration: entry.label })
+            ? t("generated.controlPlane.conexao_de_integration_4aad8d5d", { integration: entry.label })
+            : t("generated.controlPlane.catalogo_mcp_de_integration_dfcb6ae8", { integration: entry.label })
         }
       >
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 flex-1 space-y-4">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
-                {isCoreEntry ? tl("Conexão") : tl("Catálogo")}
+                {isCoreEntry ? t("generated.controlPlane.conexao_5d0e2f3c") : t("generated.controlPlane.catalogo_200920c4")}
               </div>
               <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
                 {isCoreEntry
                   ? coreEntry?.hasCredentials
-                    ? tl("Salvar a conexão grava as credenciais no control plane. A verificação executa o probe real da integração e atualiza o health, o checked_via e o estado operacional.")
-                    : tl("Conectar registra esta superfície no control plane. A verificação roda automaticamente ao abrir este detalhe, executa o probe operacional on-demand e reaproveita um cache curto para evitar rechecagens desnecessárias.")
-                  : tl("Os servidores MCP aqui representam o catálogo global do sistema. Adicionar ou editar um item atualiza a definição do servidor, transporte, documentação e schema de variáveis, enquanto a conexão por agente continua no editor de bots.")}
+                    ? t("generated.controlPlane.salvar_a_conexao_grava_as_credenciais_no_con_520a5e16")
+                    : t("generated.controlPlane.conectar_registra_esta_superficie_no_control_34739dbf")
+                  : t("generated.controlPlane.os_servidores_mcp_aqui_representam_o_catalog_9f57a3d6")}
               </p>
             </div>
 
             {isCoreEntry && connection?.last_error ? (
               <div className="rounded-xl border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-4 py-3 text-sm text-[var(--tone-warning-text)]">
-                <span className="font-medium">{tl("Último erro")}:</span> {connection.last_error}
+                <span className="font-medium">{t("generated.controlPlane.ultimo_erro_9a793b25")}:</span> {connection.last_error}
               </div>
             ) : null}
           </div>
@@ -449,7 +449,7 @@ export function IntegrationDetailView({
                     }}
                   >
                     <Plug size={14} />
-                    {connection?.configured ? tl("Editar conexão") : tl("Conectar")}
+                    {connection?.configured ? t("generated.controlPlane.editar_conexao_32fbd125") : t("generated.controlPlane.conectar_a587e076")}
                   </button>
                 ) : canManageConnection ? (
                   <AsyncActionButton
@@ -459,10 +459,10 @@ export function IntegrationDetailView({
                     onClick={() => connectIntegration(entry.key)}
                     loading={isIntegrationActionPending(entry.key, "connect")}
                     status={integrationActionStatus(entry.key, "connect")}
-                    loadingLabel={tl("Conectando")}
+                    loadingLabel={t("generated.controlPlane.conectando_6b3be187")}
                     icon={Plug}
                   >
-                    {connection?.configured ? tl("Atualizar conexão") : tl("Conectar")}
+                    {connection?.configured ? t("generated.controlPlane.atualizar_conexao_5195be6a") : t("generated.controlPlane.conectar_a587e076")}
                   </AsyncActionButton>
                 ) : null}
 
@@ -474,9 +474,9 @@ export function IntegrationDetailView({
                     onClick={() => disconnectIntegrationConnection(entry.key)}
                     loading={isIntegrationActionPending(entry.key, "disconnect")}
                     status={integrationActionStatus(entry.key, "disconnect")}
-                    loadingLabel={tl("Desconectando")}
+                    loadingLabel={t("generated.controlPlane.desconectando_35c02306")}
                   >
-                    {tl("Desconectar")}
+                    {t("generated.controlPlane.desconectar_d1a164af")}
                   </AsyncActionButton>
                 ) : null}
               </>
@@ -494,7 +494,7 @@ export function IntegrationDetailView({
                     }}
                   >
                     <Plus size={14} />
-                    {tl("Adicionar servidor")}
+                    {t("generated.controlPlane.adicionar_servidor_5ad219d2")}
                   </button>
                 ) : null}
 
@@ -505,7 +505,7 @@ export function IntegrationDetailView({
                     className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] px-3.5 py-2 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
                   >
                     <Pencil size={14} />
-                    {tl("Editar servidor")}
+                    {t("generated.controlPlane.editar_servidor_ab1f64e7")}
                   </button>
                 ) : null}
 
@@ -514,7 +514,7 @@ export function IntegrationDetailView({
                     type="button"
                     onClick={() => onRemoveMcpServer?.(entry)}
                     disabled={mcpRemoving}
-                    aria-label={mcpRemoving ? tl("Removendo") : undefined}
+                    aria-label={mcpRemoving ? t("generated.controlPlane.removendo_2b311926") : undefined}
                     aria-busy={mcpRemoving || undefined}
                     className={cn(
                       "inline-flex min-w-36 items-center justify-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors",
@@ -528,7 +528,7 @@ export function IntegrationDetailView({
                     ) : (
                       <>
                         <Trash2 size={14} />
-                        {tl("Remover servidor")}
+                        {t("generated.controlPlane.remover_servidor_f9d6522a")}
                       </>
                     )}
                   </button>
@@ -540,7 +540,7 @@ export function IntegrationDetailView({
       </section>
 
       <div>
-        <span className="eyebrow mb-3 block text-[var(--text-quaternary)]">{tl("Inclui")}</span>
+        <span className="eyebrow mb-3 block text-[var(--text-quaternary)]">{t("generated.controlPlane.inclui_e11ae750")}</span>
         {entry.capabilities.length > 0 ? (
           <div className="space-y-2">
             {entry.capabilities.map((capability, index) => (
@@ -555,13 +555,13 @@ export function IntegrationDetailView({
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-4 py-5 text-sm text-[var(--text-quaternary)]">
-            {tl("Este servidor MCP não possui um catálogo curado de ferramentas esperadas.")}
+            {t("generated.controlPlane.este_servidor_mcp_nao_possui_um_catalogo_cur_862373be")}
           </div>
         )}
       </div>
 
       <div>
-        <span className="eyebrow mb-3 block text-[var(--text-quaternary)]">{tl("Informações")}</span>
+        <span className="eyebrow mb-3 block text-[var(--text-quaternary)]">{t("generated.controlPlane.informacoes_62821400")}</span>
         <InfoTable rows={metadataRows} />
       </div>
     </div>

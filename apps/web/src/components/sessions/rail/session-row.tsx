@@ -95,9 +95,7 @@ function SessionRowImpl({
                 "shrink-0 font-mono text-[0.6875rem] text-[var(--text-quaternary)] transition-opacity duration-[120ms]",
                 onRequestDelete && "group-hover:opacity-0",
               )}
-              aria-label={t("chat.timestamp.lastActivity", {
-                defaultValue: "Last activity",
-              })}
+              aria-label={t("chat.timestamp.lastActivity", undefined)}
             >
               {timeLabel}
             </span>
@@ -114,9 +112,7 @@ function SessionRowImpl({
         <button
           type="button"
           onClick={handleDeleteClick}
-          aria-label={t("chat.rail.deleteSession", {
-            defaultValue: "Delete conversation",
-          })}
+          aria-label={t("chat.rail.deleteSession", undefined)}
           className={cn(
             "absolute right-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-panel-sm)]",
             "text-[var(--text-quaternary)] opacity-0 transition-[opacity,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",

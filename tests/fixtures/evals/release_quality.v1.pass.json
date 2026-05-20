@@ -16,6 +16,14 @@
     {
       "id": "tool_policy_regression",
       "status": "passed"
+    },
+    {
+      "id": "run_graph_completeness",
+      "status": "passed"
+    },
+    {
+      "id": "squad_golden_quality",
+      "status": "passed"
     }
   ],
   "eval_runs": [

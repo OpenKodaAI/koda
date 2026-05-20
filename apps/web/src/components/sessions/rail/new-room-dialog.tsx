@@ -124,17 +124,13 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
     const trimmedName = name.trim();
     if (!trimmedName) {
       setError(
-        t("sessions.room.create.errors.name", {
-          defaultValue: "Give the room a name.",
-        }),
+        t("sessions.room.create.errors.name", undefined),
       );
       return;
     }
     if (selectedIds.length === 0) {
       setError(
-        t("sessions.room.create.errors.agents", {
-          defaultValue: "Pick at least one agent for the room.",
-        }),
+        t("sessions.room.create.errors.agents", undefined),
       );
       return;
     }
@@ -148,9 +144,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
             name: trimmedName,
             agentIds: selectedIds,
           },
-          fallbackError: t("sessions.room.create.error", {
-            defaultValue: "Could not create the room.",
-          }),
+          fallbackError: t("sessions.room.create.error", undefined),
         },
       );
       void queryClient.invalidateQueries({
@@ -204,15 +198,13 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                 id="new-room-dialog-title"
                 className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]"
               >
-                {t("sessions.room.create.title", {
-                  defaultValue: "New room",
-                })}
+                {t("sessions.room.create.title", undefined)}
               </h2>
             </div>
             <button
               type="button"
               onClick={handleCancel}
-              aria-label={t("common.close", { defaultValue: "Close" })}
+              aria-label={t("common.close", undefined)}
               className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
             >
               <X className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
@@ -220,15 +212,12 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
           </header>
 
           <p className="mt-1 text-[var(--font-size-sm)] leading-[1.5] text-[var(--text-tertiary)]">
-            {t("sessions.room.create.helper", {
-              defaultValue:
-                "Give the room a name and pick the agents that will collaborate inside it.",
-            })}
+            {t("sessions.room.create.helper", undefined)}
           </p>
 
           <label className="mt-5 flex flex-col gap-1.5">
             <span className="text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-              {t("sessions.room.create.nameLabel", { defaultValue: "Name" })}
+              {t("sessions.room.create.nameLabel", undefined)}
             </span>
             <input
               ref={nameRef}
@@ -238,9 +227,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                 setName(event.target.value);
                 if (error) setError(null);
               }}
-              placeholder={t("sessions.room.create.namePlaceholder", {
-                defaultValue: "Marketing launch · Q2 review",
-              })}
+              placeholder={t("sessions.room.create.namePlaceholder", undefined)}
               maxLength={120}
               className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[var(--font-size-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] focus:border-[color:var(--border-strong)] focus:bg-[var(--panel)] focus:shadow-[0_0_0_1px_var(--border-strong)]"
             />
@@ -248,9 +235,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
 
           <div className="mt-4 flex flex-col gap-1.5">
             <span className="text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-              {t("sessions.room.create.agentsLabel", {
-                defaultValue: "Agents",
-              })}
+              {t("sessions.room.create.agentsLabel", undefined)}
               {selectedIds.length > 0 ? (
                 <span className="ml-1 font-mono text-[var(--text-tertiary)]">
                   · {selectedIds.length}
@@ -267,18 +252,14 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder={t("sessions.room.create.searchAgents", {
-                  defaultValue: "Search agents…",
-                })}
+                placeholder={t("sessions.room.create.searchAgents", undefined)}
                 className="flex-1 bg-transparent text-[var(--font-size-sm)] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
               />
             </label>
             <div className="mt-1 flex max-h-[260px] flex-col gap-0.5 overflow-y-auto rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] p-1">
               {filteredAgents.length === 0 ? (
                 <div className="px-3 py-4 text-center text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
-                  {t("sessions.room.create.agentsEmpty", {
-                    defaultValue: "No agents match.",
-                  })}
+                  {t("sessions.room.create.agentsEmpty", undefined)}
                 </div>
               ) : (
                 filteredAgents.map((agent) => {
@@ -316,14 +297,10 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                       </div>
                       {isPaused ? (
                         <span
-                          aria-label={t("sessions.room.create.pausedLabel", {
-                            defaultValue: "Paused agent",
-                          })}
+                          aria-label={t("sessions.room.create.pausedLabel", undefined)}
                           className="shrink-0 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]"
                         >
-                          {t("sessions.room.create.pausedBadge", {
-                            defaultValue: "paused",
-                          })}
+                          {t("sessions.room.create.pausedBadge", undefined)}
                         </span>
                       ) : null}
                       <span
@@ -346,18 +323,12 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
             </div>
             {selectedIds.length > 0 ? (
               <p className="mt-1 text-[0.6875rem] text-[var(--text-quaternary)]">
-                {t("sessions.room.create.coordinatorHint", {
-                  defaultValue:
-                    "First selected agent becomes the room's coordinator.",
-                })}
+                {t("sessions.room.create.coordinatorHint", undefined)}
               </p>
             ) : null}
             {hasPausedSelected ? (
               <p className="mt-1 text-[0.6875rem] text-[var(--tone-warning-text)]">
-                {t("sessions.room.create.pausedHint", {
-                  defaultValue:
-                    "Paused agents will be activated automatically when the room is created.",
-                })}
+                {t("sessions.room.create.pausedHint", undefined)}
               </p>
             ) : null}
           </div>
@@ -375,7 +346,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               disabled={submitting}
               className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium text-[var(--text-secondary)] transition-colors duration-[120ms] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] disabled:opacity-60"
             >
-              {t("common.cancel", { defaultValue: "Cancel" })}
+              {t("common.cancel", undefined)}
             </button>
             <button
               type="button"
@@ -391,14 +362,10 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               {submitting ? (
                 <>
                   <Loader2 className="h-3.5 w-3.5 animate-spin" strokeWidth={2} />
-                  {t("sessions.room.create.creating", {
-                    defaultValue: "Creating…",
-                  })}
+                  {t("sessions.room.create.creating", undefined)}
                 </>
               ) : (
-                t("sessions.room.create.confirm", {
-                  defaultValue: "Create room",
-                })
+                t("sessions.room.create.confirm", undefined)
               )}
             </button>
           </div>

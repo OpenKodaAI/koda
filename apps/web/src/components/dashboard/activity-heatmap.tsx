@@ -51,15 +51,15 @@ function ActivityHeatmapComponent({
   scopeSlot,
   legend,
 }: ActivityHeatmapProps) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { weeks } = data;
   const weeksLength = weeks.length;
-  const resolvedLegend = legend ?? { less: tl("less"), more: tl("more") };
+  const resolvedLegend = legend ?? { less: t("generated.dashboard.less_4089ad1a"), more: t("generated.dashboard.more_b3b73247") };
   const gridTemplate = `repeat(${weeksLength}, minmax(0, 28px))`;
 
   return (
     <section
-      aria-label={title ?? tl("Agent activity")}
+      aria-label={title ?? t("generated.dashboard.agent_activity_dd6587bf")}
       className={cn(
         "relative flex w-full flex-col gap-5",
         className,
@@ -99,7 +99,7 @@ function ActivityHeatmapComponent({
         <div
           className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4"
           role="group"
-          aria-label={tl("Activity summary")}
+          aria-label={t("generated.dashboard.activity_summary_433cdb7c")}
         >
           {stats.map((stat) => (
             <div

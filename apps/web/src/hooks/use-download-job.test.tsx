@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider, useToast } from "@/hooks/use-toast";
 import { useDownloadJob } from "@/hooks/use-download-job";
+import { translateForLanguage } from "@/lib/i18n";
 
 type FetchMock = ReturnType<typeof vi.fn>;
 
@@ -198,7 +199,7 @@ describe("useDownloadJob", () => {
     });
 
     const action = result.current.toast.toasts[0].action;
-    expect(action?.label).toBe("Cancelar");
+    expect(action?.label).toBe(translateForLanguage("en-US", "downloads.cancelAction"));
 
     await act(async () => {
       action?.onClick();
@@ -214,7 +215,7 @@ describe("useDownloadJob", () => {
       },
     );
     expect(result.current.toast.toasts[0].type).toBe("info");
-    expect(result.current.toast.toasts[0].message).toBe("Download cancelado.");
+    expect(result.current.toast.toasts[0].message).toBe(translateForLanguage("en-US", "downloads.canceled"));
     expect(result.current.toast.toasts[0].persistent).toBe(false);
     expect(result.current.toast.toasts[0].action).toBeUndefined();
   });
@@ -312,7 +313,7 @@ describe("useDownloadJob", () => {
 
     expect(result.current.toast.toasts[0].persistent).toBe(true);
     expect(result.current.toast.toasts[0].message).toBe(
-      "Conexão instável — tentando reconectar",
+      translateForLanguage("en-US", "downloads.reconnecting"),
     );
   });
 

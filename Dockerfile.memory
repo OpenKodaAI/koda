@@ -11,7 +11,10 @@ RUN cargo build --release -p koda-memory-engine
 
 FROM debian:13.4-slim
 
-RUN useradd -m -s /bin/bash svcuser
+RUN apt-get update \
+    && apt-get upgrade -y \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -m -s /bin/bash svcuser
 
 COPY --from=builder /build/rust/target/release/koda-memory-engine /usr/local/bin/koda-memory-engine
 

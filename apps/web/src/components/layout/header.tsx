@@ -21,7 +21,7 @@ export function PageHeader({
   meta,
   children,
 }: HeaderProps) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const hasHeading = Boolean(title || description);
   const hasLeadContent = Boolean((breadcrumb && breadcrumb.length > 0) || hasHeading || meta);
 
@@ -32,7 +32,7 @@ export function PageHeader({
           <div className="page-header__lead">
             {breadcrumb && breadcrumb.length > 0 ? (
               <nav
-                aria-label={tl("Breadcrumb")}
+                aria-label={t("generated.shell.breadcrumb_2f1d370c")}
                 className={cn(
                   "page-header__breadcrumb",
                   hasHeading || meta ? "mb-2" : "mb-0"

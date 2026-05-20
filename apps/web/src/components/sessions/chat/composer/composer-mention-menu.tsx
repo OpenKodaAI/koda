@@ -164,7 +164,7 @@ export function ComposerMentionMenuContent({
       className={loaderShell}
       role="status"
       aria-live="polite"
-      aria-label={t("chat.composer.suggestions.loading", { defaultValue: "Loading…" })}
+      aria-label={t("chat.composer.suggestions.loading", undefined)}
     >
       <Loader2 className={spinnerClass} strokeWidth={2} aria-hidden />
     </div>
@@ -189,17 +189,13 @@ export function ComposerMentionMenuContent({
         if (candidate) onSelect(candidate);
       }}
       onHover={onActiveIndex}
-      emptyLabel={t("chat.composer.suggestions.empty", { defaultValue: "No matches" })}
-      ariaLabel={t("chat.composer.suggestions.mentionList", {
-        defaultValue: "Skills and MCP servers",
-      })}
+      emptyLabel={t("chat.composer.suggestions.empty", undefined)}
+      ariaLabel={t("chat.composer.suggestions.mentionList", undefined)}
       idPrefix={idPrefix}
       listboxId={listboxId}
       searchValue={query}
       onSearchChange={onQueryChange}
-      searchPlaceholder={t("chat.composer.suggestions.searchMentions", {
-        defaultValue: "Search integrations and skills…",
-      })}
+      searchPlaceholder={t("chat.composer.suggestions.searchMentions", undefined)}
       footer={footer}
     />
   );

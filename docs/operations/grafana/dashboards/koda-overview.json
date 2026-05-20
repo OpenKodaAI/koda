@@ -123,6 +123,74 @@
       ],
       "title": "Postgres connections vs max",
       "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "RunGraph completeness gates by scenario/status. Source: koda_run_graph_completeness_gates_total (Counter).",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+      "id": 9,
+      "targets": [
+        {"expr": "sum by (scenario, status, failure_category) (rate(koda_run_graph_completeness_gates_total[5m]))", "legendFormat": "{{scenario}} {{status}} {{failure_category}}", "refId": "A"}
+      ],
+      "title": "RunGraph completeness gates",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Current release blockers derived from release_quality.v1. Source: koda_release_blockers (Gauge).",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+      "id": 10,
+      "targets": [
+        {"expr": "sum by (gate_id, severity, status) (koda_release_blockers)", "legendFormat": "{{gate_id}} {{severity}} {{status}}", "refId": "A"}
+      ],
+      "title": "Release blockers",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Channel gateway identity/pairing/policy events. Source: koda_channel_gateway_events_total (Counter).",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 40},
+      "id": 11,
+      "targets": [
+        {"expr": "sum by (event, status) (rate(koda_channel_gateway_events_total[5m]))", "legendFormat": "{{event}} {{status}}", "refId": "A"}
+      ],
+      "title": "Channel gateway events",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Improvement proposal lifecycle events. Source: koda_improvement_proposal_events_total (Counter).",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 40},
+      "id": 12,
+      "targets": [
+        {"expr": "sum by (event, status, proposal_type) (rate(koda_improvement_proposal_events_total[5m]))", "legendFormat": "{{event}} {{status}} {{proposal_type}}", "refId": "A"}
+      ],
+      "title": "Improvement proposal lifecycle",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Skill package scanner/eval/install/rollback events. Source: koda_skill_package_events_total (Counter).",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 48},
+      "id": 13,
+      "targets": [
+        {"expr": "sum by (event, decision, recommendation_status) (rate(koda_skill_package_events_total[5m]))", "legendFormat": "{{event}} {{decision}} {{recommendation_status}}", "refId": "A"}
+      ],
+      "title": "Skill package governance",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "description": "Ops benchmark pass/fail and runtime duration. Source: koda_ops_benchmark_runs_total (Counter), koda_ops_benchmark_duration_seconds (Histogram).",
+      "fieldConfig": {"defaults": {"unit": "s"}},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 48},
+      "id": 14,
+      "targets": [
+        {"expr": "sum by (mode, status) (rate(koda_ops_benchmark_runs_total[5m]))", "legendFormat": "{{mode}} {{status}} runs/s", "refId": "A"},
+        {"expr": "histogram_quantile(0.95, sum(rate(koda_ops_benchmark_duration_seconds_bucket[5m])) by (mode, le))", "legendFormat": "{{mode}} p95 duration", "refId": "B"}
+      ],
+      "title": "Ops benchmark",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",

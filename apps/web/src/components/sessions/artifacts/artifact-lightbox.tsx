@@ -119,14 +119,10 @@ export function ArtifactLightbox({
           </div>
           <div className="space-y-1">
             <p className="text-[0.875rem] font-medium text-white">
-              {t("sessions.artifacts.imagePreviewUnavailable", {
-                defaultValue: "Image preview unavailable",
-              })}
+              {t("sessions.artifacts.imagePreviewUnavailable", undefined)}
             </p>
             <p className="text-[0.75rem] leading-5 text-white/55">
-              {t("sessions.artifacts.imagePreviewUnavailableHint", {
-                defaultValue: "The generated file may be missing or temporarily unavailable.",
-              })}
+              {t("sessions.artifacts.imagePreviewUnavailableHint", undefined)}
             </p>
           </div>
         </div>
@@ -165,9 +161,7 @@ export function ArtifactLightbox({
 
     return (
       <div className="rounded-[var(--radius-panel)] border border-[color:var(--border-subtle)] bg-[var(--surface-panel)] px-6 py-5 text-center text-[0.875rem] text-[var(--text-tertiary)]">
-        {t("sessions.artifacts.previewUnavailable", {
-          defaultValue: "Preview unavailable.",
-        })}
+        {t("sessions.artifacts.previewUnavailable", undefined)}
       </div>
     );
   };
@@ -196,14 +190,12 @@ export function ArtifactLightbox({
           <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-white/10 px-3 sm:px-5">
             <div className="min-w-0">
               <DialogPrimitive.Title className="truncate text-[0.875rem] font-medium text-white">
-                {activeItem ? artifactTitle(activeItem) : t("sessions.artifacts.preview", { defaultValue: "Preview" })}
+                {activeItem ? artifactTitle(activeItem) : t("sessions.artifacts.preview", undefined)}
               </DialogPrimitive.Title>
               <DialogPrimitive.Description className="truncate font-mono text-[0.6875rem] text-white/45">
                 {activeItem
                   ? artifactMeta(activeItem)
-                  : t("sessions.artifacts.previewDescription", {
-                      defaultValue: "Generated artifact preview",
-                    })}
+                  : t("sessions.artifacts.previewDescription", undefined)}
               </DialogPrimitive.Description>
             </div>
             <div className="flex shrink-0 items-center gap-1">
@@ -213,14 +205,14 @@ export function ArtifactLightbox({
                   onClick={() => void downloader.download(activeItem.detail as ArtifactDetail)}
                   disabled={downloader.isDownloading}
                   aria-busy={downloader.isDownloading}
-                  aria-label={t("sessions.artifacts.download", { defaultValue: "Download" })}
+                  aria-label={t("sessions.artifacts.download", undefined)}
                   className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-chip)] bg-transparent text-white/55 transition-colors hover:bg-white/[0.08] hover:text-white disabled:opacity-50"
                 >
                   <Download className="h-4 w-4" strokeWidth={1.75} aria-hidden />
                 </button>
               ) : null}
               <DialogPrimitive.Close
-                aria-label={t("common.close", { defaultValue: "Close" })}
+                aria-label={t("common.close", undefined)}
                 className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-chip)] bg-transparent text-white/55 transition-colors hover:bg-white/[0.08] hover:text-white"
               >
                 <X className="h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -233,7 +225,7 @@ export function ArtifactLightbox({
               <button
                 type="button"
                 onClick={() => move(-1)}
-                aria-label={t("sessions.artifacts.previous", { defaultValue: "Previous artifact" })}
+                aria-label={t("sessions.artifacts.previous", undefined)}
                 style={{
                   position: "fixed",
                   top: "50%",
@@ -250,7 +242,7 @@ export function ArtifactLightbox({
               <button
                 type="button"
                 onClick={() => move(1)}
-                aria-label={t("sessions.artifacts.next", { defaultValue: "Next artifact" })}
+                aria-label={t("sessions.artifacts.next", undefined)}
                 style={{
                   position: "fixed",
                   top: "50%",

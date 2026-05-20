@@ -659,7 +659,7 @@ export function SystemSettingsProvider({
   coreIntegrations?: ControlPlaneCoreIntegrations;
   children: ReactNode;
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
   const { showToast } = useToast();
   const { runAction, isPending, getStatus } = useAsyncAction();
   const [draft, setDraft] = useState(() => cloneGeneralSystemSettings(settings));
@@ -1370,16 +1370,16 @@ export function SystemSettingsProvider({
       ? knowledgePolicy.allowed_layers.map((item) => String(item).toLowerCase())
       : [];
     if (enabledProviders.length > 0 && !enabledProviders.includes(draft.values.models.default_provider)) {
-      warnings.push(tl("O provider padrão precisa estar dentro da lista de providers habilitados."));
+      warnings.push(t("generated.controlPlane.o_provider_padrao_precisa_estar_dentro_da_li_3b53c77f"));
     }
     if (enabledProviders.length > 0 && draft.values.models.fallback_order.length === 0) {
-      warnings.push(tl("Defina a ordem de fallback para os providers habilitados."));
+      warnings.push(t("generated.controlPlane.defina_a_ordem_de_fallback_para_os_providers_94fbfdbd"));
     }
     for (const providerId of enabledProviders) {
       const connection = providerConnections[providerId];
       if (connection && !connection.verified) {
         warnings.push(
-          tl("{{provider}} precisa estar conectado e verificado para ficar habilitado.", {
+          t("generated.controlPlane.provider_precisa_estar_conectado_e_verificad_d6a071f3", {
             provider: connection.title || providerId,
           }),
         );
@@ -1395,7 +1395,7 @@ export function SystemSettingsProvider({
         .map((field) => String(field.label || field.key || integrationName));
       if (missingFields.length > 0) {
         warnings.push(
-          tl("{{title}} está habilitado, mas faltam credenciais obrigatórias: {{fields}}.", {
+          t("generated.controlPlane.title_esta_habilitado_mas_faltam_credenciais_71b26d4c", {
             title: connection.title || integrationName,
             fields: missingFields.join(", "),
           }),
@@ -1409,7 +1409,7 @@ export function SystemSettingsProvider({
       );
       if (!option) {
         warnings.push(
-          tl("O default de {{functionId}} aponta para um modelo que não existe mais no catálogo.", {
+          t("generated.controlPlane.o_default_de_functionid_aponta_para_um_model_d3aee16b", {
             functionId,
           }),
         );
@@ -1420,7 +1420,7 @@ export function SystemSettingsProvider({
       if (requiresOpenAiApiKeyDefault(functionId, selection.provider_id)) {
         if (!hasOpenAiApiKeyDefaultConnection(connection)) {
           warnings.push(
-            tl("OpenAI precisa de uma API Key configurada para usar o default de {{functionId}}.", {
+            t("generated.controlPlane.openai_precisa_de_uma_api_key_configurada_pa_7ee11994", {
               functionId,
             }),
           );
@@ -1429,7 +1429,7 @@ export function SystemSettingsProvider({
       }
       if (managedProvider && connection && !connection.verified) {
         warnings.push(
-          tl("{{provider}} precisa estar verificado para ser usado como default de {{functionId}}.", {
+          t("generated.controlPlane.provider_precisa_estar_verificado_para_ser_u_0624b593", {
             provider: option.provider_title,
             functionId,
           }),
@@ -1437,29 +1437,29 @@ export function SystemSettingsProvider({
       }
     }
     if (["t1", "t2"].includes(defaultAutonomyTier) && !draft.values.memory_and_knowledge.knowledge_enabled) {
-      warnings.push(tl("Autonomia acima de T0 sem RAG habilitado reduz muito a confiabilidade operacional do agente."));
+      warnings.push(t("generated.controlPlane.autonomia_acima_de_t0_sem_rag_habilitado_red_5989e2cc"));
     }
     if (
       defaultAutonomyTier === "t2" &&
       (!allowedKnowledgeLayers.includes("canonical_policy") ||
         !allowedKnowledgeLayers.includes("approved_runbook"))
     ) {
-      warnings.push(tl("T2 deveria manter conhecimento canônico e runbooks aprovados entre as camadas permitidas."));
+      warnings.push(t("generated.controlPlane.t2_deveria_manter_conhecimento_canonico_e_ru_09f670c6"));
     }
     if (
       defaultAutonomyTier === "t2" &&
       knowledgePolicy.require_owner_provenance !== true
     ) {
-      warnings.push(tl("T2 sem owner provenance enfraquece o grounding para ações sensíveis."));
+      warnings.push(t("generated.controlPlane.t2_sem_owner_provenance_enfraquece_o_groundi_c43846f7"));
     }
     if (
       memoryPolicy.procedural_enabled === true &&
       promotionPolicy.observed_pattern_requires_review === false
     ) {
-      warnings.push(tl("Aprendizado procedural sem revisão antes da promoção aumenta o risco de drift comportamental."));
+      warnings.push(t("generated.controlPlane.aprendizado_procedural_sem_revisao_antes_da__626ef3b1"));
     }
     return Array.from(new Set(warnings));
-  }, [draft, enabledProviders, integrationConnections, providerConnections, providerOptionMap, tl]);
+  }, [draft, enabledProviders, integrationConnections, providerConnections, providerOptionMap, t, tl]);
 
   const isDirty = useCallback(
     (sectionId: SettingsSectionId) => sectionDirty[sectionId],
@@ -1575,11 +1575,11 @@ export function SystemSettingsProvider({
           }),
         {
           successMessage: enabled
-            ? tl("Integração ativada no sistema.")
-            : tl("Integração desativada no sistema."),
+            ? t("generated.controlPlane.integracao_ativada_no_sistema_1101d5a6")
+            : t("generated.controlPlane.integracao_desativada_no_sistema_787813a1"),
           errorMessage: enabled
-            ? tl("Nao foi possivel ativar a integração no sistema.")
-            : tl("Nao foi possivel desativar a integração no sistema."),
+            ? t("generated.controlPlane.nao_foi_possivel_ativar_a_integracao_no_sist_43e38cf5")
+            : t("generated.controlPlane.nao_foi_possivel_desativar_a_integracao_no_s_0490ab37"),
           onSuccess: ({ enabled: nextEnabled, connection }) => {
             replaceIntegrationConnection(normalizeIntegrationConnectionPayload(integrationId, connection));
             commitIntegrationEnabled(integrationId, Boolean(nextEnabled));
@@ -1587,7 +1587,7 @@ export function SystemSettingsProvider({
         },
       );
     },
-    [commitIntegrationEnabled, normalizeIntegrationConnectionPayload, replaceIntegrationConnection, runAction, tl],
+    [commitIntegrationEnabled, normalizeIntegrationConnectionPayload, replaceIntegrationConnection, runAction, t, tl],
   );
 
   const connectIntegration = useCallback(
@@ -1611,15 +1611,15 @@ export function SystemSettingsProvider({
             },
           ),
         {
-          successMessage: tl("Conexão salva. Agora rode a verificação."),
-          errorMessage: tl("Nao foi possivel salvar a configuracao da integração."),
+          successMessage: t("generated.controlPlane.conexao_salva_agora_rode_a_verificacao_9fe52803"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_salvar_a_configuracao_da_in_d6c743f5"),
           onSuccess: (connection) => {
             replaceIntegrationConnection(normalizeIntegrationConnectionPayload(integrationId, connection));
           },
         },
       );
     },
-    [integrationConnections, normalizeIntegrationConnectionPayload, replaceIntegrationConnection, runAction, tl],
+    [integrationConnections, normalizeIntegrationConnectionPayload, replaceIntegrationConnection, runAction, t, tl],
   );
 
   const refreshIntegrationConnectionSilently = useCallback(
@@ -1715,12 +1715,12 @@ export function SystemSettingsProvider({
         integrationActionKey(integrationId, "verify"),
         async () => refreshIntegrationConnectionSilently(integrationId),
         {
-          successMessage: tl("Integração verificada com sucesso."),
-          errorMessage: tl("Nao foi possivel verificar a integração."),
+          successMessage: t("generated.controlPlane.integracao_verificada_com_sucesso_9ef50ea4"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_verificar_a_integracao_59b82e1e"),
         },
       );
     },
-    [refreshIntegrationConnectionSilently, runAction, tl],
+    [refreshIntegrationConnectionSilently, runAction, t, tl],
   );
 
   const disconnectIntegrationConnection = useCallback(
@@ -1734,15 +1734,15 @@ export function SystemSettingsProvider({
             method: "DELETE",
           }),
         {
-          successMessage: tl("Integração desconectada."),
-          errorMessage: tl("Nao foi possivel desconectar a integração."),
+          successMessage: t("generated.controlPlane.integracao_desconectada_845b0aca"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_desconectar_a_integracao_b5fbeabc"),
           onSuccess: ({ connection }) => {
             replaceIntegrationConnection(normalizeIntegrationConnectionPayload(integrationId, connection));
           },
         },
       );
     },
-    [normalizeIntegrationConnectionPayload, replaceIntegrationConnection, runAction, tl],
+    [normalizeIntegrationConnectionPayload, replaceIntegrationConnection, runAction, t, tl],
   );
 
   const setCredentialField = useCallback(
@@ -1793,15 +1793,15 @@ export function SystemSettingsProvider({
     if (!editingVariable) return;
     const sanitized = sanitizeVariableDraft(editingVariable);
     if (!sanitized.key) {
-      showToast(tl("Informe o nome da variável."), "warning");
+      showToast(t("generated.controlPlane.informe_o_nome_da_variavel_b665fcbe"), "warning");
       return;
     }
     if (sanitized.type === "text" && !sanitized.value.trim()) {
-      showToast(tl("Informe um valor para a variável."), "warning");
+      showToast(t("generated.controlPlane.informe_um_valor_para_a_variavel_2d9c881a"), "warning");
       return;
     }
     if (sanitized.type === "secret" && !sanitized.value.trim() && !sanitized.value_present && !sanitized.clear) {
-      showToast(tl("Informe um valor inicial para o segredo."), "warning");
+      showToast(t("generated.controlPlane.informe_um_valor_inicial_para_o_segredo_a537a83e"), "warning");
       return;
     }
     setDraft((prev) => {
@@ -1816,7 +1816,7 @@ export function SystemSettingsProvider({
     });
     setEditingVariableOriginalKey(null);
     setEditingVariable(null);
-  }, [editingVariable, editingVariableOriginalKey, showToast, tl]);
+  }, [editingVariable, editingVariableOriginalKey, showToast, t, tl]);
 
   const connectProviderApiKey = useCallback(
     async (providerId: string) => {
@@ -1842,15 +1842,15 @@ export function SystemSettingsProvider({
           if (!Boolean(verification.verification?.verified)) {
             throw new Error(
               String(
-                verification.verification?.last_error || tl("Nao foi possivel validar a API Key deste provider."),
+                verification.verification?.last_error || t("generated.controlPlane.nao_foi_possivel_validar_a_api_key_deste_pro_caa659a0"),
               ),
             );
           }
           return verification;
         },
         {
-          successMessage: tl("Provider conectado com sucesso."),
-          errorMessage: tl("Nao foi possivel conectar o provider via API Key."),
+          successMessage: t("generated.controlPlane.provider_conectado_com_sucesso_4cedb230"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_conectar_o_provider_via_api_0fac6b64"),
           onSuccess: (payload) => {
             const connection = payload.connection;
             replaceProviderConnection(connection);
@@ -1891,7 +1891,7 @@ export function SystemSettingsProvider({
       setProviderConnectionDraft,
       verifyProviderConnectionSilently,
       providerConnections.ollama,
-      tl,
+      t, tl,
     ],
   );
 
@@ -1914,15 +1914,15 @@ export function SystemSettingsProvider({
           if (!Boolean(verification.verification?.verified)) {
             throw new Error(
               String(
-                verification.verification?.last_error || tl("Nao foi possivel validar a conexao local deste provider."),
+                verification.verification?.last_error || t("generated.controlPlane.nao_foi_possivel_validar_a_conexao_local_des_ab64ccfd"),
               ),
             );
           }
           return verification;
         },
         {
-          successMessage: tl("Provider local conectado com sucesso."),
-          errorMessage: tl("Nao foi possivel conectar o provider local."),
+          successMessage: t("generated.controlPlane.provider_local_conectado_com_sucesso_f8d67a55"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_conectar_o_provider_local_401102e2"),
           onSuccess: (payload) => {
             const connection = payload.connection;
             replaceProviderConnection(connection);
@@ -1955,7 +1955,7 @@ export function SystemSettingsProvider({
       runAction,
       setProviderConnectionDraft,
       verifyProviderConnectionSilently,
-      tl,
+      t, tl,
     ],
   );
 
@@ -1976,8 +1976,8 @@ export function SystemSettingsProvider({
             body: JSON.stringify({}),
           }),
         {
-          successMessage: tl("Fluxo oficial de login iniciado."),
-          errorMessage: tl("Nao foi possivel iniciar o login oficial do provider."),
+          successMessage: t("generated.controlPlane.fluxo_oficial_de_login_iniciado_5643c986"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_iniciar_o_login_oficial_do__39e1cacc"),
           onSuccess: ({ connection, login_session }) => {
             replaceProviderConnection(connection);
             setProviderConnectionDraft(providerId, {
@@ -2010,7 +2010,7 @@ export function SystemSettingsProvider({
       replaceProviderConnection,
       runAction,
       setProviderConnectionDraft,
-      tl,
+      t, tl,
     ],
   );
 
@@ -2039,8 +2039,8 @@ export function SystemSettingsProvider({
         providerActionKey(providerId, "verify"),
         async () => verifyProviderConnectionSilently(providerId),
         {
-          successMessage: tl("Conexão verificada com sucesso."),
-          errorMessage: tl("Nao foi possivel verificar a conexao do provider."),
+          successMessage: t("generated.controlPlane.conexao_verificada_com_sucesso_370f45df"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_verificar_a_conexao_do_prov_1f762f96"),
           onSuccess: (payload) => {
             const connection = payload.connection;
             const verified = Boolean(payload.verification?.verified);
@@ -2082,7 +2082,7 @@ export function SystemSettingsProvider({
       resetOllamaModelState,
       runAction,
       setProviderConnectionDraft,
-      tl,
+      t, tl,
       verifyProviderConnectionSilently,
     ],
   );
@@ -2099,8 +2099,8 @@ export function SystemSettingsProvider({
             },
           ),
         {
-          successMessage: tl("Provider desconectado."),
-          errorMessage: tl("Nao foi possivel desconectar o provider."),
+          successMessage: t("generated.controlPlane.provider_desconectado_a1408577"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_desconectar_o_provider_488ad9fd"),
           onSuccess: ({ connection }) => {
             clearProviderLoginWindow(providerId);
             replaceProviderConnection(connection);
@@ -2127,7 +2127,7 @@ export function SystemSettingsProvider({
       resetOllamaModelState,
       runAction,
       setProviderConnectionDraft,
-      tl,
+      t, tl,
     ],
   );
 
@@ -2165,8 +2165,8 @@ export function SystemSettingsProvider({
         providerId: "kokoro",
         assetKey: normalized,
         startEndpoint: `/api/control-plane/providers/kokoro/voices/${encodeURIComponent(normalized)}/download`,
-        toastTitle: tl("Baixando voz Kokoro · {{voice}}", { voice: voiceName + language }),
-        successMessage: tl('Voz "{{voice}}" disponível.', { voice: voiceName }),
+        toastTitle: t("generated.controlPlane.baixando_voz_kokoro_voice_b0fa8be8", { voice: voiceName + language }),
+        successMessage: t("generated.controlPlane.voz_voice_disponivel_33353132", { voice: voiceName }),
         onComplete: async () => {
           kokoroVoiceCacheRef.current = {};
           await loadKokoroVoices(draft.values.models.kokoro_default_language || "pt-br", {
@@ -2175,7 +2175,7 @@ export function SystemSettingsProvider({
         },
       });
     },
-    [downloadJob, draft.values.models.kokoro_default_language, kokoroVoiceCatalog.items, loadKokoroVoices, tl],
+    [downloadJob, draft.values.models.kokoro_default_language, kokoroVoiceCatalog.items, loadKokoroVoices, t, tl],
   );
 
   const downloadKokoroModel = useCallback(async () => {
@@ -2183,13 +2183,13 @@ export function SystemSettingsProvider({
       providerId: "kokoro",
       assetKey: "model",
       startEndpoint: "/api/control-plane/providers/kokoro/model/download",
-      toastTitle: tl("Baixando modelo Kokoro"),
-      successMessage: tl("Modelo Kokoro pronto."),
+      toastTitle: t("generated.controlPlane.baixando_modelo_kokoro_e562b0ef"),
+      successMessage: t("generated.controlPlane.modelo_kokoro_pronto_0ce7d60e"),
       onComplete: async () => {
         await loadKokoroModelStatus({ force: true });
       },
     });
-  }, [downloadJob, loadKokoroModelStatus, tl]);
+  }, [downloadJob, loadKokoroModelStatus, t, tl]);
 
   const downloadSupertonicModel = useCallback(
     async (modelId: string) => {
@@ -2200,8 +2200,8 @@ export function SystemSettingsProvider({
         providerId: "supertonic",
         assetKey: normalized,
         startEndpoint: `/api/control-plane/providers/supertonic/models/${encodeURIComponent(normalized)}/download`,
-        toastTitle: tl("Baixando {{label}}", { label }),
-        successMessage: tl("{{label}} pronto.", { label }),
+        toastTitle: t("generated.controlPlane.baixando_label_b9790fba", { label }),
+        successMessage: t("generated.controlPlane.label_pronto_c7c1d5ef", { label }),
         onComplete: async () => {
           await loadSupertonicModels({ force: true });
           supertonicVoiceCacheRef.current = {};
@@ -2220,7 +2220,7 @@ export function SystemSettingsProvider({
       loadSupertonicModels,
       loadSupertonicVoices,
       supertonicModelCatalog,
-      tl,
+      t, tl,
     ],
   );
 
@@ -2235,8 +2235,8 @@ export function SystemSettingsProvider({
         providerId: "supertonic",
         assetKey,
         startEndpoint: `/api/control-plane/providers/supertonic/voices/${encodeURIComponent(normalized)}/download?model_id=${encodeURIComponent(selectedModel)}`,
-        toastTitle: tl("Baixando voz Supertonic · {{voice}}", { voice: voiceName }),
-        successMessage: tl('Voz "{{voice}}" disponível.', { voice: voiceName }),
+        toastTitle: t("generated.controlPlane.baixando_voz_supertonic_voice_df4245ae", { voice: voiceName }),
+        successMessage: t("generated.controlPlane.voz_voice_disponivel_33353132", { voice: voiceName }),
         onComplete: async () => {
           supertonicVoiceCacheRef.current = {};
           await loadSupertonicVoices(
@@ -2253,7 +2253,7 @@ export function SystemSettingsProvider({
       draft.values.models.supertonic_default_model,
       loadSupertonicVoices,
       supertonicVoiceCatalog.items,
-      tl,
+      t, tl,
     ],
   );
 
@@ -2281,8 +2281,8 @@ export function SystemSettingsProvider({
           return (await res.json()) as { voice_id?: string; name?: string };
         },
         {
-          successMessage: tl("Voz Supertonic importada."),
-          errorMessage: tl("Não foi possível importar a voz Supertonic."),
+          successMessage: t("generated.controlPlane.voz_supertonic_importada_b443b0e5"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_importar_a_voz_supertonic_e03f7e4a"),
           onSuccess: async () => {
             supertonicVoiceCacheRef.current = {};
             await loadSupertonicVoices(
@@ -2299,7 +2299,7 @@ export function SystemSettingsProvider({
       draft.values.models.supertonic_default_model,
       loadSupertonicVoices,
       runAction,
-      tl,
+      t, tl,
     ],
   );
 
@@ -2312,14 +2312,14 @@ export function SystemSettingsProvider({
         providerId: "whispercpp",
         assetKey: normalized,
         startEndpoint: `/api/control-plane/providers/whispercpp/models/${encodeURIComponent(normalized)}/download`,
-        toastTitle: tl("Baixando {{label}}", { label }),
-        successMessage: tl("{{label}} pronto.", { label }),
+        toastTitle: t("generated.controlPlane.baixando_label_b9790fba", { label }),
+        successMessage: t("generated.controlPlane.label_pronto_c7c1d5ef", { label }),
         onComplete: async () => {
           await loadWhisperCatalog({ force: true });
         },
       });
     },
-    [downloadJob, loadWhisperCatalog, tl, whisperCatalog],
+    [downloadJob, loadWhisperCatalog, t, tl, whisperCatalog],
   );
 
   const isDownloadingKokoroAsset = useCallback(
@@ -2357,14 +2357,14 @@ export function SystemSettingsProvider({
         return (await res.json()) as { bytes_freed?: number; removed?: boolean };
       },
       {
-        successMessage: tl("Modelo Kokoro removido."),
-        errorMessage: tl("Não foi possível remover o modelo Kokoro."),
+        successMessage: t("generated.controlPlane.modelo_kokoro_removido_bbe50354"),
+        errorMessage: t("generated.controlPlane.nao_foi_possivel_remover_o_modelo_kokoro_47706d1b"),
         onSuccess: async () => {
           await loadKokoroModelStatus({ force: true });
         },
       },
     );
-  }, [loadKokoroModelStatus, runAction, tl]);
+  }, [loadKokoroModelStatus, runAction, t, tl]);
 
   const deleteKokoroVoiceAsset = useCallback(
     async (voiceId: string) => {
@@ -2384,8 +2384,8 @@ export function SystemSettingsProvider({
           return (await res.json()) as { bytes_freed?: number; removed?: boolean };
         },
         {
-          successMessage: tl("Voz removida."),
-          errorMessage: tl("Não foi possível remover a voz."),
+          successMessage: t("generated.controlPlane.voz_removida_78e3a6df"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_remover_a_voz_d14993cb"),
           onSuccess: async () => {
             kokoroVoiceCacheRef.current = {};
             await loadKokoroVoices(draft.values.models.kokoro_default_language || "pt-br", {
@@ -2395,7 +2395,7 @@ export function SystemSettingsProvider({
         },
       );
     },
-    [draft.values.models.kokoro_default_language, loadKokoroVoices, runAction, tl],
+    [draft.values.models.kokoro_default_language, loadKokoroVoices, runAction, t, tl],
   );
 
   const deleteSupertonicModelAsset = useCallback(
@@ -2415,8 +2415,8 @@ export function SystemSettingsProvider({
           return (await res.json()) as { bytes_freed?: number; removed?: boolean };
         },
         {
-          successMessage: tl("Modelo Supertonic removido."),
-          errorMessage: tl("Não foi possível remover o modelo Supertonic."),
+          successMessage: t("generated.controlPlane.modelo_supertonic_removido_827e5d95"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_remover_o_modelo_supertonic_7259cb94"),
           onSuccess: async () => {
             await loadSupertonicModels({ force: true });
             supertonicVoiceCacheRef.current = {};
@@ -2435,7 +2435,7 @@ export function SystemSettingsProvider({
       loadSupertonicModels,
       loadSupertonicVoices,
       runAction,
-      tl,
+      t, tl,
     ],
   );
 
@@ -2458,8 +2458,8 @@ export function SystemSettingsProvider({
           return (await res.json()) as { bytes_freed?: number; removed?: boolean };
         },
         {
-          successMessage: tl("Voz Supertonic removida."),
-          errorMessage: tl("Não foi possível remover a voz Supertonic."),
+          successMessage: t("generated.controlPlane.voz_supertonic_removida_641d66e2"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_remover_a_voz_supertonic_e33e6fa8"),
           onSuccess: async () => {
             supertonicVoiceCacheRef.current = {};
             await loadSupertonicVoices(
@@ -2476,7 +2476,7 @@ export function SystemSettingsProvider({
       draft.values.models.supertonic_default_model,
       loadSupertonicVoices,
       runAction,
-      tl,
+      t, tl,
     ],
   );
 
@@ -2498,15 +2498,15 @@ export function SystemSettingsProvider({
           return (await res.json()) as { bytes_freed?: number; removed?: boolean };
         },
         {
-          successMessage: tl("Modelo Whisper removido."),
-          errorMessage: tl("Não foi possível remover o modelo Whisper."),
+          successMessage: t("generated.controlPlane.modelo_whisper_removido_a54794e3"),
+          errorMessage: t("generated.controlPlane.nao_foi_possivel_remover_o_modelo_whisper_0bc43f3f"),
           onSuccess: async () => {
             await loadWhisperCatalog({ force: true });
           },
         },
       );
     },
-    [loadWhisperCatalog, runAction, tl],
+    [loadWhisperCatalog, runAction, t, tl],
   );
 
   const handleSave = useCallback(async () => {
@@ -2572,7 +2572,7 @@ export function SystemSettingsProvider({
       setSectionErrors(groupErrorsBySection(clientErrors));
       const firstBadSection = sectionForField(clientErrors[0].field);
       setStoredSection(firstBadSection);
-      showToast(clientErrors[0].message, "error", { title: tl("Corrija os erros antes de salvar.") });
+      showToast(clientErrors[0].message, "error", { title: t("generated.controlPlane.corrija_os_erros_antes_de_salvar_dec5cf76") });
       return;
     }
 
@@ -2597,10 +2597,10 @@ export function SystemSettingsProvider({
             setStoredSection(firstBadSection);
             throw new Error(serverErrors[0].message);
           }
-          throw new Error(tl("Nao foi possivel salvar as configuracoes gerais."));
+          throw new Error(t("generated.controlPlane.nao_foi_possivel_salvar_as_configuracoes_ger_1fc21ff5"));
         }
         if (!response.ok) {
-          throw new Error(tl("Nao foi possivel salvar as configuracoes gerais."));
+          throw new Error(t("generated.controlPlane.nao_foi_possivel_salvar_as_configuracoes_ger_1fc21ff5"));
         }
         const refreshed = (await response.json()) as GeneralSystemSettings;
         const freshState = cloneGeneralSystemSettings(refreshed);
@@ -2622,11 +2622,11 @@ export function SystemSettingsProvider({
         return refreshed;
       },
       {
-        successMessage: tl("Configuracoes gerais salvas com sucesso."),
-        errorMessage: tl("Nao foi possivel salvar as configuracoes gerais."),
+        successMessage: t("generated.controlPlane.configuracoes_gerais_salvas_com_sucesso_20b422cd"),
+        errorMessage: t("generated.controlPlane.nao_foi_possivel_salvar_as_configuracoes_ger_1fc21ff5"),
       },
     );
-  }, [draft, enabledProviders, runAction, tl, clearSectionErrors, setStoredSection, showToast]);
+  }, [draft, enabledProviders, runAction, t, tl, clearSectionErrors, setStoredSection, showToast]);
 
   const handleDiscard = useCallback(() => {
     setDraft(cloneGeneralSystemSettings(baseline));

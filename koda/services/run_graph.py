@@ -17,6 +17,7 @@ from koda.services.runtime.redaction import redact_value
 
 RUN_GRAPH_SCHEMA_VERSION = "run_graph.v1"
 RUN_REPLAY_SCHEMA_VERSION = "run_replay.v1"
+RUN_GRAPH_COMPLETENESS_SCHEMA_VERSION = "run_graph_completeness.v1"
 
 RUN_GRAPH_NODE_TYPES = frozenset(
     {
@@ -44,6 +45,7 @@ RUN_GRAPH_NODE_TYPES = frozenset(
         "agent_request",
         "agent_followup",
         "reply_obligation",
+        "handoff_event",
         "coordinator_synthesis",
         "artifact",
         "cost",
@@ -136,6 +138,12 @@ def _list(value: Any) -> list[Any]:
     return list(value) if isinstance(value, list) else []
 
 
+def _payload_dict(value: Any) -> dict[str, Any]:
+    if hasattr(value, "to_dict"):
+        value = value.to_dict()
+    return _dict(value)
+
+
 def _clip_text(value: Any, *, limit: int = _TEXT_PREVIEW_CHARS) -> str | None:
     text = " ".join(str(value or "").split()).strip()
     if not text:
@@ -150,7 +158,7 @@ def _redacted_payload(value: Any) -> dict[str, Any]:
         redacted = redact_value(value)
     except Exception:
         redacted = _fallback_redact_value(value)
-    return _dict(redacted)
+    return _dict(_fallback_redact_value(redacted))
 
 
 def _fallback_redact_value(value: Any, *, key_hint: str | None = None) -> Any:
@@ -432,6 +440,235 @@ class RunReplayBundle:
         }
 
 
+def verify_run_graph_completeness(
+    run_graph: Mapping[str, Any] | RunGraph,
+    *,
+    scenario: str | None = None,
+    required_node_types: Iterable[str] | None = None,
+    any_node_type_groups: Mapping[str, Iterable[str]] | None = None,
+    require_edges: bool = True,
+    requires_partial_timeout: bool | None = None,
+    require_synthesis_path: bool | None = None,
+) -> dict[str, Any]:
+    """Return a deterministic completeness report for a `run_graph.v1` payload."""
+
+    payload = _payload_dict(run_graph)
+    scenario_key = _string(scenario or payload.get("scenario") or _dict(payload.get("metadata")).get("scenario"))
+    if scenario_key in {"single", "single-agent"}:
+        scenario_key = "single_agent"
+    nodes = [_dict(item) for item in _list(payload.get("nodes")) if isinstance(item, Mapping)]
+    edges = [_dict(item) for item in _list(payload.get("edges")) if isinstance(item, Mapping)]
+    node_type_by_id = {
+        node_id: _string(node.get("node_type") or node.get("type"))
+        for node in nodes
+        if (node_id := _string(node.get("node_id") or node.get("id")))
+    }
+    node_ids = set(node_type_by_id)
+    endpoint_edges = [
+        edge
+        for edge in edges
+        if _string(edge.get("from_node_id") or edge.get("from")) or _string(edge.get("to_node_id") or edge.get("to"))
+    ]
+    present_node_types = sorted(
+        {
+            node_type
+            for node in nodes
+            if (node_type := _string(node.get("node_type") or node.get("type"))) in RUN_GRAPH_NODE_TYPES
+        }
+    )
+    present_set = set(present_node_types)
+    if required_node_types is None:
+        if scenario_key == "squad":
+            required_source: Iterable[str] = (
+                "model_call",
+                "agent_request",
+                "reply_obligation",
+                "coordinator_synthesis",
+            )
+        elif scenario_key == "handoff":
+            required_source = ("model_call", "agent_request", "handoff_event", "coordinator_synthesis")
+        else:
+            required_source = ("model_call",)
+    else:
+        required_source = required_node_types
+    required_set = {node_type for node_type in (_string(item) for item in required_source) if node_type}
+    if scenario_key == "squad":
+        required_set.update({"model_call", "agent_request", "reply_obligation", "coordinator_synthesis"})
+    if scenario_key == "handoff":
+        required_set.update({"model_call", "agent_request", "handoff_event", "coordinator_synthesis"})
+    if requires_partial_timeout is True or (
+        requires_partial_timeout is None
+        and any(_string(_dict(node.get("payload")).get("event_type")) == "partial_timeout" for node in nodes)
+    ):
+        required_set.add("dependency_call")
+    required = sorted(required_set)
+    missing = [node_type for node_type in required if node_type not in present_set]
+    failures: list[dict[str, Any]] = [
+        {
+            "category": "missing_node_type",
+            "message": f"RunGraph is missing required node type {node_type!r}.",
+            "node_type": node_type,
+        }
+        for node_type in missing
+    ]
+    if scenario_key == "squad" and any_node_type_groups is None:
+        any_node_type_groups = {"child_run_or_task_result": ("child_run", "squad_reply")}
+    if scenario_key == "handoff" and any_node_type_groups is None:
+        any_node_type_groups = {"handoff_return_or_reply": ("squad_reply", "reply_obligation")}
+    if require_edges and len(nodes) > 1 and not edges:
+        failures.append(
+            {
+                "category": "missing_edges",
+                "message": "RunGraph has multiple nodes but no causal edges.",
+            }
+        )
+    if require_edges and endpoint_edges and node_ids:
+        incident_ids: set[str] = set()
+        for edge in endpoint_edges:
+            from_id = _string(edge.get("from_node_id") or edge.get("from"))
+            to_id = _string(edge.get("to_node_id") or edge.get("to"))
+            if from_id:
+                incident_ids.add(from_id)
+            if to_id:
+                incident_ids.add(to_id)
+            for endpoint_name, endpoint in (("from", from_id), ("to", to_id)):
+                if endpoint and endpoint not in node_ids:
+                    failures.append(
+                        {
+                            "category": "dangling_edge_endpoint",
+                            "message": f"RunGraph edge references missing {endpoint_name} node {endpoint!r}.",
+                            "edge_id": edge.get("edge_id") or edge.get("id") or "",
+                            "node_id": endpoint,
+                        }
+                    )
+        for node_id, node_type in sorted(node_type_by_id.items()):
+            if node_type in required_set and node_id not in incident_ids and len(nodes) > 1:
+                failures.append(
+                    {
+                        "category": "disconnected_required_node",
+                        "message": f"Required node {node_id!r} ({node_type}) is disconnected from causal edges.",
+                        "node_id": node_id,
+                        "node_type": node_type,
+                    }
+                )
+
+    groups: list[dict[str, Any]] = []
+    for group_id, raw_options in sorted((any_node_type_groups or {}).items()):
+        options = sorted({_string(item) for item in raw_options if _string(item)})
+        matching = [node_type for node_type in options if node_type in present_set]
+        group_status = "passed" if matching else "failed"
+        groups.append(
+            {
+                "id": str(group_id),
+                "status": group_status,
+                "options": options,
+                "present": matching,
+            }
+        )
+        if group_status == "failed":
+            failures.append(
+                {
+                    "category": "missing_node_type_group",
+                    "message": f"RunGraph is missing one of required node types: {', '.join(options)}.",
+                    "group_id": str(group_id),
+                    "options": options,
+                }
+            )
+
+    synthesis_path_required = require_synthesis_path is True or (
+        require_synthesis_path is None and scenario_key in {"squad", "handoff"}
+    )
+    if synthesis_path_required and node_ids and endpoint_edges:
+        synthesis_ids = {
+            node_id for node_id, node_type in node_type_by_id.items() if node_type == "coordinator_synthesis"
+        }
+        evidence_ids = {
+            node_id
+            for node_id, node_type in node_type_by_id.items()
+            if node_type in {"child_run", "squad_reply", "tool_result", "dependency_call", "handoff_event"}
+        }
+        adjacency: dict[str, set[str]] = {}
+        for edge in endpoint_edges:
+            from_id = _string(edge.get("from_node_id") or edge.get("from"))
+            to_id = _string(edge.get("to_node_id") or edge.get("to"))
+            if from_id and to_id:
+                adjacency.setdefault(from_id, set()).add(to_id)
+
+        def _reaches_synthesis(start: str) -> bool:
+            seen: set[str] = set()
+            pending = [start]
+            while pending:
+                current = pending.pop()
+                if current in seen:
+                    continue
+                seen.add(current)
+                if current in synthesis_ids and current != start:
+                    return True
+                pending.extend(sorted(adjacency.get(current, set()) - seen))
+            return False
+
+        if not synthesis_ids:
+            failures.append(
+                {
+                    "category": "missing_synthesis_path",
+                    "message": "RunGraph cannot prove synthesis because no coordinator_synthesis node exists.",
+                }
+            )
+        elif evidence_ids and not any(_reaches_synthesis(node_id) for node_id in evidence_ids):
+            failures.append(
+                {
+                    "category": "missing_synthesis_path",
+                    "message": (
+                        "RunGraph has no causal path from completed evidence or timeout into coordinator synthesis."
+                    ),
+                    "source_node_types": sorted({node_type_by_id[node_id] for node_id in evidence_ids}),
+                }
+            )
+
+    status = "passed" if not failures else "failed"
+    report = {
+        "schema_version": RUN_GRAPH_COMPLETENESS_SCHEMA_VERSION,
+        "status": status,
+        "graph_id": payload.get("graph_id") or payload.get("run_id") or "",
+        "scenario": scenario_key or "",
+        "node_count": len(nodes),
+        "edge_count": len(edges),
+        "required_node_types": required,
+        "present_node_types": present_node_types,
+        "missing_node_types": missing,
+        "any_node_type_groups": groups,
+        "failures": failures,
+    }
+    _emit_completeness_metric(report, payload=payload, nodes=nodes)
+    return report
+
+
+def _emit_completeness_metric(
+    report: Mapping[str, Any],
+    *,
+    payload: Mapping[str, Any],
+    nodes: list[dict[str, Any]],
+) -> None:
+    """Publish low-cardinality RunGraph gate telemetry without leaking run ids."""
+
+    try:
+        from koda.services.metrics import RUN_GRAPH_COMPLETENESS_GATES
+
+        agent_id = _string(payload.get("agent_id"))
+        if not agent_id and nodes:
+            agent_id = _string(nodes[0].get("agent_id"))
+        failures = [item for item in _list(report.get("failures")) if isinstance(item, Mapping)]
+        failure_category = _string(_dict(failures[0]).get("category")) if failures else "none"
+        RUN_GRAPH_COMPLETENESS_GATES.labels(
+            agent_id=(agent_id or "unknown").upper(),
+            scenario=_string(report.get("scenario")) or "default",
+            status=_string(report.get("status")) or "unknown",
+            failure_category=failure_category or "unknown",
+        ).inc()
+    except Exception:
+        return
+
+
 def _timeline_node_type(event_type: str) -> str:
     event = event_type.lower()
     if "lease_reap" in event or "lease.reap" in event:
@@ -448,6 +685,8 @@ def _timeline_node_type(event_type: str) -> str:
         return "dlq_inserted"
     if any(token in event for token in ("routing_decision", "squad_awareness", "contribution_proposal")):
         return "agent_request"
+    if "handoff" in event:
+        return "handoff_event"
     if "coordination_decision" in event or "coordination_dispatched" in event:
         return "agent_request"
     if "mention_unresolved" in event or "agent_dispatch_unavailable" in event:

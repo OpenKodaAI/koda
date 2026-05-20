@@ -491,6 +491,98 @@ def _effective_private_network_access(grant_decision: object) -> bool:
     return bool(grant.get("allow_private_network"))
 
 
+def _normalize_policy_id_set(value: object) -> set[str]:
+    if isinstance(value, str):
+        values = [value]
+    elif isinstance(value, list | tuple | set | frozenset):
+        values = list(value)
+    else:
+        return set()
+    return {str(item).strip() for item in values if str(item).strip()}
+
+
+def _skill_package_tool_policy_denial(tool_id: str, ctx: ToolContext, *, agent_id: str) -> AgentToolResult | None:
+    """Fail closed for direct calls to package tools that are not explicitly allowlisted."""
+
+    try:
+        from koda.plugins import get_registry
+
+        plugin_def = get_registry().get_tool_def(tool_id)
+    except Exception:
+        plugin_def = None
+    integration_id = str(getattr(plugin_def, "integration_id", "") or "")
+    if not integration_id.startswith("skill_package:"):
+        return None
+    package_id = integration_id.split(":", 1)[1].strip()
+    if not package_id:
+        return None
+
+    lookup_agent_id = ctx.executing_agent_id or agent_id
+    try:
+        from koda.skills._package import find_installed_package_tool
+
+        installed_tool = find_installed_package_tool(lookup_agent_id, tool_id)
+    except Exception:
+        installed_tool = None
+    if not installed_tool:
+        return AgentToolResult(
+            tool=tool_id,
+            success=False,
+            output=f"Skill package tool '{tool_id}' is not installed for this agent.",
+            metadata={
+                "category": "policy_denied",
+                "policy_blocked": True,
+                "policy_reason_code": "skill_package_not_installed",
+                "package_id": package_id,
+            },
+            completed_at=datetime.now(UTC).isoformat(),
+        )
+
+    try:
+        from koda.skills._runtime import get_runtime_agent_spec, get_runtime_skill_policy, is_skill_package_allowed
+
+        agent_spec = get_runtime_agent_spec()
+        skill_policy = get_runtime_skill_policy(agent_spec)
+    except Exception:
+        agent_spec = {}
+        skill_policy = {}
+
+    tool_policy = agent_spec.get("tool_policy") if isinstance(agent_spec, dict) else {}
+    if not isinstance(tool_policy, dict):
+        tool_policy = {}
+    allowed_tool_ids = _normalize_policy_id_set(tool_policy.get("allowed_tool_ids"))
+    package_allowed = False
+    with contextlib.suppress(Exception):
+        package_allowed = is_skill_package_allowed(package_id, skill_policy)
+
+    missing: list[str] = []
+    if tool_id not in allowed_tool_ids:
+        missing.append("tool_policy.allowed_tool_ids")
+    if not package_allowed:
+        missing.append("skill_policy.enabled_skill_packages")
+    if not missing:
+        return None
+
+    _audit_blocked(tool_id, f"skill_package_allowlist_missing:{','.join(missing)}", user_id=ctx.user_id)
+    return AgentToolResult(
+        tool=tool_id,
+        success=False,
+        output=(
+            f"Skill package tool '{tool_id}' is blocked for this agent. "
+            "Enable both the package in skill_policy.enabled_skill_packages and the tool in "
+            "tool_policy.allowed_tool_ids before use."
+        ),
+        metadata={
+            "category": "policy_denied",
+            "policy_blocked": True,
+            "policy_reason_code": "skill_package_allowlist_missing",
+            "missing_policy_fields": missing,
+            "package_id": package_id,
+        },
+        completed_at=datetime.now(UTC).isoformat(),
+    )
+
+
 async def execute_tool(
     call: AgentToolCall,
     ctx: ToolContext,
@@ -563,6 +655,7 @@ async def _execute_tool_traced(
             return
 
     handler = _TOOL_HANDLERS.get(call.tool)
+    plugin_handler = False
     if not handler:
         if PLUGIN_SYSTEM_ENABLED:
             with contextlib.suppress(Exception):
@@ -572,6 +665,7 @@ async def _execute_tool_traced(
             from koda.plugins import get_registry
 
             handler = get_registry().get_handler(call.tool)
+            plugin_handler = handler is not None
         if not handler:
             TOOL_EXECUTIONS.labels(agent_id=_agent_id_label, tool_name=call.tool, status="unknown").inc()
             return AgentToolResult(
@@ -582,6 +676,14 @@ async def _execute_tool_traced(
                 started_at=started_at,
                 completed_at=datetime.now(UTC).isoformat(),
             )
+    if plugin_handler:
+        package_denial = _skill_package_tool_policy_denial(call.tool, ctx, agent_id=_agent_id_label)
+        if package_denial is not None:
+            TOOL_EXECUTIONS.labels(agent_id=_agent_id_label, tool_name=call.tool, status="policy_denied").inc()
+            package_denial.started_at = started_at
+            if not package_denial.completed_at:
+                package_denial.completed_at = datetime.now(UTC).isoformat()
+            return package_denial
 
     access_policy = _configured_resource_access_policy()
     policy_params = _policy_params_for_call(call, ctx)
@@ -3012,6 +3114,7 @@ async def _handle_plugin_install(params: dict, ctx: ToolContext) -> AgentToolRes
             path,
             agent_id=AGENT_ID or "default",
             review_accepted=bool(params.get("review_accepted") or params.get("approved")),
+            review_note=str(params.get("review_note") or params.get("note") or ""),
         )
     except SkillPackageError as exc:
         error = dict(exc.error)

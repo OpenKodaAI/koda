@@ -35,7 +35,7 @@ export function ExecutionDetailModal({
   isOpen,
   onClose,
 }: ExecutionDetailModalProps) {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const presence = useAnimatedPresence(
     isOpen && Boolean(execution),
     { execution, detail, loading, error },
@@ -75,7 +75,7 @@ export function ExecutionDetailModal({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label={tl("Expanded execution {{id}}", {
+          aria-label={t("generated.executions.expanded_execution_id_772264c3", {
             id: data.task_id,
           })}
           data-visible={presence.isVisible}

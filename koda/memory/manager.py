@@ -76,6 +76,9 @@ class MemoryManager:
         source_query_id: int | None = None,
         source_task_id: int | None = None,
         source_episode_id: int | None = None,
+        namespace_kind: str | None = None,
+        namespace_key: str | None = None,
+        include_sensitive: bool = False,
     ) -> str:
         """Recall relevant memories and return context string for system prompt.
 
@@ -101,6 +104,9 @@ class MemoryManager:
                     source_query_id=source_query_id,
                     source_task_id=source_task_id,
                     source_episode_id=source_episode_id,
+                    namespace_kind=namespace_kind,
+                    namespace_key=namespace_key,
+                    include_sensitive=include_sensitive,
                 )
             ]
             if MEMORY_PROACTIVE_ENABLED:
@@ -161,6 +167,9 @@ class MemoryManager:
         source_query_id: int | None = None,
         source_task_id: int | None = None,
         source_episode_id: int | None = None,
+        namespace_kind: str | None = None,
+        namespace_key: str | None = None,
+        include_sensitive: bool = False,
     ) -> tuple[str, MemoryResolution]:
         """Return prompt context plus a structured resolution envelope for audit and gating."""
         if not MEMORY_ENABLED or not self._store:
@@ -182,6 +191,9 @@ class MemoryManager:
                 source_query_id=source_query_id,
                 source_task_id=source_task_id,
                 source_episode_id=source_episode_id,
+                namespace_kind=namespace_kind,
+                namespace_key=namespace_key,
+                include_sensitive=include_sensitive,
             )
             coros: list[Awaitable[object]] = [memory_resolution_task]
             if MEMORY_PROACTIVE_ENABLED:

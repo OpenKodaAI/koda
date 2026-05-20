@@ -273,7 +273,7 @@ def normalize_skill_policy(value: Any) -> dict[str, Any]:
     skill_budget_pct = _as_float(raw.get("skill_budget_pct"))
     if skill_budget_pct is not None and skill_budget_pct > 0:
         normalized["skill_budget_pct"] = skill_budget_pct
-    for key in ("enabled_skills", "disabled_skills"):
+    for key in ("enabled_skills", "disabled_skills", "enabled_skill_packages"):
         items = normalize_string_list(raw.get(key))
         if items:
             normalized[key] = items

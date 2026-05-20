@@ -4,47 +4,40 @@
   <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/main/docs/assets/brand/koda-banner.png" alt="Koda banner" width="100%" />
 </p>
 
+<h1 align="center">Koda</h1>
+
 <p align="center">
-  <strong>Open-source control plane for running, supervising, and documenting multi-agent AI systems.</strong>
+  <strong>Open-source harness for multi-agent, multi-provider AI systems.</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/OpenKodaAI/koda/blob/main/docs/install/local.md">Quickstart</a>
-  ·
-  <a href="https://github.com/OpenKodaAI/koda/blob/main/docs/README.md">Docs</a>
-  ·
-  <a href="https://github.com/OpenKodaAI/koda/blob/main/docs/reference/api.md">API</a>
-  ·
-  <a href="https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/overview.md">Architecture</a>
+  <a href="https://github.com/OpenKodaAI/koda/blob/main/docs/README.md"><img alt="Documentation" src="https://img.shields.io/badge/docs-local-111827?style=flat-square" /></a>
+  <a href="https://github.com/OpenKodaAI/koda/blob/main/docs/reference/api.md"><img alt="API" src="https://img.shields.io/badge/api-control--plane-2563eb?style=flat-square" /></a>
+  <img alt="npm" src="https://img.shields.io/npm/v/@openkodaai/koda?style=flat-square" />
+  <a href="https://github.com/OpenKodaAI/koda/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-0f766e?style=flat-square" /></a>
 </p>
 
-Koda gives AI agents the operational layer they need: setup, provider connections, agent configuration, durable state, runtime inspection, memory, retrieval, artifacts, schedules, costs, and audit trails. Bring the providers and workflows that fit your domain; Koda supplies the local-first harness around them.
+Koda is the operational layer around AI agents: a local-first, control-plane-first dashboard, runtime queue, memory system, skill system, channel gateway, eval harness, audit trail, and release-quality surface for teams that need agents to do real work without disappearing into a black box.
 
-Koda is control-plane-first: operators configure the system in the dashboard and the runtime follows that published contract.
+Configure providers, prompts, tools, secrets, agents, squads, memory policy, channel identity, and runtime safety from the dashboard. The workers follow the published contract; operators keep the evidence.
 
-## Product Tour
+**Use the providers that fit your stack.** Koda supports OpenAI-compatible and native provider paths through the control plane, including OpenAI, Anthropic, Google, Groq, Mistral, OpenRouter, DeepSeek, Qwen, Kimi, Perplexity, xAI, Ollama, llama.cpp, MLX, Kokoro, Whisper, and other configured endpoints.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/main/docs/assets/screenshots/overview.png" alt="Koda dashboard overview" width="32%" />
-  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/main/docs/assets/screenshots/costs.png" alt="Koda costs dashboard" width="32%" />
-  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/main/docs/assets/screenshots/runtime.png" alt="Koda runtime dashboard" width="32%" />
-</p>
+**Coordinate agents as squads, not just one-off chats.** Squad Rooms, reply obligations, handoffs, route explanations, child runs, synthesis gates, and RunGraph evidence make collaboration visible and auditable.
 
-- **Home:** activity, recent work, setup progress, and the command bar.
-- **Control Plane:** owners, providers, agents, workspaces, prompts, tools, and secrets.
-- **Runtime:** live queues, environments, task rooms, artifacts, terminals, and browser sessions.
-- **Operations:** costs, executions, sessions, memory review, routines, DLQ, and system health.
+**Give memory guardrails before giving it power.** Namespaced recall, memory safety scanning, redacted provenance, stale/conflict handling, utility feedback, and context-governance drops keep memory useful without silently trusting unsafe context.
 
-## Core Capabilities
+**Improve agents through governed proposals.** `improvement_proposal.v1` turns eval failures, user corrections, tool failures, timeouts, and manual signals into reviewable proposals with evidence refs, validation plans, rollback plans, audit, metrics, and RunGraph lifecycle nodes. Koda does not auto-mutate prompts, skills, policy, or memory without approval.
 
-- Agent catalog, prompt sections, provider connections, secrets, and rollout state.
-- Runtime queues, task rooms, browser/terminal access, artifacts, and recovery controls.
-- Cost, execution, session, activity, memory, schedule, and DLQ observability.
-- Local-first install path with Postgres, SeaweedFS, Rust sidecars, and a Next.js dashboard.
+**Install skills without bypassing supply-chain checks.** `koda_skill.v1`, scanner decisions, package locks, eval evidence, recommendation status, strict per-agent allowlists, and rollback state keep skills local-first and reversible.
 
-## Installation Paths
+**Prove behavior with evals, smokes, and traces.** `eval_case.v1`, squad golden evals, `run_graph_completeness.v1`, `release_quality.v1`, trajectory export, quality cockpit, Prometheus metrics, Grafana dashboards, and ops benchmarks give the platform a measurable release gate.
 
-Use the npm installer for the quickest local start:
+---
+
+## Quick Install
+
+### npm installer
 
 ```bash
 npm install -g @openkodaai/koda
@@ -74,7 +67,9 @@ open /setup
   -> sign in to the dashboard
 ```
 
-Source contributors can use the repository wrapper on apt-based Linux hosts:
+### Source install
+
+Use the repository wrapper on apt-based Linux hosts:
 
 ```bash
 git clone https://github.com/OpenKodaAI/koda.git /opt/koda
@@ -82,9 +77,52 @@ cd /opt/koda
 ./scripts/install.sh
 ```
 
-On macOS or other environments, install Docker and Node.js yourself and use the npm CLI path.
+On macOS or other environments, install Docker and Node.js yourself and use the npm CLI path. Windows users should prefer WSL2 for the most predictable local setup.
 
-## Architecture
+---
+
+## Getting Started
+
+```bash
+koda install              # install or refresh the local release bundle
+koda up                   # start the stack if it is stopped
+koda doctor               # inspect Docker, ports, env, API, and sandbox readiness
+koda auth issue-code      # issue a setup/login code from the local install
+koda logs app web         # tail release services
+koda update               # move the install to the latest published bundle
+koda down                 # stop the local stack
+```
+
+Typical first workflow:
+
+1. Open `/setup`, create the owner account, and save recovery codes.
+2. Connect at least one model provider in `/control-plane/system/models`.
+3. Create or edit an agent in `/control-plane`.
+4. Send work from `/sessions`, Telegram, or the runtime API.
+5. Inspect execution, artifacts, RunGraph, cost, memory, and release-quality evidence from the dashboard.
+
+[Full documentation](https://github.com/OpenKodaAI/koda/blob/main/docs/README.md)
+
+---
+
+## Dashboard vs Channel Quick Reference
+
+Koda has two operator surfaces: the dashboard for configuration and inspection, and the channel gateway for approved remote interaction. Telegram is the primary live channel path; Slack and Discord adapters share the same `channel_gateway.v1` contract and are validated locally unless live credentials are supplied.
+
+| Action | Dashboard | Channel gateway |
+| --- | --- | --- |
+| First setup | `/setup` | Not applicable until owner setup is complete |
+| Configure providers | `/control-plane/system/models` | Not exposed to channels |
+| Configure agents | `/control-plane` | Not exposed to channels |
+| Start work | `/sessions`, `/runtime`, runtime API | Approved Telegram identity or group mention |
+| Squad coordination | Squad Room transcript | Group mention routes into the same squad delivery path |
+| Inspect evidence | Runtime panels, RunGraph, evals, quality cockpit | Receives final response; evidence stays in Koda |
+| Approve/block identity | Channel gateway UI/API | Pairing code, approved sender, block, revoke |
+| Diagnose release readiness | Evals, release quality, sandbox doctor | Channel smoke and gateway metrics |
+
+---
+
+## What Koda Runs
 
 ```text
 Operator browser
@@ -113,9 +151,59 @@ The default compose stack starts:
 
 Koda keeps infrastructure bootstrap and product configuration separate. `.env` brings up the platform; the dashboard and `/api/control-plane/*` own providers, agents, secrets, prompts, integrations, and runtime policy.
 
+---
+
+## Core Capabilities
+
+| Area | What Koda provides |
+| --- | --- |
+| Control plane | Owner setup, provider connections, model defaults, agent catalog, workspaces, squads, secrets, tool policy, rollout state |
+| Runtime | Queue manager, task rooms, browser and terminal access, artifacts, child runs, recovery, DLQ, schedules |
+| Squads | Squad Rooms, mentions, reply obligations, handoffs, route scoring, synthesis readiness, transcript-visible coordination |
+| Memory | Safety scanner, namespaces, provenance, recall explanations, stale/conflict drops, utility feedback, quality counters |
+| Self-improvement | Governed proposal queue, eval-failure proposals, validation before apply, rollback ledger, audit and metrics |
+| Skills | Local-first packages, supply-chain scanner, strict allowlists, eval-backed recommendation, trust registry, rollback |
+| Channels | `channel_gateway.v1`, Telegram live path, Slack/Discord contract adapters, identity pairing, approve/block/revoke |
+| Evals and traces | `eval_case.v1`, squad golden eval, RunGraph completeness, release-quality gates, trajectory export |
+| Operations | Prometheus metrics, Grafana dashboard, sandbox doctor, quality cockpit, release blockers, ops benchmark |
+
+---
+
+## Product Tour
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/main/docs/assets/screenshots/overview.png" alt="Koda dashboard overview" width="32%" />
+  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/main/docs/assets/screenshots/control-plane.png" alt="Koda control plane" width="32%" />
+  <img src="https://raw.githubusercontent.com/OpenKodaAI/koda/main/docs/assets/screenshots/runtime.png" alt="Koda runtime dashboard" width="32%" />
+</p>
+
+- **Home:** activity, recent work, setup progress, and the command bar.
+- **Control Plane:** owners, providers, agents, workspaces, squads, prompts, tools, skills, and secrets.
+- **Runtime:** live queues, environments, task rooms, artifacts, terminals, browser sessions, RunGraph, and sandbox doctor.
+- **Operations:** costs, executions, sessions, memory review, routines, DLQ, evals, quality cockpit, release blockers, and system health.
+
+---
+
+## Documentation
+
+| Section | Start here |
+| --- | --- |
+| Install | [Local install](https://github.com/OpenKodaAI/koda/blob/main/docs/install/local.md), [VPS install](https://github.com/OpenKodaAI/koda/blob/main/docs/install/vps.md) |
+| Architecture | [Overview](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/overview.md), [Runtime](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/runtime.md), [RunGraph](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/run-graph-replay.md) |
+| Agents and squads | [Thread replies](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/thread-replies-agent-coordination.md), [Handoffs and route quality](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/handoffs-squad-intelligence.md) |
+| Memory and context | [Memory governance](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/memory-governance.md), [Context and release contracts](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/top-tier-phase-contracts.md) |
+| Self-improvement | [Improvement proposals](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/improvement-proposal.md), [Runbook](https://github.com/OpenKodaAI/koda/blob/main/docs/operations/improvement-proposal-runbook.md) |
+| Skills | [Plugin SDK](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/koda-skill-plugin-sdk.md), [Supply-chain scanner](https://github.com/OpenKodaAI/koda/blob/main/docs/security/skill-supply-chain-scanner.md), [Runbook](https://github.com/OpenKodaAI/koda/blob/main/docs/operations/skills-plugin-runbook.md) |
+| Channels | [Channel gateway](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/channel-gateway-onboarding.md), [Runbook](https://github.com/OpenKodaAI/koda/blob/main/docs/operations/channel-gateway-runbook.md) |
+| Evals and release | [Evals and release quality](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/evals-release-quality.md), [Release runbook](https://github.com/OpenKodaAI/koda/blob/main/docs/operations/evals-release-runbook.md) |
+| Operations | [Operations index](https://github.com/OpenKodaAI/koda/blob/main/docs/operations/README.md), [Observability](https://github.com/OpenKodaAI/koda/blob/main/docs/operations/observability.md), [Security](https://github.com/OpenKodaAI/koda/blob/main/docs/security/README.md) |
+| API | [API reference](https://github.com/OpenKodaAI/koda/blob/main/docs/reference/api.md), [OpenAPI JSON](https://github.com/OpenKodaAI/koda/blob/main/docs/openapi/control-plane.json) |
+
+---
+
 ## Local Demo Data And Screenshots
 
-Use the docs demo seed when you want a full, professional-looking local UI for screenshots or walkthroughs:
+Use the docs demo seed when you want a full local UI for screenshots or walkthroughs:
 
 ```bash
 docker compose exec app python scripts/seed_demo_data.py --apply
@@ -132,40 +220,18 @@ To remove demo data:
 docker compose exec app python scripts/seed_demo_data.py --clear
 ```
 
-## Main Interfaces
-
-- `/` dashboard home
-- `/setup` first-run owner setup
-- `/control-plane` agent and system configuration
-- `/runtime` live operational rooms
-- `/costs`, `/executions`, `/sessions`, `/memory`, `/routines`
-- `/api/control-plane/agents/*` agent configuration API
-- `/api/control-plane/*` broader public control-plane API
-- `/api/runtime/*` runtime inspection and control
-- [`docs/openapi/control-plane.json`](https://github.com/OpenKodaAI/koda/blob/main/docs/openapi/control-plane.json) maintained OpenAPI contract
-
-## Docs
-
-- [Documentation index](https://github.com/OpenKodaAI/koda/blob/main/docs/README.md)
-- [Local install](https://github.com/OpenKodaAI/koda/blob/main/docs/install/local.md)
-- [Architecture overview](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/overview.md)
-- [Runtime architecture](https://github.com/OpenKodaAI/koda/blob/main/docs/architecture/runtime.md)
-- [Configuration reference](https://github.com/OpenKodaAI/koda/blob/main/docs/config/reference.md)
-- [Operations runbooks](https://github.com/OpenKodaAI/koda/blob/main/docs/operations/README.md)
-- [Security readiness](https://github.com/OpenKodaAI/koda/blob/main/docs/security/README.md)
-- [API reference](https://github.com/OpenKodaAI/koda/blob/main/docs/reference/api.md)
-- [Release distribution](https://github.com/OpenKodaAI/koda/blob/main/docs/reference/releases.md)
+---
 
 ## Development
 
 Backend:
 
 ```bash
-pip install -e ".[dev]"
-ruff check .
-ruff format --check .
-mypy koda/ --ignore-missing-imports
-pytest --cov=koda --cov-report=term-missing
+uv sync --extra dev
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy koda/ --ignore-missing-imports
+PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python uv run python -m pytest --cov=koda --cov-report=term-missing
 ```
 
 Web:
@@ -182,15 +248,13 @@ Containerized development:
 pnpm dev:stack:build
 ```
 
-## Validation
-
-Run these before considering a code change complete:
+Before considering a code change complete:
 
 ```bash
-ruff check .
-ruff format --check .
-mypy koda/ --ignore-missing-imports
-pytest --cov=koda --cov-report=term-missing
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy koda/ --ignore-missing-imports
+PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python uv run python -m pytest --cov=koda --cov-report=term-missing
 pnpm lint:web
 pnpm test:web
 pnpm build:web
@@ -204,18 +268,33 @@ cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D war
 cargo test --manifest-path rust/Cargo.toml --workspace
 ```
 
+---
+
 ## Release Channels
 
-Public releases are cut from `main` by version.
-
-Official product releases publish the same pinned bundle through:
+Public releases are cut from `main` by version. Official product releases publish the same pinned bundle through:
 
 - npm: `@openkodaai/koda`
 - GHCR images
 - GitHub Releases with bundle archive, checksums, manifest, SBOM, and npm tarball
 
-Release automation fails loudly so the next merge must ship a new patch version instead of trying to reuse an escaped semantic tag.
+Build release artifacts locally:
 
-Use the release runbook when the GitHub release is still draft, missing assets, the npm dist-tag is still wrong, or GHCR image tags are missing, not publicly pullable, or missing `linux/amd64` or `linux/arm64`.
+```bash
+pnpm release:check-metadata
+uv run python scripts/build_release_artifacts.py --output-dir /tmp/koda-release-artifacts
+```
 
-Koda is Apache-2.0 licensed.
+Use the [release runbook](https://github.com/OpenKodaAI/koda/blob/main/docs/reference/releases.md) when the GitHub release is still draft, missing assets, the npm dist-tag is still wrong, or GHCR image tags are missing, not publicly pullable, private, or missing `linux/amd64` or `linux/arm64`. Release automation fails loudly so the next merge must ship a new patch version instead of trying to reuse an escaped semantic tag.
+
+---
+
+## Maturity Note
+
+Koda is implemented as an evidence-backed platform baseline. Individual capabilities may be marked Done, Partial, Blocked, Consolidated, or Robust in the local roadmap and assurance docs. The platform does not claim blanket Robust status unless restart/idempotency, fault/load, fail-closed security, observability, eval/smoke, and live E2E evidence are all present for the specific capability.
+
+---
+
+## License
+
+Apache-2.0. See [LICENSE](https://github.com/OpenKodaAI/koda/blob/main/LICENSE).

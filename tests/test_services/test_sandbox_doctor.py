@@ -24,6 +24,8 @@ def test_sandbox_doctor_reports_versioned_policy_and_passed_checks() -> None:
     assert payload["agent_id"] == "KODA"
     assert payload["task_id"] == 12
     assert payload["effective_policy"]["policy_version"] == "sandbox_policy.v1"
+    assert payload["effective_policy"]["channel_type"] == "local"
+    assert payload["effective_policy"]["remote_session"] is False
     assert any(check["id"] == "runtime_kernel_ready" for check in payload["checks"])
 
 
@@ -70,3 +72,30 @@ def test_cli_sandbox_doctor_uses_auto_detect_when_isolation_is_absent() -> None:
 
     assert "sandbox_policy_unknown" not in failed_ids
     assert payload["status"] in {"passed", "degraded"}
+
+
+def test_sandbox_doctor_reports_remote_channel_policy_denial() -> None:
+    payload = build_sandbox_doctor_payload(
+        task={
+            "id": 99,
+            "agent_id": "koda",
+            "risk_class": "low_risk_write",
+            "channel_type": "telegram",
+            "is_group": False,
+            "identity_status": "allowed",
+        },
+        env={
+            "KODA_MCP_ISOLATION": "docker",
+            "KODA_MCP_NETWORK_MODE": "none",
+            "BROWSER_ALLOW_PRIVATE_NETWORK": "false",
+        },
+        runtime_kernel={"ready": True, "authoritative": True},
+        mcp_risk_summary={"unknown": 0, "high_risk": 0},
+    )
+    failed_checks = {check["id"]: check for check in payload["checks"] if check["status"] == "failed"}
+
+    assert payload["status"] == "failed"
+    assert payload["effective_policy"]["channel_type"] == "telegram"
+    assert payload["effective_policy"]["remote_session"] is True
+    assert payload["effective_policy"]["identity_status"] == "allowed"
+    assert failed_checks["sandbox_remote_unsafe_default"]["scope"] == "channel"

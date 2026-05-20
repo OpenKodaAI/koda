@@ -11,6 +11,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { useToast } from "@/hooks/use-toast";
 import { requestJson } from "@/lib/http-client";
 import { formatDateTime } from "@/lib/utils";
+import { translate } from "@/lib/i18n";
 
 interface RecoverySummary {
   total: number;
@@ -34,7 +35,7 @@ function SecurityMetric({
       </p>
       <div className="m-0 mt-1 min-h-5 text-[0.8125rem] leading-5 text-[var(--text-primary)]">
         {loading ? (
-          <span className="inline-flex h-3 w-16 animate-pulse rounded bg-[var(--panel-soft)]" aria-label="Loading" />
+          <span className="inline-flex h-3 w-16 animate-pulse rounded bg-[var(--panel-soft)]" aria-label={translate("generated.account.loading_55f38d1e")} />
         ) : (
           value
         )}
@@ -70,7 +71,7 @@ function SecurityActionHeader({
 }
 
 export function SecuritySettingsCard() {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { showToast } = useToast();
   const { runAction, isPending } = useAsyncAction();
   const [summary, setSummary] = useState<RecoverySummary | null>(null);
@@ -88,14 +89,14 @@ export function SecuritySettingsCard() {
   const regenBusy = isPending("account.security.recovery");
 
   const refreshSummary = useCallback(
-    async (successMessage = tl("Security status updated.")) => {
+    async (successMessage = t("generated.account.security_status_updated_42650a69")) => {
       setLoadError(null);
       await runAction(
         "account.security.summary",
         () => requestJson<RecoverySummary>("/api/control-plane/auth/recovery-codes"),
         {
           successMessage,
-          errorMessage: tl("Could not load security info."),
+          errorMessage: t("generated.account.could_not_load_security_info_2091a03b"),
           onSuccess: (data) => {
             setSummary(data);
             setLoadError(null);
@@ -106,15 +107,15 @@ export function SecuritySettingsCard() {
         },
       );
     },
-    [runAction, tl],
+    [runAction, t],
   );
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
-      void refreshSummary(tl("Security status loaded."));
+      void refreshSummary(t("generated.account.security_status_loaded_9d4267a2"));
     }, 0);
     return () => window.clearTimeout(handle);
-  }, [refreshSummary, tl]);
+  }, [refreshSummary, t]);
 
   async function handleChangePassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -133,7 +134,7 @@ export function SecuritySettingsCard() {
         body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
       }),
       {
-        successMessage: tl("Password updated."),
+        successMessage: t("generated.account.password_updated_3f4f2b68"),
         errorMessage: t("auth.forgot.generic_error"),
         onSuccess: () => {
           setCurrentPassword("");
@@ -160,7 +161,7 @@ export function SecuritySettingsCard() {
         },
       ),
       {
-        successMessage: tl("Recovery codes regenerated."),
+        successMessage: t("generated.account.recovery_codes_regenerated_a2784532"),
         errorMessage: t("auth.forgot.generic_error"),
         onError: (error) => {
           setRegenError(error.message);
@@ -171,7 +172,7 @@ export function SecuritySettingsCard() {
     if (data) {
       setRegenCodes(data.recovery_codes || []);
       setRegenPassword("");
-      await refreshSummary(tl("Recovery status refreshed."));
+      await refreshSummary(t("generated.account.recovery_status_refreshed_c108a1cc"));
     }
   }
 
@@ -181,26 +182,26 @@ export function SecuritySettingsCard() {
         <div className="flex min-w-0 items-start justify-between gap-4">
           <div className="min-w-0">
             <CardTitle>{t("auth.settings.security.title")}</CardTitle>
-            <CardDescription>{tl("Password rotation and recovery-code controls stay private to this operator account.")}</CardDescription>
+            <CardDescription>{t("generated.account.password_rotation_and_recovery_code_controls_9d081f29")}</CardDescription>
           </div>
           {loading ? (
-            <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[var(--text-tertiary)]" strokeWidth={1.75} aria-label="Loading" />
+            <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[var(--text-tertiary)]" strokeWidth={1.75} aria-label={translate("generated.account.loading_55f38d1e")} />
           ) : null}
         </div>
       </CardHeader>
       <CardContent className="flex flex-col p-0">
         <div className="grid gap-px bg-[var(--divider-hair)] sm:grid-cols-3">
           <SecurityMetric
-            label={tl("Recovery codes")}
+            label={t("generated.account.recovery_codes_15fa0b75")}
             value={summary ? `${summary.remaining}/${summary.total}` : "—"}
             loading={loading && !summary}
           />
           <SecurityMetric
-            label={tl("Generated")}
+            label={t("generated.account.generated_2342faf6")}
             value={summary?.generated_at ? formatDateTime(summary.generated_at) : "—"}
             loading={loading && !summary}
           />
-          <SecurityMetric label={tl("Password")} value={tl("Operator managed")} />
+          <SecurityMetric label={t("generated.account.password_b30e4b30")} value={t("generated.account.operator_managed_1e25ed34")} />
         </div>
 
         {loadError ? (
@@ -217,7 +218,7 @@ export function SecuritySettingsCard() {
             <SecurityActionHeader
               icon={KeyRound}
               title={t("auth.settings.security.change_password")}
-              description={tl("Use your current password before setting a new one.")}
+              description={t("generated.account.use_your_current_password_before_setting_a_n_983775d3")}
             />
             <div className="flex flex-col gap-2">
               <Input
@@ -254,7 +255,7 @@ export function SecuritySettingsCard() {
                       count: summary.remaining,
                       total: summary.total,
                     })
-                  : tl("Current password required before codes rotate.")
+                  : t("generated.account.current_password_required_before_codes_rotat_848b2324")
               }
             />
             <form onSubmit={handleRegenerate} className="flex flex-col gap-2">

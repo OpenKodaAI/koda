@@ -70,17 +70,13 @@ export function ComposerSlashMenuContent({
         if (command) onSelect(command);
       }}
       onHover={onActiveIndex}
-      emptyLabel={t("chat.composer.suggestions.empty", { defaultValue: "No matches" })}
-      ariaLabel={t("chat.composer.suggestions.commands", {
-        defaultValue: "Commands",
-      })}
+      emptyLabel={t("chat.composer.suggestions.empty", undefined)}
+      ariaLabel={t("chat.composer.suggestions.commands", undefined)}
       idPrefix={idPrefix}
       listboxId={listboxId}
       searchValue={query}
       onSearchChange={onQueryChange}
-      searchPlaceholder={t("chat.composer.suggestions.searchCommands", {
-        defaultValue: "Search commands…",
-      })}
+      searchPlaceholder={t("chat.composer.suggestions.searchCommands", undefined)}
     />
   );
 }

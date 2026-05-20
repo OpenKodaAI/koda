@@ -19,7 +19,7 @@ export function SettingsSectionShell({
   children: ReactNode;
   hideHeader?: boolean;
 }) {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { isDirty, discardSection, handleSave, saving, saveStatus } = useSystemSettings();
   const sectionIsDirty = isDirty(sectionId);
 
@@ -48,7 +48,7 @@ export function SettingsSectionShell({
         changeCount={sectionIsDirty ? 1 : 0}
         onSave={handleSave}
         onDiscard={() => discardSection(sectionId)}
-        error={saveStatus === "error" ? tl("Não foi possível salvar") : null}
+        error={saveStatus === "error" ? t("generated.controlPlane.nao_foi_possivel_salvar_8154fbbf") : null}
         className="px-6 lg:px-10"
       />
     </div>

@@ -26,14 +26,8 @@ function RoomRowImpl({ entry, active, onSelect, onRequestDelete }: RoomRowProps)
   const time = formatRelativeTimestamp(entry.sortKey);
   const roomPhotoUrl = entry.thread.photoUrl?.trim() || null;
   const memberLabel = entry.squad.memberCount === 1
-    ? t("chat.rail.room.memberSingular", {
-        defaultValue: "{{count}} agent",
-        count: entry.squad.memberCount,
-      })
-    : t("chat.rail.room.memberPlural", {
-        defaultValue: "{{count}} agents",
-        count: entry.squad.memberCount,
-      });
+    ? t("chat.rail.room.memberSingular", { count: entry.squad.memberCount })
+    : t("chat.rail.room.memberPlural", { count: entry.squad.memberCount });
 
   const handleDeleteClick = (event: MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -102,9 +96,7 @@ function RoomRowImpl({ entry, active, onSelect, onRequestDelete }: RoomRowProps)
             "shrink-0 font-mono text-[0.6875rem] text-[var(--text-quaternary)] transition-opacity duration-[120ms]",
             onRequestDelete && "group-hover:opacity-0",
           )}
-          aria-label={t("chat.timestamp.lastActivity", {
-            defaultValue: "Last activity",
-          })}
+          aria-label={t("chat.timestamp.lastActivity", undefined)}
         >
           {time}
         </span>
@@ -113,7 +105,7 @@ function RoomRowImpl({ entry, active, onSelect, onRequestDelete }: RoomRowProps)
         <button
           type="button"
           onClick={handleDeleteClick}
-          aria-label={t("chat.rail.deleteRoom", { defaultValue: "Delete room" })}
+          aria-label={t("chat.rail.deleteRoom", undefined)}
           className={cn(
             "absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[var(--radius-panel-sm)]",
             "text-[var(--text-quaternary)] opacity-0 transition-[opacity,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",

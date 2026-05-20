@@ -294,7 +294,7 @@ export function ChatComposer({
   }, []);
 
   const resolvedPlaceholder =
-    placeholder ?? t("chat.composer.placeholder", { defaultValue: "Send a message…" });
+    placeholder ?? t("chat.composer.placeholder", undefined);
 
   const activeItemId = isSlashOpen
     ? `${slashIdPrefix}-${activeIndex}`
@@ -312,7 +312,7 @@ export function ChatComposer({
     <form
       onSubmit={handleSubmit}
       className="mx-auto w-full max-w-[760px] px-6 pb-5 pt-2 lg:px-8"
-      aria-label={t("chat.composer.placeholder", { defaultValue: "Send a message…" })}
+      aria-label={t("chat.composer.placeholder", undefined)}
     >
       <Popover
         open={popoverOpen}

@@ -69,7 +69,7 @@ describe("control-plane-editor helpers", () => {
 
   it("rejects non-object items inside JSON arrays", () => {
     expect(() => parseJsonArray("Knowledge Assets", '[{"id":1}, "oops"]')).toThrow(
-      /cada item precisa ser um objeto json/i,
+      /cada item deve ser um objeto json/i,
     );
   });
 

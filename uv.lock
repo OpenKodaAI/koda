@@ -404,19 +404,6 @@ wheels = [
 ]
 
 [[package]]
-name = "azure-core"
-version = "1.39.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "requests" },
-    { name = "typing-extensions" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/34/83/bbde3faa84ddcb8eb0eca4b3ffb3221252281db4ce351300fe248c5c70b1/azure_core-1.39.0.tar.gz", hash = "sha256:8a90a562998dd44ce84597590fff6249701b98c0e8797c95fcdd695b54c35d74", size = 367531, upload-time = "2026-03-19T01:31:29.461Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/7e/d6/8ebcd05b01a580f086ac9a97fb9fac65c09a4b012161cc97c21a336e880b/azure_core-1.39.0-py3-none-any.whl", hash = "sha256:4ac7b70fab5438c3f68770649a78daf97833caa83827f91df9c14e0e0ea7d34f", size = 218318, upload-time = "2026-03-19T01:31:31.25Z" },
-]
-
-[[package]]
 name = "babel"
 version = "2.18.0"
 source = { registry = "https://pypi.org/simple" }
@@ -460,73 +447,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c4/cf/85379f13b76f3a69bca86b60237978af17d6aa0bc5998978c3b8cf05abb2/boolean_py-5.0.tar.gz", hash = "sha256:60cbc4bad079753721d32649545505362c754e121570ada4658b852a3a318d95", size = 37047, upload-time = "2025-04-03T10:39:49.734Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/e5/ca/78d423b324b8d77900030fa59c4aa9054261ef0925631cd2501dd015b7b7/boolean_py-5.0-py3-none-any.whl", hash = "sha256:ef28a70bd43115208441b53a045d1549e2f0ec6e3d08a9d142cbc41c1938e8d9", size = 26577, upload-time = "2025-04-03T10:39:48.449Z" },
-]
-
-[[package]]
-name = "botbuilder-core"
-version = "4.17.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "botbuilder-schema" },
-    { name = "botframework-connector" },
-    { name = "botframework-streaming" },
-    { name = "jsonpickle" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/74/11/cd231b48525e6b34a11cf211db110a95e901204f141c1633bdcbfe1866f1/botbuilder_core-4.17.1-py3-none-any.whl", hash = "sha256:b0a5eea6ce9759dba0847adeed0587fec83ce069f3b4938eb348bb44becde8d7", size = 116145, upload-time = "2026-01-05T19:49:41.946Z" },
-]
-
-[[package]]
-name = "botbuilder-integration-aiohttp"
-version = "4.17.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "aiohttp" },
-    { name = "botbuilder-core" },
-    { name = "botbuilder-schema" },
-    { name = "botframework-connector" },
-    { name = "yarl" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/0f/19ebe8cfaf7181940e6a31c98a116c9549a8e23b74965be445954ce803db/botbuilder_integration_aiohttp-4.17.1-py3-none-any.whl", hash = "sha256:3b66245e2ba76b2aeeb680ac0a97915f36385bc98361984a7a0d48389d86b524", size = 19030, upload-time = "2026-01-05T19:49:44.017Z" },
-]
-
-[[package]]
-name = "botbuilder-schema"
-version = "4.17.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "msrest" },
-    { name = "urllib3" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/94/44/abac81a80ed8aea977afbf8c40c22dec11610bbc1e4bd5bff4a7d7386b94/botbuilder_schema-4.17.1-py2.py3-none-any.whl", hash = "sha256:34da28d721b0635fc41bbe3b368225b9883f527d6f17337f858efe80f74656eb", size = 38196, upload-time = "2026-01-05T19:49:45.501Z" },
-]
-
-[[package]]
-name = "botframework-connector"
-version = "4.17.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "botbuilder-schema" },
-    { name = "msal" },
-    { name = "msrest" },
-    { name = "pyjwt" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/9a/37/6c325f4e6441cba2b3184e6c9a15c3ddc00b5e5aa47966398c3d9836b598/botframework_connector-4.17.1-py2.py3-none-any.whl", hash = "sha256:929d242a242f16c7c637eec7c239a84fd7f5f5bb7f95968407d3a9aa9d7bdf8d", size = 100883, upload-time = "2026-01-05T19:49:48.285Z" },
-]
-
-[[package]]
-name = "botframework-streaming"
-version = "4.17.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "botbuilder-schema" },
-    { name = "botframework-connector" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c0/67/16b1a40b9bdc6288d90f17a464fca457e1e50cc36f1c25bc6265bcdffefe/botframework_streaming-4.17.1-py3-none-any.whl", hash = "sha256:66ad1cfe24c8c6b1fde8f95131e39e01197158e7e0bab797dfa709b4f905deb3", size = 41951, upload-time = "2026-01-05T19:49:50.245Z" },
 ]
 
 [[package]]
@@ -1388,11 +1308,11 @@ wheels = [
 
 [[package]]
 name = "idna"
-version = "3.11"
+version = "3.15"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/6f/6d/0703ccc57f3a7233505399edb88de3cbd678da106337b9fcde432b65ed60/idna-3.11.tar.gz", hash = "sha256:795dafcc9c04ed0c1fb032c2aa73654d8e8c5023a7df64a53f39190ada629902", size = 194582, upload-time = "2025-10-12T14:55:20.501Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/82/77/7b3966d0b9d1d31a36ddf1746926a11dface89a83409bf1483f0237aa758/idna-3.15.tar.gz", hash = "sha256:ca962446ea538f7092a95e057da437618e886f4d349216d2b1e294abfdb65fdc", size = 199245, upload-time = "2026-05-12T22:45:57.011Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0e/61/66938bbb5fc52dbdf84594873d5b51fb1f7c7794e9c0f5bd885f30bc507b/idna-3.11-py3-none-any.whl", hash = "sha256:771a87f49d9defaf64091e6e6fe9c18d4833f140bd19464795bc32d966ca37ea", size = 71008, upload-time = "2025-10-12T14:55:18.883Z" },
+    { url = "https://files.pythonhosted.org/packages/d2/23/408243171aa9aaba178d3e2559159c24c1171a641aa83b67bdd3394ead8e/idna-3.15-py3-none-any.whl", hash = "sha256:048adeaf8c2d788c40fee287673ccaa74c24ffd8dcf09ffa555a2fbb59f10ac8", size = 72340, upload-time = "2026-05-12T22:45:55.733Z" },
 ]
 
 [[package]]
@@ -1429,15 +1349,6 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/41/f2/d34e8b3a08a9cc79a50b2208a93dce981fe615b64d5a4d4abee421d898df/joblib-1.5.3.tar.gz", hash = "sha256:8561a3269e6801106863fd0d6d84bb737be9e7631e33aaed3fb9ce5953688da3", size = 331603, upload-time = "2025-12-15T08:41:46.427Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/7b/91/984aca2ec129e2757d1e4e3c81c3fcda9d0f85b74670a094cc443d9ee949/joblib-1.5.3-py3-none-any.whl", hash = "sha256:5fc3c5039fc5ca8c0276333a188bbd59d6b7ab37fe6632daa76bc7f9ec18e713", size = 309071, upload-time = "2025-12-15T08:41:44.973Z" },
-]
-
-[[package]]
-name = "jsonpickle"
-version = "3.4.2"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/eb/d9/05365407d3312653498001adcebe64a14024f7189691b728610209991c46/jsonpickle-3.4.2.tar.gz", hash = "sha256:2efa2778859b6397d5804b0a98d52cd2a7d9a70fcb873bc5a3ca5acca8f499ba", size = 314339, upload-time = "2024-11-06T07:48:25.479Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c0/a3/e610ae0feba3e7374da08ab6cc9bb76c8bfa84b4e502aa357bda0ef6dcae/jsonpickle-3.4.2-py3-none-any.whl", hash = "sha256:fd6c273278a02b3b66e3405db3dd2f4dbc8f4a4a3123bfcab3045177c6feb9c3", size = 46256, upload-time = "2024-11-06T07:48:22.923Z" },
 ]
 
 [[package]]
@@ -1483,12 +1394,14 @@ dependencies = [
     { name = "cryptography" },
     { name = "grpcio" },
     { name = "huggingface-hub" },
+    { name = "idna" },
     { name = "kokoro-onnx", marker = "python_full_version < '3.14'" },
     { name = "lxml" },
     { name = "openpyxl" },
     { name = "pillow" },
     { name = "playwright" },
     { name = "prometheus-client" },
+    { name = "protobuf" },
     { name = "pybreaker" },
     { name = "pypdf" },
     { name = "python-docx" },
@@ -1506,8 +1419,6 @@ dependencies = [
 
 [package.optional-dependencies]
 channels-all = [
-    { name = "botbuilder-core" },
-    { name = "botbuilder-integration-aiohttp" },
     { name = "discord-py" },
     { name = "line-bot-sdk" },
     { name = "pywa" },
@@ -1534,10 +1445,6 @@ line = [
 ]
 slack = [
     { name = "slack-bolt" },
-]
-teams = [
-    { name = "botbuilder-core" },
-    { name = "botbuilder-integration-aiohttp" },
 ]
 whatsapp = [
     { name = "pywa" },
@@ -1567,10 +1474,6 @@ requires-dist = [
     { name = "asyncssh", specifier = ">=2.23.0,<3.0" },
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.9.4,<2.0" },
     { name = "beautifulsoup4", specifier = ">=4.14.3,<5.0" },
-    { name = "botbuilder-core", marker = "extra == 'channels-all'", specifier = ">=4.17.1,<5.0" },
-    { name = "botbuilder-core", marker = "extra == 'teams'", specifier = ">=4.17.1,<5.0" },
-    { name = "botbuilder-integration-aiohttp", marker = "extra == 'channels-all'", specifier = ">=4.17.1,<5.0" },
-    { name = "botbuilder-integration-aiohttp", marker = "extra == 'teams'", specifier = ">=4.17.1,<5.0" },
     { name = "boto3", specifier = ">=1.43.6,<2.0" },
     { name = "croniter", specifier = ">=6.2.2,<7.0" },
     { name = "cryptography", specifier = ">=48.0.0,<49.0" },
@@ -1579,6 +1482,7 @@ requires-dist = [
     { name = "grpcio", specifier = ">=1.80.0,<2.0" },
     { name = "huggingface-hub", specifier = ">=1.14.0,<2.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.152.7,<7.0" },
+    { name = "idna", specifier = ">=3.15,<4.0" },
     { name = "kokoro-onnx", marker = "python_full_version < '3.14'", specifier = ">=0.5.0,<1.0" },
     { name = "line-bot-sdk", marker = "extra == 'channels-all'", specifier = ">=3.23.0,<4.0" },
     { name = "line-bot-sdk", marker = "extra == 'line'", specifier = ">=3.23.0,<4.0" },
@@ -1589,6 +1493,7 @@ requires-dist = [
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.10.0,<3.0" },
     { name = "playwright", specifier = ">=1.59.0,<2.0" },
     { name = "prometheus-client", specifier = ">=0.25.0,<1.0" },
+    { name = "protobuf", specifier = ">=7.34.1,<8.0" },
     { name = "pybreaker", specifier = ">=1.4.1,<2.0" },
     { name = "pygments", marker = "extra == 'dev'", specifier = ">=2.20.0,<3.0" },
     { name = "pypdf", specifier = ">=6.11.0,<7.0.0" },
@@ -1892,20 +1797,6 @@ wheels = [
 ]
 
 [[package]]
-name = "msal"
-version = "1.35.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "cryptography" },
-    { name = "pyjwt", extra = ["crypto"] },
-    { name = "requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/3c/aa/5a646093ac218e4a329391d5a31e5092a89db7d2ef1637a90b82cd0b6f94/msal-1.35.1.tar.gz", hash = "sha256:70cac18ab80a053bff86219ba64cfe3da1f307c74b009e2da57ef040eb1b5656", size = 165658, upload-time = "2026-03-04T23:38:51.812Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/96/86/16815fddf056ca998853c6dc525397edf0b43559bb4073a80d2bc7fe8009/msal-1.35.1-py3-none-any.whl", hash = "sha256:8f4e82f34b10c19e326ec69f44dc6b30171f2f7098f3720ea8a9f0c11832caa3", size = 119909, upload-time = "2026-03-04T23:38:50.452Z" },
-]
-
-[[package]]
 name = "msgpack"
 version = "1.1.2"
 source = { registry = "https://pypi.org/simple" }
@@ -1956,22 +1847,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f0/03/42106dcded51f0a0b5284d3ce30a671e7bd3f7318d122b2ead66ad289fed/msgpack-1.1.2-cp314-cp314t-win32.whl", hash = "sha256:1d1418482b1ee984625d88aa9585db570180c286d942da463533b238b98b812b", size = 75197, upload-time = "2025-10-08T09:15:42.954Z" },
     { url = "https://files.pythonhosted.org/packages/15/86/d0071e94987f8db59d4eeb386ddc64d0bb9b10820a8d82bcd3e53eeb2da6/msgpack-1.1.2-cp314-cp314t-win_amd64.whl", hash = "sha256:5a46bf7e831d09470ad92dff02b8b1ac92175ca36b087f904a0519857c6be3ff", size = 85772, upload-time = "2025-10-08T09:15:43.954Z" },
     { url = "https://files.pythonhosted.org/packages/81/f2/08ace4142eb281c12701fc3b93a10795e4d4dc7f753911d836675050f886/msgpack-1.1.2-cp314-cp314t-win_arm64.whl", hash = "sha256:d99ef64f349d5ec3293688e91486c5fdb925ed03807f64d98d205d2713c60b46", size = 70868, upload-time = "2025-10-08T09:15:44.959Z" },
-]
-
-[[package]]
-name = "msrest"
-version = "0.7.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "azure-core" },
-    { name = "certifi" },
-    { name = "isodate" },
-    { name = "requests" },
-    { name = "requests-oauthlib" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/68/77/8397c8fb8fc257d8ea0fa66f8068e073278c65f05acb17dcb22a02bfdc42/msrest-0.7.1.zip", hash = "sha256:6e7661f46f3afd88b75667b7187a92829924446c7ea1d169be8c4bb7eeb788b9", size = 175332, upload-time = "2022-06-13T22:41:25.111Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/15/cf/f2966a2638144491f8696c27320d5219f48a072715075d168b31d3237720/msrest-0.7.1-py3-none-any.whl", hash = "sha256:21120a810e1233e5e6cc7fe40b474eeb4ec6f757a15d7cf86702c369f9567c32", size = 85384, upload-time = "2022-06-13T22:41:22.42Z" },
 ]
 
 [[package]]
@@ -2228,15 +2103,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/58/ad/1100d7229bb248394939a12a8074d485b655e8ed44207d328fdd7fcebc7b/numpy-2.4.3-pp311-pypy311_pp73-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:7e58765ad74dcebd3ef0208a5078fba32dc8ec3578fe84a604432950cd043d79", size = 15800434, upload-time = "2026-03-09T07:58:44.837Z" },
     { url = "https://files.pythonhosted.org/packages/0c/fd/16d710c085d28ba4feaf29ac60c936c9d662e390344f94a6beaa2ac9899b/numpy-2.4.3-pp311-pypy311_pp73-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:8e236dbda4e1d319d681afcbb136c0c4a8e0f1a5c58ceec2adebb547357fe857", size = 16729409, upload-time = "2026-03-09T07:58:47.972Z" },
     { url = "https://files.pythonhosted.org/packages/57/a7/b35835e278c18b85206834b3aa3abe68e77a98769c59233d1f6300284781/numpy-2.4.3-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:4b42639cdde6d24e732ff823a3fa5b701d8acad89c4142bc1d0bd6dc85200ba5", size = 12504685, upload-time = "2026-03-09T07:58:50.525Z" },
-]
-
-[[package]]
-name = "oauthlib"
-version = "3.3.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/0b/5f/19930f824ffeb0ad4372da4812c50edbd1434f678c90c2733e1188edfc63/oauthlib-3.3.1.tar.gz", hash = "sha256:0f0f8aa759826a193cf66c12ea1af1637f87b9b4622d46e866952bb022e538c9", size = 185918, upload-time = "2025-06-19T22:48:08.269Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/9c/92789c596b8df838baa98fa71844d84283302f7604ed565dafe5a6b5041a/oauthlib-3.3.1-py3-none-any.whl", hash = "sha256:88119c938d2b8fb88561af5f6ee0eec8cc8d552b7bb1f712743136eb7523b7a1", size = 160065, upload-time = "2025-06-19T22:48:06.508Z" },
 ]
 
 [[package]]
@@ -2853,20 +2719,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyjwt"
-version = "2.12.1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/c2/27/a3b6e5bf6ff856d2509292e95c8f57f0df7017cf5394921fc4e4ef40308a/pyjwt-2.12.1.tar.gz", hash = "sha256:c74a7a2adf861c04d002db713dd85f84beb242228e671280bf709d765b03672b", size = 102564, upload-time = "2026-03-13T19:27:37.25Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/e5/7a/8dd906bd22e79e47397a61742927f6747fe93242ef86645ee9092e610244/pyjwt-2.12.1-py3-none-any.whl", hash = "sha256:28ca37c070cad8ba8cd9790cd940535d40274d22f80ab87f3ac6a713e6e8454c", size = 29726, upload-time = "2026-03-13T19:27:35.677Z" },
-]
-
-[package.optional-dependencies]
-crypto = [
-    { name = "cryptography" },
-]
-
-[[package]]
 name = "pyparsing"
 version = "3.3.2"
 source = { registry = "https://pypi.org/simple" }
@@ -3208,19 +3060,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/ac/c3/e2a2b89f2d3e2179abd6d00ebd70bff6273f37fb3e0cc209f48b39d00cbf/requests-2.34.2.tar.gz", hash = "sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed", size = 142856, upload-time = "2026-05-14T19:25:27.735Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/a0/f4/c67b0b3f1b9245e8d266f0f112c500d50e5b4e83cb6f3b71b6528104182a/requests-2.34.2-py3-none-any.whl", hash = "sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0", size = 73075, upload-time = "2026-05-14T19:25:26.443Z" },
-]
-
-[[package]]
-name = "requests-oauthlib"
-version = "2.0.0"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "oauthlib" },
-    { name = "requests" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/42/f2/05f29bc3913aea15eb670be136045bf5c5bbf4b99ecb839da9b422bb2c85/requests-oauthlib-2.0.0.tar.gz", hash = "sha256:b3dffaebd884d8cd778494369603a9e7b58d29111bf6b41bdc2dcd87203af4e9", size = 55650, upload-time = "2024-03-22T20:32:29.939Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/5d/63d4ae3b9daea098d5d6f5da83984853c1bbacd5dc826764b249fe119d24/requests_oauthlib-2.0.0-py2.py3-none-any.whl", hash = "sha256:7dd8a5c40426b779b0868c404bdef9768deccf22749cde15852df527e6269b36", size = 24179, upload-time = "2024-03-22T20:32:28.055Z" },
 ]
 
 [[package]]

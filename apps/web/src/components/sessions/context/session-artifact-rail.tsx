@@ -150,7 +150,7 @@ export function SessionArtifactRail({
           "hidden w-[300px] shrink-0 flex-col overflow-hidden border-l border-[color:var(--divider-hair)] bg-[var(--canvas)] lg:flex xl:w-[312px]",
           className,
         )}
-        aria-label={t("sessions.context.room.title", { defaultValue: "Room" })}
+        aria-label={t("sessions.context.room.title", undefined)}
       >
         <RoomSettingsPanel
           threadId={room.thread.id}
@@ -170,13 +170,13 @@ export function SessionArtifactRail({
         "hidden w-[320px] shrink-0 flex-col overflow-hidden border-l border-[color:var(--divider-hair)] bg-[var(--canvas)] lg:flex",
         className,
       )}
-      aria-label={t("sessions.context.title", { defaultValue: "Session details" })}
+      aria-label={t("sessions.context.title", undefined)}
     >
       <div className="flex justify-end px-3 pt-3">
         <button
           type="button"
           onClick={() => onOpenChange?.(false)}
-          aria-label={t("sessions.context.collapse", { defaultValue: "Collapse panel" })}
+          aria-label={t("sessions.context.collapse", undefined)}
           aria-expanded={open}
           className={cn(
             "inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)]",
@@ -192,9 +192,7 @@ export function SessionArtifactRail({
       <div className="flex flex-col gap-3 px-4 pt-2 pb-5">
         {summary && items.length > 0 ? (
           <SuspendedCard
-            title={t("sessions.context.artifacts.downloadsTitle", {
-              defaultValue: "Files",
-            })}
+            title={t("sessions.context.artifacts.downloadsTitle", undefined)}
             trailing={
               <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
                 {items.length}
@@ -247,9 +245,7 @@ function ThreadReplyCard({
       {openObligations.length > 0 ? (
         <div className="rounded-[var(--radius-panel-sm)] bg-[var(--tone-warning-bg)] px-2 py-1.5">
           <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
-            {t("sessions.context.thread.waiting", {
-              defaultValue: "Waiting",
-            })}
+            {t("sessions.context.thread.waiting", undefined)}
           </p>
           {openObligations.slice(0, 4).map((obligation) => (
             <p
@@ -272,7 +268,7 @@ function ThreadReplyCard({
             </span>
             <span className="font-mono text-[0.625rem] text-[var(--text-quaternary)]">
               {message.type === "coordinator_synthesis"
-                ? t("sessions.context.thread.final", { defaultValue: "Final" })
+                ? t("sessions.context.thread.final", undefined)
                 : message.inReplyTo ?? `#${message.id}`}
             </span>
           </div>
@@ -289,7 +285,7 @@ function ThreadReplyCard({
       <section className="border-t border-[color:var(--divider-hair)] px-4 pb-4 pt-3">
         <header className="mb-2 flex items-center justify-between gap-2">
           <h3 className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
-            {t("sessions.context.thread.title", { defaultValue: "Thread" })}
+            {t("sessions.context.thread.title", undefined)}
           </h3>
           {openObligations.length > 0 ? (
             <span className="font-mono text-[0.6875rem] text-[var(--tone-warning-text)]">
@@ -304,7 +300,7 @@ function ThreadReplyCard({
 
   return (
     <SuspendedCard
-      title={t("sessions.context.thread.title", { defaultValue: "Thread" })}
+      title={t("sessions.context.thread.title", undefined)}
       trailing={
         openObligations.length > 0 ? (
           <span className="font-mono text-[0.6875rem] text-[var(--tone-warning-text)]">
@@ -351,7 +347,7 @@ function ArtifactRow({
   const fileName =
     readArtifactFilename(artifact) ||
     artifact.label ||
-    t("sessions.context.artifacts.unknown", { defaultValue: "Untitled" });
+    t("sessions.context.artifacts.unknown", undefined);
   const isExternal = Boolean(
     artifact.kind === "url" || (artifact.url && /^https?:\/\//i.test(artifact.url)),
   );

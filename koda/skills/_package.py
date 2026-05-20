@@ -21,6 +21,8 @@ from koda.services.tool_registry import ToolDefinition, ToolSchemaError, validat
 KODA_SKILL_SCHEMA_VERSION = "koda_skill.v1"
 SKILL_SCAN_VERSION = "skill_scan.v1"
 SKILL_LOCK_VERSION = "skill_lock.v1"
+SKILL_EVAL_VERSION = "skill_eval.v1"
+SKILL_REGISTRY_VERSION = "skill_registry.v1"
 SKILL_PACKAGE_SCANNER_VERSION = "skill_package_scanner.v1"
 
 _MANIFEST_NAMES = ("koda-skill.yaml", "koda-skill.yml", "plugin.yaml", "plugin.yml")
@@ -105,6 +107,7 @@ class KodaSkillPackage:
     permissions: dict[str, Any] = field(default_factory=dict)
     docs: dict[str, Any] = field(default_factory=dict)
     tests: dict[str, Any] = field(default_factory=dict)
+    evals: tuple[dict[str, Any], ...] = ()
     skills: tuple[dict[str, Any], ...] = ()
     tools: tuple[dict[str, Any], ...] = ()
     raw_manifest: dict[str, Any] = field(default_factory=dict)
@@ -123,6 +126,7 @@ class KodaSkillPackage:
             "permissions": dict(self.permissions),
             "docs": dict(self.docs),
             "tests": dict(self.tests),
+            "evals": [dict(item) for item in self.evals],
             "skills": [dict(item) for item in self.skills],
             "tools": [dict(item) for item in self.tools],
             "path": str(self.package_dir),
@@ -229,7 +233,7 @@ def scan_skill_package(
     elif severities:
         decision = "review_required"
 
-    return SkillScanResult(
+    result = SkillScanResult(
         package=package,
         decision=decision,
         severity=severity,
@@ -240,6 +244,13 @@ def scan_skill_package(
         package_hash=package_hash,
         file_hashes=file_hashes,
     )
+    _emit_package_metric(
+        agent_id=_normalize_agent_id(agent_id),
+        event="scan",
+        decision=result.decision,
+        recommendation_status="unreviewed",
+    )
+    return result
 
 
 def install_skill_package(
@@ -247,6 +258,7 @@ def install_skill_package(
     *,
     agent_id: str | None = None,
     review_accepted: bool = False,
+    review_note: str = "",
 ) -> dict[str, Any]:
     """Install a scanned package and persist a `skill_lock.v1` payload."""
 
@@ -254,6 +266,12 @@ def install_skill_package(
     scan = scan_skill_package(path, agent_id=normalized_agent)
     if scan.decision == "deny":
         _emit_package_audit("skill_package.denied", normalized_agent, {"scan": scan.to_dict()})
+        _emit_package_metric(
+            agent_id=normalized_agent,
+            event="install_denied",
+            decision=scan.decision,
+            recommendation_status="blocked",
+        )
         raise SkillPackageError(
             "skill.scan_denied",
             "Skill package scan denied installation.",
@@ -261,22 +279,48 @@ def install_skill_package(
             user_action="Resolve scanner findings before installing.",
             payload={"scan": scan.to_dict()},
         )
-    if scan.decision == "review_required" and not review_accepted:
+    normalized_review_note = str(review_note or "").strip()
+    if scan.decision == "review_required" and (not review_accepted or not normalized_review_note):
+        _emit_package_metric(
+            agent_id=normalized_agent,
+            event="install_review_required",
+            decision=scan.decision,
+            recommendation_status="blocked",
+        )
         raise SkillPackageError(
             "skill.policy_denied",
             "Skill package requires explicit review before install.",
             category="policy_denied",
-            user_action="Review findings and retry with review_accepted=true.",
+            user_action="Review findings and retry with review_accepted=true and a review_note.",
             payload={"scan": scan.to_dict()},
         )
 
     previous_lock = get_skill_package_lock(normalized_agent, scan.package.id)
     lock = _build_lock(scan, normalized_agent, previous_lock=previous_lock)
+    if normalized_review_note:
+        lock["operator_review"] = {
+            "accepted": True,
+            "note": normalized_review_note,
+            "accepted_at": _now_iso(),
+        }
+    lock["recommendation_status"] = _recommendation_status(lock)
+    lock["trust_summary"] = _trust_summary(lock)
+    lock["run_graph_evidence"] = _package_run_graph_node("skill_package.install", normalized_agent, lock)
     _persist_skill_package_lock(normalized_agent, lock)
-    _emit_package_audit("skill_package.install", normalized_agent, {"lock": _lock_summary(lock)})
+    audit_details: dict[str, Any] = {"lock": _lock_summary(lock)}
+    if normalized_review_note:
+        audit_details["review_note"] = normalized_review_note
+    audit_details["run_graph_node"] = lock["run_graph_evidence"]
+    _emit_package_audit("skill_package.install", normalized_agent, audit_details)
     _clear_tool_registry_cache()
     if PLUGIN_SYSTEM_ENABLED:
         ensure_installed_package_tools_registered(normalized_agent, force=True)
+    _emit_package_metric(
+        agent_id=normalized_agent,
+        event="install",
+        decision=scan.decision,
+        recommendation_status=str(lock.get("recommendation_status") or "unknown"),
+    )
     return {"ok": True, "lock": lock, "scan": scan.to_dict()}
 
 
@@ -289,6 +333,12 @@ def uninstall_skill_package(agent_id: str | None, package_id: str) -> dict[str, 
     _emit_package_audit("skill_package.uninstall", normalized_agent, {"lock": _lock_summary(lock)})
     _unregister_plugin_if_present(package_id)
     _clear_tool_registry_cache()
+    _emit_package_metric(
+        agent_id=normalized_agent,
+        event="uninstall",
+        decision=str(_safe_dict(lock.get("scan_summary")).get("decision") or "unknown"),
+        recommendation_status=str(lock.get("recommendation_status") or "unknown"),
+    )
     return {"ok": True, "package_id": package_id, "uninstalled": True}
 
 
@@ -306,11 +356,24 @@ def rollback_skill_package(agent_id: str | None, package_id: str) -> dict[str, A
     restored = dict(previous)
     restored["rolled_back_at"] = _now_iso()
     restored["previous_revision"] = current
+    restored["recommendation_status"] = _recommendation_status(restored)
+    restored["trust_summary"] = _trust_summary(restored)
+    restored["run_graph_evidence"] = _package_run_graph_node("skill_package.rollback", normalized_agent, restored)
     _persist_skill_package_lock(normalized_agent, restored)
-    _emit_package_audit("skill_package.rollback", normalized_agent, {"lock": _lock_summary(restored)})
+    _emit_package_audit(
+        "skill_package.rollback",
+        normalized_agent,
+        {"lock": _lock_summary(restored), "run_graph_node": restored["run_graph_evidence"]},
+    )
     _clear_tool_registry_cache()
     if PLUGIN_SYSTEM_ENABLED:
         ensure_installed_package_tools_registered(normalized_agent, force=True)
+    _emit_package_metric(
+        agent_id=normalized_agent,
+        event="rollback",
+        decision=str(_safe_dict(restored.get("scan_summary")).get("decision") or "unknown"),
+        recommendation_status=str(restored.get("recommendation_status") or "unknown"),
+    )
     return {"ok": True, "lock": restored}
 
 
@@ -340,6 +403,104 @@ def get_installed_package_skills(agent_id: str | None = None) -> list[dict[str, 
             if isinstance(skill, dict) and skill.get("enabled", True):
                 skills.append(dict(skill))
     return skills
+
+
+def list_skill_registry(agent_id: str | None = None) -> dict[str, Any]:
+    """Build a local ``skill_registry.v1`` view from persisted package locks."""
+
+    normalized_agent = _normalize_agent_id(agent_id)
+    items: list[dict[str, Any]] = []
+    for lock in list_skill_package_locks(normalized_agent):
+        scan_summary = _safe_dict(lock.get("scan_summary"))
+        items.append(
+            {
+                "schema_version": SKILL_REGISTRY_VERSION,
+                "agent_id": normalized_agent,
+                "package_id": str(lock.get("package_id") or ""),
+                "name": str(lock.get("name") or ""),
+                "version": str(lock.get("version") or ""),
+                "description": str(lock.get("description") or ""),
+                "source": str(lock.get("source") or ""),
+                "package_hash": str(lock.get("package_hash") or ""),
+                "installed": True,
+                "installed_at": str(lock.get("installed_at") or ""),
+                "recommendation_status": str(lock.get("recommendation_status") or "unreviewed"),
+                "scan_summary": scan_summary,
+                "eval_summary": _safe_dict(lock.get("eval_summary")),
+                "trust_summary": _safe_dict(lock.get("trust_summary")),
+                "skills": [dict(item) for item in lock.get("installed_skills") or [] if isinstance(item, dict)],
+                "tools": [dict(item) for item in lock.get("installed_tools") or [] if isinstance(item, dict)],
+                "rollback_available": bool(lock.get("rollback_ref")),
+                "run_graph_evidence": _safe_dict(lock.get("run_graph_evidence")),
+            }
+        )
+    return {"schema_version": SKILL_REGISTRY_VERSION, "agent_id": normalized_agent, "items": items}
+
+
+def find_installed_package_tool(agent_id: str | None, tool_id: str) -> dict[str, Any] | None:
+    """Return metadata for an installed package tool without executing it."""
+
+    normalized_tool_id = str(tool_id or "").strip()
+    if not normalized_tool_id:
+        return None
+    for lock in list_skill_package_locks(agent_id):
+        package_id = str(lock.get("package_id") or "").strip()
+        for tool in lock.get("installed_tools") or []:
+            if isinstance(tool, dict) and str(tool.get("id") or "").strip() == normalized_tool_id:
+                return {
+                    "package_id": package_id,
+                    "tool_id": normalized_tool_id,
+                    "tool": dict(tool),
+                    "lock": _lock_summary(lock),
+                }
+    return None
+
+
+def run_skill_package_evals(agent_id: str | None, package_id: str) -> dict[str, Any]:
+    """Run deterministic offline skill evals for an installed package and update its lock."""
+
+    normalized_agent = _normalize_agent_id(agent_id)
+    lock = get_skill_package_lock(normalized_agent, package_id)
+    if not lock:
+        raise SkillPackageError("skill.validation_failed", f"Skill package '{package_id}' is not installed.")
+    skill_evals = _evaluate_skill_evals(lock.get("skill_evals") or [], package_id=str(lock.get("package_id") or ""))
+    updated = dict(lock)
+    updated["skill_evals"] = skill_evals
+    updated["eval_summary"] = _skill_eval_summary(skill_evals)
+    updated["recommendation_status"] = _recommendation_status(updated)
+    updated["trust_summary"] = _trust_summary(updated)
+    updated["evals_ran_at"] = _now_iso()
+    updated["run_graph_evidence"] = _package_run_graph_node(
+        "skill_package.evals_run",
+        normalized_agent,
+        updated,
+        payload={"eval_summary": updated["eval_summary"]},
+    )
+    _persist_skill_package_lock(normalized_agent, updated)
+    _emit_package_audit(
+        "skill_package.evals_run",
+        normalized_agent,
+        {
+            "lock": _lock_summary(updated),
+            "eval_summary": updated["eval_summary"],
+            "run_graph_node": updated["run_graph_evidence"],
+        },
+    )
+    _emit_package_metric(
+        agent_id=normalized_agent,
+        event="evals_run",
+        decision=str(_safe_dict(updated.get("scan_summary")).get("decision") or "unknown"),
+        recommendation_status=str(updated.get("recommendation_status") or "unknown"),
+    )
+    return {
+        "ok": True,
+        "schema_version": SKILL_EVAL_VERSION,
+        "package_id": package_id,
+        "skill_evals": skill_evals,
+        "eval_summary": updated["eval_summary"],
+        "recommendation_status": updated["recommendation_status"],
+        "trust_summary": updated["trust_summary"],
+    }
 
 
 def get_installed_package_tool_definitions(agent_id: str | None = None) -> list[ToolDefinition]:
@@ -425,6 +586,7 @@ def _parse_koda_skill_manifest(package_dir: Path, manifest_path: Path, raw: dict
         permissions=_safe_dict(raw.get("permissions")),
         docs=_safe_dict(raw.get("docs")),
         tests=_safe_dict(raw.get("tests")),
+        evals=tuple(_normalize_manifest_eval(item, package_id) for item in _manifest_eval_items(raw)),
         skills=tuple(_normalize_manifest_skill(item, package_dir) for item in _safe_list(raw.get("skills"))),
         tools=tuple(_normalize_manifest_tool(item) for item in _safe_list(raw.get("tools"))),
         raw_manifest=dict(raw),
@@ -468,9 +630,49 @@ def _parse_legacy_plugin_manifest(package_dir: Path, manifest_path: Path, raw: d
         source=_text(raw.get("source") or str(package_dir)),
         permissions=_safe_dict(raw.get("permissions")),
         docs=_safe_dict(raw.get("docs")),
+        tests=_safe_dict(raw.get("tests")),
+        evals=tuple(_normalize_manifest_eval(item, package_id) for item in _manifest_eval_items(raw)),
         tools=tuple(tools),
         raw_manifest=dict(raw),
     )
+
+
+def _manifest_eval_items(raw: dict[str, Any]) -> list[Any]:
+    items: list[Any] = []
+    tests = _safe_dict(raw.get("tests"))
+    items.extend(_safe_list(tests.get("evals")))
+    items.extend(_safe_list(raw.get("evals")))
+    return items
+
+
+def _normalize_manifest_eval(item: Any, package_id: str) -> dict[str, Any]:
+    raw = _safe_dict(item)
+    case = _safe_dict(raw.get("case"))
+    if str(raw.get("schema_version") or "") == "eval_case.v1":
+        case = dict(raw)
+    elif not case and raw.get("case_key"):
+        case = {
+            "schema_version": "eval_case.v1",
+            "case_key": raw.get("case_key"),
+            "agent_id": raw.get("agent_id") or "",
+            "metadata": _safe_dict(raw.get("metadata")),
+            "status": raw.get("status") or "ready",
+        }
+    metadata = _safe_dict(raw.get("metadata"))
+    case_metadata = _safe_dict(case.get("metadata"))
+    case["schema_version"] = "eval_case.v1"
+    case["case_key"] = str(case.get("case_key") or raw.get("id") or raw.get("eval_id") or f"{package_id}:eval").strip()
+    case["metadata"] = {**metadata, **case_metadata}
+    return {
+        "schema_version": SKILL_EVAL_VERSION,
+        "eval_id": _text(raw.get("id") or raw.get("eval_id") or case.get("case_key")),
+        "package_id": package_id,
+        "required": bool(raw.get("required", True)),
+        "description": _text(raw.get("description")),
+        "case": case,
+        "result": _safe_dict(raw.get("result")),
+        "metadata": metadata,
+    }
 
 
 def _normalize_manifest_skill(item: Any, package_dir: Path) -> dict[str, Any]:
@@ -803,6 +1005,16 @@ def _build_lock(
     previous_lock: dict[str, Any] | None,
 ) -> dict[str, Any]:
     package = scan.package
+    skill_evals = _evaluate_skill_evals(package.evals, package_id=package.id)
+    eval_summary = _skill_eval_summary(skill_evals)
+    base_lock = {
+        "scan_summary": {
+            "decision": scan.decision,
+            "severity": scan.severity,
+        },
+        "eval_summary": eval_summary,
+        "skill_evals": skill_evals,
+    }
     return {
         "schema_version": SKILL_LOCK_VERSION,
         "package_id": package.id,
@@ -843,9 +1055,98 @@ def _build_lock(
             "package_hash": scan.package_hash,
             "scanner_version": scan.scanner_version,
         },
+        "skill_evals": skill_evals,
+        "recommendation_status": _recommendation_status(base_lock),
+        "eval_summary": eval_summary,
+        "trust_summary": _trust_summary(base_lock),
         "installed_at": _now_iso(),
         "previous_revision": previous_lock,
         "rollback_ref": previous_lock.get("package_hash") if previous_lock else None,
+    }
+
+
+def _evaluate_skill_evals(raw_evals: Any, *, package_id: str) -> list[dict[str, Any]]:
+    from koda.services.evals import OFFLINE_REPLAY_STRATEGY, evaluate_case_offline
+
+    evaluated: list[dict[str, Any]] = []
+    for item in _safe_list(raw_evals):
+        raw = _safe_dict(item)
+        skill_eval = _normalize_manifest_eval(raw, package_id)
+        result = evaluate_case_offline(_safe_dict(skill_eval.get("case"))).to_dict()
+        skill_eval["result"] = {
+            "schema_version": SKILL_EVAL_VERSION,
+            "strategy": OFFLINE_REPLAY_STRATEGY,
+            "status": result.get("status"),
+            "score": result.get("score"),
+            "metrics": result.get("metrics") or {},
+            "failures": result.get("failures") or [],
+            "warnings": result.get("warnings") or [],
+            "evaluated_at": _now_iso(),
+            "eval_run_result": result,
+        }
+        evaluated.append(skill_eval)
+    return evaluated
+
+
+def _skill_eval_summary(skill_evals: list[dict[str, Any]]) -> dict[str, Any]:
+    required = [item for item in skill_evals if item.get("required", True)]
+    passed = [
+        item for item in skill_evals if str(_safe_dict(item.get("result")).get("status") or "").lower() == "passed"
+    ]
+    required_passed = [
+        item for item in required if str(_safe_dict(item.get("result")).get("status") or "").lower() == "passed"
+    ]
+    scores = [
+        float(_safe_dict(item.get("result")).get("score") or 0.0)
+        for item in skill_evals
+        if _safe_dict(item.get("result"))
+    ]
+    required_scores = [
+        float(_safe_dict(item.get("result")).get("score") or 0.0) for item in required if _safe_dict(item.get("result"))
+    ]
+    return {
+        "schema_version": SKILL_EVAL_VERSION,
+        "total": len(skill_evals),
+        "required": len(required),
+        "passed": len(passed),
+        "failed": max(0, len(skill_evals) - len(passed)),
+        "required_passed": len(required_passed),
+        "required_failed": max(0, len(required) - len(required_passed)),
+        "required_passed_all": bool(required) and len(required_passed) == len(required),
+        "score": sum(scores) / len(scores) if scores else 0.0,
+        "required_score": sum(required_scores) / len(required_scores) if required_scores else 0.0,
+    }
+
+
+def _recommendation_status(lock: dict[str, Any]) -> str:
+    scan = _safe_dict(lock.get("scan_summary"))
+    eval_summary = _safe_dict(lock.get("eval_summary"))
+    decision = str(scan.get("decision") or "")
+    if decision not in {"allow", "review_required"}:
+        return "blocked"
+    if decision == "review_required" and not _safe_dict(lock.get("operator_review")).get("accepted"):
+        return "blocked"
+    if not lock.get("skill_evals"):
+        return "unreviewed"
+    if eval_summary.get("required_passed_all") is True:
+        return "recommended"
+    return "eval_failed"
+
+
+def _trust_summary(lock: dict[str, Any]) -> dict[str, Any]:
+    scan = _safe_dict(lock.get("scan_summary"))
+    eval_summary = _safe_dict(lock.get("eval_summary"))
+    operator_review = _safe_dict(lock.get("operator_review"))
+    recommendation_status = _recommendation_status(lock)
+    return {
+        "schema_version": "skill_trust.v1",
+        "recommendation_status": recommendation_status,
+        "scanner_decision": str(scan.get("decision") or ""),
+        "scanner_severity": str(scan.get("severity") or ""),
+        "required_evals_passed": bool(eval_summary.get("required_passed_all")),
+        "review_required": str(scan.get("decision") or "") == "review_required",
+        "operator_review_accepted": bool(operator_review.get("accepted")),
+        "recommended": recommendation_status == "recommended",
     }
 
 
@@ -987,6 +1288,26 @@ def _emit_package_audit(event_type: str, agent_id: str, details: dict[str, Any])
         log.debug("skill_package_audit_skipped", exc_info=True)
 
 
+def _emit_package_metric(
+    *,
+    agent_id: str,
+    event: str,
+    decision: str,
+    recommendation_status: str,
+) -> None:
+    try:
+        from koda.services.metrics import SKILL_PACKAGE_EVENTS
+
+        SKILL_PACKAGE_EVENTS.labels(
+            agent_id=agent_id or "unknown",
+            event=str(event or "unknown"),
+            decision=str(decision or "unknown"),
+            recommendation_status=str(recommendation_status or "unknown"),
+        ).inc()
+    except Exception:
+        log.debug("skill_package_metric_skipped", exc_info=True)
+
+
 def _clear_tool_registry_cache() -> None:
     try:
         from koda.services import tool_registry
@@ -1069,7 +1390,7 @@ def _safe_dict(value: Any) -> dict[str, Any]:
 
 
 def _safe_list(value: Any) -> list[Any]:
-    return list(value) if isinstance(value, list) else []
+    return list(value) if isinstance(value, list | tuple | set) else []
 
 
 def _string_list(value: Any) -> list[str]:
@@ -1090,6 +1411,55 @@ def _normalize_agent_id(agent_id: str | None) -> str:
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _package_run_graph_node(
+    event_type: str,
+    agent_id: str,
+    lock: dict[str, Any],
+    *,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    package_id = str(lock.get("package_id") or "")
+    completed_at = _now_iso()
+    source_ref = {
+        "event_type": event_type,
+        "package_id": package_id,
+        "package_hash": lock.get("package_hash"),
+        "completed_at": completed_at,
+    }
+    digest = hashlib.sha256(json.dumps(source_ref, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:16]
+    from koda.services.run_graph import RunGraphNode
+
+    return RunGraphNode(
+        node_id=f"runtime_event:skill_package:{event_type.rsplit('.', 1)[-1]}:{digest}",
+        graph_id=f"skill_package:{agent_id}:{package_id}",
+        agent_id=agent_id,
+        task_id=0,
+        attempt=1,
+        node_type="runtime_event",
+        status="completed",
+        ordinal=0,
+        summary=f"{event_type} for {package_id}",
+        completed_at=completed_at,
+        payload={
+            "schema_version": KODA_SKILL_SCHEMA_VERSION,
+            "event_type": event_type,
+            "package_id": package_id,
+            "version": lock.get("version"),
+            "recommendation_status": lock.get("recommendation_status"),
+            **(payload or {}),
+        },
+        refs={
+            "skill_lock": {
+                "schema_version": lock.get("schema_version"),
+                "package_id": package_id,
+                "package_hash": lock.get("package_hash"),
+                "rollback_ref": lock.get("rollback_ref"),
+            }
+        },
+        source="skill_package_lifecycle",
+    ).to_dict()
 
 
 def _rel(root: Path, path: Path) -> str:

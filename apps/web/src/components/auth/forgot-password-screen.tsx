@@ -13,6 +13,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
 import { isSafeRedirectTarget } from "@/lib/safe-redirect";
+import { translate } from "@/lib/i18n";
 
 const MIN_LENGTH = 12;
 
@@ -74,10 +75,7 @@ export function ForgotPasswordScreen() {
     } catch (error) {
       if (isUpstreamFailure(error)) {
         setError(
-          t("auth.forgot.service_unavailable", {
-            defaultValue:
-              "Recovery service is temporarily unavailable. Please try again in a moment.",
-          }),
+          t("auth.forgot.service_unavailable", undefined),
         );
       } else {
         setError(t("auth.forgot.generic_error"));
@@ -123,7 +121,7 @@ export function ForgotPasswordScreen() {
               autoComplete="username"
               autoFocus
               disabled={busy}
-              placeholder="owner@yourdomain.com"
+              placeholder={translate("generated.account.owner_yourdomain_com_8d7a5b9d")}
               className="auth-input"
             />
           </label>
@@ -137,7 +135,7 @@ export function ForgotPasswordScreen() {
               autoCorrect="off"
               spellCheck={false}
               disabled={busy}
-              placeholder="xxxx-xxxx-xxxx"
+              placeholder={translate("generated.account.xxxx_xxxx_xxxx_d457e3cb")}
               className="auth-input auth-input--mono"
             />
           </label>

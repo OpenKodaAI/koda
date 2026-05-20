@@ -46,9 +46,7 @@ export function ArtifactViewer({
     body = (
       <FallbackViewer
         artifact={artifact}
-        banner={t("sessions.artifacts.tooLarge", {
-          defaultValue: "Too large to preview — download to inspect.",
-        })}
+        banner={t("sessions.artifacts.tooLarge", undefined)}
       />
     );
   } else if (preview.unsupported) {
@@ -63,9 +61,7 @@ export function ArtifactViewer({
     body = (
       <FallbackViewer
         artifact={artifact}
-        banner={t("sessions.artifacts.previewError", {
-          defaultValue: "Couldn’t load the preview.",
-        })}
+        banner={t("sessions.artifacts.previewError", undefined)}
       />
     );
   } else if (preview.text === null) {
@@ -126,7 +122,7 @@ export function ArtifactViewer({
               variant="ghost"
               size="sm"
               onClick={handleCopyUrl}
-              aria-label={t("sessions.artifacts.copyUrl", { defaultValue: "Copy URL" })}
+              aria-label={t("sessions.artifacts.copyUrl", undefined)}
             >
               <LinkIcon className="icon-xs" strokeWidth={1.75} aria-hidden />
             </Button>
@@ -137,13 +133,13 @@ export function ArtifactViewer({
               onClick={() => void downloader.download(artifact)}
               disabled={downloader.isDownloading}
               aria-busy={downloader.isDownloading}
-              aria-label={t("sessions.artifacts.download", { defaultValue: "Download" })}
+              aria-label={t("sessions.artifacts.download", undefined)}
             >
               <Download className="icon-xs" strokeWidth={1.75} aria-hidden />
             </Button>
             {onClose ? (
               <Button type="button" variant="ghost" size="sm" onClick={onClose}>
-                {t("common.close", { defaultValue: "Close" })}
+                {t("common.close", undefined)}
               </Button>
             ) : null}
           </div>

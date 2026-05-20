@@ -39,7 +39,7 @@ function getStatusMeta(
 ) {
   if (!stats.dbExists) {
     return {
-      label: t("overview.activity.noBase", { defaultValue: "No database" }),
+      label: t("overview.activity.noBase", undefined),
       tone: "warning" as SemanticTone,
       pulse: false,
     };
@@ -47,7 +47,7 @@ function getStatusMeta(
 
   if ((featuredTask && LIVE_STATUSES.includes(featuredTask.status)) || stats.activeTasks > 0) {
     return {
-      label: t("overview.activity.executing", { defaultValue: "Running" }),
+      label: t("overview.activity.executing", undefined),
       tone: "info" as SemanticTone,
       pulse: true,
     };
@@ -55,12 +55,8 @@ function getStatusMeta(
 
   return {
     label: featuredTask?.created_at
-      ? t("overview.activity.lastDelivery", {
-          defaultValue: "Last delivery",
-        }) + " " + formatRelativeTime(featuredTask.created_at)
-      : t("overview.activity.waitingForNewExecutions", {
-          defaultValue: "Waiting for new executions",
-        }),
+      ? t("overview.activity.lastDelivery", undefined) + " " + formatRelativeTime(featuredTask.created_at)
+      : t("overview.activity.waitingForNewExecutions", undefined),
     tone: "neutral" as SemanticTone,
     pulse: false,
   };
@@ -73,17 +69,13 @@ export function AgentSummaryCard({
   onClick,
   active = false,
 }: AgentSummaryCardProps) {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const featuredTask = getFeaturedTask(stats);
   const status = getStatusMeta(stats, featuredTask, t);
   const taskText = !stats.dbExists
-    ? t("overview.activity.waitingFirstExecution", {
-        defaultValue: "Waiting for the first execution",
-      })
+    ? t("overview.activity.waitingFirstExecution", undefined)
     : featuredTask?.query_text?.trim() ||
-      t("overview.activity.noPublishedMessage", {
-        defaultValue: "No published message",
-      });
+      t("overview.activity.noPublishedMessage", undefined);
 
   const content = (
     <div className="relative flex w-full items-start gap-3 py-3">
@@ -114,7 +106,7 @@ export function AgentSummaryCard({
             style={getSemanticTextStyle(status.tone, !status.pulse)}
           >
             {status.pulse
-              ? t("runtime.overview.live", { defaultValue: "Live" })
+              ? t("runtime.overview.live", undefined)
               : featuredTask?.created_at
                 ? formatRelativeTime(featuredTask.created_at)
                 : "—"}
@@ -140,7 +132,7 @@ export function AgentSummaryCard({
         type="button"
         onClick={onClick}
         className={classes}
-        aria-label={`${tl("Open bot summary")} ${agentConfig.label}`}
+        aria-label={`${t("generated.dashboard.open_bot_summary_8db93700")} ${agentConfig.label}`}
       >
         {content}
       </button>

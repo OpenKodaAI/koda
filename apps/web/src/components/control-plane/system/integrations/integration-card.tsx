@@ -17,7 +17,7 @@ export function IntegrationCard({
   entry: UnifiedIntegrationEntry;
   onClick: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t, tl } = useAppI18n();
 
   const status = entry.status;
   const enabled = status !== "disabled";
@@ -30,7 +30,7 @@ export function IntegrationCard({
       className={integrationCardRootClassName(
         status === "disabled" ? "disconnected" : status,
       )}
-      aria-label={`${entry.label} — ${status === "connected" ? tl("Conectado") : status === "pending" ? tl("Pendente") : tl("Desconectado")}`}
+      aria-label={`${entry.label} — ${status === "connected" ? t("generated.controlPlane.conectado_e04915ac") : status === "pending" ? t("generated.controlPlane.pendente_e3354bca") : t("generated.controlPlane.desconectado_c3597850")}`}
     >
       {/* Logo */}
       <div

@@ -561,6 +561,7 @@ def get_default_tool_registry(
     *,
     feature_flags: Mapping[str, bool] | None = None,
     allowed_tool_ids: Collection[str] | None = None,
+    skill_policy: Mapping[str, Any] | None = None,
 ) -> ToolRegistry:
     """Build the runtime registry from the existing core catalog and dispatcher maps.
 
@@ -571,6 +572,12 @@ def get_default_tool_registry(
 
     normalized_allowed = tuple(sorted(_normalize_id_set(allowed_tool_ids or ())))
     normalized_flags = tuple(sorted((str(key), bool(value)) for key, value in (feature_flags or {}).items()))
+    resolved_skill_policy = _resolve_skill_policy(skill_policy)
+    enabled_skill_packages = (
+        tuple(sorted(_normalize_id_set(resolved_skill_policy.get("enabled_skill_packages", ()))))
+        if resolved_skill_policy.get("enabled", True)
+        else ()
+    )
     installed_signature: tuple[tuple[str, str], ...] = ()
     try:
         from koda.config import AGENT_ID  # noqa: PLC0415
@@ -587,7 +594,7 @@ def get_default_tool_registry(
         )
     except Exception:
         installed_signature = ()
-    cache_key = (normalized_allowed, normalized_flags, installed_signature)
+    cache_key = (normalized_allowed, normalized_flags, enabled_skill_packages, installed_signature)
     cached = _DEFAULT_REGISTRY_CACHE.get(cache_key)
     if cached is not None:
         return cached
@@ -621,7 +628,7 @@ def get_default_tool_registry(
         default_timeout_seconds=30,
     )
     include_package_tools = feature_flags is None or bool(dict(feature_flags).get("plugins", True))
-    if include_package_tools:
+    if include_package_tools and allowed_tool_ids is not None and enabled_skill_packages:
         try:
             from koda.config import AGENT_ID  # noqa: PLC0415
             from koda.skills._package import get_installed_package_tool_definitions  # noqa: PLC0415
@@ -629,9 +636,14 @@ def get_default_tool_registry(
             package_definitions = get_installed_package_tool_definitions(AGENT_ID or "default")
         except Exception:
             package_definitions = []
-        if allowed_tool_ids is not None:
-            allowed = set(normalized_allowed)
-            package_definitions = [definition for definition in package_definitions if definition.id in allowed]
+        allowed = set(normalized_allowed)
+        allowed_packages = set(enabled_skill_packages)
+        package_definitions = [
+            definition
+            for definition in package_definitions
+            if definition.id in allowed
+            and str(definition.ui_metadata.get("source_package_id") or "").strip() in allowed_packages
+        ]
         if package_definitions:
             registry = ToolRegistry([*registry.definitions, *package_definitions])
     _DEFAULT_REGISTRY_CACHE[cache_key] = registry
@@ -648,12 +660,14 @@ def build_openai_tool_schemas_for_runtime(
     *,
     feature_flags: Mapping[str, bool] | None = None,
     allowed_tool_ids: Collection[str] | None = None,
+    skill_policy: Mapping[str, Any] | None = None,
 ) -> list[JsonObject]:
     """Return OpenAI-compatible native tool schemas for the runtime registry."""
 
     return get_default_tool_registry(
         feature_flags=feature_flags,
         allowed_tool_ids=allowed_tool_ids,
+        skill_policy=skill_policy,
     ).export_openai_tool_schemas()
 
 
@@ -730,6 +744,17 @@ def _normalize_string_tuple(values: Iterable[str]) -> tuple[str, ...]:
 
 def _normalize_id_set(values: Collection[str]) -> frozenset[str]:
     return frozenset(str(value).strip() for value in values if str(value).strip())
+
+
+def _resolve_skill_policy(skill_policy: Mapping[str, Any] | None) -> dict[str, Any]:
+    if skill_policy is not None:
+        return dict(skill_policy)
+    try:
+        from koda.skills._runtime import get_runtime_agent_spec, get_runtime_skill_policy  # noqa: PLC0415
+
+        return get_runtime_skill_policy(get_runtime_agent_spec())
+    except Exception:
+        return {}
 
 
 def _normalize_handler_ids(handler_ids: HandlerCatalog) -> frozenset[str]:

@@ -115,7 +115,7 @@ export const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>
             event.preventDefault();
             if (canSubmit) onSubmit();
           }}
-          aria-label={t("chat.composer.send", { defaultValue: "Send" })}
+          aria-label={t("chat.composer.send", undefined)}
           className={cn(
             "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
             "transition-[background-color,color,transform] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",

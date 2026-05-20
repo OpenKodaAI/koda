@@ -13,11 +13,21 @@ import type {
 
 const showToastMock = vi.fn();
 
-vi.mock("@/hooks/use-app-i18n", () => ({
-  useAppI18n: () => ({
-    tl: (value: string) => value,
-  }),
-}));
+vi.mock("@/hooks/use-app-i18n", async () => {
+  const { translateForLanguage } = await vi.importActual<typeof import("@/lib/i18n")>("@/lib/i18n");
+  const t = (key: string, options?: Record<string, unknown>) => translateForLanguage("pt-BR", key, options);
+
+  return {
+    useAppI18n: () => ({
+      t,
+      tl: (value: string) => value,
+      i18n: { t },
+      language: "pt-BR",
+      setLanguage: vi.fn(),
+      options: [],
+    }),
+  };
+});
 
 vi.mock("@/hooks/use-toast", () => ({
   useToast: () => ({
@@ -1325,7 +1335,7 @@ describe("useSystemSettings", () => {
     const { result } = renderUseSystemSettings(settings);
 
     expect(result.current.localWarnings).toEqual([
-      "OpenAI precisa de uma API Key configurada para usar o default de {{functionId}}.",
+      "OpenAI precisa de uma chave de API configurada para usar o padrão image.",
     ]);
   });
 

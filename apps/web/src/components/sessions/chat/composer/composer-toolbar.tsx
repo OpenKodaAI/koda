@@ -28,7 +28,7 @@ export function ComposerToolbar({
   return (
     <div className="flex items-center justify-between gap-3 px-3 pb-2 pt-1">
       <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
-        {t("chat.composer.sendHint", { defaultValue: "⌘↵ to send" })}
+        {t("chat.composer.sendHint", undefined)}
       </span>
       <div className="flex items-center gap-2 text-[0.75rem] text-[var(--text-tertiary)]">
         {modelLabel ? (
@@ -82,7 +82,7 @@ export function ComposerToolbar({
               </PopoverTrigger>
               <PopoverContent align="end" sideOffset={8} className="w-72 p-1">
                 <div className="px-2 pt-1.5 pb-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]">
-                  {t("chat.composer.agents", { defaultValue: "Agents" })}
+                  {t("chat.composer.agents", undefined)}
                 </div>
                 <ul role="listbox" className="flex flex-col">
                   {agents.map((agent) => {

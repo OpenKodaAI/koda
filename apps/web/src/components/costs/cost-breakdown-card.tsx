@@ -32,9 +32,7 @@ export const CostBreakdownCard = memo(function CostBreakdownCard({
   const { t } = useAppI18n();
   const resolvedEmptyLabel =
     emptyLabel ??
-    t("costs.page.emptyBreakdownShort", {
-      defaultValue: "No data",
-    });
+    t("costs.page.emptyBreakdownShort", undefined);
   const visibleItems = useMemo(() => items.slice(0, 5), [items]);
   return (
     <section className={cn("flex min-w-0 flex-col gap-1.5", className)}>

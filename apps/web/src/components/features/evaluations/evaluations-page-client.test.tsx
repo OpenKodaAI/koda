@@ -167,9 +167,134 @@ describe("EvaluationsPageClient", () => {
                 status: "failing",
                 summary: "Policy regression detected.",
               },
+              {
+                id: "run_graph_completeness",
+                title: "RunGraph completeness",
+                status: "blocked",
+                summary: "Missing policy_gate node.",
+              },
             ],
+            metrics: {
+              run_graph_warnings: ["Missing policy_gate node."],
+            },
             top_failures: [{ kind: "policy", name: "policy changed", count: 1 }],
           },
+        };
+      }
+      if (path.includes("/dashboard/quality/agents/ATLAS")) {
+        return {
+          schema_version: "quality_cockpit.v1",
+          generated_at: "2026-05-19T16:00:00Z",
+          status: "degraded",
+          summary: {
+            success_rate: 0.72,
+            failure_count: 2,
+            run_count: 10,
+            timeout_rate: 0.2,
+            eval_trend: "regressing",
+            eval_score: 0.62,
+          },
+          groups: [
+            {
+              entity_type: "agent",
+              label: "Agents",
+              status: "degraded",
+              metrics: { success_rate: 0.72, failure_count: 2, run_count: 10, timeout_rate: 0.2 },
+              items: [
+                {
+                  entity_type: "agent",
+                  entity_id: "ATLAS",
+                  label: "Atlas",
+                  status: "degraded",
+                  risk_class: "medium",
+                  metrics: { success_rate: 0.72, failure_count: 2, run_count: 10, cost_usd: 1.2 },
+                  failures: [],
+                },
+              ],
+            },
+          ],
+          top_failures: [
+            {
+              failure_id: "quality-failure:policy",
+              status: "degraded",
+              risk_class: "medium",
+              title: "Policy regression",
+              summary: "Policy changed during eval.",
+              count: 2,
+              run_graph_node_ids: ["policy_gate:1"],
+              proposal_action_available: true,
+            },
+          ],
+          route_quality_history: [
+            {
+              schema_version: "route_outcome.v1",
+              route_source: "semantic",
+              outcome_count: 2,
+              success_rate: 0.5,
+              timeout_rate: 0.5,
+              failure_rate: 0.5,
+              quality_score: 0.5,
+              run_graph_node_ids: ["agent_request:1"],
+            },
+          ],
+          release_blockers: [
+            {
+              schema_version: "release_blocker.v1",
+              blocker_id: "release-blocker:rungraph",
+              gate_id: "run_graph_completeness",
+              severity: "high",
+              status: "failing",
+              title: "RunGraph completeness",
+              summary: "Missing policy_gate node.",
+              next_action: "Inspect RunGraph completeness failures.",
+              proposal_action_available: true,
+            },
+          ],
+        };
+      }
+      if (path.includes("/improvement-proposals/prop%3A1/approve")) {
+        return {
+          schema_version: "improvement_proposal.v1",
+          proposal_id: "prop:1",
+          agent_id: "ATLAS",
+          source_kind: "eval",
+          source_ref: "eval_run:1",
+          proposal_type: "tool_policy",
+          summary: "Tighten policy gate",
+          evidence_refs: ["eval_run:1"],
+          diff_preview: { before: "allow", after: "review" },
+          risk_class: "medium",
+          validation_plan: { command: "offline suite" },
+          rollback_plan: { effects: [{ effect_kind: "ledger_only", target_ref: "policy:1" }] },
+          status: "approved",
+          validation_result: {},
+          run_graph_node_ids: ["node_policy"],
+        };
+      }
+      if (path.includes("/improvement-proposals")) {
+        return {
+          schema_version: "improvement_proposal.v1",
+          items: [
+            {
+              schema_version: "improvement_proposal.v1",
+              proposal_id: "prop:1",
+              agent_id: "ATLAS",
+              source_kind: "eval",
+              source_ref: "eval_run:1",
+              proposal_type: "tool_policy",
+              summary: "Tighten policy gate",
+              evidence_refs: ["eval_run:1"],
+              diff_preview: { before: "allow", after: "review" },
+              risk_class: "medium",
+              validation_plan: { command: "offline suite" },
+              rollback_plan: { effects: [{ effect_kind: "ledger_only", target_ref: "policy:1" }] },
+              status: "pending_review",
+              validation_result: {},
+              run_graph_node_ids: ["node_policy"],
+              created_at: "2026-05-17T10:00:00Z",
+              updated_at: "2026-05-17T10:00:00Z",
+            },
+          ],
         };
       }
       return {};
@@ -183,7 +308,7 @@ describe("EvaluationsPageClient", () => {
 
     const skeleton = await screen.findByTestId("evaluations-page-skeleton");
     expect(within(skeleton).getByTestId("evaluations-skeleton-toolbar")).toBeInTheDocument();
-    expect(within(skeleton).getAllByTestId("evaluations-skeleton-metric")).toHaveLength(4);
+    expect(within(skeleton).getAllByTestId("evaluations-skeleton-metric")).toHaveLength(6);
     expect(within(skeleton).getByTestId("evaluations-skeleton-cases-layout")).toBeInTheDocument();
     expect(skeleton.querySelectorAll("section.app-section")).toHaveLength(2);
   });
@@ -205,7 +330,20 @@ describe("EvaluationsPageClient", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Release" }));
     expect(await screen.findByText("Release gates")).toBeInTheDocument();
     expect(screen.getByText("Release readiness")).toBeInTheDocument();
-    expect(screen.getByText("Smoke eval")).toBeInTheDocument();
+    expect(screen.getAllByText("Smoke eval").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("RunGraph completeness").length).toBeGreaterThan(0);
+    expect(screen.getByText("RunGraph blocked")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Quality" }));
+    await waitFor(() => expect(screen.getAllByText("Quality cockpit").length).toBeGreaterThan(0));
+    expect(screen.getByText("Failure and trend evidence")).toBeInTheDocument();
+    expect(screen.getByText("Policy regression")).toBeInTheDocument();
+    expect(screen.getByText("Route quality trend")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Proposals" }));
+    expect(await screen.findByText("Proposal queue")).toBeInTheDocument();
+    expect(screen.getAllByText("Tighten policy gate").length).toBeGreaterThan(0);
+    expect(screen.getByText("Proposal review")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(requestJsonMock).toHaveBeenCalledWith(
@@ -218,6 +356,14 @@ describe("EvaluationsPageClient", () => {
       );
       expect(requestJsonMock).toHaveBeenCalledWith(
         "/api/control-plane/agents/ATLAS/evals/release-quality/latest",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+      expect(requestJsonMock).toHaveBeenCalledWith(
+        "/api/control-plane/agents/ATLAS/improvement-proposals?limit=80",
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+      expect(requestJsonMock).toHaveBeenCalledWith(
+        "/api/control-plane/dashboard/quality/agents/ATLAS",
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
@@ -238,5 +384,23 @@ describe("EvaluationsPageClient", () => {
       );
     });
     expect(await screen.findByRole("status")).toHaveTextContent("Offline eval suite started.");
+  });
+
+  it("queues proposal actions through the canonical proposal endpoint", async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Proposals" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Approve" }));
+
+    await waitFor(() => {
+      expect(requestJsonMock).toHaveBeenCalledWith(
+        "/api/control-plane/agents/ATLAS/improvement-proposals/prop%3A1/approve",
+        expect.objectContaining({
+          method: "POST",
+          body: "{}",
+        }),
+      );
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Proposal action queued.");
   });
 });

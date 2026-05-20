@@ -42,7 +42,7 @@ import { parseContextGovernancePayload } from "@/lib/contracts/phase3-runtime";
 import { parseRunGraphSnapshot, parseRunReplayPlan } from "@/lib/contracts/run-graph";
 import { evalErrorMessage } from "@/lib/contracts/evals";
 import { requestJson } from "@/lib/http-client";
-import { getCurrentLanguage, translate, translateLiteral } from "@/lib/i18n";
+import { getCurrentLanguage, translate } from "@/lib/i18n";
 import {
   getArtifactVisual,
   getExecutionMetadataVisual,
@@ -382,7 +382,7 @@ export function ExecutionDetailContent({
       );
       setEvalCreateState({
         status: "success",
-        message: translateLiteral("Eval case created."),
+        message: translate("generated.executions.eval_case_created_4e159649"),
       });
     } catch (caught) {
       setEvalCreateState({
@@ -390,7 +390,7 @@ export function ExecutionDetailContent({
         message:
           caught instanceof Error && caught.message.trim()
             ? caught.message
-            : evalErrorMessage(caught, translateLiteral("Could not create eval case.")),
+            : evalErrorMessage(caught, translate("generated.executions.could_not_create_eval_case_7d94f6ec")),
       });
     }
   }
@@ -463,7 +463,7 @@ export function ExecutionDetailContent({
         <NoticeCard
           icon={AlertTriangle}
           tone="error"
-          title={translateLiteral("Eval case creation failed")}
+          title={translate("generated.executions.eval_case_creation_failed_3abed341")}
           description={evalCreateState.message}
           variant={variant}
         />
@@ -482,7 +482,7 @@ export function ExecutionDetailContent({
       items={[
         {
           label: translate("common.createdAt", {
-            defaultValue: translateLiteral("Criada em"),
+            defaultValue: translate("generated.executions.criada_em_90f4965a"),
           }),
           value: formatCompactDateTime(data.created_at),
           title: formatDateTime(data.created_at),
@@ -518,7 +518,7 @@ export function ExecutionDetailContent({
               href={`/evaluations?agent=${encodeURIComponent(data.bot_id)}`}
               className="button-shell button-shell--secondary button-shell--sm inline-flex px-3"
             >
-              {translateLiteral("Open evals")}
+              {translate("generated.executions.open_evals_3abc3a4a")}
             </Link>
           ) : null}
           <button
@@ -531,10 +531,10 @@ export function ExecutionDetailContent({
           >
             <FileCheck2 className="h-3.5 w-3.5" />
             {evalCreateState.status === "pending"
-              ? translateLiteral("Creating eval")
+              ? translate("generated.executions.creating_eval_8f0b4632")
               : evalCreateState.status === "success"
-                ? translateLiteral("Eval created")
-                : translateLiteral("Create eval")}
+                ? translate("generated.executions.eval_created_75820127")
+                : translate("generated.executions.create_eval_c5f9d9d9")}
           </button>
           <Link
             href={`/runtime/${data.bot_id}/tasks/${data.task_id}`}
@@ -579,7 +579,7 @@ export function ExecutionDetailContent({
   );
 
   const runGraphSection = (
-    <DetailSection title="RunGraph" variant={variant}>
+    <DetailSection title={translate("generated.executions.rungraph_1d9c778c")} variant={variant}>
       <div className="space-y-4">
         <RunGraphSummaryPanel
           graph={runGraph}
@@ -641,7 +641,7 @@ export function ExecutionDetailContent({
               visual: getExecutionMetadataVisual("workspace"),
             },
             {
-              label: translateLiteral("User / chat"),
+              label: translate("generated.executions.user_chat_30653443"),
               value: `${data.user_id} / ${data.chat_id}`,
               mono: true,
               wrap: true,
@@ -1042,15 +1042,14 @@ function ToolCard({
                 style={getSemanticStyle(tool.success === false ? "danger" : "success")}
               >
                 {tool.success === false
-                  ? translate("common.failed", { defaultValue: "Failed" })
-                  : translate("toast.success", { defaultValue: "Success" })}
+                  ? translate("common.failed")
+                  : translate("toast.success")}
               </span>
               <span className="font-mono">{formatDuration(tool.duration_ms)}</span>
               <span>{formatDateTime(tool.completed_at ?? tool.started_at)}</span>
               {tool.redactions && (
                 <span className="rounded-lg border px-2.5 py-1 text-[10px] font-semibold" style={getSemanticStyle("warning")}>
                   {translate("executions.detail.redactions", {
-                    defaultValue: "{{count}} redactions",
                     count: tool.redactions.count,
                   })}
                 </span>
@@ -1065,7 +1064,7 @@ function ToolCard({
             className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
           >
             <Copy className="h-3.5 w-3.5" />
-            {translateLiteral("Copiar saída")}
+            {translate("generated.executions.copiar_saida_eedddac0")}
           </button>
         )}
       </div>
@@ -1076,12 +1075,12 @@ function ToolCard({
           isExpanded ? "lg:grid-cols-4" : isPanel ? "xl:grid-cols-2" : isDrawer && "md:grid-cols-2"
         )}
       >
-        <DetailRow label={translateLiteral("Início")}>{formatDateTime(tool.started_at)}</DetailRow>
-        <DetailRow label={translateLiteral("Fim")}>{formatDateTime(tool.completed_at)}</DetailRow>
+        <DetailRow label={translate("generated.executions.inicio_560f0f5f")}>{formatDateTime(tool.started_at)}</DetailRow>
+        <DetailRow label={translate("generated.executions.fim_785edcaa")}>{formatDateTime(tool.completed_at)}</DetailRow>
         <DetailRow label={translate("common.duration")}>
           <span className="font-mono">{formatDuration(tool.duration_ms)}</span>
         </DetailRow>
-        <DetailRow label={translateLiteral("Categoria")}>
+        <DetailRow label={translate("generated.executions.categoria_18707383")}>
           <span className="font-mono">{tool.category}</span>
         </DetailRow>
       </div>
@@ -1089,7 +1088,7 @@ function ToolCard({
       {command && (
         <div className="mt-4">
           <CodePanel
-            title={binary || args ? translateLiteral("Comando CLI") : translate("common.command", { defaultValue: "Command" })}
+            title={binary || args ? translate("generated.executions.comando_cli_61912471") : translate("common.command")}
             content={command}
             onCopy={() => copyExecutionValue(command)}
             lang="shell"
@@ -1101,7 +1100,7 @@ function ToolCard({
       {sql && (
         <div className="mt-4">
           <CodePanel
-            title={translateLiteral("Consulta SQL")}
+            title={translate("generated.executions.consulta_sql_ec3df875")}
             content={sql}
             onCopy={() => copyExecutionValue(sql)}
             lang="sql"
@@ -1116,22 +1115,22 @@ function ToolCard({
           isExpanded ? "lg:grid-cols-4" : isPanel ? "xl:grid-cols-2" : isDrawer && "md:grid-cols-2"
         )}
       >
-        {env && <DetailRow label={translateLiteral("Ambiente")}>{env}</DetailRow>}
-        {maxRows != null && <DetailRow label={translateLiteral("Limite de linhas")}>{String(maxRows)}</DetailRow>}
-        {analyze != null && <DetailRow label={translateLiteral("Analyze")}>{analyze ? translateLiteral("Sim") : translateLiteral("Não")}</DetailRow>}
+        {env && <DetailRow label={translate("generated.executions.ambiente_60bc9f4d")}>{env}</DetailRow>}
+        {maxRows != null && <DetailRow label={translate("generated.executions.limite_de_linhas_44567317")}>{String(maxRows)}</DetailRow>}
+        {analyze != null && <DetailRow label={translate("generated.executions.analyze_6c305051")}>{analyze ? translate("generated.executions.sim_4b2e05ee") : translate("generated.executions.nao_41b30e44")}</DetailRow>}
         {exitCode != null && (
-          <DetailRow label={translateLiteral("Código de saída")}>
+          <DetailRow label={translate("generated.executions.codigo_de_saida_84c7b4d4")}>
             <span className="font-mono">{String(exitCode)}</span>
           </DetailRow>
         )}
-        {timedOut != null && <DetailRow label={translateLiteral("Timeout")}>{timedOut ? translateLiteral("Sim") : translateLiteral("Não")}</DetailRow>}
-        {truncated != null && <DetailRow label={translateLiteral("Saída truncada")}>{truncated ? translateLiteral("Sim") : translateLiteral("Não")}</DetailRow>}
+        {timedOut != null && <DetailRow label={translate("generated.executions.timeout_8e7843bd")}>{timedOut ? translate("generated.executions.sim_4b2e05ee") : translate("generated.executions.nao_41b30e44")}</DetailRow>}
+        {truncated != null && <DetailRow label={translate("generated.executions.saida_truncada_d954f55d")}>{truncated ? translate("generated.executions.sim_4b2e05ee") : translate("generated.executions.nao_41b30e44")}</DetailRow>}
       </div>
 
       {hasEntries(tool.params) && (
         <div className="mt-4">
           <ArtifactShell
-            title={translateLiteral("Parâmetros enviados")}
+            title={translate("generated.executions.parametros_enviados_06cb0ec8")}
             onCopy={() => copyExecutionValue(tool.params)}
             visual={getExecutionMetadataVisual("tools")}
             variant={variant}
@@ -1144,7 +1143,7 @@ function ToolCard({
       {tool.output && (
         <div className="mt-4">
           <CodePanel
-            title={translateLiteral("Saída da ferramenta")}
+            title={translate("generated.executions.saida_da_ferramenta_c234aa09")}
             content={tool.output}
             onCopy={() => copyExecutionValue(tool.output)}
             variant={variant}
@@ -1155,7 +1154,7 @@ function ToolCard({
       {hasEntries(extraMetadata) && (
         <div className="mt-4">
           <ArtifactShell
-            title={translateLiteral("Metadados adicionais")}
+            title={translate("generated.executions.metadados_adicionais_a5016a1c")}
             onCopy={() => copyExecutionValue(extraMetadata)}
             visual={getExecutionMetadataVisual("metadata")}
             variant={variant}
@@ -1258,7 +1257,7 @@ function ArtifactShell({
         <div className="flex items-center gap-2">
           {unavailable && (
             <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1 text-[10px] font-semibold text-[var(--text-tertiary)]">
-              {translateLiteral("Indisponível")}
+              {translate("generated.executions.indisponivel_16d4946c")}
             </span>
           )}
           {onCopy && (
@@ -1268,8 +1267,7 @@ function ArtifactShell({
               className="button-shell button-shell--secondary button-shell--sm gap-2 px-3"
             >
               <Copy className="h-3.5 w-3.5" />
-              Copiar
-            </button>
+              {translate("generated.executions.copiar_469807dc")}</button>
           )}
         </div>
       </div>

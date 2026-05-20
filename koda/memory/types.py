@@ -121,6 +121,10 @@ class Memory:
     conflict_key: str = ""
     supersedes_memory_id: int | None = None
     memory_status: str = DEFAULT_MEMORY_STATUS
+    namespace_kind: str = "agent"
+    namespace_key: str = ""
+    namespace_scope: dict[str, str] = field(default_factory=dict)
+    sensitivity: str = "normal"
     retention_reason: str = ""
     embedding_attempts: int = 0
     embedding_last_error: str = ""
@@ -154,6 +158,21 @@ class Memory:
                 "environment": self.environment,
                 "team": self.team,
             }
+        if not self.namespace_key:
+            self.namespace_key = self.agent_id or "default"
+        if not self.namespace_scope:
+            self.namespace_scope = {
+                key: value
+                for key, value in {
+                    "user_id": str(self.user_id),
+                    "agent_id": self.agent_id or "",
+                    "session_id": self.session_id or "",
+                    "project_key": self.project_key,
+                    "environment": self.environment,
+                    "team": self.team,
+                }.items()
+                if value
+            }
 
 
 @dataclass
@@ -180,6 +199,9 @@ class RecallDiscard:
     retrieval_source: str
     reason: str
     score: float
+    namespace_kind: str = "agent"
+    namespace_key: str = ""
+    sensitivity: str = "normal"
 
 
 @dataclass(slots=True)
@@ -195,6 +217,9 @@ class RecallExplanation:
     source_query_id: int | None = None
     source_task_id: int | None = None
     source_episode_id: int | None = None
+    namespace_kind: str = "agent"
+    namespace_key: str = ""
+    sensitivity: str = "normal"
 
 
 @dataclass(slots=True)
@@ -207,6 +232,8 @@ class RecallConflict:
     winner_layer: str = MemoryLayer.CONVERSATIONAL.value
     winner_retrieval_source: str = "vector"
     winner_score: float = 0.0
+    namespace_kind: str = "agent"
+    namespace_key: str = ""
 
 
 @dataclass(slots=True)

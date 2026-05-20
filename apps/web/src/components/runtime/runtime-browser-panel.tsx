@@ -47,7 +47,7 @@ export function RuntimeBrowserPanel({
   browser,
   mutate,
 }: RuntimeBrowserPanelProps) {
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const { showToast } = useToast();
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const snapshotSocketRef = useRef<WebSocket | null>(null);
@@ -377,7 +377,7 @@ export function RuntimeBrowserPanel({
           {snapshot.novnc_port == null && screenshotUrl ? (
             <Image
               src={screenshotUrl}
-              alt={tl("Browser runtime")}
+              alt={t("generated.runtime.browser_runtime_e9acdfd2")}
               fill
               unoptimized
               className="object-contain"

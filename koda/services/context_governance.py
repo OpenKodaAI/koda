@@ -35,7 +35,7 @@ _SENSITIVE_CATEGORY_TOKENS = (
     "secret",
     "token",
 )
-_MEMORY_CATEGORIES = {"authoritative_knowledge", "cache_hints", "supporting_knowledge", "scripts_assets"}
+_MEMORY_CATEGORIES = {"memory", "authoritative_knowledge", "cache_hints", "supporting_knowledge", "scripts_assets"}
 _ARTIFACT_CATEGORIES = {"artifact", "artifacts", "supporting_knowledge"}
 _SQUAD_SEGMENT_IDS = {"squad_context"}
 
@@ -222,6 +222,127 @@ def govern_prompt_budget(
         },
         "blocks": [block.to_dict() for block in blocks],
     }
+
+
+def _memory_id_list(values: Any, *, limit: int = 25) -> list[Any]:
+    if not isinstance(values, list):
+        return []
+    ids: list[Any] = []
+    for item in values:
+        memory_id = getattr(getattr(item, "memory", None), "id", None)
+        if memory_id is None and isinstance(item, Mapping):
+            memory_id = item.get("memory_id")
+        if memory_id is not None:
+            ids.append(memory_id)
+        if len(ids) >= limit:
+            break
+    return ids
+
+
+def _memory_reason_counts(values: Any, attr: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    if not isinstance(values, list):
+        return counts
+    for item in values:
+        reason = getattr(item, attr, None)
+        if reason is None and isinstance(item, Mapping):
+            reason = item.get(attr)
+        text = str(reason or "unknown").strip() or "unknown"
+        counts[text] = counts.get(text, 0) + 1
+    return counts
+
+
+def append_memory_resolution_blocks(
+    context_summary: Mapping[str, Any] | None,
+    memory_resolution: Any | None,
+    context_policy: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Attach metadata-only memory recall explanations to context governance."""
+
+    summary = dict(context_summary or {})
+    if not memory_resolution:
+        return summary
+    policy = normalize_context_policy(context_policy or summary.get("policy"))
+    status = "included" if bool(policy.get("include_memory", False)) else "dropped"
+    selected = list(getattr(memory_resolution, "selected", []) or [])
+    discarded = list(getattr(memory_resolution, "discarded", []) or [])
+    conflicts = list(getattr(memory_resolution, "conflicts", []) or [])
+    explanations = list(getattr(memory_resolution, "explanations", []) or [])
+    sensitive_selected = sum(
+        1
+        for item in selected
+        if str(getattr(getattr(item, "memory", None), "sensitivity", "normal") or "normal") == "sensitive"
+    )
+    if sensitive_selected and bool(policy.get("review_on_sensitive", True)):
+        status = "review_required"
+    drop_reason = None
+    if status == "dropped":
+        drop_reason = "memory_not_allowed"
+    elif status == "review_required":
+        drop_reason = "sensitive_context_requires_review"
+    block = ContextGovernanceBlock(
+        block_id=_stable_id(
+            {
+                "source": "memory_recall",
+                "selected": _memory_id_list(selected),
+                "discarded": _memory_id_list(discarded),
+                "trust_score": getattr(memory_resolution, "trust_score", 0.0),
+            },
+            prefix="memory",
+        ),
+        category="memory",
+        source="memory_recall",
+        token_estimate=0,
+        status=status,
+        include_reason="memory_recall_policy_allowed_metadata_only" if status == "included" else None,
+        drop_reason=drop_reason,
+        redaction="metadata_only",
+        risk="memory" if not sensitive_selected else "sensitive",
+        provenance={
+            "selected_count": len(selected),
+            "dropped_count": len(discarded),
+            "conflict_count": len(conflicts),
+            "trust_score": float(getattr(memory_resolution, "trust_score", 0.0) or 0.0),
+            "selected_layers": list(getattr(memory_resolution, "selected_layers", []) or []),
+            "retrieval_sources": list(getattr(memory_resolution, "retrieval_sources", []) or []),
+            "selected_memory_ids": _memory_id_list(selected),
+            "dropped_reasons": _memory_reason_counts(discarded, "reason"),
+            "conflict_keys": [str(getattr(item, "conflict_key", "") or "") for item in conflicts[:20]],
+            "explanations": [
+                {
+                    "memory_id": getattr(item, "memory_id", None),
+                    "layer": getattr(item, "layer", ""),
+                    "retrieval_source": getattr(item, "retrieval_source", ""),
+                    "score": getattr(item, "score", 0.0),
+                    "scope_score": getattr(item, "scope_score", 0.0),
+                    "reasons": list(getattr(item, "reasons", []) or []),
+                    "namespace_kind": getattr(item, "namespace_kind", "agent"),
+                    "namespace_key": getattr(item, "namespace_key", ""),
+                    "sensitivity": getattr(item, "sensitivity", "normal"),
+                }
+                for item in explanations[:20]
+            ],
+        },
+    )
+    blocks = [item for item in list(summary.get("blocks") or []) if isinstance(item, Mapping)]
+    blocks.append(block.to_dict())
+    summary["schema_version"] = CONTEXT_GOVERNANCE_SCHEMA_VERSION
+    summary["policy"] = dict(policy)
+    summary["blocks"] = blocks
+    counts = {
+        "included_count": sum(1 for item in blocks if item.get("status") == "included"),
+        "dropped_count": sum(1 for item in blocks if item.get("status") == "dropped"),
+        "review_required_count": sum(1 for item in blocks if item.get("status") == "review_required"),
+    }
+    current_summary = dict(summary.get("summary") or {})
+    current_summary.update(
+        {
+            "block_count": len(blocks),
+            **counts,
+        }
+    )
+    summary["summary"] = current_summary
+    return summary
 
 
 def build_child_context_prompt(

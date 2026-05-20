@@ -3490,6 +3490,112 @@ class KnowledgeV2PostgresBackend:
                            ADD COLUMN IF NOT EXISTS import_history_json TEXT NOT NULL DEFAULT '[]'""",
                 ),
             ),
+            _Migration(
+                "045_improvement_proposals_v1",
+                (
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."improvement_proposals" (
+                            proposal_id TEXT PRIMARY KEY,
+                            schema_version TEXT NOT NULL DEFAULT 'improvement_proposal.v1',
+                            agent_id TEXT NOT NULL,
+                            source_kind TEXT NOT NULL CHECK (
+                                source_kind IN (
+                                    'run', 'eval', 'user_correction', 'timeout',
+                                    'dead_letter', 'tool_failure', 'manual'
+                                )
+                            ),
+                            source_ref TEXT NOT NULL,
+                            proposal_type TEXT NOT NULL CHECK (
+                                proposal_type IN (
+                                    'memory', 'skill', 'prompt', 'routing_profile',
+                                    'tool_policy', 'eval_case', 'docs'
+                                )
+                            ),
+                            summary TEXT NOT NULL,
+                            evidence_refs_json TEXT NOT NULL DEFAULT '[]',
+                            diff_preview_json TEXT NOT NULL DEFAULT '{{}}',
+                            risk_class TEXT NOT NULL DEFAULT 'medium' CHECK (
+                                risk_class IN ('low', 'medium', 'high', 'critical')
+                            ),
+                            validation_plan_json TEXT NOT NULL DEFAULT '{{}}',
+                            validation_result_json TEXT NOT NULL DEFAULT '{{}}',
+                            rollback_plan_json TEXT NOT NULL DEFAULT '{{}}',
+                            status TEXT NOT NULL DEFAULT 'pending_review' CHECK (
+                                status IN (
+                                    'draft', 'pending_review', 'approved', 'rejected',
+                                    'validating', 'applied', 'rolled_back', 'failed'
+                                )
+                            ),
+                            reviewer TEXT NOT NULL DEFAULT '',
+                            idempotency_hash TEXT NOT NULL,
+                            run_graph_node_ids_json TEXT NOT NULL DEFAULT '[]',
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            reviewed_at TEXT NOT NULL DEFAULT '',
+                            validated_at TEXT NOT NULL DEFAULT '',
+                            applied_at TEXT NOT NULL DEFAULT '',
+                            rolled_back_at TEXT NOT NULL DEFAULT '',
+                            status_history_json TEXT NOT NULL DEFAULT '[]',
+                            UNIQUE (agent_id, idempotency_hash)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_improvement_proposals_agent_status
+                           ON "{schema}"."improvement_proposals" (agent_id, status, updated_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_improvement_proposals_agent_type
+                           ON "{schema}"."improvement_proposals" (agent_id, proposal_type, updated_at DESC)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_improvement_proposals_source
+                           ON "{schema}"."improvement_proposals" (source_kind, source_ref)""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."improvement_proposal_effects" (
+                            effect_id TEXT PRIMARY KEY,
+                            proposal_id TEXT NOT NULL,
+                            agent_id TEXT NOT NULL,
+                            effect_kind TEXT NOT NULL,
+                            target_ref TEXT NOT NULL,
+                            before_ref_json TEXT NOT NULL DEFAULT '{{}}',
+                            after_ref_json TEXT NOT NULL DEFAULT '{{}}',
+                            status TEXT NOT NULL DEFAULT 'pending' CHECK (
+                                status IN ('pending', 'applied', 'rolled_back', 'failed')
+                            ),
+                            apply_idempotency_key TEXT NOT NULL,
+                            rollback_idempotency_key TEXT NOT NULL,
+                            error_json TEXT NOT NULL DEFAULT '{{}}',
+                            metadata_json TEXT NOT NULL DEFAULT '{{}}',
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL,
+                            applied_at TEXT NOT NULL DEFAULT '',
+                            rolled_back_at TEXT NOT NULL DEFAULT '',
+                            UNIQUE (agent_id, proposal_id, apply_idempotency_key),
+                            UNIQUE (agent_id, proposal_id, rollback_idempotency_key)
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_improvement_proposal_effects_proposal
+                           ON "{schema}"."improvement_proposal_effects" (agent_id, proposal_id, status)""",
+                ),
+            ),
+            _Migration(
+                "046_memory_governance_namespaces",
+                (
+                    f"""ALTER TABLE "{schema}"."napkin_log"
+                           ADD COLUMN IF NOT EXISTS namespace_kind TEXT NOT NULL DEFAULT 'agent'""",
+                    f"""ALTER TABLE "{schema}"."napkin_log"
+                           ADD COLUMN IF NOT EXISTS namespace_key TEXT NOT NULL DEFAULT ''""",
+                    f"""ALTER TABLE "{schema}"."napkin_log"
+                           ADD COLUMN IF NOT EXISTS namespace_scope_json TEXT NOT NULL DEFAULT '{{}}'""",
+                    f"""ALTER TABLE "{schema}"."napkin_log"
+                           ADD COLUMN IF NOT EXISTS sensitivity TEXT NOT NULL DEFAULT 'normal'""",
+                    f"""UPDATE "{schema}"."napkin_log"
+                           SET namespace_kind = COALESCE(NULLIF(namespace_kind, ''), 'agent'),
+                               namespace_key = COALESCE(NULLIF(namespace_key, ''), COALESCE(agent_id, 'default')),
+                               sensitivity = CASE
+                                   WHEN COALESCE(sensitivity, '') IN ('normal', 'sensitive') THEN sensitivity
+                                   ELSE 'normal'
+                               END
+                         WHERE namespace_key = '' OR namespace_kind = '' OR sensitivity = ''""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_napkin_namespace_lookup
+                           ON "{schema}"."napkin_log"
+                           (user_id, agent_id, namespace_kind, namespace_key, is_active)""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_napkin_sensitivity
+                           ON "{schema}"."napkin_log"
+                           (agent_id, sensitivity, memory_status, is_active)""",
+                ),
+            ),
         )
 
     async def upsert_skill_package_lock(self, agent_id: str, lock: dict[str, Any]) -> None:

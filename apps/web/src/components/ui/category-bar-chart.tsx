@@ -59,7 +59,7 @@ export function CategoryBarChart({
   footer,
   ...props
 }: CategoryBarChartProps) {
-  const { tl, language } = useAppI18n();
+  const { t, language } = useAppI18n();
   const startLabel = renderPeriodLabel(rangeStartLabel, language);
   const endLabel = renderPeriodLabel(rangeEndLabel, language);
 
@@ -145,7 +145,7 @@ export function CategoryBarChart({
                       </span>
                     </p>
                     <p className="mt-1 truncate text-xs text-[var(--text-tertiary)]">
-                      {item.meta ?? tl("Participação no recorte")}
+                      {item.meta ?? t("generated.ui.participacao_no_recorte_340e0c5c")}
                     </p>
                   </TooltipContent>
                 </Tooltip>

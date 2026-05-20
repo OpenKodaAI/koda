@@ -3440,6 +3440,23 @@ async def list_skill_packages(request: web.Request) -> web.Response:
     return web.json_response({"items": list_skill_package_locks(request.match_info["agent_id"])})
 
 
+async def list_skill_registry_route(request: web.Request) -> web.Response:
+    from koda.skills._package import list_skill_registry
+
+    return web.json_response(list_skill_registry(request.match_info["agent_id"]))
+
+
+async def run_skill_package_evals_route(request: web.Request) -> web.Response:
+    from koda.skills._package import SkillPackageError, run_skill_package_evals, skill_package_error_response
+
+    try:
+        result = run_skill_package_evals(request.match_info["agent_id"], request.match_info["package_id"])
+    except SkillPackageError as exc:
+        response = skill_package_error_response(exc)
+        return web.json_response(response, status=_skill_package_error_status(str(response["error"].get("code") or "")))
+    return web.json_response(result, status=201)
+
+
 async def scan_skill_package_route(request: web.Request) -> web.Response:
     from koda.skills._package import SkillPackageError, scan_skill_package, skill_package_error_response
 
@@ -3491,6 +3508,7 @@ async def install_skill_package_route(request: web.Request) -> web.Response:
             package_path,
             agent_id=request.match_info["agent_id"],
             review_accepted=bool(payload.get("review_accepted")),
+            review_note=str(payload.get("review_note") or ""),
         )
     except SkillPackageError as exc:
         response = skill_package_error_response(exc)
@@ -3721,6 +3739,195 @@ async def list_knowledge_candidates(request: web.Request) -> web.Response:
             )
         }
     )
+
+
+def _improvement_proposal_error_response(exc: Exception) -> web.Response:
+    from koda.memory.safety import MemorySafetyError
+    from koda.services.improvement_proposals import (
+        ImprovementProposalError,
+        ImprovementProposalNotFound,
+        InvalidImprovementProposalTransition,
+    )
+
+    def _envelope(
+        *,
+        code: str,
+        category: str,
+        message: str,
+        user_action: str,
+        retryable: bool = False,
+    ) -> dict[str, Any]:
+        return {
+            "code": code,
+            "category": category,
+            "message": message,
+            "retryable": retryable,
+            "user_action": user_action,
+        }
+
+    if isinstance(exc, ImprovementProposalNotFound):
+        return web.json_response(
+            {
+                "error": _envelope(
+                    code="improvement_proposal.not_found",
+                    category="validation",
+                    message="Improvement proposal not found.",
+                    user_action="Refresh the proposal queue and retry with an existing proposal.",
+                )
+            },
+            status=404,
+        )
+    if isinstance(exc, MemorySafetyError):
+        return web.json_response({"error": exc.error_envelope()}, status=409)
+    if isinstance(exc, KeyError):
+        return web.json_response(
+            {
+                "error": _envelope(
+                    code="improvement_proposal.agent_not_found",
+                    category="configuration",
+                    message="Agent or improvement proposal not found.",
+                    user_action="Verify the agent id and proposal id, then retry.",
+                )
+            },
+            status=404,
+        )
+    if isinstance(exc, InvalidImprovementProposalTransition):
+        return web.json_response(
+            {
+                "error": _envelope(
+                    code="improvement_proposal.invalid_transition",
+                    category="policy_denied",
+                    message=str(exc),
+                    user_action="Review the proposal status, validation result, RunGraph evidence, and rollback plan.",
+                )
+            },
+            status=409,
+        )
+    if isinstance(exc, ImprovementProposalError):
+        return web.json_response(
+            {
+                "error": _envelope(
+                    code="improvement_proposal.validation",
+                    category="validation",
+                    message=str(exc),
+                    user_action="Fix the proposal payload and submit it again.",
+                )
+            },
+            status=400,
+        )
+    raise exc
+
+
+async def list_improvement_proposals(request: web.Request) -> web.Response:
+    try:
+        limit = _bounded_int(request.query.get("limit"), name="limit", default=50, maximum=500)
+        return web.json_response(
+            _manager().list_improvement_proposals(
+                request.match_info["agent_id"],
+                status=request.query.get("status"),
+                proposal_type=request.query.get("proposal_type"),
+                limit=limit,
+            )
+        )
+    except Exception as exc:
+        return _improvement_proposal_error_response(exc)
+
+
+async def create_improvement_proposal(request: web.Request) -> web.Response:
+    try:
+        payload = await _json_payload(request)
+        return web.json_response(
+            _manager().create_improvement_proposal(request.match_info["agent_id"], payload),
+            status=201,
+        )
+    except Exception as exc:
+        return _improvement_proposal_error_response(exc)
+
+
+async def get_improvement_proposal(request: web.Request) -> web.Response:
+    try:
+        return web.json_response(
+            _manager().get_improvement_proposal(
+                request.match_info["agent_id"],
+                request.match_info["proposal_id"],
+            )
+        )
+    except Exception as exc:
+        return _improvement_proposal_error_response(exc)
+
+
+async def approve_improvement_proposal(request: web.Request) -> web.Response:
+    try:
+        payload = await _json_payload(request)
+        return web.json_response(
+            _manager().approve_improvement_proposal(
+                request.match_info["agent_id"],
+                request.match_info["proposal_id"],
+                reviewer=str(payload.get("reviewer") or request.query.get("reviewer") or "control-plane"),
+                note=str(payload.get("note") or ""),
+            )
+        )
+    except Exception as exc:
+        return _improvement_proposal_error_response(exc)
+
+
+async def reject_improvement_proposal(request: web.Request) -> web.Response:
+    try:
+        payload = await _json_payload(request)
+        return web.json_response(
+            _manager().reject_improvement_proposal(
+                request.match_info["agent_id"],
+                request.match_info["proposal_id"],
+                reviewer=str(payload.get("reviewer") or request.query.get("reviewer") or "control-plane"),
+                note=str(payload.get("note") or ""),
+            )
+        )
+    except Exception as exc:
+        return _improvement_proposal_error_response(exc)
+
+
+async def validate_improvement_proposal(request: web.Request) -> web.Response:
+    try:
+        payload = await _json_payload(request)
+        return web.json_response(
+            _manager().validate_improvement_proposal(
+                request.match_info["agent_id"],
+                request.match_info["proposal_id"],
+                payload,
+            )
+        )
+    except Exception as exc:
+        return _improvement_proposal_error_response(exc)
+
+
+async def apply_improvement_proposal(request: web.Request) -> web.Response:
+    try:
+        payload = await _json_payload(request)
+        return web.json_response(
+            _manager().apply_improvement_proposal(
+                request.match_info["agent_id"],
+                request.match_info["proposal_id"],
+                reviewer=str(payload.get("reviewer") or request.query.get("reviewer") or "control-plane"),
+                note=str(payload.get("note") or ""),
+            )
+        )
+    except Exception as exc:
+        return _improvement_proposal_error_response(exc)
+
+
+async def rollback_improvement_proposal(request: web.Request) -> web.Response:
+    try:
+        payload = await _json_payload(request)
+        return web.json_response(
+            _manager().rollback_improvement_proposal(
+                request.match_info["agent_id"],
+                request.match_info["proposal_id"],
+                reviewer=str(payload.get("reviewer") or request.query.get("reviewer") or "control-plane"),
+                note=str(payload.get("note") or ""),
+            )
+        )
+    except Exception as exc:
+        return _improvement_proposal_error_response(exc)
 
 
 async def approve_knowledge_candidate(request: web.Request) -> web.Response:
@@ -3986,6 +4193,63 @@ async def create_trajectory_export_route(request: web.Request) -> web.Response:
 
 async def get_release_quality_latest_route(request: web.Request) -> web.Response:
     return web.json_response(_manager().get_release_quality_latest(request.match_info["agent_id"]))
+
+
+async def get_quality_cockpit_overview_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    return web.json_response(_manager().get_quality_cockpit_overview())
+
+
+async def get_quality_cockpit_agent_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    try:
+        return web.json_response(_manager().get_quality_cockpit_agent(request.match_info["agent_id"]))
+    except KeyError:
+        return web.json_response({"error": "agent not found"}, status=404)
+
+
+async def create_quality_failure_proposal_route(request: web.Request) -> web.Response:
+    if (resp := _authorize_request(request)) is not None:
+        return resp
+    payload = await _json_payload(request)
+    agent_id = str(payload.get("agent_id") or payload.get("agentId") or request.query.get("agent_id") or "").strip()
+    if not agent_id:
+        return web.json_response(
+            {
+                "error": {
+                    "code": "quality_cockpit.validation_failed",
+                    "category": "validation",
+                    "message": "agent_id is required.",
+                    "retryable": False,
+                    "user_action": "Select the affected agent and retry.",
+                }
+            },
+            status=400,
+        )
+    try:
+        return web.json_response(
+            _manager().create_quality_failure_proposal(
+                agent_id=agent_id,
+                failure_id=request.match_info["failure_id"],
+                requested_by=str(payload.get("requested_by") or "quality_cockpit"),
+            ),
+            status=201,
+        )
+    except KeyError:
+        return web.json_response(
+            {
+                "error": {
+                    "code": "quality_cockpit.failure_not_found",
+                    "category": "not_found",
+                    "message": "Quality failure was not found for the selected agent.",
+                    "retryable": False,
+                    "user_action": "Refresh the quality cockpit and choose a current failure.",
+                }
+            },
+            status=404,
+        )
 
 
 async def get_dashboard_memory_map(request: web.Request) -> web.Response:
@@ -5132,6 +5396,32 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_put("/api/control-plane/agents/{agent_id}/execution-policy", put_execution_policy)
     app.router.add_get("/api/control-plane/agents/{agent_id}/policy-catalog", get_execution_policy_catalog)
     app.router.add_post("/api/control-plane/agents/{agent_id}/execution-policy/evaluate", evaluate_execution_policy)
+    app.router.add_get("/api/control-plane/agents/{agent_id}/improvement-proposals", list_improvement_proposals)
+    app.router.add_post("/api/control-plane/agents/{agent_id}/improvement-proposals", create_improvement_proposal)
+    app.router.add_get(
+        "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}",
+        get_improvement_proposal,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/approve",
+        approve_improvement_proposal,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/reject",
+        reject_improvement_proposal,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/validate",
+        validate_improvement_proposal,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/apply",
+        apply_improvement_proposal,
+    )
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/rollback",
+        rollback_improvement_proposal,
+    )
     app.router.add_get("/api/control-plane/agents/{agent_id}/knowledge-candidates", list_knowledge_candidates)
     app.router.add_post(
         "/api/control-plane/agents/{agent_id}/knowledge-candidates/{candidate_id}/approve",
@@ -5165,6 +5455,12 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_get(
         "/api/control-plane/agents/{agent_id}/evals/release-quality/latest",
         get_release_quality_latest_route,
+    )
+    app.router.add_get("/api/control-plane/dashboard/quality/overview", get_quality_cockpit_overview_route)
+    app.router.add_get("/api/control-plane/dashboard/quality/agents/{agent_id}", get_quality_cockpit_agent_route)
+    app.router.add_post(
+        "/api/control-plane/dashboard/quality/failures/{failure_id}/proposal",
+        create_quality_failure_proposal_route,
     )
 
     app.router.add_get("/api/control-plane/global-defaults", get_global_defaults)
@@ -5331,8 +5627,13 @@ def setup_control_plane_routes(app: web.Application) -> None:
         revoke_channel_gateway_identity_route,
     )
     app.router.add_get("/api/control-plane/agents/{agent_id}/skills/packages", list_skill_packages)
+    app.router.add_get("/api/control-plane/agents/{agent_id}/skills/registry", list_skill_registry_route)
     app.router.add_post("/api/control-plane/agents/{agent_id}/skills/packages/scan", scan_skill_package_route)
     app.router.add_post("/api/control-plane/agents/{agent_id}/skills/packages/install", install_skill_package_route)
+    app.router.add_post(
+        "/api/control-plane/agents/{agent_id}/skills/packages/{package_id}/evals/run",
+        run_skill_package_evals_route,
+    )
     app.router.add_delete(
         "/api/control-plane/agents/{agent_id}/skills/packages/{package_id}",
         uninstall_skill_package_route,

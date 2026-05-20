@@ -27,6 +27,8 @@ _OUTCOMES_MAX = 3
 _TOOL_CATEGORIES_MAX = 6
 _ALLOWED_TOOL_IDS_MAX = 32
 _INTEGRATION_IDS_MAX = 16
+_SKILL_IDS_MAX = 16
+_SKILL_PACKAGES_MAX = 8
 
 _TOOL_PREFIX_CATEGORY: dict[str, str] = {
     "mcp_": "mcp",
@@ -129,12 +131,15 @@ def build_capability_summary(
     """Derive a CapabilitySummary from an AgentSpec payload (normalized or raw)."""
     mission = agent_spec.get("mission_profile") or {}
     tool_policy = agent_spec.get("tool_policy") or {}
+    skill_policy = agent_spec.get("skill_policy") or {}
     model_policy = agent_spec.get("model_policy") or {}
     integration_policy = agent_spec.get("integration_policy") or agent_spec.get("integrations") or {}
     if not isinstance(mission, dict):
         mission = {}
     if not isinstance(tool_policy, dict):
         tool_policy = {}
+    if not isinstance(skill_policy, dict):
+        skill_policy = {}
     if not isinstance(model_policy, dict):
         model_policy = {}
     if not isinstance(integration_policy, dict):
@@ -156,6 +161,7 @@ def build_capability_summary(
     ]
     preferred_provider, preferred_model = _resolve_preferred_model(model_policy)
     integration_ids = _extract_integration_ids(integration_policy)
+    skill_metadata = _extract_skill_metadata(skill_policy)
     ops = agent_spec.get("routing_profile") or agent_spec.get("delivery_profile") or {}
     if not isinstance(ops, dict):
         ops = {}
@@ -178,7 +184,10 @@ def build_capability_summary(
         load_score=_coerce_float(ops.get("load_score"), default=0.0, low=0.0, high=1.0),
         quality_score=_coerce_float(ops.get("quality_score"), default=0.5, low=0.0, high=1.0),
         recent_success_rate=_coerce_optional_float(ops.get("recent_success_rate"), low=0.0, high=1.0),
-        metadata={key: value for key, value in ops.items() if key in {"notes", "quality_source", "load_source"}},
+        metadata={
+            **{key: value for key, value in ops.items() if key in {"notes", "quality_source", "load_source"}},
+            **skill_metadata,
+        },
     )
 
 
@@ -222,6 +231,19 @@ def _extract_integration_ids(integration_policy: dict[str, Any]) -> list[str]:
     if isinstance(grants, dict):
         candidates.extend(str(key) for key in grants if key)
     return _coerce_list(candidates, cap=_INTEGRATION_IDS_MAX)
+
+
+def _extract_skill_metadata(skill_policy: dict[str, Any]) -> dict[str, Any]:
+    enabled_skill_ids = _coerce_list(skill_policy.get("enabled_skills"), cap=_SKILL_IDS_MAX)
+    enabled_package_ids = _coerce_list(skill_policy.get("enabled_skill_packages"), cap=_SKILL_PACKAGES_MAX)
+    if not enabled_skill_ids and not enabled_package_ids:
+        return {}
+    return {
+        "skills": {
+            "enabled_skill_ids": enabled_skill_ids,
+            "enabled_package_ids": enabled_package_ids,
+        }
+    }
 
 
 def format_capability_block(

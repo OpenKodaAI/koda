@@ -5,13 +5,13 @@ import { PageEmptyState, PageSection } from "@/components/ui/page-primitives";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 
 export default function ControlPlaneAgentNotFound() {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <PageSection className="min-h-[420px]">
       <PageEmptyState
         icon={AgentIcon}
-        title={tl("Agent configuration not found")}
-        description={tl("The requested control plane agent could not be found.")}
+        title={t("generated.routes.agent_configuration_not_found_7fe07d4b")}
+        description={t("generated.routes.the_requested_control_plane_agent_could_not__7a323fa9")}
       />
     </PageSection>
   );

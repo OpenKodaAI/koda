@@ -10,11 +10,11 @@ export default function RuntimeError({
   error: Error & { digest?: string };
   reset: () => void;
 }) {
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
   return (
     <RouteErrorState
-      title={tl("Runtime unavailable")}
-      description={error.message || tl("The runtime section could not be loaded.")}
+      title={t("generated.routes.runtime_unavailable_27ef08e4")}
+      description={error.message || t("generated.routes.the_runtime_section_could_not_be_loaded_0bc0b972")}
       onRetry={reset}
     />
   );

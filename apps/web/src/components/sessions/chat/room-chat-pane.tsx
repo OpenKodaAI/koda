@@ -300,9 +300,7 @@ export function RoomChatPane({
           params: {
             message_limit: ROOM_THREAD_PAGE_SIZE,
           },
-          fallbackError: t("sessions.room.loadError", {
-            defaultValue: "Could not load this room.",
-          }),
+          fallbackError: t("sessions.room.loadError", undefined),
         },
       ),
   });
@@ -365,9 +363,7 @@ export function RoomChatPane({
       const cursor = typeof pageParam === "string" ? pageParam : "";
       if (!threadId || !cursor) {
         throw new Error(
-          t("sessions.room.loadError", {
-            defaultValue: "Could not load this room.",
-          }),
+          t("sessions.room.loadError", undefined),
         );
       }
       return fetchControlPlaneDashboardJson<SquadThreadOverviewResponse>(
@@ -378,9 +374,7 @@ export function RoomChatPane({
             message_limit: ROOM_THREAD_PAGE_SIZE,
             before: cursor,
           },
-          fallbackError: t("sessions.room.loadError", {
-            defaultValue: "Could not load this room.",
-          }),
+          fallbackError: t("sessions.room.loadError", undefined),
         },
       );
     },
@@ -534,7 +528,7 @@ export function RoomChatPane({
     auth?.operator?.display_name?.trim() ||
     auth?.operator?.username?.trim() ||
     auth?.operator?.email?.trim() ||
-    t("sessions.room.you", { defaultValue: "You" });
+    t("sessions.room.you", undefined);
   const operatorPhotoUrl = auth?.operator?.profile_photo_url ?? null;
   const participantAvatars = useMemo(
     () =>
@@ -556,7 +550,7 @@ export function RoomChatPane({
         messageId: message.id,
         fromAgent: message.from,
         label: isUserAuthored(message)
-          ? t("sessions.room.you", { defaultValue: "You" })
+          ? t("sessions.room.you", undefined)
           : meta.label,
         excerpt: replyExcerpt(message.content),
         targetAgentId: isReplyTargetAgent(message) ? message.from : null,
@@ -699,9 +693,7 @@ export function RoomChatPane({
                   ? { mentioned_agent_ids: mentionedAgentIds }
                   : undefined,
             },
-            fallbackError: t("sessions.room.sendError", {
-              defaultValue: "Could not post message.",
-            }),
+            fallbackError: t("sessions.room.sendError", undefined),
           },
         );
         setDraft("");
@@ -771,7 +763,7 @@ export function RoomChatPane({
             <button
               type="button"
               onClick={onOpenRail}
-              aria-label={t("chat.rail.openLabel", { defaultValue: "Open conversations" })}
+              aria-label={t("chat.rail.openLabel", undefined)}
               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] md:hidden"
             >
               <PanelLeft className="icon-sm" strokeWidth={1.75} aria-hidden />
@@ -793,7 +785,7 @@ export function RoomChatPane({
           ) : null}
           <h2 className="m-0 truncate text-[0.875rem] font-semibold text-[var(--text-primary)]">
             {detail?.thread.title ||
-              t("sessions.room.untitled", { defaultValue: "Untitled room" })}
+              t("sessions.room.untitled", undefined)}
           </h2>
         </div>
         <div className="flex items-center gap-2 overflow-hidden">
@@ -802,9 +794,7 @@ export function RoomChatPane({
             maxVisible={4}
             size="xs"
             showInitials={false}
-            ariaLabel={t("sessions.room.participants", {
-              defaultValue: "Room participants",
-            })}
+            ariaLabel={t("sessions.room.participants", undefined)}
             className="hidden sm:inline-flex"
           />
         </div>
@@ -830,26 +820,19 @@ export function RoomChatPane({
           <div className="mx-auto flex h-full w-full max-w-[480px] flex-col items-center justify-center gap-2 px-6 text-center">
             <p className="m-0 text-[var(--font-size-sm)] text-[var(--tone-danger-dot)]">
               {query.error?.message ??
-                t("sessions.room.loadError", {
-                  defaultValue: "Could not load this room.",
-                })}
+                t("sessions.room.loadError", undefined)}
             </p>
           </div>
         ) : messages.length === 0 ? (
           <div className="mx-auto flex h-full w-full max-w-[640px] flex-col items-center justify-center gap-2 px-6 text-center">
             <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-              {t("sessions.room.empty.eyebrow", { defaultValue: "New room" })}
+              {t("sessions.room.empty.eyebrow", undefined)}
             </p>
             <h1 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
-              {t("sessions.room.empty.title", {
-                defaultValue: "Kick off the conversation",
-              })}
+              {t("sessions.room.empty.title", undefined)}
             </h1>
             <p className="m-0 max-w-[420px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
-              {t("sessions.room.empty.helper", {
-                defaultValue:
-                  "Post a message; the coordinator will dispatch it to the right agents.",
-              })}
+              {t("sessions.room.empty.helper", undefined)}
             </p>
           </div>
         ) : (
@@ -890,7 +873,7 @@ export function RoomChatPane({
                   sameMessageDay(previousMessage.createdAt, message.createdAt),
               );
               const authorLabel = userAuthored
-                ? t("sessions.room.you", { defaultValue: "You" })
+                ? t("sessions.room.you", undefined)
                 : meta.label;
               const agentAccentColor =
                 !userAuthored && message.type !== "system_event"
@@ -914,10 +897,7 @@ export function RoomChatPane({
                       isContinuation ? "py-0.5" : "py-2",
                       message.type === "system_event" && "opacity-90",
                     )}
-                    aria-label={t("sessions.room.messageFrom", {
-                      defaultValue: "Message from {{label}}",
-                      label: authorLabel,
-                    })}
+                    aria-label={t("sessions.room.messageFrom", { label: authorLabel })}
                   >
                     <div className="flex justify-center pt-0.5">
                       {isContinuation ? (
@@ -953,9 +933,7 @@ export function RoomChatPane({
                           ) : null}
                           {message.type === "coordinator_synthesis" ? (
                             <span className="shrink-0 rounded-full bg-[var(--tone-info-bg)] px-2 py-0.5 font-mono text-[0.5625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-info-dot)]">
-                              {t("sessions.room.reply.synthesized", {
-                                defaultValue: "Synthesized",
-                              })}
+                              {t("sessions.room.reply.synthesized", undefined)}
                             </span>
                           ) : null}
                         </div>
@@ -964,9 +942,7 @@ export function RoomChatPane({
                         <div className="mt-1.5 flex max-w-full items-center gap-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--divider-hair)] bg-[var(--panel-soft)] px-2 py-1 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
                           <Reply className="h-3 w-3 text-[var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
                           <span className="truncate">
-                            {t("sessions.room.reply.parentPreview", {
-                              defaultValue: "Linked reply in this thread",
-                            })}
+                            {t("sessions.room.reply.parentPreview", undefined)}
                           </span>
                           <span className="hidden font-mono text-[0.625rem] text-[var(--text-quaternary)] sm:inline">
                             {inReplyTo}
@@ -1011,19 +987,13 @@ export function RoomChatPane({
                           {openReplies > 0 ? (
                             <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--tone-warning-bg)] px-2 py-0.5 font-medium text-[var(--tone-warning-dot)]">
                               <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
-                              {t("sessions.room.reply.waiting", {
-                                defaultValue: "{{count}} waiting",
-                                count: openReplies,
-                              })}
+                              {t("sessions.room.reply.waiting", { count: openReplies })}
                             </span>
                           ) : null}
                           {answeredReplies > 0 ? (
                             <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--tone-success-bg)] px-2 py-0.5 font-medium text-[var(--tone-success-dot)]">
                               <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
-                              {t("sessions.room.reply.answered", {
-                                defaultValue: "{{count}} answered",
-                                count: answeredReplies,
-                              })}
+                              {t("sessions.room.reply.answered", { count: answeredReplies })}
                             </span>
                           ) : null}
                         </div>
@@ -1040,9 +1010,7 @@ export function RoomChatPane({
                         "focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
                         "group-hover:opacity-100",
                       )}
-                      aria-label={t("sessions.room.reply.action", {
-                        defaultValue: "Reply",
-                      })}
+                      aria-label={t("sessions.room.reply.action", undefined)}
                     >
                       <Reply className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
                     </button>
@@ -1057,9 +1025,7 @@ export function RoomChatPane({
       <form
         onSubmit={handleSubmit}
         className="mx-auto w-full max-w-[760px] px-6 pb-5 pt-2 lg:px-8"
-        aria-label={t("sessions.room.composer.placeholder", {
-          defaultValue: "Send a message to this room…",
-        })}
+        aria-label={t("sessions.room.composer.placeholder", undefined)}
       >
         <Popover
           open={Boolean(mentionTrigger) && mentionCandidates.length > 0}
@@ -1081,28 +1047,19 @@ export function RoomChatPane({
               <div className="min-w-0">
                 <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
                   {replyDraft.targetAgentId
-                    ? t("sessions.room.reply.requesting", {
-                        defaultValue: "Replying to {{label}}",
-                        label: replyDraft.label,
-                      })
-                    : t("sessions.room.reply.linked", {
-                        defaultValue: "Replying in thread",
-                      })}
+                    ? t("sessions.room.reply.requesting", { label: replyDraft.label })
+                    : t("sessions.room.reply.linked", undefined)}
                 </p>
                 <p className="m-0 mt-0.5 truncate text-[0.75rem] text-[var(--text-secondary)]">
                   {replyDraft.excerpt ||
-                    t("sessions.room.reply.noPreview", {
-                      defaultValue: "No preview",
-                    })}
+                    t("sessions.room.reply.noPreview", undefined)}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setReplyDraft(null)}
                 className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
-                aria-label={t("sessions.room.reply.cancel", {
-                  defaultValue: "Cancel reply",
-                })}
+                aria-label={t("sessions.room.reply.cancel", undefined)}
               >
                 <X className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
               </button>
@@ -1133,9 +1090,7 @@ export function RoomChatPane({
                 onKeyDown={handleKeyDown}
                 disabled={submitting}
                 rows={1}
-                placeholder={t("sessions.room.composer.placeholder", {
-                  defaultValue: "Send a message to this room…",
-                })}
+                placeholder={t("sessions.room.composer.placeholder", undefined)}
                 className={cn(
                   "relative min-h-[56px] max-h-[200px] w-full resize-none bg-transparent py-1 text-[var(--font-size-md)] leading-[1.5]",
                   "caret-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none selection:bg-[var(--tone-info-bg)]",
@@ -1146,7 +1101,7 @@ export function RoomChatPane({
             <button
               type="submit"
               disabled={!draft.trim() || submitting}
-              aria-label={t("chat.composer.send", { defaultValue: "Send" })}
+              aria-label={t("chat.composer.send", undefined)}
               className={cn(
                 "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
                 "transition-[background-color,color,transform] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
@@ -1163,10 +1118,7 @@ export function RoomChatPane({
             </button>
           </div>
           <div className="px-4 pb-3 pt-1 text-[0.6875rem] text-[var(--text-quaternary)]">
-            {t("sessions.room.composer.helper", {
-              defaultValue:
-                "Cmd/Ctrl + Enter to send. Type @ to mention a participant.",
-            })}
+            {t("sessions.room.composer.helper", undefined)}
           </div>
         </div>
         </PopoverAnchor>
@@ -1186,9 +1138,7 @@ export function RoomChatPane({
         >
           <ul
             role="listbox"
-            aria-label={t("sessions.room.mentions.label", {
-              defaultValue: "Mention an agent",
-            })}
+            aria-label={t("sessions.room.mentions.label", undefined)}
             className="flex max-h-[260px] flex-col gap-0.5 overflow-y-auto"
           >
             {mentionCandidates.map((candidate, index) => {

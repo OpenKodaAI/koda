@@ -96,12 +96,34 @@ Phase 5 contract artifacts:
 
 - [Evals, Trajectory Export, And Release Quality](evals-release-quality.md)
 - [Evals And Release Quality Runbook](../operations/evals-release-runbook.md)
+- [Handoffs, Route Quality, And Synthesis Readiness](handoffs-squad-intelligence.md)
+- [Quality Cockpit Runbook](../operations/quality-cockpit-runbook.md)
+
+Phase 5 squad intelligence contract:
+
+- `handoff_event.v1` extends `squad_delivery.v1` as a transcript-visible
+  `squad_messages.system_event`, not as a replacement for room messages,
+  reply obligations, tasks, or child runs.
+- Route decisions include candidate scores, exclusions, required tool/skill
+  gates, quality inputs, and an operator-readable route explanation.
+- `synthesis_readiness.v1` is the coordinator gate before final synthesis. It
+  blocks while tasks, reply obligations, child runs, or handoffs are open and
+  allows terminal timeout/decline/failure only when the final response declares
+  the affected work.
+- `quality_cockpit.v1` aggregates quality evidence from existing evals,
+  metrics, RunGraph refs, executions, and proposals. It does not replace
+  `release_quality.v1`.
+- Failure-to-proposal always reuses `improvement_proposal.v1` and is
+  non-mutating until the proposal lifecycle approves, validates, applies, and
+  can roll back.
 
 Phase 6 contract artifacts:
 
 - [Channel Gateway And Onboarding Readiness](channel-gateway-onboarding.md)
 - [Channel Gateway Runbook](../operations/channel-gateway-runbook.md)
 - [Onboarding Readiness Runbook](../operations/onboarding-readiness-runbook.md)
+- [Scaling And Resilience Runbook](../operations/scaling-resilience-runbook.md)
+- [Sandbox Doctor Runbook](../operations/sandbox-doctor-runbook.md)
 
 Every phase must publish the following before feature slices are marked ready:
 
@@ -243,6 +265,13 @@ KG-12 and KG-13 close only when:
   memory, channel, first task, first trace, docs, and release quality checks.
 - First-task onboarding uses the normal dashboard/runtime path and does not
   bypass queue, policy, audit, metrics, or RunGraph-compatible events.
+- Slack and Discord adapter contracts route through `ChannelManager` and
+  `channel_gateway.v1`; live E2E remains blocked unless credentials are
+  available.
+- `sandbox_policy.v1` includes channel context and remote/group defaults deny
+  unsafe execution unless an explicit remote policy is present.
+- `ops_benchmark.v1` quick mode passes for queue/runtime/channel no double-run,
+  terminal states, timeout, DLQ, no infinite loading, cleanup and backpressure.
 - Docs index, OpenAPI contract, operator runbooks, frontend contracts, backend
   tests, web tests, and Obsidian handoff are updated before KG-12/KG-13 are
   marked implemented.

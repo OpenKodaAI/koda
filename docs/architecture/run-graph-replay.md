@@ -44,6 +44,12 @@ Allowed `node_type` values:
 - `resource_cleanup`
 - `user_facing_error`
 - `child_run`
+- `squad_reply`
+- `agent_request`
+- `agent_followup`
+- `reply_obligation`
+- `handoff_event`
+- `coordinator_synthesis`
 - `artifact`
 - `cost`
 - `runtime_event`
@@ -133,6 +139,25 @@ Phase 3 adds KG-09/KG-10 graph sources:
   cost, warnings, and error envelopes instead of raw child prompts or fenced
   context.
 
+Phase 5 adds `run_graph_completeness.v1`, a deterministic verifier used by
+release quality gates and squad smoke tests. It checks required node types,
+scenario-specific alternatives such as `child_run` or `squad_reply`, edge
+presence for multi-node graphs, dangling edge endpoints, disconnected required
+nodes, and the causal path from completed evidence or timeout into
+`coordinator_synthesis`.
+
+Scenario rules:
+
+- `single_agent` requires at least `model_call`.
+- `squad` requires `model_call`, `agent_request`, `reply_obligation`,
+  `coordinator_synthesis`, and at least one of `child_run` or `squad_reply`.
+- `handoff` requires `model_call`, `agent_request`, `handoff_event`,
+  `coordinator_synthesis`, and at least one of `squad_reply` or
+  `reply_obligation`.
+- Partial timeout evidence requires `dependency_call`.
+- A squad or handoff graph without a result/timeout path into synthesis fails
+  the gate.
+
 ## Validation
 
 - Contract tests for serialization and deterministic ids.
@@ -143,3 +168,4 @@ Phase 3 adds KG-09/KG-10 graph sources:
 - Replay tests that prove no provider/tool/runtime call occurs.
 - Frontend tests for graph viewer, filters, node detail, replay drawer, and
   unavailable/degraded states.
+- Completeness tests for required squad, child-run, policy, and model nodes.

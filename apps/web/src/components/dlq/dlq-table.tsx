@@ -6,6 +6,7 @@ import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { DLQEntry } from "@/lib/types";
 import { cn, formatDateTime, formatRelativeTime, truncateText } from "@/lib/utils";
+import { translate } from "@/lib/i18n";
 
 interface DLQTableProps {
   entries: DLQEntry[];
@@ -128,7 +129,7 @@ export function DLQTable({
                     >
                       <td>
                         <p className="m-0 font-mono text-[0.75rem] text-[var(--text-primary)]">
-                          DLQ #{entry.id}
+                          {translate("generated.executions.dlq_ddb953bb")}{entry.id}
                         </p>
                         <p className="m-0 text-[0.6875rem] text-[var(--text-quaternary)]">
                           {entry.bot_id ?? t("dlq.table.noAgent")}
@@ -234,7 +235,7 @@ export function DLQTable({
                   <div className="flex min-w-0 flex-col gap-2">
                     <div className="flex flex-wrap items-center gap-2 text-[0.75rem]">
                       <span className="font-mono text-[var(--text-quaternary)]">
-                        DLQ #{entry.id}
+                        {translate("generated.executions.dlq_ddb953bb")}{entry.id}
                       </span>
                       <span className="text-[var(--text-quaternary)]">·</span>
                       <span className="font-mono text-[var(--text-secondary)]">
@@ -254,11 +255,11 @@ export function DLQTable({
                     <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
                       {entry.bot_id ? (
                         <span>
-                          agent: <span className="text-[var(--text-secondary)]">{entry.bot_id}</span>
+                          {translate("generated.executions.agent_49af14f5")}<span className="text-[var(--text-secondary)]">{entry.bot_id}</span>
                         </span>
                       ) : null}
                       <span>
-                        failed:{" "}
+                        {translate("generated.executions.failed_2a342abe")}{" "}
                         <span className="text-[var(--text-secondary)]">
                           {formatRelativeTime(entry.failed_at)}
                         </span>

@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import { Check, Cpu, Server, Volume2 } from "lucide-react";
 import { useAgentEditor } from "@/hooks/use-agent-editor";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { translate } from "@/lib/i18n";
 import {
   FormCurrencyInput,
   FormField,
@@ -159,7 +160,7 @@ function ProviderLogo({
 
 export function TabRecursos() {
   const { state, core, developerMode, updateAgentSpecField, updateDocument } = useAgentEditor();
-  const { tl } = useAppI18n();
+  const { t } = useAppI18n();
 
   const modelPolicy = useMemo(
     () => parseModelPolicy(state.modelPolicyJson),
@@ -247,7 +248,7 @@ export function TabRecursos() {
   const currentModelLabel =
     (defaultModel
       ? generalModelLabelMap[`${effectiveDefaultProvider}:${defaultModel}`] || prettifyModelId(defaultModel)
-      : "") || tl("Nenhum modelo selecionado");
+      : "") || t("generated.controlPlane.nenhum_modelo_selecionado_e0cd05b0");
 
   const effortCapabilityLookup = useMemo(() => {
     const lookup: Record<string, EffortCapability> = {};
@@ -294,13 +295,13 @@ export function TabRecursos() {
   }
   const currentProviderLabel =
     providerOptions.find((item) => item.value === effectiveDefaultProvider)?.label ??
-    (effectiveDefaultProvider || tl("Nenhum provider selecionado"));
+    (effectiveDefaultProvider || t("generated.controlPlane.nenhum_provider_selecionado_a88d3d72"));
   const voiceModeLabel =
     voicePolicy.mode === "tts"
-      ? tl("Leitura em voz")
+      ? t("generated.controlPlane.leitura_em_voz_0871f7b1")
       : voicePolicy.mode === "voice_active"
-        ? tl("Fala ativa")
-        : tl("Desligado");
+        ? t("generated.controlPlane.fala_ativa_ad7e3b37")
+        : t("generated.controlPlane.desligado_ffa347b3");
 
   function updateModelPolicy(next: Partial<typeof modelPolicy>) {
     const allowedProviders = unique(
@@ -418,7 +419,7 @@ export function TabRecursos() {
   return (
     <div className="flex flex-col gap-6">
       <PolicyCard
-        title={tl("Modelo principal")}
+        title={t("generated.controlPlane.modelo_principal_c14a4970")}
         description={`${currentProviderLabel} · ${currentModelLabel}`}
         icon={Cpu}
         dirty={state.dirty.agentSpec}
@@ -430,12 +431,12 @@ export function TabRecursos() {
           <span className="chip text-xs font-mono">{currentModelLabel}</span>
           {modelPolicy.fallback_order.length > 0 ? (
             <span className="chip text-xs">
-              {tl("Fallback")}: {modelPolicy.fallback_order.join(" → ")}
+              {t("generated.controlPlane.fallback_6a7beefa")}: {modelPolicy.fallback_order.join(" → ")}
             </span>
           ) : null}
         </div>
 
-        <FormField label={tl("Providers disponíveis")}>
+        <FormField label={t("generated.controlPlane.providers_disponiveis_3b1989a2")}>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
             {providerOptions.map((provider) => {
               const isAllowed = effectiveAllowedProviders.includes(provider.value);
@@ -466,7 +467,7 @@ export function TabRecursos() {
         </FormField>
 
         {effectiveAllowedProviders.length > 1 && (
-          <FormField label={tl("Provider principal")}>
+          <FormField label={t("generated.controlPlane.provider_principal_327f7c15")}>
             <div className="flex flex-wrap gap-2">
               {effectiveAllowedProviders.map((providerId) => {
                 const title =
@@ -502,7 +503,7 @@ export function TabRecursos() {
         >
           <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(220px,0.7fr)_minmax(220px,0.7fr)]">
             <ModelSelector
-              label={tl("Modelo principal")}
+              label={t("generated.controlPlane.modelo_principal_c14a4970")}
               value={`${effectiveDefaultProvider}:${defaultModel}`}
               onChange={(combined) => {
                 const [pId, ...mParts] = combined.split(":");
@@ -530,25 +531,25 @@ export function TabRecursos() {
             />
 
             <FormCurrencyInput
-              label={tl("Orçamento por tarefa (USD)")}
+              label={t("generated.controlPlane.orcamento_por_tarefa_usd_8fc9375a")}
               value={modelPolicy.max_budget_usd}
               onValueChange={(value) =>
                 updateModelPolicy({
                   max_budget_usd: value,
                 })
               }
-              placeholder="US$ 0,00"
+              placeholder={translate("generated.controlPlane.us_0_00_d0677f33")}
             />
 
             <FormCurrencyInput
-              label={tl("Orçamento total (USD)")}
+              label={t("generated.controlPlane.orcamento_total_usd_7ec945a5")}
               value={modelPolicy.max_total_budget_usd}
               onValueChange={(value) =>
                 updateModelPolicy({
                   max_total_budget_usd: value,
                 })
               }
-              placeholder="US$ 0,00"
+              placeholder={translate("generated.controlPlane.us_0_00_d0677f33")}
             />
           </div>
 
@@ -578,7 +579,7 @@ export function TabRecursos() {
         </motion.div>
 
         {modelFunctions.length > 0 ? (
-          <SectionCollapsible title={tl("Modelos especializados por tipo de tarefa")}>
+          <SectionCollapsible title={t("generated.controlPlane.modelos_especializados_por_tipo_de_tarefa_ef022a71")}>
             <div className="flex flex-col gap-4 pt-2">
               {modelFunctions.map((functionItem) => {
                 const fnId = String(functionItem.id || "");
@@ -609,7 +610,7 @@ export function TabRecursos() {
                     enabledProviders={functionalProviderIds}
                     functionalCatalog={functionalModelCatalog}
                     functionId={fnId}
-                    emptyLabel={tl("Herdar do modelo principal")}
+                    emptyLabel={t("generated.controlPlane.herdar_do_modelo_principal_16253e7c")}
                   />
                 );
               })}
@@ -619,43 +620,43 @@ export function TabRecursos() {
       </PolicyCard>
 
       <PolicyCard
-        title={tl("Voz")}
+        title={t("generated.controlPlane.voz_4f8c6efc")}
         description={voiceModeLabel}
         icon={Volume2}
         variant="flat"
       >
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)]">
           <FormSelect
-            label={tl("Modo de voz")}
+            label={t("generated.controlPlane.modo_de_voz_87a2a67f")}
             value={voicePolicy.mode}
             onChange={(event) => updateVoicePolicy({ mode: event.target.value })}
             options={[
-              { value: "disabled", label: tl("Desligado") },
-              { value: "tts", label: tl("Leitura em voz") },
-              { value: "voice_active", label: tl("Fala ativa") },
+              { value: "disabled", label: t("generated.controlPlane.desligado_ffa347b3") },
+              { value: "tts", label: t("generated.controlPlane.leitura_em_voz_0871f7b1") },
+              { value: "voice_active", label: t("generated.controlPlane.fala_ativa_ad7e3b37") },
             ]}
           />
           <FormInput
-            label={tl("Estilo da fala")}
+            label={t("generated.controlPlane.estilo_da_fala_f21f1178")}
             value={voicePolicy.style}
             onChange={(event) => updateVoicePolicy({ style: event.target.value })}
-            placeholder={tl("Ex: calmo e objetivo")}
+            placeholder={t("generated.controlPlane.ex_calmo_e_objetivo_5645489b")}
           />
         </div>
 
         {voicePolicy.mode !== "disabled" && (
           <FormTextarea
-            label={tl("Notas de TTS")}
-            description={tl("Orientacoes para o modelo ao gerar texto para audio.")}
+            label={t("generated.controlPlane.notas_de_tts_a341b115")}
+            description={t("generated.controlPlane.orientacoes_para_o_modelo_ao_gerar_texto_par_e12918b2")}
             value={voicePolicy.tts_notes}
             onChange={(event) => updateVoicePolicy({ tts_notes: event.target.value })}
-            placeholder={tl("Ex: evitar caracteres especiais, escrever como se fala, numeros por extenso")}
+            placeholder={t("generated.controlPlane.ex_evitar_caracteres_especiais_escrever_como_07a6c6e0")}
             rows={2}
           />
         )}
 
         <MarkdownEditorField
-          label={tl("Prompt de voz")}
+          label={t("generated.controlPlane.prompt_de_voz_6bcbbbdc")}
           value={state.documents.voice_prompt_md ?? ""}
           onChange={(value) => updateDocument("voice_prompt_md", value)}
           minHeight="220px"
@@ -671,32 +672,32 @@ export function TabRecursos() {
             transition={COLLAPSE_TRANSITION}
             className="overflow-hidden"
           >
-            <SectionCollapsible title={tl("JSON avançado")}>
+            <SectionCollapsible title={t("generated.controlPlane.json_avancado_20dad4cd")}>
               <div className="flex flex-col gap-6 pt-2">
                 <JsonEditorField
-                  label={tl("Política de modelo (JSON)")}
-                  description={tl("Contrato canônico que o runtime realmente materializa.")}
+                  label={t("generated.controlPlane.politica_de_modelo_json_0a3e9bed")}
+                  description={t("generated.controlPlane.contrato_canonico_que_o_runtime_realmente_ma_8dde2359")}
                   value={state.modelPolicyJson}
                   onChange={(value) => updateAgentSpecField("modelPolicyJson", value)}
                 />
                 <JsonEditorField
-                  label={tl("Política de voz (JSON)")}
-                  description={tl("Override avançado de voz e TTS.")}
+                  label={t("generated.controlPlane.politica_de_voz_json_df790ffd")}
+                  description={t("generated.controlPlane.override_avancado_de_voz_e_tts_d5e74114")}
                   value={state.voicePolicyJson}
                   onChange={(value) => updateAgentSpecField("voicePolicyJson", value)}
                 />
 
-                <SectionCollapsible title={tl("Políticas descontinuadas")}>
+                <SectionCollapsible title={t("generated.controlPlane.politicas_descontinuadas_85414415")}>
                   <div className="flex flex-col gap-6 pt-2">
                     <JsonEditorField
-                      label={tl("Política de tools (JSON)")}
-                      description={tl("Subset efetivo do catálogo de tools do core.")}
+                      label={t("generated.controlPlane.politica_de_tools_json_6faf4d69")}
+                      description={t("generated.controlPlane.subset_efetivo_do_catalogo_de_tools_do_core_e09a7910")}
                       value={state.toolPolicyJson}
                       onChange={(value) => updateAgentSpecField("toolPolicyJson", value)}
                     />
                     <JsonEditorField
-                      label={tl("Política de imagem (JSON)")}
-                      description={tl("Override avançado para análise visual.")}
+                      label={t("generated.controlPlane.politica_de_imagem_json_23cf6468")}
+                      description={t("generated.controlPlane.override_avancado_para_analise_visual_01a8a6fe")}
                       value={state.imageAnalysisPolicyJson}
                       onChange={(value) => updateAgentSpecField("imageAnalysisPolicyJson", value)}
                     />
