@@ -97,7 +97,7 @@ jobs:
           KODA_SECURITY_GUARD_STARTUP_TIMEOUT: "120"
       - name: Upload pytest artifacts
         if: always()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: python-tests-${{ matrix.os }}-${{ matrix.python-version }}-artifacts
           path: artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}/
@@ -110,10 +110,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6.0.2
-      - uses: pnpm/action-setup@v5.0.0
+      - uses: pnpm/action-setup@v6.0.8
         with:
           version: 10.26.2
-      - uses: actions/setup-node@v6.3.0
+      - uses: actions/setup-node@v6.4.0
         with:
           node-version: "22"
           cache: pnpm
@@ -130,7 +130,7 @@ jobs:
         run: pnpm build:web
       - name: Upload web test artifacts
         if: always()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: web-quality-artifacts
           path: artifacts/web/
@@ -252,7 +252,7 @@ jobs:
         run: bash scripts/docker_smoke.sh
       - name: Upload docker smoke artifacts
         if: failure()
-        uses: actions/upload-artifact@v7.0.0
+        uses: actions/upload-artifact@v7.0.1
         with:
           name: docker-smoke-artifacts
           path: artifacts/docker/
