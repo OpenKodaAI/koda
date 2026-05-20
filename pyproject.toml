@@ -1,0 +1,189 @@
+[build-system]
+requires = ["setuptools>=82.0.1", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "koda"
+version = "1.0.17"
+description = "Koda — open-source harness for multi-agent, multi-provider AI systems"
+requires-python = ">=3.11"
+dependencies = [
+    "python-telegram-bot[job-queue]>=22.7,<23.0",
+    "python-dotenv>=1.2.2,<2.0",
+    "structlog>=25.5.0,<26.0",
+    "tenacity>=9.1.4,<10.0",
+    "aiohttp>=3.13.5,<4.0",
+    "aiolimiter>=1.2.1,<2.0",
+    "playwright>=1.59.0,<2.0",
+    "croniter>=6.2.2,<7.0",
+    "beautifulsoup4>=4.14.3,<5.0",
+    "boto3>=1.43.6,<2.0",
+    "asyncpg>=0.31.0,<1.0",
+    "asyncssh>=2.23.0,<3.0",
+    "argon2-cffi>=25.1.0,<26.0",
+    # kokoro-onnx 0.5.x does not publish Python 3.14-compatible distributions yet.
+    # Docker/runtime images stay on Python 3.12 so local Kokoro TTS remains available.
+    "kokoro-onnx>=0.5.0,<1.0; python_version < '3.14'",
+    # supertonic 1.x publishes ONNX local TTS wheels for Python <3.14.
+    "supertonic>=1.3.1,<2.0; python_version < '3.14'",
+    "openpyxl>=3.1.5,<4.0",
+    "pillow>=12.2.0,<13.0",
+    "pypdf>=6.11.0,<7.0.0",
+    "soundfile>=0.13.1,<1.0",
+    "python-docx>=1.2.0,<2.0",
+    "PyYAML>=6.0.3,<7.0",
+    # rapidocr-onnxruntime 1.4.x does not install on Python 3.13+.
+    # OCR gracefully degrades when the optional backend is absent.
+    "rapidocr-onnxruntime>=1.4.4,<2.0; python_version < '3.13'",
+    "requests>=2.34.0,<3.0",
+    "prometheus_client>=0.25.0,<1.0",
+    "pybreaker>=1.4.1,<2.0",
+    "cryptography>=48.0.0,<49.0",
+    "grpcio>=1.80.0,<2.0",
+    "protobuf>=7.34.1,<8.0",
+    "idna>=3.15,<4.0",
+    "huggingface-hub>=1.14.0,<2.0",
+    # lxml is pulled in transitively; pin a floor here so Snyk/pip-audit stop
+    # flagging CVE-2026-41066 on older wheels.
+    "lxml>=6.1.0,<7.0",
+    "urllib3>=2.7.0,<3.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.3,<10.0",
+    "pytest-asyncio>=1.3.0,<2.0",
+    "pytest-cov>=7.1.0,<8.0",
+    "hypothesis>=6.152.7,<7.0",
+    "ruff>=0.15.12,<1.0",
+    "mypy>=2.1.0,<3.0",
+    "types-PyYAML>=6.0.12.20260510,<7.0",
+    "pygments>=2.20.0,<3.0",
+    "pip-audit>=2.10.0,<3.0",
+    "bandit>=1.9.4,<2.0",
+    "watchfiles>=1.1.1,<2.0",
+]
+whatsapp = ["pywa>=3.9.0,<4.0"]
+discord = ["discord.py>=2.7.1,<3.0"]
+slack = ["slack-bolt[async]>=1.28.0,<2.0"]
+teams = []
+line = ["line-bot-sdk>=3.23.0,<4.0"]
+channels-all = [
+    "pywa>=3.9.0,<4.0",
+    "discord.py>=2.7.1,<3.0",
+    "slack-bolt[async]>=1.28.0,<2.0",
+    "line-bot-sdk>=3.23.0,<4.0",
+]
+
+[project.scripts]
+koda = "koda.control_plane.__main__:main"
+koda-control-plane = "koda.control_plane.__main__:main"
+koda-runtime-worker = "koda.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["koda*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+filterwarnings = []
+markers = [
+    "real_policy_gate: run dispatcher tests against the real central execution-policy gate",
+    "postgres: requires a real Postgres instance (testcontainers or POSTGRES_TEST_DSN env)",
+    "mcp: spawns a real MCP server subprocess (npx postgres_mcp etc.)",
+    "rust_engine: spawns a real Rust gRPC engine binary",
+    "s3: requires moto S3 fixture",
+    "golden: golden-dataset quality test (recall@K, extraction, dossier)",
+    "bench: performance/throughput benchmark; opt-in only",
+    "chaos: failure injection / fault-tolerance test",
+    "eval: multi-provider evaluation (tools quality, etc.)",
+    "audio_fixtures: requires audio fixtures and ffmpeg",
+    "acoustic: real Kokoro+Whisper acoustic round-trip (gated by KODA_TEST_ACOUSTIC=1)",
+    "slow: long-running test (>60s); skipped on PR fast tier",
+    "local_only: only runs on developer machines; skipped in CI",
+    "flags: parametrized over feature flags",
+    "security: adversarial guardrail and permission-boundary tests",
+    "guardrail: focused tests for security blocking/approval behavior",
+]
+
+[tool.coverage.report]
+# Repo-wide coverage is still climbing while large runtime/control-plane modules are
+# being brought under test. Keep this gate aligned with the measured baseline so
+# the suite fails on regressions instead of on a stale target.
+fail_under = 53.5
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+extend-exclude = ["runtime_*", "control_plane_runtime", "logs", "koda/internal_rpc/generated"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = ["SIM108"]  # ternary operator suggestions reduce readability for complex expressions
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "koda.handlers.automation",
+    "koda.handlers.browser",
+    "koda.handlers.devops",
+    "koda.handlers.fileops",
+    "koda.handlers.messages",
+    "koda.handlers.packages",
+]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = [
+    "koda.internal_rpc.generated.*",
+]
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = [
+    "telegram.*",
+    "boto3.*",
+    "botocore.*",
+    "playwright.*",
+    "psycopg2.*",
+    "psycopg.*",
+    "aiohttp.*",
+    "grpc.*",
+    "grpc_aio.*",
+    "google.*",
+    "asyncssh.*",
+    "qdrant_client.*",
+    "chromadb.*",
+    "langgraph.*",
+    "langchain_core.*",
+    "elevenlabs.*",
+    "openai.*",
+    "anthropic.*",
+    "prost.*",
+    "tonic.*",
+    "dotenv.*",
+    "yaml.*",
+    "prometheus_client.*",
+]
+ignore_missing_imports = true
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3,<10.0",
+    "pytest-asyncio>=1.3.0,<2.0",
+    "pytest-cov>=7.1.0,<8.0",
+    "hypothesis>=6.152.7,<7.0",
+    "ruff>=0.15.12,<1.0",
+    "mypy>=2.1.0,<3.0",
+    "types-PyYAML>=6.0.12.20260510,<7.0",
+    "pygments>=2.20.0,<3.0",
+    "pip-audit>=2.10.0,<3.0",
+    "bandit>=1.9.4,<2.0",
+    "watchfiles>=1.1.1,<2.0",
+]

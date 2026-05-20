@@ -1,0 +1,456 @@
+from __future__ import annotations
+
+import json
+from importlib import import_module
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+FIXTURE_ROOT = Path(__file__).resolve().parents[1] / "fixtures" / "evals"
+
+EXPECTED_PHASE5_IMPORTS = (
+    "EVAL_CASE_SCHEMA_VERSION",
+    "EVAL_RUN_SCHEMA_VERSION",
+    "TRAJECTORY_EXPORT_SCHEMA_VERSION",
+    "RELEASE_QUALITY_SCHEMA_VERSION",
+    "OfflineEvalResult",
+    "build_eval_case_from_run",
+    "evaluate_case_offline",
+    "compare_eval_quality_variants",
+    "build_eval_run_batch",
+    "build_trajectory_export",
+    "build_release_quality_report",
+)
+
+
+def _json_fixture(name: str) -> dict[str, Any]:
+    return json.loads((FIXTURE_ROOT / name).read_text(encoding="utf-8"))
+
+
+def _payload(value: Any) -> dict[str, Any]:
+    if hasattr(value, "to_dict"):
+        return value.to_dict()
+    if hasattr(value, "model_dump"):
+        return value.model_dump()
+    assert isinstance(value, dict)
+    return value
+
+
+def _phase5_evals_module() -> Any:
+    try:
+        return import_module("koda.services.evals")
+    except ModuleNotFoundError as exc:
+        if exc.name == "koda.services.evals":
+            pytest.fail(
+                "Expected Phase 5 backend import is missing: "
+                "from koda.services.evals import " + ", ".join(EXPECTED_PHASE5_IMPORTS),
+                pytrace=False,
+            )
+        raise
+
+
+def test_phase5_fixture_contracts_are_versioned_and_redacted() -> None:
+    expected_versions = {
+        "eval_case.v1.json": "eval_case.v1",
+        "eval_run.v1.pass.json": "eval_run.v1",
+        "eval_run.v1.tool_policy_regression.json": "eval_run.v1",
+        "release_quality.v1.pass.json": "release_quality.v1",
+        "release_quality.v1.regression.json": "release_quality.v1",
+        "squad_golden_eval_case.v1.json": "eval_case.v1",
+        "squad_smoke.v1.json": "squad_smoke.v1",
+    }
+    for filename, version in expected_versions.items():
+        assert _json_fixture(filename)["schema_version"] == version
+
+    lines = [
+        json.loads(line)
+        for line in (FIXTURE_ROOT / "trajectory_export.v1.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert lines
+    assert all(line["schema_version"] == "trajectory_export.v1" for line in lines)
+    assert all(line.get("redaction", {}).get("raw_prompt_included") is not True for line in lines)
+
+    redaction = _json_fixture("redaction.v1.json")
+    searchable_payload = json.dumps(redaction["payload"], sort_keys=True)
+    for forbidden in redaction["forbidden_strings"]:
+        assert forbidden not in searchable_payload
+    assert "[REDACTED]" in searchable_payload
+
+
+def test_expected_phase5_evals_module_imports_are_public() -> None:
+    evals = _phase5_evals_module()
+
+    missing = [name for name in EXPECTED_PHASE5_IMPORTS if not hasattr(evals, name)]
+
+    assert missing == []
+    assert evals.EVAL_CASE_SCHEMA_VERSION == "eval_case.v1"
+    assert evals.EVAL_RUN_SCHEMA_VERSION == "eval_run.v1"
+    assert evals.TRAJECTORY_EXPORT_SCHEMA_VERSION == "trajectory_export.v1"
+    assert evals.RELEASE_QUALITY_SCHEMA_VERSION == "release_quality.v1"
+
+
+def test_build_eval_case_from_run_consumes_run_graph_and_replay_contracts() -> None:
+    evals = _phase5_evals_module()
+    expected_case = _json_fixture("eval_case.v1.json")
+    run_graph = {
+        "schema_version": "run_graph.v1",
+        "graph_id": "run:KODA:7101:attempt:1",
+        "agent_id": "KODA",
+        "task_id": 7101,
+        "attempt": 1,
+        "nodes": [
+            {
+                "node_id": "node:model-call",
+                "node_type": "model_call",
+                "status": "completed",
+                "payload": {"prompt_hash": expected_case["input"]["hash"]},
+            }
+        ],
+        "edges": [],
+        "summary": {"status": "completed"},
+    }
+    replay_bundle = {
+        "schema_version": "run_replay.v1",
+        "replay_mode": "offline",
+        "inputs": {"query_preview": expected_case["input"]["preview"]},
+        "provider_calls_allowed": False,
+    }
+    execution = {
+        "id": 91,
+        "agent_id": "KODA",
+        "task_id": 7101,
+        "status": "completed",
+        "query_text": expected_case["input"]["preview"],
+        "response_text": "Release checks passed.",
+        "feedback_status": "promote",
+        "trace": {"tools": [{"tool": "read_file", "success": True}]},
+        "answer_gate_status": "passed",
+    }
+
+    case = _payload(
+        evals.build_eval_case_from_run(
+            agent_id="KODA",
+            task_id=7101,
+            execution=execution,
+            run_graph=run_graph,
+            replay=replay_bundle,
+            payload={
+                "expected_tool_ids": expected_case["expected_outcome"]["required_tools"],
+                "expected_policy_codes": ["package_install:denied"],
+                "reference_answer": "Release checks passed.",
+            },
+        )
+    )
+
+    assert case["schema_version"] == "eval_case.v1"
+    assert case["agent_id"] == "KODA"
+    assert case["source_task_id"] == 7101
+    assert case["metadata"]["source_run_graph_id"] == "run:KODA:7101:attempt:1"
+    assert case["metadata"]["source_run_graph_node_ids"] == ["node:model-call"]
+    assert case["metadata"]["source_replay_mode"] == "offline"
+    assert case["metadata"]["redaction"]["raw_prompt_stored"] is False
+
+
+def test_deterministic_suite_reports_tool_and_policy_regressions() -> None:
+    evals = _phase5_evals_module()
+    case = {
+        "schema_version": "eval_case.v1",
+        "case_key": "run:KODA:7101",
+        "agent_id": "KODA",
+        "source_task_id": 7101,
+        "metadata": {
+            "expected_tool_ids": ["read_file"],
+            "source_tool_ids": ["shell_execute"],
+            "expected_policy_codes": ["package_install:denied"],
+            "source_policy_codes": ["package_install:allowed"],
+            "source_status": "completed",
+            "source_replay_mode": "offline",
+        },
+    }
+
+    result = _payload(
+        evals.build_eval_run_batch(
+            agent_id="KODA",
+            suite_id="phase5-release-smoke",
+            cases=[case],
+        )
+    )
+
+    encoded = json.dumps(result, sort_keys=True)
+    assert result["schema_version"] == "eval_run.v1"
+    assert result["status"] == "failed"
+    assert result["strategy"] == "offline_replay"
+    assert "tool_regression" in encoded
+    assert "policy_regression" in encoded
+
+
+def test_trajectory_export_jsonl_is_offline_and_redacted() -> None:
+    evals = _phase5_evals_module()
+    replay = {
+        "schema_version": "run_replay.v1",
+        "replay_mode": "offline",
+        "inputs": {"query_preview": "Deploy with token sk-live-secret"},
+        "steps": [
+            {
+                "node_id": "node:model-call",
+                "type": "model_call",
+                "label": "Model call",
+                "status": "completed",
+                "notes": "Replay uses recorded output only.",
+            }
+        ],
+    }
+    graph = {
+        "schema_version": "run_graph.v1",
+        "graph_id": "run:KODA:7101:attempt:1",
+        "agent_id": "KODA",
+        "task_id": 7101,
+        "attempt": 1,
+        "nodes": [
+            {
+                "node_id": "node:model-call",
+                "node_type": "model_call",
+                "status": "completed",
+                "summary": "Model call",
+                "payload": {
+                    "api_key": "sk-live-secret",
+                    "authorization": "Bearer abcdef",
+                    "prompt_hash": "sha256:abc",
+                },
+            }
+        ],
+        "edges": [],
+    }
+
+    export = evals.build_trajectory_export(
+        agent_id="KODA",
+        task_id=7101,
+        execution={"status": "completed", "query_text": "Deploy with token sk-live-secret"},
+        run_graph=graph,
+        replay=replay,
+    )
+    lines = [json.loads(line) for line in str(export["jsonl"]).splitlines() if line.strip()]
+    encoded = json.dumps(lines, sort_keys=True)
+
+    assert lines
+    assert all(line["schema_version"] == "trajectory_export.v1" for line in lines)
+    assert "sk-live-secret" not in encoded
+    assert "Bearer abcdef" not in encoded
+    assert "raw_prompt" not in encoded
+    assert "[REDACTED]" in encoded or "sha256:" in encoded
+    assert export["manifest"]["schema_version"] == "trajectory_export_manifest.v1"
+    assert export["manifest"]["validation_status"] == "passed"
+    assert export["manifest"]["redaction_summary"]["raw_secret_count"] == 0
+    assert export["manifest"]["run_graph_refs"] == ["node:model-call"]
+
+
+def test_trajectory_export_manifest_warns_when_bundle_is_minimal() -> None:
+    evals = _phase5_evals_module()
+
+    export = evals.build_trajectory_export(
+        agent_id="KODA",
+        task_id=7102,
+        execution={"status": "completed", "query_text": "short smoke", "response_text": "ok"},
+        run_graph={"schema_version": "run_graph.v1", "nodes": []},
+        replay={"schema_version": "run_replay.v1", "steps": []},
+    )
+
+    assert export["manifest"]["schema_version"] == "trajectory_export_manifest.v1"
+    assert export["validation_status"] == "warning"
+    assert "missing_run_graph_nodes" in export["manifest"]["missing_data_warnings"]
+    assert "missing_replay_steps" in export["warnings"]
+
+
+def test_release_quality_report_aggregates_eval_export_and_gate_status() -> None:
+    evals = _phase5_evals_module()
+    pass_run = evals.build_eval_run_batch(
+        agent_id="KODA",
+        suite_id="phase5-release-smoke",
+        cases=[
+            {
+                "schema_version": "eval_case.v1",
+                "case_key": "run:KODA:7101",
+                "metadata": {
+                    "expected_tool_ids": ["read_file"],
+                    "source_tool_ids": ["read_file"],
+                    "expected_policy_codes": ["package_install:denied"],
+                    "source_policy_codes": ["package_install:denied"],
+                    "source_status": "completed",
+                    "source_replay_mode": "offline",
+                },
+            }
+        ],
+    )
+
+    report = _payload(
+        evals.build_release_quality_report(
+            agent_id="KODA",
+            latest_run=pass_run,
+            recent_runs=[pass_run],
+            trajectory_exports=[
+                {
+                    "schema_version": "trajectory_export.v1",
+                    "replay_mode": "offline",
+                    "redaction_applied": True,
+                    "record_count": 3,
+                }
+            ],
+        )
+    )
+
+    assert report["schema_version"] == "release_quality.v1"
+    assert report["status"] == "passed"
+    assert set(report["gates"]) >= {
+        "offline_eval",
+        "trajectory_export_redaction",
+        "provider_calls_disabled",
+    }
+
+
+def test_release_quality_report_fails_when_trajectory_export_is_not_redacted() -> None:
+    evals = _phase5_evals_module()
+    report = _payload(
+        evals.build_release_quality_report(
+            agent_id="KODA",
+            latest_run={"schema_version": "eval_run.v1", "status": "passed", "score": 0.93},
+            recent_runs=[],
+            trajectory_exports=[
+                {
+                    "schema_version": "trajectory_export.v1",
+                    "replay_mode": "offline",
+                    "redaction_applied": False,
+                    "record_count": 3,
+                }
+            ],
+        )
+    )
+
+    assert report["schema_version"] == "release_quality.v1"
+    assert report["status"] == "failed"
+    assert report["gates"]["trajectory_export_redaction"]["status"] == "failed"
+
+
+def test_fixture_backed_golden_eval_proves_squad_quality_wins() -> None:
+    evals = _phase5_evals_module()
+    case = _json_fixture("squad_golden_eval_case.v1.json")
+
+    comparison = evals.compare_eval_quality_variants(case)
+
+    assert comparison["schema_version"] == "eval_run.v1"
+    assert comparison["status"] == "passed"
+    assert comparison["winner"] == "squad"
+    assert comparison["quality_delta"] > 0
+    assert comparison["quality_delta"] >= comparison["thresholds"]["min_quality_delta"]
+    assert comparison["cost_delta_usd"] is not None
+    assert comparison["duration_delta_ms"] is not None
+    assert comparison["variants"][0]["id"] == "single_agent"
+    assert comparison["variants"][1]["coverage_score"] == 1.0
+    assert comparison["variants"][1]["evidence_score"] == 1.0
+    assert comparison["variants"][1]["synthesis_score"] == 1.0
+    assert comparison["variants"][1]["quality_score"] == 1.0
+    assert comparison["variants"][1]["run_graph_completeness"]["status"] == "passed"
+
+
+def test_golden_eval_fails_when_squad_evidence_ref_is_missing() -> None:
+    evals = _phase5_evals_module()
+    case = _json_fixture("squad_golden_eval_case.v1.json")
+    case["metadata"]["quality_variants"][1]["evidence_refs"]["concrete_task_result"] = ["missing-node"]
+
+    comparison = evals.compare_eval_quality_variants(case)
+
+    assert comparison["status"] == "failed"
+    squad = comparison["variants"][1]
+    assert squad["missing_evidence_terms"] == ["concrete_task_result"]
+    assert squad["evidence_score"] < 1.0
+
+
+def test_golden_eval_fails_without_quality_delta_or_required_variant() -> None:
+    evals = _phase5_evals_module()
+    case = _json_fixture("squad_golden_eval_case.v1.json")
+    case["metadata"]["quality_variants"][0]["observed_quality_terms"] = list(case["metadata"]["expected_quality_terms"])
+    case["metadata"]["quality_variants"][0]["evidence_refs"] = {
+        term: ["single-model:1"] for term in case["metadata"]["expected_quality_terms"]
+    }
+
+    tied = evals.compare_eval_quality_variants(case)
+    assert tied["status"] == "failed"
+    assert tied["quality_delta"] < tied["thresholds"]["min_quality_delta"]
+
+    missing_squad = _json_fixture("squad_golden_eval_case.v1.json")
+    missing_squad["metadata"]["quality_variants"] = [missing_squad["metadata"]["quality_variants"][0]]
+    assert evals.compare_eval_quality_variants(missing_squad)["status"] == "failed"
+
+
+def test_golden_eval_fails_when_variant_made_provider_calls() -> None:
+    evals = _phase5_evals_module()
+    case = _json_fixture("squad_golden_eval_case.v1.json")
+    case["metadata"]["quality_variants"][1]["provider_calls"] = 1
+
+    comparison = evals.compare_eval_quality_variants(case)
+
+    assert comparison["status"] == "failed"
+    assert comparison["variants"][1]["provider_calls"] == 1
+
+
+def test_release_quality_report_includes_run_graph_completeness_gate() -> None:
+    evals = _phase5_evals_module()
+    pass_run = {"schema_version": "eval_run.v1", "status": "passed", "score": 0.93}
+    golden = evals.compare_eval_quality_variants(_json_fixture("squad_golden_eval_case.v1.json"))
+    report = evals.build_release_quality_report(
+        agent_id="KODA",
+        latest_run=pass_run,
+        recent_runs=[pass_run],
+        run_graphs=[
+            {
+                "schema_version": "run_graph.v1",
+                "graph_id": "run:KODA:7101:attempt:1",
+                "nodes": [{"node_type": "model_call"}],
+                "edges": [],
+            }
+        ],
+        golden_eval_comparisons=[golden],
+    )
+
+    assert report["status"] == "passed"
+    assert report["gates"]["run_graph_completeness"]["status"] == "passed"
+    assert report["gates"]["squad_golden_quality"]["status"] == "passed"
+    assert report["artifacts"]["run_graph_completeness"][0]["schema_version"] == "run_graph_completeness.v1"
+    assert report["artifacts"]["squad_golden_quality"][0]["winner"] == "squad"
+
+
+def test_release_quality_report_fails_on_incomplete_run_graph() -> None:
+    evals = _phase5_evals_module()
+    pass_run = {"schema_version": "eval_run.v1", "status": "passed", "score": 0.93}
+    report = evals.build_release_quality_report(
+        agent_id="KODA",
+        latest_run=pass_run,
+        recent_runs=[pass_run],
+        run_graphs=[
+            {
+                "schema_version": "run_graph.v1",
+                "graph_id": "run:KODA:7101:attempt:1",
+                "nodes": [{"node_type": "tool_result"}],
+                "edges": [],
+            }
+        ],
+    )
+
+    assert report["status"] == "failed"
+    assert report["gates"]["run_graph_completeness"]["status"] == "failed"
+
+
+def test_release_quality_report_fails_when_required_run_graph_is_missing() -> None:
+    evals = _phase5_evals_module()
+    pass_run = {"schema_version": "eval_run.v1", "status": "passed", "score": 0.93}
+
+    report = evals.build_release_quality_report(
+        agent_id="KODA",
+        latest_run=pass_run,
+        recent_runs=[pass_run],
+        require_run_graphs=True,
+    )
+
+    assert report["status"] == "failed"
+    assert report["gates"]["run_graph_completeness"]["status"] == "failed"
+    assert report["gates"]["run_graph_completeness"]["failures"][0]["category"] == "missing_run_graph"

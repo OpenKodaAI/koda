@@ -1,0 +1,263 @@
+name: pr-quality
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-quality-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.10.7"
+
+jobs:
+  workflow-quality:
+    name: workflow-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Lint GitHub Actions workflows
+        uses: rhysd/actionlint@v1.7.12
+
+  python-quality:
+    name: python-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+      - name: Mypy type check
+        run: uv run mypy koda/ --ignore-missing-imports
+
+  python-tests:
+    # Cross-platform matrix. Ubuntu emits the branch-protected contexts;
+    # macOS catches darwin-specific path and isolation regressions.
+    name: ${{ matrix.check-name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: "3.11"
+            check-name: python-tests-3.11
+          - os: ubuntu-latest
+            python-version: "3.12"
+            check-name: python-tests-3.12
+          # macOS runners are scarce; only run the lower Python version
+          # there to keep CI cost predictable.
+          - os: macos-14
+            python-version: "3.11"
+            check-name: python-tests-macos-14-3.11
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Run tests with coverage
+        run: |
+          mkdir -p artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}
+          uv run pytest \
+            --cov=koda \
+            --cov-report=term-missing \
+            --cov-report=xml:artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}/coverage.xml \
+            --junitxml=artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}/pytest.xml
+        env:
+          AGENT_TOKEN: "test-token"
+          ALLOWED_USER_IDS: "123456789"
+          KODA_SECURITY_GUARD_STARTUP_TIMEOUT: "120"
+      - name: Upload pytest artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: python-tests-${{ matrix.os }}-${{ matrix.python-version }}-artifacts
+          path: artifacts/python/${{ matrix.os }}/${{ matrix.python-version }}/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  web-quality:
+    name: web-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: pnpm/action-setup@v5.0.0
+        with:
+          version: 10.26.2
+      - uses: actions/setup-node@v6.3.0
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install web dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint web
+        run: pnpm lint:web
+      - name: Test web with JUnit output
+        run: |
+          mkdir -p artifacts/web
+          pnpm test:web:ci
+      - name: Build web
+        run: pnpm build:web
+      - name: Upload web test artifacts
+        if: always()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: web-quality-artifacts
+          path: artifacts/web/
+          if-no-files-found: ignore
+          retention-days: 14
+
+  auto-sync-npm-readme:
+    # Automates the "run sync_npm_readme.py --write and commit" chore for
+    # internal PRs so authors never have to remember to rebuild
+    # packages/cli/README.md after editing the root README.md. The fallback
+    # drift check below still runs and blocks merge for PRs this job cannot
+    # touch (fork PRs, or cases where the push-back itself fails).
+    name: auto-sync npm README
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.actor != 'github-actions[bot]'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          # persist-credentials defaults to true; the resulting token can
+          # push back to this same PR branch (same-repo only — fork PRs
+          # are already excluded by the `if` guard above).
+          fetch-depth: 1
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Regenerate packages/cli/README.md
+        run: uv run python3 scripts/sync_npm_readme.py --write
+      - name: Commit + push if drift detected
+        run: |
+          set -euo pipefail
+          if git diff --quiet packages/cli/README.md; then
+            echo "packages/cli/README.md already in sync — nothing to do."
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/cli/README.md
+          git commit -m "chore(docs): sync packages/cli/README.md from root README"
+          git push
+
+  repo-hygiene:
+    name: repo-hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Check npm README drift
+        run: uv run python3 scripts/sync_npm_readme.py
+      - name: Validate open source hygiene
+        run: |
+          uv run pytest -q \
+            tests/test_open_source_hygiene.py \
+            tests/test_public_docs.py \
+            tests/test_installation_assets.py
+        env:
+          KODA_SKIP_SECURITY_GUARD_SERVICE: "1"
+
+  rust-quality:
+    name: rust-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+      - name: Rust format check
+        run: cargo +stable fmt --check
+      - name: Rust clippy
+        run: cargo +stable clippy --workspace --all-targets -- -D warnings
+      - name: Rust tests
+        run: cargo +stable test --workspace
+
+  docker-smoke:
+    name: docker-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    needs:
+      - workflow-quality
+      - python-quality
+      - python-tests
+      - web-quality
+      - repo-hygiene
+      - rust-quality
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Build primary Docker image
+        run: docker build -t koda:ci .
+      - name: Bring up stack and smoke test
+        run: bash scripts/docker_smoke.sh
+      - name: Upload docker smoke artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7.0.0
+        with:
+          name: docker-smoke-artifacts
+          path: artifacts/docker/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Tear down stack
+        if: always()
+        run: docker compose down -v

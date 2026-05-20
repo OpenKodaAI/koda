@@ -1,0 +1,17 @@
+name: legacy-ci-transition
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  legacy-ci-transition:
+    name: legacy-ci-transition
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain transition
+        run: |
+          echo "The legacy monolithic CI workflow is kept only as a transition marker."
+          echo "Use pr-quality and security for automated validation on pull requests and main."

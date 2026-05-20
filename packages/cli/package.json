@@ -1,0 +1,38 @@
+{
+  "name": "@openkodaai/koda",
+  "version": "1.0.17",
+  "description": "Open-source control plane for running, supervising, and documenting multi-agent AI systems.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "koda": "./bin/koda.mjs"
+  },
+  "files": [
+    "README.md",
+    "bin",
+    "release"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "koda",
+    "ai",
+    "agents",
+    "control-plane",
+    "docker"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OpenKodaAI/koda.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/OpenKodaAI/koda#readme",
+  "bugs": {
+    "url": "https://github.com/OpenKodaAI/koda/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  }
+}
