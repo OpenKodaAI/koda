@@ -94,12 +94,19 @@ jobs:
             --no-annotate \
             --output-file "${RUNNER_TEMP}/python-audit-requirements.txt"
       - name: Python dependency audit
+        # Ignored advisories:
+        #   PYSEC-2024-277 / CVE-2024-34997 — joblib is pulled in
+        #     transitively by kokoro-onnx -> phonemizer-fork for local TTS.
+        #     pip-audit reports no fixed version, and the advisory is
+        #     disputed upstream because the affected numpy_pickle path is
+        #     intended for trusted cache content rather than untrusted input.
         run: |
           uv run pip-audit \
             --strict \
             --requirement "${RUNNER_TEMP}/python-audit-requirements.txt" \
             --require-hashes \
-            --disable-pip
+            --disable-pip \
+            --ignore-vuln PYSEC-2024-277
       - name: Node dependency audit
         run: pnpm audit --audit-level=moderate
       - name: Install cargo-audit

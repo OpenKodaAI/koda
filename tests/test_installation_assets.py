@@ -724,6 +724,8 @@ def test_security_and_release_workflows_scan_all_runtime_images() -> None:
     assert "--require-hashes" in security_workflow_text
     assert "--disable-pip" in release_workflow_text
     assert "--disable-pip" in security_workflow_text
+    assert "--ignore-vuln PYSEC-2024-277" in release_workflow_text
+    assert "--ignore-vuln PYSEC-2024-277" in security_workflow_text
     for advisory in (
         "RUSTSEC-2026-0098",
         "RUSTSEC-2026-0099",
