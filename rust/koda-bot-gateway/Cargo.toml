@@ -21,7 +21,7 @@ futures.workspace = true
 koda-observability = { path = "../koda-observability" }
 koda-postgres = { path = "../koda-postgres" }
 koda-proto = { path = "../koda-proto" }
-prost = "0.13"
+prost = "0.14"
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true
