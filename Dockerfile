@@ -9,7 +9,7 @@ RUN npm install -g \
 
 # Keep the runtime image on Python 3.12: kokoro-onnx 0.5.x supports <3.14,
 # while rapidocr-onnxruntime 1.4.x still requires <3.13.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ENV HEALTHCHECK_URL=http://127.0.0.1:8090/health
 ENV DEBIAN_FRONTEND=noninteractive
