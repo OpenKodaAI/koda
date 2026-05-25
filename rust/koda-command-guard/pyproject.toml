@@ -1,0 +1,18 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "koda-command-guard"
+version = "0.1.0"
+description = "Native regex DFA matcher used by koda's tool dispatcher."
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+
+[tool.maturin]
+# The Python module name imported as ``import koda_command_guard``. Must match
+# the ``[lib].name`` in Cargo.toml so the resulting ``.so``/``.pyd`` file name
+# is what Python's importer looks for.
+module-name = "koda_command_guard"
+features = ["extension-module"]
+strip = true

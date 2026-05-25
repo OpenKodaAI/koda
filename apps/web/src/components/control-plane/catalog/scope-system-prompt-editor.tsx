@@ -1,0 +1,156 @@
+"use client";
+
+import { type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { X } from "lucide-react";
+import { MarkdownEditorField } from "@/components/control-plane/shared/markdown-editor-field";
+import { InlineSpinner } from "@/components/ui/async-feedback";
+import { useAppI18n } from "@/hooks/use-app-i18n";
+import {
+  useAnimatedPresence,
+  useBodyScrollLock,
+  useEscapeToClose,
+} from "@/hooks/use-animated-presence";
+
+interface ScopeSystemPromptEditorProps {
+  open: boolean;
+  loading: boolean;
+  saving: boolean;
+  icon: ReactNode;
+  title: string;
+  subtitle: string;
+  description: string;
+  fieldLabel: string;
+  value: string;
+  placeholder: string;
+  onChange: (value: string) => void;
+  onClose: () => void;
+  onSave: () => void;
+}
+
+export function ScopeSystemPromptEditor({
+  open,
+  loading,
+  saving,
+  icon,
+  title,
+  subtitle,
+  description,
+  fieldLabel,
+  value,
+  placeholder,
+  onChange,
+  onClose,
+  onSave,
+}: ScopeSystemPromptEditorProps) {
+  const { t } = useAppI18n();
+  const presence = useAnimatedPresence(open, null, { duration: 200 });
+
+  useBodyScrollLock(presence.shouldRender);
+  useEscapeToClose(presence.shouldRender, onClose);
+
+  if (!presence.shouldRender) return null;
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <>
+      <div
+        className="app-overlay-backdrop app-overlay-anim z-[70]"
+        data-visible={presence.isVisible}
+        onClick={onClose}
+        aria-hidden="true"
+      />
+      <div className="app-modal-frame z-[80] items-center overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="scope-system-prompt-editor-title"
+            data-visible={presence.isVisible}
+            className="app-modal-panel app-modal-anim relative flex h-[min(80vh,48rem)] w-full max-w-5xl flex-col overflow-hidden border-[var(--border-strong)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+              <button
+                type="button"
+                onClick={onClose}
+                className="app-surface-close"
+                aria-label={t("generated.controlPlane.fechar_modal_1b5b2901")}
+              >
+                <X className="h-4 w-4" />
+              </button>
+
+              <div className="border-b border-[var(--border-subtle)] px-6 py-5 pr-14 sm:pr-16">
+                <div className="flex items-start gap-4">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.75rem] border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.03)] text-[var(--text-secondary)]">
+                    {icon}
+                  </div>
+                  <div className="min-w-0">
+                    <h2
+                      id="scope-system-prompt-editor-title"
+                      className="text-lg font-semibold tracking-[-0.04em] text-[var(--text-primary)]"
+                    >
+                      {title}
+                    </h2>
+                    <p className="mt-1 text-sm text-[var(--text-quaternary)]">
+                      {description}
+                    </p>
+                    {!loading && subtitle ? (
+                      <p className="mt-2 text-xs uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+                        {subtitle}
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-5">
+                {loading ? (
+                  <div
+                    className="flex min-h-0 flex-1 items-center justify-center text-sm text-[var(--text-quaternary)]"
+                    role="status"
+                    aria-label={t("generated.controlPlane.carregando_62b04e95")}
+                  >
+                    <InlineSpinner className="h-5 w-5" />
+                  </div>
+                ) : (
+                  <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="min-h-0 flex-1">
+                      <MarkdownEditorField
+                        label={fieldLabel}
+                        value={value}
+                        onChange={onChange}
+                        minHeight="min(46vh, 28rem)"
+                        placeholder={placeholder}
+                        hideFieldHeader
+                        textareaAriaLabel={fieldLabel}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-3 border-t border-[var(--border-subtle)] px-6 py-4">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="button-shell button-shell--secondary"
+                >
+                  {t("generated.controlPlane.cancelar_091200fb")}
+                </button>
+                <button
+                  type="button"
+                  onClick={onSave}
+                  disabled={loading || saving}
+                  aria-label={saving ? t("generated.controlPlane.salvando_b58cece2") : undefined}
+                  aria-busy={saving || undefined}
+                  className="button-shell button-shell--primary"
+                >
+                  {saving ? <InlineSpinner className="h-4 w-4" /> : null}
+                  <span>{t("generated.controlPlane.salvar_system_prompt_ff8b05a5")}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+      </>,
+    document.body,
+  );
+}

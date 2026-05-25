@@ -1,0 +1,236 @@
+import { translate } from "@/lib/i18n";
+
+export function prettyJson(value: unknown) {
+  return JSON.stringify(value, null, 2);
+}
+
+export function parseJsonObject(
+  label: string,
+  value: string,
+): Record<string, unknown> {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return {};
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : translate("generated.lib.json_invalido_27bfe6a8");
+    throw new Error(`${label}: ${message}`);
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${label}: ${translate("generated.lib.o_valor_precisa_ser_um_objeto_json_63ee7d8a")}`);
+  }
+
+  return parsed as Record<string, unknown>;
+}
+
+export function parseJsonArray(
+  label: string,
+  value: string,
+): Array<Record<string, unknown>> {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : translate("generated.lib.json_invalido_27bfe6a8");
+    throw new Error(`${label}: ${message}`);
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new Error(`${label}: ${translate("generated.lib.o_valor_precisa_ser_um_array_json_5c5cd90a")}`);
+  }
+
+  const invalidIndex = parsed.findIndex(
+    (item) => !item || typeof item !== "object" || Array.isArray(item),
+  );
+  if (invalidIndex >= 0) {
+    throw new Error(
+      `${label}: ${translate("generated.lib.cada_item_precisa_ser_um_objeto_json_indice__b6c8ffad", { index: invalidIndex })}`,
+    );
+  }
+
+  return parsed as Array<Record<string, unknown>>;
+}
+
+export function parseHealthPort(value: string): number {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(translate("generated.lib.health_port_e_obrigatorio_16131d9d"));
+  }
+
+  const parsed = Number(trimmed);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 65535) {
+    throw new Error(translate("generated.lib.health_port_precisa_ser_um_inteiro_entre_1_e_b9115df0"));
+  }
+
+  return parsed;
+}
+
+export function buildAgentMetadataPayload(input: {
+  displayName: string;
+  status: string;
+  storageNamespace: string;
+  workspaceId: string;
+  squadId: string;
+  color: string;
+  colorRgb: string;
+  existingAppearance?: Record<string, unknown> | null;
+}) {
+  const displayName = input.displayName.trim();
+  const storageNamespace = input.storageNamespace.trim();
+  if (!displayName) {
+    throw new Error(translate("generated.lib.display_name_e_obrigatorio_0275591e"));
+  }
+  if (!storageNamespace) {
+    throw new Error(translate("generated.lib.storage_namespace_e_obrigatorio_71d84dd6"));
+  }
+
+  const appearance: Record<string, unknown> = { ...(input.existingAppearance ?? {}) };
+  appearance.label = displayName;
+  if (input.color.trim()) {
+    appearance.color = input.color.trim();
+  } else {
+    delete appearance.color;
+  }
+  if (input.colorRgb.trim()) {
+    appearance.color_rgb = input.colorRgb.trim();
+  } else {
+    delete appearance.color_rgb;
+  }
+
+  return {
+    display_name: displayName,
+    status: input.status,
+    storage_namespace: storageNamespace,
+    appearance,
+    organization: {
+      workspace_id: input.workspaceId.trim() || null,
+      squad_id: input.workspaceId.trim()
+        ? input.squadId.trim() || null
+        : null,
+    },
+  };
+}
+
+export function buildAgentSpecPayload(input: {
+  missionProfileJson: string;
+  interactionStyleJson: string;
+  operatingInstructionsJson: string;
+  hardRulesJson: string;
+  responsePolicyJson: string;
+  modelPolicyJson: string;
+  toolPolicyJson: string;
+  memoryPolicyJson: string;
+  knowledgePolicyJson: string;
+  autonomyPolicyJson: string;
+  executionPolicyJson?: string | null;
+  resourceAccessPolicyJson: string;
+  voicePolicyJson: string;
+  imageAnalysisPolicyJson: string;
+  memoryExtractionSchemaJson: string;
+  skillPolicyJson?: string;
+  customSkillsJson?: string;
+}) {
+  return {
+    mission_profile: parseJsonObject(
+      "Mission profile JSON",
+      input.missionProfileJson,
+    ),
+    interaction_style: parseJsonObject(
+      "Interaction style JSON",
+      input.interactionStyleJson,
+    ),
+    operating_instructions: parseJsonObject(
+      "Operating instructions JSON",
+      input.operatingInstructionsJson,
+    ),
+    hard_rules: parseJsonObject("Hard rules JSON", input.hardRulesJson),
+    response_policy: parseJsonObject(
+      "Response policy JSON",
+      input.responsePolicyJson,
+    ),
+    model_policy: parseJsonObject("Model policy JSON", input.modelPolicyJson),
+    tool_policy: parseJsonObject("Tool policy JSON", input.toolPolicyJson),
+    memory_policy: parseJsonObject(
+      "Memory policy JSON",
+      input.memoryPolicyJson,
+    ),
+    knowledge_policy: parseJsonObject(
+      "Knowledge policy JSON",
+      input.knowledgePolicyJson,
+    ),
+    autonomy_policy: parseJsonObject(
+      "Autonomy policy JSON",
+      input.autonomyPolicyJson,
+    ),
+    ...(input.executionPolicyJson != null
+      ? {
+          execution_policy: parseJsonObject(
+            "Execution policy JSON",
+            input.executionPolicyJson ?? "",
+          ),
+        }
+      : {}),
+    resource_access_policy: parseJsonObject(
+      "Resource access policy JSON",
+      input.resourceAccessPolicyJson,
+    ),
+    voice_policy: parseJsonObject("Voice policy JSON", input.voicePolicyJson),
+    image_analysis_policy: parseJsonObject(
+      "Image analysis policy JSON",
+      input.imageAnalysisPolicyJson,
+    ),
+    memory_extraction_schema: parseJsonObject(
+      "Memory extraction schema JSON",
+      input.memoryExtractionSchemaJson,
+    ),
+    skill_policy: parseJsonObject(
+      "Skill policy JSON",
+      input.skillPolicyJson ?? "{}",
+    ),
+    custom_skills: parseJsonArray(
+      "Custom skills JSON",
+      input.customSkillsJson ?? "[]",
+    ),
+  };
+}
+
+export function validateColor(hex: string): boolean {
+  return /^#[0-9a-fA-F]{6}$/.test(hex);
+}
+
+export function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const match = /^#([0-9a-fA-F]{2})([0-9a-fA-F]{2})([0-9a-fA-F]{2})$/.exec(hex);
+  if (!match) return null;
+  return {
+    r: parseInt(match[1], 16),
+    g: parseInt(match[2], 16),
+    b: parseInt(match[3], 16),
+  };
+}
+
+export function rgbToHex(r: number, g: number, b: number): string {
+  const clamp = (n: number) => Math.max(0, Math.min(255, Math.round(n)));
+  return `#${[r, g, b].map((c) => clamp(c).toString(16).padStart(2, "0")).join("")}`;
+}
+
+export function rgbStringToComponents(rgb: string): { r: number; g: number; b: number } | null {
+  const parts = rgb.split(",").map((s) => parseInt(s.trim(), 10));
+  if (parts.length !== 3 || parts.some(isNaN)) return null;
+  return { r: parts[0], g: parts[1], b: parts[2] };
+}
+
+export function componentsToRgbString(r: number, g: number, b: number): string {
+  return `${r}, ${g}, ${b}`;
+}

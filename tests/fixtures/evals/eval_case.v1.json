@@ -1,0 +1,35 @@
+{
+  "schema_version": "eval_case.v1",
+  "case_id": "case_run_7101",
+  "case_key": "run:7101:release-readiness",
+  "agent_id": "KODA",
+  "source_task_id": 7101,
+  "source": {
+    "kind": "run",
+    "task_id": 7101,
+    "attempt": 1,
+    "run_graph_id": "run:KODA:7101:attempt:1",
+    "replay_mode": "offline"
+  },
+  "input": {
+    "preview": "Check whether the release is ready using recorded smoke data.",
+    "hash": "sha256:1a6f9d1d9c0d4d6c8b9b2f1c4d3e5a708192a6f2d3c4b5a69788776655443322"
+  },
+  "expected_outcome": {
+    "status": "completed",
+    "required_tools": ["read_file", "run_smoke"],
+    "policy_decisions": [
+      {
+        "tool_id": "package_install",
+        "decision": "denied",
+        "reason": "release smoke must not install packages dynamically"
+      }
+    ],
+    "min_task_success_proxy": 0.85
+  },
+  "metadata": {
+    "created_from_run": true,
+    "trajectory_export_required": true,
+    "raw_provider_calls_allowed": false
+  }
+}
