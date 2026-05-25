@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360" role="img" aria-labelledby="title desc">
+  <title id="title">Koda runtime flow</title>
+  <desc id="desc">Queued work moves through policy checks, provider execution, runtime kernel operations, and response delivery.</desc>
+  <rect width="960" height="360" fill="#fbfaf7"/>
+  <g fill="#ffffff" stroke="#293241" stroke-width="2">
+    <rect x="48" y="128" width="144" height="104" rx="10"/>
+    <rect x="242" y="128" width="144" height="104" rx="10"/>
+    <rect x="436" y="128" width="144" height="104" rx="10"/>
+    <rect x="630" y="128" width="144" height="104" rx="10"/>
+    <rect x="824" y="128" width="88" height="104" rx="10"/>
+  </g>
+  <g fill="#1f2933" font-family="Inter, Arial, sans-serif" text-anchor="middle">
+    <text x="120" y="172" font-size="18" font-weight="700">Queue</text>
+    <text x="120" y="198" font-size="13">Task intake</text>
+    <text x="314" y="172" font-size="18" font-weight="700">Policy</text>
+    <text x="314" y="198" font-size="13">Safety gates</text>
+    <text x="508" y="172" font-size="18" font-weight="700">Provider</text>
+    <text x="508" y="198" font-size="13">Model run</text>
+    <text x="702" y="172" font-size="18" font-weight="700">Kernel</text>
+    <text x="702" y="198" font-size="13">Tools and state</text>
+    <text x="868" y="172" font-size="18" font-weight="700">Reply</text>
+    <text x="868" y="198" font-size="13">Deliver</text>
+  </g>
+  <g fill="none" stroke="#00a676" stroke-width="3" marker-end="url(#arrow)">
+    <path d="M192 180h40"/>
+    <path d="M386 180h40"/>
+    <path d="M580 180h40"/>
+    <path d="M774 180h40"/>
+  </g>
+  <g fill="#425466" font-family="Inter, Arial, sans-serif" font-size="13" text-anchor="middle">
+    <text x="480" y="70">Control plane orchestrates work, records audit, and keeps runtime health visible.</text>
+    <text x="480" y="302">Failures return to queue state with diagnostics instead of blocking onboarding or login.</text>
+  </g>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#00a676"/>
+    </marker>
+  </defs>
+</svg>
