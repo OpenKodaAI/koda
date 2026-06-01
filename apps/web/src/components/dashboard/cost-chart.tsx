@@ -1,0 +1,191 @@
+"use client";
+
+import { memo, useEffect, useMemo, useState } from "react";
+import {
+  Area,
+  AreaChart,
+  CartesianGrid,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import { getCurrentLanguage } from "@/lib/i18n";
+import { cn, formatCost } from "@/lib/utils";
+import { getAgentChartColor, getAgentLabel } from "@/lib/agent-constants";
+
+interface CostChartProps {
+  data: { agentId: string; dailyCosts: { date: string; cost: number }[] }[];
+  className?: string;
+}
+
+function mergeDailyCosts(
+  data: { agentId: string; dailyCosts: { date: string; cost: number }[] }[]
+): Record<string, unknown>[] {
+  const dateMap = new Map<string, Record<string, unknown>>();
+
+  for (const series of data) {
+    for (const entry of series.dailyCosts) {
+      if (!dateMap.has(entry.date)) {
+        dateMap.set(entry.date, { date: entry.date });
+      }
+      dateMap.get(entry.date)![series.agentId] = entry.cost;
+    }
+  }
+
+  return Array.from(dateMap.values()).sort((a, b) =>
+    (a.date as string).localeCompare(b.date as string)
+  );
+}
+
+function formatDateShort(dateStr: string): string {
+  const date = new Date(dateStr + "T00:00:00");
+  return date.toLocaleDateString(getCurrentLanguage(), { day: "2-digit", month: "short" });
+}
+
+interface CustomTooltipProps {
+  active?: boolean;
+  payload?: { dataKey: string; value: number; color: string }[];
+  label?: string;
+}
+
+const CustomTooltip = memo(function CustomTooltip({ active, payload, label }: CustomTooltipProps) {
+  if (!active || !payload?.length) return null;
+
+  return (
+    <div className="glass-card-sm min-w-[180px] px-3 py-3 text-xs shadow-2xl">
+      <p className="mb-2 font-medium text-[var(--text-primary)]">
+        {label ? formatDateShort(label) : ""}
+      </p>
+      {payload.map((entry) => (
+        <div
+          key={entry.dataKey}
+          className="flex items-center justify-between gap-4 py-0.5"
+        >
+          <div className="flex items-center gap-2">
+            <span
+              className="block h-2 w-2 rounded-full"
+              style={{ backgroundColor: entry.color }}
+            />
+            <span className="text-[var(--text-secondary)]">
+              {getAgentLabel(entry.dataKey)}
+            </span>
+          </div>
+          <span className="font-medium tabular-nums text-[var(--text-primary)]">
+            {formatCost(entry.value)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+});
+
+export const CostChart = memo(function CostChart({ data, className }: CostChartProps) {
+  const mergedData = useMemo(() => mergeDailyCosts(data), [data]);
+  const series = useMemo(() => data.filter((entry) => entry.dailyCosts.length > 0), [data]);
+  const agentIds = useMemo(() => series.map((entry) => entry.agentId), [series]);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const update = () => setIsMobile(window.innerWidth < 640);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  return (
+    <div className={cn(className)}>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {agentIds.map((agentId) => (
+          <span
+            key={agentId}
+            className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] font-medium text-[var(--text-secondary)]"
+            style={{
+              borderColor: `color-mix(in srgb, ${getAgentChartColor(agentId)} 58%, #2b2d31)`,
+              background: `linear-gradient(180deg, color-mix(in srgb, ${getAgentChartColor(agentId)} 28%, #2e3137) 0%, color-mix(in srgb, ${getAgentChartColor(agentId)} 16%, #17181b) 100%)`,
+              color: "var(--text-primary)",
+            }}
+          >
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: getAgentChartColor(agentId) }}
+            />
+            {getAgentLabel(agentId)}
+          </span>
+        ))}
+      </div>
+      <div className={cn("w-full min-w-0", isMobile ? "h-[236px]" : "h-[336px]")}>
+        <AreaChart
+          responsive
+          data={mergedData}
+          style={{ width: "100%", height: "100%" }}
+          margin={{ top: 8, right: 10, bottom: 2, left: isMobile ? -14 : 2 }}
+        >
+          <defs>
+            {agentIds.map((agentId) => (
+              <linearGradient
+                key={agentId}
+                id={`cost-gradient-${agentId}`}
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop
+                  offset="0%"
+                  stopColor={getAgentChartColor(agentId)}
+                  stopOpacity={0.42}
+                />
+                <stop
+                  offset="100%"
+                  stopColor={getAgentChartColor(agentId)}
+                  stopOpacity={0.06}
+                />
+              </linearGradient>
+            ))}
+          </defs>
+          <CartesianGrid
+            strokeDasharray="2 6"
+            stroke="var(--border-subtle)"
+            vertical={false}
+          />
+          <XAxis
+            dataKey="date"
+            tickFormatter={formatDateShort}
+            tick={{ fill: "var(--text-tertiary)", fontSize: isMobile ? 10 : 11 }}
+            axisLine={{ stroke: "var(--border-subtle)" }}
+            tickLine={false}
+            interval="preserveStartEnd"
+          />
+          {!isMobile && (
+            <YAxis
+              tickFormatter={(v: number) => formatCost(v)}
+              tick={{ fill: "var(--text-tertiary)", fontSize: 11 }}
+              axisLine={false}
+              tickLine={false}
+              width={66}
+            />
+          )}
+          <Tooltip content={<CustomTooltip />} />
+          {agentIds.map((agentId) => (
+            <Area
+              key={agentId}
+              type="monotone"
+              dataKey={agentId}
+              stroke={getAgentChartColor(agentId)}
+              strokeWidth={2.2}
+              fill={`url(#cost-gradient-${agentId})`}
+              dot={false}
+              isAnimationActive={false}
+              activeDot={{
+                r: 4,
+                fill: getAgentChartColor(agentId),
+                stroke: "var(--panel)",
+                strokeWidth: 2,
+              }}
+            />
+          ))}
+        </AreaChart>
+      </div>
+    </div>
+  );
+});

@@ -1,0 +1,106 @@
+# Phase E — observability stack overlay.
+#
+# Adds Prometheus, Grafana, Tempo (OTLP traces) and a Postgres
+# exporter alongside the koda services. The base docker-compose.yml
+# already exposes ``app:8090/metrics`` (Prometheus) and accepts the
+# ``OTEL_EXPORTER_OTLP_ENDPOINT`` env var (Phase 2D). Bring the stack
+# up with both files together:
+#
+#   docker compose -f docker-compose.yml -f docker-compose-observability.yml up -d
+#
+# Defaults are tuned for self-hosters: every service binds to
+# 127.0.0.1 only so the operator can reach Grafana via SSH tunnel
+# without exposing dashboards publicly. Add a reverse proxy with
+# auth in front of Grafana for shared-team access.
+
+services:
+  app:
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: "${OTEL_EXPORTER_OTLP_ENDPOINT:-http://tempo:4317}"
+      OTEL_SERVICE_NAME: "${OTEL_SERVICE_NAME:-koda-worker}"
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    restart: unless-stopped
+    volumes:
+      - ./docs/operations/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./docs/operations/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 1G
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:?Set GRAFANA_ADMIN_PASSWORD in .env}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./docs/operations/grafana/provisioning:/etc/grafana/provisioning:ro
+      # Mount the versioned dashboards into the path the dashboards
+      # provisioner watches. Each JSON file becomes a dashboard
+      # automatically; edit + commit to add or change one.
+      - ./docs/operations/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      # Default 3001; override with GRAFANA_PORT in .env when 3001
+      # collides with another local service (common with dev tooling).
+      - "127.0.0.1:${GRAFANA_PORT:-3001}:3000"
+    networks:
+      - backend
+    depends_on:
+      - prometheus
+      - tempo
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  tempo:
+    image: grafana/tempo:2.6.1
+    restart: unless-stopped
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./docs/operations/tempo.yaml:/etc/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "127.0.0.1:4317:4317"   # OTLP gRPC
+      - "127.0.0.1:4318:4318"   # OTLP HTTP
+    networks:
+      - backend
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.16.0
+    restart: unless-stopped
+    environment:
+      DATA_SOURCE_NAME: "postgresql://${POSTGRES_USER:?Set POSTGRES_USER in .env}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/${POSTGRES_DB:?Set POSTGRES_DB in .env}?sslmode=disable"
+    networks:
+      - backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  tempo-data:

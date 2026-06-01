@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="360" viewBox="0 0 960 360" role="img" aria-labelledby="title desc">
+  <title id="title">Koda platform topology</title>
+  <desc id="desc">Dashboard, control plane, storage, and runtime sidecars in the default Koda deployment.</desc>
+  <rect width="960" height="360" fill="#f7f9fb"/>
+  <g fill="#ffffff" stroke="#243447" stroke-width="2">
+    <rect x="54" y="58" width="184" height="92" rx="10"/>
+    <rect x="54" y="210" width="184" height="92" rx="10"/>
+    <rect x="388" y="58" width="184" height="92" rx="10"/>
+    <rect x="388" y="210" width="184" height="92" rx="10"/>
+    <rect x="722" y="58" width="184" height="92" rx="10"/>
+    <rect x="722" y="210" width="184" height="92" rx="10"/>
+  </g>
+  <g fill="#1b2838" font-family="Inter, Arial, sans-serif" text-anchor="middle">
+    <text x="146" y="98" font-size="20" font-weight="700">Web Dashboard</text>
+    <text x="146" y="124" font-size="14">/setup, /control-plane</text>
+    <text x="146" y="250" font-size="20" font-weight="700">Operator</text>
+    <text x="146" y="276" font-size="14">Browser session</text>
+    <text x="480" y="98" font-size="20" font-weight="700">Control Plane</text>
+    <text x="480" y="124" font-size="14">Auth, agents, queues</text>
+    <text x="480" y="250" font-size="20" font-weight="700">Postgres + S3</text>
+    <text x="480" y="276" font-size="14">State and artifacts</text>
+    <text x="814" y="98" font-size="20" font-weight="700">Runtime Sidecars</text>
+    <text x="814" y="124" font-size="14">Security, memory, kernel</text>
+    <text x="814" y="250" font-size="20" font-weight="700">Agent Channels</text>
+    <text x="814" y="276" font-size="14">Telegram and APIs</text>
+  </g>
+  <g fill="none" stroke="#2f80ed" stroke-width="3" marker-end="url(#arrow)">
+    <path d="M238 104h140"/>
+    <path d="M480 150v50"/>
+    <path d="M572 104h140"/>
+    <path d="M572 256h140"/>
+    <path d="M238 256h140"/>
+  </g>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f80ed"/>
+    </marker>
+  </defs>
+</svg>

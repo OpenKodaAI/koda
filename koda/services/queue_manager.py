@@ -1,0 +1,9438 @@
+"""Per-user async queue management.
+
+Bug fixes:
+- Race condition on worker spawn: uses asyncio.Lock per user
+- Validates work_dir before use
+
+Features:
+- Streaming responses with throttled edits
+- Auto-model routing
+- Bookmark button on responses
+- Session auto-save
+- Tool use visibility
+"""
+
+import asyncio
+import contextlib
+import hashlib
+import inspect
+import json
+import os
+import random
+import re
+import subprocess
+import time
+import unicodedata
+import uuid
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, field, replace
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Protocol, cast
+
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+from koda.agent_contract import normalize_integration_grants
+from koda.config import (
+    AGENT_ID,
+    AGENT_RESOURCE_ACCESS_POLICY,
+    ARTIFACT_EXTRACTION_TIMEOUT,
+    DEFAULT_PROVIDER,
+    DEFAULT_SYSTEM_PROMPT,
+    DEFAULT_WORK_DIR,
+    IMAGE_TEMP_DIR,
+    MAX_AGENT_TOOL_ITERATIONS,
+    MAX_BROWSER_TASKS_GLOBAL,
+    MAX_CONCURRENT_TASKS_GLOBAL,
+    MAX_CONCURRENT_TASKS_PER_USER,
+    MAX_HEAVY_TASKS_GLOBAL,
+    MAX_QUEUED_TASKS_PER_USER,
+    MAX_STANDARD_TASKS_GLOBAL,
+    MAX_TOTAL_BUDGET_USD,
+    MAX_TURNS,
+    PROVIDER_MODELS,
+    QUEUE_MAX_RECOVERY_ATTEMPTS,
+    RUNTIME_ENVIRONMENTS_ENABLED,
+    RUNTIME_HEARTBEAT_INTERVAL_SECONDS,
+    TASK_LEASE_DURATION_SECONDS,
+    TASK_LEASE_HEARTBEAT_SECONDS,
+    TASK_LEASE_JANITOR_INTERVAL_SECONDS,
+    TASK_MAX_RETRY_ATTEMPTS,
+    TASK_RETRY_BASE_DELAY,
+    TASK_RETRY_MAX_DELAY,
+    TRANSCRIPT_REPLAY_LIMIT,
+    TTS_MAX_CHARS,
+    VOICE_ACTIVE_PROMPT,
+    VOICE_SPOKEN_MAX_CHARS,
+)
+from koda.logging_config import ctx_query_id, ctx_user_id, get_logger
+from koda.services.llm_runner import (
+    build_bootstrap_prompt,
+    get_provider_capabilities,
+    get_provider_fallback_chain,
+    get_provider_runtime_eligibility,
+    is_retryable_provider_error,
+    resolve_provider_model,
+    run_llm,
+    run_llm_streaming,
+    summarize_native_items,
+)
+from koda.services.prompt_budget import PromptBudgetPlanner, PromptSegment
+from koda.services.provider_runtime import TurnMode, infer_turn_mode
+from koda.services.response_markup import build_response_markup
+from koda.state.history_store import (
+    acquire_task_lease,
+    create_task,
+    delete_provider_session_mapping,
+    dlq_insert,
+    dlq_mark_retried,
+    extend_task_lease,
+    get_provider_session_mapping,
+    list_pending_tasks_for_recovery,
+    log_query,
+    reap_expired_task_leases,
+    release_task_lease,
+    save_provider_session_mapping,
+    save_session,
+    save_user_cost,
+    update_task_status,
+    update_task_with_lease,
+)
+from koda.state.knowledge_governance_store import get_execution_reliability_stats, list_approved_runbooks
+from koda.telegram_types import BotContext
+from koda.telegram_types import MessageUpdate as Update
+from koda.utils.artifacts import (
+    ARTIFACT_EXTS,
+    AUDIO_EXTS,
+    DOCUMENT_EXTS,
+    GIF_EXTS,
+    IMAGE_EXTS,
+    VIDEO_EXTS,
+    VOICE_EXTS,
+    extract_created_files,
+    send_created_files,
+)
+from koda.utils.command_helpers import (
+    ensure_canonical_session_id,
+    get_provider_model,
+    init_user_data,
+    normalize_provider,
+    sync_user_data_with_runtime_settings,
+    tts_enabled_for_session,
+)
+from koda.utils.images import untrack_images
+from koda.utils.progress import (
+    _format_elapsed,
+    compact_tool_label,
+    progress_indicator,
+)
+from koda.utils.prompt_sanitizer import sanitize_user_system_prompt
+from koda.utils.tool_parser import (
+    format_tool_summary,
+    parse_tool_uses,
+    summarize_tool_uses,
+)
+from koda.utils.workdir import validate_work_dir
+
+log = get_logger(__name__)
+
+
+class CacheHitLike(Protocol):
+    match_type: str
+    similarity: float
+    response: str
+
+
+class TelegramBotLike(Protocol):
+    async def send_message(self, *args: Any, **kwargs: Any) -> Any: ...
+
+
+_AUTO_INTEGRATION_ACTION_LEVELS: dict[tuple[str, str], str] = {
+    ("cache", "lookup"): "read",
+    ("cache", "store"): "write",
+    ("script_library", "search"): "read",
+    ("script_library", "auto_extract"): "write",
+}
+
+
+def _queue_manager_resource_access_policy() -> dict[str, Any]:
+    return dict(AGENT_RESOURCE_ACCESS_POLICY or {}) if isinstance(AGENT_RESOURCE_ACCESS_POLICY, dict) else {}
+
+
+def _queue_manager_normalized_grants() -> dict[str, dict[str, Any]]:
+    return normalize_integration_grants(_queue_manager_resource_access_policy().get("integration_grants"))
+
+
+def _queue_manager_action_matches(pattern: str, *, integration_id: str, action_id: str) -> bool:
+    normalized = str(pattern or "").strip().lower()
+    if not normalized:
+        return False
+    candidates = {
+        action_id.lower(),
+        f"{integration_id}.{action_id}".lower(),
+    }
+    if normalized.endswith(".*"):
+        prefix = normalized[:-2]
+        return any(candidate == prefix or candidate.startswith(prefix + ".") for candidate in candidates)
+    return normalized in candidates
+
+
+def _queue_manager_action_allowed(
+    *,
+    integration_id: str,
+    action_id: str,
+    user_id: int,
+    task_id: int | None,
+    details: dict[str, Any] | None = None,
+) -> bool:
+    grants = _queue_manager_normalized_grants()
+    grant = grants.get(integration_id)
+    if grant is None:
+        return True
+    if grant.get("enabled") is False:
+        reason = "integration_disabled"
+    else:
+        for pattern in grant.get("deny_actions") or []:
+            if _queue_manager_action_matches(str(pattern), integration_id=integration_id, action_id=action_id):
+                reason = "action_denied"
+                break
+        else:
+            allow_actions = [str(item) for item in grant.get("allow_actions") or []]
+            if allow_actions and not any(
+                _queue_manager_action_matches(pattern, integration_id=integration_id, action_id=action_id)
+                for pattern in allow_actions
+            ):
+                reason = "action_not_granted"
+            else:
+                access_level = _AUTO_INTEGRATION_ACTION_LEVELS.get((integration_id, action_id), "write")
+                approval_mode = str(grant.get("approval_mode") or "guarded").strip().lower()
+                if approval_mode == "read_only" and access_level != "read":
+                    reason = "read_only_policy"
+                else:
+                    return True
+    try:
+        from koda.services import audit
+
+        audit.emit(
+            audit.AuditEvent(
+                event_type="queue_manager.integration_grant_denied",
+                user_id=user_id,
+                task_id=task_id,
+                details={
+                    "integration_id": integration_id,
+                    "action_id": action_id,
+                    "grant_decision": "denied",
+                    "reason": reason,
+                    **dict(details or {}),
+                },
+            )
+        )
+    except Exception:
+        log.exception("queue_manager_integration_grant_audit_failed")
+    return False
+
+
+_AUDIO_RESPONSE_INTENT_RE = re.compile(
+    r"\b("
+    r"(me\s+)?(envie|envia|enviar|mande|manda|mandar)\s+(um\s+|uma\s+)?(audio|voz)"
+    r"|(?:envie|envia|enviar|mande|manda|mandar|responda|responder)\s+(?:.*\s+)?(em|por)\s+(audio|voz)"
+    r"|send\s+(me\s+)?(a\s+)?(voice|audio)(\s+message)?"
+    r"|(?:reply|answer|respond)\s+(by|with|in)\s+(voice|audio)"
+    r"|(?:voice|audio)\s+reply"
+    r"|(em|por)\s+(audio|voz)"
+    r")\b",
+    re.IGNORECASE,
+)
+_ARTIFACT_COMPLETION_RE = re.compile(
+    r"\b(criei|gerei|salvei|arquivo|documento|artefato|artifact|entreguei|entrega|created|generated|saved|attached)\b"
+    r".*\.(docx|doc|pdf|pptx|ppt|xlsx|xls|csv|html|zip|png|jpg|jpeg|webp|mp3|wav|ogg)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_ARTIFACT_FILENAME_RE = re.compile(
+    r"\b[\w.-]+\.(docx|doc|pdf|pptx|ppt|xlsx|xls|csv|html|zip|png|jpg|jpeg|webp|mp3|wav|ogg)\b",
+    re.IGNORECASE,
+)
+_COMPLETED_OUTPUT_MARKERS = (
+    "artefato",
+    "artifact",
+    "entreguei",
+    "entregou",
+    "entrega",
+    "fechei",
+    "ficou pronto",
+    "o que ficou pronto",
+    "pronto",
+    "created",
+    "generated",
+    "saved",
+    "delivered",
+    "done",
+    "completed",
+)
+_PROVIDER_ERROR_PREFIX_RE = re.compile(
+    r"^(provider unavailable|codex authentication failed|timeout after|failed to|error:|api error:|usage:)",
+    re.IGNORECASE,
+)
+
+
+def _normalize_audio_intent_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", str(text or ""))
+    return "".join(ch for ch in normalized if not unicodedata.combining(ch)).lower()
+
+
+def _detect_audio_response_request(text: str) -> bool:
+    """Return true when the user asks for this turn as voice/audio."""
+    normalized = _normalize_audio_intent_text(text)
+    if not normalized.strip():
+        return False
+    return bool(_AUDIO_RESPONSE_INTENT_RE.search(normalized))
+
+
+def _looks_like_artifact_completion(text: str) -> bool:
+    return bool(_ARTIFACT_COMPLETION_RE.search(str(text or "")))
+
+
+def _looks_like_completed_output_after_provider_error(provider: str, text: str) -> bool:
+    stripped = str(text or "").strip()
+    if len(stripped) < 80:
+        return False
+    normalized = stripped.casefold()
+    if "<agent_cmd" in normalized:
+        return False
+    if _PROVIDER_ERROR_PREFIX_RE.search(stripped):
+        return False
+    if is_retryable_provider_error(provider, stripped):
+        return False
+    if _looks_like_artifact_completion(stripped):
+        return True
+    marker_count = sum(1 for marker in _COMPLETED_OUTPUT_MARKERS if marker in normalized)
+    return marker_count >= 2 and bool(_ARTIFACT_FILENAME_RE.search(stripped))
+
+
+def _voice_policy_from_user_data(user_data: dict[str, Any] | None) -> dict[str, Any]:
+    policy = user_data.get("voice_policy") if isinstance(user_data, dict) else None
+    return dict(policy) if isinstance(policy, dict) else {}
+
+
+def _voice_continuous_mode_active(user_data: dict[str, Any] | None) -> bool:
+    if not isinstance(user_data, dict):
+        return False
+    mode = str(user_data.get("voice_policy_mode") or "").strip().lower()
+    return (
+        bool(user_data.get("audio_response"))
+        or bool(user_data.get("voice_policy_active"))
+        or mode
+        in {
+            "tts",
+            "voice_active",
+        }
+    )
+
+
+def _voice_policy_int(user_data: dict[str, Any] | None, *keys: str, default: int) -> int:
+    policy = _voice_policy_from_user_data(user_data)
+    for key in keys:
+        value = policy.get(key)
+        if value is None and isinstance(user_data, dict):
+            value = user_data.get(key)
+        if value is None:
+            continue
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            continue
+        if parsed > 0:
+            return parsed
+    return default
+
+
+def _voice_spoken_max_chars(user_data: dict[str, Any] | None) -> int:
+    configured = _voice_policy_int(
+        user_data,
+        "max_spoken_chars",
+        "spoken_max_chars",
+        "max_audio_chars",
+        default=VOICE_SPOKEN_MAX_CHARS,
+    )
+    return max(240, min(configured, TTS_MAX_CHARS))
+
+
+def _voice_language_is_portuguese(user_data: dict[str, Any] | None) -> bool:
+    language = str((user_data or {}).get("tts_voice_language") or "").strip().lower()
+    return language.startswith("pt")
+
+
+def _voice_delivery_note(user_data: dict[str, Any] | None) -> str:
+    if _voice_language_is_portuguese(user_data):
+        return "Deixei os detalhes completos em texto."
+    return "I left the full details in text."
+
+
+def _voice_code_note(user_data: dict[str, Any] | None) -> str:
+    if _voice_language_is_portuguese(user_data):
+        return "A resposta completa tem codigo ou detalhes tecnicos."
+    return "The full response includes code or technical details."
+
+
+def _artifact_voice_kind(path: str) -> str:
+    ext = Path(path).suffix.lower()
+    if ext in IMAGE_EXTS:
+        return "image"
+    if ext in GIF_EXTS:
+        return "animation"
+    if ext in VIDEO_EXTS:
+        return "video"
+    if ext in AUDIO_EXTS:
+        return "audio"
+    if ext in VOICE_EXTS:
+        return "voice"
+    if ext in DOCUMENT_EXTS:
+        return "document"
+    return "file"
+
+
+def _artifact_voice_counts(paths: list[str]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for path in paths:
+        kind = _artifact_voice_kind(path)
+        counts[kind] = counts.get(kind, 0) + 1
+    return counts
+
+
+def _artifact_voice_phrase(paths: list[str], user_data: dict[str, Any] | None) -> str:
+    counts = _artifact_voice_counts(paths)
+    total = sum(counts.values())
+    if total <= 0:
+        return "os arquivos gerados" if _voice_language_is_portuguese(user_data) else "the generated files"
+    if len(counts) > 1:
+        return "os artefatos gerados" if _voice_language_is_portuguese(user_data) else "the generated artifacts"
+
+    kind = next(iter(counts))
+    singular = total == 1
+    if _voice_language_is_portuguese(user_data):
+        phrases = {
+            "image": ("a imagem", "as imagens"),
+            "animation": ("a animacao", "as animacoes"),
+            "video": ("o video", "os videos"),
+            "audio": ("o audio", "os audios"),
+            "voice": ("a nota de voz", "as notas de voz"),
+            "document": ("o documento", "os documentos"),
+            "file": ("o arquivo gerado", "os arquivos gerados"),
+        }
+    else:
+        phrases = {
+            "image": ("the image", "the images"),
+            "animation": ("the animation", "the animations"),
+            "video": ("the video", "the videos"),
+            "audio": ("the audio file", "the audio files"),
+            "voice": ("the voice note", "the voice notes"),
+            "document": ("the document", "the documents"),
+            "file": ("the generated file", "the generated files"),
+        }
+    one, many = phrases.get(kind, phrases["file"])
+    return one if singular else many
+
+
+def _artifact_style_hint(query_text: str | None) -> str:
+    text = " ".join(str(query_text or "").replace("\n", " ").split())
+    if not text:
+        return ""
+    match = re.search(r"\b(?:no|na|em)\s+estilo\s+([^.;,\n]+)", text, re.IGNORECASE)
+    if not match:
+        return ""
+    style = match.group(1).strip(" .,:;")
+    if not style:
+        return ""
+    return _truncate_spoken_text(style, 80).rstrip(".")
+
+
+def _artifact_voice_completion_clause(
+    paths: list[str],
+    user_data: dict[str, Any] | None,
+    query_text: str | None,
+) -> str:
+    counts = _artifact_voice_counts(paths)
+    only_kind = next(iter(counts)) if len(counts) == 1 else ""
+    portuguese = _voice_language_is_portuguese(user_data)
+    if portuguese:
+        if only_kind == "image":
+            style = _artifact_style_hint(query_text)
+            return f"gerei a imagem no estilo {style}" if style else "gerei a imagem que voce pediu"
+        if only_kind == "animation":
+            return "gerei a animacao que voce pediu"
+        if only_kind == "video":
+            return "gerei o video que voce pediu"
+        if only_kind == "audio":
+            return "gerei o audio que voce pediu"
+        if only_kind == "voice":
+            return "gerei a nota de voz que voce pediu"
+        if only_kind == "document":
+            if sum(counts.values()) > 1:
+                return "preparei os documentos solicitados"
+            return "preparei o documento solicitado"
+        return "gerei os arquivos solicitados"
+    if only_kind == "image":
+        return "I generated the image you asked for"
+    if only_kind == "animation":
+        return "I generated the animation you asked for"
+    if only_kind == "video":
+        return "I generated the video you asked for"
+    if only_kind == "audio":
+        return "I generated the audio file you asked for"
+    if only_kind == "voice":
+        return "I generated the voice note you asked for"
+    if only_kind == "document":
+        return "I prepared the requested documents" if sum(counts.values()) > 1 else "I prepared the requested document"
+    return "I generated the requested files"
+
+
+def _artifact_voice_delivery_summary(
+    paths: list[str],
+    user_data: dict[str, Any] | None,
+    query_text: str | None,
+) -> str:
+    phrase = _artifact_voice_phrase(paths, user_data)
+    clause = _artifact_voice_completion_clause(paths, user_data, query_text)
+    if _voice_language_is_portuguese(user_data):
+        return f"Pronto, {clause} e anexei {phrase} aqui no Telegram."
+    return f"Done, {clause} and attached {phrase} here in Telegram."
+
+
+def _voice_artifact_note(paths: list[str], user_data: dict[str, Any] | None) -> str:
+    if not paths:
+        return ""
+    phrase = _artifact_voice_phrase(paths, user_data)
+    if _voice_language_is_portuguese(user_data):
+        return f"Tambem anexei {phrase} aqui no Telegram."
+    return f"I also attached {phrase} here in Telegram."
+
+
+def _sanitize_artifact_names_for_voice(
+    text: str,
+    created_artifacts: list[str] | None,
+    user_data: dict[str, Any] | None,
+) -> str:
+    if not text or not created_artifacts:
+        return text
+    replacement = _artifact_voice_phrase(created_artifacts, user_data)
+    names = sorted(
+        {os.path.basename(path.rstrip(os.sep)) for path in created_artifacts if os.path.basename(path.rstrip(os.sep))},
+        key=len,
+        reverse=True,
+    )
+    sanitized = text
+    for name in names:
+        if _voice_language_is_portuguese(user_data):
+            sanitized = re.sub(
+                rf"\b(?:o|a|os|as)?\s*(?:arquivo|ficheiro|anexo)\s+{re.escape(name)}",
+                replacement,
+                sanitized,
+                flags=re.IGNORECASE,
+            )
+        else:
+            sanitized = re.sub(
+                rf"\b(?:the\s+)?(?:file|attachment)\s+{re.escape(name)}",
+                replacement,
+                sanitized,
+                flags=re.IGNORECASE,
+            )
+        sanitized = re.sub(re.escape(name), replacement, sanitized, flags=re.IGNORECASE)
+    sanitized = re.sub(r"\s+([.,;:])", r"\1", sanitized)
+    sanitized = re.sub(r"(?:,\s*)?(?:\+\d+)\b", "", sanitized)
+    return re.sub(r"\s+", " ", sanitized).strip()
+
+
+def _safe_voice_policy_text(value: Any, *, max_len: int = 120) -> str:
+    text = str(value or "").strip().replace("\n", " ")
+    return text[:max_len].strip()
+
+
+def _build_voice_active_prompt(user_data: dict[str, Any] | None, *, force_audio_response: bool = False) -> str:
+    policy = _voice_policy_from_user_data(user_data)
+    lines: list[str] = []
+    max_chars = _voice_spoken_max_chars(user_data)
+    lines.append(f"max_spoken_chars={max_chars}")
+    for key in ("spoken_style", "style", "detail_level", "language", "tone"):
+        value = _safe_voice_policy_text(policy.get(key))
+        if value:
+            lines.append(f"{key}={value}")
+    delivery_state = (
+        "<voice_delivery_state>\n"
+        "Voice delivery is ACTIVE for this response. The runtime has already decided that this answer "
+        "will be synthesized and sent as Telegram audio/voice.\n"
+        f"continuous_voice_mode={'active' if _voice_continuous_mode_active(user_data) else 'inactive'}\n"
+        f"turn_audio_request={'true' if force_audio_response else 'false'}\n"
+        f"session_tts_enabled={'true' if tts_enabled_for_session(user_data) else 'false'}\n"
+        "Do not say voice mode, TTS, or audio is disabled. Do not tell the user to use /voice to enable "
+        "audio in this response. If you mention delivery, say the audio is being sent now.\n"
+        "</voice_delivery_state>"
+    )
+    if not lines:
+        return f"{VOICE_ACTIVE_PROMPT}\n\n{delivery_state}"
+    return (
+        f"{VOICE_ACTIVE_PROMPT}\n\n"
+        f"{delivery_state}\n\n"
+        "<agent_voice_delivery_policy>\n"
+        "These voice delivery preferences come from the active agent configuration. "
+        "Follow them as formatting guidance while preserving the agent persona and task requirements.\n"
+        + "\n".join(lines)
+        + "\n</agent_voice_delivery_policy>"
+    )
+
+
+# Dataclasses
+
+
+@dataclass
+class QueueItem:
+    """Parsed queue item with all fields resolved."""
+
+    chat_id: int
+    query_text: str
+    update: Update | None = None
+    image_paths: list[str] | None = None
+    artifact_bundle: Any | None = None
+    is_continuation: bool = False
+    is_link_analysis: bool = False
+    continuation_session_id: str | None = None
+    continuation_provider: str | None = None
+    is_scheduled_run: bool = False
+    scheduled_job_id: int | None = None
+    scheduled_run_id: int | None = None
+    scheduled_dry_run: bool = False
+    scheduled_provider: str | None = None
+    scheduled_model: str | None = None
+    scheduled_work_dir: str | None = None
+    scheduled_session_id: str | None = None
+    scheduled_trigger_reason: str | None = None
+    runtime_work_dir: str | None = None
+    is_dashboard_chat: bool = False
+    override_session_id: str | None = None
+    force_audio_response: bool = False
+    executing_agent_id: str | None = None
+    squad_thread_id: str | None = None
+    squad_task_id: str | None = None
+    parent_message_id: str | None = None
+    delegation_chain: list[str] = field(default_factory=list)
+    delegation_request_id: str | None = None
+    delegation_origin_agent_id: str | None = None
+    telegram_message_thread_id: int | None = None
+    is_child_run: bool = False
+    child_run_id: str | None = None
+    parent_task_id: int | None = None
+    child_context_prompt: str | None = None
+    child_context_policy: dict[str, Any] = field(default_factory=dict)
+    child_toolset: str | None = None
+    silent_response: bool = False
+
+
+@dataclass
+class QueryContext:
+    """Resolved context for a single query execution."""
+
+    provider: str
+    work_dir: str
+    model: str
+    session_id: str
+    provider_session_id: str | None
+    system_prompt: str
+    agent_mode: str
+    permission_mode: str
+    max_turns: int
+    task_id: int | None = None
+    warnings: list[str] = field(default_factory=list)
+    fallback_chain: list[str] = field(default_factory=list)
+    cache_hit: CacheHitLike | None = None  # CacheLookupResult from cache_manager
+    script_matches: list = field(default_factory=list)  # list[ScriptSearchResult]
+    knowledge_hits: list[Any] = field(default_factory=list)
+    knowledge_resolution: Any | None = None
+    memory_resolution: Any | None = None
+    memory_profile: Any | None = None
+    memory_trust_score: float = 0.0
+    confidence_reports: list[dict[str, Any]] = field(default_factory=list)
+    task_kind: str = "general"
+    knowledge_query_context: Any | None = None
+    effective_policy: Any | None = None
+    ungrounded_operationally: bool = False
+    stale_sources_present: bool = False
+    last_action_plan: dict[str, Any] | None = None
+    verified_before_finalize: bool = False
+    human_approval_used: bool = False
+    execution_episode_id: int | None = None
+    answer_evaluation: Any | None = None
+    grounding_gate_decision: Any | None = None
+    grounded_answer: Any | None = None
+    answer_judgement: Any | None = None
+    turn_mode: TurnMode = "new_turn"
+    resume_requested: bool = False
+    supports_native_resume: bool = True
+    provider_available: bool = True
+    dry_run: bool = False
+    scheduled_job_id: int | None = None
+    scheduled_run_id: int | None = None
+    artifact_dossiers: list[Any] = field(default_factory=list)
+    visual_paths: list[str] = field(default_factory=list)
+    temp_paths: list[str] = field(default_factory=list)
+    runtime_env_id: int | None = None
+    runtime_classification: str = "light"
+    runtime_environment_kind: str = "dev_worktree"
+    source_root_path: str | None = None
+    prompt_budget: dict[str, Any] | None = None
+    asset_refs: list[dict[str, Any]] = field(default_factory=list)
+    skill_matches: list[Any] = field(default_factory=list)
+    effort: str | int | None = None
+    force_audio_response: bool = False
+    executing_agent_id: str | None = None
+    squad_thread_id: str | None = None
+    squad_task_id: str | None = None
+    parent_message_id: str | None = None
+    delegation_chain: list[str] = field(default_factory=list)
+    delegation_request_id: str | None = None
+    delegation_origin_agent_id: str | None = None
+    telegram_message_thread_id: int | None = None
+    is_child_run: bool = False
+    child_run_id: str | None = None
+    parent_task_id: int | None = None
+    child_context_policy: dict[str, Any] = field(default_factory=dict)
+    child_toolset: str | None = None
+    context_governance: dict[str, Any] | None = None
+
+
+@dataclass
+class RunResult:
+    """Result from provider execution."""
+
+    provider: str
+    model: str
+    result: str
+    session_id: str
+    provider_session_id: str | None
+    cost_usd: float
+    error: bool
+    stop_reason: str
+    usage: dict[str, Any] = field(default_factory=dict)
+    tool_uses: list[dict] = field(default_factory=list)
+    native_items: list[dict[str, Any]] = field(default_factory=list)
+    tool_execution_trace: list[dict[str, Any]] = field(default_factory=list)
+    raw_output: str = ""
+    warnings: list[str] = field(default_factory=list)
+    fallback_chain: list[str] = field(default_factory=list)
+    turn_mode: TurnMode = "new_turn"
+    supports_native_resume: bool = True
+    error_kind: str = ""
+    retryable: bool = False
+    runtime_terminal_id: int | None = None
+    runtime_terminal_path: str | None = None
+
+
+@dataclass
+class DeliveryOutcome:
+    """Prepared user-visible delivery state for history, trace, and channel send."""
+
+    response: str
+    tool_summary: str = ""
+    explicit_spoken_response: str | None = None
+    created_artifacts: list[str] = field(default_factory=list)
+    artifact_summary_applied: bool = False
+
+
+class BudgetExceeded(Exception):
+    """Raised when the user has exceeded their budget."""
+
+
+@dataclass
+class TaskInfo:
+    """In-memory state for an active task."""
+
+    task_id: int
+    user_id: int
+    chat_id: int
+    query_text: str
+    status: str = "queued"
+    attempt: int = 1
+    created_at: float = field(default_factory=time.time)
+    started_at: float | None = None
+    completed_at: float | None = None
+    cost_usd: float = 0.0
+    error_message: str | None = None
+    model: str | None = None
+    asyncio_task: asyncio.Task | None = None
+    runtime_env_id: int | None = None
+    runtime_classification: str | None = None
+    runtime_environment_kind: str | None = None
+    runtime_work_dir: str | None = None
+
+
+class _RetryableError(Exception):
+    """Transient error that allows retry (overloaded, rate limit, connection, timeout)."""
+
+
+class _RuntimeGuardrailError(Exception):
+    """Runtime guardrail triggered and execution must stop safely."""
+
+
+def _recover_provider_error_with_completed_output(run_result: RunResult) -> bool:
+    """Treat a provider-side error flag as successful only when the final text is clearly usable."""
+    if not run_result.error:
+        return False
+
+    error_kind = str(run_result.error_kind or "").strip()
+    if error_kind not in {"", "provider_runtime"}:
+        return False
+
+    if not _looks_like_completed_output_after_provider_error(run_result.provider, run_result.result):
+        return False
+
+    warning = "provider reported an error after producing a completed response; continuing with delivery"
+    if warning not in run_result.warnings:
+        run_result.warnings.append(warning)
+    run_result.error = False
+    run_result.retryable = False
+    run_result.error_kind = ""
+    if not run_result.stop_reason or run_result.stop_reason == "error":
+        run_result.stop_reason = "completed_with_provider_warning"
+    return True
+
+
+# Helper functions (compact tool labels, status line)
+
+
+def _compact_tool_label(name: str, input_data: dict | None = None) -> str:
+    """Build a compact label like 'Read(file.py)', 'Bash(npm test...)'."""
+    return compact_tool_label(name, input_data)
+
+
+def _get_throttle_interval(elapsed: float) -> float:
+    """Adaptive throttle: fast at start, slower for long tasks."""
+    if elapsed < 10:
+        return 1.5
+    if elapsed < 30:
+        return 3.0
+    if elapsed < 120:
+        return 5.0
+    return 8.0
+
+
+def _make_timeline_item(
+    item_type: str,
+    title: str,
+    *,
+    timestamp: str | None = None,
+    status: str = "info",
+    summary: str | None = None,
+    details: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "type": item_type,
+        "title": title,
+        "status": status,
+        "timestamp": timestamp or datetime.now(UTC).isoformat(),
+    }
+    if summary:
+        payload["summary"] = summary
+    if details:
+        payload["details"] = details
+    return payload
+
+
+def _build_operational_reasoning(
+    *,
+    provider: str | None,
+    model: str | None,
+    status: str,
+    stop_reason: str,
+    warning_count: int,
+    tool_count: int,
+    attempt: int,
+    max_attempts: int,
+) -> list[str]:
+    notes: list[str] = []
+    if model:
+        if provider:
+            notes.append(f"The run used provider {provider} with model {model}.")
+        else:
+            notes.append(f"The run used model {model}.")
+    if tool_count:
+        notes.append(f"The agent invoked {tool_count} tool(s) during the resolution.")
+    else:
+        notes.append("The response was produced without invoking any auxiliary tools.")
+    if stop_reason:
+        notes.append(f"The runtime cycle ended with stop reason '{stop_reason}'.")
+    if warning_count:
+        notes.append(f"Recorded {warning_count} operational warning(s) during the run.")
+    if status == "completed":
+        notes.append(f"The task completed successfully on attempt {attempt} of {max_attempts}.")
+    else:
+        notes.append(f"The task ended as {status} after {attempt} attempt(s) of {max_attempts}.")
+    return notes
+
+
+def _build_execution_trace_payload(
+    *,
+    item: QueueItem,
+    task_info: TaskInfo,
+    ctx: QueryContext | None,
+    run_result: RunResult | None,
+    status: str,
+    work_dir: str | None,
+    timeline: list[dict[str, Any]],
+    error_message: str | None = None,
+    response_text_override: str | None = None,
+) -> dict[str, Any]:
+    tool_steps = run_result.tool_execution_trace if run_result else []
+    tool_count = len(tool_steps)
+    warning_count = len(run_result.warnings) if run_result else 0
+    reasoning_summary = _build_operational_reasoning(
+        provider=run_result.provider if run_result else None,
+        model=task_info.model,
+        status=status,
+        stop_reason=run_result.stop_reason if run_result else "",
+        warning_count=warning_count,
+        tool_count=tool_count,
+        attempt=task_info.attempt,
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+    )
+    return {
+        "query_text": item.query_text,
+        "response_text": (
+            response_text_override
+            if response_text_override is not None
+            else (run_result.result if run_result else None)
+        ),
+        "provider": run_result.provider if run_result else None,
+        "model": task_info.model,
+        "session_id": run_result.session_id if run_result else None,
+        "provider_session_id": run_result.provider_session_id if run_result else None,
+        "work_dir": work_dir,
+        "status": status,
+        "cost_usd": task_info.cost_usd,
+        "duration_ms": (
+            ((task_info.completed_at or time.time()) - task_info.started_at) * 1000 if task_info.started_at else None
+        ),
+        "stop_reason": run_result.stop_reason if run_result else None,
+        "warnings": run_result.warnings if run_result else [],
+        "tool_uses": run_result.tool_uses if run_result else [],
+        "tools": tool_steps,
+        "timeline": timeline,
+        "reasoning_summary": reasoning_summary,
+        "grounding": {
+            "knowledge_hits": _serialize_knowledge_hits(ctx.knowledge_hits if ctx else []),
+            "knowledge_hit_count": len(ctx.knowledge_hits) if ctx else 0,
+            "memory_trust_score": float(ctx.memory_trust_score) if ctx else 0.0,
+            "memory_layers": list(getattr(ctx.memory_resolution, "selected_layers", []) or []) if ctx else [],
+            "memory_retrieval_sources": (
+                list(getattr(ctx.memory_resolution, "retrieval_sources", []) or []) if ctx else []
+            ),
+            "memory_explanations": [
+                {
+                    "memory_id": explanation.memory_id,
+                    "layer": explanation.layer,
+                    "retrieval_source": explanation.retrieval_source,
+                    "score": explanation.score,
+                    "scope_score": explanation.scope_score,
+                    "reasons": explanation.reasons,
+                    "source_query_id": explanation.source_query_id,
+                    "source_task_id": explanation.source_task_id,
+                    "source_episode_id": explanation.source_episode_id,
+                    "namespace_kind": getattr(explanation, "namespace_kind", "agent"),
+                    "namespace_key": getattr(explanation, "namespace_key", ""),
+                    "sensitivity": getattr(explanation, "sensitivity", "normal"),
+                }
+                for explanation in (getattr(ctx.memory_resolution, "explanations", []) if ctx else [])
+            ],
+            "memory_discards": [
+                {
+                    "memory_id": discard.memory_id,
+                    "reason": discard.reason,
+                    "layer": discard.layer,
+                    "retrieval_source": discard.retrieval_source,
+                    "score": discard.score,
+                    "namespace_kind": getattr(discard, "namespace_kind", "agent"),
+                    "namespace_key": getattr(discard, "namespace_key", ""),
+                    "sensitivity": getattr(discard, "sensitivity", "normal"),
+                }
+                for discard in (getattr(ctx.memory_resolution, "discarded", []) if ctx else [])
+            ],
+            "task_kind": ctx.task_kind if ctx else "general",
+            "ungrounded_operationally": bool(ctx.ungrounded_operationally) if ctx else False,
+            "stale_sources_present": bool(ctx.stale_sources_present) if ctx else False,
+            "artifact_dossier_count": len(ctx.artifact_dossiers) if ctx else 0,
+            "artifact_blocking_gaps": any(dossier.has_blocking_gaps for dossier in ctx.artifact_dossiers)
+            if ctx
+            else False,
+            "guardrails": [
+                {
+                    "id": guardrail.id,
+                    "title": guardrail.title,
+                    "severity": guardrail.severity,
+                    "reason": guardrail.reason,
+                    "source_label": guardrail.source_label,
+                }
+                for guardrail in (getattr(ctx.knowledge_resolution, "guardrails", []) if ctx else [])
+            ],
+            "conflicts": [
+                {
+                    "title": conflict.title,
+                    "higher_layer": conflict.higher_layer.value,
+                    "lower_layer": conflict.lower_layer.value,
+                    "higher_source_label": conflict.higher_source_label,
+                    "lower_source_label": conflict.lower_source_label,
+                }
+                for conflict in (getattr(ctx.knowledge_resolution, "conflicts", []) if ctx else [])
+            ],
+            "effective_policy": _policy_to_dict(ctx.effective_policy if ctx else None),
+            "verified_before_finalize": bool(ctx.verified_before_finalize) if ctx else False,
+            "context_governance": ctx.context_governance if ctx and ctx.context_governance else None,
+        },
+        "confidence_reports": list(ctx.confidence_reports) if ctx else [],
+        "raw_artifacts": {
+            "assistant_raw_output": run_result.raw_output if run_result and run_result.raw_output else None,
+            "native_items": run_result.native_items if run_result else [],
+            "fallback_chain": run_result.fallback_chain if run_result else [],
+            "artifact_dossiers": [dossier.to_trace_dict() for dossier in ctx.artifact_dossiers] if ctx else [],
+            "child_run": {
+                "is_child_run": bool(ctx.is_child_run) if ctx else False,
+                "child_run_id": ctx.child_run_id if ctx else None,
+                "parent_task_id": ctx.parent_task_id if ctx else None,
+                "toolset": ctx.child_toolset if ctx else None,
+            }
+            if ctx and ctx.is_child_run
+            else None,
+        },
+        "error_message": error_message,
+    }
+
+
+def _tool_steps_to_timeline(tool_steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    timeline: list[dict[str, Any]] = []
+    for step in tool_steps:
+        tool_name = str(step.get("tool") or "tool")
+        success = bool(step.get("success"))
+        summary = step.get("metadata", {}).get("category")
+        if summary:
+            description = f"{tool_name} ({summary})"
+        else:
+            description = tool_name
+        timeline.append(
+            _make_timeline_item(
+                "task.tool_executed",
+                f"Ferramenta {tool_name}",
+                timestamp=step.get("completed_at"),
+                status="success" if success else "error",
+                summary=description,
+                details={
+                    "tool": tool_name,
+                    "duration_ms": step.get("duration_ms"),
+                    "success": success,
+                },
+            )
+        )
+    return timeline
+
+
+def _serialize_knowledge_hits(hits: list[Any]) -> list[dict[str, Any]]:
+    serialized: list[dict[str, Any]] = []
+    for hit in hits:
+        if hasattr(hit, "to_trace_dict"):
+            serialized.append(hit.to_trace_dict())
+        elif isinstance(hit, dict):
+            serialized.append(hit)
+    return serialized
+
+
+async def _persist_artifact_evidence_nodes(
+    query_context: Any | None,
+    dossiers: list[Any],
+) -> None:
+    if query_context is None or not dossiers:
+        return
+    try:
+        from koda.knowledge import get_knowledge_manager
+
+        km = get_knowledge_manager()
+        if km.initialized:
+            await km.ingest_artifact_dossiers(query_context, dossiers)
+    except Exception:
+        log.exception("artifact_evidence_import_error")
+
+
+def _policy_to_dict(policy: Any | None) -> dict[str, Any]:
+    if policy is None:
+        return {}
+    required_layers = getattr(policy, "required_layers", ())
+    return {
+        "task_kind": getattr(policy, "task_kind", ""),
+        "autonomy_tier": getattr(getattr(policy, "autonomy_tier", None), "value", ""),
+        "min_read_evidence": getattr(policy, "min_read_evidence", 1),
+        "required_source_layers": [layer.value if hasattr(layer, "value") else str(layer) for layer in required_layers],
+        "required_verifications": list(getattr(policy, "required_verifications", ())),
+        "requires_rollback": bool(getattr(policy, "requires_rollback", False)),
+        "requires_probable_cause": bool(getattr(policy, "requires_probable_cause", False)),
+        "approval_mode": getattr(policy, "approval_mode", "standard"),
+        "max_source_age_days": getattr(policy, "max_source_age_days", 90),
+    }
+
+
+def _workspace_fingerprint(work_dir: str) -> str:
+    return hashlib.sha256(work_dir.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+
+
+def _hash_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
+
+
+def _workspace_diff_hash(work_dir: str | None) -> str:
+    if not work_dir:
+        return ""
+    try:
+        status_result = subprocess.run(
+            ["git", "-C", work_dir, "status", "--short", "--untracked-files=all"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        return ""
+    if status_result.returncode != 0:
+        return ""
+    status_text = status_result.stdout or ""
+    if not status_text.strip():
+        return "clean"
+    try:
+        diff_result = subprocess.run(
+            ["git", "-C", work_dir, "diff", "--binary", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except Exception:
+        diff_text = ""
+    else:
+        diff_text = diff_result.stdout or ""
+    return _hash_text(diff_text or status_text)
+
+
+def _parse_runbook_id_from_source_path(source_path: str) -> int | None:
+    if not source_path.startswith("approved_runbook:"):
+        return None
+    try:
+        return int(source_path.split(":", 1)[1])
+    except ValueError:
+        return None
+
+
+def _select_policy_runbook(
+    scoped_runbooks: list[dict[str, Any]],
+    knowledge_resolution: Any | None,
+) -> dict[str, Any] | None:
+    if not scoped_runbooks:
+        return None
+    runbooks_by_id = {
+        int(runbook["id"]): runbook for runbook in scoped_runbooks if isinstance(runbook.get("id"), (int, str))
+    }
+    if knowledge_resolution is not None:
+        for hit in getattr(knowledge_resolution, "hits", []) or []:
+            layer = getattr(getattr(hit, "entry", None), "layer", None)
+            source_path = str(getattr(getattr(hit, "entry", None), "source_path", "") or "")
+            if getattr(layer, "value", layer) != "approved_runbook":
+                continue
+            runbook_id = _parse_runbook_id_from_source_path(source_path)
+            if runbook_id is not None and runbook_id in runbooks_by_id:
+                return runbooks_by_id[runbook_id]
+    if len(scoped_runbooks) == 1:
+        return scoped_runbooks[0]
+    return None
+
+
+def _apply_policy_overrides(base_policy: Any, runbook: dict[str, Any] | None) -> Any:
+    if base_policy is None or not runbook:
+        return base_policy
+    from koda.knowledge.task_policy_defaults import sanitize_policy_overrides
+
+    try:
+        overrides = sanitize_policy_overrides(dict(runbook.get("policy_overrides") or {}))
+    except (TypeError, ValueError):
+        log.warning(
+            "invalid_policy_overrides_ignored",
+            runbook_id=runbook.get("id"),
+            overrides=runbook.get("policy_overrides"),
+        )
+        return base_policy
+
+    if not overrides:
+        return base_policy
+    patch: dict[str, Any] = {}
+    if "min_read_evidence" in overrides:
+        patch["min_read_evidence"] = int(overrides["min_read_evidence"])
+    if "required_layers" in overrides:
+        from koda.knowledge.types import KnowledgeLayer
+
+        patch["required_layers"] = tuple(KnowledgeLayer(str(item)) for item in overrides["required_layers"])
+    if "required_verifications" in overrides:
+        patch["required_verifications"] = tuple(str(item) for item in overrides["required_verifications"])
+    if "requires_rollback" in overrides:
+        patch["requires_rollback"] = bool(overrides["requires_rollback"])
+    if "requires_probable_cause" in overrides:
+        patch["requires_probable_cause"] = bool(overrides["requires_probable_cause"])
+    if "approval_mode" in overrides:
+        patch["approval_mode"] = str(overrides["approval_mode"])
+    if "max_source_age_days" in overrides:
+        patch["max_source_age_days"] = int(overrides["max_source_age_days"])
+    if "autonomy_tier" in overrides and hasattr(base_policy, "autonomy_tier"):
+        from koda.knowledge.types import AutonomyTier
+
+        patch["autonomy_tier"] = AutonomyTier(str(overrides["autonomy_tier"]).lower())
+    return replace(base_policy, **patch) if patch else base_policy
+
+
+def _downgrade_policy_from_reliability(base_policy: Any, stats: dict[str, Any]) -> Any:
+    if base_policy is None:
+        return None
+    total_runs = int(stats.get("total_runs") or 0)
+    successful_runs = int(stats.get("successful_runs") or 0)
+    correction_count = int(stats.get("correction_count") or 0)
+    success_rate = (successful_runs / total_runs) if total_runs else 0.0
+    if getattr(getattr(base_policy, "autonomy_tier", None), "value", "") != "t2":
+        return base_policy
+    if total_runs < 3 or success_rate < 0.75 or correction_count > 0:
+        return replace(base_policy, approval_mode="supervised")
+    return base_policy
+
+
+def _has_post_write_verification(tool_steps: list[dict[str, Any]]) -> bool:
+    """Whether a successful read-only check happened after the last write."""
+    last_write_index: int | None = None
+    for index, step in enumerate(tool_steps):
+        if step.get("metadata", {}).get("write"):
+            last_write_index = index
+    if last_write_index is None:
+        return False
+    for step in tool_steps[last_write_index + 1 :]:
+        if step.get("success") and not step.get("metadata", {}).get("write"):
+            return True
+    return False
+
+
+def _requires_post_write_verification(ctx: QueryContext) -> bool:
+    policy = ctx.effective_policy
+    if policy is None:
+        return False
+    return bool(getattr(policy, "required_verifications", ()))
+
+
+def _has_grounded_operational_layer(hits: list[Any]) -> bool:
+    serialized_hits = _serialize_knowledge_hits(hits)
+    return any(hit.get("layer") in {"canonical_policy", "approved_runbook"} for hit in serialized_hits)
+
+
+def _latest_confidence_score(ctx: QueryContext | None) -> float | None:
+    if not ctx or not ctx.confidence_reports:
+        return None
+    latest = ctx.confidence_reports[-1]
+    score = latest.get("score")
+    if isinstance(score, (int, float)):
+        return float(score)
+    return None
+
+
+def _answer_eval_value(answer_evaluation: Any | None, field: str, default: Any = None) -> Any:
+    if answer_evaluation is None:
+        return default
+    if isinstance(answer_evaluation, dict):
+        return answer_evaluation.get(field, default)
+    return getattr(answer_evaluation, field, default)
+
+
+_knowledge_orchestration_service: Any | None = None
+_query_context_service: Any | None = None
+_execution_episode_service: Any | None = None
+
+
+def _get_knowledge_orchestration_service() -> Any:
+    global _knowledge_orchestration_service
+    if _knowledge_orchestration_service is None:
+        from koda.knowledge.repository import KnowledgeRepository
+        from koda.knowledge.storage_v2 import KnowledgeStorageV2
+        from koda.services.knowledge_orchestration_service import KnowledgeOrchestrationService
+
+        repository = KnowledgeRepository(AGENT_ID or None)
+        storage = KnowledgeStorageV2(repository, AGENT_ID or None)
+        _knowledge_orchestration_service = KnowledgeOrchestrationService(storage)
+    return _knowledge_orchestration_service
+
+
+def _get_query_context_service() -> Any:
+    global _query_context_service
+    if _query_context_service is None:
+        from koda.services.query_context_service import QueryContextService
+
+        _query_context_service = QueryContextService()
+    return _query_context_service
+
+
+def _get_execution_episode_service() -> Any:
+    global _execution_episode_service
+    if _execution_episode_service is None:
+        from koda.services.execution_episode_service import ExecutionEpisodeService
+
+        _execution_episode_service = ExecutionEpisodeService(agent_id=AGENT_ID)
+    return _execution_episode_service
+
+
+def _append_prompt_segment(
+    segments: list[PromptSegment],
+    *,
+    segment_id: str,
+    text: str,
+    category: str,
+    priority: int,
+    compression_strategy: str = "truncate_tail",
+    drop_policy: str = "drop",
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    if not str(text or "").strip():
+        return
+    segments.append(
+        PromptSegment(
+            segment_id=segment_id,
+            text=str(text).strip(),
+            category=category,
+            priority=priority,
+            compression_strategy=compression_strategy,
+            drop_policy=drop_policy,
+            metadata=dict(metadata or {}),
+        )
+    )
+
+
+def _compile_runtime_prompt_budget(
+    *,
+    provider: str,
+    model: str,
+    segments: list[PromptSegment],
+    memory_context_max_tokens: int,
+    knowledge_context_max_tokens: int,
+) -> dict[str, Any]:
+    result = PromptBudgetPlanner().compile(
+        provider=provider,
+        model=model,
+        segments=segments,
+        category_token_caps={
+            "memory": memory_context_max_tokens,
+            "authoritative_knowledge": knowledge_context_max_tokens,
+            "supporting_knowledge": max(512, int(knowledge_context_max_tokens * 0.5)),
+        },
+    )
+    payload = result.to_dict()
+    payload["compiled_prompt"] = result.compiled_prompt
+    return payload
+
+
+def _prompt_budget_error_message(prompt_budget: dict[str, Any]) -> str:
+    overflow_tokens = int(prompt_budget.get("overflow_tokens") or 0)
+    gate_reason = str(prompt_budget.get("gate_reason") or "compiled_overflow").strip()
+    final_segment_order = list(prompt_budget.get("final_segment_order") or [])
+    tail = ", ".join(str(item) for item in final_segment_order[-3:] if str(item).strip())
+    suffix = f" Final segments kept: {tail}." if tail else ""
+    if gate_reason == "hard_floor_overflow":
+        return (
+            "System prompt exceeds the configured token budget before any discretionary context can be trimmed. "
+            f"Overflow={overflow_tokens} tokens.{suffix}"
+        )
+    return (
+        f"System prompt exceeds the configured token budget for this turn. Overflow={overflow_tokens} tokens.{suffix}"
+    )
+
+
+async def _record_procedural_memory(
+    *,
+    query_text: str,
+    user_id: int,
+    task_id: int | None,
+    source_episode_id: int | None,
+    status: str,
+    ctx: QueryContext | None,
+    run_result: RunResult | None,
+    error_message: str | None,
+) -> None:
+    """Persist a best-effort procedural memory from the task outcome."""
+    if ctx is None or run_result is None or ctx.dry_run:
+        return
+    if ctx.is_child_run and not bool((ctx.child_context_policy or {}).get("allow_memory_writes", False)):
+        try:
+            from koda.memory.quality import record_memory_quality_counter
+
+            record_memory_quality_counter(ctx.executing_agent_id or AGENT_ID, "memory_write", "denied", "child_run")
+        except Exception:
+            log.debug("child_run_memory_write_counter_failed", exc_info=True)
+        return
+    try:
+        from koda.memory import get_memory_manager
+
+        mm = get_memory_manager()
+        await mm.record_execution_pattern(
+            query=query_text,
+            user_id=user_id,
+            task_id=task_id,
+            source_episode_id=source_episode_id,
+            status=status,
+            confidence_score=_latest_confidence_score(ctx),
+            error_message=error_message,
+            tool_uses=run_result.tool_uses,
+            tool_execution_trace=run_result.tool_execution_trace,
+            knowledge_hits=_serialize_knowledge_hits(ctx.knowledge_hits),
+            work_dir=ctx.work_dir,
+            model=run_result.model,
+            task_kind=ctx.task_kind,
+            verified_before_finalize=ctx.verified_before_finalize,
+            ungrounded_operationally=ctx.ungrounded_operationally,
+            action_plan=ctx.last_action_plan,
+            project_key=getattr(ctx.knowledge_query_context, "project_key", ""),
+            environment=getattr(ctx.knowledge_query_context, "environment", ""),
+            team=getattr(ctx.knowledge_query_context, "team", ""),
+        )
+    except Exception:
+        log.exception("procedural_memory_record_error")
+
+
+async def _record_execution_episode(
+    *,
+    user_id: int,
+    task_id: int | None,
+    status: str,
+    ctx: QueryContext | None,
+    run_result: RunResult | None,
+    human_override_delta: int = 0,
+) -> None:
+    """Persist execution episodes and scoped reliability counters."""
+    service = _get_execution_episode_service()
+    await service.record_execution_episode(
+        user_id=user_id,
+        task_id=task_id,
+        status=status,
+        ctx=ctx,
+        run_result=run_result,
+        confidence_score=float(_latest_confidence_score(ctx) or 0.0) if ctx is not None else 0.0,
+        source_refs=_serialize_knowledge_hits(ctx.knowledge_hits) if ctx is not None else [],
+        human_override_delta=human_override_delta,
+    )
+
+
+# Module-level state
+
+active_processes: dict[int, Any] = {}  # task_id -> local subprocess or runtime-kernel proxy
+_user_queues: dict[int, asyncio.Queue] = {}
+_queue_workers: dict[int, asyncio.Task] = {}
+_worker_locks: dict[int, asyncio.Lock] = {}
+_user_queue_task_ids: dict[int, list[int]] = {}
+_active_chat_ids: dict[int, set[int]] = {}  # user_id -> set of active chat_ids
+agent_start_time = time.time()
+_shutting_down = False
+
+_user_tasks: dict[int, dict[int, TaskInfo]] = {}  # user_id -> {task_id -> TaskInfo}
+_user_semaphores: dict[int, asyncio.Semaphore] = {}
+_global_semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS_GLOBAL)
+_standard_task_semaphore = asyncio.Semaphore(MAX_STANDARD_TASKS_GLOBAL)
+_heavy_task_semaphore = asyncio.Semaphore(MAX_HEAVY_TASKS_GLOBAL)
+_browser_task_semaphore = asyncio.Semaphore(MAX_BROWSER_TASKS_GLOBAL)
+_agent_id_label = AGENT_ID or "default"
+_cancelled_task_ids: set[int] = set()
+
+
+async def _cancel_pending_task(task: asyncio.Task[Any] | None) -> None:
+    """Cancel and drain a best-effort background task if it is still pending."""
+    if task is None or task.done():
+        return
+    task.cancel()
+    with contextlib.suppress(asyncio.CancelledError, Exception):
+        await task
+
+
+def _get_user_semaphore(user_id: int) -> asyncio.Semaphore:
+    """Get or create the concurrency semaphore for a user."""
+    if user_id not in _user_semaphores:
+        _user_semaphores[user_id] = asyncio.Semaphore(MAX_CONCURRENT_TASKS_PER_USER)
+    return _user_semaphores[user_id]
+
+
+def _get_active_task_count(user_id: int) -> int:
+    """Return the number of in-flight tasks currently owned by a user."""
+    return len(_user_tasks.get(user_id, {}))
+
+
+def _set_queue_depth_metric() -> None:
+    from koda.services import metrics
+
+    metrics.QUEUE_DEPTH.labels(agent_id=_agent_id_label).set(sum(queue.qsize() for queue in _user_queues.values()))
+
+
+def _sync_user_queue_observability(user_id: int) -> None:
+    """Refresh queue metrics and persisted queue positions for one user."""
+    _set_queue_depth_metric()
+    queued_task_ids = list(_user_queue_task_ids.get(user_id, ()))
+    if not queued_task_ids:
+        return
+    try:
+        from koda.services.runtime import get_runtime_controller
+
+        runtime = get_runtime_controller()
+        base_position = _get_active_task_count(user_id)
+        runtime.store.bulk_update_runtime_queue_items(
+            [
+                {
+                    "task_id": task_id,
+                    "status": "queued",
+                    "queue_position": base_position + offset,
+                }
+                for offset, task_id in enumerate(queued_task_ids)
+            ]
+        )
+    except Exception as exc:
+        log.warning("queue_observability_sync_failed", user_id=user_id, error=str(exc))
+
+
+def _build_queue_feedback(task_id: int, ahead_count: int) -> str:
+    if ahead_count <= 1:
+        return (
+            f"Received your message and queued it. "
+            f"I'll process it once the current task finishes. Reference: #{task_id}."
+        )
+    return (
+        f"Received your message and queued it. "
+        f"There are {ahead_count} tasks ahead of it; I'll process them in order. Reference: #{task_id}."
+    )
+
+
+def _get_total_queued_task_count() -> int:
+    return sum(len(task_ids) for task_ids in _user_queue_task_ids.values())
+
+
+def _track_queued_task_id(user_id: int, task_id: int | None) -> None:
+    if task_id is None:
+        return
+    task_ids = _user_queue_task_ids.setdefault(user_id, [])
+    if task_id not in task_ids:
+        task_ids.append(task_id)
+
+
+def _untrack_queued_task_id(user_id: int, task_id: int | None) -> None:
+    if task_id is None:
+        return
+    task_ids = _user_queue_task_ids.get(user_id)
+    if not task_ids:
+        return
+    with contextlib.suppress(ValueError):
+        task_ids.remove(task_id)
+    if not task_ids:
+        _user_queue_task_ids.pop(user_id, None)
+
+
+def _serialize_artifact_bundle(bundle: Any | None) -> dict[str, Any] | None:
+    if bundle is None:
+        return None
+    payload = asdict(bundle)
+    refs = cast(list[dict[str, Any]], payload.get("refs") or [])
+    for ref in refs:
+        kind = ref.get("kind")
+        kind_value = getattr(kind, "value", None)
+        if kind_value is not None:
+            ref["kind"] = kind_value
+    return payload
+
+
+def _deserialize_artifact_bundle(payload: Any | None) -> Any | None:
+    if not isinstance(payload, dict):
+        return None
+    from koda.services.artifact_ingestion import ArtifactBundle, ArtifactKind, ArtifactRef
+
+    refs_payload = payload.get("refs") or []
+    refs: list[ArtifactRef] = []
+    for ref_payload in refs_payload:
+        if not isinstance(ref_payload, dict):
+            continue
+        kind_raw = str(ref_payload.get("kind") or ArtifactKind.UNKNOWN.value)
+        try:
+            kind = ArtifactKind(kind_raw)
+        except ValueError:
+            kind = ArtifactKind.UNKNOWN
+        refs.append(
+            ArtifactRef(
+                artifact_id=str(ref_payload.get("artifact_id") or ""),
+                kind=kind,
+                label=str(ref_payload.get("label") or ""),
+                source_type=str(ref_payload.get("source_type") or ""),
+                mime_type=str(ref_payload.get("mime_type") or ""),
+                path=cast(str | None, ref_payload.get("path")),
+                url=cast(str | None, ref_payload.get("url")),
+                issue_key=cast(str | None, ref_payload.get("issue_key")),
+                comment_id=cast(str | None, ref_payload.get("comment_id")),
+                size_bytes=cast(int | None, ref_payload.get("size_bytes")),
+                updated_at=cast(str | None, ref_payload.get("updated_at")),
+                critical_for_action=bool(ref_payload.get("critical_for_action", True)),
+                metadata=dict(ref_payload.get("metadata") or {}),
+            )
+        )
+    return ArtifactBundle(
+        refs=refs,
+        source=str(payload.get("source") or ""),
+        metadata=dict(payload.get("metadata") or {}),
+    )
+
+
+def _raw_item_source_kind(raw_item: Any) -> str:
+    if isinstance(raw_item, dict):
+        if raw_item.get("_child_run"):
+            return "child_run"
+        if raw_item.get("_scheduled_run"):
+            return "scheduled_run"
+        if raw_item.get("_dashboard_chat"):
+            return "dashboard_chat"
+        if raw_item.get("_runtime_retry"):
+            return "runtime_retry"
+        if raw_item.get("_continuation"):
+            return "continuation"
+        if raw_item.get("_link_analysis"):
+            return "link_analysis"
+        if raw_item.get("_recovered_task"):
+            return "recovered_task"
+        if raw_item.get("_user_message"):
+            return "telegram_message"
+    return "user"
+
+
+def _serialize_queue_payload(raw_item: Any) -> str:
+    payload: dict[str, Any]
+    if isinstance(raw_item, dict):
+        payload = dict(raw_item)
+        payload.pop("update", None)
+        if "artifact_bundle" in payload:
+            payload["artifact_bundle"] = _serialize_artifact_bundle(payload.get("artifact_bundle"))
+    elif isinstance(raw_item, tuple):
+        task_id = _extract_task_id_from_raw_item(raw_item)
+        if len(raw_item) == 5:
+            update, query_text, image_paths, artifact_bundle, _ = raw_item
+            payload = {
+                "_user_message": True,
+                "_task_id": task_id,
+                "chat_id": update.effective_chat.id,
+                "query_text": query_text,
+                "image_paths": list(image_paths or []),
+                "artifact_bundle": _serialize_artifact_bundle(artifact_bundle),
+                "force_audio_response": False,
+            }
+        elif len(raw_item) == 4:
+            update, query_text, image_paths, _ = raw_item
+            payload = {
+                "_user_message": True,
+                "_task_id": task_id,
+                "chat_id": update.effective_chat.id,
+                "query_text": query_text,
+                "image_paths": list(image_paths or []),
+                "force_audio_response": False,
+            }
+        else:
+            update, query_text = raw_item
+            payload = {
+                "_user_message": True,
+                "_task_id": task_id,
+                "chat_id": update.effective_chat.id,
+                "query_text": query_text,
+                "force_audio_response": False,
+            }
+    else:
+        payload = {"_unsupported_payload": True}
+    return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def _deserialize_queue_payload(payload_json: str | None) -> dict[str, Any] | None:
+    if not payload_json:
+        return None
+    try:
+        payload = json.loads(payload_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    if "artifact_bundle" in payload:
+        payload["artifact_bundle"] = _deserialize_artifact_bundle(payload.get("artifact_bundle"))
+    image_paths = payload.get("image_paths")
+    if image_paths is not None and not isinstance(image_paths, list):
+        payload["image_paths"] = list(image_paths) if isinstance(image_paths, tuple) else []
+    return payload
+
+
+def _build_user_message_raw_item(
+    *,
+    task_id: int,
+    chat_id: int,
+    query_text: str,
+    provider: str | None,
+    model: str | None,
+    work_dir: str | None,
+    session_id: str | None,
+    update: Update | None,
+    image_paths: list[str] | None,
+    artifact_bundle: Any | None,
+    force_audio_response: bool = False,
+) -> dict[str, Any]:
+    return {
+        "_user_message": True,
+        "_task_id": task_id,
+        "chat_id": chat_id,
+        "query_text": query_text,
+        "provider": provider,
+        "model": model,
+        "work_dir": work_dir,
+        "session_id": session_id,
+        "update": update,
+        "image_paths": list(image_paths or []),
+        "artifact_bundle": artifact_bundle,
+        "force_audio_response": bool(force_audio_response),
+    }
+
+
+def _build_dlq_metadata(
+    *,
+    raw_item: Any,
+    reason: str,
+    task_id: int | None,
+    recovery_count: int = 0,
+    extra: dict[str, Any] | None = None,
+) -> str:
+    metadata = {
+        "queue_payload": _deserialize_queue_payload(_serialize_queue_payload(raw_item)),
+        "history": [
+            {
+                "event": "dlq_inserted",
+                "at": datetime.now(UTC).isoformat(),
+                "reason": reason,
+                "task_id": task_id,
+                "recovery_count": recovery_count,
+            }
+        ],
+    }
+    if extra:
+        metadata.update(extra)
+    return json.dumps(metadata, ensure_ascii=False, default=str)
+
+
+def _load_json_object(raw_json: str | None) -> dict[str, Any]:
+    if not raw_json:
+        return {}
+    try:
+        loaded = json.loads(raw_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return dict(loaded) if isinstance(loaded, dict) else {}
+
+
+def _append_history_entry(metadata: dict[str, Any], event: dict[str, Any]) -> dict[str, Any]:
+    updated = dict(metadata)
+    history = list(updated.get("history") or [])
+    history.append(event)
+    updated["history"] = history
+    return updated
+
+
+async def _handle_queue_dispatch_failure(
+    *,
+    raw_item: Any,
+    user_id: int,
+    context: BotContext,
+    task_id: int | None,
+    error: Exception,
+) -> None:
+    error_message = str(error) or error.__class__.__name__
+    log.exception("queue_dispatch_failure", task_id=task_id, user_id=user_id)
+    parsed_item: QueueItem | None = None
+    try:
+        parsed_item = _parse_queue_item(raw_item)
+    except Exception:
+        parsed_item = None
+    chat_id = (
+        parsed_item.chat_id
+        if parsed_item is not None
+        else int(raw_item.get("chat_id") or 0)
+        if isinstance(raw_item, dict)
+        else 0
+    )
+    query_text = (
+        parsed_item.query_text
+        if parsed_item is not None
+        else str(raw_item.get("query_text") or "")
+        if isinstance(raw_item, dict)
+        else ""
+    )
+    model = str(raw_item.get("model") or "") or None if isinstance(raw_item, dict) else None
+    recovery_count = int(raw_item.get("_recovery_count") or 0) if isinstance(raw_item, dict) else 0
+
+    if task_id is not None:
+        update_task_status(
+            task_id,
+            "failed",
+            error_message=error_message,
+            completed_at=datetime.now().isoformat(),
+        )
+        dlq_insert(
+            task_id=task_id,
+            user_id=user_id,
+            chat_id=chat_id,
+            query_text=query_text,
+            error_message=error_message,
+            error_class=error.__class__.__name__,
+            attempt_count=max(1, recovery_count),
+            model=model,
+            metadata_json=_build_dlq_metadata(
+                raw_item=raw_item,
+                reason="queue_dispatch_failure",
+                task_id=task_id,
+                recovery_count=recovery_count,
+            ),
+        )
+        _update_runtime_queue_status(task_id, "failed", last_error=error_message)
+        if RUNTIME_ENVIRONMENTS_ENABLED:
+            from koda.services.runtime import get_runtime_controller
+
+            runtime = get_runtime_controller()
+            with contextlib.suppress(Exception):
+                await runtime.record_warning(
+                    task_id=task_id,
+                    warning_type="queue_dispatch_failure",
+                    message="Falha estrutural ao despachar item da fila.",
+                    details={"error": error_message},
+                )
+            with contextlib.suppress(Exception):
+                await runtime.finalize_task(task_id=task_id, success=False, error_message=error_message)
+    if chat_id:
+        with contextlib.suppress(Exception):
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=(
+                    "An internal failure occurred while recovering your task from the queue. "
+                    "It has been quarantined for safe analysis and will not loop."
+                ),
+            )
+
+
+def _register_task(task_info: TaskInfo) -> None:
+    """Register a task in the active tasks registry."""
+    if task_info.user_id not in _user_tasks:
+        _user_tasks[task_info.user_id] = {}
+    _user_tasks[task_info.user_id][task_info.task_id] = task_info
+
+
+def _unregister_task(task_info: TaskInfo) -> None:
+    """Remove a task from the active registry."""
+    user_tasks = _user_tasks.get(task_info.user_id, {})
+    user_tasks.pop(task_info.task_id, None)
+    if not user_tasks:
+        _user_tasks.pop(task_info.user_id, None)
+
+
+def get_active_tasks(user_id: int) -> list[TaskInfo]:
+    """Get all active (in-memory) tasks for a user."""
+    return list(_user_tasks.get(user_id, {}).values())
+
+
+def get_total_active_task_count() -> int:
+    """Total number of active tasks across all users."""
+    return sum(len(tasks) for tasks in _user_tasks.values())
+
+
+def get_task_info(task_id: int) -> TaskInfo | None:
+    """Look up an active task by ID across all users."""
+    for user_tasks in _user_tasks.values():
+        if task_id in user_tasks:
+            return user_tasks[task_id]
+    return None
+
+
+async def cancel_active_task_execution(task_id: int, *, reason: str = "Cancelled by scheduler control.") -> bool:
+    """Cancel an active task and terminate its provider process when possible."""
+    from koda.utils.process_control import terminate_process_tree
+
+    task_info = get_task_info(task_id)
+    proc = active_processes.get(task_id)
+    cancelled = False
+    if proc is not None:
+        with contextlib.suppress(Exception):
+            await terminate_process_tree(proc)
+        cancelled = True
+    if task_info and task_info.asyncio_task and not task_info.asyncio_task.done():
+        task_info.error_message = reason
+        task_info.asyncio_task.cancel()
+        cancelled = True
+    return cancelled
+
+
+def _get_worker_lock(user_id: int) -> asyncio.Lock:
+    """Get or create a lock for worker spawn coordination."""
+    if user_id not in _worker_locks:
+        _worker_locks[user_id] = asyncio.Lock()
+    return _worker_locks[user_id]
+
+
+def get_queue(user_id: int) -> asyncio.Queue:
+    """Get or create the queue for a user."""
+    if user_id not in _user_queues:
+        _user_queues[user_id] = asyncio.Queue()
+    return _user_queues[user_id]
+
+
+def _extract_task_id_from_raw_item(raw_item: Any) -> int | None:
+    if isinstance(raw_item, dict):
+        value = raw_item.get("_task_id")
+        if isinstance(value, int):
+            return value
+    if isinstance(raw_item, tuple) and len(raw_item) >= 4:
+        candidate = raw_item[-1]
+        if isinstance(candidate, int):
+            return candidate
+    return None
+
+
+def _pending_tasks_for_user(user_id: int) -> int:
+    return _get_active_task_count(user_id) + len(_user_queue_task_ids.get(user_id, ()))
+
+
+def _queue_capacity_message(pending_count: int) -> str:
+    return (
+        "Your queue is currently full. "
+        f"There are {pending_count} pending task(s) for this user. "
+        "Wait for some to finish before sending new messages."
+    )
+
+
+async def _persist_runtime_queue_item(
+    *,
+    task_id: int,
+    user_id: int,
+    chat_id: int,
+    query_text: str,
+    raw_item: Any,
+    recovery_count: int = 0,
+    last_recovered_at: str | None = None,
+    last_error: str | None = None,
+) -> None:
+    try:
+        from koda.services.runtime import get_runtime_controller
+
+        await get_runtime_controller().register_queued_task(
+            task_id=task_id,
+            user_id=user_id,
+            chat_id=chat_id,
+            query_text=query_text,
+            payload_json=_serialize_queue_payload(raw_item),
+            recovery_count=recovery_count,
+            last_recovered_at=last_recovered_at,
+            source_kind=_raw_item_source_kind(raw_item),
+            last_error=last_error,
+        )
+    except Exception as exc:
+        log.warning("runtime_queue_persist_failed", task_id=task_id, user_id=user_id, error=str(exc))
+
+
+def _update_runtime_queue_status(task_id: int | None, status: str, *, last_error: str | None = None) -> None:
+    if task_id is None:
+        return
+    try:
+        from koda.services.runtime import get_runtime_controller
+
+        get_runtime_controller().store.update_runtime_queue_item(task_id, status=status, last_error=last_error)
+    except Exception:
+        log.debug("runtime_queue_status_update_skipped", task_id=task_id, status=status, exc_info=True)
+
+
+def _build_recovered_raw_item(
+    task_row: dict[str, Any],
+    *,
+    payload: dict[str, Any] | None = None,
+    recovery_count: int = 0,
+    runtime_preprovisioned: bool = False,
+) -> dict[str, Any]:
+    raw: dict[str, Any]
+    if payload:
+        raw = dict(payload)
+        # Strip the _recovered_task marker only when we actually rebuilt the
+        # payload from persisted state. An empty persisted payload ({} — the
+        # default column value when the original persist failed) must still
+        # go through the recovered_task branch below so _parse_queue_item
+        # recognizes the item shape. ``if payload is not None`` was dropping
+        # the marker for ``{}`` → ValueError: too many values to unpack.
+        raw.pop("update", None)
+        raw.pop("_recovered_task", None)
+    else:
+        raw = {
+            "_recovered_task": True,
+            "chat_id": int(task_row.get("chat_id") or 0),
+            "query_text": str(task_row.get("query_text") or ""),
+            "provider": task_row.get("provider"),
+            "model": task_row.get("model"),
+            "work_dir": task_row.get("work_dir"),
+            "session_id": task_row.get("session_id"),
+            "image_paths": [],
+        }
+        raw.pop("update", None)
+    raw["_queue_recovered"] = True
+    raw["_task_id"] = int(task_row["id"])
+    raw["_recovery_count"] = recovery_count
+    raw.setdefault("chat_id", int(task_row.get("chat_id") or 0))
+    raw.setdefault("query_text", str(task_row.get("query_text") or ""))
+    raw.setdefault("provider", task_row.get("provider"))
+    raw.setdefault("model", task_row.get("model"))
+    raw.setdefault("work_dir", task_row.get("work_dir"))
+    raw.setdefault("session_id", task_row.get("session_id"))
+    raw.setdefault("image_paths", [])
+    if runtime_preprovisioned:
+        raw["_runtime_retry"] = True
+        raw["_runtime_preprovisioned"] = True
+    return raw
+
+
+def _build_dlq_reprocess_raw_item(
+    entry: dict[str, Any], payload: dict[str, Any] | None, *, task_id: int
+) -> dict[str, Any]:
+    image_paths: list[str] | None = None
+    artifact_bundle = None
+    provider: str | None = None
+    model: str | None = None
+    work_dir: str | None = None
+    session_id: str | None = None
+    force_audio_response = False
+    query_text = str(entry.get("query_text") or "")
+    chat_id = int(entry.get("chat_id") or 0)
+    if payload:
+        query_text = str(payload.get("query_text") or query_text)
+        chat_id = int(payload.get("chat_id") or chat_id)
+        provider = cast(str | None, payload.get("provider"))
+        model = cast(str | None, payload.get("model"))
+        work_dir = cast(str | None, payload.get("work_dir"))
+        session_id = cast(str | None, payload.get("session_id"))
+        payload_image_paths = payload.get("image_paths")
+        if isinstance(payload_image_paths, list):
+            image_paths = [str(path) for path in payload_image_paths if path]
+        artifact_bundle = payload.get("artifact_bundle")
+        force_audio_response = bool(payload.get("force_audio_response"))
+    return _build_user_message_raw_item(
+        task_id=task_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        provider=provider,
+        model=model,
+        work_dir=work_dir,
+        session_id=session_id,
+        update=None,
+        image_paths=image_paths,
+        artifact_bundle=artifact_bundle,
+        force_audio_response=force_audio_response,
+    )
+
+
+async def _ensure_queue_worker(user_id: int, context: BotContext) -> None:
+    lock = _get_worker_lock(user_id)
+    async with lock:
+        if user_id not in _queue_workers or _queue_workers[user_id].done():
+            _queue_workers[user_id] = asyncio.create_task(_process_queue(user_id, context))
+
+
+async def cancel_queued_task(task_id: int) -> bool:
+    """Mark a queued task as cancelled so the worker discards it on dequeue."""
+    _cancelled_task_ids.add(task_id)
+    _set_queue_depth_metric()
+    return True
+
+
+async def enqueue_runtime_retry_task(
+    *,
+    application: Any,
+    user_id: int,
+    task_id: int,
+    chat_id: int,
+    query_text: str,
+    provider: str | None,
+    model: str | None,
+    work_dir: str | None,
+    session_id: str | None,
+    env_id: int,
+    classification: str,
+    environment_kind: str,
+    checkpoint_id: int,
+) -> None:
+    """Enqueue a retry task that already has a restored runtime environment."""
+    context = build_runtime_context(application, user_id)
+    raw_item = {
+        "_runtime_retry": True,
+        "_runtime_preprovisioned": True,
+        "_task_id": task_id,
+        "chat_id": chat_id,
+        "query_text": query_text,
+        "provider": provider,
+        "model": model,
+        "work_dir": work_dir,
+        "session_id": session_id,
+        "runtime_env_id": env_id,
+        "classification": classification,
+        "environment_kind": environment_kind,
+        "checkpoint_id": checkpoint_id,
+    }
+    queue = get_queue(user_id)
+    await queue.put(raw_item)
+    _track_queued_task_id(user_id, task_id)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        raw_item=raw_item,
+    )
+    from koda.services import audit
+
+    _sync_user_queue_observability(user_id)
+    audit.emit_task_lifecycle("task.queued", user_id=user_id, task_id=task_id)
+    await _ensure_queue_worker(user_id, context)
+
+
+async def enqueue_dashboard_chat_task(
+    *,
+    application: Any,
+    user_id: int,
+    chat_id: int,
+    query_text: str,
+    provider: str | None,
+    model: str | None,
+    work_dir: str | None,
+    session_id: str,
+    bot_override: Any | None = None,
+) -> int:
+    """Enqueue a silent dashboard-originated chat turn."""
+    if _shutting_down:
+        raise RuntimeError("Agent runtime is shutting down.")
+
+    from koda.services import audit
+
+    task_id = create_task(
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        provider=provider,
+        model=model,
+        session_id=session_id,
+        work_dir=work_dir,
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+        source_action="dashboard_chat",
+    )
+    audit.emit_task_lifecycle("task.created", user_id=user_id, task_id=task_id)
+    context = build_runtime_context(application, user_id, bot_override=bot_override)
+    raw_item = {
+        "_dashboard_chat": True,
+        "_task_id": task_id,
+        "chat_id": chat_id,
+        "query_text": query_text,
+        "provider": provider,
+        "model": model,
+        "work_dir": work_dir,
+        "session_id": session_id,
+        "force_audio_response": _detect_audio_response_request(query_text),
+    }
+    queue = get_queue(user_id)
+    await queue.put(raw_item)
+    _track_queued_task_id(user_id, task_id)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        raw_item=raw_item,
+    )
+    _sync_user_queue_observability(user_id)
+    audit.emit_task_lifecycle("task.queued", user_id=user_id, task_id=task_id)
+    await _ensure_queue_worker(user_id, context)
+    return task_id
+
+
+async def start_child_run_task(
+    *,
+    application: Any,
+    user_id: int,
+    chat_id: int,
+    query_text: str,
+    parent_task_id: int,
+    child_run_id: str,
+    provider: str | None,
+    model: str | None,
+    work_dir: str | None,
+    session_id: str | None,
+    child_context_prompt: str,
+    context_policy: dict[str, Any],
+    toolset: str,
+    target_agent_id: str | None = None,
+    bot_override: Any | None = None,
+    user_data_overlay: dict[str, Any] | None = None,
+) -> tuple[int, asyncio.Task[None]]:
+    """Create and start an ephemeral child-run task.
+
+    This uses normal task persistence and execution machinery, but does not
+    enqueue behind the parent user's FIFO worker. Parent tasks wait for child
+    results; putting children behind the same per-user FIFO would deadlock.
+    """
+
+    if _shutting_down:
+        raise RuntimeError("Agent runtime is shutting down.")
+    if application is None:
+        raise RuntimeError("subagent.runtime_unavailable")
+
+    from koda.services import audit
+
+    child_session_id = session_id or f"child:{child_run_id}"
+    task_id = create_task(
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        provider=provider,
+        model=model,
+        session_id=child_session_id,
+        work_dir=work_dir,
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+        source_task_id=parent_task_id,
+        source_action="child_run",
+    )
+    audit.emit_task_lifecycle(
+        "task.created",
+        user_id=user_id,
+        task_id=task_id,
+        source_task_id=parent_task_id,
+        source_action="child_run",
+        child_run_id=child_run_id,
+    )
+    context = build_runtime_context(application, user_id, bot_override=bot_override)
+    context.user_data = dict(getattr(context, "user_data", {}) or {})
+    if provider:
+        context.user_data["provider"] = provider
+    if model:
+        context.user_data["model"] = model
+    if work_dir:
+        context.user_data["work_dir"] = work_dir
+    if child_session_id:
+        context.user_data["session_id"] = child_session_id
+    context.user_data.update(dict(user_data_overlay or {}))
+    raw_item = {
+        "_dashboard_chat": True,
+        "_child_run": True,
+        "_task_id": task_id,
+        "chat_id": chat_id,
+        "query_text": query_text,
+        "provider": provider,
+        "model": model,
+        "work_dir": work_dir,
+        "session_id": child_session_id,
+        "executing_agent_id": target_agent_id or AGENT_ID or "default",
+        "force_audio_response": False,
+        "silent_response": True,
+        "child_run_id": child_run_id,
+        "parent_task_id": parent_task_id,
+        "child_context_prompt": child_context_prompt,
+        "child_context_policy": dict(context_policy or {}),
+        "child_toolset": toolset,
+    }
+    task_info = TaskInfo(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        model=model,
+    )
+    _register_task(task_info)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        raw_item=raw_item,
+    )
+    _update_runtime_queue_status(task_id, "queued")
+    audit.emit_task_lifecycle(
+        "task.queued",
+        user_id=user_id,
+        task_id=task_id,
+        source_task_id=parent_task_id,
+        source_action="child_run",
+        child_run_id=child_run_id,
+    )
+    task = asyncio.create_task(_execute_single_task(raw_item, user_id, context, task_id, task_info))
+    task_info.asyncio_task = task
+    return task_id, task
+
+
+async def enqueue_squad_agent_task(
+    *,
+    application: Any,
+    user_id: int,
+    chat_id: int,
+    query_text: str,
+    executing_agent_id: str,
+    squad_thread_id: str,
+    squad_task_id: str | None = None,
+    parent_message_id: str | None = None,
+    delegation_chain: list[str] | None = None,
+    delegation_request_id: str | None = None,
+    delegation_origin_agent_id: str | None = None,
+    telegram_message_thread_id: int | None = None,
+    bot_override: Any | None = None,
+) -> int:
+    """Enqueue a squad-scoped turn with runtime context already attached."""
+    if _shutting_down:
+        raise RuntimeError("Agent runtime is shutting down.")
+
+    from koda.services import audit
+
+    context = build_runtime_context(application, user_id, bot_override=bot_override)
+    init_user_data(context.user_data, user_id=user_id)
+    provider = context.user_data.get("provider")
+    model = get_provider_model(context.user_data, provider)
+    task_id = create_task(
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        provider=provider,
+        model=model,
+        session_id=context.user_data.get("session_id"),
+        work_dir=context.user_data.get("work_dir"),
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+        source_action="squad_thread_input",
+    )
+    audit.emit_task_lifecycle("task.created", user_id=user_id, task_id=task_id)
+    raw_item = {
+        "_dashboard_chat": True,
+        "_task_id": task_id,
+        "chat_id": chat_id,
+        "query_text": query_text,
+        "provider": provider,
+        "model": model,
+        "work_dir": context.user_data.get("work_dir"),
+        "session_id": context.user_data.get("session_id"),
+        "executing_agent_id": executing_agent_id,
+        "squad_thread_id": squad_thread_id,
+        "squad_task_id": squad_task_id,
+        "parent_message_id": parent_message_id,
+        "delegation_chain": list(delegation_chain or []),
+        "delegation_request_id": delegation_request_id,
+        "delegation_origin_agent_id": delegation_origin_agent_id,
+        "telegram_message_thread_id": telegram_message_thread_id,
+    }
+    queue = get_queue(user_id)
+    await queue.put(raw_item)
+    _track_queued_task_id(user_id, task_id)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        raw_item=raw_item,
+    )
+    _sync_user_queue_observability(user_id)
+    audit.emit_task_lifecycle("task.queued", user_id=user_id, task_id=task_id)
+    await _ensure_queue_worker(user_id, context)
+    return task_id
+
+
+def _coerce_int_or_zero(value: Any) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _control_plane_prompt_for_agent(agent_id: str) -> str | None:
+    """Best-effort prompt for a squad target running in this local process.
+
+    In production each agent usually runs in its own process with its prompt in
+    env. The Docker/dev gateway can execute another squad member in-process, so
+    load just the published prompt documents without compiling the full
+    AgentSpec; full spec validation can fail for unrelated provider settings.
+    """
+
+    normalized = str(agent_id or "").strip()
+    if not normalized:
+        return None
+    try:
+        from koda.control_plane.agent_spec import compose_agent_prompt
+        from koda.control_plane.manager import get_control_plane_manager
+        from koda.control_plane.settings import DOCUMENT_KINDS
+
+        manager = get_control_plane_manager()
+        documents: dict[str, str] = {}
+        for kind in DOCUMENT_KINDS:
+            row = manager.get_document(normalized, kind)
+            if isinstance(row, dict):
+                documents[kind] = str(row.get("content_md") or "")
+        prompt = compose_agent_prompt(documents)
+        return prompt or None
+    except Exception:
+        log.exception("control_plane_agent_prompt_lookup_failed", agent_id=normalized)
+        return None
+
+
+def _control_plane_workspace_root_for_agent(agent_id: str | None) -> str | None:
+    normalized = str(agent_id or "").strip()
+    if not normalized:
+        return None
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        return get_control_plane_manager().get_workspace_runtime_root_for_agent(normalized)
+    except Exception:
+        log.debug("control_plane_workspace_root_lookup_failed", agent_id=normalized, exc_info=True)
+        return None
+
+
+def _resolve_task_source_work_dir(item: QueueItem, context: Any, *, strict: bool = False) -> tuple[str, str | None]:
+    explicit = item.scheduled_work_dir
+    workspace_root = None if explicit else _control_plane_workspace_root_for_agent(item.executing_agent_id or AGENT_ID)
+    candidate = explicit or workspace_root or context.user_data.get("work_dir") or DEFAULT_WORK_DIR
+    resolved = _validate_work_dir(candidate, strict=strict)
+    source_root = workspace_root if workspace_root and resolved != item.runtime_work_dir else None
+    if explicit:
+        source_root = resolved
+    elif workspace_root:
+        source_root = workspace_root
+    return resolved, source_root
+
+
+async def _squad_thread_runtime_defaults(thread_id: str) -> tuple[int, int]:
+    """Best-effort owner/chat defaults for bus-dispatched squad turns."""
+    try:
+        from koda.squads import get_squad_thread_store
+
+        store = get_squad_thread_store()
+        if store is None:
+            return 0, 0
+        thread = await store.get_thread(thread_id)
+        if thread is None:
+            return 0, 0
+        return int(thread.owner_user_id or 0), int(thread.telegram_chat_id or 0)
+    except Exception:
+        log.exception("squad_inbox_thread_defaults_failed", thread_id=thread_id)
+        return 0, 0
+
+
+async def start_squad_inbox_dispatcher(application: Any) -> None:
+    """Consume durable squad inbox messages and enqueue real agent turns.
+
+    This is the bridge that makes Postgres bus delivery active instead of
+    requiring an agent to call ``squad_inbox_drain`` manually.
+    """
+    from koda.agents import get_message_bus
+    from koda.config import SQUAD_POLL_INTERVAL_S, SQUADS_ENABLED
+
+    agent_id = AGENT_ID or "default"
+    if not SQUADS_ENABLED:
+        log.info("squad_inbox_dispatcher_disabled")
+        while not _shutting_down:
+            await asyncio.sleep(3600)
+        return
+
+    bus = get_message_bus()
+    dispatchable_kinds = {
+        "squad_thread_input",
+        "user_input",
+        "task_request",
+        "delegation_request",
+        "task_result",
+        "delegation_result",
+        "agent_text",
+    }
+    while not _shutting_down:
+        messages = await bus.receive_batch(
+            agent_id,
+            limit=50,
+            timeout=max(0.5, float(SQUAD_POLL_INTERVAL_S)),
+        )
+        if not messages:
+            continue
+        for msg in messages:
+            metadata = dict(msg.metadata or {})
+            kind = str(metadata.get("kind") or msg.kind or msg.message_type or "")
+            thread_id = msg.thread_id or metadata.get("thread_id") or metadata.get("squad_thread_id")
+            try:
+                if not thread_id or kind not in dispatchable_kinds:
+                    log.debug(
+                        "squad_inbox_message_skipped",
+                        agent_id=agent_id,
+                        message_id=msg.message_id,
+                        kind=kind,
+                        has_thread=bool(thread_id),
+                    )
+                    await bus.ack(agent_id, msg.message_id)
+                    continue
+
+                user_id = _coerce_int_or_zero(metadata.get("user_id"))
+                chat_id = _coerce_int_or_zero(metadata.get("telegram_chat_id") or metadata.get("chat_id"))
+                if not user_id or not chat_id:
+                    default_user_id, default_chat_id = await _squad_thread_runtime_defaults(str(thread_id))
+                    user_id = user_id or default_user_id
+                    chat_id = chat_id or default_chat_id
+                delegation_chain = metadata.get("delegation_chain")
+                chain = [str(value) for value in delegation_chain] if isinstance(delegation_chain, list) else []
+                if msg.from_agent and msg.from_agent not in chain:
+                    chain.append(msg.from_agent)
+                request_id = metadata.get("request_id") if kind in {"task_request", "delegation_request"} else None
+
+                enqueued_task_id = await enqueue_squad_agent_task(
+                    application=application,
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    query_text=msg.content,
+                    executing_agent_id=agent_id,
+                    squad_thread_id=str(thread_id),
+                    squad_task_id=metadata.get("squad_task_id") or metadata.get("task_id"),
+                    parent_message_id=metadata.get("parent_message_id") or msg.causation_id or msg.message_id,
+                    delegation_chain=chain,
+                    delegation_request_id=str(request_id) if request_id else None,
+                    delegation_origin_agent_id=msg.from_agent if request_id else None,
+                    telegram_message_thread_id=_coerce_int_or_zero(metadata.get("telegram_message_thread_id")) or None,
+                    bot_override=getattr(application, "bot", None),
+                )
+                await bus.ack(agent_id, msg.message_id, enqueued_task_id=enqueued_task_id)
+                log.info(
+                    "squad_inbox_message_enqueued",
+                    agent_id=agent_id,
+                    message_id=msg.message_id,
+                    kind=kind,
+                    thread_id=str(thread_id),
+                    enqueued_task_id=enqueued_task_id,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log.exception(
+                    "squad_inbox_dispatch_failed",
+                    agent_id=agent_id,
+                    message_id=msg.message_id,
+                    kind=kind,
+                    thread_id=str(thread_id) if thread_id else None,
+                )
+                with contextlib.suppress(Exception):
+                    await bus.nack(
+                        agent_id,
+                        msg.message_id,
+                        error=str(exc),
+                        retry_after=max(0.5, float(SQUAD_POLL_INTERVAL_S)),
+                    )
+
+
+def get_queue_depth(user_id: int) -> int:
+    """Get queue depth for a user."""
+    queue = _user_queues.get(user_id)
+    return queue.qsize() if queue else 0
+
+
+def is_process_running(user_id: int) -> bool:
+    """Check if any process is running for a user (checks active tasks)."""
+    user_tasks = _user_tasks.get(user_id, {})
+    return any(task_info.status == "running" for task_info in user_tasks.values())
+
+
+def _validate_work_dir(work_dir: str | None, *, strict: bool = False) -> str:
+    """Validate a work_dir, optionally failing closed for scheduled execution."""
+    validation = validate_work_dir(work_dir, fallback_to_default=not strict)
+    if validation.ok:
+        if validation.reason:
+            log.warning("work_dir_normalized", work_dir=validation.path, reason=validation.reason)
+        return validation.path
+    if strict:
+        raise ValueError(validation.reason or "Blocked: invalid work directory.")
+    log.warning("work_dir_missing", work_dir=work_dir, fallback=DEFAULT_WORK_DIR)
+    return DEFAULT_WORK_DIR
+
+
+# Queue item parsing and context preparation
+
+
+def _parse_queue_item(item: Any) -> QueueItem:
+    """Parse a raw queue item into a structured QueueItem."""
+
+    def squad_fields(raw: dict[str, Any]) -> dict[str, Any]:
+        chain = raw.get("delegation_chain") or []
+        if not isinstance(chain, list):
+            chain = []
+        return {
+            "executing_agent_id": raw.get("executing_agent_id"),
+            "squad_thread_id": raw.get("squad_thread_id") or raw.get("thread_id"),
+            "squad_task_id": raw.get("squad_task_id"),
+            "parent_message_id": raw.get("parent_message_id"),
+            "delegation_chain": [str(value) for value in chain if value],
+            "delegation_request_id": raw.get("delegation_request_id") or raw.get("request_id"),
+            "delegation_origin_agent_id": raw.get("delegation_origin_agent_id"),
+            "telegram_message_thread_id": _coerce_int_or_zero(raw.get("telegram_message_thread_id")) or None,
+        }
+
+    def child_run_fields(raw: dict[str, Any]) -> dict[str, Any]:
+        policy = raw.get("child_context_policy")
+        return {
+            "is_child_run": bool(raw.get("_child_run")),
+            "child_run_id": raw.get("child_run_id"),
+            "parent_task_id": _coerce_int_or_zero(raw.get("parent_task_id")) or None,
+            "child_context_prompt": raw.get("child_context_prompt"),
+            "child_context_policy": dict(policy) if isinstance(policy, dict) else {},
+            "child_toolset": raw.get("child_toolset"),
+            "silent_response": bool(raw.get("silent_response")),
+        }
+
+    if isinstance(item, dict) and (item.get("_user_message") or item.get("_recovered_task")):
+        image_paths = cast(list[str] | None, item.get("image_paths"))
+        if image_paths is not None:
+            image_paths = [str(path) for path in image_paths if path]
+        return QueueItem(
+            chat_id=item["chat_id"],
+            query_text=item["query_text"],
+            update=cast(Update | None, item.get("update")),
+            image_paths=image_paths or None,
+            artifact_bundle=item.get("artifact_bundle"),
+            scheduled_provider=item.get("provider"),
+            scheduled_model=item.get("model"),
+            scheduled_work_dir=item.get("work_dir"),
+            override_session_id=item.get("session_id"),
+            force_audio_response=bool(item.get("force_audio_response")),
+            **squad_fields(item),
+            **child_run_fields(item),
+        )
+    if isinstance(item, dict) and item.get("_dashboard_chat"):
+        return QueueItem(
+            chat_id=item["chat_id"],
+            query_text=item["query_text"],
+            scheduled_provider=item.get("provider"),
+            scheduled_model=item.get("model"),
+            scheduled_work_dir=item.get("work_dir"),
+            is_dashboard_chat=True,
+            override_session_id=item.get("session_id"),
+            force_audio_response=bool(item.get("force_audio_response")),
+            **squad_fields(item),
+            **child_run_fields(item),
+        )
+    if isinstance(item, dict) and item.get("_runtime_retry"):
+        return QueueItem(
+            chat_id=item["chat_id"],
+            query_text=item["query_text"],
+            scheduled_provider=item.get("provider"),
+            scheduled_model=item.get("model"),
+            scheduled_work_dir=item.get("work_dir"),
+            scheduled_session_id=item.get("session_id"),
+            **squad_fields(item),
+            **child_run_fields(item),
+        )
+    if isinstance(item, dict) and item.get("_scheduled_run"):
+        return QueueItem(
+            chat_id=item["chat_id"],
+            query_text=item["query_text"],
+            is_scheduled_run=True,
+            scheduled_job_id=item.get("scheduled_job_id"),
+            scheduled_run_id=item.get("scheduled_run_id"),
+            scheduled_dry_run=bool(item.get("dry_run")),
+            scheduled_provider=item.get("provider"),
+            scheduled_model=item.get("model"),
+            scheduled_work_dir=item.get("work_dir"),
+            scheduled_session_id=item.get("session_id"),
+            scheduled_trigger_reason=item.get("trigger_reason"),
+            **squad_fields(item),
+        )
+    if isinstance(item, dict) and item.get("_continuation"):
+        return QueueItem(
+            chat_id=item["chat_id"],
+            query_text=item.get("query_text") or "Continue from where you left off.",
+            is_continuation=True,
+            continuation_session_id=item["session_id"],
+            continuation_provider=item.get("provider"),
+            **squad_fields(item),
+        )
+    if isinstance(item, dict) and item.get("_link_analysis"):
+        return QueueItem(
+            chat_id=item["chat_id"],
+            query_text=item["query_text"],
+            is_link_analysis=True,
+            **squad_fields(item),
+        )
+    # Handle 5-tuple from enqueue (update, query_text, image_paths, artifact_bundle, task_id)
+    if isinstance(item, tuple) and len(item) == 5:
+        update, query_text, image_paths, artifact_bundle, _task_id = item
+        return QueueItem(
+            chat_id=update.effective_chat.id,
+            query_text=query_text,
+            update=update,
+            image_paths=image_paths,
+            artifact_bundle=artifact_bundle,
+        )
+    # Handle 4-tuple legacy enqueue payloads
+    if isinstance(item, tuple) and len(item) == 4:
+        update, query_text, image_paths, _task_id = item
+        return QueueItem(
+            chat_id=update.effective_chat.id,
+            query_text=query_text,
+            update=update,
+            image_paths=image_paths,
+        )
+    if len(item) == 3:
+        update, query_text, image_paths = item
+        return QueueItem(
+            chat_id=update.effective_chat.id,
+            query_text=query_text,
+            update=update,
+            image_paths=image_paths,
+        )
+    update, query_text = item
+    return QueueItem(
+        chat_id=update.effective_chat.id,
+        query_text=query_text,
+        update=update,
+    )
+
+
+def _filter_visual_paths(paths: list[str] | None) -> list[str]:
+    """Keep only real image-like paths for provider visual attachments."""
+    if not paths:
+        return []
+    from koda.services.artifact_ingestion import ArtifactKind, detect_artifact_kind
+
+    visual_paths: list[str] = []
+    for raw_path in paths:
+        if not raw_path:
+            continue
+        kind = detect_artifact_kind(path=raw_path)
+        if kind == ArtifactKind.IMAGE and raw_path not in visual_paths:
+            visual_paths.append(raw_path)
+    return visual_paths
+
+
+async def _runtime_heartbeat_loop(task_id: int, env_id: int | None, phase_getter: Callable[[], str]) -> None:
+    """Emit periodic heartbeats for long-running runtime environments."""
+    if not RUNTIME_ENVIRONMENTS_ENABLED:
+        return
+    from koda.services.runtime import get_runtime_controller
+
+    controller = get_runtime_controller()
+    while True:
+        await asyncio.sleep(RUNTIME_HEARTBEAT_INTERVAL_SECONDS)
+        await controller.heartbeat(task_id=task_id, env_id=env_id, phase=phase_getter())
+
+
+# Per-process worker identity used as the ``lease_owner`` on every task
+# this process claims. Generated once at import so heartbeat renewals and
+# the final terminal UPDATE all carry the same owner; the janitor's reaper
+# can then unambiguously identify orphaned rows by comparing against this
+# identity (or, more importantly, by spotting an expired lease whose owner
+# is no longer renewing).
+_WORKER_ID = f"worker_{os.getpid()}_{uuid.uuid4().hex[:12]}"
+
+
+async def _task_lease_renewal_loop(task_id: int, owner: str, cancel: asyncio.Event) -> None:
+    """Extend the per-task lease while the worker is processing it.
+
+    Returns cleanly when ``cancel`` is set (worker reached a terminal state
+    and is finalizing). On extension failure — meaning the row's
+    ``lease_owner`` no longer matches us, i.e. the janitor reaped the task
+    or another worker stole the row — the loop sets ``cancel`` to let the
+    worker observe the loss at its next checkpoint. Any subsequent
+    :func:`update_task_with_lease` call from the worker will return False,
+    so the worker cannot resurrect a row the janitor already requeued.
+    """
+    interval = max(0.001, float(TASK_LEASE_HEARTBEAT_SECONDS))
+    while not cancel.is_set():
+        try:
+            await asyncio.wait_for(cancel.wait(), timeout=interval)
+            return
+        except TimeoutError:
+            pass
+        try:
+            renewed = await asyncio.to_thread(extend_task_lease, task_id, owner, TASK_LEASE_DURATION_SECONDS)
+        except Exception:
+            log.exception("task_lease_renewal_error", task_id=task_id, owner=owner)
+            continue
+        if not renewed:
+            log.error(
+                "task_lease_lost",
+                task_id=task_id,
+                owner=owner,
+                detail="extend returned 0 rows — janitor reaped or another worker stole this task",
+            )
+            cancel.set()
+            return
+
+
+async def _stale_task_lease_janitor() -> None:
+    """Background sweep that reaps tasks whose lease has expired.
+
+    Each cycle issues two atomic ``UPDATE … RETURNING`` queries — one for
+    rows still inside the retry budget (requeued, ``attempt += 1``) and
+    one for exhausted rows (terminal ``failed`` with explicit error). The
+    Postgres row-level lock makes this safe under any number of concurrent
+    workers and parallel janitor instances; the worker's renewal loop
+    competes for the same row and either wins (extending the lease before
+    the janitor sees it as expired) or loses (lease expired → worker's
+    next ``update_task_with_lease`` returns False and the worker bails).
+    """
+    interval = max(0.001, float(TASK_LEASE_JANITOR_INTERVAL_SECONDS))
+    log.info("task_lease_janitor_started", interval_seconds=interval)
+    while True:
+        try:
+            await asyncio.sleep(interval)
+            reaped = await asyncio.to_thread(reap_expired_task_leases)
+            if not reaped:
+                continue
+            for entry in reaped:
+                outcome = entry.get("outcome", "unknown")
+                log.warning(
+                    "task_lease_reaped",
+                    task_id=entry.get("id"),
+                    user_id=entry.get("user_id"),
+                    chat_id=entry.get("chat_id"),
+                    attempt=entry.get("attempt"),
+                    max_attempts=entry.get("max_attempts"),
+                    outcome=outcome,
+                )
+                from koda.services import audit as _audit
+
+                _audit.emit_task_lifecycle(
+                    "task.lease_reaped",
+                    user_id=int(entry.get("user_id") or 0),
+                    task_id=int(entry.get("id") or 0),
+                    outcome=outcome,
+                    attempt=int(entry.get("attempt") or 0),
+                )
+        except asyncio.CancelledError:
+            log.info("task_lease_janitor_stopped")
+            raise
+        except Exception:
+            log.exception("task_lease_janitor_cycle_failed")
+
+
+async def _prepare_query_context(
+    context: BotContext,
+    item: QueueItem,
+    user_id: int,
+    task_id: int | None = None,
+) -> QueryContext:
+    """Build system prompt, check budget, resolve model and session.
+
+    Raises BudgetExceeded if budget is exceeded.
+    """
+    from koda.utils.command_helpers import init_user_data
+
+    init_user_data(context.user_data, user_id=user_id)
+    try:
+        from koda.services.agent_settings import get_agent_runtime_settings
+
+        sync_user_data_with_runtime_settings(context.user_data, get_agent_runtime_settings())
+    except Exception:
+        log.debug("agent_runtime_settings_sync_skipped", exc_info=True)
+    from koda.knowledge import classify_task_kind, default_execution_policy
+
+    # Budget check
+    if context.user_data["total_cost"] >= MAX_TOTAL_BUDGET_USD:
+        raise BudgetExceeded(f"Cumulative budget of ${MAX_TOTAL_BUDGET_USD:.2f} reached. Use /resetcost to reset.")
+
+    source_base_dir, source_root_path = _resolve_task_source_work_dir(item, context, strict=item.is_scheduled_run)
+    work_dir = _validate_work_dir(item.runtime_work_dir or source_base_dir, strict=item.is_scheduled_run)
+    context.user_data["work_dir"] = work_dir
+    if source_root_path:
+        context.user_data["source_root_path"] = source_root_path
+    task_kind = classify_task_kind(item.query_text)
+    project_key = Path(work_dir).name.lower()
+    environment = ""
+    runtime_agent_id = str(item.executing_agent_id or AGENT_ID or "default").strip() or "default"
+    current_process_agent_id = str(AGENT_ID or "default").strip() or "default"
+    team = runtime_agent_id.lower()
+    preferred_provider = normalize_provider(context.user_data.get("provider"))
+    provider = item.scheduled_provider or item.continuation_provider or preferred_provider or DEFAULT_PROVIDER
+    session_id = ensure_canonical_session_id(context.user_data)
+    recall_session_id = (
+        item.continuation_session_id or item.scheduled_session_id or item.override_session_id or session_id
+    )
+    model = get_provider_model(context.user_data, provider)
+    provider_session_id = None
+
+    prompt_segments: list[PromptSegment] = []
+
+    # System prompt
+    user_system_prompt = context.user_data.get("system_prompt")
+    agent_system_prompt = DEFAULT_SYSTEM_PROMPT
+    agent_prompt_source = "default_system_prompt"
+    if runtime_agent_id != current_process_agent_id:
+        local_agent_prompt = _control_plane_prompt_for_agent(runtime_agent_id)
+        if local_agent_prompt:
+            agent_system_prompt = local_agent_prompt
+            agent_prompt_source = "control_plane_agent_prompt"
+    system_prompt = agent_system_prompt
+    _append_prompt_segment(
+        prompt_segments,
+        segment_id="immutable_base_policy",
+        text=agent_system_prompt,
+        category="base",
+        priority=0,
+        compression_strategy="truncate_tail",
+        drop_policy="hard_floor",
+        metadata={"source": agent_prompt_source, "agent_id": runtime_agent_id},
+    )
+    if user_system_prompt:
+        sanitized_prompt = sanitize_user_system_prompt(str(user_system_prompt))
+        if sanitized_prompt:
+            _append_prompt_segment(
+                prompt_segments,
+                segment_id="operator_instructions",
+                text=sanitized_prompt,
+                category="user",
+                priority=5,
+                compression_strategy="truncate_tail",
+                drop_policy="hard_floor",
+            )
+
+    if item.is_scheduled_run and item.scheduled_dry_run:
+        _append_prompt_segment(
+            prompt_segments,
+            segment_id="scheduled_dry_run_rules",
+            text=(
+                "## Scheduled Dry-Run Mode\n"
+                "This execution validates a scheduled job in dry-run mode. "
+                "Do not perform irreversible actions. Prefer previews, simulations, and read-only verification. "
+                "If a write-capable tool has no safe dry-run path, explain that it was blocked."
+            ),
+            category="runtime_rules",
+            priority=10,
+            compression_strategy="truncate_tail",
+            drop_policy="hard_floor",
+        )
+
+    if item.is_child_run and item.child_context_prompt:
+        _append_prompt_segment(
+            prompt_segments,
+            segment_id="child_run_context",
+            text=item.child_context_prompt,
+            category="runtime_context",
+            priority=12,
+            compression_strategy="truncate_tail",
+            drop_policy="hard_floor",
+            metadata={
+                "source": "child_run",
+                "child_run_id": item.child_run_id,
+                "parent_task_id": item.parent_task_id,
+                "toolset": item.child_toolset or "read_only",
+            },
+        )
+
+    # Voice instructions
+    voice_requested = bool(item.force_audio_response or _voice_continuous_mode_active(context.user_data))
+    voice_enabled = bool(item.force_audio_response or tts_enabled_for_session(context.user_data))
+    if voice_requested and voice_enabled:
+        _append_prompt_segment(
+            prompt_segments,
+            segment_id="voice_prompt",
+            text=_build_voice_active_prompt(context.user_data, force_audio_response=item.force_audio_response),
+            category="runtime_rules",
+            priority=20,
+            compression_strategy="head_and_tail",
+            drop_policy="drop",
+        )
+
+    # Launch memory recall + cache/script lookups concurrently
+    memory_task = None
+    knowledge_task = None
+    cache_task = None
+    script_task = None
+    artifact_task = None
+    knowledge_waits_for_artifacts = item.artifact_bundle is not None
+    knowledge_enabled = False
+    base_policy = default_execution_policy(task_kind, environment=environment)
+    knowledge_query_context = _get_query_context_service().build_knowledge_query_context(
+        query=item.query_text,
+        task_id=task_id,
+        agent_id=runtime_agent_id,
+        user_id=user_id,
+        workspace_dir=work_dir,
+        workspace_fingerprint=_workspace_fingerprint(work_dir),
+        project_key=project_key,
+        task_kind=task_kind,
+        environment=environment,
+        team=team,
+        autonomy_tier_target=base_policy.autonomy_tier,
+        task_risk="high" if task_kind == "deploy" and environment.lower() in {"prod", "production"} else "medium",
+        requires_write=task_kind in {"deploy", "code_change", "bugfix"},
+        retrieval_strategy=context.user_data.get("knowledge_strategy"),
+    )
+    effective_policy = base_policy
+    try:
+        from koda.knowledge.config import KNOWLEDGE_ENABLED as _KNOWLEDGE_ENABLED
+
+        knowledge_enabled = _KNOWLEDGE_ENABLED
+    except Exception:
+        log.exception("knowledge_config_setup_error")
+
+    try:
+        from koda.memory.config import MEMORY_ENABLED
+
+        child_policy = item.child_context_policy if isinstance(item.child_context_policy, dict) else {}
+        memory_recall_allowed = not item.is_child_run or bool(child_policy.get("include_memory", False))
+        include_sensitive_memory = bool(
+            child_policy.get("include_sensitive_memory", False) or child_policy.get("include_sensitive", False)
+        )
+        if MEMORY_ENABLED and memory_recall_allowed:
+            from koda.memory import get_memory_manager
+
+            mm = get_memory_manager()
+            pre_query_callable = getattr(mm, "pre_query_details", None) or getattr(mm, "pre_query", None)
+            if pre_query_callable is None:
+                raise RuntimeError("memory manager has no pre_query callable")
+            pre_query_result = pre_query_callable(
+                item.query_text,
+                user_id,
+                include_procedural=True,
+                session_id=recall_session_id,
+                project_key=project_key,
+                environment=environment,
+                team=team,
+                task_id=task_id,
+                source_query_id=context.user_data.get("last_query_id"),
+                source_task_id=task_id,
+                source_episode_id=context.user_data.get("last_execution_episode_id"),
+                include_sensitive=include_sensitive_memory,
+            )
+            if not inspect.isawaitable(pre_query_result):
+                fallback_callable = getattr(mm, "pre_query", None)
+                if fallback_callable is None or fallback_callable is pre_query_callable:
+                    raise TypeError("memory pre_query callable must be awaitable")
+                pre_query_result = fallback_callable(
+                    item.query_text,
+                    user_id,
+                    include_procedural=True,
+                    session_id=recall_session_id,
+                    project_key=project_key,
+                    environment=environment,
+                    team=team,
+                    task_id=task_id,
+                    source_query_id=context.user_data.get("last_query_id"),
+                    source_task_id=task_id,
+                    source_episode_id=context.user_data.get("last_execution_episode_id"),
+                    include_sensitive=include_sensitive_memory,
+                )
+            memory_task = asyncio.create_task(pre_query_result)
+        elif MEMORY_ENABLED and item.is_child_run:
+            log.info("child_run_memory_recall_fenced", child_run_id=item.child_run_id)
+    except Exception:
+        log.exception("memory_recall_setup_error")
+
+    try:
+        if knowledge_enabled:
+            from koda.knowledge import get_knowledge_manager
+
+            km = get_knowledge_manager()
+            if km.initialized and not knowledge_waits_for_artifacts:
+                knowledge_task = asyncio.create_task(km.resolve(knowledge_query_context))
+    except Exception:
+        log.exception("knowledge_recall_setup_error")
+
+    try:
+        from koda.services.cache_config import CACHE_ENABLED
+
+        if CACHE_ENABLED:
+            from koda.services.cache_manager import get_cache_manager
+
+            cm = get_cache_manager()
+            if cm._initialized and _queue_manager_action_allowed(
+                integration_id="cache",
+                action_id="lookup",
+                user_id=user_id,
+                task_id=task_id,
+                details={"query_text": item.query_text, "work_dir": work_dir},
+            ):
+                cache_task = asyncio.create_task(
+                    cm.lookup(
+                        item.query_text,
+                        user_id,
+                        work_dir=work_dir,
+                        source_scope=tuple(knowledge_query_context.allowed_source_labels or ()),
+                        strategy_version=str(
+                            getattr(context.user_data.get("knowledge_strategy"), "value", "")
+                            or context.user_data.get("knowledge_strategy")
+                            or ""
+                        ),
+                        model_family=provider,
+                    )
+                )
+    except Exception:
+        log.exception("cache_lookup_setup_error")
+
+    try:
+        from koda.services.cache_config import SCRIPT_LIBRARY_ENABLED
+
+        if SCRIPT_LIBRARY_ENABLED and not item.is_continuation:
+            from koda.services.script_manager import get_script_manager
+
+            sm = get_script_manager()
+            if sm._initialized and _queue_manager_action_allowed(
+                integration_id="script_library",
+                action_id="search",
+                user_id=user_id,
+                task_id=task_id,
+                details={"query_text": item.query_text},
+            ):
+                script_task = asyncio.create_task(sm.search(item.query_text, user_id))
+    except Exception:
+        log.exception("script_lookup_setup_error")
+
+    try:
+        if item.artifact_bundle is not None:
+            from koda.services.artifact_ingestion import extract_bundle
+
+            artifact_task = asyncio.create_task(extract_bundle(item.artifact_bundle))
+    except Exception:
+        log.exception("artifact_bundle_setup_error")
+
+    # Override session_id for continuations
+    if item.is_continuation and item.continuation_session_id:
+        session_id = item.continuation_session_id
+        context.user_data["session_id"] = session_id
+        if item.continuation_provider:
+            provider = normalize_provider(item.continuation_provider)
+    elif item.is_scheduled_run and item.scheduled_session_id:
+        session_id = item.scheduled_session_id
+    elif item.override_session_id:
+        session_id = item.override_session_id
+        context.user_data["session_id"] = session_id
+
+    agent_mode = context.user_data.get("agent_mode", "autonomous")
+    permission_mode = "plan" if item.is_scheduled_run and item.scheduled_dry_run else "bypassPermissions"
+    max_turns = 1 if agent_mode == "supervised" else MAX_TURNS
+    _query_warnings: list[str] = []
+    visual_paths = _filter_visual_paths(item.image_paths)
+    artifact_dossiers: list[Any] = []
+    asset_refs: list[dict[str, Any]] = []
+    temp_paths: list[str] = list(dict.fromkeys(item.image_paths or []))
+
+    # Auto-model routing
+    if context.user_data.get("auto_model"):
+        model = resolve_provider_model(
+            provider,
+            query=item.query_text,
+            auto_model=True,
+            has_images=bool(visual_paths),
+        )
+        log.info("auto_model_selected", provider=provider, model=model)
+    else:
+        model = resolve_provider_model(
+            provider,
+            preferred_model=item.scheduled_model or model,
+            query=item.query_text,
+            has_images=bool(visual_paths),
+        )
+
+    if item.is_scheduled_run and item.scheduled_dry_run:
+        provider_session_id = None
+        _query_warnings.append("dry-run forced fresh provider turn")
+    else:
+        mapping = get_provider_session_mapping(session_id, provider)
+        if mapping:
+            provider_session_id, mapped_model = mapping
+            context.user_data.setdefault("provider_sessions", {})[provider] = provider_session_id
+            if (
+                not context.user_data.get("auto_model")
+                and mapped_model
+                and mapped_model in PROVIDER_MODELS.get(provider, [])
+            ):
+                model = resolve_provider_model(provider, preferred_model=mapped_model, query=item.query_text)
+
+    # Save last_query for /retry
+    context.user_data["last_query"] = {
+        "text": item.query_text,
+        "image_paths": item.image_paths,
+        "artifact_bundle": item.artifact_bundle,
+    }
+    if not item.scheduled_dry_run:
+        save_session(
+            user_id,
+            session_id,
+            provider=provider,
+            provider_session_id=provider_session_id,
+            model=model,
+        )
+
+    # Collect memory result with timeout (ran concurrently with setup above)
+    from koda.services import metrics as _metrics
+
+    memory_context = ""
+    memory_resolution = None
+    if memory_task:
+        _recall_start = time.time()
+        try:
+            from koda.memory.config import MEMORY_RECALL_TIMEOUT
+
+            memory_result = await asyncio.wait_for(memory_task, timeout=MEMORY_RECALL_TIMEOUT)
+            if isinstance(memory_result, tuple) and len(memory_result) == 2:
+                memory_context, memory_resolution = memory_result
+            elif isinstance(memory_result, str):
+                memory_context = memory_result
+            if memory_context:
+                _append_prompt_segment(
+                    prompt_segments,
+                    segment_id="memory_context",
+                    text=memory_context,
+                    category="memory",
+                    priority=40,
+                    compression_strategy="head_and_tail",
+                    drop_policy="drop",
+                )
+        except TimeoutError:
+            log.warning("memory_recall_timeout")
+            await _cancel_pending_task(memory_task)
+            _query_warnings.append("memory timeout")
+        except Exception:
+            log.exception("memory_recall_error")
+            _query_warnings.append("memory unavailable")
+        _metrics.MEMORY_RECALL_DURATION.labels(agent_id=_agent_id_label).observe(time.time() - _recall_start)
+        if memory_context and "## Procedural Memory" in memory_context:
+            _metrics.PROCEDURAL_HITS.labels(agent_id=_agent_id_label).inc()
+        else:
+            _metrics.PROCEDURAL_MISSES.labels(agent_id=_agent_id_label).inc()
+
+    knowledge_hits: list[Any] = []
+    knowledge_resolution: Any | None = None
+    stale_sources_present = False
+
+    scoped_runbooks: list[dict[str, Any]] = []
+    try:
+        scoped_runbooks = list_approved_runbooks(
+            agent_id=runtime_agent_id,
+            task_kind=task_kind,
+            project_key=project_key or None,
+            environment=environment or None,
+            team=team or None,
+            limit=10,
+        )
+    except Exception:
+        log.exception("approved_runbook_lookup_error")
+    reliability_stats = {
+        "total_runs": 0,
+        "successful_runs": 0,
+        "verified_runs": 0,
+        "human_override_count": 0,
+        "correction_count": 0,
+        "rollback_count": 0,
+        "updated_at": None,
+    }
+    try:
+        reliability_stats = get_execution_reliability_stats(
+            agent_id=runtime_agent_id,
+            task_kind=task_kind,
+            project_key=project_key,
+            environment=environment,
+        )
+    except Exception:
+        log.exception("execution_reliability_lookup_error")
+    # Collect cache/script results
+    _cache_hit = None
+    _script_matches: list = []
+
+    if cache_task:
+        try:
+            from koda.services.cache_config import CACHE_LOOKUP_TIMEOUT
+
+            _cache_hit = await asyncio.wait_for(cache_task, timeout=CACHE_LOOKUP_TIMEOUT)
+            if _cache_hit:
+                _metrics.CACHE_HITS.labels(agent_id=_agent_id_label).inc()
+            else:
+                _metrics.CACHE_MISSES.labels(agent_id=_agent_id_label).inc()
+        except TimeoutError:
+            log.warning("cache_lookup_timeout")
+            await _cancel_pending_task(cache_task)
+            _query_warnings.append("cache timeout")
+        except Exception:
+            log.exception("cache_lookup_error")
+
+    if script_task:
+        try:
+            from koda.services.cache_config import SCRIPT_LOOKUP_TIMEOUT
+
+            _script_matches = await asyncio.wait_for(script_task, timeout=SCRIPT_LOOKUP_TIMEOUT)
+        except TimeoutError:
+            log.warning("script_lookup_timeout")
+            await _cancel_pending_task(script_task)
+            _query_warnings.append("script timeout")
+        except Exception:
+            log.exception("script_lookup_error")
+
+    if artifact_task:
+        try:
+            artifact_dossier = await asyncio.wait_for(artifact_task, timeout=ARTIFACT_EXTRACTION_TIMEOUT)
+            artifact_dossiers.append(artifact_dossier)
+            _append_prompt_segment(
+                prompt_segments,
+                segment_id="artifact_context",
+                text=artifact_dossier.to_prompt_context(item.query_text),
+                category="supporting_knowledge",
+                priority=70,
+                compression_strategy="head_and_tail",
+                drop_policy="drop",
+            )
+            for path in artifact_dossier.visual_paths:
+                if path not in visual_paths:
+                    visual_paths.append(path)
+            for artifact in artifact_dossier.artifacts:
+                if artifact.ref.path and artifact.ref.path not in temp_paths:
+                    temp_paths.append(artifact.ref.path)
+                for path in artifact.visual_paths:
+                    if path not in temp_paths:
+                        temp_paths.append(path)
+        except TimeoutError:
+            log.warning("artifact_bundle_timeout")
+            await _cancel_pending_task(artifact_task)
+            _query_warnings.append("artifact extraction timeout")
+        except Exception:
+            log.exception("artifact_bundle_error")
+            _query_warnings.append("artifact extraction unavailable")
+
+    # Inject cache hint or relevant scripts into system prompt
+    if _cache_hit and hasattr(_cache_hit, "match_type") and _cache_hit.match_type == "fuzzy_suggest":
+        hint = _cache_hit.response[:3000]
+        _append_prompt_segment(
+            prompt_segments,
+            segment_id="cache_hint",
+            text=(
+                "<cached_response_hint>\n"
+                "A similar question was asked before. Here is the previous response as reference — "
+                "adapt it if appropriate, but verify accuracy:\n\n"
+                f"{hint}\n</cached_response_hint>"
+            ),
+            category="cache_hints",
+            priority=90,
+            compression_strategy="truncate_tail",
+            drop_policy="drop",
+        )
+
+    if _script_matches:
+        scripts_text = ""
+        total_chars = 0
+        for sm_result in _script_matches[:3]:
+            snippet = sm_result.content[:1200]
+            if total_chars + len(snippet) > 4000:
+                break
+            lang = sm_result.language or ""
+            scripts_text += f"\n### {sm_result.title} ({lang})\n```{lang}\n{snippet}\n```\n"
+            total_chars += len(snippet)
+        if scripts_text:
+            _append_prompt_segment(
+                prompt_segments,
+                segment_id="relevant_scripts",
+                text=(
+                    "<relevant_scripts>\n"
+                    "The user has saved scripts that may be relevant. "
+                    "Reuse or adapt them when appropriate:\n"
+                    f"{scripts_text}\n</relevant_scripts>"
+                ),
+                category="scripts_assets",
+                priority=80,
+                compression_strategy="head_and_tail",
+                drop_policy="drop",
+            )
+
+    # Agent tools prompt
+    from koda.services.tool_prompt import build_agent_tools_prompt
+
+    _runtime_agent_spec_for_tools: dict[str, Any] = {}
+    try:
+        from koda.skills._runtime import get_runtime_agent_spec
+
+        _runtime_agent_spec_for_tools = get_runtime_agent_spec()
+    except Exception:
+        _runtime_agent_spec_for_tools = {}
+    agent_tools_section = build_agent_tools_prompt(
+        tool_policy=(
+            _runtime_agent_spec_for_tools.get("tool_policy")
+            if isinstance(_runtime_agent_spec_for_tools.get("tool_policy"), dict)
+            else None
+        ),
+        skill_policy=(
+            _runtime_agent_spec_for_tools.get("skill_policy")
+            if isinstance(_runtime_agent_spec_for_tools.get("skill_policy"), dict)
+            else None
+        ),
+    )
+    if agent_tools_section:
+        _append_prompt_segment(
+            prompt_segments,
+            segment_id="tool_contracts",
+            text=agent_tools_section,
+            category="tool_contracts",
+            priority=30,
+            compression_strategy="truncate_tail",
+            drop_policy="hard_floor",
+        )
+
+    # --- Skills selection ---
+    _resolved_skill_matches: list = []
+    try:
+        from koda.skills._composer import (
+            compose_output_requirements,
+            compose_skill_prompt,
+            resolve_skill_graph,
+        )
+        from koda.skills._index import SkillEmbeddingIndex
+        from koda.skills._registry import build_skill_registry_from_custom_skills
+        from koda.skills._runtime import (
+            get_runtime_agent_spec,
+            get_runtime_custom_skills,
+            get_runtime_skill_policy,
+        )
+        from koda.skills._selector import SkillSelector
+        from koda.skills._telemetry import emit_skill_selection
+
+        agent_spec = get_runtime_agent_spec()
+        _agent_custom_skills = get_runtime_custom_skills(agent_spec)
+        _agent_skill_policy = get_runtime_skill_policy(agent_spec) or None
+
+        registry = build_skill_registry_from_custom_skills(_agent_custom_skills, _agent_skill_policy)
+        agent_skills = registry.get_all()
+        if agent_skills:
+            skill_index = SkillEmbeddingIndex()
+            skill_index.rebuild(agent_skills)
+            selector = SkillSelector(registry, skill_index)
+            skill_matches = selector.select(
+                item.query_text,
+                max_skills=_agent_skill_policy.get("max_skills", 6) if _agent_skill_policy else 6,
+                agent_skill_policy=_agent_skill_policy,
+            )
+
+            if skill_matches:
+                resolved = resolve_skill_graph(skill_matches, registry)
+                _resolved_skill_matches = resolved
+                skill_prompt = compose_skill_prompt(resolved, token_budget=1600, progressive=True)
+
+                if skill_prompt:
+                    best_score = max(m.composite_score for m in resolved)
+                    effective_priority = max(15, 30 - int(best_score * 15))
+
+                    _append_prompt_segment(
+                        prompt_segments,
+                        segment_id="active_skills",
+                        text=skill_prompt,
+                        category="skills",
+                        priority=effective_priority,
+                        compression_strategy="head_and_tail",
+                        drop_policy="drop",
+                    )
+
+                    output_req = compose_output_requirements(resolved)
+                    if output_req:
+                        _append_prompt_segment(
+                            prompt_segments,
+                            segment_id="skill_output_requirements",
+                            text=output_req,
+                            category="skills",
+                            priority=10,
+                            compression_strategy="truncate_tail",
+                            drop_policy="drop",
+                        )
+
+                emit_skill_selection(
+                    user_id=getattr(item, "user_id", None),
+                    task_id=getattr(item, "task_id", None),
+                    query_text=item.query_text,
+                    matches=skill_matches,
+                    resolved=resolved,
+                    included_in_prompt=bool(skill_prompt),
+                )
+    except Exception:
+        log.exception("skills_selection_failed")
+
+    has_blocking_artifact_gap = any(dossier.has_blocking_gaps for dossier in artifact_dossiers)
+    if has_blocking_artifact_gap:
+        effective_policy = replace(effective_policy, approval_mode="read_only")
+        permission_mode = "plan"
+        _query_warnings.append("artifact dossier incomplete; writes blocked")
+        ungrounded_operationally = True
+
+    await _persist_artifact_evidence_nodes(knowledge_query_context, artifact_dossiers)
+
+    try:
+        from koda.services.agent_asset_registry import get_agent_asset_registry
+        from koda.services.cache_config import SCRIPT_LOOKUP_TIMEOUT
+
+        asset_refs = await asyncio.wait_for(
+            get_agent_asset_registry(runtime_agent_id).search(
+                query=item.query_text,
+                user_id=user_id,
+                work_dir=work_dir,
+                project_key=project_key,
+                workspace_fingerprint=knowledge_query_context.workspace_fingerprint,
+                source_scope=tuple(knowledge_query_context.allowed_source_labels or ()),
+                task_id=task_id,
+                limit=6,
+                script_matches=_script_matches,
+            ),
+            timeout=SCRIPT_LOOKUP_TIMEOUT,
+        )
+        if asset_refs:
+            asset_lines = []
+            for ref in asset_refs[:5]:
+                score = float(ref.get("score") or 0.0)
+                asset_kind = str(ref.get("asset_kind") or "asset")
+                title = str(ref.get("title") or ref.get("asset_key") or "asset")
+                reason = str(ref.get("reuse_reason") or "contextual_match")
+                path_hint = str(ref.get("source_path") or ref.get("source_url") or "").strip()
+                suffix = f" [{path_hint}]" if path_hint else ""
+                asset_lines.append(f"- [{asset_kind}] {title} (score={score:.2f}, reason={reason}){suffix}")
+            _append_prompt_segment(
+                prompt_segments,
+                segment_id="asset_memory",
+                text=(
+                    "<asset_memory>\n"
+                    "Previously stored agent assets may be reusable for this request.\n"
+                    "Reuse them only when they are coherent with the current goal and context.\n\n"
+                    + "\n".join(asset_lines)
+                    + "\n</asset_memory>"
+                ),
+                category="scripts_assets",
+                priority=75,
+                compression_strategy="truncate_tail",
+                drop_policy="drop",
+            )
+    except TimeoutError:
+        _query_warnings.append("asset registry timeout")
+    except Exception:
+        log.exception("asset_registry_lookup_error")
+        _query_warnings.append("asset registry unavailable")
+
+    if knowledge_enabled and knowledge_task is None:
+        try:
+            from koda.knowledge import get_knowledge_manager
+
+            km = get_knowledge_manager()
+            if km.initialized:
+                knowledge_task = asyncio.create_task(km.resolve(knowledge_query_context))
+        except Exception:
+            log.exception("knowledge_recall_setup_error")
+
+    if knowledge_task:
+        _knowledge_start = time.time()
+        try:
+            from koda.knowledge.config import KNOWLEDGE_RECALL_TIMEOUT
+
+            knowledge_resolution = await asyncio.wait_for(knowledge_task, timeout=KNOWLEDGE_RECALL_TIMEOUT)
+            knowledge_context = knowledge_resolution.context if knowledge_resolution else ""
+            knowledge_hits = list(knowledge_resolution.hits) if knowledge_resolution else []
+            if knowledge_context:
+                _append_prompt_segment(
+                    prompt_segments,
+                    segment_id="authoritative_knowledge",
+                    text=knowledge_context,
+                    category="authoritative_knowledge",
+                    priority=60,
+                    compression_strategy="head_and_tail",
+                    drop_policy="drop",
+                )
+                _metrics.KNOWLEDGE_HITS.labels(agent_id=_agent_id_label).inc()
+            else:
+                _metrics.KNOWLEDGE_MISSES.labels(agent_id=_agent_id_label).inc()
+            if knowledge_resolution:
+                strategy_label = getattr(
+                    getattr(knowledge_resolution, "retrieval_strategy", None),
+                    "value",
+                    str(getattr(knowledge_resolution, "retrieval_strategy", "") or "unknown"),
+                )
+                route_label = str(getattr(knowledge_resolution, "retrieval_route", "") or "unknown")
+                _metrics.KNOWLEDGE_STRATEGY_SELECTIONS.labels(
+                    agent_id=_agent_id_label,
+                    strategy=strategy_label,
+                    route=route_label,
+                ).inc()
+                _metrics.KNOWLEDGE_GROUNDING_SCORE.labels(
+                    agent_id=_agent_id_label,
+                    strategy=strategy_label,
+                ).observe(float(getattr(knowledge_resolution, "grounding_score", 0.0) or 0.0))
+                if getattr(knowledge_resolution, "trace_id", None) is not None:
+                    _metrics.KNOWLEDGE_TRACE_PERSISTED.labels(
+                        agent_id=_agent_id_label,
+                        strategy=strategy_label,
+                    ).inc()
+        except TimeoutError:
+            log.warning("knowledge_recall_timeout")
+            await _cancel_pending_task(knowledge_task)
+            _query_warnings.append("knowledge timeout")
+            _metrics.KNOWLEDGE_MISSES.labels(agent_id=_agent_id_label).inc()
+        except Exception:
+            log.exception("knowledge_recall_error")
+            _query_warnings.append("knowledge unavailable")
+            _metrics.KNOWLEDGE_MISSES.labels(agent_id=_agent_id_label).inc()
+        _metrics.KNOWLEDGE_RECALL_DURATION.labels(agent_id=_agent_id_label).observe(time.time() - _knowledge_start)
+
+    selected_policy_runbook = _select_policy_runbook(scoped_runbooks, knowledge_resolution)
+    if selected_policy_runbook:
+        effective_policy = _apply_policy_overrides(effective_policy, selected_policy_runbook)
+    effective_policy = _downgrade_policy_from_reliability(
+        effective_policy,
+        reliability_stats,
+    )
+    if item.is_child_run:
+        if item.child_toolset in {None, "read_only", "analysis", "research"}:
+            effective_policy = replace(effective_policy, approval_mode="read_only")
+            permission_mode = "plan"
+            _query_warnings.append("child_run_read_only_toolset")
+        else:
+            effective_policy = replace(effective_policy, approval_mode="supervised")
+            permission_mode = "plan"
+            _query_warnings.append("child_run_restricted_toolset")
+    ungrounded_operationally = bool(getattr(knowledge_resolution, "ungrounded_operationally", False))
+    stale_sources_present = bool(getattr(knowledge_resolution, "stale_sources_present", False))
+
+    if item.squad_thread_id:
+        executing_agent = runtime_agent_id
+        try:
+            from koda.squads import build_squad_context_block_default, get_squad_access_service
+
+            access_service = get_squad_access_service()
+            if access_service is None:
+                raise PermissionError("squad access service unavailable")
+            await access_service.require_thread_access(
+                thread_id=item.squad_thread_id,
+                agent_id=executing_agent,
+            )
+            squad_context_block = await build_squad_context_block_default(
+                thread_id=item.squad_thread_id,
+                executing_agent_id=executing_agent,
+                delegation_chain=item.delegation_chain or None,
+            )
+            if squad_context_block:
+                _append_prompt_segment(
+                    prompt_segments,
+                    segment_id="squad_context",
+                    text=squad_context_block,
+                    category="runtime_context",
+                    priority=55,
+                    compression_strategy="truncate_tail",
+                    drop_policy="drop",
+                    metadata={
+                        "thread_id": item.squad_thread_id,
+                        "squad_task_id": item.squad_task_id,
+                        "executing_agent_id": executing_agent,
+                    },
+                )
+        except Exception as exc:
+            raise PermissionError(
+                f"unable to prepare squad context for thread {item.squad_thread_id!r}: {exc}"
+            ) from exc
+
+    from koda.knowledge.config import KNOWLEDGE_CONTEXT_MAX_TOKENS
+    from koda.memory.config import MEMORY_MAX_CONTEXT_TOKENS
+
+    prompt_budget = _compile_runtime_prompt_budget(
+        provider=provider,
+        model=model,
+        segments=prompt_segments,
+        memory_context_max_tokens=MEMORY_MAX_CONTEXT_TOKENS,
+        knowledge_context_max_tokens=KNOWLEDGE_CONTEXT_MAX_TOKENS,
+    )
+    if not bool(prompt_budget.get("within_budget", False)):
+        raise BudgetExceeded(_prompt_budget_error_message(prompt_budget))
+    system_prompt = str(prompt_budget.get("compiled_prompt") or DEFAULT_SYSTEM_PROMPT)
+    context_governance: dict[str, Any] | None = None
+    try:
+        from koda.services.context_governance import append_memory_resolution_blocks, govern_prompt_budget
+
+        runtime_context_policy = (
+            item.child_context_policy
+            if item.is_child_run
+            else {
+                "mode": "runtime",
+                "allow_categories": [
+                    "base",
+                    "runtime_rules",
+                    "tool_contracts",
+                    "memory",
+                    "authoritative_knowledge",
+                    "supporting_knowledge",
+                    "cache_hints",
+                    "scripts_assets",
+                    "artifact",
+                    "artifacts",
+                    "runtime_context",
+                ],
+                "deny_categories": ["secrets", "pending_approval"],
+                "include_memory": True,
+                "include_artifacts": True,
+                "include_squad_context": True,
+                "review_on_sensitive": True,
+            }
+        )
+
+        context_governance = govern_prompt_budget(prompt_budget, runtime_context_policy)
+        context_governance = append_memory_resolution_blocks(
+            context_governance,
+            memory_resolution,
+            runtime_context_policy,
+        )
+        if task_id is not None:
+            try:
+                from koda.services.runtime import get_runtime_controller
+
+                runtime = get_runtime_controller()
+                env = runtime.store.get_environment_by_task(task_id)
+                await runtime.events.publish(
+                    task_id=task_id,
+                    env_id=int(env["id"]) if env else None,
+                    attempt=None,
+                    phase="planning",
+                    event_type="context_governance.evaluated",
+                    severity="info",
+                    payload={
+                        "schema_version": context_governance.get("schema_version"),
+                        "summary": context_governance.get("summary"),
+                        "child_run_id": item.child_run_id,
+                    },
+                )
+            except Exception:
+                log.debug("context_governance_runtime_event_skipped", task_id=task_id, exc_info=True)
+    except Exception:
+        log.debug("context_governance_unavailable", task_id=task_id, exc_info=True)
+
+    from koda.services.agent_settings import get_agent_runtime_settings, resolve_effort
+
+    effort_value = resolve_effort(get_agent_runtime_settings(), provider, model)
+
+    return QueryContext(
+        task_id=task_id,
+        provider=provider,
+        work_dir=work_dir,
+        model=model,
+        session_id=session_id,
+        provider_session_id=provider_session_id,
+        system_prompt=system_prompt,
+        agent_mode=agent_mode,
+        permission_mode=permission_mode,
+        max_turns=max_turns,
+        effort=effort_value,
+        warnings=_query_warnings,
+        cache_hit=_cache_hit,
+        script_matches=_script_matches,
+        knowledge_hits=knowledge_hits,
+        knowledge_resolution=knowledge_resolution,
+        memory_resolution=memory_resolution,
+        memory_profile=getattr(mm, "profile", None) if "mm" in locals() else None,
+        memory_trust_score=float(getattr(memory_resolution, "trust_score", 0.0) or 0.0),
+        task_kind=task_kind,
+        knowledge_query_context=knowledge_query_context,
+        effective_policy=effective_policy,
+        ungrounded_operationally=ungrounded_operationally,
+        stale_sources_present=stale_sources_present,
+        turn_mode=cast(
+            TurnMode,
+            "new_turn" if item.is_scheduled_run and item.scheduled_dry_run else infer_turn_mode(provider_session_id),
+        ),
+        resume_requested=provider_session_id is not None and not (item.is_scheduled_run and item.scheduled_dry_run),
+        dry_run=item.scheduled_dry_run,
+        scheduled_job_id=item.scheduled_job_id,
+        scheduled_run_id=item.scheduled_run_id,
+        artifact_dossiers=artifact_dossiers,
+        visual_paths=visual_paths,
+        temp_paths=temp_paths,
+        runtime_env_id=None,
+        runtime_classification="light",
+        runtime_environment_kind="dev_worktree",
+        source_root_path=source_root_path,
+        prompt_budget=prompt_budget,
+        asset_refs=asset_refs,
+        skill_matches=_resolved_skill_matches,
+        force_audio_response=item.force_audio_response,
+        executing_agent_id=item.executing_agent_id,
+        squad_thread_id=item.squad_thread_id,
+        squad_task_id=item.squad_task_id,
+        parent_message_id=item.parent_message_id,
+        delegation_chain=item.delegation_chain,
+        delegation_request_id=item.delegation_request_id,
+        delegation_origin_agent_id=item.delegation_origin_agent_id,
+        telegram_message_thread_id=item.telegram_message_thread_id,
+        is_child_run=item.is_child_run,
+        child_run_id=item.child_run_id,
+        parent_task_id=item.parent_task_id,
+        child_context_policy=dict(item.child_context_policy or {}),
+        child_toolset=item.child_toolset,
+        context_governance=context_governance,
+    )
+
+
+# Provider execution (streaming + fallback)
+
+
+async def _run_streaming(
+    ctx: QueryContext,
+    item: QueueItem,
+    user_id: int,
+    chat_id: int,
+    context: BotContext,
+    task_id: int | None = None,
+) -> RunResult | None:
+    """Run the selected provider with streaming. Returns RunResult or None if streaming fails."""
+    streaming_msg = None
+    thread_kwargs: dict[str, int] = {}
+    if ctx.telegram_message_thread_id is not None and (item.update is None or item.update.message is None):
+        thread_kwargs["message_thread_id"] = ctx.telegram_message_thread_id
+    try:
+        streaming_msg = await cast(Any, context.bot).send_message(chat_id=chat_id, text="Processing…", **thread_kwargs)
+    except Exception:
+        log.warning(
+            "streaming_progress_message_failed",
+            chat_id=chat_id,
+            task_id=task_id,
+            exc_info=True,
+        )
+
+    process_ready = asyncio.Event()
+    process_holder: dict = {"event": process_ready}
+    proc_key = task_id if task_id is not None else user_id
+
+    async def _track_process(
+        _ev: asyncio.Event = process_ready,
+        _ph: dict = process_holder,
+    ) -> None:
+        await _ev.wait()
+        active_processes[proc_key] = _ph["proc"]
+        if task_id is not None and RUNTIME_ENVIRONMENTS_ENABLED and ctx.runtime_env_id is not None:
+            from koda.services.runtime import get_runtime_controller
+
+            await get_runtime_controller().record_process(
+                task_id=task_id,
+                command=f"{ctx.provider}:{ctx.model}",
+                proc=_ph["proc"],
+                role="provider_stream",
+            )
+
+    track_task = asyncio.create_task(_track_process())
+    typing_task = asyncio.create_task(_send_typing(chat_id, context))
+    metadata_collector: dict = {}
+    raw_output = ""
+    runtime_terminal_id: int | None = None
+    runtime_terminal_path: str | None = None
+
+    try:
+        from koda.services.runtime import get_runtime_controller
+        from koda.utils.progress_tracker import ProgressTracker
+
+        chunks: list[str] = []
+        last_edit_time = 0.0
+        stream_start = time.time()
+        tracker = ProgressTracker(start_time=stream_start)
+        if task_id is not None and RUNTIME_ENVIRONMENTS_ENABLED and ctx.runtime_env_id is not None:
+            runtime = get_runtime_controller()
+            runtime_terminal_path = "kernel-stream://stdout"
+            runtime_terminal_id = await runtime.register_terminal(
+                task_id=task_id,
+                terminal_kind="provider_stream",
+                label=f"{ctx.provider} stream",
+                path=runtime_terminal_path,
+                stream_path="kernel-stream://stdout",
+            )
+            metadata_collector["runtime_terminal_id"] = runtime_terminal_id
+            metadata_collector["runtime_terminal_path"] = runtime_terminal_path
+
+        async for chunk in run_llm_streaming(
+            provider=ctx.provider,
+            query=item.query_text,
+            work_dir=ctx.work_dir,
+            model=ctx.model,
+            provider_session_id=ctx.provider_session_id,
+            process_holder=process_holder,
+            system_prompt=ctx.system_prompt,
+            image_paths=ctx.visual_paths,
+            permission_mode=ctx.permission_mode,
+            max_turns=ctx.max_turns,
+            metadata_collector=metadata_collector,
+            turn_mode=cast(TurnMode, ctx.turn_mode),
+            dry_run=ctx.dry_run,
+            runtime_task_id=task_id if (RUNTIME_ENVIRONMENTS_ENABLED and ctx.runtime_env_id is not None) else None,
+            effort=ctx.effort,
+        ):
+            chunks.append(chunk)
+            raw_output += chunk
+            if (
+                task_id is not None
+                and RUNTIME_ENVIRONMENTS_ENABLED
+                and ctx.runtime_env_id is not None
+                and runtime_terminal_id is not None
+            ):
+                await runtime.cooperate_pause(task_id=task_id, env_id=ctx.runtime_env_id, phase="executing")
+            now = time.time()
+            elapsed = now - stream_start
+            # Adaptive throttle based on elapsed time
+            if now - last_edit_time >= _get_throttle_interval(elapsed):
+                tool_uses = metadata_collector.get("tool_uses", [])
+                status_line = tracker.build_status(elapsed, tool_uses)
+                full_text = "".join(chunks)
+                max_preview = max(4000 - len(status_line) - 4, 0)
+                if full_text and max_preview > 0:
+                    if len(full_text) > max_preview:
+                        preview = "…" + full_text[-max_preview:]
+                    else:
+                        preview = full_text
+                    display = f"{status_line}\n\n{preview}"
+                else:
+                    display = status_line
+                if streaming_msg is not None:
+                    with contextlib.suppress(Exception):
+                        await streaming_msg.edit_text(display)
+                last_edit_time = now
+
+                # Send milestone notifications for long tasks
+                milestone = tracker.check_milestone(elapsed, tool_uses)
+                if milestone:
+                    with contextlib.suppress(Exception):
+                        ms_msg = await cast(Any, context.bot).send_message(
+                            chat_id=chat_id,
+                            text=milestone,
+                            **thread_kwargs,
+                        )
+                        tracker.add_milestone_message(ms_msg.message_id)
+
+        typing_task.cancel()
+        full_response = "".join(chunks)
+
+        # Clean up milestone messages
+        for ms_id in tracker.milestone_message_ids:
+            with contextlib.suppress(Exception):
+                await context.bot.delete_message(chat_id=chat_id, message_id=ms_id)
+
+        if streaming_msg is not None:
+            with contextlib.suppress(Exception):
+                await streaming_msg.delete()
+
+        error = bool(metadata_collector.get("error"))
+        result_text = full_response or metadata_collector.get("error_message", "")
+        if not result_text and not error and metadata_collector.get("stop_reason"):
+            result_text = "Task completed (no text output)."
+        return RunResult(
+            provider=ctx.provider,
+            model=ctx.model,
+            result=result_text,
+            session_id=ctx.session_id,
+            provider_session_id=metadata_collector.get("session_id", ctx.provider_session_id),
+            cost_usd=metadata_collector.get("cost_usd", 0.0),
+            usage=metadata_collector.get("usage", {}),
+            error=error,
+            stop_reason=metadata_collector.get("stop_reason", ""),
+            tool_uses=metadata_collector.get("tool_uses", []),
+            native_items=metadata_collector.get("native_items", []),
+            raw_output=raw_output,
+            warnings=metadata_collector.get("warnings", []),
+            turn_mode=cast(TurnMode, str(metadata_collector.get("turn_mode", ctx.turn_mode))),
+            supports_native_resume=bool(metadata_collector.get("supports_native_resume", ctx.supports_native_resume)),
+            error_kind=str(metadata_collector.get("error_kind", "")),
+            retryable=bool(metadata_collector.get("retryable", False)),
+            runtime_terminal_id=runtime_terminal_id,
+            runtime_terminal_path=runtime_terminal_path,
+        )
+
+    except Exception:
+        log.exception("streaming_error")
+        if streaming_msg is not None:
+            with contextlib.suppress(Exception):
+                await streaming_msg.delete()
+        return None
+
+    finally:
+        track_task.cancel()
+        typing_task.cancel()
+        active_processes.pop(proc_key, None)
+
+
+def _native_tool_schemas_for_runtime() -> list[dict[str, Any]]:
+    """Build provider-native schemas from the Phase 1 ToolRegistry contract."""
+
+    try:
+        from koda import config as _config
+        from koda.agent_contract import normalize_string_list
+        from koda.services.tool_registry import build_openai_tool_schemas_for_runtime
+        from koda.skills._runtime import get_runtime_agent_spec, get_runtime_skill_policy
+
+        feature_flags = {
+            "browser": bool(getattr(_config, "BROWSER_FEATURES_ENABLED", False)),
+            "browser_network": bool(getattr(_config, "BROWSER_NETWORK_INTERCEPTION_ENABLED", False)),
+            "browser_session": bool(getattr(_config, "BROWSER_SESSION_PERSISTENCE_ENABLED", False)),
+            "fileops": bool(getattr(_config, "FILEOPS_ENABLED", False)),
+            "shell": bool(getattr(_config, "SHELL_ENABLED", False)),
+            "git": bool(getattr(_config, "GIT_ENABLED", False)),
+            "plugins": bool(getattr(_config, "PLUGIN_SYSTEM_ENABLED", False)),
+            "workflows": bool(getattr(_config, "WORKFLOW_ENABLED", False)),
+            "inter_agent": bool(getattr(_config, "INTER_AGENT_ENABLED", False)),
+            "snapshots": bool(getattr(_config, "SNAPSHOT_ENABLED", False)),
+            "webhooks": bool(getattr(_config, "WEBHOOK_ENABLED", False)),
+        }
+        agent_spec = get_runtime_agent_spec()
+        tool_policy = agent_spec.get("tool_policy") if isinstance(agent_spec.get("tool_policy"), dict) else {}
+        allowed_tool_ids = normalize_string_list(tool_policy.get("allowed_tool_ids")) if tool_policy else []
+        return build_openai_tool_schemas_for_runtime(
+            feature_flags=feature_flags,
+            allowed_tool_ids=allowed_tool_ids or None,
+            skill_policy=get_runtime_skill_policy(agent_spec),
+        )
+    except Exception:
+        return []
+
+
+def _agent_turn_input_audit_payload(ctx: QueryContext) -> dict[str, Any]:
+    try:
+        from koda.agent_turn import from_query_context
+
+        snapshot = from_query_context(ctx).to_dict()
+        compiled_prompt = str(snapshot.pop("compiled_prompt", "") or "")
+        snapshot["compiled_prompt_sha256"] = hashlib.sha256(compiled_prompt.encode("utf-8")).hexdigest()
+        snapshot["compiled_prompt_chars"] = len(compiled_prompt)
+        return snapshot
+    except Exception:
+        return {"contract_version": "agent_turn.v1", "provider": ctx.provider, "model": ctx.model}
+
+
+def _agent_turn_output_audit_payload(result: RunResult) -> dict[str, Any]:
+    try:
+        from koda.agent_turn import from_run_result
+
+        snapshot = from_run_result(result).to_dict()
+        result_text = str(snapshot.pop("result", "") or "")
+        raw_output = str(snapshot.pop("raw_output", "") or "")
+        snapshot["result_sha256"] = hashlib.sha256(result_text.encode("utf-8")).hexdigest()
+        snapshot["result_chars"] = len(result_text)
+        if raw_output:
+            snapshot["raw_output_sha256"] = hashlib.sha256(raw_output.encode("utf-8")).hexdigest()
+            snapshot["raw_output_chars"] = len(raw_output)
+        return snapshot
+    except Exception:
+        return {
+            "contract_version": "agent_turn.v1",
+            "provider": result.provider,
+            "model": result.model,
+            "error": result.error,
+        }
+
+
+async def _run_fallback(
+    ctx: QueryContext,
+    item: QueueItem,
+    user_id: int,
+    chat_id: int,
+    context: BotContext,
+    task_id: int | None = None,
+) -> RunResult:
+    """Run the selected provider without streaming (fallback with progress indicator)."""
+    progress_task = asyncio.create_task(progress_indicator(chat_id, context))
+
+    process_ready = asyncio.Event()
+    process_holder: dict = {"event": process_ready}
+    proc_key = task_id if task_id is not None else user_id
+
+    async def _track_process(
+        _ev: asyncio.Event = process_ready,
+        _ph: dict = process_holder,
+    ) -> None:
+        await _ev.wait()
+        active_processes[proc_key] = _ph["proc"]
+        if task_id is not None and RUNTIME_ENVIRONMENTS_ENABLED and ctx.runtime_env_id is not None:
+            from koda.services.runtime import get_runtime_controller
+
+            await get_runtime_controller().record_process(
+                task_id=task_id,
+                command=f"{ctx.provider}:{ctx.model}",
+                proc=_ph["proc"],
+                role="provider",
+            )
+
+    track_task = asyncio.create_task(_track_process())
+    try:
+        with contextlib.suppress(Exception):
+            from koda.services import audit
+
+            audit.emit_task_lifecycle(
+                "agent_turn.started",
+                user_id=user_id,
+                task_id=task_id,
+                **_agent_turn_input_audit_payload(ctx),
+            )
+        result = await run_llm(
+            provider=ctx.provider,
+            query=item.query_text,
+            work_dir=ctx.work_dir,
+            model=ctx.model,
+            provider_session_id=ctx.provider_session_id,
+            process_holder=process_holder,
+            system_prompt=ctx.system_prompt,
+            image_paths=ctx.visual_paths,
+            permission_mode=ctx.permission_mode,
+            max_turns=ctx.max_turns,
+            turn_mode=cast(TurnMode, ctx.turn_mode),
+            dry_run=ctx.dry_run,
+            runtime_task_id=task_id if (RUNTIME_ENVIRONMENTS_ENABLED and ctx.runtime_env_id is not None) else None,
+            effort=ctx.effort,
+            native_tools=_native_tool_schemas_for_runtime(),
+        )
+        run_result = RunResult(
+            provider=ctx.provider,
+            model=ctx.model,
+            result=result["result"],
+            session_id=ctx.session_id,
+            provider_session_id=result.get("provider_session_id") or result.get("session_id"),
+            cost_usd=result.get("cost_usd", 0.0),
+            usage=result.get("usage", {}),
+            error=result.get("error", False),
+            stop_reason=result.get("_stop_reason", ""),
+            tool_uses=result.get("_tool_uses", []),
+            native_items=result.get("_native_items", []),
+            warnings=result.get("warnings", []),
+            turn_mode=cast(TurnMode, str(result.get("turn_mode", ctx.turn_mode))),
+            supports_native_resume=bool(result.get("supports_native_resume", ctx.supports_native_resume)),
+            error_kind=str(result.get("error_kind", "")),
+            retryable=bool(result.get("retryable", False)),
+        )
+        with contextlib.suppress(Exception):
+            from koda.services import audit
+
+            audit.emit_task_lifecycle(
+                "agent_turn.completed",
+                user_id=user_id,
+                task_id=task_id,
+                cost_usd=run_result.cost_usd,
+                **_agent_turn_output_audit_payload(run_result),
+            )
+        return run_result
+    finally:
+        track_task.cancel()
+        active_processes.pop(proc_key, None)
+        progress_task.cancel()
+        try:
+            progress_msg = await progress_task
+            if progress_msg is not None:
+                await progress_msg.delete()
+        except Exception:
+            pass
+
+
+def _should_switch_provider(run_result: RunResult | None) -> bool:
+    """Decide whether the current provider failed in a way that warrants provider fallback."""
+    if run_result is None:
+        return True
+    if run_result.error:
+        if run_result.error_kind in {"adapter_contract", "invalid_session", "provider_auth"}:
+            return True
+        if run_result.retryable:
+            return True
+        return is_retryable_provider_error(run_result.provider, run_result.result)
+    return not run_result.result and not run_result.stop_reason
+
+
+def _build_handoff_context(run_result: RunResult | None) -> str | None:
+    """Build compact handoff context for bootstrap prompts during provider fallback."""
+    if run_result is None:
+        return None
+    parts: list[str] = []
+    if run_result.result:
+        parts.append("Latest assistant output:\n" + run_result.result[:4000])
+    if run_result.native_items:
+        parts.append(
+            "Native execution items:\n" + json.dumps(run_result.native_items[:8], ensure_ascii=False, default=str)
+        )
+    if run_result.tool_execution_trace:
+        parts.append(
+            "Executed agent tools:\n" + json.dumps(run_result.tool_execution_trace[:8], ensure_ascii=False, default=str)
+        )
+    return "\n\n".join(parts) if parts else None
+
+
+def _clear_stale_provider_session(*, session_id: str | None, provider: str, context: BotContext) -> None:
+    """Forget an invalid provider-native session from the runtime state."""
+    context.user_data.setdefault("provider_sessions", {}).pop(provider, None)
+    if session_id:
+        delete_provider_session_mapping(session_id, provider)
+
+
+async def _resolve_provider_context(
+    *,
+    base_ctx: QueryContext,
+    provider: str,
+    item: QueueItem,
+    context: BotContext,
+) -> QueryContext:
+    """Resolve model/native session state for one provider attempt."""
+    preferred_model = (
+        base_ctx.model
+        if provider == base_ctx.provider and base_ctx.model in PROVIDER_MODELS.get(provider, [])
+        else get_provider_model(context.user_data, provider)
+    )
+    mapping = get_provider_session_mapping(base_ctx.session_id, provider)
+    provider_session_id = None
+    mapped_model = None
+    if mapping:
+        provider_session_id, mapped_model = mapping
+    elif provider == base_ctx.provider and base_ctx.provider_session_id:
+        provider_session_id = base_ctx.provider_session_id
+    elif (
+        provider == "claude"
+        and base_ctx.session_id
+        and provider == normalize_provider(context.user_data.get("provider"))
+    ):
+        provider_session_id = context.user_data.get("provider_sessions", {}).get(provider)
+    if mapped_model:
+        preferred_model = mapped_model
+
+    resume_requested = provider_session_id is not None
+    desired_turn_mode = infer_turn_mode(provider_session_id)
+    capabilities = await get_provider_capabilities(provider, desired_turn_mode)
+    effective_turn_mode = desired_turn_mode
+    warning_messages = list(base_ctx.warnings)
+
+    if resume_requested and not capabilities.can_execute:
+        warning_prefix = capabilities.errors[0] if capabilities.errors else "native resume unavailable"
+        warning_messages.append(f"resume degraded: {provider} ({warning_prefix})")
+        effective_turn_mode = "new_turn"
+        provider_session_id = None
+        capabilities = await get_provider_capabilities(provider, effective_turn_mode)
+
+    if not capabilities.can_execute:
+        warning_prefix = capabilities.errors[0] if capabilities.errors else "provider unavailable"
+        warning_messages.append(f"provider unavailable: {provider} ({warning_prefix})")
+
+    model = resolve_provider_model(
+        provider,
+        preferred_model=preferred_model,
+        query=item.query_text,
+        auto_model=bool(context.user_data.get("auto_model")),
+        has_images=bool(base_ctx.visual_paths or _filter_visual_paths(item.image_paths)),
+    )
+    from koda.services.agent_settings import get_agent_runtime_settings, resolve_effort
+
+    effort_value = resolve_effort(get_agent_runtime_settings(), provider, model)
+    return replace(
+        base_ctx,
+        provider=provider,
+        model=model,
+        provider_session_id=provider_session_id,
+        warnings=warning_messages,
+        turn_mode=effective_turn_mode,
+        resume_requested=resume_requested,
+        supports_native_resume=capabilities.supports_native_resume,
+        provider_available=capabilities.can_execute,
+        effort=effort_value,
+    )
+
+
+async def _run_with_provider_fallback(
+    ctx: QueryContext,
+    item: QueueItem,
+    user_id: int,
+    chat_id: int,
+    context: BotContext,
+    task_id: int | None = None,
+) -> RunResult:
+    """Run a task turn with transparent provider fallback."""
+    from koda.services import audit, metrics
+
+    attempted: list[str] = []
+    handoff_context: str | None = None
+    last_result: RunResult | None = None
+
+    async def _execute_attempt(attempt_ctx: QueryContext, attempt_item: QueueItem) -> RunResult:
+        run_result = await _run_streaming(attempt_ctx, attempt_item, user_id, chat_id, context, task_id=task_id)
+        if run_result is None or (not run_result.result and not run_result.stop_reason):
+            attempt_ctx.warnings.append("streaming fallback")
+            run_result = await _run_fallback(attempt_ctx, attempt_item, user_id, chat_id, context, task_id=task_id)
+            run_result.warnings.append("streaming fallback")
+
+        for warning in attempt_ctx.warnings:
+            if warning not in run_result.warnings:
+                run_result.warnings.append(warning)
+        run_result.turn_mode = attempt_ctx.turn_mode
+        run_result.supports_native_resume = attempt_ctx.supports_native_resume
+        return run_result
+
+    def _build_bootstrap_item(
+        *,
+        from_provider: str,
+        to_provider: str,
+        extra_context: str | None,
+    ) -> QueueItem:
+        return replace(
+            item,
+            query_text=build_bootstrap_prompt(
+                user_id=user_id,
+                canonical_session_id=ctx.session_id,
+                current_query=item.query_text,
+                from_provider=from_provider,
+                to_provider=to_provider,
+                transcript_limit=TRANSCRIPT_REPLAY_LIMIT,
+                extra_context=extra_context,
+            ),
+        )
+
+    def _record_resume_degraded(provider: str, reason: str) -> None:
+        metrics.PROVIDER_RESUME_DEGRADED_TOTAL.labels(agent_id=_agent_id_label, provider=provider).inc()
+        audit.emit_task_lifecycle(
+            "task.provider_resume_degraded",
+            user_id=user_id,
+            task_id=task_id,
+            provider=provider,
+            reason=reason,
+        )
+
+    fallback_chain = ctx.fallback_chain or get_provider_fallback_chain(ctx.provider)
+    if not fallback_chain:
+        eligibility = get_provider_runtime_eligibility()
+        reasons = {
+            provider: str(details.get("reason") or "not_eligible")
+            for provider, details in eligibility.items()
+            if not bool(details.get("eligible", False))
+        }
+        audit.emit_task_lifecycle(
+            "task.provider_fallback_unavailable",
+            user_id=user_id,
+            task_id=task_id,
+            provider=ctx.provider,
+            reasons=reasons,
+        )
+        return RunResult(
+            provider=ctx.provider,
+            model=ctx.model,
+            result="No verified providers are eligible for runtime fallback.",
+            session_id=ctx.session_id,
+            provider_session_id=ctx.provider_session_id,
+            cost_usd=0.0,
+            error=True,
+            stop_reason="error",
+            warnings=["no eligible verified providers"],
+            fallback_chain=[],
+            turn_mode=cast(TurnMode, ctx.turn_mode),
+            supports_native_resume=ctx.supports_native_resume,
+            error_kind="provider_runtime",
+            retryable=False,
+        )
+
+    for provider in fallback_chain:
+        attempt_ctx = await _resolve_provider_context(base_ctx=ctx, provider=provider, item=item, context=context)
+        if not attempt_ctx.provider_available:
+            attempted.append(provider)
+            last_result = RunResult(
+                provider=provider,
+                model=attempt_ctx.model,
+                result=attempt_ctx.warnings[-1] if attempt_ctx.warnings else f"{provider} unavailable",
+                session_id=ctx.session_id,
+                provider_session_id=None,
+                cost_usd=0.0,
+                error=True,
+                stop_reason="error",
+                warnings=list(attempt_ctx.warnings),
+                fallback_chain=attempted.copy(),
+                turn_mode=attempt_ctx.turn_mode,
+                supports_native_resume=attempt_ctx.supports_native_resume,
+                error_kind="provider_runtime",
+                retryable=False,
+            )
+            handoff_context = _build_handoff_context(last_result)
+            continue
+
+        attempt_item = item
+        bootstrap_without_resume = attempt_ctx.resume_requested and attempt_ctx.turn_mode != "resume_turn"
+        if bootstrap_without_resume:
+            reason = attempt_ctx.warnings[-1] if attempt_ctx.warnings else "native resume unavailable"
+            _record_resume_degraded(provider, reason)
+            attempt_item = _build_bootstrap_item(
+                from_provider=provider,
+                to_provider=provider,
+                extra_context=handoff_context,
+            )
+        elif provider != ctx.provider and not attempt_ctx.provider_session_id:
+            attempt_item = _build_bootstrap_item(
+                from_provider=attempted[-1] if attempted else ctx.provider,
+                to_provider=provider,
+                extra_context=handoff_context,
+            )
+
+        run_result = await _execute_attempt(attempt_ctx, attempt_item)
+
+        attempted.append(provider)
+        run_result.fallback_chain = attempted.copy()
+        if provider != ctx.provider:
+            run_result.warnings.append(f"provider fallback: {ctx.provider} -> {provider}")
+        if run_result.error_kind == "invalid_session":
+            _clear_stale_provider_session(session_id=ctx.session_id, provider=provider, context=context)
+            run_result.provider_session_id = None
+        if run_result.provider_session_id:
+            save_provider_session_mapping(
+                ctx.session_id,
+                provider,
+                run_result.provider_session_id,
+                attempt_ctx.model,
+            )
+            context.user_data.setdefault("provider_sessions", {})[provider] = run_result.provider_session_id
+
+        if run_result.error_kind in {"adapter_contract", "invalid_session"}:
+            if run_result.error_kind == "adapter_contract":
+                metrics.PROVIDER_ADAPTER_CONTRACT_ERRORS_TOTAL.labels(
+                    agent_id=_agent_id_label,
+                    provider=provider,
+                    turn_mode=run_result.turn_mode,
+                ).inc()
+                audit_event = "task.provider_adapter_contract_error"
+                degrade_reason_fallback = "adapter contract error"
+            else:
+                audit_event = "task.provider_invalid_session"
+                degrade_reason_fallback = "invalid provider session"
+            audit.emit_task_lifecycle(
+                audit_event,
+                user_id=user_id,
+                task_id=task_id,
+                provider=provider,
+                turn_mode=run_result.turn_mode,
+                error_message=run_result.result[:500],
+            )
+            if attempt_ctx.resume_requested and attempt_ctx.turn_mode == "resume_turn":
+                degrade_reason = run_result.result.splitlines()[0][:200] or degrade_reason_fallback
+                _record_resume_degraded(provider, degrade_reason)
+                degraded_ctx = replace(
+                    attempt_ctx,
+                    provider_session_id=None,
+                    turn_mode="new_turn",
+                    supports_native_resume=False,
+                    warnings=list(
+                        dict.fromkeys([*attempt_ctx.warnings, f"resume degraded: {provider} ({degrade_reason})"])
+                    ),
+                )
+                degraded_item = _build_bootstrap_item(
+                    from_provider=provider,
+                    to_provider=provider,
+                    extra_context=_build_handoff_context(run_result) or run_result.result[:1000],
+                )
+                degraded_result = await _execute_attempt(degraded_ctx, degraded_item)
+                degraded_result.fallback_chain = attempted.copy()
+                if degraded_result.error_kind == "invalid_session":
+                    _clear_stale_provider_session(session_id=ctx.session_id, provider=provider, context=context)
+                    degraded_result.provider_session_id = None
+                if degraded_result.provider_session_id:
+                    save_provider_session_mapping(
+                        ctx.session_id,
+                        provider,
+                        degraded_result.provider_session_id,
+                        degraded_ctx.model,
+                    )
+                    context.user_data.setdefault("provider_sessions", {})[provider] = (
+                        degraded_result.provider_session_id
+                    )
+                if not _should_switch_provider(degraded_result):
+                    return degraded_result
+                handoff_context = _build_handoff_context(degraded_result)
+                last_result = degraded_result
+                continue
+
+        if not _should_switch_provider(run_result):
+            return run_result
+
+        handoff_context = _build_handoff_context(run_result)
+        last_result = run_result
+
+    if last_result is not None:
+        return last_result
+    return RunResult(
+        provider=ctx.provider,
+        model=ctx.model,
+        result="All providers failed to execute the task.",
+        session_id=ctx.session_id,
+        provider_session_id=ctx.provider_session_id,
+        cost_usd=0.0,
+        error=True,
+        stop_reason="error",
+        warnings=["all providers failed"],
+        fallback_chain=attempted,
+        turn_mode=cast(TurnMode, ctx.turn_mode),
+        supports_native_resume=ctx.supports_native_resume,
+        error_kind="provider_runtime",
+        retryable=False,
+    )
+
+
+# Agent tool loop
+
+
+def _run_result_has_native_tool_calls(run_result: RunResult) -> bool:
+    for item in run_result.tool_uses:
+        if not isinstance(item, dict):
+            continue
+        if item.get("source") == "openai_compatible_tool_call":
+            return True
+        function = item.get("function")
+        if isinstance(function, dict) and function.get("name"):
+            return True
+    return False
+
+
+async def _run_agent_loop(
+    ctx: QueryContext,
+    item: QueueItem,
+    user_id: int,
+    chat_id: int,
+    context: BotContext,
+    initial_result: RunResult,
+    task_id: int | None = None,
+) -> RunResult:
+    """Execute agent tool calls in a loop, resuming the provider session with results."""
+    import json as _json
+    from dataclasses import asdict
+
+    from koda.knowledge import default_execution_policy
+    from koda.services.execution_confidence import evaluate_write_confidence, parse_action_plan
+    from koda.services.execution_policy import evaluate_execution_policy
+    from koda.services.runtime import get_runtime_controller
+    from koda.services.tool_dispatcher import (
+        AgentToolCall,
+        AgentToolResult,
+        ToolContext,
+        _infer_tool_category,
+        _is_write_tool,
+        _policy_params_for_call,
+        execute_tool,
+        format_tool_results,
+        is_known_tool,
+        parse_agent_commands,
+    )
+    from koda.utils.approval import (
+        APPROVAL_TIMEOUT,
+        cleanup_agent_cmd_op,
+        consume_agent_approval_grant,
+        get_agent_cmd_decision,
+        match_agent_approval_grant,
+        peek_agent_approval_grant,
+        request_agent_cmd_approval,
+    )
+
+    current_result = initial_result
+    runtime = None
+    with contextlib.suppress(Exception):
+        runtime = get_runtime_controller()
+    if ctx.effective_policy is None:
+        ctx.effective_policy = default_execution_policy(
+            ctx.task_kind,
+            environment=str(getattr(ctx.knowledge_query_context, "environment", "")),
+        )
+    seen_calls: set[frozenset] = set()
+    status_msg_ids: list[int] = []
+    all_temp_image_paths: list[str] = []
+    verification_follow_up_requested = False
+    guardrail_message: str | None = None
+    last_diff_hash = ""
+    last_failure_fingerprint = ""
+    repeated_failure_streak = 0
+    consumed_native_call_keys: set[str] = set()
+
+    def _native_tool_calls_for_result(result: RunResult) -> list[AgentToolCall]:
+        calls: list[AgentToolCall] = []
+        for index, item in enumerate(result.tool_uses):
+            if not isinstance(item, dict):
+                continue
+            if item.get("source") != "openai_compatible_tool_call" and not isinstance(item.get("function"), dict):
+                continue
+            raw_function = item.get("function")
+            function: dict[str, Any] = raw_function if isinstance(raw_function, dict) else {}
+            tool_name = str(item.get("name") or function.get("name") or "").strip()
+            if not tool_name:
+                continue
+            raw_args = item.get("arguments", function.get("arguments", {}))
+            if isinstance(raw_args, str):
+                try:
+                    params = _json.loads(raw_args) if raw_args.strip() else {}
+                except (TypeError, ValueError):
+                    params = {}
+            elif isinstance(raw_args, dict):
+                params = dict(raw_args)
+            else:
+                params = {}
+            key = str(item.get("id") or f"{index}:{tool_name}:{_json.dumps(params, sort_keys=True)}")
+            if key in consumed_native_call_keys:
+                continue
+            consumed_native_call_keys.add(key)
+            calls.append(
+                AgentToolCall(
+                    tool=tool_name,
+                    params=params,
+                    raw_match=f"<native_tool_call id={key!r} tool={tool_name!r}>",
+                )
+            )
+        return calls
+
+    def _approval_contract_for_call(call: AgentToolCall, risk_class: str | None) -> dict[str, Any]:
+        args_schema: dict[str, Any] = {"type": "object", "additionalProperties": True}
+        with contextlib.suppress(Exception):
+            from koda.services.tool_registry import get_tool_definition
+
+            definition = get_tool_definition(call.tool)
+            if definition is not None and isinstance(definition.args_schema, dict):
+                args_schema = dict(definition.args_schema)
+        return {
+            "tool_id": call.tool,
+            "original_params": dict(call.params),
+            "args_schema": args_schema,
+            "risk_class": risk_class,
+        }
+
+    loop_exhausted = False
+    for _iteration in range(MAX_AGENT_TOOL_ITERATIONS):
+        if (
+            runtime is not None
+            and task_id is not None
+            and RUNTIME_ENVIRONMENTS_ENABLED
+            and ctx.runtime_env_id is not None
+        ):
+            await runtime.cooperate_pause(task_id=task_id, env_id=ctx.runtime_env_id, phase="executing")
+        xml_tool_calls, clean_text = parse_agent_commands(current_result.result)
+        native_tool_calls = _native_tool_calls_for_result(current_result)
+        tool_calls = [*xml_tool_calls, *native_tool_calls]
+        if not tool_calls:
+            if (
+                _requires_post_write_verification(ctx)
+                and current_result.tool_execution_trace
+                and any(step.get("metadata", {}).get("write") for step in current_result.tool_execution_trace)
+                and not _has_post_write_verification(current_result.tool_execution_trace)
+                and not verification_follow_up_requested
+            ):
+                verification_follow_up_requested = True
+                verification_requirements = ", ".join(getattr(ctx.effective_policy, "required_verifications", ()))
+                verification_prompt = (
+                    "A write operation already happened for this task. "
+                    f"Policy for '{ctx.task_kind}' requires post-write verification ({verification_requirements}). "
+                    "Before finalizing, emit only read-only <agent_cmd> calls that verify the resulting state."
+                )
+                resume_ctx = QueryContext(
+                    task_id=ctx.task_id,
+                    provider=current_result.provider,
+                    work_dir=context.user_data.get("work_dir", ctx.work_dir),
+                    model=ctx.model,
+                    session_id=current_result.session_id,
+                    provider_session_id=current_result.provider_session_id,
+                    system_prompt=ctx.system_prompt,
+                    agent_mode=ctx.agent_mode,
+                    permission_mode=ctx.permission_mode,
+                    max_turns=1,
+                    warnings=ctx.warnings,
+                    cache_hit=ctx.cache_hit,
+                    script_matches=ctx.script_matches,
+                    knowledge_hits=ctx.knowledge_hits,
+                    knowledge_resolution=ctx.knowledge_resolution,
+                    memory_resolution=ctx.memory_resolution,
+                    memory_profile=ctx.memory_profile,
+                    memory_trust_score=ctx.memory_trust_score,
+                    confidence_reports=ctx.confidence_reports,
+                    task_kind=ctx.task_kind,
+                    knowledge_query_context=ctx.knowledge_query_context,
+                    effective_policy=ctx.effective_policy,
+                    ungrounded_operationally=ctx.ungrounded_operationally,
+                    last_action_plan=ctx.last_action_plan,
+                    artifact_dossiers=ctx.artifact_dossiers,
+                    visual_paths=ctx.visual_paths,
+                    temp_paths=ctx.temp_paths,
+                    runtime_env_id=ctx.runtime_env_id,
+                    executing_agent_id=ctx.executing_agent_id,
+                    squad_thread_id=ctx.squad_thread_id,
+                    squad_task_id=ctx.squad_task_id,
+                    parent_message_id=ctx.parent_message_id,
+                    delegation_chain=ctx.delegation_chain,
+                    delegation_request_id=ctx.delegation_request_id,
+                    delegation_origin_agent_id=ctx.delegation_origin_agent_id,
+                    telegram_message_thread_id=ctx.telegram_message_thread_id,
+                    is_child_run=ctx.is_child_run,
+                    child_run_id=ctx.child_run_id,
+                    parent_task_id=ctx.parent_task_id,
+                    child_context_policy=dict(ctx.child_context_policy or {}),
+                    child_toolset=ctx.child_toolset,
+                    context_governance=ctx.context_governance,
+                )
+                resume_item = QueueItem(
+                    chat_id=chat_id,
+                    query_text=verification_prompt,
+                    executing_agent_id=ctx.executing_agent_id,
+                    squad_thread_id=ctx.squad_thread_id,
+                    squad_task_id=ctx.squad_task_id,
+                    parent_message_id=ctx.parent_message_id,
+                    delegation_chain=ctx.delegation_chain,
+                    delegation_request_id=ctx.delegation_request_id,
+                    delegation_origin_agent_id=ctx.delegation_origin_agent_id,
+                    telegram_message_thread_id=ctx.telegram_message_thread_id,
+                )
+                resume_result = await _run_with_provider_fallback(
+                    resume_ctx,
+                    resume_item,
+                    user_id,
+                    chat_id,
+                    context,
+                    task_id,
+                )
+                if resume_result is None:
+                    current_result.result = clean_text
+                    break
+                resume_result.cost_usd += current_result.cost_usd
+                resume_result.usage = current_result.usage | resume_result.usage
+                resume_result.tool_uses = current_result.tool_uses + resume_result.tool_uses
+                resume_result.native_items = current_result.native_items + resume_result.native_items
+                resume_result.tool_execution_trace = (
+                    current_result.tool_execution_trace + resume_result.tool_execution_trace
+                )
+                current_result = resume_result
+                continue
+            ctx.verified_before_finalize = _has_post_write_verification(current_result.tool_execution_trace)
+            current_result.result = clean_text
+            break
+
+        # Cycle detection
+        call_signatures = frozenset((c.tool, _json.dumps(c.params, sort_keys=True)) for c in tool_calls)
+        if call_signatures in seen_calls:
+            log.warning("agent_loop_cycle_detected", iteration=_iteration)
+            if (
+                runtime is not None
+                and task_id is not None
+                and RUNTIME_ENVIRONMENTS_ENABLED
+                and ctx.runtime_env_id is not None
+            ):
+                cycle_id = await runtime.record_loop_cycle(
+                    task_id=task_id,
+                    cycle_index=_iteration + 1,
+                    phase="executing",
+                    command_fingerprint=_json.dumps(sorted(call_signatures), ensure_ascii=False),
+                    outcome={"cycle_detected": True},
+                )
+                await runtime.record_guardrail_hit(
+                    task_id=task_id,
+                    guardrail_type="repeated_command",
+                    cycle_id=cycle_id,
+                    details={"iteration": _iteration},
+                )
+                await runtime.record_warning(
+                    task_id=task_id,
+                    warning_type="loop_detected",
+                    message="Repeated tool signature detected; stopping agent loop.",
+                    details={"iteration": _iteration},
+                )
+                await runtime.pause_environment(
+                    task_id=task_id,
+                    reason="Loop detectado pelo runtime: assinatura de tools repetida.",
+                )
+            guardrail_message = "Loop detectado pelo runtime: assinatura repetida de comandos."
+            current_result.warnings.append(guardrail_message)
+            break
+        seen_calls.add(call_signatures)
+
+        # Visual status for the user
+        tool_names = ", ".join(c.tool for c in tool_calls)
+        try:
+            thread_kwargs: dict[str, int] = {}
+            if ctx.telegram_message_thread_id is not None:
+                thread_kwargs["message_thread_id"] = ctx.telegram_message_thread_id
+            msg = await cast(Any, context.bot).send_message(
+                chat_id=chat_id,
+                text=f"\U0001f527 {tool_names}...",
+                **thread_kwargs,
+            )
+            status_msg_ids.append(msg.message_id)
+        except Exception:
+            pass
+
+        # Preserve tool order while still evaluating approval and confidence before writes.
+        tool_ctx = ToolContext(
+            user_id=user_id,
+            chat_id=chat_id,
+            work_dir=context.user_data.get("work_dir", ctx.work_dir),
+            user_data=context.user_data,
+            agent=context.bot,
+            agent_mode=ctx.agent_mode,
+            task_id=task_id,
+            dry_run=ctx.dry_run,
+            scheduled_job_id=ctx.scheduled_job_id,
+            scheduled_run_id=ctx.scheduled_run_id,
+            task_kind=ctx.task_kind,
+            effective_policy=ctx.effective_policy,
+            executing_agent_id=ctx.executing_agent_id,
+            squad_thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+            parent_message_id=ctx.parent_message_id,
+            delegation_chain=ctx.delegation_chain,
+            delegation_request_id=ctx.delegation_request_id,
+            delegation_origin_agent_id=ctx.delegation_origin_agent_id,
+            bot=context.bot,
+            application=getattr(context, "application", None),
+            context_governance=ctx.context_governance,
+            source_root_path=ctx.source_root_path or context.user_data.get("source_root_path"),
+            runtime_workspace_path=ctx.work_dir if ctx.runtime_env_id is not None else None,
+        )
+
+        from koda.services import audit, metrics
+
+        leading_read_calls: list[AgentToolCall] = []
+        encountered_write = False
+        for call in tool_calls:
+            if not encountered_write and not _is_write_tool(call.tool, call.params):
+                leading_read_calls.append(call)
+                continue
+            if _is_write_tool(call.tool, call.params):
+                encountered_write = True
+
+        write_candidates = [call for call in tool_calls if _is_write_tool(call.tool, call.params)]
+        confidence_report = None
+        if write_candidates:
+            action_plan = parse_action_plan(current_result.result)
+            if action_plan:
+                ctx.last_action_plan = asdict(action_plan)
+                if (
+                    runtime is not None
+                    and task_id is not None
+                    and RUNTIME_ENVIRONMENTS_ENABLED
+                    and ctx.runtime_env_id is not None
+                ):
+                    await runtime.record_plan(task_id=task_id, plan=ctx.last_action_plan)
+            confidence_report = evaluate_write_confidence(
+                action_plan=action_plan,
+                task_kind=ctx.task_kind,
+                policy=ctx.effective_policy,
+                read_calls=leading_read_calls,
+                prior_tool_steps=current_result.tool_execution_trace,
+                native_tool_uses=current_result.tool_uses,
+                knowledge_hits=_serialize_knowledge_hits(ctx.knowledge_hits),
+                memory_resolution=ctx.memory_resolution,
+                memory_profile=ctx.memory_profile,
+                warnings=ctx.warnings,
+                guardrails=list(getattr(ctx.knowledge_resolution, "guardrails", []) or []),
+                stale_sources_present=ctx.stale_sources_present,
+                ungrounded_operationally=ctx.ungrounded_operationally,
+            )
+            ctx.confidence_reports.append(confidence_report.to_dict())
+            metrics.EXECUTION_CONFIDENCE_SCORE.labels(agent_id=_agent_id_label, mode=ctx.agent_mode).observe(
+                confidence_report.score
+            )
+            if confidence_report.blocked:
+                if confidence_report.write_mode == "read_only":
+                    reason_label = "read_only_policy"
+                elif "task requires explicit escalation before writes" in confidence_report.reasons:
+                    reason_label = "missing_escalation"
+                elif not confidence_report.plan_valid:
+                    reason_label = "missing_plan"
+                elif "required policy/source layer is missing" in confidence_report.reasons:
+                    reason_label = "missing_sources"
+                elif "rollback note is required for this task kind" in confidence_report.reasons:
+                    reason_label = "missing_rollback"
+                elif "probable cause is required for this task kind" in confidence_report.reasons:
+                    reason_label = "missing_probable_cause"
+                elif "verification plan is required for this task kind" in confidence_report.reasons:
+                    reason_label = "missing_verification_plan"
+                elif confidence_report.read_evidence_count < getattr(ctx.effective_policy, "min_read_evidence", 1):
+                    reason_label = "missing_evidence"
+                else:
+                    reason_label = "low_score"
+                metrics.EXECUTION_CONFIDENCE_BLOCKS.labels(agent_id=_agent_id_label, reason=reason_label).inc()
+                audit.emit_task_lifecycle(
+                    "task.confidence_blocked",
+                    user_id=user_id,
+                    task_id=task_id,
+                    confidence=confidence_report.score,
+                    reason=reason_label,
+                    missing_fields=confidence_report.missing_fields,
+                )
+
+        executed_pairs: list[tuple[AgentToolCall, AgentToolResult]] = []
+        skip_following_reads = False
+
+        for call in tool_calls:
+            if skip_following_reads:
+                executed_pairs.append(
+                    (
+                        call,
+                        AgentToolResult(
+                            tool=call.tool,
+                            success=False,
+                            output="Skipped because a previous write step was blocked or denied.",
+                            metadata={
+                                "category": _infer_tool_category(call.tool),
+                                "skipped_after_blocked_write": True,
+                            },
+                        ),
+                    )
+                )
+                continue
+
+            policy_params = _policy_params_for_call(call, tool_ctx)
+            policy_evaluation = evaluate_execution_policy(
+                call.tool,
+                policy_params,
+                task_kind=ctx.task_kind,
+                effective_policy=ctx.effective_policy,
+                confidence_report=confidence_report.to_dict()
+                if confidence_report is not None and _is_write_tool(call.tool, call.params)
+                else None,
+                known_tool=is_known_tool(call.tool),
+            )
+            requested_scope = policy_evaluation.approval_scope
+            approval_grant = None
+
+            if policy_evaluation.requires_confirmation and requested_scope is not None:
+                approval_grant = peek_agent_approval_grant(
+                    user_id=user_id,
+                    agent_id=AGENT_ID or "default",
+                    envelope=policy_evaluation.envelope,
+                    approval_scope=requested_scope,
+                    session_id=str(context.user_data.get("session_id") or "").strip() or None,
+                    chat_id=chat_id,
+                )
+                if approval_grant is not None:
+                    policy_evaluation = evaluate_execution_policy(
+                        call.tool,
+                        policy_params,
+                        task_kind=ctx.task_kind,
+                        effective_policy=ctx.effective_policy,
+                        confidence_report=confidence_report.to_dict()
+                        if confidence_report is not None and _is_write_tool(call.tool, call.params)
+                        else None,
+                        approval_grant=approval_grant,
+                        known_tool=is_known_tool(call.tool),
+                    )
+
+            if policy_evaluation.requires_confirmation:
+                approval_contract = _approval_contract_for_call(
+                    call,
+                    getattr(policy_evaluation.envelope, "risk_class", None),
+                )
+                description = f"{call.tool}({_json.dumps(call.params, ensure_ascii=False)[:240]})"
+                op_id = await request_agent_cmd_approval(
+                    context.bot,
+                    chat_id,
+                    user_id,
+                    description,
+                    agent_id=AGENT_ID or "default",
+                    session_id=str(context.user_data.get("session_id") or "").strip() or None,
+                    requests=[
+                        {
+                            "envelope": policy_evaluation.envelope,
+                            "approval_scope": requested_scope,
+                            **approval_contract,
+                        }
+                    ],
+                    preview_text=policy_evaluation.preview_text,
+                    task_id=ctx.task_id,
+                    **approval_contract,
+                )
+                try:
+                    from koda.utils.approval import _PENDING_AGENT_CMD_OPS
+
+                    op = _PENDING_AGENT_CMD_OPS.get(op_id)
+                    if op:
+                        try:
+                            await asyncio.wait_for(op["event"].wait(), timeout=APPROVAL_TIMEOUT)
+                        except TimeoutError:
+                            op["decision"] = "timeout"
+                    approval_result = get_agent_cmd_decision(op_id) or {}
+                    decision = approval_result.get("decision")
+                    approved_by_edit = False
+                    if decision == "responded":
+                        response_text = str(approval_result.get("response_text") or "").strip()
+                        executed_pairs.append(
+                            (
+                                call,
+                                AgentToolResult(
+                                    tool=call.tool,
+                                    success=True,
+                                    output=response_text or "Human operator supplied an empty response.",
+                                    metadata={
+                                        "category": _infer_tool_category(call.tool),
+                                        "approval": "responded",
+                                        "human_intervention": True,
+                                    },
+                                ),
+                            )
+                        )
+                        continue
+                    if decision == "edited":
+                        edited_params = approval_result.get("edited_params")
+                        if isinstance(edited_params, dict):
+                            call = AgentToolCall(call.tool, dict(edited_params), call.raw_match)
+                            policy_params = _policy_params_for_call(call, tool_ctx)
+                            policy_evaluation = evaluate_execution_policy(
+                                call.tool,
+                                policy_params,
+                                task_kind=ctx.task_kind,
+                                effective_policy=ctx.effective_policy,
+                                confidence_report=confidence_report.to_dict()
+                                if confidence_report is not None and _is_write_tool(call.tool, call.params)
+                                else None,
+                                known_tool=is_known_tool(call.tool),
+                            )
+                            requested_scope = policy_evaluation.approval_scope
+                            if policy_evaluation.decision == "deny":
+                                executed_pairs.append(
+                                    (
+                                        call,
+                                        AgentToolResult(
+                                            tool=call.tool,
+                                            success=False,
+                                            output=f"Edited approval was blocked by policy: {policy_evaluation.reason}",
+                                            metadata={
+                                                "category": _infer_tool_category(call.tool),
+                                                "approval": "edited_policy_denied",
+                                                "policy_reason_code": policy_evaluation.reason_code,
+                                            },
+                                        ),
+                                    )
+                                )
+                                if _is_write_tool(call.tool, call.params):
+                                    skip_following_reads = True
+                                continue
+                            if policy_evaluation.requires_confirmation:
+                                policy_evaluation = evaluate_execution_policy(
+                                    call.tool,
+                                    policy_params,
+                                    task_kind=ctx.task_kind,
+                                    effective_policy=ctx.effective_policy,
+                                    confidence_report=confidence_report.to_dict()
+                                    if confidence_report is not None and _is_write_tool(call.tool, call.params)
+                                    else None,
+                                    approval_grant={"grant_id": f"edited:{op_id}", "kind": "approve_once"},
+                                    known_tool=is_known_tool(call.tool),
+                                )
+                            ctx.human_approval_used = True
+                            approved_by_edit = True
+                            metrics.HUMAN_OVERRIDE.labels(agent_id=_agent_id_label, decision="edited").inc()
+                        else:
+                            decision = "denied"
+                    if decision in {"approved", "approved_scope"}:
+                        ctx.human_approval_used = True
+                        metrics.HUMAN_OVERRIDE.labels(agent_id=_agent_id_label, decision=str(decision)).inc()
+                        approval_grant = match_agent_approval_grant(
+                            approval_result.get("grants"),
+                            envelope=policy_evaluation.envelope,
+                            approval_scope=requested_scope,
+                            session_id=str(context.user_data.get("session_id") or "").strip() or None,
+                            chat_id=chat_id,
+                        )
+                        if approval_grant is None:
+                            approval_grant = peek_agent_approval_grant(
+                                user_id=user_id,
+                                agent_id=AGENT_ID or "default",
+                                envelope=policy_evaluation.envelope,
+                                approval_scope=requested_scope,
+                                session_id=str(context.user_data.get("session_id") or "").strip() or None,
+                                chat_id=chat_id,
+                            )
+                        policy_evaluation = evaluate_execution_policy(
+                            call.tool,
+                            policy_params,
+                            task_kind=ctx.task_kind,
+                            effective_policy=ctx.effective_policy,
+                            confidence_report=confidence_report.to_dict()
+                            if confidence_report is not None and _is_write_tool(call.tool, call.params)
+                            else None,
+                            approval_grant=approval_grant,
+                            known_tool=is_known_tool(call.tool),
+                        )
+                    elif not approved_by_edit:
+                        decision_label = "denied" if decision == "denied" else "timeout"
+                        metrics.HUMAN_OVERRIDE.labels(agent_id=_agent_id_label, decision=decision_label).inc()
+                        executed_pairs.append(
+                            (
+                                call,
+                                AgentToolResult(
+                                    tool=call.tool,
+                                    success=False,
+                                    output="Denied by user." if decision == "denied" else "Approval timed out.",
+                                    metadata={
+                                        "category": _infer_tool_category(call.tool),
+                                        "approval": decision_label,
+                                    },
+                                ),
+                            )
+                        )
+                        if _is_write_tool(call.tool, call.params):
+                            skip_following_reads = True
+                        continue
+                finally:
+                    cleanup_agent_cmd_op(op_id)
+
+            if policy_evaluation.decision == "deny":
+                denied_output = policy_evaluation.reason
+                if confidence_report is not None and policy_evaluation.reason_code == "confidence_blocked":
+                    denied_output = confidence_report.to_tool_message()
+                result = AgentToolResult(
+                    tool=call.tool,
+                    success=False,
+                    output=denied_output,
+                    metadata={
+                        "category": _infer_tool_category(call.tool),
+                        "policy_blocked": True,
+                        "policy_reason_code": policy_evaluation.reason_code,
+                        "policy_rule_id": policy_evaluation.rule_id,
+                    },
+                )
+                executed_pairs.append((call, result))
+                if _is_write_tool(call.tool, call.params):
+                    skip_following_reads = True
+                continue
+
+            if policy_evaluation.requires_confirmation:
+                result = AgentToolResult(
+                    tool=call.tool,
+                    success=False,
+                    output="Human approval required before execution.",
+                    metadata={
+                        "category": _infer_tool_category(call.tool),
+                        "approval_required": True,
+                        "policy_reason_code": policy_evaluation.reason_code,
+                        "policy_rule_id": policy_evaluation.rule_id,
+                    },
+                )
+                executed_pairs.append((call, result))
+                if _is_write_tool(call.tool, call.params):
+                    skip_following_reads = True
+                continue
+
+            result = await execute_tool(call, tool_ctx, policy_evaluation=policy_evaluation)
+            executed_pairs.append((call, result))
+            if requested_scope is not None and approval_grant is not None and result.success:
+                consume_agent_approval_grant(
+                    user_id=user_id,
+                    agent_id=AGENT_ID or "default",
+                    envelope=policy_evaluation.envelope,
+                    approval_scope=requested_scope,
+                    session_id=str(context.user_data.get("session_id") or "").strip() or None,
+                    chat_id=chat_id,
+                )
+
+        results = [result for _, result in executed_pairs]
+        updated_work_dir = context.user_data.get("work_dir", ctx.work_dir)
+        diff_hash = _workspace_diff_hash(updated_work_dir if ctx.runtime_env_id is not None else None)
+        successful_write_executed = any(
+            _is_write_tool(call.tool, call.params) and result.success for call, result in executed_pairs
+        )
+        failure_outputs = [
+            f"{call.tool}:{result.output[:2000]}"
+            for call, result in executed_pairs
+            if not result.success and result.output
+        ]
+        failure_fingerprint = _hash_text("\n".join(failure_outputs)) if failure_outputs else ""
+        repeated_diff_detected = bool(diff_hash) and diff_hash == last_diff_hash and successful_write_executed
+        if failure_fingerprint and failure_fingerprint == last_failure_fingerprint:
+            repeated_failure_streak += 1
+        elif failure_fingerprint:
+            repeated_failure_streak = 1
+        else:
+            repeated_failure_streak = 0
+        last_failure_fingerprint = failure_fingerprint
+        recorded_cycle_id: int | None = None
+        if (
+            runtime is not None
+            and task_id is not None
+            and RUNTIME_ENVIRONMENTS_ENABLED
+            and ctx.runtime_env_id is not None
+        ):
+            recorded_cycle_id = await runtime.record_loop_cycle(
+                task_id=task_id,
+                cycle_index=_iteration + 1,
+                phase="executing",
+                plan=ctx.last_action_plan or {},
+                command_fingerprint=_json.dumps(
+                    [(call.tool, _json.dumps(call.params, sort_keys=True)) for call, _ in executed_pairs],
+                    ensure_ascii=False,
+                ),
+                diff_hash=diff_hash,
+                failure_fingerprint=failure_fingerprint,
+                validations=[{"tool": call.tool, "success": result.success} for call, result in executed_pairs],
+                outcome={"result_count": len(results)},
+            )
+        current_result.tool_execution_trace.extend(
+            [
+                {
+                    "iteration": _iteration + 1,
+                    "tool": call.tool,
+                    "params": call.params,
+                    "success": result.success,
+                    "output": result.output,
+                    "metadata": {
+                        "write": _is_write_tool(call.tool, call.params),
+                        **result.metadata,
+                    },
+                    "data": result.data if call.tool == "task" else None,
+                    "duration_ms": result.duration_ms,
+                    "started_at": result.started_at,
+                    "completed_at": result.completed_at,
+                }
+                for call, result in executed_pairs
+            ]
+        )
+
+        # Detect image artifacts returned by tools. Runtime browser screenshots may
+        # live inside the task directory and must stay available after the turn.
+        visual_paths_this_iteration: list[str] = []
+        temp_frame_paths_this_iteration: list[str] = []
+        for r in results:
+            if r.success and "/" in r.output:
+                import re as _re
+
+                paths = _re.findall(
+                    r"/[^\s'\"<>]+\.(?:jpg|jpeg|png|gif|webp)",
+                    r.output,
+                )
+                for path in paths:
+                    if path not in visual_paths_this_iteration:
+                        visual_paths_this_iteration.append(path)
+                    if path.startswith(f"{IMAGE_TEMP_DIR}/") or path.startswith(str(IMAGE_TEMP_DIR)):
+                        temp_frame_paths_this_iteration.append(path)
+        all_temp_image_paths.extend(temp_frame_paths_this_iteration)
+        no_change_detected = (
+            bool(diff_hash)
+            and diff_hash == last_diff_hash
+            and not successful_write_executed
+            and not visual_paths_this_iteration
+        )
+        if (
+            recorded_cycle_id is not None
+            and runtime is not None
+            and task_id is not None
+            and RUNTIME_ENVIRONMENTS_ENABLED
+            and ctx.runtime_env_id is not None
+        ):
+            if repeated_diff_detected:
+                await runtime.record_guardrail_hit(
+                    task_id=task_id,
+                    guardrail_type="repeated_diff",
+                    cycle_id=recorded_cycle_id,
+                    details={"iteration": _iteration + 1, "diff_hash": diff_hash},
+                )
+                await runtime.record_warning(
+                    task_id=task_id,
+                    warning_type="repeated_diff",
+                    message="The workspace diff did not change across two consecutive write cycles.",
+                    details={"iteration": _iteration + 1, "diff_hash": diff_hash},
+                )
+                await runtime.pause_environment(
+                    task_id=task_id,
+                    reason="Runtime guardrail: repeated diff across consecutive cycles.",
+                )
+                guardrail_message = "Runtime guardrail triggered: repeated diff across consecutive cycles."
+            elif no_change_detected:
+                await runtime.record_guardrail_hit(
+                    task_id=task_id,
+                    guardrail_type="no_change",
+                    cycle_id=recorded_cycle_id,
+                    details={"iteration": _iteration + 1, "diff_hash": diff_hash},
+                )
+                await runtime.record_warning(
+                    task_id=task_id,
+                    warning_type="no_change",
+                    message="No observable change was detected across two consecutive cycles.",
+                    details={"iteration": _iteration + 1, "diff_hash": diff_hash},
+                )
+                await runtime.pause_environment(
+                    task_id=task_id,
+                    reason="Runtime guardrail: no observable change across consecutive cycles.",
+                )
+                guardrail_message = "Runtime guardrail triggered: no observable change across consecutive cycles."
+            elif repeated_failure_streak >= 3:
+                await runtime.record_guardrail_hit(
+                    task_id=task_id,
+                    guardrail_type="repeated_failure",
+                    cycle_id=recorded_cycle_id,
+                    details={"iteration": _iteration + 1, "failure_fingerprint": failure_fingerprint},
+                )
+                await runtime.record_warning(
+                    task_id=task_id,
+                    warning_type="repeated_failure",
+                    message="The same failure repeated across three consecutive cycles.",
+                    details={"iteration": _iteration + 1, "failure_fingerprint": failure_fingerprint},
+                )
+                await runtime.pause_environment(
+                    task_id=task_id,
+                    reason="Runtime guardrail: same failure repeated across three cycles.",
+                )
+                guardrail_message = "Runtime guardrail triggered: the same failure repeated across three cycles."
+        if guardrail_message:
+            current_result.warnings.append(guardrail_message)
+            break
+        last_diff_hash = diff_hash or last_diff_hash
+
+        # Resume session with results.
+        # Use original model for complex resumes (3+ tools or large output),
+        # Haiku for simple resumes (1-2 tools with small output).
+        resume_prompt = format_tool_results(results)
+        if successful_write_executed:
+            verification_requirements = ", ".join(getattr(ctx.effective_policy, "required_verifications", ()))
+            verification_suffix = (
+                f"\n\nBefore you finalize, verify the resulting state with read-only checks. "
+                f"Task policy for '{ctx.task_kind}' requires: {verification_requirements or 'read-back verification'}."
+            )
+            resume_prompt += verification_suffix
+        total_output_len = sum(len(r.output) for r in results)
+        use_original_model = len(results) >= 3 or total_output_len > 4000
+        resume_model = (
+            ctx.model
+            if use_original_model
+            else resolve_provider_model(
+                ctx.provider,
+                query=resume_prompt,
+                auto_model=True,
+                has_images=bool(visual_paths_this_iteration),
+            )
+        )
+        resume_ctx = QueryContext(
+            task_id=ctx.task_id,
+            provider=current_result.provider,
+            work_dir=updated_work_dir,
+            model=resume_model,
+            session_id=current_result.session_id,
+            provider_session_id=current_result.provider_session_id,
+            system_prompt=ctx.system_prompt,
+            agent_mode=ctx.agent_mode,
+            permission_mode=ctx.permission_mode,
+            max_turns=2,
+            warnings=ctx.warnings,
+            cache_hit=ctx.cache_hit,
+            script_matches=ctx.script_matches,
+            knowledge_hits=ctx.knowledge_hits,
+            knowledge_resolution=ctx.knowledge_resolution,
+            memory_resolution=ctx.memory_resolution,
+            memory_profile=ctx.memory_profile,
+            memory_trust_score=ctx.memory_trust_score,
+            confidence_reports=ctx.confidence_reports,
+            task_kind=ctx.task_kind,
+            knowledge_query_context=ctx.knowledge_query_context,
+            effective_policy=ctx.effective_policy,
+            ungrounded_operationally=ctx.ungrounded_operationally,
+            last_action_plan=ctx.last_action_plan,
+            artifact_dossiers=ctx.artifact_dossiers,
+            visual_paths=visual_paths_this_iteration if visual_paths_this_iteration else ctx.visual_paths,
+            temp_paths=list(dict.fromkeys([*ctx.temp_paths, *temp_frame_paths_this_iteration])),
+            runtime_env_id=ctx.runtime_env_id,
+            executing_agent_id=ctx.executing_agent_id,
+            squad_thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+            parent_message_id=ctx.parent_message_id,
+            delegation_chain=ctx.delegation_chain,
+            delegation_request_id=ctx.delegation_request_id,
+            delegation_origin_agent_id=ctx.delegation_origin_agent_id,
+            telegram_message_thread_id=ctx.telegram_message_thread_id,
+            is_child_run=ctx.is_child_run,
+            child_run_id=ctx.child_run_id,
+            parent_task_id=ctx.parent_task_id,
+            child_context_policy=dict(ctx.child_context_policy or {}),
+            child_toolset=ctx.child_toolset,
+            context_governance=ctx.context_governance,
+        )
+        resume_item = QueueItem(
+            chat_id=chat_id,
+            query_text=resume_prompt,
+            image_paths=visual_paths_this_iteration if visual_paths_this_iteration else None,
+            executing_agent_id=ctx.executing_agent_id,
+            squad_thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+            parent_message_id=ctx.parent_message_id,
+            delegation_chain=ctx.delegation_chain,
+            delegation_request_id=ctx.delegation_request_id,
+            delegation_origin_agent_id=ctx.delegation_origin_agent_id,
+            telegram_message_thread_id=ctx.telegram_message_thread_id,
+        )
+
+        resume_result = await _run_with_provider_fallback(resume_ctx, resume_item, user_id, chat_id, context, task_id)
+        if resume_result is None:
+            current_result.result = clean_text
+            break
+
+        # Accumulate cost and tool_uses
+        resume_result.cost_usd += current_result.cost_usd
+        resume_result.usage = current_result.usage | resume_result.usage
+        resume_result.tool_uses = current_result.tool_uses + resume_result.tool_uses
+        resume_result.native_items = current_result.native_items + resume_result.native_items
+        resume_result.tool_execution_trace = current_result.tool_execution_trace + resume_result.tool_execution_trace
+        current_result = resume_result
+
+    else:
+        # for-loop completed without break — iterations exhausted
+        loop_exhausted = True
+
+    if loop_exhausted:
+        current_result.warnings.append(
+            f"iteration limit ({MAX_AGENT_TOOL_ITERATIONS}) reached — use /retry to continue"
+        )
+        log.warning("agent_loop_exhausted", iterations=MAX_AGENT_TOOL_ITERATIONS)
+        if (
+            runtime is not None
+            and task_id is not None
+            and RUNTIME_ENVIRONMENTS_ENABLED
+            and ctx.runtime_env_id is not None
+        ):
+            loop_exhausted_cycle_id = await runtime.record_loop_cycle(
+                task_id=task_id,
+                cycle_index=MAX_AGENT_TOOL_ITERATIONS,
+                phase="executing",
+                outcome={"loop_exhausted": True},
+            )
+            await runtime.record_guardrail_hit(
+                task_id=task_id,
+                guardrail_type="retry_exhausted",
+                cycle_id=loop_exhausted_cycle_id,
+                details={"iterations": MAX_AGENT_TOOL_ITERATIONS},
+            )
+            await runtime.record_warning(
+                task_id=task_id,
+                warning_type="retry_exhausted",
+                message="Agent loop reached the iteration limit.",
+                details={"iterations": MAX_AGENT_TOOL_ITERATIONS},
+            )
+            await runtime.pause_environment(
+                task_id=task_id,
+                reason="Agent loop reached the iteration limit and was paused.",
+            )
+        guardrail_message = f"Runtime guardrail triggered: iteration limit ({MAX_AGENT_TOOL_ITERATIONS}) reached."
+
+    # Clean up status messages
+    for msg_id in status_msg_ids:
+        with contextlib.suppress(Exception):
+            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+
+    # Clean up extracted video frames
+    if all_temp_image_paths:
+        from koda.utils.video import cleanup_video_frames
+
+        cleanup_video_frames(all_temp_image_paths)
+
+    # Strip any residual tags
+    ctx.verified_before_finalize = _has_post_write_verification(current_result.tool_execution_trace)
+    _, current_result.result = parse_agent_commands(current_result.result)
+    if guardrail_message:
+        current_result.error = True
+        current_result.retryable = False
+        current_result.error_kind = "runtime_guardrail"
+        current_result.result = guardrail_message
+    return current_result
+
+
+# Response sending
+
+
+def _build_operational_footer(ctx: QueryContext | None, run_result: RunResult) -> str:
+    if ctx is None:
+        return ""
+    if not any(step.get("metadata", {}).get("write") for step in run_result.tool_execution_trace):
+        return ""
+
+    from koda.utils.formatting import escape_html
+
+    source_parts: list[str] = []
+    seen_sources: set[str] = set()
+    for hit in _serialize_knowledge_hits(ctx.knowledge_hits):
+        label = str(hit.get("source_label") or "").strip()
+        if not label or label in seen_sources:
+            continue
+        seen_sources.add(label)
+        updated_at = str(hit.get("updated_at") or "").strip()
+        source_parts.append(f"{label} ({updated_at})" if updated_at else label)
+        if len(source_parts) >= 3:
+            break
+
+    tier = getattr(getattr(ctx.effective_policy, "autonomy_tier", None), "value", "unknown")
+    approval_mode = str(getattr(ctx.effective_policy, "approval_mode", "standard"))
+    verification_status = "verified" if ctx.verified_before_finalize else "missing"
+    latest = ctx.confidence_reports[-1] if ctx.confidence_reports else {}
+    answer_eval = ctx.answer_evaluation
+
+    flow_bits: list[str] = []
+    if ctx.human_approval_used:
+        flow_bits.append("human-approved")
+    elif ctx.confidence_reports and ctx.confidence_reports[-1].get("requires_human_approval"):
+        flow_bits.append("escalated")
+    else:
+        flow_bits.append(approval_mode)
+    if len(run_result.fallback_chain) > 1:
+        flow_bits.append("provider-fallback")
+    if ctx.stale_sources_present:
+        flow_bits.append("stale-sources")
+
+    lines = [
+        f"Sources: {', '.join(source_parts) if source_parts else 'runtime inspection'}",
+        (
+            "Winning sources: "
+            + ", ".join((getattr(ctx.knowledge_resolution, "winning_sources", []) or [])[:3] or ["none"])
+        ),
+        (
+            f"Memory trust: {ctx.memory_trust_score:.2f}"
+            + (
+                f" | layers: {', '.join(getattr(ctx.memory_resolution, 'selected_layers', [])[:3])}"
+                if getattr(ctx, "memory_resolution", None)
+                else ""
+            )
+        ),
+        (
+            "Grounding: "
+            + ", ".join(latest.get("operable_source_layers", [])[:3] or ["none-operable"])
+            + (
+                f" | weak: {', '.join(latest.get('non_operable_source_layers', [])[:3])}"
+                if latest.get("non_operable_source_layers")
+                else ""
+            )
+        )
+        if ctx.confidence_reports
+        else "Grounding: runtime inspection",
+        (
+            "Retrieval: "
+            f"{getattr(getattr(ctx.knowledge_resolution, 'retrieval_strategy', None), 'value', 'unknown')}"
+            f" | route: {getattr(ctx.knowledge_resolution, 'retrieval_route', 'unknown')}"
+            f" | grounding score: {float(getattr(ctx.knowledge_resolution, 'grounding_score', 0.0) or 0.0):.2f}"
+        ),
+        f"Citations: {float(_answer_eval_value(answer_eval, 'citation_coverage', 0.0) or 0.0):.0%}",
+        f"Verification: {verification_status}",
+        f"Tier: {tier} | Mode: {approval_mode}",
+        f"Flow: {', '.join(flow_bits)}",
+    ]
+    return "\n" + "\n".join(f"<i>{escape_html(line)}</i>" for line in lines)
+
+
+_LEADING_TOOL_TRANSCRIPT_RE = re.compile(r"^\s*Tools:\s*(?:shell|bash|tool|[\w.-]+)\(", re.IGNORECASE)
+_NATURAL_RESPONSE_START_RE = re.compile(
+    r"^(?:Vou|Criei|Aqui|Segue|Pronto|Nao|Não|Encontrei|I\b|I['’]ve|Created|Here|Done)\b",
+    re.IGNORECASE,
+)
+_SPOKEN_RESPONSE_BLOCK_RE = re.compile(r"<spoken_response>(.*?)</spoken_response>", re.IGNORECASE | re.DOTALL)
+_MARKDOWN_TABLE_ROW_RE = re.compile(r"^\s*\|.+\|\s*$", re.MULTILINE)
+_BULLET_LINE_RE = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\S+", re.MULTILINE)
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
+_NO_TEXT_COMPLETION_RE = re.compile(
+    r"^\s*(?:task|text)\s+completed\s*\(\s*no\s+text\s+output\s*\)\.?\s*$",
+    re.IGNORECASE,
+)
+_ARTIFACT_DISCOVERY_POLL_SECONDS = 6.0
+_ARTIFACT_DISCOVERY_POLL_INTERVAL_SECONDS = 0.35
+_ARTIFACT_DISCOVERY_MTIME_SLOP_SECONDS = 2.0
+_ARTIFACT_WORKDIR_SCAN_MAX_FILES = 20_000
+_ARTIFACT_WORKDIR_SKIP_DIRS = {
+    ".codex",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".next",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+    "venv",
+}
+
+
+def _strip_leading_tool_transcript(text: str) -> str:
+    """Remove provider-generated tool transcript preambles from final text."""
+    if not text or not _LEADING_TOOL_TRANSCRIPT_RE.search(text):
+        return text
+    lines = text.splitlines()
+    for idx, line in enumerate(lines[1:], start=1):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _NATURAL_RESPONSE_START_RE.search(stripped):
+            return "\n".join(lines[idx:]).lstrip()
+    return text
+
+
+def _extract_spoken_response_block(text: str) -> tuple[str, str | None]:
+    match = _SPOKEN_RESPONSE_BLOCK_RE.search(text or "")
+    if not match:
+        return text, None
+    spoken = match.group(1).strip()
+    visible = _SPOKEN_RESPONSE_BLOCK_RE.sub("", text, count=1).strip()
+    return visible, spoken or None
+
+
+def _truncate_spoken_text(text: str, max_chars: int) -> str:
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if len(text) <= max_chars:
+        return text
+    truncated = text[:max_chars]
+    for sep in (". ", "! ", "? ", ".\n", "!\n", "?\n"):
+        idx = truncated.rfind(sep)
+        if idx > max_chars // 2:
+            return truncated[: idx + 1].strip()
+    return truncated.rstrip(" ,;:") + "..."
+
+
+def _first_spoken_sentences(text: str, max_chars: int, *, max_sentences: int = 3) -> str:
+    sentences = [part.strip() for part in _SENTENCE_BOUNDARY_RE.split(text) if part.strip()]
+    selected: list[str] = []
+    for sentence in sentences:
+        candidate = " ".join([*selected, sentence]).strip()
+        if selected and len(candidate) > max_chars:
+            break
+        selected.append(sentence)
+        if len(selected) >= max_sentences:
+            break
+    return _truncate_spoken_text(" ".join(selected) if selected else text, max_chars)
+
+
+def _response_needs_spoken_summary(response: str, plain_text: str, max_chars: int) -> bool:
+    if len(plain_text) > max_chars:
+        return True
+    if "```" in response:
+        return True
+    if _MARKDOWN_TABLE_ROW_RE.search(response):
+        return True
+    return len(_BULLET_LINE_RE.findall(response)) >= 5
+
+
+def _prepare_spoken_response_for_tts(
+    response: str,
+    *,
+    explicit_spoken_response: str | None = None,
+    created_artifacts: list[str] | None = None,
+    artifact_summary_response: bool = False,
+    query_text: str | None = None,
+    user_data: dict[str, Any] | None = None,
+) -> tuple[str, bool]:
+    """Return concise TTS text and whether full text should also be sent."""
+    from koda.utils.tts import is_mostly_code, strip_for_tts
+
+    max_chars = _voice_spoken_max_chars(user_data)
+    artifact_note = _voice_artifact_note(created_artifacts or [], user_data)
+
+    if artifact_summary_response and created_artifacts:
+        spoken = _artifact_voice_delivery_summary(created_artifacts, user_data, query_text)
+        return _truncate_spoken_text(spoken, max_chars), False
+
+    if explicit_spoken_response:
+        spoken = _sanitize_artifact_names_for_voice(
+            strip_for_tts(explicit_spoken_response),
+            created_artifacts,
+            user_data,
+        )
+        if artifact_note and artifact_note not in spoken:
+            spoken = f"{spoken} {artifact_note}".strip()
+        visible_plain = _sanitize_artifact_names_for_voice(strip_for_tts(response), created_artifacts, user_data)
+        return _truncate_spoken_text(spoken, max_chars), bool(visible_plain and visible_plain != spoken)
+
+    plain = _sanitize_artifact_names_for_voice(strip_for_tts(response), created_artifacts, user_data)
+    mostly_code = is_mostly_code(response)
+    needs_summary = mostly_code or _response_needs_spoken_summary(response, plain, max_chars)
+    if not needs_summary:
+        spoken = plain
+        if artifact_note and artifact_note not in spoken:
+            spoken = f"{spoken} {artifact_note}".strip()
+        return _truncate_spoken_text(spoken, max_chars), False
+
+    if mostly_code:
+        base = f"{_voice_code_note(user_data)} {_voice_delivery_note(user_data)}"
+    else:
+        base = _first_spoken_sentences(plain, max_chars)
+        if base:
+            base = f"{base} {_voice_delivery_note(user_data)}"
+        else:
+            base = _voice_delivery_note(user_data)
+    if artifact_note:
+        base = f"{base} {artifact_note}".strip()
+    return _truncate_spoken_text(base, max_chars), True
+
+
+def _compose_response_text(
+    run_result: RunResult,
+    *,
+    response_override: str | None = None,
+    elapsed: float = 0.0,
+    include_tool_summary: bool = True,
+) -> tuple[str, str]:
+    """Compose the user-visible response text before Telegram formatting."""
+    from koda.services.execution_confidence import strip_internal_blocks
+
+    tool_summary = ""
+    if include_tool_summary and run_result.tool_uses:
+        from koda.utils.tool_parser import format_completion_summary
+
+        completion = format_completion_summary(run_result.tool_uses, elapsed)
+        if completion:
+            tool_summary = completion
+        else:
+            tool_summary = summarize_tool_uses(run_result.tool_uses)
+    elif include_tool_summary and run_result.native_items:
+        tool_summary = summarize_native_items(run_result.native_items)
+    elif include_tool_summary and run_result.raw_output:
+        tools = parse_tool_uses(run_result.raw_output)
+        tool_summary = format_tool_summary(tools)
+
+    response = response_override if response_override is not None else strip_internal_blocks(run_result.result or "")
+    response = _strip_leading_tool_transcript(response)
+    if response == "Task completed (no text output)." and tool_summary:
+        response = tool_summary
+    if not response and tool_summary:
+        response = tool_summary
+    return response, tool_summary
+
+
+def _extract_created_artifacts(run_result: RunResult, work_dir: str | None) -> list[str]:
+    return extract_created_files(
+        run_result.tool_uses,
+        run_result.native_items,
+        run_result.tool_execution_trace,
+        work_dir=work_dir,
+    )
+
+
+def _is_no_text_completion_response(text: str | None) -> bool:
+    stripped = str(text or "").strip()
+    return not stripped or bool(_NO_TEXT_COMPLETION_RE.match(stripped))
+
+
+def _codex_generated_artifacts(run_result: RunResult, work_dir: str | None) -> list[str]:
+    """Find Codex-generated artifacts when the CLI omits the artifact event on stdout."""
+    if str(run_result.provider or "").strip().lower() != "codex":
+        return []
+    provider_session_id = str(run_result.provider_session_id or "").strip()
+    if not provider_session_id:
+        return []
+
+    roots: list[Path] = []
+    for raw_root in (os.environ.get("HOME"), work_dir):
+        if not raw_root:
+            continue
+        codex_root = Path(str(raw_root)).expanduser() / ".codex"
+        if not codex_root.is_dir():
+            continue
+        for generated_root in sorted(codex_root.glob("generated*")):
+            candidate = generated_root / provider_session_id
+            if candidate not in roots:
+                roots.append(candidate)
+
+    paths: list[str] = []
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for item in sorted(root.rglob("*"), key=lambda value: value.stat().st_mtime if value.exists() else 0):
+            if item.is_file() and item.suffix.lower() in ARTIFACT_EXTS:
+                paths.append(str(item.resolve()))
+    return paths
+
+
+def _work_dir_created_artifacts(work_dir: str | None, *, modified_after: float | None) -> list[str]:
+    if not work_dir:
+        return []
+    try:
+        root = Path(work_dir).expanduser().resolve()
+    except OSError:
+        return []
+    if not root.is_dir():
+        return []
+
+    artifacts: list[tuple[float, str]] = []
+    scanned = 0
+    truncated = False
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [name for name in dirnames if name not in _ARTIFACT_WORKDIR_SKIP_DIRS]
+        for filename in filenames:
+            scanned += 1
+            if scanned > _ARTIFACT_WORKDIR_SCAN_MAX_FILES:
+                truncated = True
+                break
+            if Path(filename).suffix.lower() not in ARTIFACT_EXTS:
+                continue
+            candidate = Path(dirpath) / filename
+            try:
+                stat = candidate.stat()
+            except OSError:
+                continue
+            if modified_after is not None and stat.st_mtime < modified_after:
+                continue
+            try:
+                resolved = str(candidate.resolve())
+            except OSError:
+                continue
+            artifacts.append((stat.st_mtime, resolved))
+        if truncated:
+            break
+    if truncated:
+        log.warning("artifact_workdir_scan_truncated", work_dir=str(root), scanned=scanned)
+    return [path for _, path in sorted(artifacts)]
+
+
+def _merge_artifact_paths(*path_groups: list[str]) -> list[str]:
+    merged: list[str] = []
+    seen: set[str] = set()
+    for paths in path_groups:
+        for raw_path in paths:
+            path = os.path.abspath(os.path.expanduser(str(raw_path)))
+            if path and path not in seen:
+                seen.add(path)
+                merged.append(path)
+    return merged
+
+
+def _existing_supported_artifact_paths(paths: list[str]) -> list[str]:
+    existing: list[str] = []
+    seen: set[str] = set()
+    for raw_path in paths:
+        path = os.path.abspath(os.path.expanduser(str(raw_path)))
+        if path in seen or Path(path).suffix.lower() not in ARTIFACT_EXTS:
+            continue
+        if os.path.isfile(path):
+            seen.add(path)
+            existing.append(path)
+    return existing
+
+
+def _artifact_size_snapshot(paths: list[str]) -> dict[str, int]:
+    snapshot: dict[str, int] = {}
+    for path in paths:
+        try:
+            snapshot[path] = os.path.getsize(path)
+        except OSError:
+            continue
+    return snapshot
+
+
+def _artifact_discovery_poll_seconds(run_result: RunResult, response: str) -> float:
+    configured = max(0.0, float(_ARTIFACT_DISCOVERY_POLL_SECONDS))
+    if configured <= 0:
+        return 0.0
+    provider = str(run_result.provider or "").strip().lower()
+    if provider == "codex" and str(run_result.provider_session_id or "").strip():
+        return configured
+    if _looks_like_artifact_completion(response):
+        return configured
+    if run_result.tool_uses or run_result.native_items or run_result.tool_execution_trace:
+        return min(configured, 1.5)
+    return 0.0
+
+
+async def _discover_created_artifacts(
+    run_result: RunResult,
+    work_dir: str | None,
+    *,
+    response: str,
+    elapsed: float,
+) -> list[str]:
+    """Collect provider and filesystem artifacts, waiting briefly for files to settle."""
+    modified_after = None
+    if elapsed > 0:
+        modified_after = max(0.0, time.time() - elapsed - _ARTIFACT_DISCOVERY_MTIME_SLOP_SECONDS)
+    poll_seconds = _artifact_discovery_poll_seconds(run_result, response)
+    deadline = time.monotonic() + poll_seconds
+    previous_snapshot: dict[str, int] | None = None
+
+    while True:
+        provider_signals = (
+            _extract_created_artifacts(run_result, work_dir)
+            if run_result.tool_uses or run_result.native_items or run_result.tool_execution_trace
+            else []
+        )
+        discovered = _existing_supported_artifact_paths(
+            _merge_artifact_paths(
+                provider_signals,
+                _codex_generated_artifacts(run_result, work_dir),
+                _work_dir_created_artifacts(work_dir, modified_after=modified_after),
+            )
+        )
+        snapshot = _artifact_size_snapshot(discovered)
+        if discovered and previous_snapshot is not None and snapshot == previous_snapshot:
+            return discovered
+        if poll_seconds <= 0 or time.monotonic() >= deadline:
+            return discovered
+        previous_snapshot = snapshot
+        sleep_for = min(_ARTIFACT_DISCOVERY_POLL_INTERVAL_SECONDS, max(0.05, deadline - time.monotonic()))
+        await asyncio.sleep(sleep_for)
+
+
+def _artifact_name_summary(created_artifacts: list[str], *, limit: int = 6) -> str:
+    names = [os.path.basename(path.rstrip(os.sep)) or path for path in created_artifacts]
+    unique_names = list(dict.fromkeys(name for name in names if name))
+    if not unique_names:
+        return "os arquivos gerados"
+    shown = ", ".join(unique_names[:limit])
+    if len(unique_names) > limit:
+        shown += f", +{len(unique_names) - limit}"
+    return shown
+
+
+def _created_artifacts_summary(created_artifacts: list[str]) -> str:
+    return f"Pronto, gerei e anexei: {_artifact_name_summary(created_artifacts)}."
+
+
+def _no_text_no_artifacts_summary() -> str:
+    return "A execucao terminou sem texto e sem artefatos localizaveis."
+
+
+def _artifact_delivery_failure_notice(created_artifacts: list[str]) -> str:
+    return (
+        "Encontrei os artefatos gerados, mas nao consegui anexa-los pelo Telegram: "
+        f"{_artifact_name_summary(created_artifacts)}."
+    )
+
+
+async def _persist_created_artifacts(
+    *,
+    task_id: int | None,
+    created_artifacts: list[str],
+    run_result: RunResult,
+) -> int:
+    if task_id is None or not created_artifacts:
+        return 0
+
+    import mimetypes
+
+    from koda.services.artifact_ingestion import detect_artifact_kind
+    from koda.services.runtime import get_runtime_controller
+
+    try:
+        runtime = get_runtime_controller()
+    except Exception:
+        log.exception("runtime_artifact_controller_unavailable", task_id=task_id)
+        return 0
+
+    existing_paths: set[str] = set()
+    try:
+        for item in runtime.store.list_artifacts(task_id):
+            existing_path = str(item.get("path") or "").strip()
+            existing_metadata = item.get("metadata") if isinstance(item, dict) else {}
+            if existing_path and not (
+                isinstance(existing_metadata, dict) and existing_metadata.get("artifact_engine_ready") is False
+            ):
+                existing_paths.add(os.path.abspath(os.path.expanduser(existing_path)))
+    except Exception:
+        log.exception("runtime_artifact_dedupe_failed", task_id=task_id)
+
+    persisted = 0
+    for raw_path in created_artifacts:
+        path = os.path.abspath(os.path.expanduser(str(raw_path)))
+        if path in existing_paths:
+            continue
+        if not os.path.isfile(path):
+            log.warning("runtime_artifact_missing", task_id=task_id, path=path)
+            continue
+
+        filename = os.path.basename(path)
+        mime_type = mimetypes.guess_type(path)[0] or ""
+        artifact_kind = detect_artifact_kind(path=path, mime_type=mime_type).value
+        try:
+            size_bytes = os.path.getsize(path)
+        except OSError:
+            size_bytes = None
+
+        metadata: dict[str, Any] = {
+            "source_type": "provider_output",
+            "provider": run_result.provider,
+            "model": run_result.model,
+            "session_id": run_result.session_id,
+            "provider_session_id": run_result.provider_session_id,
+            "stop_reason": run_result.stop_reason,
+            "mime_type": mime_type,
+            "size_bytes": size_bytes,
+        }
+        try:
+            artifact_row_id = await runtime.add_artifact(
+                task_id=task_id,
+                artifact_kind=artifact_kind,
+                label=filename,
+                path=path,
+                metadata=metadata,
+            )
+        except Exception:
+            log.exception("runtime_artifact_persist_failed", task_id=task_id, path=path)
+            continue
+
+        existing_paths.add(path)
+        persisted += 1
+        artifact_id = str(artifact_row_id or filename)
+        event_payload = {
+            "artifact": {
+                "id": artifact_id,
+                "kind": artifact_kind,
+                "label": filename,
+                "mime_type": mime_type or None,
+                "size_bytes": size_bytes,
+                "created_at": datetime.now(UTC).isoformat(),
+                "source_session_id": run_result.session_id,
+                "source_execution_id": str(task_id),
+                "download_url": f"/api/runtime/artifacts/{artifact_id}/download",
+                "preview_state": "available",
+                "path": path,
+            }
+        }
+        try:
+            await runtime.events.publish(
+                task_id=task_id,
+                env_id=None,
+                attempt=None,
+                phase="delivering",
+                event_type="artifact_ready",
+                severity="info",
+                payload=event_payload,
+                artifact_refs=[path],
+            )
+        except Exception:
+            log.exception("runtime_artifact_event_publish_failed", task_id=task_id, path=path)
+
+    if persisted:
+        log.info("runtime_artifacts_persisted", task_id=task_id, count=persisted)
+    return persisted
+
+
+async def _register_squad_artifacts(
+    *,
+    ctx: QueryContext | None,
+    runtime_task_id: int | None,
+    created_artifacts: list[str],
+    run_result: RunResult,
+) -> list[str]:
+    if ctx is None or not ctx.squad_thread_id or not created_artifacts:
+        return []
+    try:
+        from koda.services.artifact_ingestion import detect_artifact_kind
+        from koda.squads import get_squad_artifact_store
+
+        store = get_squad_artifact_store()
+        if store is None:
+            return []
+    except Exception:
+        log.exception("squad_artifact_store_unavailable", thread_id=ctx.squad_thread_id)
+        return []
+
+    owner = ctx.executing_agent_id or AGENT_ID or "default"
+    artifact_ids: list[str] = []
+    for raw_path in created_artifacts:
+        path = os.path.abspath(os.path.expanduser(str(raw_path)))
+        if not os.path.isfile(path):
+            continue
+        try:
+            stat = os.stat(path)
+            digest = hashlib.sha256(
+                f"{ctx.squad_thread_id}:{path}:{stat.st_mtime_ns}:{stat.st_size}".encode()
+            ).hexdigest()[:32]
+            artifact_id = f"runtime:{runtime_task_id or 'unknown'}:{digest}"
+            kind = detect_artifact_kind(path=path, mime_type="").value
+            artifact = await store.upsert_artifact(
+                artifact_id=artifact_id,
+                thread_id=ctx.squad_thread_id,
+                task_id=ctx.squad_task_id,
+                owner_agent_id=owner,
+                kind=kind,
+                path_or_uri=path,
+                visible_to_squad=True,
+                metadata={
+                    "runtime_task_id": runtime_task_id,
+                    "provider": run_result.provider,
+                    "model": run_result.model,
+                    "size_bytes": stat.st_size,
+                },
+            )
+            artifact_ids.append(artifact.artifact_id)
+        except Exception:
+            log.exception("squad_artifact_register_failed", thread_id=ctx.squad_thread_id, path=path)
+    return artifact_ids
+
+
+async def _persist_voice_response_artifact(
+    *,
+    task_id: int | None,
+    ogg_path: str,
+    spoken_text: str,
+    run_result: RunResult,
+    tts_voice: str,
+    audio_provider: str,
+    audio_model: str,
+) -> dict[str, Any] | None:
+    if task_id is None:
+        return None
+
+    from koda.services.runtime import get_runtime_controller
+
+    try:
+        runtime = get_runtime_controller()
+    except Exception:
+        log.exception("runtime_voice_artifact_controller_unavailable", task_id=task_id)
+        return None
+
+    metadata: dict[str, Any] = {
+        "source_type": "voice_response",
+        "mime_type": "audio/ogg",
+        "provider": audio_provider or "default",
+        "model": audio_model,
+        "voice": str(tts_voice),
+        "session_id": run_result.session_id,
+        "provider_session_id": run_result.provider_session_id,
+        "response_provider": run_result.provider,
+        "response_model": run_result.model,
+        "spoken_text_preview": _truncate_spoken_text(spoken_text, 320),
+    }
+    try:
+        artifact = await runtime.persist_generated_artifact_file(
+            task_id=task_id,
+            source_path=ogg_path,
+            artifact_kind="audio",
+            label=f"voice-response-{task_id}.ogg",
+            metadata=metadata,
+        )
+    except Exception:
+        log.exception("runtime_voice_artifact_persist_failed", task_id=task_id, path=ogg_path)
+        return None
+
+    artifact_id = str(artifact.get("id") or "").strip()
+    if not artifact_id or artifact_id == "0":
+        artifact_id = str(artifact.get("label") or f"voice-response-{task_id}.ogg")
+    event_payload = {
+        "artifact": {
+            "id": artifact_id,
+            "kind": "audio",
+            "label": artifact.get("label") or f"voice-response-{task_id}.ogg",
+            "mime_type": artifact.get("mime_type") or "audio/ogg",
+            "size_bytes": artifact.get("size_bytes"),
+            "created_at": datetime.now(UTC).isoformat(),
+            "source_session_id": run_result.session_id,
+            "source_execution_id": str(task_id),
+            "download_url": f"/api/runtime/artifacts/{artifact_id}/download",
+            "preview_state": "available",
+            "path": artifact.get("path"),
+        }
+    }
+    try:
+        await runtime.events.publish(
+            task_id=task_id,
+            env_id=None,
+            attempt=None,
+            phase="delivering",
+            event_type="artifact_ready",
+            severity="info",
+            payload=event_payload,
+            artifact_refs=[str(artifact.get("path") or ogg_path)],
+        )
+    except Exception:
+        log.exception("runtime_voice_artifact_event_publish_failed", task_id=task_id, path=artifact.get("path"))
+    log.info("runtime_voice_artifact_persisted", task_id=task_id, artifact_id=artifact_id)
+    return artifact
+
+
+async def _prepare_delivery_outcome(
+    run_result: RunResult,
+    work_dir: str,
+    *,
+    elapsed: float = 0.0,
+    task_id: int | None = None,
+    response_override: str | None = None,
+    include_tool_summary: bool = True,
+) -> DeliveryOutcome:
+    """Resolve the final delivery text and persist runtime artifacts before history writes."""
+    response, tool_summary = _compose_response_text(
+        run_result,
+        response_override=response_override,
+        elapsed=elapsed,
+        include_tool_summary=include_tool_summary,
+    )
+    raw_completion_had_no_text = response_override is None and _is_no_text_completion_response(run_result.result)
+    response, explicit_spoken_response = _extract_spoken_response_block(response)
+    created_artifacts = await _discover_created_artifacts(
+        run_result,
+        work_dir,
+        response=response,
+        elapsed=elapsed,
+    )
+    artifact_summary_applied = False
+    if created_artifacts:
+        await _persist_created_artifacts(
+            task_id=task_id,
+            created_artifacts=created_artifacts,
+            run_result=run_result,
+        )
+        if raw_completion_had_no_text or _is_no_text_completion_response(response):
+            response = _created_artifacts_summary(created_artifacts)
+            artifact_summary_applied = True
+    elif raw_completion_had_no_text or _is_no_text_completion_response(response):
+        response = _no_text_no_artifacts_summary()
+    elif (run_result.tool_uses or run_result.native_items or run_result.tool_execution_trace) and (
+        not run_result.error and _looks_like_artifact_completion(response)
+    ):
+        response = (
+            f"{response}\n\n"
+            "Nao encontrei esse arquivo no diretorio de trabalho, entao nao consegui anexa-lo. "
+            "Vou tratar isso como uma falha de geracao do artefato, nao como uma entrega concluida."
+        )
+        if "artifact not found" not in run_result.warnings:
+            run_result.warnings.append("artifact not found")
+
+    return DeliveryOutcome(
+        response=response,
+        tool_summary=tool_summary,
+        explicit_spoken_response=explicit_spoken_response,
+        created_artifacts=created_artifacts,
+        artifact_summary_applied=artifact_summary_applied,
+    )
+
+
+async def _send_response(
+    chat_id: int,
+    update: Update | None,
+    context: BotContext,
+    run_result: RunResult,
+    work_dir: str,
+    agent_mode: str,
+    elapsed: float = 0.0,
+    model: str = "",
+    task_id: int | None = None,
+    ctx: QueryContext | None = None,
+    response_override: str | None = None,
+    query_text: str | None = None,
+    include_tool_summary: bool = True,
+    delivery_outcome: DeliveryOutcome | None = None,
+) -> None:
+    """Send the provider response: TTS, code blocks, HTML text, artifacts, supervised buttons."""
+    cost = run_result.cost_usd
+    thread_kwargs: dict[str, int] = {}
+    if ctx is not None and ctx.telegram_message_thread_id is not None and (update is None or update.message is None):
+        thread_kwargs["message_thread_id"] = ctx.telegram_message_thread_id
+    delivery = delivery_outcome
+    if delivery is None:
+        delivery = await _prepare_delivery_outcome(
+            run_result,
+            work_dir,
+            elapsed=elapsed,
+            task_id=task_id,
+            response_override=response_override,
+            include_tool_summary=include_tool_summary,
+        )
+    response = delivery.response
+    tool_summary = delivery.tool_summary
+    explicit_spoken_response = delivery.explicit_spoken_response
+    created_artifacts = delivery.created_artifacts
+    artifact_summary_applied = delivery.artifact_summary_applied
+
+    response_markup = build_response_markup(task_id)
+
+    artifacts_sent = 0
+    artifact_delivery_failed = False
+    if created_artifacts:
+        artifacts_sent = await send_created_files(
+            created_artifacts,
+            chat_id,
+            context,
+            update,
+            message_thread_id=ctx.telegram_message_thread_id if ctx is not None else None,
+        )
+        if artifacts_sent:
+            log.info("artifacts_sent", count=artifacts_sent, total=len(created_artifacts))
+            if artifacts_sent < len(created_artifacts):
+                log.warning(
+                    "artifacts_partially_sent",
+                    sent=artifacts_sent,
+                    total=len(created_artifacts),
+                    paths=created_artifacts,
+                )
+        else:
+            artifact_delivery_failed = True
+            failure_notice = _artifact_delivery_failure_notice(created_artifacts)
+            run_result.warnings.append("artifact delivery failed")
+            log.warning("artifacts_discovered_but_not_sent", total=len(created_artifacts), paths=created_artifacts)
+            response = failure_notice if artifact_summary_applied else f"{response}\n\n{failure_notice}".strip()
+
+    # --- TTS voice response branch ---
+    audio_sent = False
+    audio_failure_notice = ""
+    send_text_with_audio = False
+    force_audio_response = bool(ctx and ctx.force_audio_response)
+    voice_requested = bool(force_audio_response or _voice_continuous_mode_active(context.user_data))
+    voice_enabled = bool(force_audio_response or tts_enabled_for_session(context.user_data))
+    if voice_requested and voice_enabled:
+        from koda.utils.tts import get_last_tts_error, synthesize_speech
+
+        plain, send_text_with_audio = _prepare_spoken_response_for_tts(
+            response,
+            explicit_spoken_response=explicit_spoken_response,
+            created_artifacts=created_artifacts if artifacts_sent else [],
+            artifact_summary_response=artifact_summary_applied and bool(artifacts_sent),
+            query_text=query_text,
+            user_data=context.user_data,
+        )
+        if plain.strip():
+            from koda.config import ELEVENLABS_TIMEOUT, TTS_DEFAULT_VOICE, TTS_SPEED
+
+            tts_voice = context.user_data.get("tts_voice", TTS_DEFAULT_VOICE)
+            audio_provider = str(context.user_data.get("audio_provider") or "").strip().lower()
+            ogg_path = await synthesize_speech(
+                plain,
+                tts_voice,
+                TTS_SPEED,
+                provider=audio_provider or None,
+                model=str(context.user_data.get("audio_model") or "").strip() or None,
+                language=str(context.user_data.get("tts_voice_language") or "").strip().lower() or None,
+            )
+            if not ogg_path:
+                if audio_provider == "elevenlabs":
+                    tts_error = get_last_tts_error() or {}
+                    error_code = str(tts_error.get("code") or "").strip().lower()
+                    error_message = str(tts_error.get("message") or "").strip()
+                    if error_code == "paid_plan_required":
+                        audio_failure_notice = (
+                            "Nao consegui gerar o audio com ElevenLabs porque a voz selecionada exige "
+                            "plano pago para uso via API. Escolha uma voz premade em /voice ou atualize "
+                            "o plano no ElevenLabs."
+                        )
+                    elif error_code in {"missing_api_key", "invalid_api_key"}:
+                        audio_failure_notice = (
+                            "Nao consegui gerar o audio com ElevenLabs. Verifique a conexao/API key em /voice."
+                        )
+                    elif error_code == "timeout":
+                        audio_failure_notice = (
+                            "Nao consegui gerar o audio com ElevenLabs porque a API demorou mais de "
+                            f"{ELEVENLABS_TIMEOUT}s para responder. Vou manter o texto e os arquivos aqui."
+                        )
+                    elif error_message:
+                        audio_failure_notice = f"Nao consegui gerar o audio com ElevenLabs: {error_message}"
+                    else:
+                        audio_failure_notice = (
+                            "Nao consegui gerar o audio com ElevenLabs. "
+                            "Verifique a conexao/API key em /voice e tente novamente."
+                        )
+                    run_result.warnings.append("audio unavailable: ElevenLabs")
+                else:
+                    run_result.warnings.append("audio unavailable; use /voice to finish setup")
+                    audio_failure_notice = (
+                        "Nao consegui gerar o audio com a configuracao atual. Revise /voice e tente novamente."
+                    )
+            if ogg_path:
+                log.info(
+                    "tts_synthesized",
+                    task_id=task_id,
+                    provider=audio_provider or "default",
+                    voice=str(tts_voice),
+                )
+                from pathlib import Path as _P
+
+                try:
+                    audio_model = str(context.user_data.get("audio_model") or "").strip()
+                    await _persist_voice_response_artifact(
+                        task_id=task_id,
+                        ogg_path=ogg_path,
+                        spoken_text=plain,
+                        run_result=run_result,
+                        tts_voice=str(tts_voice),
+                        audio_provider=audio_provider or "default",
+                        audio_model=audio_model,
+                    )
+                    caption = (
+                        f"Cost: ${cost:.4f} | "
+                        f"Total: ${context.user_data['total_cost']:.4f} | "
+                        f"Dir: {os.path.basename(work_dir)}"
+                    )
+                    with open(ogg_path, "rb") as vf:
+                        if update and update.message:
+                            await update.message.reply_voice(
+                                voice=vf,
+                                caption=caption,
+                                reply_markup=response_markup,
+                            )
+                        else:
+                            await cast(Any, context.bot).send_voice(
+                                chat_id=chat_id,
+                                voice=vf,
+                                caption=caption,
+                                reply_markup=response_markup,
+                                **thread_kwargs,
+                            )
+                    audio_sent = True
+                    log.info("send_voice", task_id=task_id, chat_id=chat_id)
+                except Exception:
+                    log.exception("tts_send_error")
+                finally:
+                    _P(ogg_path).unlink(missing_ok=True)
+
+    # Send text response
+    import tempfile
+    from pathlib import Path
+
+    from koda.utils.formatting import (
+        escape_html,
+        extract_and_replace_large_blocks,
+        format_error_message,
+        safe_markdown_to_telegram_html,
+    )
+
+    if audio_failure_notice:
+        response = f"{response}\n\n{audio_failure_notice}"
+
+    code_files: list[tuple[str, str]]
+    send_text_response = (not audio_sent) or send_text_with_audio or artifact_delivery_failed
+    if run_result.error:
+        modified_text, code_files = response, []
+    elif send_text_response:
+        modified_text, code_files = extract_and_replace_large_blocks(response)
+    else:
+        modified_text, code_files = response, []
+
+    if send_text_response:
+        # Send code files
+        for filename, content in code_files:
+            with tempfile.NamedTemporaryFile(mode="w", suffix=f"_{filename}", prefix="code_", delete=False) as f:
+                f.write(content)
+                tmp_path = f.name
+            try:
+                with open(tmp_path, "rb") as fh:
+                    if update and update.message:
+                        await update.message.reply_document(
+                            document=fh,
+                            filename=filename,
+                            caption=f"Code block: {filename}",
+                        )
+                    else:
+                        await cast(Any, context.bot).send_document(
+                            chat_id=chat_id,
+                            document=fh,
+                            filename=filename,
+                            caption=f"Code block: {filename}",
+                            **thread_kwargs,
+                        )
+            finally:
+                Path(tmp_path).unlink(missing_ok=True)
+
+        from telegram.constants import ParseMode
+
+        from koda.utils.messaging import split_message
+
+        html_text = (
+            format_error_message(modified_text) if run_result.error else safe_markdown_to_telegram_html(modified_text)
+        )
+        # Enriched footer for tasks >5s, minimal for quick tasks
+        tool_count = len(run_result.tool_uses) if run_result.tool_uses else len(run_result.native_items)
+        extra_parts = []
+        extra_parts.append(escape_html(run_result.provider))
+        if model:
+            extra_parts.append(escape_html(model))
+        if elapsed > 5:
+            extra_parts.append(_format_elapsed(elapsed))
+        if tool_count > 0 and elapsed > 5:
+            extra_parts.append(f"{tool_count} tools")
+        extra = " | ".join(extra_parts)
+        footer_detail = f" | {extra}" if extra else ""
+        warning_text = ""
+        if run_result.warnings:
+            warning_text = "\n⚠️ " + ", ".join(run_result.warnings)
+        footer = (
+            f"\n\n———\n<i>Cost: ${cost:.4f} | "
+            f"Total: ${context.user_data['total_cost']:.4f}{footer_detail} | "
+            f"Dir: {escape_html(os.path.basename(work_dir))}</i>"
+            f"{warning_text}"
+            f"{_build_operational_footer(ctx, run_result)}"
+        )
+        html_text += footer
+        chunks_to_send = split_message(html_text)
+        for i, chunk in enumerate(chunks_to_send):
+            is_last = i == len(chunks_to_send) - 1
+            try:
+                if update and update.message:
+                    await update.message.reply_text(
+                        chunk,
+                        parse_mode=ParseMode.HTML,
+                        reply_markup=response_markup if is_last else None,
+                    )
+                else:
+                    if ctx is not None and ctx.squad_thread_id and thread_kwargs.get("message_thread_id") is not None:
+                        from koda.squads.telegram_outbound import post_to_topic_buffered
+
+                        await post_to_topic_buffered(
+                            cast(Any, context.bot),
+                            chat_id=chat_id,
+                            message_thread_id=thread_kwargs.get("message_thread_id"),
+                            text=chunk,
+                            agent_label=ctx.executing_agent_id or AGENT_ID or "agent",
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=response_markup if is_last else None,
+                        )
+                    else:
+                        await cast(Any, context.bot).send_message(
+                            chat_id=chat_id,
+                            text=chunk,
+                            parse_mode=ParseMode.HTML,
+                            reply_markup=response_markup if is_last else None,
+                            **thread_kwargs,
+                        )
+            except Exception:
+                import re as _re
+
+                plain_text = _re.sub(r"<[^>]+>", "", chunk)
+                try:
+                    if update and update.message:
+                        await update.message.reply_text(
+                            plain_text,
+                            reply_markup=response_markup if is_last else None,
+                        )
+                    else:
+                        if (
+                            ctx is not None
+                            and ctx.squad_thread_id
+                            and thread_kwargs.get("message_thread_id") is not None
+                        ):
+                            from koda.squads.telegram_outbound import post_to_topic_buffered
+
+                            await post_to_topic_buffered(
+                                cast(Any, context.bot),
+                                chat_id=chat_id,
+                                message_thread_id=thread_kwargs.get("message_thread_id"),
+                                text=plain_text,
+                                agent_label=ctx.executing_agent_id or AGENT_ID or "agent",
+                                reply_markup=response_markup if is_last else None,
+                            )
+                        else:
+                            await cast(Any, context.bot).send_message(
+                                chat_id=chat_id,
+                                text=plain_text,
+                                reply_markup=response_markup if is_last else None,
+                                **thread_kwargs,
+                            )
+                except Exception:
+                    if update and update.message:
+                        await update.message.reply_text(plain_text)
+                    else:
+                        await cast(Any, context.bot).send_message(chat_id=chat_id, text=plain_text, **thread_kwargs)
+
+    # Supervised mode: Continue/Stop buttons
+    if agent_mode == "supervised" and run_result.stop_reason == "max_turns" and run_result.session_id:
+        from telegram.constants import ParseMode
+
+        context.user_data["_supervised_session_id"] = run_result.session_id
+        context.user_data["_supervised_provider"] = run_result.provider
+        supervised_buttons = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("▶ Continue", callback_data="supervised:continue"),
+                    InlineKeyboardButton("⏹ Stop", callback_data="supervised:stop"),
+                ]
+            ]
+        )
+        supervised_text = f"🔍 <b>Supervised mode</b> — {escape_html(run_result.provider)} paused after 1 turn."
+        if tool_summary:
+            supervised_text += f"\n{tool_summary}"
+        await cast(Any, context.bot).send_message(
+            chat_id=chat_id,
+            text=supervised_text,
+            reply_markup=supervised_buttons,
+            parse_mode=ParseMode.HTML,
+            **thread_kwargs,
+        )
+
+
+# Post-processing
+
+_SQUAD_DELEGATION_NARRATIVE_RE = re.compile(
+    r"\b("
+    r"chamei|acionei|deleguei|passei|repass(ei|o)|coordenei|"
+    r"o\s+planejador|a\s+planejadora|o\s+desenvolvedor|a\s+desenvolvedora|"
+    r"frontend\s+(entregou|fez)|backend\s+(entregou|fez)|"
+    r"planner\s+(entregou|fez)|especialista\s+(entregou|fez)|"
+    r"called|delegated|handed\s+off|the\s+planner|the\s+developer|specialist\s+delivered"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+async def _squad_coordination_integrity_override(ctx: QueryContext, response_text: str) -> str | None:
+    """Block coordinator responses that narrate delegation without durable evidence."""
+    if not ctx.squad_thread_id or not response_text or not _SQUAD_DELEGATION_NARRATIVE_RE.search(response_text):
+        return None
+    try:
+        from koda.squads import get_squad_thread_store
+
+        store = get_squad_thread_store()
+        if store is None:
+            return None
+        thread = await store.get_thread(ctx.squad_thread_id)
+        if thread is None or not thread.coordinator_agent_id:
+            return None
+        executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
+        if executing_agent != thread.coordinator_agent_id:
+            return None
+        history = await store.thread_history(thread_id=ctx.squad_thread_id, limit=30)
+        parent = ctx.parent_message_id
+        has_evidence = False
+        for message in history:
+            msg_type = str(message.get("type") or "")
+            if msg_type not in {"task_request", "task_result", "delegation_request", "delegation_result"}:
+                continue
+            raw_metadata = message.get("metadata")
+            metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+            if parent and metadata.get("parent_message_id") not in {parent, parent.removeprefix("msg-")}:
+                continue
+            has_evidence = True
+            break
+        if has_evidence:
+            return None
+        await store.post_thread_message(
+            thread_id=ctx.squad_thread_id,
+            from_agent="system",
+            content="[coordination_integrity_violation] coordinator claimed delegation without persisted task evidence",
+            message_type="system_event",
+            metadata={
+                "event_type": "coordination_integrity_violation",
+                "parent_message_id": parent,
+                "executing_agent_id": executing_agent,
+            },
+        )
+        return (
+            "Eu não vou afirmar que acionei outros agentes sem um rastro real de task_request/task_result no thread. "
+            "Vou refazer a coordenação pelo fluxo auditável do squad para que os especialistas sejam chamados de fato."
+        )
+    except Exception:
+        log.exception("squad_coordination_integrity_guard_failed", thread_id=ctx.squad_thread_id)
+        return None
+
+
+async def _advance_squad_task_from_run(
+    *,
+    ctx: QueryContext,
+    run_result: RunResult,
+    response_text: str,
+    artifact_ids: list[str],
+) -> None:
+    if not ctx.squad_thread_id or not ctx.squad_task_id:
+        return
+    try:
+        from koda.squads import get_squad_task_store
+
+        store = get_squad_task_store()
+        if store is None:
+            return
+        agent_id = ctx.executing_agent_id or AGENT_ID or "default"
+        task = await store.get_task(ctx.squad_task_id)
+        if task is None or task.status in {"done", "failed", "cancelled", "escalated"}:
+            return
+        if task.status == "pending":
+            task = await store.claim_task(task_id=task.id, agent_id=agent_id)
+        if task.status == "claimed":
+            task = await store.update_task_status(
+                task_id=task.id,
+                new_status="in_progress",
+                agent_id=agent_id,
+                expected_version=task.version,
+            )
+        terminal_status = "failed" if run_result.error else "done"
+        await store.update_task_status(
+            task_id=task.id,
+            new_status=terminal_status,
+            agent_id=agent_id,
+            expected_version=task.version,
+            error_message=response_text[:1000] if run_result.error else None,
+            result_summary=response_text[:1000],
+            deliverables=artifact_ids,
+        )
+    except Exception:
+        log.exception(
+            "squad_task_auto_advance_failed",
+            thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+        )
+
+
+def _render_existing_squad_task_request(task: Any) -> str:
+    lines = [
+        f"Task request [{task.kind}] {task.id}",
+        f"Assigned to: {task.assigned_agent_id or 'unassigned'}",
+        "",
+        "Execution role:",
+        "- You are the assigned worker for this task, not the squad coordinator.",
+        "- The coordinator has already delegated the work. Do not spawn, delegate, or ask others to do this task.",
+        "- Treat prior thread context as context only; your responsibility is the Objective below.",
+        "- Return only your own concrete task_result for this assigned objective.",
+        "",
+        "Objective:",
+        str(task.description or "").strip(),
+    ]
+    if getattr(task, "acceptance_criteria", None):
+        lines.extend(["", "Acceptance criteria:"])
+        lines.extend(f"- {item}" for item in task.acceptance_criteria)
+    if getattr(task, "deliverables_spec", None):
+        lines.extend(["", "Deliverables:"])
+        lines.extend(f"- {item}" for item in task.deliverables_spec)
+    lines.extend(
+        [
+            "",
+            "Return a concrete task_result in this thread using visible squad context and without progress narration.",
+        ]
+    )
+    return "\n".join(lines)
+
+
+async def _maybe_enqueue_unblocked_squad_tasks(
+    *,
+    user_id: int,
+    context: BotContext,
+    ctx: QueryContext,
+) -> int:
+    """Dispatch pending squad tasks whose dependencies just became satisfied."""
+    if not ctx.squad_thread_id:
+        return 0
+    try:
+        from koda.config import SQUAD_CLAIM_TTL_S
+        from koda.squads import get_squad_task_store, get_squad_thread_store
+
+        thread_store = get_squad_thread_store()
+        task_store = get_squad_task_store()
+        if thread_store is None or task_store is None:
+            return 0
+        thread = await thread_store.get_thread(ctx.squad_thread_id)
+        if thread is None or not thread.coordinator_agent_id:
+            return 0
+        pending = await task_store.list_tasks(
+            thread_id=ctx.squad_thread_id,
+            status="pending",
+            limit=50,
+        )
+        dispatched = 0
+        for task in pending:
+            assignee = str(task.assigned_agent_id or "").strip()
+            if not assignee or assignee == thread.coordinator_agent_id:
+                continue
+            ready = True
+            for dependency_id in task.depends_on:
+                dependency = await task_store.get_task(dependency_id)
+                if dependency is None or dependency.status != "done":
+                    ready = False
+                    break
+            if not ready:
+                continue
+
+            try:
+                claimed = await task_store.claim_task(
+                    task_id=task.id,
+                    agent_id=assignee,
+                    ttl_seconds=SQUAD_CLAIM_TTL_S,
+                )
+            except Exception:
+                log.exception(
+                    "squad_unblocked_task_claim_failed",
+                    thread_id=ctx.squad_thread_id,
+                    squad_task_id=task.id,
+                    assignee=assignee,
+                )
+                continue
+            request_id = f"coord-{claimed.id}"
+            parent_message_id = (
+                str(claimed.metadata.get("coordination_parent_message_id") or "")
+                or ctx.parent_message_id
+                or f"task-{ctx.squad_task_id}"
+            )
+            request_content = _render_existing_squad_task_request(claimed)
+            with contextlib.suppress(Exception):
+                await thread_store.post_thread_message(
+                    thread_id=ctx.squad_thread_id,
+                    from_agent=thread.coordinator_agent_id,
+                    content=f"[task_unblocked] {claimed.title} -> {assignee}",
+                    message_type="status_update",
+                    metadata={
+                        "event_type": "task_unblocked",
+                        "squad_task_id": claimed.id,
+                        "parent_message_id": parent_message_id,
+                        "dependencies": list(claimed.depends_on),
+                    },
+                )
+            app = getattr(context, "application", None)
+            chat_id = int(thread.telegram_chat_id or 0)
+            try:
+                if app is not None and chat_id:
+                    await enqueue_squad_agent_task(
+                        application=app,
+                        user_id=user_id or int(thread.owner_user_id or 0),
+                        chat_id=chat_id,
+                        query_text=request_content,
+                        executing_agent_id=assignee,
+                        squad_thread_id=ctx.squad_thread_id,
+                        squad_task_id=claimed.id,
+                        parent_message_id=parent_message_id,
+                        delegation_chain=[thread.coordinator_agent_id],
+                        delegation_request_id=request_id,
+                        delegation_origin_agent_id=thread.coordinator_agent_id,
+                        telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+                        bot_override=getattr(context, "bot", None),
+                    )
+                else:
+                    from koda.agents import get_message_bus
+
+                    await get_message_bus().send(
+                        from_agent=thread.coordinator_agent_id,
+                        to_agent=assignee,
+                        content=request_content,
+                        metadata={
+                            "kind": "task_request",
+                            "thread_id": ctx.squad_thread_id,
+                            "squad_id": thread.squad_id,
+                            "squad_task_id": claimed.id,
+                            "task_id": claimed.id,
+                            "request_id": request_id,
+                            "correlation_id": request_id,
+                            "parent_message_id": parent_message_id,
+                            "delegation_chain": [thread.coordinator_agent_id],
+                            "telegram_chat_id": thread.telegram_chat_id,
+                            "telegram_message_thread_id": ctx.telegram_message_thread_id
+                            or thread.telegram_message_thread_id,
+                            "user_id": user_id or thread.owner_user_id,
+                            "chat_id": thread.telegram_chat_id or 0,
+                            "payload": {
+                                "task_id": claimed.id,
+                                "description": claimed.description,
+                                "deliverables": list(claimed.deliverables_spec),
+                                "acceptance_criteria": list(claimed.acceptance_criteria),
+                                "context_refs": ["user_input", "squad_context", "dependency_task_results"],
+                            },
+                        },
+                    )
+            except Exception:
+                log.exception(
+                    "squad_unblocked_task_enqueue_failed",
+                    thread_id=ctx.squad_thread_id,
+                    squad_task_id=claimed.id,
+                    assignee=assignee,
+                )
+                continue
+            dispatched += 1
+        return dispatched
+    except Exception:
+        log.exception(
+            "squad_unblocked_task_dispatch_failed",
+            thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+        )
+        return 0
+
+
+async def _maybe_enqueue_squad_coordinator_synthesis(
+    *,
+    user_id: int,
+    context: BotContext,
+    ctx: QueryContext,
+    response_text: str,
+    squad_message_id: str | None,
+    artifact_ids: list[str],
+) -> None:
+    if not ctx.squad_thread_id or not ctx.squad_task_id:
+        return
+    try:
+        from koda.squads import (
+            dispatch_squad_turn,
+            evaluate_synthesis_readiness,
+            get_squad_task_store,
+            get_squad_thread_store,
+            synthesis_gate_metric,
+        )
+
+        thread_store = get_squad_thread_store()
+        task_store = get_squad_task_store()
+        if thread_store is None or task_store is None:
+            return
+        thread = await thread_store.get_thread(ctx.squad_thread_id)
+        if thread is None or not thread.coordinator_agent_id:
+            return
+        executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
+        if thread.coordinator_agent_id == executing_agent:
+            return
+        open_tasks = []
+        for attempt in range(4):
+            open_tasks = await task_store.list_tasks(
+                thread_id=ctx.squad_thread_id,
+                status=["pending", "claimed", "in_progress", "blocked"],
+                limit=1,
+            )
+            if not open_tasks:
+                break
+            if attempt < 3:
+                await asyncio.sleep(0.5)
+        if open_tasks:
+            readiness = evaluate_synthesis_readiness(tasks=open_tasks)
+            synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
+            return
+        synthesis_parent_id = ctx.parent_message_id
+        synthesis_idempotency_key = (
+            f"squad_synthesis:{ctx.squad_thread_id}:{synthesis_parent_id}:{thread.coordinator_agent_id}"
+        )
+        visible_results: list[str] = []
+        confirmed_results: list[str] = []
+        result_messages: list[dict[str, Any]] = []
+        handoff_events: list[dict[str, Any]] = []
+        declared_timeouts: list[dict[str, Any]] = []
+        with contextlib.suppress(Exception):
+            history = await thread_store.thread_history(thread_id=ctx.squad_thread_id, limit=120)
+            for message in history:
+                raw_metadata = message.get("metadata")
+                metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+                if metadata.get("idempotency_key") == synthesis_idempotency_key:
+                    return
+                raw_payload = metadata.get("payload")
+                payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
+                if payload.get("schema_version") == "handoff_event.v1" and payload.get("parent_message_id") in {
+                    ctx.parent_message_id,
+                    squad_message_id,
+                }:
+                    handoff_events.append({"payload": payload})
+                    if str(payload.get("status") or "").lower() in {"timed_out", "declined", "failed"}:
+                        declared_timeouts.append(
+                            {
+                                "kind": "handoff_event",
+                                "id": payload.get("handoff_id"),
+                                "status": payload.get("status"),
+                                "agent_ids": payload.get("destination_agent_ids") or [],
+                            }
+                        )
+            for message in reversed(history):
+                if message.get("type") != "task_result":
+                    continue
+                raw_metadata = message.get("metadata")
+                metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+                if metadata.get("parent_message_id") != ctx.parent_message_id:
+                    continue
+                task_id = str(metadata.get("squad_task_id") or "").strip()
+                if not task_id:
+                    continue
+                agent = str(message.get("from") or "agent").strip() or "agent"
+                content = str(message.get("content") or "").strip()
+                if content:
+                    result_messages.append(message)
+                    visible_results.append(f"{agent} / {task_id}:\n{content[:1500]}")
+                    first_line = next((line.strip() for line in content.splitlines() if line.strip()), "")
+                    if first_line:
+                        confirmed_results.append(f"- {agent} / {task_id}: {first_line[:500]}")
+        if not any(ctx.squad_task_id and f"/ {ctx.squad_task_id}:" in item for item in visible_results):
+            visible_results.append(f"{executing_agent} / {ctx.squad_task_id}:\n{response_text[:1500]}")
+            result_messages.append(
+                {
+                    "type": "task_result",
+                    "id": squad_message_id or ctx.squad_task_id,
+                    "from": executing_agent,
+                    "metadata": {"squad_task_id": ctx.squad_task_id},
+                }
+            )
+            first_line = next((line.strip() for line in response_text.splitlines() if line.strip()), "")
+            if first_line:
+                confirmed_results.append(f"- {executing_agent} / {ctx.squad_task_id}: {first_line[:500]}")
+        readiness = evaluate_synthesis_readiness(
+            handoff_events=handoff_events,
+            result_messages=result_messages,
+            declared_timeouts=declared_timeouts,
+        )
+        synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
+        if not readiness.ready:
+            return
+        visible_results_block = "\n\n".join(visible_results)
+        confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
+        timeout_block = ""
+        if declared_timeouts:
+            timeout_lines = [
+                "- " + ", ".join(str(agent) for agent in item.get("agent_ids") or []) + f": {item.get('status')}"
+                for item in declared_timeouts
+            ]
+            timeout_block = "\n\nTimeouts/bloqueios declarados:\n" + "\n".join(timeout_lines)
+        synthesis_query = (
+            "Todos os task_result abertos deste ciclo já foram recebidos. "
+            "Sintetize a entrega final para o usuário usando obrigatoriamente todos os resultados visíveis abaixo. "
+            "Não use apenas o último resultado e declare divergências ou lacunas se houver. "
+            "Se houver handoff recusado, falho ou expirado, declare explicitamente os agentes afetados. "
+            "Preserve literalmente marcadores, IDs, labels de aceite e tokens de verificação presentes nos resultados; "
+            "não os traduza, normalize ou parafraseie. "
+            "Formato obrigatório da resposta final: comece com a seção 'Resultados confirmados:' e copie "
+            "literalmente cada linha confirmada abaixo antes da síntese profissional.\n\n"
+            f"Resultados confirmados:\n{confirmed_results_block}\n\n"
+            f"Resultados visíveis deste ciclo:\n{visible_results_block}"
+            f"{timeout_block}"
+        )
+        await dispatch_squad_turn(
+            target_agent_id=thread.coordinator_agent_id,
+            thread=thread,
+            thread_store=thread_store,
+            query_text=synthesis_query,
+            parent_message_id=squad_message_id or ctx.parent_message_id,
+            metadata={
+                "kind": "task_result",
+                "from_agent": executing_agent,
+                "thread_id": ctx.squad_thread_id,
+                "squad_id": thread.squad_id,
+                "parent_message_id": squad_message_id or ctx.parent_message_id,
+                "telegram_chat_id": thread.telegram_chat_id,
+                "telegram_message_thread_id": ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+                "user_id": user_id or thread.owner_user_id,
+                "chat_id": thread.telegram_chat_id or 0,
+                "delivery_intent": "final_synthesis",
+                "idempotency_key": synthesis_idempotency_key,
+                "payload": {
+                    "task_id": ctx.squad_task_id,
+                    "status": "ok",
+                    "output_md": response_text,
+                    "artifact_ids": artifact_ids,
+                },
+            },
+            application=getattr(context, "application", None),
+            user_id=user_id or int(thread.owner_user_id or 0),
+            chat_id=int(thread.telegram_chat_id or 0),
+            delegation_chain=[executing_agent],
+            delegation_request_id=synthesis_idempotency_key,
+            delegation_origin_agent_id=executing_agent,
+            telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+            bot_override=getattr(context, "bot", None),
+        )
+    except Exception:
+        log.exception(
+            "squad_coordinator_synthesis_enqueue_failed",
+            thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+        )
+
+
+async def _maybe_enqueue_squad_reply_synthesis(
+    *,
+    user_id: int,
+    context: BotContext,
+    ctx: QueryContext,
+    response_text: str,
+    squad_message_id: str | None,
+) -> None:
+    if not ctx.squad_thread_id or not ctx.delegation_request_id or ctx.squad_task_id:
+        return
+    try:
+        from koda.squads import (
+            dispatch_squad_turn,
+            evaluate_synthesis_readiness,
+            get_squad_thread_store,
+            get_thread_reply_service,
+            message_ref_to_id,
+            synthesis_gate_metric,
+        )
+
+        thread_store = get_squad_thread_store()
+        if thread_store is None:
+            return
+        thread = await thread_store.get_thread(ctx.squad_thread_id)
+        if thread is None or not thread.coordinator_agent_id:
+            await thread_store.post_thread_message(
+                thread_id=ctx.squad_thread_id,
+                from_agent="system",
+                content="[synthesis_blocked] thread reply cycle has no coordinator",
+                message_type="system_event",
+                metadata={
+                    "event_type": "synthesis_blocked",
+                    "parent_message_id": ctx.parent_message_id,
+                    "correlation_id": ctx.delegation_request_id,
+                },
+            )
+            return
+        executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
+        if executing_agent == thread.coordinator_agent_id:
+            return
+        source_id = message_ref_to_id(ctx.parent_message_id)
+        reply_service = get_thread_reply_service(thread_store)
+        if reply_service is not None and source_id is not None:
+            open_items = await reply_service.list_obligations(
+                thread_id=ctx.squad_thread_id,
+                message_ids=[source_id],
+                status="open",
+            )
+            if open_items:
+                readiness = evaluate_synthesis_readiness(reply_obligations=open_items)
+                synthesis_gate_metric(gate="reply_cycle", result=readiness)
+                return
+        readiness = evaluate_synthesis_readiness(
+            result_messages=[
+                {
+                    "type": "agent_reply",
+                    "id": squad_message_id or ctx.delegation_request_id,
+                    "from": executing_agent,
+                }
+            ]
+        )
+        synthesis_gate_metric(gate="reply_cycle", result=readiness)
+        if not readiness.ready:
+            return
+        synthesis_query = (
+            "As obrigações de reply deste ciclo foram respondidas. "
+            "Sintetize a resposta final para o usuário usando apenas as mensagens visíveis da thread, "
+            "incluindo divergências, pendências canceladas ou falhas se existirem. "
+            f"Última contribuição ({executing_agent}): {response_text[:1200]}"
+        )
+        result = await dispatch_squad_turn(
+            target_agent_id=thread.coordinator_agent_id,
+            thread=thread,
+            thread_store=thread_store,
+            query_text=synthesis_query,
+            parent_message_id=squad_message_id or ctx.parent_message_id,
+            metadata={
+                "from_agent": executing_agent,
+                "source": "reply_obligations_resolved",
+                "delivery_intent": "final_synthesis",
+                "reply_contract_version": "thread_reply.v1",
+                "reply_kind": "synthesis_request",
+                "correlation_id": ctx.delegation_request_id,
+            },
+            application=getattr(context, "application", None),
+            user_id=user_id or int(thread.owner_user_id or 0),
+            chat_id=int(thread.telegram_chat_id or 0),
+            delegation_chain=[executing_agent],
+            telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+            bot_override=getattr(context, "bot", None),
+        )
+        if result.dispatched:
+            await thread_store.notify_event(
+                thread_id=ctx.squad_thread_id,
+                event_type="synthesis_created",
+                data={"coordinator_agent_id": thread.coordinator_agent_id, "dispatch": result.to_dict()},
+            )
+    except Exception:
+        log.exception("squad_reply_synthesis_enqueue_failed", thread_id=ctx.squad_thread_id)
+
+
+async def _post_process(
+    user_id: int,
+    context: BotContext,
+    run_result: RunResult,
+    query_text: str,
+    work_dir: str,
+    model: str,
+    *,
+    task_id: int | None = None,
+    ctx: QueryContext | None = None,
+    dry_run: bool = False,
+    cacheable: bool = True,
+    final_status: str = "completed",
+    response_text_override: str | None = None,
+    delivery_outcome: DeliveryOutcome | None = None,
+) -> None:
+    """Update session, stats, log query, extract memories."""
+    effective_model = run_result.model or model
+
+    # Update session and stats
+    if run_result.session_id and not dry_run:
+        context.user_data["session_id"] = run_result.session_id
+        if run_result.provider_session_id:
+            context.user_data.setdefault("provider_sessions", {})[run_result.provider] = run_result.provider_session_id
+            save_provider_session_mapping(
+                run_result.session_id,
+                run_result.provider,
+                run_result.provider_session_id,
+                effective_model,
+            )
+        save_session(
+            user_id,
+            run_result.session_id,
+            provider=run_result.provider,
+            provider_session_id=run_result.provider_session_id,
+            model=effective_model,
+        )
+
+    cost = run_result.cost_usd
+    context.user_data["total_cost"] += cost
+    context.user_data["query_count"] += 1
+
+    save_user_cost(user_id, context.user_data["total_cost"], context.user_data["query_count"])
+
+    # Post-execution budget enforcement
+    if context.user_data.get("total_cost", 0.0) > MAX_TOTAL_BUDGET_USD:
+        log.warning(
+            "budget_overrun_detected",
+            user_id=user_id,
+            total_cost=context.user_data["total_cost"],
+            max_budget=MAX_TOTAL_BUDGET_USD,
+        )
+        context.user_data["budget_exceeded"] = True
+
+    # Log canonically through the history store (use "cache" as model for cache-served responses)
+    log_model = "cache" if run_result.stop_reason == "cache_hit" else effective_model
+    query_id: int | None = None
+    squad_message_id: str | None = None
+    response_text = response_text_override if response_text_override is not None else run_result.result
+    squad_artifact_ids: list[str] = []
+    if not dry_run and ctx is not None and ctx.squad_thread_id:
+        try:
+            from koda.squads import get_squad_thread_store
+
+            store = get_squad_thread_store()
+            if store is not None:
+                squad_artifact_ids = await _register_squad_artifacts(
+                    ctx=ctx,
+                    runtime_task_id=task_id,
+                    created_artifacts=list(delivery_outcome.created_artifacts) if delivery_outcome else [],
+                    run_result=run_result,
+                )
+                message_kind = "task_result" if ctx.squad_task_id else "agent_text"
+                correlation_id = ctx.delegation_request_id or ctx.squad_task_id or ctx.parent_message_id
+                reply_kind = "agent_result" if ctx.delegation_request_id else message_kind
+                posted_id = await store.post_thread_message(
+                    thread_id=ctx.squad_thread_id,
+                    from_agent=ctx.executing_agent_id or AGENT_ID or "default",
+                    content=response_text,
+                    message_type=message_kind,
+                    metadata={
+                        "query_cost_usd": cost,
+                        "provider": run_result.provider,
+                        "model": log_model,
+                        "squad_task_id": ctx.squad_task_id,
+                        "parent_message_id": ctx.parent_message_id,
+                        "reply_contract_version": "thread_reply.v1",
+                        "reply_kind": reply_kind,
+                        "in_reply_to": ctx.parent_message_id,
+                        "correlation_id": correlation_id,
+                        "payload": {
+                            "task_id": ctx.squad_task_id,
+                            "status": "failed" if run_result.error else "ok",
+                            "output_md": response_text,
+                            "artifact_ids": squad_artifact_ids,
+                            "cost_usd": cost,
+                        }
+                        if ctx.squad_task_id
+                        else {"markdown": response_text},
+                    },
+                    in_reply_to=ctx.parent_message_id,
+                    correlation_id=str(correlation_id) if correlation_id else None,
+                )
+                squad_message_id = f"msg-{posted_id}"
+                try:
+                    from koda.squads import get_thread_reply_service
+
+                    reply_service = get_thread_reply_service(store)
+                    if reply_service is not None:
+                        await reply_service.resolve_for_reply(
+                            thread_id=ctx.squad_thread_id,
+                            reply_message_id=posted_id,
+                            from_agent=ctx.executing_agent_id or AGENT_ID or "default",
+                            in_reply_to=ctx.parent_message_id,
+                            correlation_id=str(correlation_id) if correlation_id else None,
+                        )
+                except Exception:
+                    log.exception("squad_reply_obligation_resolve_failed", thread_id=ctx.squad_thread_id)
+                await _advance_squad_task_from_run(
+                    ctx=ctx,
+                    run_result=run_result,
+                    response_text=response_text,
+                    artifact_ids=squad_artifact_ids,
+                )
+        except Exception:
+            log.exception("squad_post_process_message_persist_failed", thread_id=ctx.squad_thread_id)
+        await _maybe_enqueue_unblocked_squad_tasks(
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+        )
+        await _maybe_enqueue_squad_coordinator_synthesis(
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+            response_text=response_text,
+            squad_message_id=squad_message_id,
+            artifact_ids=squad_artifact_ids,
+        )
+        await _maybe_enqueue_squad_reply_synthesis(
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+            response_text=response_text,
+            squad_message_id=squad_message_id,
+        )
+        if ctx.delegation_request_id and ctx.delegation_origin_agent_id:
+            try:
+                from koda.agents import get_message_bus
+                from koda.agents.models import DelegationResult
+
+                get_message_bus().resolve_delegation(
+                    ctx.delegation_request_id,
+                    DelegationResult(
+                        request_id=ctx.delegation_request_id,
+                        from_agent=ctx.executing_agent_id or AGENT_ID or "default",
+                        to_agent=ctx.delegation_origin_agent_id,
+                        success=not run_result.error,
+                        result=response_text,
+                        error=response_text if run_result.error else None,
+                        duration_ms=None,
+                        metadata={
+                            "task_id": ctx.squad_task_id,
+                            "thread_id": ctx.squad_thread_id,
+                            "message_id": squad_message_id,
+                            "cost_usd": cost,
+                            "artifact_ids": squad_artifact_ids,
+                        },
+                    ),
+                )
+            except Exception:
+                log.exception(
+                    "squad_delegation_auto_resolve_failed",
+                    thread_id=ctx.squad_thread_id,
+                    request_id=ctx.delegation_request_id,
+                )
+    if not dry_run:
+        query_id = log_query(
+            user_id=user_id,
+            query_text=query_text,
+            response_text=response_text,
+            cost_usd=cost,
+            provider=run_result.provider,
+            model=log_model,
+            session_id=run_result.session_id,
+            provider_session_id=run_result.provider_session_id,
+            usage=run_result.usage,
+            work_dir=work_dir,
+            error=run_result.error,
+            squad_thread_id=getattr(ctx, "squad_thread_id", None) if ctx is not None else None,
+            squad_message_id=squad_message_id,
+            squad_task_id=getattr(ctx, "squad_task_id", None) if ctx is not None else None,
+        )
+        context.user_data["last_query_id"] = query_id
+        if ctx and getattr(ctx, "execution_episode_id", None) is not None:
+            context.user_data["last_execution_episode_id"] = ctx.execution_episode_id
+
+        # record billed LLM spend with the workspace
+        # policy engine so the monthly cap + warning thresholds reflect
+        # real-time consumption. Permissive on failure (spend-ledger
+        # drift is preferable to losing a generated response).
+        if cost > 0:
+            from koda.internal_rpc.policy_engine import record_spend_safe
+            from koda.services.policy_engine_runtime import get_policy_engine_client
+
+            policy_client = await get_policy_engine_client()
+            await record_spend_safe(
+                policy_client,
+                agent_id=str(AGENT_ID or "default"),
+                cost_usd=float(cost),
+                provider=str(run_result.provider or ""),
+                model=str(log_model or ""),
+            )
+
+    # Extract and store memories (fire-and-forget)
+    if not run_result.error and not dry_run and final_status == "completed":
+        try:
+            from koda.memory.config import MEMORY_ENABLED
+
+            if MEMORY_ENABLED:
+                from koda.memory import get_memory_manager
+                from koda.memory.extraction_supervisor import get_memory_extraction_supervisor
+
+                async def _extract_memory() -> None:
+                    if (
+                        ctx
+                        and ctx.is_child_run
+                        and not bool((ctx.child_context_policy or {}).get("allow_memory_writes"))
+                    ):
+                        try:
+                            from koda.memory.quality import record_memory_quality_counter
+
+                            record_memory_quality_counter(
+                                ctx.executing_agent_id or AGENT_ID,
+                                "memory_write",
+                                "denied",
+                                "child_run",
+                            )
+                        except Exception:
+                            log.debug("child_run_memory_write_counter_failed", exc_info=True)
+                        return
+                    mm = get_memory_manager()
+                    knowledge_ctx = getattr(ctx, "knowledge_query_context", None)
+                    await mm.post_query(
+                        query_text,
+                        run_result.result,
+                        user_id,
+                        run_result.session_id,
+                        source_query_id=query_id,
+                        source_task_id=task_id,
+                        source_episode_id=getattr(ctx, "execution_episode_id", None),
+                        project_key=str(getattr(knowledge_ctx, "project_key", "") or ""),
+                        environment=str(getattr(knowledge_ctx, "environment", "") or ""),
+                        team=str(getattr(knowledge_ctx, "team", "") or ""),
+                    )
+
+                get_memory_extraction_supervisor().submit(
+                    _extract_memory,
+                    agent_id=AGENT_ID,
+                    user_id=user_id,
+                    task_id=task_id,
+                )
+        except Exception:
+            log.exception("memory_extraction_setup_error")
+
+    # Cache store and script auto-extraction (fire-and-forget)
+    if (
+        not run_result.error
+        and run_result.stop_reason != "cache_hit"
+        and not dry_run
+        and cacheable
+        and final_status == "completed"
+    ):
+        try:
+            from koda.services.cache_config import CACHE_ENABLED
+            from koda.services.cache_manager import should_cache
+
+            if (
+                CACHE_ENABLED
+                and should_cache(query_text, run_result.result)
+                and _queue_manager_action_allowed(
+                    integration_id="cache",
+                    action_id="store",
+                    user_id=user_id,
+                    task_id=task_id,
+                    details={"query_text": query_text, "work_dir": work_dir},
+                )
+            ):
+                from koda.services.cache_manager import get_cache_manager
+
+                async def _cache_store() -> None:
+                    try:
+                        cm = get_cache_manager()
+                        await cm.store(
+                            user_id,
+                            query_text,
+                            run_result.result,
+                            effective_model,
+                            cost,
+                            work_dir,
+                            source_scope=tuple(
+                                getattr(getattr(ctx, "knowledge_query_context", None), "allowed_source_labels", ())
+                                or ()
+                            ),
+                            strategy_version=str(
+                                getattr(getattr(ctx, "knowledge_query_context", None), "retrieval_strategy", "") or ""
+                            ),
+                            model_family=run_result.provider,
+                        )
+                    except Exception:
+                        log.exception("cache_store_error")
+
+                asyncio.create_task(_cache_store())
+        except Exception:
+            log.exception("cache_store_setup_error")
+
+        try:
+            from koda.services.cache_config import SCRIPT_AUTO_EXTRACT, SCRIPT_LIBRARY_ENABLED
+
+            if (
+                SCRIPT_LIBRARY_ENABLED
+                and SCRIPT_AUTO_EXTRACT
+                and _queue_manager_action_allowed(
+                    integration_id="script_library",
+                    action_id="auto_extract",
+                    user_id=user_id,
+                    task_id=task_id,
+                    details={"query_text": query_text},
+                )
+            ):
+                from koda.services.script_manager import get_script_manager
+
+                async def _script_extract() -> None:
+                    try:
+                        sm = get_script_manager()
+                        await sm.auto_extract(query_text, run_result.result, user_id)
+                    except Exception:
+                        log.exception("script_extraction_error")
+
+                asyncio.create_task(_script_extract())
+        except Exception:
+            log.exception("script_extraction_setup_error")
+
+    log.info(
+        "query_complete",
+        cost_usd=cost,
+        model=log_model,
+        error=run_result.error,
+        dry_run=dry_run,
+        final_status=final_status,
+    )
+
+
+# Main queue processor (orchestrator) — parallel dispatcher
+
+
+async def _process_task_item(
+    ctx: QueryContext,
+    item: QueueItem,
+    user_id: int,
+    chat_id: int,
+    context: BotContext,
+    task_id: int,
+) -> RunResult:
+    """Core processing logic for a single task (extracted from old _process_queue)."""
+    # Short-circuit for high-confidence cache hits
+    if not ctx.artifact_dossiers and ctx.cache_hit and ctx.cache_hit.match_type in ("exact", "fuzzy_auto"):
+        log.info(
+            "cache_short_circuit",
+            match_type=ctx.cache_hit.match_type,
+            similarity=round(ctx.cache_hit.similarity, 3),
+        )
+        return RunResult(
+            provider=ctx.provider,
+            model=ctx.model,
+            result=ctx.cache_hit.response,
+            session_id=ctx.session_id,
+            provider_session_id=ctx.provider_session_id,
+            cost_usd=0.0,
+            error=False,
+            stop_reason="cache_hit",
+        )
+
+    run_result = await _run_with_provider_fallback(ctx, item, user_id, chat_id, context, task_id=task_id)
+
+    # Agent loop: execute agent tool calls if present
+    if run_result and run_result.result:
+        from koda.services.tool_dispatcher import parse_agent_commands as _parse_cmds
+
+        _calls, _ = _parse_cmds(run_result.result)
+        if _calls or _run_result_has_native_tool_calls(run_result):
+            run_result = await _run_agent_loop(
+                ctx,
+                item,
+                user_id,
+                chat_id,
+                context,
+                run_result,
+                task_id=task_id,
+            )
+
+    run_result.warnings.extend(ctx.warnings)
+    return run_result
+
+
+async def _send_task_error(
+    task_info: TaskInfo,
+    error_msg: str,
+    context: BotContext,
+    item: QueueItem | None = None,
+) -> None:
+    """Notify the user of a task failure via Telegram."""
+    if item and item.silent_response:
+        return
+    from koda.utils.formatting import format_error_message
+
+    text = f"Task #{task_info.task_id} falhou:\n{format_error_message(error_msg)}"
+    with contextlib.suppress(Exception):
+        from telegram.constants import ParseMode
+
+        if item and item.update and item.update.effective_message:
+            await item.update.effective_message.reply_text(text, parse_mode=ParseMode.HTML)
+        else:
+            await context.bot.send_message(chat_id=task_info.chat_id, text=text, parse_mode=ParseMode.HTML)
+
+
+def _scheduled_summary(text: str | None, limit: int = 320) -> str | None:
+    if not text:
+        return None
+    compact = " ".join(text.strip().split())
+    if not compact:
+        return None
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."
+
+
+async def _finalize_scheduled_run(
+    *,
+    item: QueueItem | None,
+    ctx: QueryContext | None,
+    run_result: RunResult | None,
+    task_id: int,
+    task_info: TaskInfo,
+    context: BotContext,
+    error_message: str | None = None,
+    dlq_id: int | None = None,
+    duration_ms: float | None = None,
+) -> None:
+    """Bridge queue outcomes back into the unified scheduled job ledger."""
+    if not item or not item.is_scheduled_run or not item.scheduled_run_id:
+        return
+
+    from koda.services.scheduled_jobs import (
+        derive_verification_status,
+        get_run_details,
+        handle_run_cancellation,
+        handle_run_failure,
+        handle_run_success,
+    )
+
+    run_details = get_run_details(item.scheduled_run_id)
+    verification_policy = None
+    if run_details:
+        verification_policy = (run_details.get("job") or {}).get("verification_policy")
+
+    tool_trace = run_result.tool_execution_trace if run_result else []
+    had_writes = any(step.get("metadata", {}).get("write") for step in tool_trace)
+    verification_status = derive_verification_status(
+        trigger_reason=item.scheduled_trigger_reason or "",
+        dry_run=bool(ctx.dry_run) if ctx else bool(item.scheduled_dry_run),
+        had_writes=had_writes,
+        verified_before_finalize=bool(ctx.verified_before_finalize) if ctx else False,
+        tool_execution_trace=tool_trace,
+        error=bool(error_message),
+        error_message=error_message,
+        verification_policy=verification_policy,
+    )
+
+    if verification_status == "cancelled":
+        await handle_run_cancellation(
+            run_id=item.scheduled_run_id,
+            task_id=task_id,
+            status="cancelled",
+            reason=error_message or "Cancelled by scheduler control.",
+            telegram_bot=context.bot,
+            notification_chat_id=task_info.chat_id,
+        )
+        return
+
+    if error_message or verification_status in {"failed", "blocked"}:
+        await handle_run_failure(
+            run_id=item.scheduled_run_id,
+            task_id=task_id,
+            error_message=error_message or "verification failed",
+            provider_effective=(
+                run_result.provider if run_result else (ctx.provider if ctx else item.scheduled_provider)
+            ),
+            model_effective=run_result.model if run_result else (ctx.model if ctx else item.scheduled_model),
+            duration_ms=duration_ms,
+            verification_status=verification_status,
+            notification_summary=_scheduled_summary(run_result.result if run_result else error_message),
+            notification_chat_id=task_info.chat_id,
+            telegram_bot=context.bot,
+            dlq_id=dlq_id,
+        )
+        return
+
+    await handle_run_success(
+        run_id=item.scheduled_run_id,
+        task_id=task_id,
+        provider_effective=run_result.provider if run_result else (ctx.provider if ctx else item.scheduled_provider),
+        model_effective=run_result.model if run_result else (ctx.model if ctx else item.scheduled_model),
+        duration_ms=duration_ms,
+        verification_status=verification_status,
+        summary_text=_scheduled_summary(run_result.result if run_result else None),
+        fallback_chain=run_result.fallback_chain if run_result else [],
+        artifacts=_extract_created_artifacts(run_result, ctx.work_dir if ctx else None) if run_result else [],
+        telegram_bot=context.bot,
+        notification_chat_id=task_info.chat_id,
+    )
+
+
+@contextlib.asynccontextmanager
+async def _task_capacity_scope(raw_item: Any, semaphore: asyncio.Semaphore) -> Any:
+    """Acquire normal task capacity unless this is a bounded child-run lane.
+
+    Parent turns hold the normal user/global task semaphores while waiting for
+    child results. Re-acquiring the same capacity in a child run can deadlock,
+    so child-runs rely on their dedicated fan-out semaphore and still pass
+    through leases, runtime status, policy, sandbox, and provider handling.
+    """
+
+    if isinstance(raw_item, dict) and raw_item.get("_child_run"):
+        yield
+        return
+    async with _global_semaphore, semaphore:
+        yield
+
+
+async def _execute_single_task(
+    raw_item: Any,
+    user_id: int,
+    context: BotContext,
+    task_id: int,
+    task_info: TaskInfo,
+) -> None:
+    """Execute a single task with semaphore, retry, and error reporting."""
+    from koda.services import audit, metrics
+    from koda.services.runtime import get_runtime_controller
+
+    semaphore = _get_user_semaphore(user_id)
+    item: QueueItem | None = None
+    ctx: QueryContext | None = None
+    run_result: RunResult | None = None
+    execution_timeline: list[dict[str, Any]] = []
+    runtime = get_runtime_controller()
+    heartbeat_task: asyncio.Task[None] | None = None
+    runtime_capacity: contextlib.AsyncExitStack | None = None
+    lease_cancel: asyncio.Event | None = None
+    lease_loop: asyncio.Task[None] | None = None
+
+    audit.emit_task_lifecycle("task.assigned", user_id=user_id, task_id=task_id)
+    execution_timeline.append(
+        _make_timeline_item(
+            "task.assigned",
+            "Task assigned",
+            summary="The run was forwarded to the processing queue.",
+            details={"task_id": task_id},
+        )
+    )
+
+    try:
+        metrics.ACTIVE_TASKS.labels(agent_id=_agent_id_label).inc()
+        async with _task_capacity_scope(raw_item, semaphore):
+            ctx_user_id.set(user_id)
+            query_id = str(uuid.uuid4())[:8]
+            ctx_query_id.set(query_id)
+
+            item = _parse_queue_item(raw_item)
+            if RUNTIME_ENVIRONMENTS_ENABLED:
+                try:
+                    runtime.store.update_runtime_queue_item(task_id, status="running", queue_position=0)
+                except Exception:
+                    log.debug("runtime_queue_status_update_skipped", task_id=task_id)
+            else:
+                _update_runtime_queue_status(task_id, "running")
+            if RUNTIME_ENVIRONMENTS_ENABLED:
+                from koda.utils.command_helpers import init_user_data
+
+                init_user_data(context.user_data, user_id=user_id)
+                try:
+                    existing_env = (
+                        runtime.store.get_environment_by_task(task_id)
+                        if isinstance(raw_item, dict) and raw_item.get("_runtime_preprovisioned")
+                        else None
+                    )
+                    if existing_env is not None:
+                        if str(existing_env.get("environment_kind") or "") == "dev_worktree_browser":
+                            existing_env = (
+                                await runtime.ensure_environment_live_resources(
+                                    task_id=task_id,
+                                    env_id=int(existing_env["id"]),
+                                )
+                                or existing_env
+                            )
+                        task_info.runtime_env_id = int(existing_env["id"])
+                        task_info.runtime_work_dir = str(existing_env["workspace_path"])
+                        item.runtime_work_dir = str(existing_env["workspace_path"])
+                        if existing_env.get("base_work_dir"):
+                            context.user_data["source_root_path"] = str(existing_env["base_work_dir"])
+                        task_info.runtime_classification = str(existing_env.get("classification") or "light")
+                        task_info.runtime_environment_kind = str(existing_env.get("environment_kind") or "dev_worktree")
+                        heartbeat_task = asyncio.create_task(
+                            _runtime_heartbeat_loop(
+                                task_id,
+                                task_info.runtime_env_id,
+                                lambda: task_info.status,
+                            )
+                        )
+                    else:
+                        classification = await runtime.classify_task(task_id=task_id, query_text=item.query_text)
+                        task_info.runtime_classification = classification.classification
+                        task_info.runtime_environment_kind = classification.environment_kind
+                        runtime_capacity = contextlib.AsyncExitStack()
+                        await runtime_capacity.__aenter__()
+                        if classification.classification == "standard":
+                            await runtime_capacity.enter_async_context(_standard_task_semaphore)
+                        if classification.classification == "heavy":
+                            await runtime_capacity.enter_async_context(_heavy_task_semaphore)
+                        if classification.environment_kind == "dev_worktree_browser":
+                            await runtime_capacity.enter_async_context(_browser_task_semaphore)
+                        base_work_dir, source_root_path = _resolve_task_source_work_dir(
+                            item,
+                            context,
+                            strict=item.is_scheduled_run,
+                        )
+                        if source_root_path:
+                            context.user_data["source_root_path"] = source_root_path
+                        env = await runtime.provision_environment(
+                            task_id=task_id,
+                            user_id=user_id,
+                            chat_id=item.chat_id,
+                            query_text=item.query_text,
+                            base_work_dir=base_work_dir,
+                            classification=classification,
+                        )
+                        if env is not None:
+                            task_info.runtime_env_id = int(env["id"])
+                            task_info.runtime_work_dir = str(env["workspace_path"])
+                            item.runtime_work_dir = str(env["workspace_path"])
+                            heartbeat_task = asyncio.create_task(
+                                _runtime_heartbeat_loop(
+                                    task_id,
+                                    task_info.runtime_env_id,
+                                    lambda: task_info.status,
+                                )
+                            )
+                except Exception:
+                    log.debug("runtime_environments_setup_skipped", task_id=task_id)
+            # Atomic lease acquisition. If another worker (or the janitor)
+            # already holds a fresh lease on this row we abort silently —
+            # the row is being processed elsewhere and double-execution is
+            # not safe. The renewal loop then keeps the lease alive at
+            # ``TASK_LEASE_HEARTBEAT_SECONDS`` cadence; on lease loss the
+            # loop sets ``lease_cancel`` and every subsequent
+            # ``update_task_with_lease`` call rejects, so the worker can
+            # bail without resurrecting a row the janitor already requeued.
+            try:
+                lease_acquired = await asyncio.to_thread(
+                    acquire_task_lease, task_id, _WORKER_ID, TASK_LEASE_DURATION_SECONDS
+                )
+            except Exception:
+                log.exception("task_lease_acquire_error", task_id=task_id, worker=_WORKER_ID)
+                lease_acquired = False
+            if not lease_acquired:
+                log.warning(
+                    "task_lease_acquire_skipped",
+                    task_id=task_id,
+                    worker=_WORKER_ID,
+                    detail="another worker holds a fresh lease or task is already terminal",
+                )
+                audit.emit_task_lifecycle("task.lease_skipped", user_id=user_id, task_id=task_id)
+                return
+            task_info.status = "running"
+            task_info.started_at = time.time()
+            lease_cancel = asyncio.Event()
+            lease_loop = asyncio.create_task(_task_lease_renewal_loop(task_id, _WORKER_ID, lease_cancel))
+            if RUNTIME_ENVIRONMENTS_ENABLED:
+                with contextlib.suppress(Exception):
+                    await runtime.mark_phase(
+                        task_id=task_id,
+                        env_id=task_info.runtime_env_id,
+                        phase="planning",
+                        attempt=task_info.attempt,
+                    )
+            log.info("task_started", task_id=task_id, attempt=task_info.attempt)
+            audit.emit_task_lifecycle("task.started", user_id=user_id, task_id=task_id)
+            execution_timeline.append(
+                _make_timeline_item(
+                    "task.started",
+                    "Processing started",
+                    status="info",
+                    summary="The task began execution.",
+                    details={"attempt": task_info.attempt},
+                )
+            )
+
+            # Prepare context (budget check, model routing, etc.)
+            try:
+                lock = _get_worker_lock(user_id)
+                async with lock:
+                    ctx = await _prepare_query_context(context, item, user_id, task_id=task_id)
+            except BudgetExceeded as e:
+                task_info.status = "failed"
+                task_info.error_message = str(e)
+                task_info.completed_at = time.time()
+                update_task_with_lease(
+                    task_id,
+                    _WORKER_ID,
+                    "failed",
+                    error_message=str(e),
+                    completed_at=datetime.now().isoformat(),
+                )
+                _update_runtime_queue_status(task_id, "failed", last_error=str(e))
+                if not item.silent_response:
+                    if item.update and item.update.message:
+                        await item.update.message.reply_text(str(e))
+                    else:
+                        await context.bot.send_message(chat_id=item.chat_id, text=str(e))
+                if RUNTIME_ENVIRONMENTS_ENABLED:
+                    await runtime.record_warning(
+                        task_id=task_id,
+                        warning_type="budget_exceeded",
+                        message=str(e),
+                    )
+                    cycle_id = await runtime.record_loop_cycle(
+                        task_id=task_id,
+                        cycle_index=0,
+                        phase="planning",
+                        failure_fingerprint=_hash_text(str(e)),
+                        outcome={"budget_exceeded": True},
+                    )
+                    await runtime.record_guardrail_hit(
+                        task_id=task_id,
+                        guardrail_type="budget_exceeded",
+                        cycle_id=cycle_id,
+                        details={"message": str(e)},
+                    )
+                    await runtime.finalize_task(task_id=task_id, success=False, error_message=str(e))
+                log.info("task_failed", task_id=task_id, error="budget_exceeded")
+                metrics.REQUESTS_TOTAL.labels(agent_id=_agent_id_label, status="failed").inc()
+                audit.emit_task_lifecycle("task.failed", user_id=user_id, task_id=task_id, error="budget_exceeded")
+                audit.emit(
+                    audit.AuditEvent(
+                        event_type="cost.budget_exceeded",
+                        user_id=user_id,
+                        task_id=task_id,
+                        cost_usd=context.user_data.get("total_cost", 0.0),
+                        details={"budget_limit": MAX_TOTAL_BUDGET_USD},
+                    )
+                )
+                execution_timeline.append(
+                    _make_timeline_item(
+                        "task.failed",
+                        "Budget exceeded",
+                        status="error",
+                        summary="The run was aborted before invoking the model.",
+                        details={"error": str(e)},
+                    )
+                )
+                trace_payload = _build_execution_trace_payload(
+                    item=item,
+                    task_info=task_info,
+                    ctx=None,
+                    run_result=None,
+                    status="failed",
+                    work_dir=context.user_data.get("work_dir"),
+                    timeline=execution_timeline,
+                    error_message=str(e),
+                )
+                audit.emit_execution_trace(
+                    user_id=user_id,
+                    task_id=task_id,
+                    query_text=trace_payload["query_text"],
+                    response_text=trace_payload["response_text"],
+                    model=trace_payload["model"],
+                    session_id=trace_payload["session_id"],
+                    work_dir=trace_payload["work_dir"],
+                    status="failed",
+                    cost_usd=trace_payload["cost_usd"],
+                    duration_ms=trace_payload["duration_ms"],
+                    stop_reason=trace_payload["stop_reason"],
+                    warnings=trace_payload["warnings"],
+                    tool_uses=trace_payload["tool_uses"],
+                    tools=trace_payload["tools"],
+                    timeline=trace_payload["timeline"],
+                    reasoning_summary=trace_payload["reasoning_summary"],
+                    raw_artifacts=trace_payload["raw_artifacts"],
+                    grounding=trace_payload["grounding"],
+                    confidence_reports=trace_payload["confidence_reports"],
+                    error_message=str(e),
+                    attempt=task_info.attempt,
+                    max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+                    user_context={"user_id": user_id, "chat_id": item.chat_id},
+                )
+                await _finalize_scheduled_run(
+                    item=item,
+                    ctx=ctx,
+                    run_result=None,
+                    task_id=task_id,
+                    task_info=task_info,
+                    context=context,
+                    error_message=str(e),
+                )
+                return
+
+            task_info.model = ctx.model
+            ctx.runtime_env_id = task_info.runtime_env_id
+            ctx.runtime_classification = task_info.runtime_classification or "light"
+            ctx.runtime_environment_kind = task_info.runtime_environment_kind or "dev_worktree"
+            update_task_with_lease(
+                task_id,
+                _WORKER_ID,
+                "running",
+                provider=ctx.provider,
+                model=ctx.model,
+                session_id=ctx.session_id,
+                provider_session_id=ctx.provider_session_id,
+            )
+            _active_chat_ids.setdefault(user_id, set()).add(item.chat_id)
+            query_start_time = time.time()
+
+            max_attempts = TASK_MAX_RETRY_ATTEMPTS
+            last_error: str | None = None
+            last_retry_failure_fingerprint = ""
+            repeated_retry_failure_count = 0
+
+            for attempt in range(1, max_attempts + 1):
+                task_info.attempt = attempt
+                task_info.status = "executing"
+                try:
+                    if RUNTIME_ENVIRONMENTS_ENABLED:
+                        await runtime.mark_phase(
+                            task_id=task_id,
+                            env_id=task_info.runtime_env_id,
+                            phase="executing",
+                            attempt=attempt,
+                        )
+                    run_result = await _process_task_item(ctx, item, user_id, item.chat_id, context, task_id)
+                    task_info.model = run_result.model
+                    if RUNTIME_ENVIRONMENTS_ENABLED:
+                        task_root = Path(runtime.runtime_root) / "tasks" / str(task_id)
+                        task_root.mkdir(parents=True, exist_ok=True)
+                        runtime_terminal_path = str(run_result.runtime_terminal_path or "")
+                        if not runtime_terminal_path.startswith(("kernel://", "kernel-stream://")):
+                            raise RuntimeError("runtime terminal output requires a kernel-backed terminal path")
+                        stdout_path = None
+                        if run_result.runtime_terminal_id is None:
+                            await runtime.register_terminal(
+                                task_id=task_id,
+                                terminal_kind="command",
+                                label=f"{run_result.provider} attempt {attempt}",
+                                path=str(stdout_path) if stdout_path is not None else runtime_terminal_path,
+                            )
+
+                    if _recover_provider_error_with_completed_output(run_result):
+                        log.warning(
+                            "provider_error_recovered_with_completed_output",
+                            task_id=task_id,
+                            provider=run_result.provider,
+                            model=run_result.model,
+                            stop_reason=run_result.stop_reason,
+                        )
+
+                    # Check if the result itself indicates a retryable error
+                    if run_result.error and (
+                        run_result.retryable
+                        or (
+                            run_result.result
+                            and not run_result.error_kind
+                            and is_retryable_provider_error(run_result.provider, run_result.result)
+                        )
+                    ):
+                        raise _RetryableError(run_result.result)
+                    if run_result.error:
+                        if run_result.error_kind == "runtime_guardrail":
+                            raise _RuntimeGuardrailError(run_result.result)
+                        raise RuntimeError(run_result.result or run_result.error_kind or "provider execution failed")
+
+                    # Success path
+                    query_elapsed = time.time() - query_start_time
+                    task_info.cost_usd = run_result.cost_usd
+                    task_info.status = "validating"
+                    if RUNTIME_ENVIRONMENTS_ENABLED:
+                        await runtime.mark_phase(
+                            task_id=task_id,
+                            env_id=task_info.runtime_env_id,
+                            phase="validating",
+                            attempt=attempt,
+                        )
+
+                    had_write = any(step.get("metadata", {}).get("write") for step in run_result.tool_execution_trace)
+                    final_response_text, _ = _compose_response_text(run_result, elapsed=query_elapsed)
+                    final_status = "completed"
+                    runtime_final_phase: str | None = None
+                    response_override: str | None = None
+                    try:
+                        orchestration_service = _get_knowledge_orchestration_service()
+                        (
+                            ctx.grounded_answer,
+                            ctx.answer_judgement,
+                            ctx.answer_evaluation,
+                            ctx.grounding_gate_decision,
+                        ) = orchestration_service.evaluate_response(
+                            response=final_response_text,
+                            resolution=getattr(ctx, "knowledge_resolution", None),
+                            had_write=had_write,
+                            verified_before_finalize=ctx.verified_before_finalize,
+                            required_verifications=tuple(
+                                getattr(getattr(ctx, "effective_policy", None), "required_verifications", ())
+                            ),
+                            task_id=task_id,
+                        )
+                        ctx.last_action_plan = orchestration_service.build_plan_payload(
+                            existing_plan=ctx.last_action_plan,
+                            resolution=getattr(ctx, "knowledge_resolution", None),
+                            grounded_answer=ctx.grounded_answer,
+                            judgement=ctx.answer_judgement,
+                        )
+                        resolution = getattr(ctx, "knowledge_resolution", None)
+                        if resolution is not None:
+                            resolution.grounded_answer = ctx.grounded_answer
+                            resolution.answer_judgement = ctx.answer_judgement
+                            resolution.answer_evaluation = ctx.answer_evaluation
+                        strategy_label = getattr(
+                            getattr(getattr(ctx, "knowledge_resolution", None), "retrieval_strategy", None),
+                            "value",
+                            str(
+                                getattr(getattr(ctx, "knowledge_resolution", None), "retrieval_strategy", "")
+                                or "unknown"
+                            ),
+                        )
+                        metrics.KNOWLEDGE_CITATION_COVERAGE.labels(
+                            agent_id=(AGENT_ID or "default").lower(),
+                            strategy=strategy_label,
+                        ).observe(float(_answer_eval_value(ctx.answer_evaluation, "citation_coverage", 0.0) or 0.0))
+                        if getattr(ctx, "answer_judgement", None) is not None:
+                            metrics.KNOWLEDGE_CITATION_SPAN_PRECISION.labels(
+                                agent_id=(AGENT_ID or "default").lower(),
+                                strategy=strategy_label,
+                            ).observe(float(getattr(ctx.answer_judgement, "citation_span_precision", 0.0) or 0.0))
+                            metrics.KNOWLEDGE_CONTRADICTION_ESCAPE.labels(
+                                agent_id=(AGENT_ID or "default").lower(),
+                                strategy=strategy_label,
+                                status=(
+                                    "escaped"
+                                    if float(getattr(ctx.answer_judgement, "contradiction_escape_rate", 0.0) or 0.0) > 0
+                                    else "contained"
+                                ),
+                            ).inc()
+                            metrics.KNOWLEDGE_JUDGE_OUTCOMES.labels(
+                                agent_id=(AGENT_ID or "default").lower(),
+                                status=str(getattr(ctx.answer_judgement, "status", "passed") or "passed"),
+                            ).inc()
+                        for warning in list(_answer_eval_value(ctx.answer_evaluation, "warnings", []) or []):
+                            if warning not in run_result.warnings:
+                                run_result.warnings.append(str(warning))
+                        if getattr(ctx.grounding_gate_decision, "status", "passed") != "passed":
+                            final_status = "needs_review"
+                            runtime_final_phase = "needs_review_retained"
+                            response_override = str(
+                                getattr(ctx.grounding_gate_decision, "safe_response", "") or final_response_text
+                            )
+                            for reason in list(getattr(ctx.grounding_gate_decision, "reasons", []) or []):
+                                warning = f"grounding_gate:{reason}"
+                                if warning not in run_result.warnings:
+                                    run_result.warnings.append(warning)
+                    except Exception:
+                        log.exception("knowledge_answer_evaluation_error")
+
+                    if ctx.squad_thread_id:
+                        integrity_override = await _squad_coordination_integrity_override(
+                            ctx,
+                            response_override or final_response_text,
+                        )
+                        if integrity_override:
+                            response_override = integrity_override
+                            final_response_text = integrity_override
+                            run_result.result = integrity_override
+                            if "squad_coordination_integrity_repair" not in run_result.warnings:
+                                run_result.warnings.append("squad_coordination_integrity_repair")
+
+                    delivery_outcome = await _prepare_delivery_outcome(
+                        run_result,
+                        ctx.work_dir,
+                        elapsed=query_elapsed,
+                        task_id=task_id,
+                        response_override=response_override,
+                        include_tool_summary=response_override is None,
+                    )
+                    delivered_response_text = delivery_outcome.response
+
+                    # Skill compliance check (post-response)
+                    if ctx.skill_matches:
+                        try:
+                            from koda.skills._telemetry import emit_skill_compliance
+
+                            for _sm in ctx.skill_matches:
+                                if getattr(_sm.skill, "output_format_enforcement", "") and _sm.composite_score >= 0.7:
+                                    emit_skill_compliance(
+                                        user_id=user_id,
+                                        task_id=task_id,
+                                        skill_id=_sm.skill.id,
+                                        response_text=delivered_response_text,
+                                        output_format_enforcement=_sm.skill.output_format_enforcement,
+                                    )
+                        except Exception:
+                            log.debug("skill_compliance_check_failed", exc_info=True)
+
+                    await _record_execution_episode(
+                        user_id=user_id,
+                        task_id=task_id,
+                        status=final_status,
+                        ctx=ctx,
+                        run_result=run_result,
+                        human_override_delta=1 if ctx.human_approval_used else 0,
+                    )
+
+                    # Lock user_data writes to avoid races with concurrent tasks
+                    lock = _get_worker_lock(user_id)
+                    async with lock:
+                        await _post_process(
+                            user_id,
+                            context,
+                            run_result,
+                            item.query_text,
+                            ctx.work_dir,
+                            ctx.model,
+                            task_id=task_id,
+                            ctx=ctx,
+                            dry_run=ctx.dry_run,
+                            cacheable=not ctx.artifact_dossiers,
+                            final_status=final_status,
+                            response_text_override=delivered_response_text,
+                            delivery_outcome=delivery_outcome,
+                        )
+
+                    if not item.silent_response:
+                        await _send_response(
+                            item.chat_id,
+                            item.update,
+                            context,
+                            run_result,
+                            ctx.work_dir,
+                            ctx.agent_mode,
+                            elapsed=query_elapsed,
+                            model=run_result.model,
+                            task_id=task_id,
+                            ctx=ctx,
+                            response_override=response_override,
+                            query_text=item.query_text,
+                            include_tool_summary=response_override is None,
+                            delivery_outcome=delivery_outcome,
+                        )
+
+                    task_info.status = final_status
+                    task_info.completed_at = time.time()
+                    update_task_with_lease(
+                        task_id,
+                        _WORKER_ID,
+                        final_status,
+                        cost_usd=run_result.cost_usd,
+                        completed_at=datetime.now().isoformat(),
+                        attempt=attempt,
+                        session_id=run_result.session_id,
+                        provider=run_result.provider,
+                        model=run_result.model,
+                        provider_session_id=run_result.provider_session_id,
+                    )
+                    _update_runtime_queue_status(task_id, final_status)
+                    log.info(
+                        "task_finalized",
+                        task_id=task_id,
+                        status=final_status,
+                        cost_usd=run_result.cost_usd,
+                        elapsed_s=round(query_elapsed, 1),
+                    )
+
+                    # Metrics
+                    duration_ms = query_elapsed * 1000
+                    metrics.REQUESTS_TOTAL.labels(agent_id=_agent_id_label, status=final_status).inc()
+                    metrics.REQUEST_DURATION.labels(
+                        agent_id=_agent_id_label,
+                        provider=run_result.provider,
+                        model=run_result.model,
+                    ).observe(query_elapsed)
+                    if run_result.cost_usd > 0:
+                        metrics.COST_PER_QUERY.labels(
+                            agent_id=_agent_id_label,
+                            provider=run_result.provider,
+                            model=run_result.model,
+                        ).observe(run_result.cost_usd)
+                        metrics.COST_TOTAL.labels(
+                            agent_id=_agent_id_label,
+                            provider=run_result.provider,
+                            model=run_result.model,
+                        ).inc(run_result.cost_usd)
+                    grounded_status = "grounded" if ctx.knowledge_hits else "ungrounded"
+                    metrics.GROUNDED_ANSWERS.labels(agent_id=_agent_id_label, status=grounded_status).inc()
+                    runbook_status = (
+                        "hit"
+                        if any(
+                            hit.get("layer") == "approved_runbook"
+                            for hit in _serialize_knowledge_hits(ctx.knowledge_hits)
+                        )
+                        else "miss"
+                    )
+                    metrics.RUNBOOK_HITS.labels(
+                        agent_id=_agent_id_label,
+                        task_kind=ctx.task_kind,
+                        status=runbook_status,
+                    ).inc()
+                    metrics.AUTONOMY_TIER_DISTRIBUTION.labels(
+                        agent_id=_agent_id_label,
+                        task_kind=ctx.task_kind,
+                        tier=getattr(getattr(ctx.effective_policy, "autonomy_tier", None), "value", "unknown"),
+                    ).inc()
+                    if any(hit.get("freshness") == "stale" for hit in _serialize_knowledge_hits(ctx.knowledge_hits)):
+                        stale_layers = {
+                            str(hit.get("layer") or "unknown")
+                            for hit in _serialize_knowledge_hits(ctx.knowledge_hits)
+                            if hit.get("freshness") == "stale"
+                        }
+                        for layer in stale_layers:
+                            metrics.STALE_SOURCE_USAGE.labels(agent_id=_agent_id_label, layer=layer).inc()
+                    if any(step.get("metadata", {}).get("write") for step in run_result.tool_execution_trace):
+                        verification_status = "verified" if ctx.verified_before_finalize else "missing"
+                        metrics.VERIFICATION_BEFORE_FINALIZE.labels(
+                            agent_id=_agent_id_label,
+                            task_kind=ctx.task_kind,
+                            status=verification_status,
+                        ).inc()
+                    # Audit
+                    audit.emit_task_lifecycle(
+                        "task.completed" if final_status == "completed" else "task.needs_review",
+                        user_id=user_id,
+                        task_id=task_id,
+                        cost_usd=run_result.cost_usd,
+                        duration_ms=duration_ms,
+                        model=run_result.model,
+                        attempt=attempt,
+                    )
+                    if run_result.cost_usd > 0:
+                        audit.emit_cost(
+                            user_id=user_id,
+                            task_id=task_id,
+                            cost_usd=run_result.cost_usd,
+                            model=run_result.model,
+                        )
+                    success_timeline = execution_timeline + _tool_steps_to_timeline(run_result.tool_execution_trace)
+                    success_timeline.append(
+                        _make_timeline_item(
+                            "task.completed" if final_status == "completed" else "task.needs_review",
+                            "Execution completed" if final_status == "completed" else "Forwarded for review",
+                            status="success" if final_status == "completed" else "warning",
+                            summary=(
+                                "The final response was sent to the user."
+                                if final_status == "completed"
+                                else "The response was blocked by the grounding gate and forwarded for review."
+                            ),
+                            details={
+                                "attempt": attempt,
+                                "stop_reason": run_result.stop_reason,
+                                "final_status": final_status,
+                            },
+                        )
+                    )
+                    trace_payload = _build_execution_trace_payload(
+                        item=item,
+                        task_info=task_info,
+                        ctx=ctx,
+                        run_result=run_result,
+                        status=final_status,
+                        work_dir=ctx.work_dir,
+                        timeline=success_timeline,
+                        response_text_override=delivered_response_text,
+                    )
+                    audit.emit_execution_trace(
+                        user_id=user_id,
+                        task_id=task_id,
+                        query_text=trace_payload["query_text"],
+                        response_text=trace_payload["response_text"],
+                        model=trace_payload["model"],
+                        session_id=trace_payload["session_id"],
+                        work_dir=trace_payload["work_dir"],
+                        status=final_status,
+                        cost_usd=trace_payload["cost_usd"],
+                        duration_ms=trace_payload["duration_ms"],
+                        stop_reason=trace_payload["stop_reason"],
+                        warnings=trace_payload["warnings"],
+                        tool_uses=trace_payload["tool_uses"],
+                        tools=trace_payload["tools"],
+                        timeline=trace_payload["timeline"],
+                        reasoning_summary=trace_payload["reasoning_summary"],
+                        raw_artifacts=trace_payload["raw_artifacts"],
+                        grounding=trace_payload["grounding"],
+                        confidence_reports=trace_payload["confidence_reports"],
+                        attempt=attempt,
+                        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+                        user_context={"user_id": user_id, "chat_id": item.chat_id},
+                    )
+                    if RUNTIME_ENVIRONMENTS_ENABLED:
+                        await runtime.finalize_task(
+                            task_id=task_id,
+                            success=final_status == "completed",
+                            summary={
+                                "provider": run_result.provider,
+                                "model": run_result.model,
+                                "cost_usd": run_result.cost_usd,
+                                "stop_reason": run_result.stop_reason,
+                                "tool_count": len(run_result.tool_execution_trace),
+                                "final_status": final_status,
+                            },
+                            final_phase=runtime_final_phase,
+                        )
+                    await _finalize_scheduled_run(
+                        item=item,
+                        ctx=ctx,
+                        run_result=run_result,
+                        task_id=task_id,
+                        task_info=task_info,
+                        context=context,
+                        duration_ms=duration_ms,
+                    )
+                    asyncio.create_task(
+                        _record_procedural_memory(
+                            query_text=item.query_text,
+                            user_id=user_id,
+                            task_id=task_id,
+                            source_episode_id=getattr(ctx, "execution_episode_id", None),
+                            status=final_status,
+                            ctx=ctx,
+                            run_result=run_result,
+                            error_message=(
+                                "; ".join(getattr(ctx.grounding_gate_decision, "reasons", []) or [])
+                                if final_status != "completed"
+                                else None
+                            ),
+                        )
+                    )
+                    return
+
+                except _RetryableError as e:
+                    last_error = str(e)
+                    failure_fingerprint = _hash_text(last_error)
+                    repeated_retry_failure_count = (
+                        repeated_retry_failure_count + 1 if failure_fingerprint == last_retry_failure_fingerprint else 1
+                    )
+                    last_retry_failure_fingerprint = failure_fingerprint
+                    if RUNTIME_ENVIRONMENTS_ENABLED and task_info.runtime_env_id is not None:
+                        cycle_id = await runtime.record_loop_cycle(
+                            task_id=task_id,
+                            cycle_index=attempt,
+                            phase="executing",
+                            failure_fingerprint=failure_fingerprint,
+                            outcome={"retryable_error": last_error, "attempt": attempt},
+                        )
+                        if repeated_retry_failure_count >= 3:
+                            await runtime.record_guardrail_hit(
+                                task_id=task_id,
+                                guardrail_type="repeated_failure",
+                                cycle_id=cycle_id,
+                                details={"attempt": attempt, "failure_fingerprint": failure_fingerprint},
+                            )
+                            await runtime.record_warning(
+                                task_id=task_id,
+                                warning_type="repeated_failure",
+                                message="A mesma falha se repetiu em tentativas consecutivas.",
+                                details={"attempt": attempt, "failure_fingerprint": failure_fingerprint},
+                            )
+                            await runtime.pause_environment(
+                                task_id=task_id,
+                                reason="Guardrail do runtime: a mesma falha se repetiu em tentativas consecutivas.",
+                            )
+                            raise _RuntimeGuardrailError(
+                                "Guardrail do runtime acionado: a mesma falha se repetiu em tentativas consecutivas."
+                            ) from e
+                    if attempt < max_attempts:
+                        max_delay = min(TASK_RETRY_BASE_DELAY * (4 ** (attempt - 1)), TASK_RETRY_MAX_DELAY)
+                        delay = random.uniform(max(1.0, max_delay * 0.5), max_delay)
+                        task_info.status = "retrying"
+                        if RUNTIME_ENVIRONMENTS_ENABLED:
+                            await runtime.events.publish(
+                                task_id=task_id,
+                                env_id=task_info.runtime_env_id,
+                                attempt=attempt,
+                                phase="executing",
+                                event_type="retry.scheduled",
+                                severity="warning",
+                                payload={"error": last_error, "attempt": attempt, "delay_seconds": delay},
+                            )
+                        update_task_with_lease(
+                            task_id,
+                            _WORKER_ID,
+                            "retrying",
+                            attempt=attempt,
+                            error_message=last_error,
+                            provider=run_result.provider if run_result else ctx.provider,
+                            model=run_result.model if run_result else ctx.model,
+                            session_id=run_result.session_id if run_result else ctx.session_id,
+                            provider_session_id=(
+                                run_result.provider_session_id if run_result else ctx.provider_session_id
+                            ),
+                        )
+                        _update_runtime_queue_status(task_id, "retrying", last_error=last_error)
+                        log.warning(
+                            "task_retrying",
+                            task_id=task_id,
+                            attempt=attempt,
+                            delay=delay,
+                            error=last_error,
+                        )
+                        metrics.REQUESTS_TOTAL.labels(agent_id=_agent_id_label, status="retried").inc()
+                        audit.emit_task_lifecycle(
+                            "task.retried",
+                            user_id=user_id,
+                            task_id=task_id,
+                            attempt=attempt,
+                            error=last_error,
+                        )
+                        execution_timeline.append(
+                            _make_timeline_item(
+                                "task.retried",
+                                "Retry scheduled",
+                                status="warning",
+                                summary=f"Attempt {attempt} failed and will be retried in {delay}s.",
+                                details={"attempt": attempt, "delay_seconds": delay, "error": last_error},
+                            )
+                        )
+                        await asyncio.sleep(delay)
+                    else:
+                        break
+
+            # All retries exhausted
+            query_elapsed = time.time() - query_start_time
+            task_info.status = "failed"
+            task_info.error_message = last_error
+            task_info.completed_at = time.time()
+            update_task_with_lease(
+                task_id,
+                _WORKER_ID,
+                "failed",
+                error_message=last_error,
+                completed_at=datetime.now().isoformat(),
+                attempt=max_attempts,
+                provider=run_result.provider if run_result else ctx.provider,
+                model=run_result.model if run_result else ctx.model,
+                session_id=run_result.session_id if run_result else ctx.session_id,
+                provider_session_id=run_result.provider_session_id if run_result else ctx.provider_session_id,
+            )
+            _update_runtime_queue_status(task_id, "failed", last_error=last_error)
+            log.warning("task_failed", task_id=task_id, error=last_error, attempts=max_attempts)
+            metrics.REQUESTS_TOTAL.labels(agent_id=_agent_id_label, status="failed").inc()
+            metrics.AUTONOMY_TIER_DISTRIBUTION.labels(
+                agent_id=_agent_id_label,
+                task_kind=ctx.task_kind,
+                tier=getattr(getattr(ctx.effective_policy, "autonomy_tier", None), "value", "unknown"),
+            ).inc()
+            if ctx.task_kind == "deploy":
+                metrics.ROLLBACK_NEEDED.labels(agent_id=_agent_id_label, task_kind=ctx.task_kind).inc()
+            audit.emit_task_lifecycle(
+                "task.failed",
+                user_id=user_id,
+                task_id=task_id,
+                error=last_error,
+                attempts=max_attempts,
+                duration_ms=query_elapsed * 1000,
+            )
+            failed_timeline = execution_timeline + _tool_steps_to_timeline(
+                run_result.tool_execution_trace if run_result else []
+            )
+            failed_timeline.append(
+                _make_timeline_item(
+                    "task.failed",
+                    "Execution failed",
+                    status="error",
+                    summary="All retry attempts were exhausted without success.",
+                    details={"attempts": max_attempts, "error": last_error},
+                )
+            )
+
+            dlq_id = dlq_insert(
+                task_id=task_id,
+                user_id=user_id,
+                chat_id=item.chat_id,
+                query_text=item.query_text,
+                error_message=last_error,
+                error_class="RetryableError",
+                attempt_count=max_attempts,
+                model=task_info.model,
+                original_created_at=datetime.fromtimestamp(task_info.created_at).isoformat(),
+                metadata_json=_build_dlq_metadata(
+                    raw_item=raw_item,
+                    reason="retry_exhausted",
+                    task_id=task_id,
+                    recovery_count=int(raw_item.get("_recovery_count") or 0) if isinstance(raw_item, dict) else 0,
+                    extra={"attempts": max_attempts, "last_error": last_error},
+                ),
+            )
+            audit.emit_task_lifecycle("task.dead_letter", user_id=user_id, task_id=task_id, error=last_error)
+            trace_payload = _build_execution_trace_payload(
+                item=item,
+                task_info=task_info,
+                ctx=ctx,
+                run_result=run_result,
+                status="failed",
+                work_dir=ctx.work_dir,
+                timeline=failed_timeline,
+                error_message=last_error,
+            )
+            audit.emit_execution_trace(
+                user_id=user_id,
+                task_id=task_id,
+                query_text=trace_payload["query_text"],
+                response_text=trace_payload["response_text"],
+                model=trace_payload["model"],
+                session_id=trace_payload["session_id"],
+                work_dir=trace_payload["work_dir"],
+                status="failed",
+                cost_usd=trace_payload["cost_usd"],
+                duration_ms=trace_payload["duration_ms"],
+                stop_reason=trace_payload["stop_reason"],
+                warnings=trace_payload["warnings"],
+                tool_uses=trace_payload["tool_uses"],
+                tools=trace_payload["tools"],
+                timeline=trace_payload["timeline"],
+                reasoning_summary=trace_payload["reasoning_summary"],
+                raw_artifacts=trace_payload["raw_artifacts"],
+                grounding=trace_payload["grounding"],
+                confidence_reports=trace_payload["confidence_reports"],
+                error_message=last_error,
+                attempt=max_attempts,
+                max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+                user_context={"user_id": user_id, "chat_id": item.chat_id},
+            )
+            if RUNTIME_ENVIRONMENTS_ENABLED:
+                cycle_id = await runtime.record_loop_cycle(
+                    task_id=task_id,
+                    cycle_index=max_attempts,
+                    phase="executing",
+                    failure_fingerprint=_hash_text(last_error or "retry_exhausted"),
+                    outcome={"retry_exhausted": True, "attempts": max_attempts},
+                )
+                await runtime.record_guardrail_hit(
+                    task_id=task_id,
+                    guardrail_type="retry_exhausted",
+                    cycle_id=cycle_id,
+                    details={"attempts": max_attempts},
+                )
+                await runtime.finalize_task(
+                    task_id=task_id,
+                    success=False,
+                    error_message=last_error,
+                    summary={
+                        "provider": run_result.provider if run_result else ctx.provider,
+                        "model": run_result.model if run_result else ctx.model,
+                        "attempts": max_attempts,
+                    },
+                )
+            await _record_execution_episode(
+                user_id=user_id,
+                task_id=task_id,
+                status="failed",
+                ctx=ctx,
+                run_result=run_result,
+                human_override_delta=1 if ctx.human_approval_used else 0,
+            )
+            asyncio.create_task(
+                _record_procedural_memory(
+                    query_text=item.query_text,
+                    user_id=user_id,
+                    task_id=task_id,
+                    source_episode_id=getattr(ctx, "execution_episode_id", None),
+                    status="failed",
+                    ctx=ctx,
+                    run_result=run_result,
+                    error_message=last_error,
+                )
+            )
+            await _finalize_scheduled_run(
+                item=item,
+                ctx=ctx,
+                run_result=run_result,
+                task_id=task_id,
+                task_info=task_info,
+                context=context,
+                error_message=last_error,
+                dlq_id=dlq_id,
+                duration_ms=query_elapsed * 1000,
+            )
+            await _send_task_error(task_info, last_error or "unknown error", context, item)
+
+    except _RuntimeGuardrailError as e:
+        error_str = str(e)
+        task_info.status = "failed"
+        task_info.error_message = error_str
+        task_info.completed_at = time.time()
+        update_task_with_lease(
+            task_id,
+            _WORKER_ID,
+            "failed",
+            error_message=error_str,
+            completed_at=datetime.now().isoformat(),
+        )
+        _update_runtime_queue_status(task_id, "failed", last_error=error_str)
+        if item:
+            await _finalize_scheduled_run(
+                item=item,
+                ctx=ctx,
+                run_result=run_result,
+                task_id=task_id,
+                task_info=task_info,
+                context=context,
+                error_message=error_str,
+            )
+        if RUNTIME_ENVIRONMENTS_ENABLED:
+            await runtime.finalize_task(task_id=task_id, success=False, error_message=error_str)
+        await _send_task_error(task_info, error_str, context, item)
+    except asyncio.CancelledError:
+        cancellation_reason = task_info.error_message or "Cancelled by scheduler control."
+        task_info.status = "cancelled"
+        task_info.completed_at = time.time()
+        update_task_with_lease(
+            task_id,
+            _WORKER_ID,
+            "cancelled",
+            error_message=cancellation_reason,
+            completed_at=datetime.now().isoformat(),
+        )
+        _update_runtime_queue_status(task_id, "cancelled", last_error=cancellation_reason)
+        if RUNTIME_ENVIRONMENTS_ENABLED:
+            await runtime.finalize_task(
+                task_id=task_id,
+                success=False,
+                error_message=cancellation_reason,
+                summary={"cancelled": True},
+                final_phase="cancelled_retained",
+            )
+        if item:
+            await _finalize_scheduled_run(
+                item=item,
+                ctx=ctx,
+                run_result=run_result,
+                task_id=task_id,
+                task_info=task_info,
+                context=context,
+                error_message=cancellation_reason,
+            )
+        raise
+    except Exception as e:
+        error_str = str(e)
+        log.error("task_execution_error", task_id=task_id, error=error_str, error_type=type(e).__name__)
+        task_info.status = "failed"
+        task_info.error_message = error_str
+        task_info.completed_at = time.time()
+        try:
+            update_task_with_lease(
+                task_id,
+                _WORKER_ID,
+                "failed",
+                error_message=error_str,
+                completed_at=datetime.now().isoformat(),
+            )
+        except Exception:
+            log.debug("task_status_update_in_error_handler_failed", task_id=task_id)
+        _update_runtime_queue_status(task_id, "failed", last_error=error_str)
+        if RUNTIME_ENVIRONMENTS_ENABLED:
+            with contextlib.suppress(Exception):
+                await runtime.record_warning(
+                    task_id=task_id,
+                    warning_type="unexpected_exception",
+                    message=error_str,
+                )
+        log.exception("task_error", task_id=task_id, error=error_str)
+        metrics.REQUESTS_TOTAL.labels(agent_id=_agent_id_label, status="failed").inc()
+        if ctx and ctx.task_kind == "deploy":
+            metrics.ROLLBACK_NEEDED.labels(agent_id=_agent_id_label, task_kind=ctx.task_kind).inc()
+        audit.emit_task_lifecycle("task.failed", user_id=user_id, task_id=task_id, error=error_str)
+        exception_timeline = execution_timeline + _tool_steps_to_timeline(
+            run_result.tool_execution_trace if run_result else []
+        )
+        exception_timeline.append(
+            _make_timeline_item(
+                "task.failed",
+                "Unexpected failure",
+                status="error",
+                summary="The run ended due to an exception outside the retry flow.",
+                details={"error": error_str},
+            )
+        )
+        if item:
+            trace_payload = _build_execution_trace_payload(
+                item=item,
+                task_info=task_info,
+                ctx=ctx,
+                run_result=run_result,
+                status="failed",
+                work_dir=ctx.work_dir if ctx else context.user_data.get("work_dir"),
+                timeline=exception_timeline,
+                error_message=error_str,
+            )
+            audit.emit_execution_trace(
+                user_id=user_id,
+                task_id=task_id,
+                query_text=trace_payload["query_text"],
+                response_text=trace_payload["response_text"],
+                model=trace_payload["model"],
+                session_id=trace_payload["session_id"],
+                work_dir=trace_payload["work_dir"],
+                status="failed",
+                cost_usd=trace_payload["cost_usd"],
+                duration_ms=trace_payload["duration_ms"],
+                stop_reason=trace_payload["stop_reason"],
+                warnings=trace_payload["warnings"],
+                tool_uses=trace_payload["tool_uses"],
+                tools=trace_payload["tools"],
+                timeline=trace_payload["timeline"],
+                reasoning_summary=trace_payload["reasoning_summary"],
+                raw_artifacts=trace_payload["raw_artifacts"],
+                grounding=trace_payload["grounding"],
+                confidence_reports=trace_payload["confidence_reports"],
+                error_message=error_str,
+                attempt=task_info.attempt,
+                max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+                user_context={"user_id": user_id, "chat_id": item.chat_id},
+            )
+            await _record_execution_episode(
+                user_id=user_id,
+                task_id=task_id,
+                status="failed",
+                ctx=ctx,
+                run_result=run_result,
+                human_override_delta=1 if (ctx and ctx.human_approval_used) else 0,
+            )
+            asyncio.create_task(
+                _record_procedural_memory(
+                    query_text=item.query_text,
+                    user_id=user_id,
+                    task_id=task_id,
+                    source_episode_id=getattr(ctx, "execution_episode_id", None) if ctx else None,
+                    status="failed",
+                    ctx=ctx,
+                    run_result=run_result,
+                    error_message=error_str,
+                )
+            )
+            await _finalize_scheduled_run(
+                item=item,
+                ctx=ctx,
+                run_result=run_result,
+                task_id=task_id,
+                task_info=task_info,
+                context=context,
+                error_message=error_str,
+            )
+        if RUNTIME_ENVIRONMENTS_ENABLED:
+            await runtime.finalize_task(task_id=task_id, success=False, error_message=error_str)
+        await _send_task_error(task_info, error_str, context, item)
+    finally:
+        if heartbeat_task:
+            heartbeat_task.cancel()
+        # Stop the lease renewal loop and best-effort release the lease.
+        # Terminal-state transitions (failed/completed/cancelled) already
+        # cleared the lease atomically via update_task_with_lease, so the
+        # release call below is a no-op for the happy path. It only matters
+        # when the worker exits via a code path that did NOT hit a terminal
+        # update_task_with_lease — in that case we clear the lease so the
+        # janitor classifies the row consistently on its next sweep.
+        if lease_cancel is not None:
+            lease_cancel.set()
+        if lease_loop is not None:
+            with contextlib.suppress(BaseException):
+                await asyncio.wait_for(lease_loop, timeout=2)
+        with contextlib.suppress(Exception):
+            await asyncio.to_thread(release_task_lease, task_id, _WORKER_ID)
+        if runtime_capacity is not None:
+            await runtime_capacity.aclose()
+        metrics.ACTIVE_TASKS.labels(agent_id=_agent_id_label).dec()
+        chat_ids = _active_chat_ids.get(user_id)
+        if chat_ids and item:
+            chat_ids.discard(item.chat_id)
+            if not chat_ids:
+                _active_chat_ids.pop(user_id, None)
+        if item:
+            untrack_images(item.image_paths)
+        if ctx and ctx.temp_paths:
+            from koda.services.artifact_ingestion import cleanup_artifact_temp_paths
+
+            cleanup_artifact_temp_paths(ctx.temp_paths)
+        _unregister_task(task_info)
+
+
+async def _process_queue(user_id: int, context: BotContext) -> None:
+    """Sequential FIFO dispatcher for a single user's queue."""
+    queue = _user_queues[user_id]
+    ctx_user_id.set(user_id)
+
+    try:
+        while True:
+            if queue.empty():
+                break
+
+            raw_item = await queue.get()
+            task_id = _extract_task_id_from_raw_item(raw_item)
+            _untrack_queued_task_id(user_id, task_id)
+            _sync_user_queue_observability(user_id)
+            task_info: TaskInfo | None = None
+
+            try:
+                if task_id is not None and task_id in _cancelled_task_ids:
+                    _cancelled_task_ids.discard(task_id)
+                    continue
+
+                if isinstance(raw_item, dict):
+                    chat_id = int(raw_item.get("chat_id") or 0)
+                    query_text = str(raw_item.get("query_text") or "continuation")
+                    task_provider = raw_item.get("provider") or context.user_data.get("provider")
+                else:
+                    chat_id = raw_item[0].effective_chat.id
+                    query_text = raw_item[1]
+                    task_provider = context.user_data.get("provider")
+
+                if task_id is None:
+                    provider_sessions = context.user_data.get("provider_sessions", {})
+                    task_id = create_task(
+                        user_id,
+                        chat_id,
+                        query_text,
+                        provider=task_provider,
+                        model=get_provider_model(context.user_data, task_provider),
+                        session_id=context.user_data.get("session_id"),
+                        provider_session_id=provider_sessions.get(task_provider),
+                        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+                    )
+                    from koda.services import audit as _audit
+
+                    _audit.emit_task_lifecycle("task.created", user_id=user_id, task_id=task_id)
+                    await _persist_runtime_queue_item(
+                        task_id=task_id,
+                        user_id=user_id,
+                        chat_id=chat_id,
+                        query_text=query_text,
+                        raw_item=raw_item,
+                    )
+
+                task_info = TaskInfo(
+                    task_id=cast(int, task_id),
+                    user_id=user_id,
+                    chat_id=chat_id,
+                    query_text=query_text,
+                )
+                _register_task(task_info)
+                _sync_user_queue_observability(user_id)
+                log.info("task_created", task_id=task_id, user_id=user_id, query_preview=query_text[:60])
+
+                t = asyncio.create_task(_execute_single_task(raw_item, user_id, context, cast(int, task_id), task_info))
+                task_info.asyncio_task = t
+                await t
+            except Exception as exc:
+                if task_info is not None:
+                    _unregister_task(task_info)
+                await _handle_queue_dispatch_failure(
+                    raw_item=raw_item,
+                    user_id=user_id,
+                    context=context,
+                    task_id=task_id,
+                    error=exc,
+                )
+            finally:
+                queue.task_done()
+                _sync_user_queue_observability(user_id)
+    finally:
+        _queue_workers.pop(user_id, None)
+
+
+async def _send_typing(chat_id: int, context: BotContext) -> None:
+    """Send typing action periodically."""
+    try:
+        while True:
+            from telegram.constants import ChatAction
+
+            with contextlib.suppress(Exception):
+                await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        pass
+
+
+# Public API
+
+
+def build_runtime_context(application: Any, user_id: int, *, bot_override: Any | None = None) -> Any:
+    """Build a lightweight context object for background scheduled runs."""
+    from types import SimpleNamespace
+
+    # mappingproxy view auto-creates entries on __getitem__ — see recover_pending_tasks.
+    user_data = application.user_data[user_id]
+    return SimpleNamespace(
+        application=application,
+        bot=bot_override or application.bot,
+        bot_data=getattr(application, "bot_data", {}),
+        job_queue=getattr(application, "job_queue", None),
+        user_data=user_data,
+    )
+
+
+async def recover_pending_tasks(application: Any) -> dict[str, int]:
+    """Rehydrate persisted queued/running tasks back into per-user FIFO queues."""
+    summary = {"recovered": 0, "exhausted": 0, "skipped": 0}
+    pending_tasks = list_pending_tasks_for_recovery()
+    if not pending_tasks:
+        return summary
+
+    from koda.services import audit
+    from koda.services.runtime import get_runtime_controller
+    from koda.utils.command_helpers import init_user_data
+
+    runtime = get_runtime_controller()
+    runtime_queue_map = {
+        int(item["task_id"]): item for item in runtime.store.list_runtime_queues() if item.get("task_id") is not None
+    }
+
+    for task_row in pending_tasks:
+        task_id = int(task_row["id"])
+        user_id = int(task_row["user_id"])
+        chat_id = int(task_row["chat_id"] or 0)
+        query_text = str(task_row.get("query_text") or "")
+
+        if task_id in _user_tasks.get(user_id, {}) or task_id in _user_queue_task_ids.get(user_id, ()):
+            summary["skipped"] += 1
+            continue
+
+        persisted_item = runtime_queue_map.get(task_id, {})
+        payload = _deserialize_queue_payload(cast(str | None, persisted_item.get("payload_json")))
+        recovery_count = int(persisted_item.get("recovery_count") or 0)
+
+        if recovery_count >= QUEUE_MAX_RECOVERY_ATTEMPTS:
+            error_message = "The task exceeded the queue's automatic recovery limit and was moved to the DLQ."
+            failed_raw_item = _build_recovered_raw_item(
+                task_row,
+                payload=payload,
+                recovery_count=recovery_count,
+                runtime_preprovisioned=False,
+            )
+            update_task_status(
+                task_id,
+                "failed",
+                error_message=error_message,
+                completed_at=datetime.now(UTC).isoformat(),
+            )
+            _update_runtime_queue_status(task_id, "failed", last_error=error_message)
+            dlq_insert(
+                task_id=task_id,
+                user_id=user_id,
+                chat_id=chat_id,
+                query_text=query_text,
+                error_message=error_message,
+                error_class="QueueRecoveryExhausted",
+                attempt_count=max(1, int(task_row.get("attempt") or 0)),
+                model=cast(str | None, task_row.get("model")),
+                original_created_at=cast(str | None, task_row.get("created_at")),
+                metadata_json=_build_dlq_metadata(
+                    raw_item=failed_raw_item,
+                    reason="queue_recovery_exhausted",
+                    task_id=task_id,
+                    recovery_count=recovery_count,
+                    extra={
+                        "previous_status": task_row.get("status"),
+                        "recovery_limit": QUEUE_MAX_RECOVERY_ATTEMPTS,
+                    },
+                ),
+            )
+            if RUNTIME_ENVIRONMENTS_ENABLED:
+                runtime.store.update_runtime_queue_item(
+                    task_id,
+                    status="failed",
+                    recovery_count=recovery_count,
+                    last_error=error_message,
+                )
+                with contextlib.suppress(Exception):
+                    await runtime.record_warning(
+                        task_id=task_id,
+                        warning_type="queue_recovery_exhausted",
+                        message=error_message,
+                        details={"recovery_count": recovery_count, "limit": QUEUE_MAX_RECOVERY_ATTEMPTS},
+                    )
+                with contextlib.suppress(Exception):
+                    await runtime.events.publish(
+                        task_id=task_id,
+                        env_id=None,
+                        attempt=int(task_row.get("attempt") or 1),
+                        phase="failed",
+                        event_type="queue.recovery.exhausted",
+                        severity="warning",
+                        payload={"recovery_count": recovery_count, "limit": QUEUE_MAX_RECOVERY_ATTEMPTS},
+                    )
+                with contextlib.suppress(Exception):
+                    await runtime.finalize_task(
+                        task_id=task_id,
+                        success=False,
+                        error_message=error_message,
+                        summary={"queue_recovery_exhausted": True, "recovery_count": recovery_count},
+                    )
+            audit.emit_task_lifecycle(
+                "task.dead_letter",
+                user_id=user_id,
+                task_id=task_id,
+                error=error_message,
+                recovery_count=recovery_count,
+            )
+            summary["exhausted"] += 1
+            continue
+
+        # application.user_data is a mappingproxy in python-telegram-bot >= v20;
+        # it auto-creates per-user dict entries on __getitem__ access, but has
+        # no .setdefault. Using [] triggers the default-factory behavior.
+        init_user_data(application.user_data[user_id], user_id=user_id)
+        runtime_preprovisioned = False
+        env_id: int | None = None
+        if RUNTIME_ENVIRONMENTS_ENABLED:
+            existing_env = runtime.store.get_environment_by_task(task_id)
+            runtime_preprovisioned = existing_env is not None
+            env_id = int(existing_env["id"]) if existing_env is not None else None
+
+        recovered_at = datetime.now(UTC).isoformat()
+        raw_item = _build_recovered_raw_item(
+            task_row,
+            payload=payload,
+            recovery_count=recovery_count + 1,
+            runtime_preprovisioned=runtime_preprovisioned,
+        )
+        lease_owner = str(task_row.get("lease_owner") or "").strip()
+        if lease_owner:
+            release_task_lease(task_id, lease_owner)
+        queue = get_queue(user_id)
+        await queue.put(raw_item)
+        _track_queued_task_id(user_id, task_id)
+        update_task_status(
+            task_id,
+            "queued",
+            error_message=None,
+            started_at=None,
+            completed_at=None,
+        )
+        await _persist_runtime_queue_item(
+            task_id=task_id,
+            user_id=user_id,
+            chat_id=chat_id,
+            query_text=query_text,
+            raw_item=raw_item,
+            recovery_count=recovery_count + 1,
+            last_recovered_at=recovered_at,
+            last_error=None,
+        )
+        _sync_user_queue_observability(user_id)
+        if RUNTIME_ENVIRONMENTS_ENABLED:
+            with contextlib.suppress(Exception):
+                await runtime.events.publish(
+                    task_id=task_id,
+                    env_id=env_id,
+                    attempt=int(task_row.get("attempt") or 1),
+                    phase="queued",
+                    event_type="queue.recovered",
+                    payload={
+                        "recovery_count": recovery_count + 1,
+                        "previous_status": task_row.get("status"),
+                        "runtime_preprovisioned": runtime_preprovisioned,
+                    },
+                )
+        audit.emit_task_lifecycle(
+            "task.recovered",
+            user_id=user_id,
+            task_id=task_id,
+            recovery_count=recovery_count + 1,
+            previous_status=task_row.get("status"),
+        )
+        await _ensure_queue_worker(user_id, build_runtime_context(application, user_id))
+        summary["recovered"] += 1
+
+    return summary
+
+
+async def requeue_dlq_entry(
+    entry: dict[str, Any],
+    *,
+    application: Any,
+    actor: str | int,
+    bot_override: Any | None = None,
+) -> int:
+    """Create a fresh task from a DLQ entry and enqueue it with retry history."""
+    from koda.services import audit
+    from koda.utils.command_helpers import init_user_data
+
+    metadata = _load_json_object(cast(str | None, entry.get("metadata_json")))
+    payload = metadata.get("queue_payload")
+    if not isinstance(payload, dict):
+        payload = None
+
+    user_id = int(entry["user_id"])
+    chat_id = int(entry["chat_id"])
+    query_text = str((payload or {}).get("query_text") or entry.get("query_text") or "")
+    provider = cast(str | None, (payload or {}).get("provider"))
+    model = cast(str | None, (payload or {}).get("model") or entry.get("model"))
+    work_dir = cast(str | None, (payload or {}).get("work_dir"))
+    session_id = cast(str | None, (payload or {}).get("session_id"))
+
+    init_user_data(application.user_data[user_id], user_id=user_id)
+    context = build_runtime_context(application, user_id, bot_override=bot_override)
+    provider_sessions = context.user_data.get("provider_sessions", {})
+    task_id = create_task(
+        user_id,
+        chat_id,
+        query_text,
+        provider=provider,
+        model=model or get_provider_model(context.user_data, provider),
+        session_id=session_id,
+        provider_session_id=provider_sessions.get(provider),
+        work_dir=work_dir or context.user_data.get("work_dir"),
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+        source_task_id=int(entry["task_id"]),
+        source_action="dlq_reprocess",
+    )
+    raw_item = _build_dlq_reprocess_raw_item(entry, payload, task_id=task_id)
+    queue = get_queue(user_id)
+    await queue.put(raw_item)
+    _track_queued_task_id(user_id, task_id)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        raw_item=raw_item,
+    )
+    _sync_user_queue_observability(user_id)
+
+    history_event = {
+        "event": "dlq_requeued",
+        "at": datetime.now(UTC).isoformat(),
+        "actor": str(actor),
+        "source_task_id": int(entry["task_id"]),
+        "new_task_id": task_id,
+    }
+    updated_metadata = _append_history_entry(metadata, history_event)
+    updated_metadata["last_reprocessed_task_id"] = task_id
+    updated_metadata["last_reprocessed_at"] = history_event["at"]
+    updated_metadata["last_reprocessed_by"] = str(actor)
+    dlq_mark_retried(
+        int(entry["id"]),
+        metadata_json=json.dumps(updated_metadata, ensure_ascii=False, default=str),
+    )
+    audit.emit_task_lifecycle(
+        "task.created",
+        user_id=user_id,
+        task_id=task_id,
+        source_task_id=int(entry["task_id"]),
+        source_action="dlq_reprocess",
+    )
+    audit.emit_task_lifecycle(
+        "task.queued",
+        user_id=user_id,
+        task_id=task_id,
+        source_task_id=int(entry["task_id"]),
+        source_action="dlq_reprocess",
+    )
+    await _ensure_queue_worker(user_id, context)
+    return task_id
+
+
+async def enqueue(
+    user_id: int,
+    update: Update,
+    context: BotContext,
+    query_text: str,
+    image_paths: list[str] | None = None,
+    artifact_bundle: Any | None = None,
+) -> int | None:
+    """Enqueue a query and ensure a worker is running. Returns task_id."""
+    enqueue_started = time.monotonic()
+    if _shutting_down:
+        await update.message.reply_text("Agent is shutting down. Please try again in a moment.")
+        return None
+
+    from koda.services import audit
+
+    chat_id = update.effective_chat.id
+    pending_count = _pending_tasks_for_user(user_id)
+    if pending_count >= MAX_QUEUED_TASKS_PER_USER:
+        await update.message.reply_text(_queue_capacity_message(pending_count))
+        return None
+
+    # workspace policy gate. When ``POLICY_ENGINE_ENABLED``
+    # is False the helper short-circuits to allow with zero overhead;
+    # when enabled it consults the engine for rate / concurrency /
+    # spend-cap decisions. Failures fall through permissively (the
+    # bot-gateway's at-least-once delivery means we never silently
+    # drop a user message, only skip the policy check during outage).
+    from koda.config import AGENT_ID
+    from koda.internal_rpc.policy_engine import check_ingest_or_allow
+    from koda.services.policy_engine_runtime import get_policy_engine_client
+
+    policy_client = await get_policy_engine_client()
+    decision = await check_ingest_or_allow(
+        policy_client,
+        agent_id=str(AGENT_ID or "default"),
+        message_size_bytes=len(query_text or ""),
+    )
+    if not decision.allowed:
+        retry_hint = ""
+        if decision.retry_after_ms > 0:
+            retry_hint = f" (try again in ~{decision.retry_after_ms / 1000:.1f}s)"
+        await update.message.reply_text(f"Workspace policy blocked this message: {decision.deny_reason}{retry_hint}")
+        return None
+
+    provider = context.user_data.get("provider")
+    provider_sessions = context.user_data.get("provider_sessions", {})
+    force_audio_response = _detect_audio_response_request(query_text)
+    task_id = create_task(
+        user_id,
+        chat_id,
+        query_text,
+        provider=provider,
+        model=get_provider_model(context.user_data, provider),
+        session_id=context.user_data.get("session_id"),
+        provider_session_id=provider_sessions.get(provider),
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+    )
+    audit.emit_task_lifecycle("task.created", user_id=user_id, task_id=task_id)
+    raw_item = _build_user_message_raw_item(
+        task_id=task_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        provider=provider,
+        model=get_provider_model(context.user_data, provider),
+        work_dir=context.user_data.get("work_dir"),
+        session_id=context.user_data.get("session_id"),
+        update=update,
+        image_paths=image_paths,
+        artifact_bundle=artifact_bundle,
+        force_audio_response=force_audio_response,
+    )
+
+    queue = get_queue(user_id)
+    ahead_count = pending_count
+    await queue.put(raw_item)
+    _track_queued_task_id(user_id, task_id)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        raw_item=raw_item,
+    )
+    _sync_user_queue_observability(user_id)
+    audit.emit_task_lifecycle("task.queued", user_id=user_id, task_id=task_id)
+    log.info(
+        "telegram_enqueue_completed",
+        task_id=task_id,
+        duration_ms=round((time.monotonic() - enqueue_started) * 1000),
+        force_audio_response=force_audio_response,
+    )
+
+    if ahead_count > 0:
+        await update.message.reply_text(_build_queue_feedback(task_id, ahead_count))
+
+    # Use lock to prevent race condition on worker spawn
+    await _ensure_queue_worker(user_id, context)
+
+    return cast(int | None, task_id)
+
+
+async def enqueue_scheduled_run(
+    *,
+    user_id: int,
+    chat_id: int,
+    context: BotContext,
+    query_text: str,
+    scheduled_job_id: int,
+    scheduled_run_id: int,
+    dry_run: bool,
+    provider: str | None,
+    model: str | None,
+    work_dir: str | None,
+    session_id: str | None,
+    trigger_reason: str,
+) -> int:
+    """Enqueue a scheduled job occurrence into the shared runtime queue."""
+    from koda.services import audit
+    from koda.utils.command_helpers import init_user_data
+
+    init_user_data(context.user_data, user_id=user_id)
+    resolved_provider = normalize_provider(provider or context.user_data.get("provider"))
+    task_id = create_task(
+        user_id,
+        chat_id,
+        query_text,
+        provider=resolved_provider,
+        model=model or get_provider_model(context.user_data, resolved_provider),
+        session_id=session_id or context.user_data.get("session_id"),
+        provider_session_id=context.user_data.get("provider_sessions", {}).get(resolved_provider),
+        work_dir=work_dir or context.user_data.get("work_dir"),
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+    )
+    raw_item = {
+        "_scheduled_run": True,
+        "_task_id": task_id,
+        "chat_id": chat_id,
+        "query_text": query_text,
+        "scheduled_job_id": scheduled_job_id,
+        "scheduled_run_id": scheduled_run_id,
+        "dry_run": dry_run,
+        "provider": resolved_provider,
+        "model": model,
+        "work_dir": work_dir,
+        "session_id": session_id,
+        "trigger_reason": trigger_reason,
+    }
+    queue = get_queue(user_id)
+    await queue.put(raw_item)
+    _track_queued_task_id(user_id, task_id)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=query_text,
+        raw_item=raw_item,
+    )
+    _sync_user_queue_observability(user_id)
+    audit.emit_task_lifecycle(
+        "task.queued",
+        user_id=user_id,
+        task_id=task_id,
+        scheduled_job_id=scheduled_job_id,
+        scheduled_run_id=scheduled_run_id,
+    )
+    await _ensure_queue_worker(user_id, context)
+    return cast(int, task_id)
+
+
+async def enqueue_continuation(
+    user_id: int,
+    chat_id: int,
+    context: BotContext,
+) -> None:
+    """Enqueue a supervised-mode continuation (resume session for 1 more turn).
+
+    Puts a special continuation dict into the queue to distinguish from normal items.
+    Session ID is read from user_data["_supervised_session_id"].
+    """
+    session_id = context.user_data.get("_supervised_session_id")
+    if not session_id:
+        return
+    provider = context.user_data.get("_supervised_provider")
+    task_id = create_task(
+        user_id,
+        chat_id,
+        "Continue from where you left off.",
+        provider=provider,
+        model=get_provider_model(context.user_data, provider) if provider else None,
+        session_id=session_id,
+        provider_session_id=context.user_data.get("provider_sessions", {}).get(provider),
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+        source_action="continuation",
+    )
+    queue = get_queue(user_id)
+    raw_item = {
+        "_continuation": True,
+        "_task_id": task_id,
+        "chat_id": chat_id,
+        "query_text": "Continue from where you left off.",
+        "session_id": session_id,
+        "provider": provider,
+    }
+    await queue.put(raw_item)
+    _track_queued_task_id(user_id, task_id)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text="Continue from where you left off.",
+        raw_item=raw_item,
+    )
+    _sync_user_queue_observability(user_id)
+
+    await _ensure_queue_worker(user_id, context)
+
+
+async def initiate_shutdown(telegram_bot: TelegramBotLike) -> None:
+    """Gracefully shut down: stop accepting queries, notify active users, wait for workers."""
+    global _shutting_down  # noqa: PLW0603
+    _shutting_down = True
+    log.info("shutdown_initiated", active_users=len(_active_chat_ids))
+
+    # Notify users with active queries
+    for _uid, chat_ids in list(_active_chat_ids.items()):
+        for chat_id in chat_ids:
+            with contextlib.suppress(Exception):
+                await telegram_bot.send_message(
+                    chat_id=chat_id,
+                    text="⚠️ Agent is restarting. Your current query will complete if possible.",
+                )
+
+    # Wait for active workers (max 30s)
+    active_workers = [t for t in _queue_workers.values() if not t.done()]
+    if active_workers:
+        log.info("shutdown_waiting_for_workers", count=len(active_workers))
+        await asyncio.wait(active_workers, timeout=30)
+
+
+async def enqueue_link_analysis(
+    user_id: int,
+    chat_id: int,
+    context: BotContext,
+    prompt: str,
+) -> None:
+    """Enqueue a link analysis prompt for provider processing."""
+    provider = context.user_data.get("provider")
+    provider_sessions = context.user_data.get("provider_sessions", {})
+    task_id = create_task(
+        user_id,
+        chat_id,
+        prompt,
+        provider=provider,
+        model=get_provider_model(context.user_data, provider),
+        session_id=context.user_data.get("session_id"),
+        provider_session_id=provider_sessions.get(provider),
+        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
+        source_action="link_analysis",
+    )
+    queue = get_queue(user_id)
+    raw_item = {
+        "_link_analysis": True,
+        "_task_id": task_id,
+        "chat_id": chat_id,
+        "query_text": prompt,
+        "provider": provider,
+        "model": get_provider_model(context.user_data, provider),
+        "work_dir": context.user_data.get("work_dir"),
+        "session_id": context.user_data.get("session_id"),
+    }
+    await queue.put(raw_item)
+    _track_queued_task_id(user_id, task_id)
+    await _persist_runtime_queue_item(
+        task_id=task_id,
+        user_id=user_id,
+        chat_id=chat_id,
+        query_text=prompt,
+        raw_item=raw_item,
+    )
+    _sync_user_queue_observability(user_id)
+
+    lock = _get_worker_lock(user_id)
+    async with lock:
+        if user_id not in _queue_workers or _queue_workers[user_id].done():
+            _queue_workers[user_id] = asyncio.create_task(_process_queue(user_id, context))

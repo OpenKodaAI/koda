@@ -1,0 +1,485 @@
+syntax = "proto3";
+
+package koda.memory.v1;
+
+import "common/v1/metadata.proto";
+
+message MemoryItem {
+  string memory_id = 1;
+  string kind = 2;
+  string content = 3;
+  double score = 4;
+}
+
+message RecallContext {
+  int64 user_id = 1;
+  repeated string memory_types = 2;
+  string project_key = 3;
+  string environment = 4;
+  string team = 5;
+  repeated string origin_kinds = 6;
+  string session_id = 7;
+  int64 source_query_id = 8;
+  int64 source_task_id = 9;
+  int64 source_episode_id = 10;
+  repeated string memory_statuses = 11;
+}
+
+message RecallResultItem {
+  MemoryRecordRow memory = 1;
+  double score = 2;
+  string retrieval_source = 3;
+  string layer = 4;
+}
+
+message RecallRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string query = 3;
+  uint32 limit = 4;
+  RecallContext context = 5;
+  repeated string allowed_layers = 6;
+  repeated string allowed_retrieval_sources = 7;
+}
+
+message RecallResponse {
+  repeated RecallResultItem items = 1;
+}
+
+message DynamicValue {
+  oneof kind {
+    bool null_value = 1;
+    bool bool_value = 2;
+    double number_value = 3;
+    string string_value = 4;
+    DynamicStruct struct_value = 5;
+    DynamicList list_value = 6;
+  }
+}
+
+message DynamicField {
+  string key = 1;
+  DynamicValue value = 2;
+}
+
+message DynamicStruct {
+  repeated DynamicField fields = 1;
+}
+
+message DynamicList {
+  repeated DynamicValue items = 1;
+}
+
+message MemoryRecordRow {
+  int64 id = 1;
+  string content_hash = 2;
+  string conflict_key = 3;
+  double quality_score = 4;
+  double importance = 5;
+  string created_at = 6;
+  string agent_id = 7;
+  string memory_type = 8;
+  string subject = 9;
+  string content = 10;
+  string session_id = 11;
+  int64 user_id = 12;
+  string origin_kind = 13;
+  int64 source_query_id = 14;
+  int64 source_task_id = 15;
+  int64 source_episode_id = 16;
+  string project_key = 17;
+  string environment = 18;
+  string team = 19;
+  double extraction_confidence = 20;
+  string embedding_status = 21;
+  string claim_kind = 22;
+  string decision_source = 23;
+  DynamicValue evidence_refs = 24;
+  DynamicValue applicability_scope = 25;
+  string valid_until = 26;
+  int64 supersedes_memory_id = 27;
+  string memory_status = 28;
+  string retention_reason = 29;
+  int64 embedding_attempts = 30;
+  string embedding_last_error = 31;
+  string embedding_retry_at = 32;
+  int64 access_count = 33;
+  string last_accessed = 34;
+  string last_recalled_at = 35;
+  string expires_at = 36;
+  bool is_active = 37;
+  DynamicStruct metadata = 38;
+  string vector_ref_id = 39;
+  string source_query_preview = 40;
+}
+
+message ClusterRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  repeated MemoryRecordRow rows = 3;
+}
+
+message ClusterResponse {
+  string cluster_json = 1;
+}
+
+message DeduplicateRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  repeated MemoryRecordRow rows = 3;
+}
+
+message DeduplicateResponse {
+  string dedupe_json = 1;
+}
+
+message CurationOverview {
+  int64 pending_memories = 1;
+  int64 pending_clusters = 2;
+  int64 expiring_soon = 3;
+  int64 discarded_last_7d = 4;
+  int64 merged_last_7d = 5;
+  int64 approved_last_7d = 6;
+}
+
+message CurationItem {
+  string agent_id = 1;
+  int64 id = 2;
+  int64 memory_id = 3;
+  string memory_type = 4;
+  string title = 5;
+  string content = 6;
+  int64 source_query_id = 7;
+  string source_query_preview = 8;
+  string session_id = 9;
+  int64 user_id = 10;
+  double importance = 11;
+  int64 access_count = 12;
+  string created_at = 13;
+  string last_accessed = 14;
+  string expires_at = 15;
+  string review_status = 16;
+  string review_reason = 17;
+  int64 duplicate_of_memory_id = 18;
+  string cluster_id = 19;
+  double semantic_strength = 20;
+  string memory_status = 21;
+  DynamicStruct metadata = 22;
+  bool is_active = 23;
+}
+
+message CurationClusterSummary {
+  string cluster_id = 1;
+  string agent_id = 2;
+  string summary = 3;
+  int64 memory_count = 4;
+  string latest_created_at = 5;
+  string review_status = 6;
+  string dominant_type = 7;
+  repeated int64 member_ids = 8;
+}
+
+message Pagination {
+  int64 limit = 1;
+  int64 offset = 2;
+  int64 total = 3;
+  bool has_more = 4;
+}
+
+message MemoryMapSummary {
+  int64 total = 1;
+  int64 active = 2;
+  int64 superseded = 3;
+  int64 stale = 4;
+  int64 invalidated = 5;
+}
+
+message CounterEntry {
+  string key = 1;
+  int64 count = 2;
+  string updated_at = 3;
+}
+
+message RecallLogItem {
+  int64 id = 1;
+  int64 user_id = 2;
+  int64 task_id = 3;
+  string query_preview = 4;
+  double trust_score = 5;
+  int64 total_considered = 6;
+  int64 total_selected = 7;
+  int64 total_discarded = 8;
+  int64 conflict_group_count = 9;
+  string selected_layers_csv = 10;
+  string retrieval_sources_csv = 11;
+  string created_at = 12;
+}
+
+message MaintenanceLogItem {
+  string operation = 1;
+  int64 memories_affected = 2;
+  string details = 3;
+  string executed_at = 4;
+}
+
+message AuditLogItem {
+  int64 id = 1;
+  int64 task_id = 2;
+  string query_preview = 3;
+  double trust_score = 4;
+  DynamicValue considered = 5;
+  DynamicValue selected = 6;
+  DynamicValue discarded = 7;
+  DynamicValue conflicts = 8;
+  DynamicValue explanations = 9;
+  string created_at = 10;
+  string timestamp = 11;
+  DynamicValue details = 12;
+}
+
+message UserMemoryCount {
+  int64 user_id = 1;
+  int64 memory_count = 2;
+  int64 active_count = 3;
+}
+
+message MemoryDashboardFilter {
+  int64 user_id = 1;
+  string session_id = 2;
+  int64 days = 3;
+  bool include_inactive = 4;
+  int64 limit = 5;
+  int64 offset = 6;
+  string review_status = 7;
+  string memory_status = 8;
+  string memory_type = 9;
+  string query = 10;
+  string cluster_id = 11;
+  string origin_kind = 12;
+  string kind = 13;
+  bool has_is_active = 14;
+  bool is_active = 15;
+}
+
+message FilterOption {
+  string value = 1;
+  string label = 2;
+  int64 count = 3;
+  string color = 4;
+}
+
+message UserFilterOption {
+  int64 user_id = 1;
+  string label = 2;
+  int64 count = 3;
+}
+
+message SessionFilterOption {
+  string session_id = 1;
+  string label = 2;
+  int64 count = 3;
+  string last_used = 4;
+}
+
+message MemoryGraphNode {
+  string id = 1;
+  string kind = 2;
+  string agent_id = 3;
+  string label = 4;
+  string title = 5;
+  int64 size = 6;
+  string cluster_id = 7;
+  string created_at = 8;
+  int64 related_count = 9;
+  string source_query_text = 10;
+  int64 memory_id = 11;
+  string memory_type = 12;
+  string content = 13;
+  int64 source_query_id = 14;
+  string source_query_preview = 15;
+  string session_id = 16;
+  int64 user_id = 17;
+  double importance = 18;
+  int64 access_count = 19;
+  string last_accessed = 20;
+  string expires_at = 21;
+  string review_status = 22;
+  string review_reason = 23;
+  int64 duplicate_of_memory_id = 24;
+  double semantic_strength = 25;
+  string memory_status = 26;
+  DynamicStruct metadata = 27;
+  bool is_active = 28;
+  string dominant_type = 29;
+  string summary = 30;
+  repeated int64 member_ids = 31;
+  int64 member_count = 32;
+  repeated string session_ids = 33;
+}
+
+message MemoryGraphEdge {
+  string id = 1;
+  string source = 2;
+  string target = 3;
+  string type = 4;
+  double weight = 5;
+  string label = 6;
+  double similarity = 7;
+  string session_id = 8;
+  string source_key = 9;
+}
+
+message MemoryMapStats {
+  int64 total_memories = 1;
+  int64 rendered_memories = 2;
+  int64 hidden_memories = 3;
+  int64 active_memories = 4;
+  int64 inactive_memories = 5;
+  int64 learning_nodes = 6;
+  int64 users = 7;
+  int64 sessions = 8;
+  int64 semantic_edges = 9;
+  int64 contextual_edges = 10;
+  int64 expiring_soon = 11;
+  int64 maintenance_operations = 12;
+  string last_maintenance_at = 13;
+  string semantic_status = 14;
+}
+
+message CurationOverlap {
+  string session_id = 1;
+  int64 count = 2;
+}
+
+message CurationActionOperation {
+  string op = 1;
+  int64 memory_id = 2;
+  repeated int64 memory_ids = 3;
+  string review_status = 4;
+  string memory_status = 5;
+  bool is_active = 6;
+  string reason = 7;
+  int64 duplicate_of_memory_id = 8;
+  bool expires_now = 9;
+}
+
+message ListCurationItemsRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  int64 total = 3;
+  repeated MemoryRecordRow rows = 4;
+  repeated MemoryRecordRow all_rows = 5;
+  repeated CurationClusterSummary cluster_rows = 6;
+  MemoryDashboardFilter filters = 7;
+}
+
+message ListCurationItemsResponse {
+  string agent_id = 1;
+  CurationOverview overview = 2;
+  repeated CurationItem items = 3;
+  repeated CurationClusterSummary clusters = 4;
+  Pagination page = 5;
+  MemoryDashboardFilter filters = 6;
+  repeated FilterOption status_filters = 7;
+  repeated FilterOption type_filters = 8;
+}
+
+message GetMemoryMapRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  MemoryMapSummary summary = 3;
+  repeated CounterEntry type_counts = 4;
+  repeated UserMemoryCount user_counts = 5;
+  repeated CounterEntry embedding_jobs = 6;
+  repeated CounterEntry quality_counters = 7;
+  repeated CurationClusterSummary cluster_rows = 8;
+  repeated MemoryRecordRow rows = 9;
+  repeated RecallLogItem recent_recall = 10;
+  repeated MaintenanceLogItem maintenance_rows = 11;
+  MemoryDashboardFilter filters = 12;
+}
+
+message GetMemoryMapResponse {
+  string agent_id = 1;
+  MemoryMapSummary summary = 2;
+  repeated CounterEntry embedding_jobs = 3;
+  repeated CounterEntry quality_counters = 4;
+  repeated CurationClusterSummary top_clusters = 5;
+  repeated RecallLogItem recent_recall = 6;
+  repeated MaintenanceLogItem maintenance = 7;
+  repeated MemoryGraphNode nodes = 8;
+  repeated MemoryGraphEdge edges = 9;
+  MemoryMapStats stats = 10;
+  MemoryDashboardFilter filters = 11;
+  repeated UserFilterOption filter_users = 12;
+  repeated SessionFilterOption filter_sessions = 13;
+  repeated FilterOption filter_types = 14;
+  repeated CounterEntry type_counts = 15;
+  repeated UserMemoryCount user_counts = 16;
+  string semantic_status = 17;
+}
+
+message GetCurationDetailRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string subject_id = 3;
+  string detail_kind = 4;
+  string cluster_id = 5;
+  MemoryRecordRow row = 6;
+  repeated MemoryRecordRow cluster_rows = 7;
+  repeated MemoryRecordRow related_rows = 8;
+  repeated AuditLogItem recent_audits = 9;
+}
+
+message GetCurationDetailResponse {
+  string detail_kind = 1;
+  CurationItem memory = 2;
+  repeated CurationItem related_memories = 3;
+  repeated CurationItem cluster_members = 4;
+  repeated AuditLogItem recent_audits = 5;
+  CurationClusterSummary cluster_summary = 6;
+  string source_query_text = 7;
+  string session_name = 8;
+  repeated CurationOverlap overlaps = 9;
+  repeated AuditLogItem history = 10;
+}
+
+message ApplyCurationActionRequest {
+  koda.common.v1.RequestMetadata metadata = 1;
+  string agent_id = 2;
+  string subject_id = 3;
+  string action = 4;
+  string target_type = 5;
+  repeated string target_ids = 6;
+  repeated string cluster_ids = 7;
+  repeated int64 memory_ids = 8;
+  string reason = 9;
+  int64 duplicate_of_memory_id = 10;
+  string memory_status = 11;
+  repeated MemoryRecordRow cluster_rows = 12;
+}
+
+message ApplyCurationActionResponse {
+  bool applied = 1;
+  int64 updated_count = 2;
+  repeated int64 memory_ids = 3;
+  int64 duplicate_of_memory_id = 4;
+  repeated CurationActionOperation operations = 5;
+  string error = 6;
+  string target_type = 7;
+  repeated string cluster_ids = 8;
+  string reason = 9;
+  string memory_status = 10;
+  string review_status = 11;
+}
+
+service MemoryEngineService {
+  rpc Recall(RecallRequest) returns (RecallResponse);
+  rpc Cluster(ClusterRequest) returns (ClusterResponse);
+  rpc Deduplicate(DeduplicateRequest) returns (DeduplicateResponse);
+  rpc ListCurationItems(ListCurationItemsRequest) returns (ListCurationItemsResponse);
+  rpc GetMemoryMap(GetMemoryMapRequest) returns (GetMemoryMapResponse);
+  rpc GetCurationDetail(GetCurationDetailRequest) returns (GetCurationDetailResponse);
+  rpc ApplyCurationAction(ApplyCurationActionRequest) returns (ApplyCurationActionResponse);
+  rpc Health(koda.common.v1.HealthRequest) returns (koda.common.v1.HealthResponse);
+}
