@@ -1,0 +1,47 @@
+schema_version: koda_skill.v1
+id: safe_readonly
+name: Safe Readonly
+version: 1.0.0
+description: Example local package with one prompt skill and one read-only tool.
+author: Koda
+license: MIT
+permissions:
+  filesystem:
+    read:
+      - skills
+docs:
+  readme: README.md
+skills:
+  - id: safe_review
+    name: Safe Review
+    instruction: Use the safe review checklist when evaluating local docs.
+    content_path: skills/safe-review.md
+    aliases:
+      - safe-review
+    tags:
+      - example
+      - review
+    output_format_enforcement: Return findings, evidence, and next actions.
+    max_token_budget: 1800
+tools:
+  - id: safe_read_file_summary
+    title: Safe Read File Summary
+    category: skill_package
+    description: Return a short summary of a small text file inside the package docs folder.
+    handler: handlers.read_file_summary
+    access_level: read
+    effect_tags:
+      - local_read
+    idempotency: read_only
+    risk_class: read_context
+    approval_default: allow
+    timeout_seconds: 10
+    args_schema:
+      type: object
+      properties:
+        path:
+          type: string
+          description: Relative path under the package directory.
+      required:
+        - path
+      additionalProperties: false

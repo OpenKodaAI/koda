@@ -1,0 +1,24 @@
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "next-env.d.ts",
+    // Large static translation table; TypeScript/build still validate imports.
+    "src/lib/i18n-resources.ts",
+    "src/lib/i18n-generated-ui.ts",
+    // Keep project config/entrypoint files out of the React rule set.
+    "*.config.{js,cjs,mjs,ts}",
+    "server.mjs",
+  ]),
+]);
+
+export default eslintConfig;
