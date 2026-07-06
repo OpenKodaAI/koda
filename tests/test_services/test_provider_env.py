@@ -1,0 +1,114 @@
+"""Tests for subprocess environment sanitization helpers."""
+
+from unittest.mock import patch
+
+import pytest
+
+from koda.services.provider_env import build_llm_subprocess_env, build_tool_subprocess_env, validate_shell_command
+
+
+def test_llm_subprocess_env_keeps_provider_credentials_only():
+    env = build_llm_subprocess_env(
+        {
+            "PATH": "/usr/bin",
+            "HOME": "/tmp/home",
+            "CLAUDE_AUTH_MODE": "api_key",
+            "ANTHROPIC_API_KEY": "anthropic-secret",
+            "OPENAI_API_KEY": "openai-secret",
+            "AGENT_TOKEN": "telegram-secret",
+            "JIRA_API_TOKEN": "jira-secret",
+            "RUNTIME_LOCAL_UI_TOKEN": "runtime-secret",
+        },
+        provider="claude",
+    )
+
+    assert env["PATH"] == "/usr/bin"
+    assert env["HOME"] == "/tmp/home"
+    assert env["ANTHROPIC_API_KEY"] == "anthropic-secret"
+    assert env["CLAUDE_AUTH_MODE"] == "api_key"
+    assert "OPENAI_API_KEY" not in env
+    assert "AGENT_TOKEN" not in env
+    assert "JIRA_API_TOKEN" not in env
+    assert "RUNTIME_LOCAL_UI_TOKEN" not in env
+
+
+def test_gemini_llm_subprocess_env_keeps_project_only_for_active_provider():
+    env = build_llm_subprocess_env(
+        {
+            "PATH": "/usr/bin",
+            "HOME": "/tmp/home",
+            "GEMINI_AUTH_MODE": "api_key",
+            "GEMINI_API_KEY": "gemini-secret",
+            "GOOGLE_CLOUD_PROJECT": "control-plane",
+            "OPENAI_API_KEY": "openai-secret",
+        },
+        provider="gemini",
+    )
+
+    assert env["GEMINI_API_KEY"] == "gemini-secret"
+    assert env["GOOGLE_CLOUD_PROJECT"] == "control-plane"
+    assert "OPENAI_API_KEY" not in env
+
+
+def test_llm_subprocess_env_includes_provider_credentials_from_process_env(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("GEMINI_AUTH_MODE", "api_key")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini-secret")
+    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "control-plane")
+
+    env = build_llm_subprocess_env(provider="gemini")
+
+    assert env["GEMINI_AUTH_MODE"] == "api_key"
+    assert env["GEMINI_API_KEY"] == "gemini-secret"
+    assert env["GOOGLE_CLOUD_PROJECT"] == "control-plane"
+
+
+def test_openrouter_llm_subprocess_env_keeps_attribution_headers_only_for_openrouter():
+    env = build_llm_subprocess_env(
+        {
+            "PATH": "/usr/bin",
+            "HOME": "/tmp/home",
+            "OPENROUTER_AUTH_MODE": "api_key",
+            "OPENROUTER_API_KEY": "sk-or-v1-test",
+            "OPENROUTER_HTTP_REFERER": "https://koda.example",
+            "OPENROUTER_APP_TITLE": "Koda",
+            "OPENROUTER_APP_CATEGORIES": "cli-agent,personal-agent",
+            "OPENAI_API_KEY": "openai-secret",
+        },
+        provider="openrouter",
+    )
+
+    assert env["OPENROUTER_API_KEY"] == "sk-or-v1-test"
+    assert env["OPENROUTER_HTTP_REFERER"] == "https://koda.example"
+    assert env["OPENROUTER_APP_TITLE"] == "Koda"
+    assert env["OPENROUTER_APP_CATEGORIES"] == "cli-agent,personal-agent"
+    assert "OPENAI_API_KEY" not in env
+
+
+def test_tool_subprocess_env_keeps_only_safe_base_env_plus_explicit_overrides():
+    env = build_tool_subprocess_env(
+        {
+            "PATH": "/usr/bin",
+            "HOME": "/tmp/home",
+            "OPENAI_API_KEY": "openai-secret",
+            "AGENT_TOKEN": "telegram-secret",
+        },
+        env_overrides={"LOCAL_FLAG": "enabled", "GWS_CREDENTIALS_FILE": "/tmp/creds.json"},
+    )
+
+    assert env["PATH"] == "/usr/bin"
+    assert env["LOCAL_FLAG"] == "enabled"
+    assert env["GWS_CREDENTIALS_FILE"] == "/tmp/creds.json"
+    assert "HOME" not in env
+    assert "OPENAI_API_KEY" not in env
+    assert "AGENT_TOKEN" not in env
+
+
+def test_validate_shell_command_delegates_external_cli_to_security_guard():
+    command = "npx -y @googleworkspace/cli gmail users.messages.list"
+    with patch("koda.services.provider_env.get_security_guard_client") as guard_factory:
+        guard = guard_factory.return_value
+        guard.validate_shell_command.return_value = command
+
+        assert validate_shell_command(command) == command
+
+    guard.validate_shell_command.assert_called_once_with(command)

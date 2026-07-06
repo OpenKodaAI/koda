@@ -1,0 +1,80 @@
+{
+  "schema_version": "release_quality.v1",
+  "release_id": "phase5-smoke-pass",
+  "status": "passed",
+  "suite_score": 0.93,
+  "generated_at": "2026-05-17T12:15:00Z",
+  "gates": [
+    {
+      "id": "deterministic_eval_suite",
+      "status": "passed"
+    },
+    {
+      "id": "trajectory_export_redaction",
+      "status": "passed"
+    },
+    {
+      "id": "tool_policy_regression",
+      "status": "passed"
+    },
+    {
+      "id": "run_graph_completeness",
+      "status": "passed"
+    },
+    {
+      "id": "squad_golden_quality",
+      "status": "passed"
+    }
+  ],
+  "eval_runs": [
+    {
+      "schema_version": "eval_run.v1",
+      "run_id": "eval_run_phase5_pass",
+      "status": "passed",
+      "replay_mode": "offline",
+      "provider_calls": 0,
+      "case_results": [
+        {
+          "case_id": "case_run_7101",
+          "status": "passed",
+          "score": 0.93,
+          "expectations": {
+            "tool_calls": [
+              {
+                "tool_id": "read_file",
+                "effect": "read_context"
+              }
+            ],
+            "policy_decisions": [
+              {
+                "tool_id": "package_install",
+                "decision": "denied"
+              }
+            ]
+          },
+          "observed": {
+            "tool_calls": [
+              {
+                "tool_id": "read_file",
+                "effect": "read_context"
+              }
+            ],
+            "policy_decisions": [
+              {
+                "tool_id": "package_install",
+                "decision": "denied"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ],
+  "trajectory_export": {
+    "schema_version": "trajectory_export.v1",
+    "replay_mode": "offline",
+    "raw_prompt_included": false,
+    "raw_secret_count": 0,
+    "line_count": 3
+  }
+}
