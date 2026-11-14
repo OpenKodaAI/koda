@@ -20,6 +20,12 @@ covered:
 
 It fails closed: when either setting cannot be applied it raises
 :class:`ProcessHardeningError` and the worker does not start.
+
+It cannot cover Python's own startup (the interpreter, ``site`` and ``.pth``
+processing, ``koda/__init__.py``), which runs before the entrypoint. Until then
+the worker is dumpable and a same-uid process can read its environment. The
+"startup window" residual in ``docs/operations/hardening.md`` describes it;
+ADR-002's L2 confinement (AG-14) closes it.
 """
 
 from __future__ import annotations

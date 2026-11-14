@@ -93,3 +93,4 @@ Databases, object storage, reverse proxies, webhook senders, OAuth providers, an
 - MCP safety classification accuracy for newly added servers
 - browser automation against internal-only apps when private-network access is intentionally enabled
 - incident detection for suspicious attach, relay, or integration usage
+- the agent worker's startup window: until the worker makes itself non-dumpable in the first statement of `koda/__main__.py`, a process running as the same user (a provider CLI, an MCP server, a governed shell command) can read its environment, including the DSN, the S3 secret and granted secrets. Such a process can also kill the worker to make the kernel restart it and open a new window. This stays open until AG-14 runs those processes under Landlock (ADR-002 L2); see `docs/operations/hardening.md`

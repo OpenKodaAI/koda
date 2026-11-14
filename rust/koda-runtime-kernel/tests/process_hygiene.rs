@@ -8,13 +8,22 @@
 //! The kernel and the reading sibling run as one unprivileged uid: root (or
 //! any holder of `CAP_SYS_PTRACE`) reads every `environ` whatever the kernel
 //! does, so a root reader would prove nothing. When the tests run as root they
-//! switch both processes to an unused uid; when that is impossible they print
-//! the reason and return without asserting anything.
+//! switch both processes to an unused uid.
+//!
+//! Rust has no skipped state and `cargo test` hides a passing test's output,
+//! so a test that returns early is reported as `ok`. Only an identity
+//! precondition may end a test early: no unused uid, a non-root runner that
+//! holds `CAP_SYS_PTRACE`, or root that may not act as the throwaway uid. Even
+//! then the test fails unless `KODA_TEST_ALLOW_PROCESS_HYGIENE_SKIP=1` says a
+//! run that proves nothing is acceptable. A kernel that cannot be started for
+//! any other reason, or that exits during startup (as it does when it cannot
+//! harden itself), always fails the test with its exit status and output.
 
 #![cfg(target_os = "linux")]
 
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{self, Read, Seek, SeekFrom};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::process::CommandExt;
@@ -33,6 +42,22 @@ const KERNEL_BIN: &str = env!("CARGO_BIN_EXE_koda-runtime-kernel");
 const CANARY_KEY: &str = "KODA_AG04_CANARY";
 const CAP_SYS_PTRACE: u32 = 19;
 const SEARCH_PATH: &str = "/usr/local/bin:/usr/bin:/bin";
+/// Set to `1` to let a test whose identity precondition fails pass without
+/// proving anything, instead of failing.
+const ALLOW_SKIP_ENV: &str = "KODA_TEST_ALLOW_PROCESS_HYGIENE_SKIP";
+
+/// Ends a test whose proof cannot be made here: fails it, unless
+/// [`ALLOW_SKIP_ENV`] allows the skip. Only identity preconditions call this.
+fn skip(test: &str, reason: &str) {
+    if std::env::var_os(ALLOW_SKIP_ENV).is_some_and(|value| value == "1") {
+        eprintln!("SKIPPED {test}: {reason}");
+        return;
+    }
+    panic!(
+        "{test} cannot make its proof here: {reason}. \
+         Set {ALLOW_SKIP_ENV}=1 to let it pass without proving anything."
+    );
+}
 
 /// The unprivileged uid that the kernel and the sibling share.
 #[derive(Clone, Copy)]
@@ -44,12 +69,33 @@ struct Identity {
 }
 
 impl Identity {
+    /// The user running the tests, with no switch.
+    fn current() -> Self {
+        // SAFETY: plain getters without arguments.
+        let (uid, gid) = unsafe { (libc::getuid(), libc::getgid()) };
+        Identity {
+            uid,
+            gid,
+            switch: false,
+        }
+    }
+
     fn apply(&self, command: &mut Command) {
         if self.switch {
             // std clears the supplementary groups when it changes the uid.
             command.uid(self.uid).gid(self.gid);
         }
     }
+}
+
+/// Root that may not act as the throwaway uid (no `CAP_SETUID` or
+/// `CAP_CHOWN`, or a path that uid cannot reach) is an identity
+/// precondition, returned as the reason. Every other error fails the test.
+fn uid_switch_refused(id: Identity, what: String, err: io::Error) -> String {
+    if id.switch && err.kind() == io::ErrorKind::PermissionDenied {
+        return format!("root may not {what}: {err}");
+    }
+    panic!("cannot {what}: {err}");
 }
 
 fn cap_eff_has(cap: u32) -> bool {
@@ -117,36 +163,56 @@ impl Kernel {
 
 /// Starts the real binary the way the compose service does, as `id`.
 fn start_kernel(id: Identity, canary: &str) -> Result<Kernel, String> {
+    let port = free_port();
+    launch_kernel(id, canary, &format!("127.0.0.1:{port}"), port)
+}
+
+/// Starts the kernel listening on `socket` and waits until `port` accepts.
+///
+/// `Err` is only the identity precondition of [`uid_switch_refused`]. Any
+/// other failure panics, and a kernel that exits before it listens panics
+/// with its exit status and output: a kernel that refuses to start must fail
+/// the test, never skip it.
+fn launch_kernel(id: Identity, canary: &str, socket: &str, port: u16) -> Result<Kernel, String> {
     let root = tempfile::tempdir().expect("kernel root");
     if id.switch {
-        std::os::unix::fs::chown(root.path(), Some(id.uid), Some(id.gid))
-            .map_err(|e| format!("chown kernel root: {e}"))?;
+        std::os::unix::fs::chown(root.path(), Some(id.uid), Some(id.gid)).map_err(|err| {
+            uid_switch_refused(id, format!("chown the kernel root to uid {}", id.uid), err)
+        })?;
     }
-    let port = free_port();
+    // stdout carries the kernel's tracing, stderr the error main() returns.
+    let mut output = tempfile::tempfile().expect("kernel output file");
     let mut command = Command::new(KERNEL_BIN);
     command
         .env_clear()
-        .env("RUNTIME_KERNEL_SOCKET", format!("127.0.0.1:{port}"))
+        .env("RUNTIME_KERNEL_SOCKET", socket)
         .env("RUNTIME_KERNEL_ROOT", root.path())
         .env(CANARY_KEY, canary)
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stdout(output.try_clone().expect("share the kernel output file"))
+        .stderr(output.try_clone().expect("share the kernel output file"));
     id.apply(&mut command);
-    let child = command
-        .spawn()
-        .map_err(|e| format!("cannot start {KERNEL_BIN} as uid {}: {e}", id.uid))?;
+    let child = command.spawn().map_err(|err| {
+        uid_switch_refused(id, format!("start {KERNEL_BIN} as uid {}", id.uid), err)
+    })?;
     let mut process = Reaped(child);
 
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
         if let Some(status) = process.0.try_wait().expect("poll kernel") {
-            return Err(format!("kernel exited during startup: {status}"));
+            panic!(
+                "kernel exited during startup: {status}\n--- kernel output ---\n{}",
+                read_all(&mut output)
+            );
         }
         if TcpStream::connect(("127.0.0.1", port)).is_ok() {
             break;
         }
-        assert!(Instant::now() < deadline, "kernel did not listen on {port}");
+        assert!(
+            Instant::now() < deadline,
+            "kernel did not listen on {port}\n--- kernel output ---\n{}",
+            read_all(&mut output)
+        );
         std::thread::sleep(Duration::from_millis(50));
     }
     Ok(Kernel {
@@ -154,6 +220,17 @@ fn start_kernel(id: Identity, canary: &str) -> Result<Kernel, String> {
         port,
         _root: root,
     })
+}
+
+fn read_all(file: &mut File) -> String {
+    let mut bytes = Vec::new();
+    match file
+        .seek(SeekFrom::Start(0))
+        .and_then(|_| file.read_to_end(&mut bytes))
+    {
+        Ok(_) => String::from_utf8_lossy(&bytes).into_owned(),
+        Err(err) => format!("<cannot read the kernel output: {err}>"),
+    }
 }
 
 /// A same-uid process reading `/proc/<pid>/environ`, exactly as a provider
@@ -223,12 +300,10 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 
 #[test]
 fn same_uid_sibling_cannot_read_kernel_environ_and_core_dumps_are_off() {
+    const TEST: &str = "same_uid_sibling_cannot_read_kernel_environ_and_core_dumps_are_off";
     let id = match identity() {
         Ok(id) => id,
-        Err(reason) => {
-            eprintln!("SKIPPED same_uid_sibling_cannot_read_kernel_environ: {reason}");
-            return;
-        }
+        Err(reason) => return skip(TEST, &reason),
     };
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -249,11 +324,8 @@ fn same_uid_sibling_cannot_read_kernel_environ_and_core_dumps_are_off() {
     let control = match control.spawn() {
         Ok(child) => Reaped(child),
         Err(err) => {
-            eprintln!(
-                "SKIPPED same_uid_sibling_cannot_read_kernel_environ: cannot start a process as uid {}: {err}",
-                id.uid
-            );
-            return;
+            let what = format!("start a process as uid {}", id.uid);
+            return skip(TEST, &uid_switch_refused(id, what, err));
         }
     };
     let control_pid = control.0.id() as i32;
@@ -274,10 +346,7 @@ fn same_uid_sibling_cannot_read_kernel_environ_and_core_dumps_are_off() {
 
     let kernel = match start_kernel(id, &canary) {
         Ok(kernel) => kernel,
-        Err(reason) => {
-            eprintln!("SKIPPED same_uid_sibling_cannot_read_kernel_environ: {reason}");
-            return;
-        }
+        Err(reason) => return skip(TEST, &reason),
     };
     let pid = kernel.pid();
     assert_eq!(real_uid(pid), id.uid);
@@ -299,6 +368,42 @@ fn same_uid_sibling_cannot_read_kernel_environ_and_core_dumps_are_off() {
     assert_ne!(id.uid, 0);
 
     assert_eq!(core_limit(pid), ("0".to_string(), "0".to_string()));
+}
+
+/// Guards the two kernel tests: a kernel that exits during startup (as it does
+/// when it cannot harden itself) fails them with its exit status and output,
+/// instead of ending them early as a pass.
+#[test]
+fn kernel_exiting_during_startup_fails_the_test() {
+    let port = free_port();
+    // The real kernel hardens itself, then main() returns the parse error of
+    // this listen address and the process exits 1 before it ever listens. The
+    // test's own user runs it: no identity precondition applies.
+    let outcome = std::panic::catch_unwind(|| {
+        launch_kernel(
+            Identity::current(),
+            "startup-failure",
+            "not-a-socket-address",
+            port,
+        )
+    });
+    let Err(payload) = outcome else {
+        panic!("a kernel that exited during startup was not reported as a failure");
+    };
+    let message = payload
+        .downcast_ref::<String>()
+        .cloned()
+        .or_else(|| payload.downcast_ref::<&str>().map(|text| text.to_string()))
+        .unwrap_or_default();
+    assert!(
+        message.contains("kernel exited during startup: exit status: 1"),
+        "{message}"
+    );
+    // The kernel's own stderr is part of the failure, so it can be diagnosed.
+    assert!(
+        message.contains("invalid socket address syntax"),
+        "{message}"
+    );
 }
 
 fn worker(agent_id: &str, script: &str) -> AgentWorkerSpec {
@@ -332,19 +437,14 @@ async fn get_worker(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn hardened_kernel_still_supervises_agent_workers() {
+    const TEST: &str = "hardened_kernel_still_supervises_agent_workers";
     let id = match identity() {
         Ok(id) => id,
-        Err(reason) => {
-            eprintln!("SKIPPED hardened_kernel_still_supervises_agent_workers: {reason}");
-            return;
-        }
+        Err(reason) => return skip(TEST, &reason),
     };
     let kernel = match start_kernel(id, "supervision") {
         Ok(kernel) => kernel,
-        Err(reason) => {
-            eprintln!("SKIPPED hardened_kernel_still_supervises_agent_workers: {reason}");
-            return;
-        }
+        Err(reason) => return skip(TEST, &reason),
     };
     let kernel_pid = kernel.pid();
     let mut client =

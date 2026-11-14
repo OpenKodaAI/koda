@@ -64,20 +64,46 @@ def test_entrypoint_hardens_before_any_other_statement() -> None:
     assert not second.value.args and not second.value.keywords
 
 
+@pytest.mark.security
+def test_security_docs_record_the_worker_startup_window() -> None:
+    """Python starts up (``site``, ``.pth`` files, ``koda/__init__.py``) before the
+    entrypoint's first statement runs, and until then a same-uid process can read
+    the worker's environment. Only ADR-002's L2 confinement (AG-14) closes that, so
+    the docs that describe the guarantee must state the residual."""
+    docs = ROOT_DIR / "docs"
+    hardening = (docs / "operations" / "hardening.md").read_text(encoding="utf-8")
+    matrix = (docs / "security" / "guardrail-test-matrix.md").read_text(encoding="utf-8")
+    threat_model = (docs / "security" / "threat-model.md").read_text(encoding="utf-8")
+
+    places = {
+        "hardening.md, Process hygiene": hardening.split("\n## Process hygiene", 1)[1].split("\n## ", 1)[0],
+        "guardrail-test-matrix.md, worker row": next(
+            line for line in matrix.splitlines() if line.startswith("| Worker and runtime-kernel processes |")
+        ),
+        "threat-model.md, residuals": threat_model.split("\n## Residual High-Risk Areas", 1)[1],
+    }
+    for place, text in places.items():
+        assert "startup window" in text, f"{place} does not record the worker's startup window"
+        assert "AG-14" in text, f"{place} does not say which task closes the startup window"
+
+
 # --------------------------------------------------------------------------- #
 #  Real processes                                                              #
 # --------------------------------------------------------------------------- #
 
 # Prints the dumpable state and the core limit of a fresh interpreter, after
 # optionally running the entrypoint module body (``import koda.__main__`` runs
-# it without calling ``main()``).
+# it without calling ``main()``), and which file that body came from.
 _PROBE = r"""
 import ctypes, json, resource, sys
+entrypoint = None
 if sys.argv[1] == "worker":
     import koda.__main__  # noqa: F401
+    entrypoint = sys.modules["koda.__main__"].__file__
 zero = ctypes.c_ulong(0)
 dumpable = ctypes.CDLL(None, use_errno=True).prctl(3, zero, zero, zero, zero)
-print(json.dumps({"dumpable": dumpable, "core": list(resource.getrlimit(resource.RLIMIT_CORE))}))
+core = list(resource.getrlimit(resource.RLIMIT_CORE))
+print(json.dumps({"dumpable": dumpable, "core": core, "entrypoint": entrypoint}))
 """
 
 
@@ -108,6 +134,8 @@ def test_entrypoint_makes_worker_non_dumpable_with_core_dumps_off() -> None:
     control = _probe("control")
     worker = _probe("worker")
 
+    # The body that ran is this checkout's entrypoint, not another installed copy.
+    assert Path(worker["entrypoint"]).resolve() == ENTRYPOINT
     # A fresh interpreter starts dumpable: the test can see the difference.
     assert control["dumpable"] == 1
     assert worker["dumpable"] == 0
@@ -117,9 +145,10 @@ def test_entrypoint_makes_worker_non_dumpable_with_core_dumps_off() -> None:
 
 # A process that holds a canary in its environment and stays alive. When it
 # starts as root it drops to the throwaway uid first (see _same_uid_identity).
+# Its "ready" line reports which entrypoint file ran after the drop.
 _TARGET = r"""
-import ctypes, os, sys, time
-mode, uid, gid = sys.argv[1], int(sys.argv[2]), int(sys.argv[3])
+import ctypes, json, os, sys, time
+mode, uid, gid, expected_entrypoint = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
 libc = ctypes.CDLL(None, use_errno=True)
 zero = ctypes.c_ulong(0)
 if os.geteuid() != uid:
@@ -140,9 +169,17 @@ if os.geteuid() != uid:
     # only the entrypoint can make the difference between control and worker.
     if libc.prctl(4, ctypes.c_ulong(1), zero, zero, zero) != 0:
         raise OSError(ctypes.get_errno(), "prctl(PR_SET_DUMPABLE, 1)")
+    # Unable to read this checkout, the import below would find another
+    # installed copy of koda (an editable install, say) or none at all.
+    if not os.access(expected_entrypoint, os.R_OK):
+        print("skip:", f"uid {uid} cannot read {expected_entrypoint}", flush=True)
+        sys.exit(0)
+entrypoint = None
 if mode == "worker":
     import koda.__main__  # noqa: F401
-print("ready", os.getuid(), libc.prctl(3, zero, zero, zero, zero), flush=True)
+    entrypoint = sys.modules["koda.__main__"].__file__
+state = {"uid": os.getuid(), "dumpable": libc.prctl(3, zero, zero, zero, zero), "entrypoint": entrypoint}
+print("ready", json.dumps(state), flush=True)
 time.sleep(120)
 """
 
@@ -176,7 +213,7 @@ def _same_uid_identity() -> tuple[int, int]:
 @contextmanager
 def _target(mode: str, uid: int, gid: int, canary: str) -> Iterator[tuple[int, int]]:
     proc = subprocess.Popen(
-        [sys.executable, "-c", _TARGET, mode, str(uid), str(gid)],
+        [sys.executable, "-c", _TARGET, mode, str(uid), str(gid), str(ENTRYPOINT)],
         cwd=ROOT_DIR,
         env=_child_env(KODA_AG04_CANARY=canary),
         stdin=subprocess.DEVNULL,
@@ -189,14 +226,19 @@ def _target(mode: str, uid: int, gid: int, canary: str) -> Iterator[tuple[int, i
         ready, _, _ = select.select([proc.stdout], [], [], 60)
         line = proc.stdout.readline().strip() if ready else ""
         if line.startswith("skip:"):
-            pytest.skip(f"cannot switch to throwaway uid {uid}: {line[5:].strip()}")
+            pytest.skip(f"cannot run the target as throwaway uid {uid}: {line[5:].strip()}")
         if not line.startswith("ready "):
             proc.kill()
             _, stderr = proc.communicate(timeout=10)
             pytest.fail(f"{mode} target did not start: {line!r} {stderr}")
-        _, target_uid, dumpable = line.split()
-        assert int(target_uid) == uid
-        yield proc.pid, int(dumpable)
+        state = json.loads(line[len("ready ") :])
+        assert state["uid"] == uid
+        if mode == "worker":
+            # Otherwise the proof would be about some other checkout's entrypoint.
+            assert Path(state["entrypoint"]).resolve() == ENTRYPOINT, (
+                f"the worker ran {state['entrypoint']}, not {ENTRYPOINT}"
+            )
+        yield proc.pid, int(state["dumpable"])
     finally:
         proc.kill()
         proc.communicate(timeout=10)
