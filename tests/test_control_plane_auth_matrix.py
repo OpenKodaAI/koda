@@ -15,7 +15,9 @@ the records that must agree with it:
 
 A new route that answers without credentials therefore fails here until the OpenAPI
 document marks it public. HEAD routes have no OpenAPI operation of their own; each must
-answer exactly like its GET twin.
+answer exactly like its GET twin. Outside /api/control-plane/ the middleware checks nothing,
+and one line of OpenAPI would be enough, so the routes there that answer without
+credentials are also pinned in ``ANONYMOUS_ROOT_ROUTES``.
 
 The auth middleware skips the bearer check only when the router resolved the request to a
 public route, with a method the table names for it. One request per route cannot show that
@@ -71,6 +73,22 @@ SUPERVISOR_INTERNAL_ROUTES = frozenset(
         ("GET", "/cluster/status"),
         ("POST", "/cluster/drain"),
         ("POST", "/cluster/undrain"),
+    }
+)
+
+# The routes outside /api/control-plane/ that answer without a session, besides the HEAD twin
+# aiohttp adds to each GET. The auth middleware never checks these paths, so nothing in the
+# code limits them, and an OpenAPI entry alone does not make one acceptable: a new root route
+# that answers without a session fails the matrix until it is listed here on purpose (and in
+# docs/security/authentication.md). Once D-033 puts /cluster/drain and /cluster/undrain behind
+# a bearer token, they leave this set.
+ANONYMOUS_ROOT_ROUTES = frozenset(
+    {
+        ("GET", "/"),
+        ("GET", "/setup"),
+        ("GET", "/health"),
+        ("GET", "/openapi/control-plane.json"),
+        *SUPERVISOR_INTERNAL_ROUTES,
     }
 )
 
@@ -224,6 +242,25 @@ class RouteMatrix:
         }
 
 
+def _with_head_twins(routes: Iterable[tuple[str, str]]) -> set[tuple[str, str]]:
+    keys = set(routes)
+    return keys | {("HEAD", path) for method, path in keys if method == "GET"}
+
+
+def _anonymous_root_drift(probes: dict[tuple[str, str], RouteProbe]) -> list[str]:
+    """Routes outside /api/control-plane/ whose anonymous answer differs from ``ANONYMOUS_ROOT_ROUTES``."""
+    pinned = _with_head_twins(ANONYMOUS_ROOT_ROUTES)
+    problems = []
+    for key, probe in sorted(probes.items()):
+        if probe.path.startswith(CONTROL_PLANE_PREFIX):
+            continue
+        if probe.public and key not in pinned:
+            problems.append(f"{probe.identity}: answers without a session but is not in ANONYMOUS_ROOT_ROUTES")
+        elif key in pinned and not probe.public:
+            problems.append(f"{probe.identity}: needs a session now; drop it from ANONYMOUS_ROOT_ROUTES")
+    return problems
+
+
 @pytest.fixture(scope="module")
 def route_matrix() -> RouteMatrix:
     async def run() -> RouteMatrix:
@@ -342,6 +379,14 @@ def test_head_routes_answer_like_their_get_twin(route_matrix: RouteMatrix) -> No
     assert problems == [], "\n".join(problems)
 
 
+def test_root_routes_answering_without_credentials_are_the_pinned_set(route_matrix: RouteMatrix) -> None:
+    """Outside /api/control-plane/ the middleware checks nothing, so the set is pinned here."""
+    missing = sorted(_with_head_twins(ANONYMOUS_ROOT_ROUTES) - set(route_matrix.probes))
+    assert missing == [], f"in ANONYMOUS_ROOT_ROUTES but not registered: {missing}"
+    problems = _anonymous_root_drift(route_matrix.probes)
+    assert problems == [], "\n".join(problems)
+
+
 def test_supervisor_internal_routes_are_registered_and_left_out_of_openapi(route_matrix: RouteMatrix) -> None:
     openapi = _openapi_public_operations()
     for key in SUPERVISOR_INTERNAL_ROUTES:
@@ -414,6 +459,27 @@ async def test_matrix_flags_new_routes_that_answer_without_credentials() -> None
     ]
     # Left undocumented, all three fail.
     assert len(_openapi_drift(probes, {})) == 3
+
+
+async def test_matrix_flags_new_root_routes_even_when_the_openapi_marks_them_public() -> None:
+    """A root route needs only one line of OpenAPI to pass the OpenAPI check; the pin still fails it."""
+    app = _build_supervisor_app()
+    app.router.add_get("/debug/state", _unreachable_handler)
+    new_routes = [
+        route for route in app.router.routes() if route.resource and route.resource.canonical == "/debug/state"
+    ]
+    probes = await _probe_routes(app, new_routes)
+
+    assert {key: probe.public for key, probe in probes.items()} == {
+        ("GET", "/debug/state"): True,
+        ("HEAD", "/debug/state"): True,
+    }
+    # The author documents it as `security: []`: the OpenAPI comparison is satisfied.
+    assert _openapi_drift(probes, {("GET", "/debug/state"): True}) == []
+    assert _anonymous_root_drift(probes) == [
+        "GET /debug/state: answers without a session but is not in ANONYMOUS_ROOT_ROUTES",
+        "HEAD /debug/state: answers without a session but is not in ANONYMOUS_ROOT_ROUTES",
+    ]
 
 
 async def test_routes_added_under_or_beside_a_public_path_need_a_session() -> None:

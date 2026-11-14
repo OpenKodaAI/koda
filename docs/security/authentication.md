@@ -132,10 +132,13 @@ session. `tests/test_control_plane_auth_matrix.py` sends a request to every rout
 registers, through its own middleware stack, without a session and with one. It fails when a
 route answers without a session and the OpenAPI document does not let that operation through
 without a token. It also fails when the routes that answer without a session differ, by path or
-method, from the public routes listed above or from the dashboard list. It sends other spellings
-of each public path (a sub-path, a trailing slash, another case or method, dot segments, encoded
-slashes) and routes added under or next to one, and fails if any of them reaches a handler
-without a session.
+method, from the public routes listed above or from the dashboard list. Outside
+`/api/control-plane/` it pins the supervisor routes listed here (`ANONYMOUS_ROOT_ROUTES` in the
+test, with their `HEAD` twins): a new route there that answers without a session fails the test,
+even when the OpenAPI document marks it `security: []`, until it is added to that set. It sends
+other spellings of each public path (a sub-path, a trailing slash, another case or method, dot
+segments, encoded slashes) and routes added under or next to one, and fails if any of them
+reaches a handler without a session.
 
 ### Onboarding status before login
 
