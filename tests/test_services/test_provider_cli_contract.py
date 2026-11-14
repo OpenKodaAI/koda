@@ -537,8 +537,10 @@ def test_validate_args_treats_flag_values_as_data():
 @pytest.mark.parametrize(
     "argv",
     [
-        ["--prompt", "-y"],  # yargs: prompt="" and yolo=true
-        ["--prompt", "--approval-mode=yolo"],  # yargs: approval-mode gains "yolo"
+        # gemini-cli 0.68.0 reads the "-y" as --yolo and fails with "Not enough arguments
+        # following: prompt"; another value starting with "-" could become any option.
+        ["--prompt", "-y"],
+        ["--prompt", "--approval-mode=yolo"],
         ["--model", "gemini-2.5-pro"],  # a separate value is refused even when it looks harmless
         ["--approval-mode", "default"],
     ],
@@ -556,14 +558,59 @@ def test_gemini_attached_values_keep_choices_and_flag_checks():
         pcc.validate_args("gemini", ["--yolo=true"])
 
 
+def test_attached_values_contract_still_checks_config_overrides(monkeypatch):
+    """Review: a future attached-values contract with a config flag keeps the config-key allowlist."""
+    codex = pcc.get_contract("codex")
+    attached = dataclasses.replace(
+        codex,
+        attached_values=True,
+        config_flag="--config",
+        flags=(*codex.flags, pcc.FlagSpec("--config", pcc._CODEX_SCOPES, 1)),
+    )
+    monkeypatch.setitem(pcc.CONTRACTS, "codex", attached)
+
+    with pytest.raises(pcc.ProviderCliContractError, match="mcp_servers"):
+        pcc.validate_args("codex", ["exec", '--config=mcp_servers={x={command="sh"}}', "-"])
+
+
+def _legacy_tokens(contract: pcc.ProviderCliContract, args: Sequence[str]) -> set[str]:
+    """Legacy flags and legacy choices in ``args``, in the separate or the attached form."""
+    pairs: list[tuple[str, str | None]] = []
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if contract.attached_values and token.startswith("--") and "=" in token:
+            flag, _, value = token.partition("=")
+            pairs.append((flag, value))
+        else:
+            pairs.append((token, args[index + 1] if index + 1 < len(args) else None))
+        index += 1
+    legacy_flags = {flag.token for flag in contract.flags if flag.legacy}
+    legacy_choices = {(flag.token, choice) for flag in contract.flags for choice in flag.legacy_choices}
+    found = {flag for flag, _ in pairs if flag in legacy_flags}
+    found |= {f"{flag} {value}" for flag, value in pairs if (flag, value) in legacy_choices}
+    return found
+
+
+@pytest.mark.parametrize(
+    ("provider", "args", "expected"),
+    [
+        ("gemini", ["--approval-mode=plan"], {"--approval-mode plan"}),
+        ("gemini", ["--prompt=x"], {"--prompt"}),
+        ("gemini", ["--approval-mode=default"], set()),
+    ],
+)
+def test_legacy_guard_sees_attached_values(provider, args, expected):
+    """Review: with attached values the guard must split ``--flag=value`` before matching."""
+    assert _legacy_tokens(pcc.get_contract(provider), args) == expected
+
+
 def test_level_profiles_only_use_current_contract_tokens():
     expected_floors = {"claude": "none", "codex": "read_only", "gemini": "read_only"}
     for provider in PROVIDERS:
         contract = pcc.get_contract(provider)
         assert set(contract.levels) == set(pcc.BUILTIN_TOOL_LEVELS), provider
         assert contract.floor == expected_floors[provider]
-        legacy = {flag.token for flag in contract.flags if flag.legacy}
-        legacy_choices = {(flag.token, choice) for flag in contract.flags for choice in flag.legacy_choices}
         scope = next(iter(contract.scopes))
         subcommand = list(contract.scopes[scope].subcommand)
         positionals = ["-"] if provider == "codex" else []
@@ -572,9 +619,7 @@ def test_level_profiles_only_use_current_contract_tokens():
                 continue
             args = [*contract.base_args, *profile.args]
             pcc.validate_args(provider, [*subcommand, *args, *positionals])
-            tokens = set(args)
-            assert not tokens & legacy, (provider, level)
-            assert not {(a, b) for a, b in itertools.pairwise(args)} & legacy_choices, (provider, level)
+            assert not _legacy_tokens(contract, args), (provider, level)
             # Nothing is proven self-confined or resume-safe until the live checks of AG-23..25.
             assert profile.self_confined is False, (provider, level)
         if provider == "codex":
@@ -762,6 +807,57 @@ def test_provider_bin_path_is_used_verbatim(tmp_path, provider, variable):
     assert command == (str(binary),)
 
 
+@pytest.mark.parametrize(("provider", "variable"), [("gemini", "GEMINI_BIN"), ("codex", "CODEX_BIN")])
+def test_runners_and_probes_use_the_configured_executable(tmp_path, monkeypatch, provider, variable):
+    """Review: without a ``base_env`` the setting comes from ``koda.config``, stripped, for every caller."""
+    from koda import config
+    from koda.services import codex_runner, gemini_runner, provider_auth
+
+    binary = tmp_path / "pinned clis" / provider
+    binary.parent.mkdir()
+    binary.write_text("#!/bin/sh\nexit 0\n")
+    binary.chmod(0o755)
+    monkeypatch.setattr(config, variable, f"  {binary}  ")
+    monkeypatch.setenv("PATH", "/nonexistent")
+
+    assert provider_auth.provider_executable(provider) == str(binary)
+    assert provider_auth.resolve_provider_command(provider) == (str(binary),)
+    assert pcc._runner_command(provider) == (str(binary),)
+    if provider == "codex":
+        assert codex_runner._build_new_turn_cmd("gpt-5.4-mini", "/tmp/w", None, None)[0] == str(binary)
+    else:
+        cmd = gemini_runner._build_cmd(
+            model="gemini-2.5-pro",
+            work_dir="/tmp/w",
+            prompt="hi",
+            permission_mode=None,
+            dry_run=False,
+            output_format="json",
+        )
+        assert cmd[0] == str(binary)
+
+
+@pytest.mark.parametrize(("variable", "default"), [("GEMINI_BIN", "gemini"), ("CODEX_BIN", "codex")])
+def test_blank_executable_setting_falls_back_to_the_cli_name(monkeypatch, variable, default):
+    from koda import config
+    from koda.services import provider_auth
+
+    monkeypatch.setattr(config, variable, "   ")
+    provider = default
+    assert provider_auth.provider_executable(provider) == default
+    assert provider_auth.provider_executable(provider, base_env={variable: "  "}) == default
+
+
+@pytest.mark.parametrize("provider", ["perplexity", "openrouter", "elevenlabs", "unknown"])
+def test_only_local_cli_providers_resolve_to_a_command(fake_bin, provider):
+    """Review: an HTTP provider used to fall through to the Gemini branch and resolve to ``gemini``."""
+    from koda.services import provider_auth
+
+    env = fake_bin("gemini", "claude", "codex", "ollama")
+    with pytest.raises(KeyError):
+        provider_auth.resolve_provider_command(provider, base_env=env)
+
+
 def test_gemini_login_probe_stays_inside_the_contract(monkeypatch):
     """The subscription-login probe is a builder too: attached values, contract flags only."""
     from koda.services import provider_auth
@@ -781,6 +877,14 @@ def test_gemini_login_probe_stays_inside_the_contract(monkeypatch):
     (command,) = captured
     pcc.validate_args("gemini", command[1:])
     assert all(arg.startswith("--") and "=" in arg for arg in command[1:])
+
+    # The probe checks its own command line: a token outside the contract never runs.
+    captured.clear()
+    monkeypatch.setattr(provider_auth, "resolve_provider_command", lambda provider, base_env=None: ("gemini", "--yolo"))
+    refused = provider_auth.verify_provider_subscription_login("gemini")
+    assert refused.verified is False
+    assert "--yolo" in refused.last_error
+    assert captured == []
 
 
 @pytest.mark.real_cli_contract_probe

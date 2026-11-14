@@ -16,6 +16,7 @@ import tempfile
 import termios
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -421,32 +422,50 @@ def _provider_command_env(base_env: dict[str, str] | None = None) -> dict[str, s
     return env
 
 
-def resolve_provider_command(provider_id: str, base_env: dict[str, str] | None = None) -> tuple[str, ...]:
-    env = _provider_command_env(base_env)
+# Providers Koda runs as a local CLI, and the setting that names the executable when one does.
+_CLI_PROVIDER_IDS = frozenset({"claude", "codex", "gemini", "ollama"})
+_PROVIDER_EXECUTABLE_SETTINGS: dict[str, tuple[str, str]] = {
+    "codex": ("CODEX_BIN", "codex"),
+    "gemini": ("GEMINI_BIN", "gemini"),
+}
+
+
+def provider_executable(provider_id: str, base_env: Mapping[str, str] | None = None) -> str:
+    """The one executable a provider CLI runs as, before any ``PATH`` lookup.
+
+    ``CODEX_BIN`` and ``GEMINI_BIN`` are each one executable path, never a command line: extra
+    tokens would be argv outside the CLI contract, and a runner such as
+    ``npx -y @google/gemini-cli`` would run whatever package version it resolves (ADR-002 AG-02).
+    A non-empty value in ``base_env`` (the control plane's provider environment) wins, then the
+    value ``koda.config`` read from the process environment (which honours the ``{AGENT_ID}_``
+    prefix), then the CLI's own name. Runners, probes and auth flows all resolve the executable
+    here, so they run the same file.
+    """
     normalized = provider_id.strip().lower()
-    if normalized not in MANAGED_PROVIDER_IDS:
+    if normalized not in _CLI_PROVIDER_IDS:
         raise KeyError(provider_id)
-    if normalized == "elevenlabs":
-        raise KeyError(provider_id)
-    if normalized == "ollama":
-        if shutil.which("ollama", path=env.get("PATH")):
-            return ("ollama",)
-        raise FileNotFoundError("ollama")
-    if normalized == "claude":
-        if shutil.which("claude", path=env.get("PATH")):
-            return ("claude",)
-        raise FileNotFoundError("claude")
-    # CODEX_BIN and GEMINI_BIN are one executable path each, never a command line: extra tokens
-    # would be argv outside the CLI contract, and a runner such as ``npx -y @google/gemini-cli``
-    # would run whatever package version it resolves (ADR-002 AG-02). The runners use the same
-    # value as ``argv[0]``.
-    variable, default = ("CODEX_BIN", "codex") if normalized == "codex" else ("GEMINI_BIN", "gemini")
-    configured = str(env.get(variable) or "").strip() or default
-    if shutil.which(configured, path=env.get("PATH")):
-        return (configured,)
-    # Never fall back to an unpinned ``npx`` package (ADR-002 AG-02): a missing binary means
-    # the provider is unavailable until the pinned CLI is installed.
-    raise FileNotFoundError(configured)
+    setting = _PROVIDER_EXECUTABLE_SETTINGS.get(normalized)
+    if setting is None:
+        return normalized
+    variable, default = setting
+    from koda import config
+
+    configured = str(dict(base_env or {}).get(variable) or "").strip()
+    return configured or str(getattr(config, variable, "") or "").strip() or default
+
+
+def resolve_provider_command(provider_id: str, base_env: dict[str, str] | None = None) -> tuple[str, ...]:
+    """The command for a provider CLI, or ``FileNotFoundError`` when its executable is missing.
+
+    Never falls back to an unpinned ``npx`` package (ADR-002 AG-02): a missing binary means the
+    provider is unavailable until the pinned CLI is installed. ``KeyError`` for providers that
+    are not a local CLI.
+    """
+    executable = provider_executable(provider_id, base_env)
+    env = _provider_command_env(base_env)
+    if shutil.which(executable, path=env.get("PATH")):
+        return (executable,)
+    raise FileNotFoundError(executable)
 
 
 def provider_login_command(

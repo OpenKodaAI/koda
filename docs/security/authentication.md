@@ -83,7 +83,14 @@ credential or are required to bootstrap auth itself):
 - `/api/control-plane/auth/password/recover`
 
 Paths match exactly, in the backend and in the dashboard. A trailing slash or a route added
-under one of these paths (`/api/control-plane/auth/login/...`) still needs a session.
+under one of these paths (`/api/control-plane/auth/login/...`) still needs a session. The
+backend also checks the route the request resolved to: it skips the bearer check only when the
+router matched one of these routes itself, with the method it is registered for (`GET` and
+`HEAD` for the two status routes, `POST` for the others). So a route added later cannot take
+over a public path. A `GET /api/control-plane/auth/login` that a new `/auth/{name}` pattern would
+answer needs a session, and so does an encoded slash (`auth%2Fstatus`) that resolves to another
+route. `tests/test_control_plane_public_paths.py` checks the methods against the registered
+routes.
 
 The dashboard uses the same list. `apps/web/src/lib/public-control-plane-paths.ts` is read by
 both the Next.js proxy (`apps/web/src/proxy.ts`) and the catch-all BFF route, and

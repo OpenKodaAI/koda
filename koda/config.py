@@ -262,7 +262,8 @@ CLAUDE_DEFAULT_MODEL: str = _env(
 
 # --- Codex CLI ---
 CODEX_ENABLED: bool = _env("CODEX_ENABLED", "true").lower() == "true"
-CODEX_BIN: str = _env("CODEX_BIN", "codex")
+# One executable path, never a command line (ADR-002 AG-02); provider_auth.provider_executable() reads it.
+CODEX_BIN: str = _env("CODEX_BIN", "").strip() or "codex"
 CODEX_TIMEOUT: int = int(_env("CODEX_TIMEOUT", str(CLAUDE_TIMEOUT)))
 CODEX_FIRST_CHUNK_TIMEOUT: int = int(_env("CODEX_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
 CODEX_SANDBOX: str = _env("CODEX_SANDBOX", "danger-full-access")
@@ -287,7 +288,8 @@ CODEX_DEFAULT_MODEL: str = _env("CODEX_DEFAULT_MODEL", CODEX_TIER_MODELS["large"
 
 # --- Gemini CLI ---
 GEMINI_ENABLED: bool = _env("GEMINI_ENABLED", "false").lower() == "true"
-GEMINI_BIN: str = _env("GEMINI_BIN", "") or ""
+# One executable path, never a command line (ADR-002 AG-02); provider_auth.provider_executable() reads it.
+GEMINI_BIN: str = _env("GEMINI_BIN", "").strip() or "gemini"
 GEMINI_TIMEOUT: int = int(_env("GEMINI_TIMEOUT", str(CLAUDE_TIMEOUT)))
 GEMINI_FIRST_CHUNK_TIMEOUT: int = int(_env("GEMINI_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
 # Gemini lineup verified against https://ai.google.dev/gemini-api/docs/models

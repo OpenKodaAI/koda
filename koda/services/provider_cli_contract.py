@@ -419,24 +419,26 @@ def validate_args(provider: str, args: Sequence[str]) -> None:
                 raise ProviderCliContractError(f"{contract.contract_id}: {token} takes no value")
             continue
         if contract.attached_values:
+            # One attached value per flag: a list flag would need separate elements, which yargs
+            # could read as options, so it has no attached form.
             if attached is None or spec.arity == "+":
                 raise ProviderCliContractError(
                     f"{contract.contract_id}: {token} needs its value attached as {token}=VALUE"
                 )
-            if spec.choices and attached not in spec.choices:
-                raise ProviderCliContractError(f"{contract.contract_id}: {token} {attached} is not in the contract")
-            continue
-        if spec.arity == "+":
+            value = attached
+        elif spec.arity == "+":
             start = index
             while index < len(args) and not args[index].startswith("-"):
                 index += 1
             if index == start:
                 raise ProviderCliContractError(f"{contract.contract_id}: {token} needs at least one value")
             continue
-        if index >= len(args):
-            raise ProviderCliContractError(f"{contract.contract_id}: {token} needs a value")
-        value = args[index]
-        index += 1
+        else:
+            if index >= len(args):
+                raise ProviderCliContractError(f"{contract.contract_id}: {token} needs a value")
+            value = args[index]
+            index += 1
+        # The same value checks apply whichever form carried the value.
         if spec.choices and value not in spec.choices:
             raise ProviderCliContractError(f"{contract.contract_id}: {token} {value} is not in the contract")
         if token == contract.config_flag:
@@ -728,26 +730,20 @@ async def _probe_hidden_flags(
 def _runner_command(provider: str) -> tuple[str, ...]:
     """The command each runner invokes its CLI with (``claude_runner``, ``codex_runner``,
     ``gemini_runner``), so this check probes the same binary the runners would run."""
-    if provider == "codex":
-        from koda.config import CODEX_BIN
+    from koda.services.provider_auth import provider_executable
 
-        return (CODEX_BIN,)
-    if provider == "gemini":
-        from koda.services.provider_auth import resolve_provider_command
-
-        return resolve_provider_command("gemini")
-    return (provider,)
+    return (provider_executable(provider),)
 
 
 async def _check_as_runner(provider: str) -> CliContractCheck:
-    """Probe one CLI with the runner's command and its allowlisted child env, never os.environ."""
+    """Probe one CLI with the runner's command and its allowlisted child env, never os.environ.
+
+    A missing executable is reported by ``verify_provider_cli`` as not installed."""
     from koda.services.provider_env import build_llm_subprocess_env
 
-    try:
-        command = _runner_command(provider)
-    except FileNotFoundError as exc:
-        return not_installed_check(provider, str(exc) or provider)
-    return await verify_provider_cli(provider, command, env=build_llm_subprocess_env(provider=provider))
+    return await verify_provider_cli(
+        provider, _runner_command(provider), env=build_llm_subprocess_env(provider=provider)
+    )
 
 
 def main(argv: Sequence[str] | None = None) -> int:

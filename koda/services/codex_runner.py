@@ -14,7 +14,6 @@ from typing import Any, cast
 from koda.config import (
     AGENT_ID,
     CODEX_APPROVAL_POLICY,
-    CODEX_BIN,
     CODEX_FIRST_CHUNK_TIMEOUT,
     CODEX_SANDBOX,
     CODEX_SKIP_GIT_REPO_CHECK,
@@ -23,7 +22,11 @@ from koda.config import (
 )
 from koda.logging_config import get_logger
 from koda.services import provider_cli_contract
-from koda.services.provider_auth import PROVIDER_API_KEY_ENV_KEYS, PROVIDER_AUTH_MODE_ENV_KEYS
+from koda.services.provider_auth import (
+    PROVIDER_API_KEY_ENV_KEYS,
+    PROVIDER_AUTH_MODE_ENV_KEYS,
+    provider_executable,
+)
 from koda.services.provider_env import build_llm_subprocess_env
 from koda.services.provider_runtime import ProviderCapabilities, TurnMode
 from koda.utils.process_control import terminate_process_tree
@@ -149,7 +152,7 @@ async def _terminate_process(proc: object) -> None:
 
 async def _read_login_status() -> tuple[int, str, str]:
     proc = await asyncio.create_subprocess_exec(
-        CODEX_BIN,
+        provider_executable("codex"),
         "login",
         "status",
         stdout=asyncio.subprocess.PIPE,
@@ -222,7 +225,7 @@ def _build_new_turn_cmd(
 ) -> list[str]:
     resolved_sandbox = sandbox or CODEX_SANDBOX
     cmd = [
-        CODEX_BIN,
+        provider_executable("codex"),
         "exec",
         "--json",
         "--cd",
@@ -250,7 +253,7 @@ def _build_resume_turn_cmd(
     *,
     effort: str | int | None = None,
 ) -> list[str]:
-    cmd = [CODEX_BIN, "exec", "resume", "--json", "--model", model]
+    cmd = [provider_executable("codex"), "exec", "resume", "--json", "--model", model]
     if CODEX_SKIP_GIT_REPO_CHECK:
         cmd.append("--skip-git-repo-check")
     if CODEX_SANDBOX == "danger-full-access":
@@ -340,7 +343,7 @@ async def get_codex_capabilities(turn_mode: TurnMode) -> ProviderCapabilities:
             entry = _CAPABILITY_CACHE.get(turn_mode)
             if entry is None or time.monotonic() - entry[0] >= _CAPABILITY_CACHE_TTL_SECONDS:
                 check = await provider_cli_contract.verify_provider_cli(
-                    "codex", (CODEX_BIN,), env=build_llm_subprocess_env(provider="codex")
+                    "codex", (provider_executable("codex"),), env=build_llm_subprocess_env(provider="codex")
                 )
                 entry = (time.monotonic(), _capability_from_contract(turn_mode, check))
                 _CAPABILITY_CACHE[turn_mode] = entry
@@ -400,9 +403,9 @@ async def _get_codex_auth_status() -> tuple[bool, str, str]:
             try:
                 returncode, stdout_text, stderr_text = await _read_login_status()
             except FileNotFoundError:
-                result = (False, "login_status", f"{CODEX_BIN} not found on PATH")
+                result = (False, "login_status", f"{provider_executable('codex')} not found on PATH")
             except TimeoutError:
-                result = (False, "login_status", f"{CODEX_BIN} login status timed out")
+                result = (False, "login_status", f"{provider_executable('codex')} login status timed out")
             except Exception as exc:
                 result = (False, "login_status", f"failed to probe codex login status: {exc}")
             else:

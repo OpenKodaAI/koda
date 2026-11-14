@@ -101,11 +101,17 @@ class MasterKeyMismatch(MasterKeyError):
     """The master key differs from the one whose fingerprint the database recorded."""
 
 
-def _tighten_permissions(path: Path) -> None:
-    """Remove group and other access from the key file.
+# (path, mode) pairs already reported, so a key read on every request warns once, not each time.
+_REPORTED_EXPOSURES: set[tuple[str, int]] = set()
 
-    A file that cannot be changed (for example a read-only secret mount) is
-    still used, but the exposure is logged so the operator can fix the mount.
+
+def _tighten_permissions(path: Path) -> None:
+    """Remove group and other access from the key file, without adding any.
+
+    The key is read on every use, so this runs each time. A key that stays exposed, because
+    chmod is refused (a read-only secret mount) or accepted but ignored (some network, FUSE or
+    host bind mounts), is still used, and the exposure is logged once per file and mode so the
+    operator can fix the mount.
     """
     try:
         mode = path.stat().st_mode & 0o777
@@ -113,15 +119,21 @@ def _tighten_permissions(path: Path) -> None:
         return
     if not mode & 0o077:
         return
+    error = ""
     try:
-        path.chmod(0o600)
+        path.chmod(mode & 0o700)
+        remaining = path.stat().st_mode & 0o777
     except OSError as exc:
-        log.warning(
-            "control_plane_master_key_permissions_too_open",
-            path=str(path),
-            mode=oct(mode),
-            error=str(exc),
-        )
+        remaining, error = mode, str(exc)
+    if not remaining & 0o077 or (str(path), remaining) in _REPORTED_EXPOSURES:
+        return
+    _REPORTED_EXPOSURES.add((str(path), remaining))
+    log.warning(
+        "control_plane_master_key_permissions_too_open",
+        path=str(path),
+        mode=oct(remaining),
+        error=error or "the filesystem kept the mode after chmod",
+    )
 
 
 def _read_current_key() -> bytes | None:
@@ -519,9 +531,10 @@ def rotate_master_key(encrypted_values: list[str]) -> list[str]:
 
 
 def clear_fernet_cache() -> None:
-    """Clear cached Fernet instances, e.g. after key rotation."""
+    """Clear cached Fernet instances, e.g. after key rotation, and report key-file exposure again."""
     get_fernet.cache_clear()
     get_previous_fernet.cache_clear()
+    _REPORTED_EXPOSURES.clear()
 
 
 def mask_secret(value: str) -> str:

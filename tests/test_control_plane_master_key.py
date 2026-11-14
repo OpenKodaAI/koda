@@ -175,7 +175,24 @@ def test_key_readable_by_group_or_others_is_tightened(key_paths: SimpleNamespace
     _write_key(key_paths.key_file, key, mode=loose_mode)
 
     assert crypto.get_signing_key() == key
-    assert _mode(key_paths.key_file) & 0o077 == 0
+    # Group and other access go; the owner's bits stay as they were (nothing is added).
+    assert _mode(key_paths.key_file) == loose_mode & 0o700
+
+
+def test_key_mode_the_filesystem_ignores_is_logged_once(
+    key_paths: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Review: a mount that accepts chmod but keeps the mode must not pass silently."""
+    key = Fernet.generate_key()
+    _write_key(key_paths.key_file, key, mode=0o644)
+    warnings: list[tuple[str, dict]] = []
+    monkeypatch.setattr(crypto.log, "warning", lambda event, **kw: warnings.append((event, kw)))
+    monkeypatch.setattr(Path, "chmod", lambda self, mode: None)
+
+    assert crypto.get_signing_key() == key
+    assert crypto.get_signing_key() == key
+    assert [event for event, _ in warnings] == ["control_plane_master_key_permissions_too_open"]
+    assert warnings[0][1]["mode"] == "0o644"
 
 
 def test_key_on_unchangeable_mount_is_used_and_exposure_logged(
@@ -192,6 +209,8 @@ def test_key_on_unchangeable_mount_is_used_and_exposure_logged(
     monkeypatch.setattr(Path, "chmod", _read_only)
 
     assert crypto.get_signing_key() == key
+    assert crypto.get_signing_key() == key
+    # Reported once per file and mode, although the key is read on every use.
     assert [event for event, _ in warnings] == ["control_plane_master_key_permissions_too_open"]
     assert warnings[0][1]["mode"] == "0o444"
 

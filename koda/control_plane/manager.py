@@ -102,6 +102,7 @@ from koda.services.provider_auth import (
     parse_login_session_state,
     provider_command_present,
     provider_default_base_url,
+    provider_executable,
     run_provider_logout,
     start_login_process,
     verify_provider_api_key,
@@ -3234,10 +3235,8 @@ class ControlPlaneManager:
                 "medium": _trimmed_text(env.get(f"{prefix}_MODEL_MEDIUM") or os.environ.get(f"{prefix}_MODEL_MEDIUM")),
                 "large": _trimmed_text(env.get(f"{prefix}_MODEL_LARGE") or os.environ.get(f"{prefix}_MODEL_LARGE")),
             }
-            if provider == "codex":
-                binary = _trimmed_text(env.get("CODEX_BIN") or os.environ.get("CODEX_BIN") or "codex")
-            elif provider == "gemini":
-                binary = _trimmed_text(env.get("GEMINI_BIN") or os.environ.get("GEMINI_BIN") or "gemini")
+            if provider in {"codex", "gemini"}:
+                binary = provider_executable(provider, base_env=env)
             elif provider == "ollama":
                 binary = _trimmed_text(env.get("OLLAMA_BASE_URL") or os.environ.get("OLLAMA_BASE_URL") or "ollama")
             elif provider == "whispercpp":

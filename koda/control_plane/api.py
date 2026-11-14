@@ -10,9 +10,10 @@ import json
 import mimetypes
 import urllib.parse
 import urllib.request
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 
 from aiohttp import ClientConnectionResetError, ContentTypeError, web
@@ -128,24 +129,41 @@ def _clip_preview_text(value: Any, *, limit: int) -> str | None:
     return text[: max(0, limit - 1)].rstrip() + "…"
 
 
-# Keep in sync with apps/web/src/lib/public-control-plane-paths.ts
-# (tests/test_control_plane_public_paths.py compares the two lists).
-_PUBLIC_CONTROL_PLANE_API_PATHS: tuple[str, ...] = (
-    "/api/control-plane/onboarding/status",
-    "/api/control-plane/auth/status",
-    "/api/control-plane/auth/bootstrap/exchange",
-    "/api/control-plane/auth/login",
-    "/api/control-plane/auth/register-owner",
-    "/api/control-plane/auth/password/recover",
+# The routes a caller reaches without an operator session, as path -> methods. Keep the paths in
+# sync with apps/web/src/lib/public-control-plane-paths.ts; tests/test_control_plane_public_paths.py
+# compares both lists and the methods setup_control_plane_routes registers.
+_PUBLIC_CONTROL_PLANE_API_ROUTES: Mapping[str, frozenset[str]] = MappingProxyType(
+    {
+        "/api/control-plane/onboarding/status": frozenset({"GET", "HEAD"}),
+        "/api/control-plane/auth/status": frozenset({"GET", "HEAD"}),
+        "/api/control-plane/auth/bootstrap/exchange": frozenset({"POST"}),
+        "/api/control-plane/auth/login": frozenset({"POST"}),
+        "/api/control-plane/auth/register-owner": frozenset({"POST"}),
+        "/api/control-plane/auth/password/recover": frozenset({"POST"}),
+    }
 )
-
-
-_PUBLIC_CONTROL_PLANE_API_PATH_SET = frozenset(_PUBLIC_CONTROL_PLANE_API_PATHS)
+_PUBLIC_CONTROL_PLANE_API_PATHS: tuple[str, ...] = tuple(_PUBLIC_CONTROL_PLANE_API_ROUTES)
 
 
 def _is_public_control_plane_api_path(path: str) -> bool:
     # Exact match, like the dashboard: a route added under a public path still needs a session.
-    return path in _PUBLIC_CONTROL_PLANE_API_PATH_SET
+    return path in _PUBLIC_CONTROL_PLANE_API_ROUTES
+
+
+def _is_public_control_plane_request(request: web.Request) -> bool:
+    """Whether the router resolved ``request`` to one of the public routes itself.
+
+    The check uses the resolved resource and method, not the path string, so a route added
+    later cannot take over a public path: a dynamic ``/auth/{name}``, a GET next to a public
+    POST, or a pattern an encoded slash (``auth%2Fstatus``) resolves to all need a session.
+    Unmatched requests (404, 405) have no resource and need one too.
+    """
+    route = request.match_info.route
+    resource = route.resource
+    if resource is None:
+        return False
+    methods = _PUBLIC_CONTROL_PLANE_API_ROUTES.get(resource.canonical)
+    return methods is not None and route.method in methods
 
 
 def _optional_auth_context(request: web.Request) -> OperatorAuthContext | None:
@@ -338,7 +356,7 @@ async def control_plane_auth_middleware(
     handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
 ) -> web.StreamResponse:
     if request.path.startswith("/api/control-plane/"):
-        if _is_public_control_plane_api_path(request.path):
+        if _is_public_control_plane_request(request):
             context = _optional_auth_context(request)
             if context is not None:
                 request["operator_auth"] = context
