@@ -51,6 +51,25 @@ Preserve these current defaults unless a later phase changes them deliberately:
 - Resources are bounded and released.
 - Observability is part of the product contract.
 
+## Dependency Circuit Breakers
+
+The breakers in `koda/services/resilience.py` (Claude and Codex CLIs, web
+search/fetch, ElevenLabs, the scheduler dispatcher, and the rest of
+`ALL_BREAKERS`) recover on their own after a transient outage:
+
+- A breaker opens after `fail_max` consecutive recorded failures; calls are
+  rejected with `<dependency> temporarily unavailable (circuit breaker open).`
+- After `reset_timeout` seconds the next call is admitted as the single
+  recovery probe and the breaker reports `half-open`
+  (`koda_circuit_breaker_state == 1`). Other calls stay rejected while the
+  probe runs.
+- A successful probe closes the breaker (`koda_circuit_breaker_state == 0`). A
+  failed probe re-opens it for another `reset_timeout`.
+- A probe that never reports an outcome frees the slot after `reset_timeout`,
+  so the next call becomes the probe.
+- The state flips to `half-open` only when a call arrives. A breaker with no
+  traffic keeps reporting `open` past `reset_timeout` until the next call.
+
 ## Validation Gates
 
 | Gate | Required scenarios | Expected evidence |
