@@ -46,6 +46,15 @@ The control plane owns product configuration and operator-facing management. The
 
 The runtime API powers the dashboard's live operational rooms. It is not published as a separate OpenAPI document; use this inventory together with `koda/services/runtime/api.py` and the dashboard runtime contracts.
 
+Every runtime route, including the WebSocket upgrades, needs an `X-Runtime-Token` header. This is a short-lived token that the control plane signs with the agent's `RUNTIME_LOCAL_UI_TOKEN`. It is scoped to one agent and to a capability. The worker compares the token's agent with its own `AGENT_ID`, but it skips this check when either one is empty. A token without an agent scope, or any token sent to a worker started without `AGENT_ID`, passes the agent check. The control plane always signs a token for one agent and the supervisor always sets `AGENT_ID`, so supervised workers are not affected. Set `AGENT_ID` on any worker you start by hand. The control plane issues the token as `runtime_request_token` from `GET /api/control-plane/agents/{agent_id}/runtime-access?capability=read|mutate|attach`, and the dashboard relay fetches it on the server side.
+
+- Read routes and the WebSocket routes need `read`.
+- Write and control routes need `mutate`. The two `attach` routes need `attach`.
+- The terminal and browser WebSockets also need the attach token that the matching `attach` route returns. Send it in `X-Koda-Attach-Token` or in the `token` query parameter.
+- `GET /api/runtime/tasks/{task_id}?include_sensitive=true` also needs a sensitive scope token in `X-Runtime-Access-Scope`. The control plane returns it as `access_scope_token` when you call it with `include_sensitive=true`.
+
+The worker answers `403` to a missing, forged, expired or wrongly scoped token, and to any token when it has no `RUNTIME_LOCAL_UI_TOKEN`. A WebSocket upgrade is refused with `403`. `/health`, `/ready` and `/metrics` on the same port need no token.
+
 Read routes:
 
 - `GET /api/runtime/readiness`
