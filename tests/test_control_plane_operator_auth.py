@@ -176,6 +176,29 @@ def test_wrong_setup_code_fails_without_creating_owner(operator_db: Path) -> Non
 
 
 @pytest.mark.postgres
+def test_an_expired_bootstrap_file_no_longer_locks_setup(operator_db: Path) -> None:
+    """D-195: past its TTL, the file is replaced at the next status request, and the new code works."""
+    service = operator_auth_mod.OperatorAuthService()
+    expired = _bootstrap_file_code(service)
+    lines = operator_db.read_text(encoding="utf-8").splitlines()
+    operator_db.write_text(
+        "\n".join("expires_at=2000-01-01T00:00:00+00:00" if line.startswith("expires_at=") else line for line in lines),
+        encoding="utf-8",
+    )
+    owner = {"email": "vps@example.com", "password": STRONG_PASSWORD, "remote_ip": "203.0.113.7"}
+    with pytest.raises(ValueError, match=r"^Setup code is invalid or expired\.$"):
+        service.register_owner(bootstrap_code=expired, **owner)
+
+    fresh = _bootstrap_file_code(service)
+
+    assert fresh != expired
+    assert service.register_owner(bootstrap_code=fresh, **owner)["operator"]["email"] == "vps@example.com"
+    assert not operator_db.exists()
+    service.onboarding_payload()
+    assert not operator_db.exists(), "an install with an owner never writes a setup code"
+
+
+@pytest.mark.postgres
 def test_setup_code_is_single_use_and_expires(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     used = service.issue_bootstrap_code(label="cli")["code"]

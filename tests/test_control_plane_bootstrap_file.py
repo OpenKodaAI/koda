@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -248,6 +249,21 @@ def test_the_docs_say_where_the_setup_code_is_shown() -> None:
     assert "A seed set here replaces that code and is never logged or printed." in env_example
 
 
+def test_the_docs_say_an_expired_setup_code_is_replaced() -> None:
+    """authentication.md states the TTL rule ensure_bootstrap_file follows (D-195)."""
+    root = Path(__file__).resolve().parents[1]
+    guide = " ".join((root / "docs" / "security" / "authentication.md").read_text(encoding="utf-8").split())
+
+    settings = (root / "koda" / "control_plane" / "settings.py").read_text(encoding="utf-8")
+    assert 'os.environ.get("CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS", "900")' in settings
+    assert (
+        "The code expires `CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS` (default 900, so 15 minutes) after the file"
+        " is written. The next status request after that, such as reloading `/setup`, replaces the expired file"
+        " with a new code and a new banner (a seed is written again, with a fresh expiry), so an expired code never"
+        " locks setup. An install with an owner never writes the file." in guide
+    )
+
+
 def test_the_seed_setting_is_documented_where_operators_look() -> None:
     """CONTROL_PLANE_BOOTSTRAP_CODE, and the /setup rule for it, in .env.example and the config reference."""
     root = Path(__file__).resolve().parents[1]
@@ -286,6 +302,111 @@ def test_read_bootstrap_file_rejects_expired_content(isolated_bootstrap: Path) -
         encoding="utf-8",
     )
     assert bootstrap_file_mod.read_bootstrap_file() is None
+
+
+# An injected clock for the TTL tests (D-195, M1-E1-T14).
+_WRITTEN_AT = datetime(2026, 3, 1, 12, 0, tzinfo=UTC)
+_TTL = timedelta(seconds=bootstrap_file_mod.CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)
+
+
+def _file_expires_at(path: Path) -> str:
+    (line,) = [line for line in path.read_text(encoding="utf-8").splitlines() if line.startswith("expires_at=")]
+    return line.removeprefix("expires_at=")
+
+
+def test_the_ttl_counts_from_when_the_file_is_written(isolated_bootstrap: Path) -> None:
+    code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+
+    assert _file_expires_at(isolated_bootstrap) == (_WRITTEN_AT + _TTL).isoformat()
+    just_before = _WRITTEN_AT + _TTL - timedelta(seconds=1)
+    assert bootstrap_file_mod.read_bootstrap_file(now=just_before) == code
+    assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT + _TTL) is None
+
+
+def test_a_file_within_its_ttl_is_kept(isolated_bootstrap: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+    capsys.readouterr()
+
+    just_before = _WRITTEN_AT + _TTL - timedelta(seconds=1)
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=just_before) is None
+    assert isolated_bootstrap.read_text(encoding="utf-8").splitlines()[0] == code
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("elapsed", [_TTL, _TTL + timedelta(seconds=1), timedelta(days=30)])
+def test_an_expired_file_is_replaced_by_a_new_code_at_the_next_start(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], elapsed: timedelta
+) -> None:
+    """Setup is no longer locked once the TTL passes: the next status request writes a fresh code."""
+    old = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+    assert old is not None
+    capsys.readouterr()
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap_file_mod, "log", log)
+    later = _WRITTEN_AT + elapsed
+    assert bootstrap_file_mod.read_bootstrap_file(now=later) is None
+
+    new = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=later)
+
+    assert new is not None and new != old
+    assert isolated_bootstrap.read_text(encoding="utf-8").splitlines()[0] == new
+    assert _file_expires_at(isolated_bootstrap) == (later + _TTL).isoformat()
+    assert os.stat(isolated_bootstrap).st_mode & 0o777 == 0o600
+    assert bootstrap_file_mod.read_bootstrap_file(now=later) == new
+    # The new code gets its own banner; the structured log names neither code.
+    console = capsys.readouterr()
+    assert console.err.count(new) == 1
+    assert old not in console.err
+    (replaced,) = [call for call in log.info.call_args_list if call.args == ("bootstrap_file_expired_replaced",)]
+    assert replaced.kwargs["expired_at"] == (_WRITTEN_AT + _TTL).isoformat()
+    logged = repr(_logged(log))
+    assert old not in logged
+    assert new not in logged
+    # Only the expired file is replaced: a second call keeps the new one.
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=later) is None
+
+
+def test_an_expired_file_left_by_an_earlier_start_is_replaced(
+    isolated_bootstrap: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    isolated_bootstrap.parent.mkdir(parents=True, exist_ok=True)
+    isolated_bootstrap.write_text(
+        "EXPI-REDC-ODEX\nexpires_at=2000-01-01T00:00:00+00:00\nsetup_url=/setup\n",
+        encoding="utf-8",
+    )
+
+    code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
+
+    assert code is not None and code != "EXPI-REDC-ODEX"
+    assert bootstrap_file_mod.read_bootstrap_file() == code
+    assert capsys.readouterr().err.count(code) == 1
+
+
+def test_an_expired_seed_file_is_written_again_with_a_fresh_ttl(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", "WB7K-QZ3M-NP4X")
+    bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+    later = _WRITTEN_AT + _TTL + timedelta(minutes=5)
+
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=later) == "WB7K-QZ3M-NP4X"
+    assert _file_expires_at(isolated_bootstrap) == (later + _TTL).isoformat()
+    assert bootstrap_file_mod.read_bootstrap_file(now=later) == "WB7K-QZ3M-NP4X"
+
+
+@pytest.mark.parametrize("elapsed", [timedelta(0), _TTL + timedelta(seconds=1), timedelta(days=30)])
+def test_an_install_with_an_owner_never_writes_a_file(
+    isolated_bootstrap: Path, capsys: pytest.CaptureFixture[str], elapsed: timedelta
+) -> None:
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=True, now=_WRITTEN_AT + elapsed) is None
+    assert not isolated_bootstrap.exists()
+
+    # A file left from before the owner registered is removed, expired or not, never replaced.
+    bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+    capsys.readouterr()
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=True, now=_WRITTEN_AT + elapsed) is None
+    assert not isolated_bootstrap.exists()
+    assert capsys.readouterr().err == ""
 
 
 def test_consume_removes_file(isolated_bootstrap: Path) -> None:

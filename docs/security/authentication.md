@@ -14,12 +14,17 @@ mechanisms, checked in priority order:
 
 1. **Legacy registration token** — obtained via `koda auth issue-code`, then
    `POST /api/control-plane/auth/bootstrap/exchange`. Still supported for automated installs.
-2. **Bootstrap code (recommended for VPS)** — on first boot the control plane writes
-   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) and prints a generated code
+2. **Bootstrap code (recommended for VPS)** — while no owner exists, the control plane writes
+   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) at the first auth or onboarding
+   status request (the setup screen and the CLI make one right away), and prints a generated code
    once, in a banner on stderr, which is part of the container log (never a
    `CONTROL_PLANE_BOOTSTRAP_CODE` seed, and never in the structured log). The operator SSHs in,
    reads the file or the banner, pastes the code into `/setup`, and the file is deleted after
-   registration.
+   registration. The code expires `CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS` (default 900, so
+   15 minutes) after the file is written. The next status request after that, such as reloading
+   `/setup`, replaces the expired file with a new code and a new banner (a seed is written again,
+   with a fresh expiry), so an expired code never locks setup. An install with an owner never
+   writes the file.
 3. **Loopback trust (dev only)** — when `ALLOW_LOOPBACK_BOOTSTRAP=true` and the request comes
    from `127.0.0.1` / `::1` with no `X-Forwarded-For` hop, no code is required. This mode is
    refused at boot when `KODA_ENV=production`.

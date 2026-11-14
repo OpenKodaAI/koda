@@ -20,7 +20,9 @@ supported (in priority order):
 3. **Disk file** — `state/control_plane/bootstrap.txt` (mode 0600) written on first
    boot if no owner exists. The operator SSHs in and reads it. A generated code is
    also shown once, in a banner on stderr; the structured log (`bootstrap_file_written`)
-   never carries it.
+   never carries it. The code expires `CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS` after
+   the file is written; while no owner exists, the next status request replaces an
+   expired file with a new code.
 
 The file is deleted automatically after the owner registers.
 """
@@ -131,18 +133,42 @@ def _show_setup_code_banner(code: str, expires_at: datetime) -> None:
     sys.stderr.flush()
 
 
-def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
-    """Write a bootstrap code to disk if one is needed and none exists.
+def _read_file_fields() -> tuple[str, datetime | None] | None:
+    """Return the code and ``expires_at`` stored on disk; None when there is no readable code file."""
+    if not _BOOTSTRAP_FILE_PATH.exists():
+        return None
+    try:
+        content = _BOOTSTRAP_FILE_PATH.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        log.warning("bootstrap_file_read_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
+        return None
+    if not content:
+        return None
+    lines = [line.strip() for line in content.splitlines() if line.strip()]
+    code = ""
+    expires_at: datetime | None = None
+    for line in lines:
+        if line.startswith("expires_at="):
+            expires_at = _parse_expires_at(line.split("=", 1)[1])
+        elif not code and "=" not in line:
+            code = line
+    return code, expires_at
+
+
+def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> str | None:
+    """Write a bootstrap code to disk if one is needed and no valid one exists.
 
     Returns the plaintext code if a *new* one was written, or None if nothing was
     written. A new generated code is shown once, in a banner on stderr; the
-    structured log never carries it.
+    structured log never carries it. The code expires
+    ``CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS`` after the file is written
+    (``now``, the current time unless a test injects one).
 
     Does nothing when:
-    - The owner account already exists.
-    - The file already exists (we never overwrite an existing code).
-    - Both the env seed and the file path point to a code — env takes priority
-      but we still don't overwrite the file.
+    - The owner account already exists (and removes a file left over).
+    - The file already exists and has not expired (we never overwrite a valid code).
+      An expired file is replaced by a new code (D-195); with an env seed the new
+      file holds the same seed with a fresh expiry.
     """
     if has_owner:
         if _BOOTSTRAP_FILE_PATH.exists():
@@ -152,11 +178,21 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
             except OSError as exc:
                 log.warning("bootstrap_file_unlink_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
         return None
+    now = now or datetime.now(UTC)
     if _BOOTSTRAP_FILE_PATH.exists():
-        return None
+        fields = _read_file_fields()
+        expired_at = fields[1] if fields is not None else None
+        if expired_at is None or expired_at > now:
+            return None
+        try:
+            _BOOTSTRAP_FILE_PATH.unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning("bootstrap_file_unlink_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
+            return None
+        log.info("bootstrap_file_expired_replaced", path=str(_BOOTSTRAP_FILE_PATH), expired_at=expired_at.isoformat())
     _BOOTSTRAP_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     code = CONTROL_PLANE_BOOTSTRAP_CODE_SEED or _generate_code()
-    expires_at = datetime.now(UTC) + timedelta(seconds=CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)
+    expires_at = now + timedelta(seconds=CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)
     try:
         fd = os.open(
             str(_BOOTSTRAP_FILE_PATH),
@@ -210,26 +246,13 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
     return code
 
 
-def read_bootstrap_file() -> str | None:
-    """Return the bootstrap code stored on disk, if any."""
-    if not _BOOTSTRAP_FILE_PATH.exists():
+def read_bootstrap_file(*, now: datetime | None = None) -> str | None:
+    """Return the bootstrap code stored on disk, if any and not expired by ``now``."""
+    fields = _read_file_fields()
+    if fields is None:
         return None
-    try:
-        content = _BOOTSTRAP_FILE_PATH.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        log.warning("bootstrap_file_read_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
-        return None
-    if not content:
-        return None
-    lines = [line.strip() for line in content.splitlines() if line.strip()]
-    code = ""
-    expires_at: datetime | None = None
-    for line in lines:
-        if line.startswith("expires_at="):
-            expires_at = _parse_expires_at(line.split("=", 1)[1])
-        elif not code and "=" not in line:
-            code = line
-    if expires_at is not None and expires_at <= datetime.now(UTC):
+    code, expires_at = fields
+    if expires_at is not None and expires_at <= (now or datetime.now(UTC)):
         log.info("bootstrap_file_expired", path=str(_BOOTSTRAP_FILE_PATH), expires_at=expires_at.isoformat())
         return None
     return code or None
