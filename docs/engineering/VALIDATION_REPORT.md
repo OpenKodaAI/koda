@@ -143,5 +143,5 @@ reference updated; release CHECKSUMS regenerated.
 | reviewer `docker compose config` (base, +prod, +dev, +cluster, release) | app → 127.0.0.1:8090, web → 127.0.0.1:3000, no duplicates |
 
 Review: independent reviewer, round 1 request changes (2 major docs issues: silent `koda update` behaviour
-change; plain-HTTP LAN advice incompatible with Secure cookies; plus minors) → all addressed; round 2 approve (see above).
+change; plain-HTTP LAN advice incompatible with Secure cookies; plus minors) → all addressed; round 2 **approve**: the reviewer re-rendered `docker compose config` for base, +prod, +dev, +cluster and release with `CONTROL_PLANE_PORT=18090` (host 127.0.0.1:18090 → container 8090, web → app:8090, no duplicate bindings) and ran 162 related tests. Round-2 minors fixed in `52ffc26`: `cluster_smoke.sh` probes the fixed internal port; tailnet-IP guidance removed (plain HTTP over a tailnet still drops Secure cookies; use `tailscale serve --bg`); stale compose comments; a remote proxy reaches only the dashboard; `CONTROL_PLANE_PUBLIC_PORT` documented in `.env.example`.
 Follow-up: cluster overlay `replicas: 3` with a fixed host port (pre-existing).
