@@ -9,6 +9,7 @@ import itertools
 import json
 import os
 import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Iterator, Sequence
@@ -727,28 +728,59 @@ def test_gemini_builder_validates_everything_after_the_executable():
         )
 
 
-@pytest.mark.parametrize("configured", ["gemini --yolo --sandbox=false", "npx -y @google/gemini-cli"])
-def test_gemini_bin_is_one_executable_path_never_a_command_line(fake_bin, configured):
+@pytest.mark.parametrize(
+    ("provider", "variable", "configured"),
+    [
+        ("gemini", "GEMINI_BIN", "gemini --yolo --sandbox=false"),
+        ("gemini", "GEMINI_BIN", "npx -y @google/gemini-cli"),
+        ("codex", "CODEX_BIN", "codex --dangerously-bypass-approvals-and-sandbox"),
+        ("codex", "CODEX_BIN", "npx -y @openai/codex"),
+    ],
+)
+def test_provider_bin_is_one_executable_path_never_a_command_line(fake_bin, provider, variable, configured):
+    """Extra tokens in ``*_BIN`` would be argv the contract never checks (ADR-002 AG-02)."""
     from koda.services import provider_auth
 
-    env = fake_bin("gemini", "npx")
+    env = fake_bin(provider, "npx")
     with pytest.raises(FileNotFoundError):
-        provider_auth.resolve_provider_command("gemini", base_env={**env, "GEMINI_BIN": configured})
-    assert provider_auth.provider_command_present("gemini", base_env={**env, "GEMINI_BIN": configured}) is False
+        provider_auth.resolve_provider_command(provider, base_env={**env, variable: configured})
+    assert provider_auth.provider_command_present(provider, base_env={**env, variable: configured}) is False
 
 
-def test_gemini_bin_path_is_used_verbatim(tmp_path):
+@pytest.mark.parametrize(("provider", "variable"), [("gemini", "GEMINI_BIN"), ("codex", "CODEX_BIN")])
+def test_provider_bin_path_is_used_verbatim(tmp_path, provider, variable):
     from koda.services import provider_auth
 
-    binary = tmp_path / "pinned clis" / "gemini"
+    binary = tmp_path / "pinned clis" / provider
     binary.parent.mkdir()
     binary.write_text("#!/bin/sh\nexit 0\n")
     binary.chmod(0o755)
 
     command = provider_auth.resolve_provider_command(
-        "gemini", base_env={"PATH": str(tmp_path), "GEMINI_BIN": f"  {binary}  "}
+        provider, base_env={"PATH": str(tmp_path), variable: f"  {binary}  "}
     )
     assert command == (str(binary),)
+
+
+def test_gemini_login_probe_stays_inside_the_contract(monkeypatch):
+    """The subscription-login probe is a builder too: attached values, contract flags only."""
+    from koda.services import provider_auth
+
+    captured: list[tuple[str, ...]] = []
+
+    def fake_run(command, **kwargs):
+        captured.append(tuple(command))
+        return subprocess.CompletedProcess(command, 0, stdout='{"response": "OK"}', stderr="")
+
+    monkeypatch.setattr(provider_auth, "resolve_provider_command", lambda provider, base_env=None: ("gemini",))
+    monkeypatch.setattr(provider_auth.subprocess, "run", fake_run)
+
+    result = provider_auth.verify_provider_subscription_login("gemini")
+
+    assert result.verified is True
+    (command,) = captured
+    pcc.validate_args("gemini", command[1:])
+    assert all(arg.startswith("--") and "=" in arg for arg in command[1:])
 
 
 @pytest.mark.real_cli_contract_probe

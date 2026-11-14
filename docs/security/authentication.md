@@ -82,6 +82,9 @@ credential or are required to bootstrap auth itself):
 - `/api/control-plane/auth/register-owner`
 - `/api/control-plane/auth/password/recover`
 
+Paths match exactly, in the backend and in the dashboard. A trailing slash or a route added
+under one of these paths (`/api/control-plane/auth/login/...`) still needs a session.
+
 The dashboard uses the same list. `apps/web/src/lib/public-control-plane-paths.ts` is read by
 both the Next.js proxy (`apps/web/src/proxy.ts`) and the catch-all BFF route, and
 `tests/test_control_plane_public_paths.py` fails when it differs from the backend list or when

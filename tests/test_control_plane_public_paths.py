@@ -54,3 +54,11 @@ def test_openapi_marks_the_onboarding_status_bearer_as_optional() -> None:
     public_shape = operation["responses"]["200"]["content"]["application/json"]["schema"]["anyOf"][0]
     assert set(public_shape["properties"]) == {"has_owner", "bootstrap_required"}
     assert public_shape["additionalProperties"] is False
+
+
+def test_public_paths_match_exactly_so_a_new_subroute_needs_a_session() -> None:
+    """Prefix matching would make any route added under a public path public by accident."""
+    for path in BACKEND_PUBLIC_PATHS:
+        assert control_plane_api._is_public_control_plane_api_path(path)
+        assert not control_plane_api._is_public_control_plane_api_path(f"{path}/")
+        assert not control_plane_api._is_public_control_plane_api_path(f"{path}/anything")

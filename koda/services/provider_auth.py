@@ -9,7 +9,6 @@ import os
 import pty
 import re
 import select
-import shlex
 import shutil
 import struct
 import subprocess
@@ -437,27 +436,17 @@ def resolve_provider_command(provider_id: str, base_env: dict[str, str] | None =
         if shutil.which("claude", path=env.get("PATH")):
             return ("claude",)
         raise FileNotFoundError("claude")
-    if normalized == "codex":
-        configured = str(env.get("CODEX_BIN") or "codex").strip()
-        parts = tuple(shlex.split(configured))
-        executable = parts[0] if parts else "codex"
-        if shutil.which(executable, path=env.get("PATH")):
-            return parts or ("codex",)
-        raise FileNotFoundError(executable)
-
-    # GEMINI_BIN is one executable path, never a command line: extra tokens would be argv
-    # outside the CLI contract, and a runner such as ``npx -y @google/gemini-cli`` would run
-    # whatever package version it resolves (ADR-002 AG-02).
-    configured = str(env.get("GEMINI_BIN") or "").strip()
-    if configured:
-        if shutil.which(configured, path=env.get("PATH")):
-            return (configured,)
-        raise FileNotFoundError(configured)
-    if shutil.which("gemini", path=env.get("PATH")):
-        return ("gemini",)
-    # Never fall back to an unpinned ``npx -y @google/gemini-cli`` (ADR-002 AG-02): a missing
-    # binary means the provider is unavailable until the pinned CLI is installed.
-    raise FileNotFoundError("gemini")
+    # CODEX_BIN and GEMINI_BIN are one executable path each, never a command line: extra tokens
+    # would be argv outside the CLI contract, and a runner such as ``npx -y @google/gemini-cli``
+    # would run whatever package version it resolves (ADR-002 AG-02). The runners use the same
+    # value as ``argv[0]``.
+    variable, default = ("CODEX_BIN", "codex") if normalized == "codex" else ("GEMINI_BIN", "gemini")
+    configured = str(env.get(variable) or "").strip() or default
+    if shutil.which(configured, path=env.get("PATH")):
+        return (configured,)
+    # Never fall back to an unpinned ``npx`` package (ADR-002 AG-02): a missing binary means
+    # the provider is unavailable until the pinned CLI is installed.
+    raise FileNotFoundError(configured)
 
 
 def provider_login_command(
@@ -1472,13 +1461,16 @@ def verify_provider_subscription_login(
                 details={"stdout": text},
             )
 
+        from koda.services import provider_cli_contract
+
+        # Attached values, checked against the contract like the runner's command line: yargs
+        # would read a separate value that starts with "-" as an option.
         command = (
             *resolve_provider_command("gemini", base_env=env),
-            "-p",
-            "Reply with OK only.",
-            "--output-format",
-            "json",
+            "--prompt=Reply with OK only.",
+            "--output-format=json",
         )
+        provider_cli_contract.validate_args("gemini", command[1:])
         proc = subprocess.run(
             command,
             capture_output=True,

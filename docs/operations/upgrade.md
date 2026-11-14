@@ -175,11 +175,12 @@ reason:
 Koda never runs a turn on an unverified CLI. Rebuild or pull the
 images to get the pinned versions. Native (non-Docker) runs must
 install exactly the versions in `packages/provider-clis/package.json`.
-The `gemini_bin` system setting (`GEMINI_BIN`) is the path of one
-executable, the pinned `gemini` binary. A command line such as
-`npx -y @google/gemini-cli` is not a valid value: Koda reads the
-whole value as one path, finds no such executable, and treats the
-CLI as not installed.
+The `codex_bin` and `gemini_bin` system settings (`CODEX_BIN`,
+`GEMINI_BIN`) are each the path of one executable, the pinned `codex`
+or `gemini` binary. A command line such as `npx -y @google/gemini-cli`
+or `codex --model o3` is not a valid value: Koda reads the whole value
+as one path, finds no such executable, and treats the CLI as not
+installed.
 
 `python -m koda.services.provider_cli_contract` prints the check for
 every provider as JSON and exits non-zero on any mismatch. It runs

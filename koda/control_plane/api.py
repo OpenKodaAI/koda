@@ -140,8 +140,12 @@ _PUBLIC_CONTROL_PLANE_API_PATHS: tuple[str, ...] = (
 )
 
 
+_PUBLIC_CONTROL_PLANE_API_PATH_SET = frozenset(_PUBLIC_CONTROL_PLANE_API_PATHS)
+
+
 def _is_public_control_plane_api_path(path: str) -> bool:
-    return any(path == candidate or path.startswith(f"{candidate}/") for candidate in _PUBLIC_CONTROL_PLANE_API_PATHS)
+    # Exact match, like the dashboard: a route added under a public path still needs a session.
+    return path in _PUBLIC_CONTROL_PLANE_API_PATH_SET
 
 
 def _optional_auth_context(request: web.Request) -> OperatorAuthContext | None:
