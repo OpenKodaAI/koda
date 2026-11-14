@@ -95,3 +95,15 @@ def test_readme_covers_public_entrypoints() -> None:
     assert "/setup" in readme
     assert "runtime API" in readme
     assert "SeaweedFS" in readme
+
+
+def test_contributor_setup_covers_platforms_without_cryptography_wheels() -> None:
+    # Koda requires cryptography >= 50.0.2 for security fixes; cryptography 49 and
+    # later publish no wheels for Intel macOS or 32-bit Windows, so it builds there.
+    guide = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Intel (x86_64) macOS or 32-bit Windows" in guide
+    assert "brew install openssl@3 rust" in guide
+    assert "builds `cryptography` from source" in readme
+    assert "(CONTRIBUTING.md#development-setup)" in readme

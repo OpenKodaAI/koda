@@ -18,6 +18,13 @@ pnpm test:web
 pnpm build:web
 ```
 
+Koda needs `cryptography` 50.0.2 or later for security fixes, and cryptography
+49 and later publish no wheels for Intel (x86_64) macOS or 32-bit Windows. On
+those platforms the install builds it from source, which needs the Xcode command
+line tools, Rust and OpenSSL (`brew install openssl@3 rust` on macOS); see
+[cryptography's installation guide](https://cryptography.io/en/latest/installation/).
+Apple silicon, 64-bit Windows, Linux and the Docker images use prebuilt wheels.
+
 For product-facing local work, prefer the Docker-first stack documented in:
 
 - [README.md](README.md)
