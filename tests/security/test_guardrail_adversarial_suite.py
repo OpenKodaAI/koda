@@ -1887,6 +1887,122 @@ async def test_browser_upload_does_not_follow_a_work_dir_swapped_for_a_symlink_i
     upload.assert_not_awaited()
 
 
+def _native_home_with_a_bootstrap_code(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The native layout: the work dir is HOME and the state root ``~/.koda-state`` sits inside it."""
+    import koda.utils.workdir as workdir
+
+    root = tmp_path.resolve()
+    home = root / "home"
+    control_plane = home / ".koda-state" / "control_plane"
+    control_plane.mkdir(parents=True)
+    (control_plane / "bootstrap.txt").write_text("canary-bootstrap\n", encoding="utf-8")
+    (home / "notes.txt").write_text("visible\n", encoding="utf-8")
+    monkeypatch.setitem(vars(workdir), "SENSITIVE_DIRS", frozenset({str(root / "etc")}))
+    monkeypatch.setitem(vars(workdir), "DEFAULT_WORK_DIR", str(home))
+    monkeypatch.setitem(vars(workdir), "RUNTIME_ROOT_DIR", root / "koda-runtime")
+    monkeypatch.setitem(vars(workdir), "RUNTIME_EPHEMERAL_ROOT", root / "koda-runtime")
+    monkeypatch.setitem(vars(workdir), "STATE_ROOT_DIR", home / ".koda-state")
+    monkeypatch.chdir(root)
+    return home
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+async def test_browser_upload_never_sends_a_file_from_the_control_plane_state_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The bootstrap code claims the owner role; the upload refuses it as file_read does, and keeps its other reach."""
+    from koda.services.browser_manager import browser_manager
+    from koda.services.tool_dispatcher import ToolContext, _handle_browser_upload, _handle_file_read
+
+    home = _native_home_with_a_bootstrap_code(tmp_path, monkeypatch)
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(home),
+        user_data={"work_dir": str(home)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    requested = ".koda-state/control_plane/bootstrap.txt"
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        read = await _handle_file_read({"path": requested}, ctx)
+    with (
+        patch("koda.services.tool_dispatcher._check_browser_available", new_callable=AsyncMock, return_value=None),
+        patch.object(browser_manager, "upload_file", new_callable=AsyncMock, return_value="Uploaded") as upload,
+    ):
+        result = await _handle_browser_upload({"file_path": requested}, ctx)
+        visible = await _handle_browser_upload({"file_path": "notes.txt"}, ctx)
+
+    assert not read.success
+    assert not result.success, result.output
+    assert result.output == read.output
+    assert "sensitive system directory" in result.output
+    assert visible.success, visible.output
+    upload.assert_awaited_once()
+    assert upload.await_args.args[2] == str(home / "notes.txt")
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        ("cat", [".koda-state/control_plane/bootstrap.txt"]),
+        ("file", [".koda-state/control_plane/bootstrap.txt"]),
+        ("ls", [".koda-state/control_plane"]),
+        ("write", [".koda-state/control_plane/bootstrap.txt", "attacker-code"]),
+        ("edit", [".koda-state/control_plane/bootstrap.txt", "attacker-code"]),
+        ("rm", [".koda-state/control_plane/bootstrap.txt"]),
+        ("mkdir", [".koda-state/control_plane/extra"]),
+    ],
+)
+async def test_the_file_commands_never_reach_the_control_plane_state_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_update: Any,
+    mock_context: Any,
+    command: str,
+    args: list[str],
+) -> None:
+    """An allowed Telegram user who is not the owner cannot read, list or change the bootstrap code."""
+    from koda.handlers.commands import cmd_file, cmd_ls
+    from koda.handlers.fileops import cmd_cat, cmd_edit, cmd_mkdir, cmd_rm, cmd_write
+    from koda.utils.approval import dispatch_approved_operation
+
+    home = _native_home_with_a_bootstrap_code(tmp_path, monkeypatch)
+    control_plane = home / ".koda-state" / "control_plane"
+    mock_context.user_data["work_dir"] = str(home)
+    mock_context.args = args
+    handler = {
+        "cat": cmd_cat,
+        "file": cmd_file,
+        "ls": cmd_ls,
+        "write": cmd_write,
+        "edit": cmd_edit,
+        "rm": cmd_rm,
+        "mkdir": cmd_mkdir,
+    }[command]
+    with (
+        patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", {}),
+        patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send,
+        patch("koda.handlers.commands.send_long_message", new_callable=AsyncMock) as command_send,
+    ):
+        await handler(mock_update, mock_context)
+        if "_pending_op_id" in mock_context.user_data:
+            await dispatch_approved_operation(str(mock_context.user_data["_pending_op_id"]))
+
+    shown = [call.args[1] for call in send.call_args_list + command_send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+    assert not any("canary-bootstrap" in text or "bootstrap.txt" in text for text in shown), shown
+    mock_update.message.reply_document.assert_not_awaited()
+    assert (control_plane / "bootstrap.txt").read_text(encoding="utf-8") == "canary-bootstrap\n"
+    assert not (control_plane / "extra").exists()
+    assert any("sensitive system directory" in text for text in shown), shown
+
+
 class _RedirectResponse:
     status = 302
     headers = {"Location": "http://169.254.169.254/latest/meta-data"}

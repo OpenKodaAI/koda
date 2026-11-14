@@ -54,10 +54,25 @@ def runtime_roots() -> tuple[str, ...]:
 def control_plane_state_dir() -> str:
     """Return the control-plane state directory as configured (``STATE_ROOT_DIR/control_plane``).
 
-    It holds the master key and the bootstrap code, so it is never a work dir and the file
-    tools refuse every path inside it, whatever the work dir (:class:`SensitiveDirs`).
+    It holds the master key and the bootstrap code, so it is never a work dir, and the file
+    tools, the file commands and ``browser_upload`` refuse every path inside it, whatever
+    the work dir (:class:`SensitiveDirs`, :func:`control_plane_state_dir_for`).
     """
     return _configured_path(os.path.join(os.fspath(STATE_ROOT_DIR), "control_plane"))
+
+
+def control_plane_state_dir_for(path: str) -> str | None:
+    """Return :func:`control_plane_state_dir` when ``path`` lies inside it, or None.
+
+    ``path`` is absolute and resolved; the directory is compared as configured and
+    resolved, by whole path component. It is never waived, so every caller of the shared
+    path policy applies this check, also those that skip ``SENSITIVE_DIRS``
+    (:func:`koda.utils.files.resolve_work_path` with ``deny_sensitive_dirs=False``).
+    """
+    control_plane = control_plane_state_dir()
+    if any(_is_within(path, root) for root in _sensitive_roots(control_plane)):
+        return control_plane
+    return None
 
 
 def _waived_sensitive_roots(work_dir: str | None) -> frozenset[str]:

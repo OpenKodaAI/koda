@@ -9,7 +9,7 @@ from typing import Any
 
 from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS, FILEOPS_BLOCKED_EXTENSIONS
 from koda.logging_config import get_logger
-from koda.utils.workdir import sensitive_dir_for
+from koda.utils.workdir import control_plane_state_dir_for, sensitive_dir_for
 
 log = get_logger(__name__)
 
@@ -215,12 +215,14 @@ def resolve_work_path(
     validates it (:func:`koda.utils.workdir.validate_work_dir`), or it is the operator's
     ``DEFAULT_WORK_DIR``.
 
-    ``deny_sensitive_dirs=False`` skips only the sensitive-directory check. The file
-    commands and ``browser_upload`` pass it: they have never applied that check, and
-    anything inside the work dir stays uploadable. It changes a decision only for a path
-    inside a sensitive directory that is not waived: one inside the work dir (a work dir
-    of ``/`` contains ``/etc``), or one a validated work dir resolves into later, through
-    a symlink. ``deny_sensitive_work_dir=True``, which ``browser_upload`` passes with it,
+    ``deny_sensitive_dirs=False`` skips only the ``SENSITIVE_DIRS`` check, never the
+    control-plane state directory, which is refused for every caller
+    (:func:`koda.utils.workdir.control_plane_state_dir_for`). The file commands and
+    ``browser_upload`` pass it: they have never applied that check, and anything else
+    inside the work dir stays uploadable. It changes a decision only for a path inside a
+    sensitive directory that is not waived: one inside the work dir (a work dir of ``/``
+    contains ``/etc``), or one a validated work dir resolves into later, through a
+    symlink. ``deny_sensitive_work_dir=True``, which ``browser_upload`` passes with it,
     keeps the check for the work dir itself: a work dir that resolves into a sensitive
     directory it is not waived for, such as a validated work dir later replaced with a
     symlink into ``/etc``, refuses every path, while a sensitive directory inside the work
@@ -240,10 +242,11 @@ def resolve_work_path(
         )
     if deny_sensitive_dirs:
         sensitive = sensitive_dir_for(resolved, work_dir=root)
-    elif deny_sensitive_work_dir:
-        sensitive = sensitive_dir_for(root, work_dir=root)
     else:
-        sensitive = None
+        # The control-plane state directory is never waived, whatever the caller skips.
+        sensitive = control_plane_state_dir_for(resolved)
+        if sensitive is None and deny_sensitive_work_dir:
+            sensitive = sensitive_dir_for(root, work_dir=root)
     if sensitive is not None:
         return _refuse(
             path_str, work_dir, "path_sensitive_dir", f"Access denied: '{sensitive}' is a sensitive system directory."

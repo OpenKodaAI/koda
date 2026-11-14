@@ -1988,10 +1988,11 @@ async def _handle_browser_upload(params: dict, ctx: ToolContext) -> AgentToolRes
     if not selector:
         selector = 'input[type="file"]'
     # The file the page receives follows the shared path policy: relative to the work dir,
-    # inside it, and never a secret file such as .env. Like the file commands, uploads skip
-    # the sensitive-directory check for the paths inside the work dir and keep their reach,
-    # anything inside it; unlike them, a work dir that itself resolves into a sensitive
-    # directory it is not waived for (one swapped for a symlink into /etc) is refused.
+    # inside it, and never a secret file such as .env or a file in the control-plane state
+    # dir. Like the file commands, uploads skip the SENSITIVE_DIRS check for the paths inside
+    # the work dir and keep their reach, anything else inside it; unlike them, a work dir
+    # that itself resolves into a sensitive directory it is not waived for (one swapped for
+    # a symlink into /etc) is refused.
     resolution = _resolve_file_path(file_path, ctx.work_dir, deny_sensitive_dirs=False, deny_sensitive_work_dir=True)
     if resolution.path is None:
         return AgentToolResult(tool="browser_upload", success=False, output=resolution.error or "Access denied.")

@@ -183,3 +183,31 @@ class TestControlPlaneStateIsRefusedInsideAWorkDir:
         resolution = resolve_work_path(".koda-state/control_plane/bootstrap.txt", str(home))
         assert resolution.path is None
         assert resolution.reason == "path_sensitive_dir"
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            {"deny_sensitive_dirs": False},
+            {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True},
+        ],
+        ids=["the file commands", "browser_upload"],
+    )
+    @pytest.mark.parametrize(
+        "path",
+        [
+            ".koda-state/control_plane/bootstrap.txt",
+            ".koda-state/control_plane",
+            "{home}/.koda-state/control_plane/bootstrap.txt",
+            "link-to-control-plane/bootstrap.txt",
+        ],
+    )
+    def test_the_file_commands_and_browser_upload_refuse_its_files_too(
+        self, home: Path, options: dict[str, bool], path: str
+    ) -> None:
+        """It is never waived: the callers that skip the SENSITIVE_DIRS check still refuse it."""
+        (home / "link-to-control-plane").symlink_to(home / ".koda-state" / "control_plane")
+        resolution = resolve_work_path(path.format(home=home), str(home), **options)
+        assert resolution.path is None
+        assert resolution.reason == "path_sensitive_dir"
+        assert resolve_work_path("notes.txt", str(home), **options).path == home / "notes.txt"
+        assert resolve_work_path(".koda-state", str(home), **options).path == home / ".koda-state"
