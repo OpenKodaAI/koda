@@ -9,6 +9,8 @@ supported (in priority order):
    endpoint accepts requests without a bootstrap code. Default: true in development,
    false in production (enforced in settings.py at boot).
 2. **Env var** — `CONTROL_PLANE_BOOTSTRAP_CODE` seeds the code instead of autogen.
+   The file keeps the seed as configured; `operator_auth` canonicalizes both the
+   stored and the typed code, so only its ASCII letters and digits count.
 3. **Disk file** — `state/control_plane/bootstrap.txt` (mode 0600) written on first
    boot if no owner exists. The operator SSHs in and reads it.
 

@@ -192,6 +192,102 @@ def test_setup_code_is_single_use_and_expires(operator_db: Path) -> None:
     assert service.has_owner() is False
 
 
+# Setup codes are issued as ``XXXX-XXXX-XXXX``, like recovery codes, and the
+# server canonicalizes what the operator types the same way (D-221).
+_TYPED_CODE_VARIANTS = [
+    pytest.param(str.lower, id="lowercase"),
+    pytest.param(lambda code: code.replace("-", ""), id="no-dashes"),
+    pytest.param(lambda code: f"  {code.lower().replace('-', ' ')}\n", id="spaces-and-padding"),
+    pytest.param(lambda code: code.replace("-", "_").lower(), id="underscores"),
+]
+
+
+def _setup_code(service: operator_auth_mod.OperatorAuthService, source: str) -> str:
+    if source == "cli":
+        return str(service.issue_bootstrap_code(label="cli")["code"])
+    return _bootstrap_file_code(service)
+
+
+def _register_with_setup_code(service: operator_auth_mod.OperatorAuthService, code: str) -> dict[str, Any]:
+    return service.register_owner(
+        bootstrap_code=code,
+        email="owner@example.com",
+        password=STRONG_PASSWORD,
+        remote_ip="203.0.113.7",
+    )
+
+
+def test_setup_code_canonicalizer_is_the_recovery_code_canonicalizer() -> None:
+    normalize = operator_auth_mod._normalize_bootstrap_code
+    assert normalize("abcd-efgh-jklm") == "ABCD-EFGH-JKLM"
+    assert normalize(" abcd efgh\tjklm ") == "ABCD-EFGH-JKLM"
+    assert normalize("ABCDEFGHJKLM") == "ABCD-EFGH-JKLM"
+    for typed in ("ab-cd--efgh_jk.lm", "abſd-efgh-jklm", "ＡＢＣＤ-efgh-jklm", "----", "", None):
+        assert normalize(typed) == operator_auth_mod._normalize_recovery_code(typed)
+    # Issued codes are already canonical, so stored hashes keep matching.
+    issued = operator_auth_mod._random_code()
+    assert normalize(issued) == issued
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("source", ["cli", "bootstrap_file"])
+@pytest.mark.parametrize("transform", _TYPED_CODE_VARIANTS)
+def test_setup_code_accepts_case_and_separator_variants(operator_db: Path, source: str, transform: Any) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    code = _setup_code(service, source)
+    assert code == operator_auth_mod._normalize_bootstrap_code(code)
+
+    payload = _register_with_setup_code(service, transform(code))
+
+    assert payload["operator"]["email"] == "owner@example.com"
+    assert service.has_owner() is True
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("source", ["cli", "bootstrap_file"])
+def test_setup_code_canonicalization_does_not_accept_other_codes(operator_db: Path, source: str) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    code = _setup_code(service, source)
+    compact = code.replace("-", "").lower()
+    other = "a" if compact[-1] != "a" else "b"
+    # A missing, wrong, extra or non-ASCII (look-alike) character still fails
+    # with the generic error, never a server error.
+    for candidate in (compact[:-1], compact[:-1] + other, compact + "a", code[:-1] + "ſ", code[:-1] + "é", "----"):
+        with pytest.raises(ValueError, match=r"^Setup code is invalid or expired\.$"):
+            _register_with_setup_code(service, candidate)
+    assert service.has_owner() is False
+
+
+@pytest.mark.postgres
+def test_seeded_setup_code_is_canonicalized_on_the_stored_side(
+    operator_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``CONTROL_PLANE_BOOTSTRAP_CODE`` reaches ``bootstrap.txt`` as configured; matching ignores its spelling."""
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", "cust omse edcd")
+    service = operator_auth_mod.OperatorAuthService()
+    assert _bootstrap_file_code(service) == "cust omse edcd"
+
+    _register_with_setup_code(service, "CUST-OMSE-EDCD")
+
+    assert service.has_owner() is True
+
+
+@pytest.mark.postgres
+def test_setup_code_without_ascii_letters_or_digits_never_matches(
+    operator_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A seed that canonicalizes to nothing must not match input that also canonicalizes to nothing."""
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", "ÄÖÜ-ÄÖÜ")
+    service = operator_auth_mod.OperatorAuthService()
+    _bootstrap_file_code(service)
+
+    for candidate in ("----", "ÄÖÜ-ÄÖÜ", "äöü äöü"):
+        with pytest.raises(ValueError, match=r"^Setup code is invalid or expired\.$"):
+            _register_with_setup_code(service, candidate)
+    assert service.has_owner() is False
+    assert _count("cp_bootstrap_codes") == 0
+
+
 @pytest.mark.postgres
 def test_loopback_rejected_when_flag_disabled(
     operator_db: Path,
@@ -441,6 +537,47 @@ async def test_password_recover_route_accepts_lowercase_compact_code(
         )
         assert fresh.status == 200, await fresh.text()
         assert (await fresh.json())["operator"]["username"] == "owner"
+
+
+@pytest.mark.postgres
+async def test_register_owner_route_accepts_lowercase_compact_setup_code(
+    operator_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End to end through the aiohttp handler and the control-plane middlewares."""
+    service = operator_auth_mod.OperatorAuthService()
+    code = _bootstrap_file_code(service)
+    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
+
+    app = web.Application(
+        middlewares=[
+            control_plane_api.control_plane_error_middleware,
+            control_plane_api.control_plane_auth_middleware,
+        ]
+    )
+    app.router.add_post("/api/control-plane/auth/register-owner", control_plane_api.auth_register_owner)
+    account = {"email": "owner@example.com", "password": STRONG_PASSWORD}
+    compact = code.lower().replace("-", "")
+
+    async with TestClient(TestServer(app)) as client:
+        wrong = await client.post(
+            "/api/control-plane/auth/register-owner",
+            json={**account, "bootstrap_code": compact[:-1] + ("a" if compact[-1] != "a" else "b")},
+        )
+        assert wrong.status == 400
+        assert await wrong.json() == {"error": "Setup code is invalid or expired."}
+
+        created = await client.post(
+            "/api/control-plane/auth/register-owner",
+            json={**account, "bootstrap_code": compact},
+        )
+        assert created.status == 201, await created.text()
+        body = await created.json()
+        assert body["operator"]["email"] == "owner@example.com"
+        assert len(body["recovery_codes"]) >= 10
+
+    assert service.has_owner() is True
+    assert not operator_db.exists()
 
 
 @pytest.mark.postgres
