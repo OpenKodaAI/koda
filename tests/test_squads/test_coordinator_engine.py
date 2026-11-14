@@ -511,3 +511,71 @@ async def test_engine_handoff_mode_persists_visible_handoff_event_and_tasks() ->
         call.kwargs["metadata"]["handoff_correlation_id"] == payload["correlation_id"]
         for call in task_store.create_task.await_args_list
     )
+
+
+class _NoTaskPlanner:
+    """Planner that picks a mode and creates no task (D-015)."""
+
+    def __init__(self, mode: str, *, selected_agents: list[str] | None = None) -> None:
+        self._mode = mode
+        self._selected_agents = selected_agents or []
+
+    async def plan(self, planner_input: CoordinationPlannerInput) -> CoordinationDecision:
+        return CoordinationDecision(
+            mode=cast(Any, self._mode),
+            confidence=0.7,
+            reasoning_summary=f"planner chose {self._mode}",
+            selected_agents=list(self._selected_agents),
+            needs_user_clarification=self._mode == "ask_clarification",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("mode", "selected", "expects_coordinator_query"),
+    [
+        ("ask_clarification", [], True),
+        ("decline", [], True),
+        ("handoff", ["FE"], False),
+    ],
+)
+async def test_engine_without_tasks_hands_the_turn_back_to_the_caller(
+    mode: str, selected: list[str], expects_coordinator_query: bool
+) -> None:
+    thread_store = AsyncMock()
+    thread_store.post_thread_message = AsyncMock(return_value=10)
+    thread_store.notify_event = AsyncMock()
+    task_store = AsyncMock()
+    dispatch = AsyncMock()
+    engine = SquadCoordinatorEngine(
+        thread_store=thread_store,
+        task_store=task_store,
+        planner=_NoTaskPlanner(mode, selected_agents=selected),
+    )
+
+    execution = await engine.coordinate_user_input(
+        text="Faça aquilo",
+        thread=_thread(),
+        participants=[_participant("PM", "coordinator"), _participant("FE")],
+        coordinator_agent_id="PM",
+        capability_hints={},
+        semantic_result=_semantic_result("FE"),
+        dispatch=dispatch,
+        parent_message_id="msg-99",
+    )
+
+    # coordinated=True makes the Telegram and web handlers return without any reply.
+    assert execution.coordinated is False
+    assert execution.decision.mode == mode
+    dispatch.assert_not_awaited()
+    task_store.create_task.assert_not_awaited()
+    posted_types = [
+        call.kwargs["metadata"].get("event_type") for call in thread_store.post_thread_message.await_args_list
+    ]
+    assert "handoff_event" not in posted_types
+    if expects_coordinator_query:
+        assert execution.coordinator_query is not None
+        assert "Faça aquilo" in execution.coordinator_query
+        assert f"planner chose {mode}" in execution.coordinator_query
+    else:
+        assert execution.coordinator_query is None

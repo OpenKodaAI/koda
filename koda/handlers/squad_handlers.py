@@ -659,6 +659,35 @@ async def _notify_squad_targets(
                         tasks=execution.task_ids,
                     )
                     return
+                if execution.coordinator_query:
+                    # ask_clarification or decline: the coordinator answers the user itself (D-015).
+                    await record_squad_routing_decision(
+                        thread_store,
+                        thread_id=thread.id,
+                        source="coordinator_engine",
+                        targets=[coordinator_id],
+                        parent_message_id=parent_message_id,
+                        metadata={"mode": execution.decision.mode, "member_profiles": member_profiles},
+                    )
+                    await dispatch_squad_turn(
+                        target_agent_id=coordinator_id,
+                        thread=thread,
+                        thread_store=thread_store,
+                        query_text=execution.coordinator_query,
+                        parent_message_id=parent_message_id,
+                        metadata={
+                            "from_user": sender_handle,
+                            "source": "coordinator_engine",
+                            "delivery_intent": "execution",
+                        },
+                        application=getattr(bot_context, "application", None) if bot_context is not None else None,
+                        user_id=user_id,
+                        chat_id=telegram_chat_id,
+                        delegation_chain=["squad_router"],
+                        telegram_message_thread_id=telegram_message_thread_id,
+                        bot_override=getattr(bot_context, "bot", None) if bot_context is not None else None,
+                    )
+                    return
             except Exception:
                 log.exception(
                     "squad_supervisor_coordination_failed",

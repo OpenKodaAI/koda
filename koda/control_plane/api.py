@@ -1537,6 +1537,37 @@ async def post_dashboard_squad_thread_message_route(request: web.Request) -> web
                     return web.json_response(
                         {"messageId": message_id, "fromAgent": from_agent, "coordination": coordination_payload}
                     )
+                if execution.coordinator_query:
+                    # ask_clarification or decline: the coordinator answers the user itself (D-015).
+                    await record_squad_routing_decision(
+                        store,
+                        thread_id=thread_id,
+                        source="coordinator_engine",
+                        targets=[coordinator_id],
+                        parent_message_id=f"msg-{message_id}",
+                        metadata={"mode": execution.decision.mode},
+                    )
+                    await dispatch_squad_turn(
+                        target_agent_id=coordinator_id,
+                        thread=resolved_thread,
+                        thread_store=store,
+                        query_text=execution.coordinator_query,
+                        parent_message_id=f"msg-{message_id}",
+                        metadata={
+                            "from_user": from_agent,
+                            "source": "coordinator_engine",
+                            "delivery_intent": "execution",
+                        },
+                        application=request.app.get("telegram_application"),
+                        user_id=resolved_thread.owner_user_id,
+                        chat_id=resolved_thread.telegram_chat_id or 0,
+                        delegation_chain=["squad_router"],
+                        telegram_message_thread_id=resolved_thread.telegram_message_thread_id,
+                    )
+                    coordination_payload = {"mode": execution.decision.mode, "tasks": [], "agents": [coordinator_id]}
+                    return web.json_response(
+                        {"messageId": message_id, "fromAgent": from_agent, "coordination": coordination_payload}
+                    )
         if (
             thread is not None
             and not thread.coordinator_agent_id

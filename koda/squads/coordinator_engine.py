@@ -206,6 +206,9 @@ class CoordinationExecution:
     message_ids: list[str] = field(default_factory=list)
     delivery_status: str = "coordinating"
     schema_version: str = SQUAD_DELIVERY_SCHEMA_VERSION
+    # Set when the decision dispatched no task: the caller sends this to the
+    # coordinator so the user still gets a clarification or decline reply.
+    coordinator_query: str | None = None
 
     @property
     def dispatched_count(self) -> int:
@@ -680,6 +683,15 @@ class SquadCoordinatorEngine:
             decision=decision,
             parent_message_id=parent_message_id,
         )
+        if not decision.tasks:
+            # ask_clarification, decline or a task-less handoff: nothing is
+            # dispatched here, so the caller must still route the turn (D-015).
+            return CoordinationExecution(
+                coordinated=False,
+                decision=decision,
+                message_ids=[f"msg-{decision_message_id}"],
+                coordinator_query=_coordinator_reply_query(decision, source_request=text),
+            )
         task_ids: list[str] = []
         pending_task_ids: list[str] = []
         dispatched_agents: list[str] = []
@@ -1039,6 +1051,29 @@ def _render_task_request(*, task: CoordinationTask, source_request: str, task_id
             "contributed unless their task_result is visible.",
         ]
     )
+    return "\n".join(lines)
+
+
+_COORDINATOR_REPLY_INSTRUCTIONS: dict[str, str] = {
+    "ask_clarification": (
+        "Você decidiu pedir esclarecimentos antes de delegar. Responda ao usuário com uma pergunta objetiva "
+        "de esclarecimento sobre o pedido abaixo. Não delegue nem execute a tarefa ainda."
+    ),
+    "decline": (
+        "Você decidiu não atender este pedido. Responda ao usuário explicando de forma breve o motivo e, "
+        "se possível, o que ele pode fazer. Não delegue nem execute a tarefa."
+    ),
+}
+
+
+def _coordinator_reply_query(decision: CoordinationDecision, *, source_request: str) -> str | None:
+    instruction = _COORDINATOR_REPLY_INSTRUCTIONS.get(decision.mode)
+    if instruction is None:
+        return None
+    lines = [instruction]
+    if decision.reasoning_summary.strip():
+        lines.extend(["", f"Motivo da decisão: {decision.reasoning_summary.strip()}"])
+    lines.extend(["", "Pedido do usuário:", source_request.strip()])
     return "\n".join(lines)
 
 
