@@ -17,6 +17,12 @@ VALIDATION_REPORT.md holds its evidence (mission §11).
 minor issues, 23 coverage gaps and 11 cases of over-engineering. This revision addresses all of them. Tasks
 were split, moved or added, and every moved task keeps a pointer from its old ID (section 4.2).
 
+**Reference update (2026-11-14, OpenBot).** REFERENCE_RESEARCH §3.8 adds OpenBot (openbot.run), which
+the operator named as a reference for design, user experience, chat and agents. It also adds principles
+P21 to P28 and the experience and visual direction in §6.10. This plan amends M3-E5-T2, M3-E5-T3,
+M3-E6-T4, M3-E6-T5, M6-E2-T5, M6-E2-T7, M8-E1-T4, M8-E2-T5, M8-E5-T10 and M8-E5-T12, and adds
+M6-E3-T8 and M8-E2-T6 (dispositions in section 5.4). Tasks that WAVE-6 is running were not amended.
+
 ## Contents
 
 1. [How to use this plan](#1-how-to-use-this-plan)
@@ -177,12 +183,12 @@ per milestone:
 | M3 | Broken critical journeys | Through the M0-E3-T2 harness, on Postgres with a stub provider (M3-E9-T1): a scheduled routine runs; a gated tool call is approved and executes (once M3-E3-T1 is approved); a squad conversation delegates and synthesises; memory is recalled across sessions; password recovery works; cancel stops child runs; emergency stop works; **a dashboard-only agent answers in `/sessions` (J-11)**; an MCP server is connected and its tool called; a skill package is installed through review. The real-provider checkpoint (M3-E9-T2) is recorded, or its blocker is stated. | 43 | 19 / 15 / 3 / 0 / 3 / 3 |
 | M4 | Dead-weight removal | Zero-consumer code, configuration and files are removed in deletion-only changes. Unreachable web modules are gone. A CI check prevents regrowth. | 22 | 18 / 0 / 4 / 0 / 0 / 0 |
 | M5 | Architecture consolidation | One implementation per concern (ARCHITECTURE_AUDIT §7). Default stack reduced toward 6 containers, with a tested rollback for each fold. No `run_coro_sync` on hot paths. | 68 | 10 / 43 / 15 / 0 / 0 / 0 |
-| M6 | Core functionality completion | Every in-scope feature is `complete_verified`, or removed or deferred with approval. Controls with no backend are labelled. Governance surfaces are reachable. Learning has a definition and measures (ADR-031). | 25 | 16 / 4 / 5 / 0 / 0 / 0 |
+| M6 | Core functionality completion | Every in-scope feature is `complete_verified`, or removed or deferred with approval. Controls with no backend are labelled. Governance surfaces are reachable. Learning has a definition and measures (ADR-031). | 26 | 17 / 4 / 5 / 0 / 0 / 0 |
 | M7 | Reliability and operations | Health reflects failure. Kernel shutdown is graceful. CI is consolidated and pinned. Resource limits and growth budgets are set. | 20 | 10 / 5 / 5 / 0 / 0 / 0 |
-| M8 | UX and accessibility | WCAG 2.2 AA on key routes, with exceptions documented. No raw i18n keys or hydration errors. One design system per mission §6.2 category. Every key route has its interaction-state row (mission §6.3). | 31 | 17 / 14 / 0 / 0 / 0 / 0 |
+| M8 | UX and accessibility | WCAG 2.2 AA on key routes, with exceptions documented. No raw i18n keys or hydration errors. One design system per mission §6.2 category. Every key route has its interaction-state row (mission §6.3). | 32 | 17 / 15 / 0 / 0 / 0 / 0 |
 | M9 | Performance and maintainability | Measured baselines and targets exist. Event loops are not blocked. Hot queries have recorded plans. God modules are split along their seams. | 20 | 9 / 10 / 1 / 0 / 0 / 0 |
 | M10 | Polish, documentation and release readiness | Docs match behaviour. Every contract change has its changelog entry. Final acceptance (M10-E1-T5) runs after M1 to M9 exit, with real infrastructure (mission §11, §16). | 5 | 2 / 2 / 1 / 0 / 0 / 0 |
-| | **Total** | | **351** | **160 / 120 / 52 / 4 / 5 / 10** |
+| | **Total** | | **353** | **161 / 121 / 52 / 4 / 5 / 10** |
 
 The counts were refreshed on 2026-11-14 from `scripts/check_master_plan.py` (M0-E1-T4). "Ready" means every hard dependency is done and no gate is open. The plan
 lint (M0-E1-T4) prints these counts; refresh the table from its output when statuses change (M10-E1-T4).
@@ -331,26 +337,38 @@ revisited at the M10-E1-T4 refresh.
 
 | P | Principle | Disposition | Tasks or reason |
 |---|---|---|---|
-| P1 | Three edited layers per agent | Accept, verify first | M8-E2-T5 checks the editor against the three layers; M6-E2-T6 covers the child-run part |
+| P1 | Three edited layers per agent | Accept, verify first | M8-E2-T5 checks the editor against the three layers, and decides on agent settings opened from the chat header and the agent glyph in rows; M6-E2-T6 covers the child-run part |
 | P2 | Effective config and its origin | Defer | Needs the typed settings work (M5-E4-T3) first; the resolved-config view is new UI with no defect behind it |
 | P3 | Draft, publish, diff and roles | Partial: the draft and publish lifecycle is kept; roles are rejected | A single-owner product has no Manager or Collaborator (mission §12). Pre-publish diff deferred |
 | P4 | One handle, explicit bindings, pairing limits | Accept (pairing limits) | M1-E5-T3; bindings follow Q-2 and Q-3 |
-| P5 | Small squads, one owner per stage | Accept | M6-E2-T7 |
+| P5 | Small squads, one owner per stage | Accept | M6-E2-T7 (now also readable handoff lines and the waiting block) |
 | P6 | Coordination mode as an explicit setting | Defer the setting; record the semantics now | ADR-032 and M3-E6-T7 define the current mode (lead synthesizes) and test it; a mode selector waits for a second mode with a user |
 | P7 | Child runs bounded and capability subset | Accept | M6-E2-T6, M3-E2-T4 |
-| P8 | Child runs panel with cascade wording | Accept (wording) | M6-E2-T5 states the cascade, which M3-E2-T4 implements |
+| P8 | Child runs panel with cascade wording | Accept (wording, and the in-chat row) | M6-E2-T5 states the cascade, which M3-E2-T4 implements; M6-E3-T8 adds the collapsed child-run row to the chat |
 | P9 | The supply-chain check is the install UI | Accept (minimal) | M1-E4-T3 and M1-E8-T2 show hash and verdict at the operator review; rescans deferred |
 | P10 | Visibility and authority shown apart | Defer | Depends on one tool catalog (M5-E3-T1); revisit with M8-E2-T5 |
 | P11 | Skill lifecycle, Pin and Lock | Reject for now | No requirement or consumer; skill telemetry exists |
-| P12 | Budgeted core memory above recall | Defer | Recall must work first (M3-E4); ADR-031 defines what is measured |
+| P12 | Budgeted core memory above recall | Defer | Recall must work first (M3-E4); ADR-031 defines what is measured. The composer context meter (REFERENCE_RESEARCH §3.8) is evaluated in M8-E2-T5; context governance already has the totals |
 | P13 | One learning inbox | Defer | ADR-031 keeps two queues (memory review, proposals) until a measured need; M6-E1-T9 keeps proposals honest |
-| P14 | Learned items editable and deletable | Accept | M6-E4-T2, M2-E5-T3 |
-| P15 | Standard approval verbs, narrow Always, fail closed | Accept | M6-E2-T5, M3-E3-T2 |
+| P14 | Learned items editable and deletable | Accept | M6-E4-T2, M2-E5-T3. The per-turn memory receipt is deferred: no per-turn memory-write record exists yet (REFERENCE_RESEARCH §5) |
+| P15 | Standard approval verbs, narrow Always, fail closed | Accept | M6-E2-T5 (scope never widens beyond the card), M3-E3-T2 |
 | P16 | Policy resolves toward strictness | Accept (resolution rule) | M5-E3-T3 and the per-store tasks keep "tighten only" as an acceptance check; the AI-reviewer tier is rejected |
 | P17 | Stopping does not undo work | Accept | M6-E2-T5, M3-E2-T5 |
 | P18 | Agent profile organized around activity | Defer | UX review first (M8-E2-T5) |
-| P19 | Three planes and a Needs-you count | Defer | M8-E2-T5 evaluates it; no task until that review |
+| P19 | Three planes and a Needs-you count | Partial: the Needs-you rail group is accepted; the cross-plane count stays deferred | M8-E2-T6 builds the rail group after the M8-E2-T5 review places it; the global count across approvals, learnings, pairing and skills waits for that review |
 | P20 | Row-first, low density | Accept (already the design rule) | Applied by M8-E5 tasks; no separate task |
+| P21 | Questions and approvals share one waiting state | Accept (one wait state, receipts); the question card is deferred | M6-E2-T5. A structured question card waits for a requirement (operator question); if built, it uses the broker's `respond` path, not `ui_choice` |
+| P22 | Provider failover is visible and never repeats side effects | Accept (visibility, side-effect safety); ask-first is the operator's call | M6-E3-T8 (the note), M2-E4-T1 (no tool replay). Asking before a switch changes how a configured fallback behaves for users (MISSION §13); no task until the operator decides |
+| P23 | Every turn leaves a receipt | Partial | M6-E3-T8 (child runs, provider switch). The memory row waits for P14's write record; the time-axis RunGraph view is evaluated in M8-E2-T5 |
+| P24 | The conversation says who, which model and what state | Accept | M3-E5-T2 (recipient, configured model, paused state). The waiting reason for queued messages waits for M3-E2-T3, which reworks the per-user lock |
+| P25 | System events read as sentences | Accept | M6-E2-T7 (rendering), M3-E6-T4 and M3-E6-T5 (limit and pause events) |
+| P26 | Calm surfaces in Koda's own tokens | Accept (already the design rule) | M8-E5-T3, M8-E5-T10 (weights), M8-E5-T12 (row anatomy) |
+| P27 | Motion and focus designed per component | Accept | M8-E1-T1 (focus token, unchanged while WAVE-6 runs it), M8-E1-T4 (reduced-motion and focus-contrast checks), M8-E5-T12 (row names) |
+| P28 | Copy states the effect, the scope and the next step | Accept (already planned) | M8-E3-T2, M6-E1-T10, M6-E3-T5, M8-E5-T2 |
+
+REFERENCE_RESEARCH §6.10 also lists the OpenBot patterns Koda does not adopt (dark-only theme, its
+accent and avatars, emoji reactions, decorative WebGL, full access by default, and others). They get no
+task.
 
 ---
 
@@ -1704,22 +1722,24 @@ Owner AIM · Risk med · Gate none (Q-13 default) · **pending** · Deps M0-E3-T
 
 #### M3-E5-T2 · Honest composer
 Owner FE · Risk low · Gate none · **ready** · Deps —
-- **Addresses:** D-206, D-077, D-205, F-CNV-03, F-CNV-04, F-CNV-05, TD-153 (part)
-- **Files:** `apps/web/src/components/features/sessions/sessions-page-client.tsx` (~905, ~1012), `apps/web/src/hooks/use-commands-catalog.ts` (~13)
+- **Addresses:** D-206, D-077, D-205, F-CNV-03, F-CNV-04, F-CNV-05, TD-153 (part); P24 (REFERENCE_RESEARCH §3.8: a composer that names its recipient and shows the configured model)
+- **Files:** `apps/web/src/components/features/sessions/sessions-page-client.tsx` (~905, ~1012, `modelLabel` ~1034), `apps/web/src/hooks/use-commands-catalog.ts` (~13), `apps/web/src/components/sessions/chat/composer/chat-composer.tsx`, `composer-toolbar.tsx`, i18n resources
 - **Do:**
   - for a paused agent, show the paused state with an Activate action and disable send;
   - keep the `@token` text until mentions work end to end, so nothing is silently dropped;
   - the slash menu uses the static catalog;
-  - remove the no-op `/context`.
-- **Done when:** a send to a paused agent never returns 400, no mention disappears, and there are no 404 fetches.
+  - remove the no-op `/context`;
+  - the placeholder names the recipient ("Message <agent>", or the room's name in a room) instead of the generic "Send a message…";
+  - the toolbar's model label shows the provider, model and effort from the agent's published configuration, not the model of the last reply. It stays read-only; changes stay in the agent editor and its publish step.
+- **Done when:** a send to a paused agent never returns 400, no mention disappears, and there are no 404 fetches. The placeholder names the selected agent or room in both locales. For a fixture agent whose last reply came from another model, the toolbar shows the configured model and effort.
 - **Tests:** web component tests; G · **Evidence:** —
 
 #### M3-E5-T3 · Telegram optional per agent; dashboard-only agents answer
 Owner BE (AIM) · Risk med · Gate decision Q-2 (approval batch 1) · **blocked** · Deps M0-E3-T3
-- **Addresses:** D-124, F-AGT-07, F-CNV-03, F-CHN-01, J-11, R-24; formerly M6-E1-T1. J-11 (chat with an agent in `/sessions`) is broken for any agent without a Telegram token, so this is a broken critical journey.
-- **Files:** `koda/control_plane/manager.py` (~8477 publish checks), `koda/__main__.py` (PTB lifecycle), `koda/channels/telegram/*`, README, the install docs, the onboarding checklist
-- **Do:** a worker boots without PTB when no token is configured, and serves the runtime HTTP API only. A missing token becomes a publish warning instead of an error.
-- **Done when:** in the M0-E3-T2 harness, an agent published with no Telegram token answers a dashboard message in `/sessions`, and a Telegram agent behaves as before.
+- **Addresses:** D-124, F-AGT-07, F-CNV-03, F-CHN-01, J-11, R-24; formerly M6-E1-T1. J-11 (chat with an agent in `/sessions`) is broken for any agent without a Telegram token, so this is a broken critical journey. REFERENCE_RESEARCH §3.8 (onboarding: provider, agent, a small checkable first task, then its activity).
+- **Files:** `koda/control_plane/manager.py` (~8477 publish checks), `koda/__main__.py` (PTB lifecycle), `koda/channels/telegram/*`, README, the install docs, the onboarding checklist (`apps/web/src/components/dashboard/setup-checklist-card.tsx`)
+- **Do:** a worker boots without PTB when no token is configured, and serves the runtime HTTP API only. A missing token becomes a publish warning instead of an error. The setup checklist marks its Telegram step optional, so the default path runs provider, agent, first task in `/sessions`, then its trace (the onboarding order in REFERENCE_RESEARCH §3.8).
+- **Done when:** in the M0-E3-T2 harness, an agent published with no Telegram token answers a dashboard message in `/sessions`, and a Telegram agent behaves as before. The setup checklist can be completed without a Telegram token; today its completion requires `telegramReady` (`setup-checklist-card.tsx` ~68).
 - **Tests:** M0-E3-T3 extended; G-PG agent-turn test with no token; changelog entry (publish check) · **Evidence:** —
 
 #### M3-E6 — Squads (journey: a squad room conversation with delegation and synthesis)
@@ -1750,18 +1770,18 @@ Owner AIM · Risk med · Gate none · **ready** · Deps —
 
 #### M3-E6-T4 · Bounded delegation and `agent_send`
 Owner AIM (SEC) · Risk med · Gate none · **ready** · Deps —
-- **Addresses:** D-095, D-096, D-185 (unbounded `_delegation_data`), F-SQD-07, F-SQD-06, R-27
+- **Addresses:** D-095, D-096, D-185 (unbounded `_delegation_data`), F-SQD-07, F-SQD-06, R-27; P25 (the limit is visible)
 - **Files:** `koda/agents/postgres_message_bus.py` (~477), `koda/services/tool_dispatcher.py` (~3396), the inbox dispatcher
-- **Do:** carry the full delegation chain and depth in request metadata, and enforce both in the inbox dispatcher before enqueueing. Apply a hop limit to `agent_send` in squad threads. Store a delegation result only when a local waiter exists, or in a TTL map.
-- **Done when:** an A→B→C→A cycle is rejected, depth is capped, and A↔B ping-pong stops at the limit.
+- **Do:** carry the full delegation chain and depth in request metadata, and enforce both in the inbox dispatcher before enqueueing. Apply a hop limit to `agent_send` in squad threads. Store a delegation result only when a local waiter exists, or in a TTL map. When a limit rejects a delegation in a squad thread, post one `system_event` whose metadata names the limit (cycle, depth or hop count), so the room can say why the work stopped (P25; M6-E2-T7 renders it).
+- **Done when:** an A→B→C→A cycle is rejected, depth is capped, and A↔B ping-pong stops at the limit. Each rejection in a squad thread leaves exactly one system event that names its limit.
 - **Tests:** G-PG · **Evidence:** —
 
 #### M3-E6-T5 · Budget pause enforced; expired claims redispatched
 Owner AIM · Risk med · Gate none · **ready** · Deps —
-- **Addresses:** D-075, D-097, F-SQD-19, F-SQD-15, F-SQD-18
+- **Addresses:** D-075, D-097, F-SQD-19, F-SQD-15, F-SQD-18; P25 (the pause reason is visible)
 - **Files:** `koda/squads/router.py` (~388), `koda/squads/tasks.py` (~478), `koda/squads/dispatch.py`
-- **Do:** gate `dispatch_squad_turn` and `enqueue_squad_agent_task` on `status == 'open'` and on cost being under the cap. Keep the planned assignee, and redispatch or escalate a claim that expires.
-- **Done when:** a paused thread runs no turns, and an expired claim progresses.
+- **Do:** gate `dispatch_squad_turn` and `enqueue_squad_agent_task` on `status == 'open'` and on cost being under the cap. Keep the planned assignee, and redispatch or escalate a claim that expires. When a thread pauses, post one `system_event` whose metadata gives the reason (budget reached, or paused by the operator), so the room says why nothing runs (P25; REFERENCE_RESEARCH §3.8, stated waiting reasons).
+- **Done when:** a paused thread runs no turns, and an expired claim progresses. A pause leaves exactly one system event that names its reason.
 - **Tests:** G-PG · **Evidence:** —
 
 #### M3-E6-T6 · Live room events stay connected
@@ -2735,10 +2755,10 @@ Owner FE · Risk med · Gate none · **ready** · Deps —
 
 #### M6-E2-T5 · Approval cards and stop dialogs
 Owner UX (FE, SEC) · Risk med · Gate none · **pending** · Deps M3-E3-T2
-- **Addresses:** P15, P17, F-GOV-05, F-GOV-06
-- **Files:** the dashboard approval UI, the Telegram approval keyboard (`koda/utils/approval.py`; keep the PT-BR labels), the cancel and stop dialogs
-- **Do:** use the same verbs in both channels (allow once, allow scope, deny with a reason), and have the card show the exact grant scope and its expiry. Stop and cancel dialogs list the side effects already executed (from the trace) and whether child runs are affected.
-- **Done when:** a dashboard approval of a scoped grant shows the scope, and the stop dialog lists the executed writes.
+- **Addresses:** P15, P17, P21, F-GOV-05, F-GOV-06; REFERENCE_RESEARCH §3.8 (one design for every waiting card; a collapsed receipt after the answer)
+- **Files:** the dashboard approval UI (`apps/web/src/components/sessions/chat/approval-prompt.tsx`, `assistant-message.tsx`), the session detail that lists a turn's approvals (`koda/state/dashboard_store.py`, `koda/control_plane/dashboard_service.py`), the Telegram approval keyboard (`koda/utils/approval.py`; keep the PT-BR labels), the cancel and stop dialogs
+- **Do:** use the same verbs in both channels (allow once, allow scope, deny with a reason), and have the card show the exact grant scope and its expiry. Stop and cancel dialogs list the side effects already executed (from the trace) and whether child runs are affected. Approval and respond requests share one card layout: the action or question, the agent's reasons, the scope and expiry, then the verbs, with "Waiting for your decision" while open. Once decided, the card collapses to a one-line receipt in the thread (decision, scope, when), read from the recorded decision. "Allow scope" never widens beyond the scope the card shows.
+- **Done when:** a dashboard approval of a scoped grant shows the scope, and the stop dialog lists the executed writes. A decided approval leaves a one-line receipt in its turn that is still there after a page reload, in both locales.
 - **Tests:** web tests; G-PG · **Evidence:** —
 
 #### M6-E2-T6 · Child runs never exceed parent capabilities
@@ -2751,10 +2771,10 @@ Owner AIM (SEC) · Risk med · Gate none · **ready** · Deps —
 
 #### M6-E2-T7 · Squad activity, metrics and task actions in the rooms UI
 Owner FE (AIM) · Risk med · Gate none · **ready** · Deps —
-- **Addresses:** F-SQD-27, P5 (current owner and open obligations visible), ARCHITECTURE_AUDIT §3.3 (backend capabilities with no UI)
-- **Files:** `apps/web/src/components/sessions/*` (room rail, room settings drawer), the existing squad task claim, complete, escalate and metrics routes
-- **Do:** show the squad task list with claim, complete and escalate actions, plus thread metrics and open reply obligations, using the existing backend routes.
-- **Done when:** an operator can see and act on squad tasks from the room.
+- **Addresses:** F-SQD-27, P5 (current owner and open obligations visible), P25 (system events read as sentences), ARCHITECTURE_AUDIT §3.3 (backend capabilities with no UI); REFERENCE_RESEARCH §3.8 (handover as a readable message; "Waiting for replies" block)
+- **Files:** `apps/web/src/components/sessions/*` (room rail, room settings drawer, `chat/room-chat-pane.tsx`), i18n resources, the existing squad task claim, complete, escalate and metrics routes
+- **Do:** show the squad task list with claim, complete and escalate actions, plus thread metrics and open reply obligations, using the existing backend routes. Show the open task's current owner, and a waiting block that lists each agent the thread waits on, with its obligation state (waiting or answered). Render `system_event` messages (routing, handoff, the limit and pause events from M3-E6-T4 and M3-E6-T5) as one short muted sentence built from the event metadata with i18n keys, for example "Ada handed the task to Linus: <reason>". The stored message content stays as it is.
+- **Done when:** an operator can see and act on squad tasks from the room. No room message shows a raw `[routing_decision]` or `[handoff_event]` tag in either locale, and an event whose metadata cannot be read falls back to a generic translated line.
 - **Tests:** web tests; G-PG for the routes · **Evidence:** —
 
 #### M6-E3 — Providers and composer
@@ -2814,6 +2834,18 @@ Owner SEC (AIM) · Risk low · Gate none · **pending** · Deps M1-E4-T3
 - **Do:** record what the KodaSkill manifest declares today. Enforce its version and any declared Koda compatibility range at install and at load. If the manifest has no compatibility field, add an optional `requires_koda` range; packages without it are accepted. An upgrade shows the old and new versions on the operator review screen.
 - **Done when:** a package whose declared range excludes the running version is refused with a clear message, and an upgrade shows both versions.
 - **Tests:** unit tests; G · **Evidence:** —
+
+#### M6-E3-T8 · The chat shows child runs and provider switches
+Owner FE (AIM) · Risk low · Gate none · **ready** · Deps —
+- **Addresses:** P8 (in-chat child-run row), P22 (failover is visible), P23 (turn receipts); REFERENCE_RESEARCH §3.8 (turn summary rows, provider-switch note). Journeys: chat in `/sessions` (J-11) and delegation with child runs (the M3 cancel journey). Today the operator must open execution detail to learn that a turn started child runs or moved to another provider.
+- **Files:** `koda/control_plane/dashboard_service.py` (~883) and `koda/state/dashboard_store.py` (~1445), whichever builds the session detail's `linked_execution` (search for `linked_execution`); `koda/services/child_runs.py` (`list_child_runs_for_parent_sync`, read only); `apps/web/src/components/sessions/chat/assistant-message.tsx`, `tool-call-card.tsx`; the session contract under `apps/web/src/lib/contracts/`; i18n resources
+- **Do:**
+  - add two fields to the `linked_execution` summary: child-run counts by status, and, when the turn switched provider, the providers before and after. Derive the switch from the trace's existing `provider fallback: <a> -> <b>` warning, with a unit test that pins that format. `queue_manager.py` does not change;
+  - under the assistant message, show one collapsed row ("2 child runs · 2 done · 41s") that expands to one line per child (goal, status, duration) and links to the existing child-runs panel;
+  - when the provider switched, show one muted line naming both providers;
+  - add no new controls: stopping children stays with M3-E2-T4 and M6-E2-T5.
+- **Done when:** for a seeded parent task with two child runs, the thread shows the collapsed row with the count, and both children after expanding. For a seeded task whose trace records a provider switch, the thread shows one line naming both providers. Both work in both locales, and execution detail is unchanged.
+- **Tests:** G-PG for the summary fields; web component tests; G; changelog entry (session detail response body) · **Evidence:** —
 
 #### M6-E4 — Learning and memory curation (ADR-031)
 
@@ -3037,10 +3069,10 @@ Owner UX · Risk low · Gate none · **ready** · Deps —
 
 #### M8-E1-T4 · Browser accessibility pass
 Owner QA (UX) · Risk low · Gate infra: Docker for the full stack (CI) · **pending** · Deps M0-E3-T7
-- **Addresses:** mission §6.4, F-QA-09
+- **Addresses:** mission §6.4, F-QA-09; P27 (REFERENCE_RESEARCH §3.8: reduced motion designed per component, one focus token with at least 3:1 contrast)
 - **Files:** `apps/web/tests/e2e/a11y.spec.ts` (new)
-- **Do:** run axe through Playwright on the key routes at desktop and mobile viewports. Document the WCAG 2.2 AA exceptions in `docs/engineering/VALIDATION_REPORT.md`.
-- **Done when:** no serious or critical axe violation remains without a documented exception.
+- **Do:** run axe through Playwright on the key routes at desktop and mobile viewports. Document the WCAG 2.2 AA exceptions in `docs/engineering/VALIDATION_REPORT.md`. Add a run with `reducedMotion: 'reduce'` that counts running animations (`document.getAnimations()`) and checks that no content stays hidden behind an unfinished reveal. Measure the focus ring's contrast against each surface it sits on in the sessions rail, the composer and dialogs.
+- **Done when:** no serious or critical axe violation remains without a documented exception. Under reduced motion the key routes run no animation except a documented, non-moving exception, and the measured focus contrast is at least 3:1 on every surface checked.
 - **Tests:** G-CI · **Evidence:** —
 
 #### M8-E2 — Navigation and shell
@@ -3082,11 +3114,27 @@ Owner UX · Risk low · Gate none · **ready** · Deps —
 
 #### M8-E2-T5 · Information-architecture review
 Owner UX (PROD, FE) · Risk low · Gate none · **ready** · Deps —
-- **Addresses:** mission §6.1 (navigation and information architecture, workspace switching, agent, group, skills, memory and governance surfaces), §3.4; P1, P10, P18, P19 (to be evaluated)
+- **Addresses:** mission §6.1 (navigation and information architecture, workspace switching, agent, group, skills, memory and governance surfaces), §3.4; P1, P10, P18, P19 (to be evaluated); P12, P21, P23 and P24 gaps without a task (REFERENCE_RESEARCH §6, §6.10)
 - **Files:** a new review section in `docs/engineering/VALIDATION_REPORT.md` with screenshots from the rendered app; this plan (new tasks)
-- **Do:** walk the rendered app at desktop and mobile widths and record, per area (agents, squads and workspaces, sessions, skills and tools, memory, governance and approvals, monitoring, settings), where each task starts, how many steps it takes, and what is duplicated or unreachable. Evaluate workspace switching end to end. Evaluate P1, P10, P18 and P19 against what exists.
-- **Done when:** the review lists each finding with a screenshot, and every finding is either a new task in this plan or a recorded "no change" with a reason.
+- **Do:** walk the rendered app at desktop and mobile widths and record, per area (agents, squads and workspaces, sessions, skills and tools, memory, governance and approvals, monitoring, settings), where each task starts, how many steps it takes, and what is duplicated or unreachable. Evaluate workspace switching end to end. Evaluate P1, P10, P18 and P19 against what exists. Also decide, with Koda's own design system:
+  - where the Needs-you group sits in the sessions rail (M8-E2-T6 builds it);
+  - whether the agent's settings open from the chat header in the side panel, and how the editor's steps group into identity, knowledge, tools and rules (P1);
+  - whether session rows and the chat header show the agent glyph and mission role once M4-E3-T3 lands (P1);
+  - whether the composer shows a context meter fed by the context-governance totals (P12), a structured question card exists (P21), RunGraph gets a time-axis view opened from the turn row (P23), and messages get a Copy action;
+  - keep or drop for chat folders, conversation tabs and message search in the palette.
+- **Done when:** the review lists each finding with a screenshot, and every finding is either a new task in this plan or a recorded "no change" with a reason. Each decision listed under Do is recorded the same way.
 - **Tests:** none (review) · **Evidence:** —
+
+#### M8-E2-T6 · "Needs you" group in the sessions rail
+Owner FE (UX) · Risk low · Gate none · **pending** · Deps M8-E2-T5
+- **Addresses:** P19 (the Needs-you part only), P21; REFERENCE_RESEARCH §3.8 (a "Needs you" group with a count and the question as the row preview). Journey: a gated tool call is approved and executed (M3-E3). Today a pending approval in a session the operator is not viewing has no mark in the rail, and the command palette lists approvals for the first agent only (REFERENCE_RESEARCH §5).
+- **Files:** `apps/web/src/components/sessions/rail/session-rail.tsx`, `session-row.tsx`, `apps/web/src/hooks/use-command-catalog.ts` (`usePendingApprovalsCatalog`), `apps/web/src/components/command-bar/command-bar-modal.tsx` (~28), i18n resources
+- **Do:**
+  - one hook lists pending approvals for every agent from the existing `/agents/{agent_id}/approvals` route, on the realtime tier with the silent-refresh rules in `apps/web/CLAUDE.md`. An aggregate read is added only if the M8-E2-T5 review finds the per-agent requests too many;
+  - the rail shows a "Needs you" section at the place M8-E2-T5 chose, only while something waits. Its rows are the sessions with a pending approval, matched on `session_id`, each naming the agent and the tool or question, with the count in the section header;
+  - the command palette uses the same hook, so it lists the approvals of every agent.
+- **Done when:** with pending approvals for two agents in two sessions, the rail shows both rows under "Needs you" with a count of 2, in both locales. Deciding one removes its row within one refresh. With nothing pending, the section is absent. The palette lists both approvals.
+- **Tests:** web component tests; G · **Evidence:** —
 
 #### M8-E3 — Internationalisation and rendering
 
@@ -3220,10 +3268,10 @@ Owner UX (FE) · Risk med · Gate none · **pending** · Deps M8-E5-T8
 
 #### M8-E5-T10 · Typography and spacing scales
 Owner UX · Risk med · Gate none · **pending** · Deps M8-E5-T8, M8-E5-T3
-- **Addresses:** mission §6.2 (typography, spacing and sizing)
-- **Files:** `globals.css` tokens, the Tailwind config, the components the inventory lists
-- **Do:** define one type scale and one spacing scale as tokens, and replace arbitrary font sizes and spacings in the listed components.
-- **Done when:** a lint finds no arbitrary `text-[..px]` or spacing value outside the scales in the listed components.
+- **Addresses:** mission §6.2 (typography, spacing and sizing); P26 (REFERENCE_RESEARCH §6.10: three weights, monospace by role)
+- **Files:** `globals.css` tokens, the Tailwind config, the components the inventory lists, `apps/web/CLAUDE.md`
+- **Do:** define one type scale and one spacing scale as tokens, and replace arbitrary font sizes and spacings in the listed components. The type scale includes the weights: 400, 500 and 600, with display text at 500 as the design guide already says. Monospace is for eyebrows, timestamps, code and tabular numbers only. Record both rules in `apps/web/CLAUDE.md`.
+- **Done when:** a lint finds no arbitrary `text-[..px]` or spacing value outside the scales in the listed components, and no font weight outside 400, 500 and 600 in them.
 - **Tests:** lint; web tests · **Evidence:** —
 
 #### M8-E5-T11 · One icon set
@@ -3236,10 +3284,10 @@ Owner UX · Risk low · Gate none · **pending** · Deps M8-E5-T8
 
 #### M8-E5-T12 · Table, list, dialog and panel primitives
 Owner UX (FE) · Risk med · Gate none · **pending** · Deps M8-E5-T8
-- **Addresses:** mission §6.2 (tables, lists, cards, dialogs and panels); P20
-- **Files:** `components/ui/`, the call sites the inventory lists
-- **Do:** one row-list and table primitive, and one dialog and one side-panel primitive, all keyboard-accessible. Migrate the listed call sites.
-- **Done when:** the listed call sites use the primitives, and the keyboard tests (open, close with Escape, focus return) pass for each dialog and panel.
+- **Addresses:** mission §6.2 (tables, lists, cards, dialogs and panels); P20; P26 and P27 (REFERENCE_RESEARCH §6.10: rows grouped by tone, with a summarising accessible name)
+- **Files:** `components/ui/`, the call sites the inventory lists, including `components/sessions/rail/session-row.tsx` and `room-row.tsx`
+- **Do:** one row-list and table primitive, and one dialog and one side-panel primitive, all keyboard-accessible. Migrate the listed call sites. The row primitive has slots for a leading glyph, a title with an optional role tag, a one-line preview, a compact timestamp and a trailing count or status. Its accessible name summarises the row (name, state, last activity).
+- **Done when:** the listed call sites use the primitives, including the session and room rows of the sessions rail, and the keyboard tests (open, close with Escape, focus return) pass for each dialog and panel. A component test reads each rail row's accessible name.
 - **Tests:** web tests · **Evidence:** —
 
 #### M8-E5-T13 · One loading skeleton
@@ -3616,7 +3664,7 @@ flowchart LR
 8. **Policy:** M1-E4-T9 and {M1-E4-T5, M1-E5-T1} → M5-E3-T1 → M5-E3-T2 (offline replay) → M5-E3-T3 (approval batch 4) → M5-E3-T5 → M5-E3-T12 → … → M5-E3-T17 → M5-E3-T19.
 9. **Command guard and sidecars:** {M1-E4-T1, M1-E4-T10} → M5-E3-T6 (kernel guard); {M5-E3-T6, M1-E4-T13, M5-E3-T8} → M5-E5-T1.
 10. **Control plane:** M0-E3-T1 → M5-E6-T2. M1-E1-T5 → M5-E6-T1 → {M5-E6-T12, M5-E6-T10, M5-E8-T1 (error shape), M9-E3-T8 → M9-E3-T9}. {M0-E3-T1, M0-E3-T10} → M5-E6-T8.
-11. **Web:** M4-E3-T1 → M5-E8-T1 → {M5-E8-T2, M5-E8-T3, M5-E8-T6}. M4-E3-T1 → {M5-E8-T4, M8-E5-T1 → M8-E5-T6 → M8-E5-T7, M8-E5-T4}. M8-E5-T8 → M8-E5-T9 … T13. M3-E8-T3 → M8-E6-T1 → {M8-E6-T2, M8-E6-T3}. M0-E3-T7 → M8-E1-T4.
+11. **Web:** M4-E3-T1 → M5-E8-T1 → {M5-E8-T2, M5-E8-T3, M5-E8-T6}. M4-E3-T1 → {M5-E8-T4, M8-E5-T1 → M8-E5-T6 → M8-E5-T7, M8-E5-T4}. M8-E5-T8 → M8-E5-T9 … T13. M8-E2-T5 → M8-E2-T6. M3-E8-T3 → M8-E6-T1 → {M8-E6-T2, M8-E6-T3}. M0-E3-T7 → M8-E1-T4.
 12. **Auth docs:** {M1-E1-T2 … T7, M1-E1-T13, T14, T15} → M1-E1-T8.
 13. **Journeys and acceptance:** M3 tasks → M3-E9-T1 → M3-E9-T2 (needs M0-E1-T5) → M10-E1-T5 (after every milestone exit).
 
@@ -3640,13 +3688,14 @@ scheduling hint only: a hard ordering is always a Deps entry.
 | `apps/web/src/app/globals.css` | M8-E1-T1 → M8-E5-T3 → M8-E5-T10 → M8-E5-T7 → M8-E5-T4 |
 | `apps/web` i18n resources | M1-E8-T1 → M6-E1-T10 → M6-E3-T5 → M8-E3-T2 → M8-E3-T4 |
 | BFF proxy `app/api/control-plane/[...path]/route.ts` | M3-E6-T6 → M3-E8-T3 → M9-E2-T1 |
+| `apps/web/src/components/sessions/` (thread, composer, rail) | M8-E2-T1 → M3-E5-T2 → M6-E2-T7 → M6-E3-T8 → M6-E2-T5 → M8-E2-T6 → M8-E5-T12 |
 
 **Lanes for parallel subagents** (each with a disjoint file set):
 
 - **A:** security outbound and tools (M1-E3, M1-E4 outside the dispatcher, M1-E8-T2).
 - **B:** auth and control plane (M1-E1, M2-E2-T1, M3-E7).
 - **C:** squads and memory (M3-E4, M3-E6, Rust memory).
-- **D:** web (M1-E8-T1, M3-E1 UI tasks, M3-E5-T2, M4-E3, M6-E1-T10, M6-E3-T5, M8).
+- **D:** web (M1-E8-T1, M3-E1 UI tasks, M3-E5-T2, M4-E3, M6-E1-T10, M6-E2-T7, M6-E3-T5, M6-E3-T8, M8).
 - **E:** DevOps and supply chain (M0-E3-T7, M1-E7, M2-E6, M7-E4).
 
 `queue_manager.py` and `tool_dispatcher.py` work stays in a single lane. On this host the effective
