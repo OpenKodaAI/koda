@@ -119,6 +119,21 @@ It fails while `POSTGRES_PASSWORD` or an `S3_*` secret is still a `replace-with-
 the rotation command (see [Rotating placeholder Postgres and object-storage
 secrets](#rotating-placeholder-postgres-and-object-storage-secrets)).
 
+It reads the storage settings the way Koda receives them. Under Docker Compose the `.env` holds
+`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` and `S3_*`, and Compose builds the app's Postgres DSN
+and object-storage keys from them. A native install sets `KNOWLEDGE_V2_POSTGRES_DSN` and
+`KNOWLEDGE_V2_S3_*` itself; when `.env` sets `KNOWLEDGE_V2_POSTGRES_DSN`, doctor uses it.
+Compose does not publish Postgres or SeaweedFS on the host. When this host cannot resolve their service
+names (`postgres`, `seaweedfs`), doctor opens the connection from the app container with
+`docker compose exec app`, in the Compose project of the `--env-file` directory. For a project started with `-p`, set `COMPOSE_PROJECT_NAME`.
+With `OBJECT_STORAGE_REQUIRED=false`, the object-storage checks are still reported, marked
+`"required": false`, and do not fail doctor.
+
+Doctor itself needs only the Python standard library. Its sandbox check imports Koda, so under a `python3`
+that lacks Koda's dependencies it reports that check as `skipped`: doctor still passes, and `--strict`
+fails. To include the sandbox check, run doctor with Koda's environment from the source checkout:
+`uv run python scripts/doctor.py --env-file .env`.
+
 ## Manual Startup
 
 Every `replace-with-...` value in `.env.example` must become a random secret before the first
