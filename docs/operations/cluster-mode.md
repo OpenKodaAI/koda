@@ -51,18 +51,28 @@ cycle cannot push heartbeat past staleness and cause split-brain.
 
 Each supervisor exposes:
 
-| Endpoint | What |
-|---|---|
-| `GET /cluster/status` | Returns supervisor_id, version, host, capacity, draining flag, owned_agents list, owned_count |
-| `POST /cluster/drain` | Sets `draining=true`. Next heartbeat releases all claims. |
-| `POST /cluster/undrain` | Reverts the drain flag. |
+| Endpoint | What | Credential |
+|---|---|---|
+| `GET /cluster/status` | Returns supervisor_id, version, host, capacity, draining flag, owned_agents list, owned_count | none |
+| `POST /cluster/drain` | Sets `draining=true`. Next heartbeat releases all claims. | operator bearer token |
+| `POST /cluster/undrain` | Reverts the drain flag. | operator bearer token |
 
-These are unauthenticated by design: the control-plane port (8090)
-is published on the host's loopback only, so they are reachable from
-the host and from containers on the stack network. Multi-host clusters
-must reach them over a private network or VPN (a dedicated Compose
-override using `ports: !override`); they are NOT exposed publicly under
-any circumstance.
+Drain and undrain take `Authorization: Bearer <token>`, checked like every
+`/api/control-plane/*` route: an operator session, a personal API token or
+the break-glass `CONTROL_PLANE_API_TOKEN` (during a rotation, any token of
+the list). Without one they answer `401` and change nothing. A deploy script
+normally sends the break-glass token, here the first one of the list:
+
+```bash
+curl -fs -X POST -H "Authorization: Bearer ${CONTROL_PLANE_API_TOKEN%%,*}" \
+  http://127.0.0.1:8090/cluster/drain
+```
+
+The control-plane port (8090) is published on the host's loopback only, so
+these endpoints are reachable from the host and from containers on the stack
+network. Multi-host clusters must reach them over a private network or VPN
+(a dedicated Compose override using `ports: !override`); they are NOT exposed
+publicly under any circumstance.
 
 ## Rolling deploy (blue/green)
 
@@ -70,7 +80,7 @@ Already documented in [upgrade.md](upgrade.md#step-2-cluster--bluegreen-drain).
 Summary:
 
 1. Bring up new-version supervisors alongside old.
-2. POST `/cluster/drain` on each old supervisor.
+2. POST `/cluster/drain` on each old supervisor, with an operator bearer token.
 3. Wait for `owned_count → 0` on old (typically <30s).
 4. Stop old.
 

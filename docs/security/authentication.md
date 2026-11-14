@@ -156,8 +156,11 @@ proxy at `5174` is defence in depth, not the only line of defence: `apps/web/src
 unseals the operator-session cookie and forwards the bearer token to the backend, so the
 normal dashboard flow is unaffected.
 
-The middleware checks only `/api/control-plane/*`. The supervisor's other routes (`/`, `/setup`,
-`/health`, `/openapi/control-plane.json` and the `/cluster/*` deploy hooks) answer without a
+Outside `/api/control-plane/*` the middleware checks only the two cluster-mode deploy hooks that
+change state, `POST /cluster/drain` and `POST /cluster/undrain`
+([Cluster mode](../operations/cluster-mode.md)), with the same bearer check: without a valid
+token they answer `401` and change nothing. The supervisor's other routes (`/`, `/setup`,
+`/health`, `/openapi/control-plane.json` and `GET /cluster/status`) answer without a
 session. `tests/test_control_plane_auth_matrix.py` sends a request to every route the supervisor
 registers, through its own middleware stack, without a session and with one. It fails when a
 route answers without a session and the OpenAPI document does not let that operation through

@@ -83,9 +83,11 @@ docker compose up -d --scale supervisor=4 supervisor   # 2 old + 2 new
 # 2. Drain the old supervisors. Each releases its claims; the new
 #    supervisors pick them up via the SELECT FOR UPDATE SKIP LOCKED
 #    path. In-flight messages are preserved by the bot-gateway's
-#    durable queue.
+#    durable queue. Drain needs an operator bearer token, such as the
+#    first CONTROL_PLANE_API_TOKEN of the list.
 for old_pod in supervisor-old-1 supervisor-old-2; do
-    curl -fs -X POST http://${old_pod}:8090/cluster/drain
+    curl -fs -X POST -H "Authorization: Bearer ${CONTROL_PLANE_API_TOKEN%%,*}" \
+        http://${old_pod}:8090/cluster/drain
 done
 
 # 3. Wait for owned_count → 0 on the old pods.

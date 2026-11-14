@@ -229,6 +229,7 @@ class ControlPlaneSupervisor:
         setup_control_plane_routes(app)
         app.router.add_get("/health", self._health)
         app.router.add_get("/cluster/status", self._cluster_status)
+        # Drain and undrain need an operator bearer token: control_plane_auth_middleware (D-033).
         app.router.add_post("/cluster/drain", self._cluster_drain)
         app.router.add_post("/cluster/undrain", self._cluster_undrain)
         return app

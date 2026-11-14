@@ -166,6 +166,18 @@ def _is_public_control_plane_request(request: web.Request) -> bool:
     return methods is not None and route.method in methods
 
 
+# Supervisor routes outside /api/control-plane/ that change state (ControlPlaneSupervisor.build_app).
+# They take an operator credential like every API route (D-033); the other root routes answer
+# without one.
+_OPERATOR_ROOT_ROUTES: frozenset[str] = frozenset({"/cluster/drain", "/cluster/undrain"})
+
+
+def _is_operator_root_request(request: web.Request) -> bool:
+    """Whether the router resolved ``request`` to one of ``_OPERATOR_ROOT_ROUTES``."""
+    resource = request.match_info.route.resource
+    return resource is not None and resource.canonical in _OPERATOR_ROOT_ROUTES
+
+
 def _optional_auth_context(request: web.Request) -> OperatorAuthContext | None:
     auth_header = request.headers.get("Authorization", "").strip()
     if not auth_header.startswith("Bearer "):
@@ -361,6 +373,10 @@ async def control_plane_auth_middleware(
             if context is not None:
                 request["operator_auth"] = context
             return await handler(request)
+        response = _authorize_request(request)
+        if response is not None:
+            return response
+    elif _is_operator_root_request(request):
         response = _authorize_request(request)
         if response is not None:
             return response

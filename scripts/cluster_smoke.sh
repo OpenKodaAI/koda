@@ -31,6 +31,14 @@ pg_query() {
     psql -U "${PG_USER}" -d "${PG_DB}" -tA -c "$1"
 }
 
+# POST a /cluster/* hook inside a container. Drain and undrain need an operator bearer token:
+# the container's first CONTROL_PLANE_API_TOKEN, sent on stdin so it stays off the command line.
+cluster_post() {
+  docker exec "$1" sh -c \
+    'printf "Authorization: Bearer %s\n" "${CONTROL_PLANE_API_TOKEN%%,*}" | curl -fs -X POST -H @- "$0"' \
+    "http://127.0.0.1:${SUPERVISOR_PORT}$2"
+}
+
 # ---------------------------------------------------------------------------
 # 1. Wait for replicas to register
 # ---------------------------------------------------------------------------
@@ -77,7 +85,7 @@ target_sup_id=$(docker exec "${target_cid}" sh -c "curl -fs http://127.0.0.1:${S
 [[ -n "${target_sup_id}" ]] || fail "could not read supervisor_id from ${target_cid}"
 
 say "draining supervisor ${target_sup_id}"
-docker exec "${target_cid}" sh -c "curl -fs -X POST http://127.0.0.1:${SUPERVISOR_PORT}/cluster/drain" >/dev/null
+cluster_post "${target_cid}" /cluster/drain >/dev/null
 
 # Wait up to 60s for owned_count to drop to 0
 for _ in $(seq 1 30); do
@@ -89,7 +97,7 @@ done
 ok "drain released all claims for ${target_sup_id}"
 
 # Undrain so the supervisor returns to service
-docker exec "${target_cid}" sh -c "curl -fs -X POST http://127.0.0.1:${SUPERVISOR_PORT}/cluster/undrain" >/dev/null
+cluster_post "${target_cid}" /cluster/undrain >/dev/null
 ok "undrain restored ${target_sup_id} to active"
 
 # ---------------------------------------------------------------------------
