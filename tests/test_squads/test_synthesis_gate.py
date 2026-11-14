@@ -43,3 +43,42 @@ def test_synthesis_gate_requires_disclosure_for_terminal_failures() -> None:
 
     assert ready.ready is True
     assert ready.evidence_refs[-1] == {"kind": "task_result", "id": "msg-9", "agent_id": "QA"}
+
+
+def _handoff(status: str = "requested", destinations: tuple[str, ...] = ("FE", "QA")) -> dict[str, object]:
+    return {"payload": {"handoff_id": "handoff-1", "status": status, "destination_agent_ids": list(destinations)}}
+
+
+def test_handoff_completes_once_every_destination_has_a_task_result() -> None:
+    partial = evaluate_synthesis_readiness(
+        handoff_events=[_handoff()],
+        result_messages=[{"type": "task_result", "id": "msg-1", "from": "FE"}],
+    )
+    assert partial.ready is False
+    assert partial.blockers == [
+        {"kind": "handoff_event", "id": "handoff-1", "status": "requested", "reason": "open_handoff"}
+    ]
+
+    complete = evaluate_synthesis_readiness(
+        handoff_events=[_handoff()],
+        result_messages=[
+            {"type": "task_result", "id": "msg-1", "from": "FE"},
+            {"type": "task_result", "id": "msg-2", "from": "QA"},
+        ],
+    )
+    assert complete.ready is True
+    assert {"kind": "handoff_event", "id": "handoff-1", "status": "returned"} in complete.evidence_refs
+
+
+def test_handoff_completes_from_answered_reply_obligations() -> None:
+    result = evaluate_synthesis_readiness(
+        handoff_events=[_handoff(destinations=("FE",))],
+        reply_obligations=[{"id": 7, "status": "answered", "target_agent_id": "FE"}],
+    )
+    assert result.ready is True
+    assert {"kind": "handoff_event", "id": "handoff-1", "status": "returned"} in result.evidence_refs
+
+
+def test_handoff_marked_returned_supersedes_the_requested_event() -> None:
+    result = evaluate_synthesis_readiness(handoff_events=[_handoff("returned"), _handoff("requested")])
+    assert result.ready is True

@@ -25,7 +25,10 @@ room messages, reply obligations, tasks, or private child runs.
 Parallel handoff is represented either as one event with multiple
 `destination_agent_ids` or as correlated events sharing `correlation_id`.
 Coordinator synthesis must see an explicit return, timeout, decline, or failure
-before treating handoff work as terminal.
+before treating handoff work as terminal. A `requested` or `accepted` handoff
+counts as returned once every destination has a visible task result or reply,
+or an answered reply obligation. When synthesis then runs, a `returned` event
+with the same `handoff_id` is recorded, and it supersedes the open event.
 
 ## Route Quality
 

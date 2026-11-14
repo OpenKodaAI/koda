@@ -17,6 +17,7 @@ _OPEN_TASK_STATUSES = {"pending", "claimed", "in_progress", "blocked"}
 _OPEN_OBLIGATION_STATUSES = {"open"}
 _OPEN_HANDOFF_STATUSES = {"requested", "accepted"}
 _OPEN_CHILD_RUN_STATUSES = {"queued", "running", "retrying"}
+_REPLY_MESSAGE_TYPES = {"task_result", "delegation_result", "agent_reply"}
 _DISCLOSURE_REQUIRED_STATUSES = {"declined", "timed_out", "failed", "cancelled", "escalated"}
 
 
@@ -53,6 +54,16 @@ def evaluate_synthesis_readiness(
     blockers: list[dict[str, Any]] = []
     evidence_refs: list[dict[str, Any]] = []
     disclosures = [_dict(item) for item in declared_timeouts or []]
+    reply_obligations = list(reply_obligations or [])
+    result_messages = [_dict(item) for item in result_messages or []]
+    handoff_payloads = [_dict(_dict(event).get("payload")) or _dict(event) for event in handoff_events or []]
+    replied_agents = _replied_agent_ids(result_messages, reply_obligations)
+    # A later event with a closed status (for example ``returned``) supersedes the requested one.
+    closed_handoff_ids = {
+        _string(payload.get("handoff_id") or payload.get("id"))
+        for payload in handoff_payloads
+        if _string(payload.get("status")).lower() not in _OPEN_HANDOFF_STATUSES
+    }
 
     for task in tasks or []:
         task_id = _field(task, "id", "task_id")
@@ -85,10 +96,16 @@ def evaluate_synthesis_readiness(
         elif obligation_id:
             evidence_refs.append({"kind": "reply_obligation", "id": obligation_id, "status": status})
 
-    for event in handoff_events or []:
-        payload = _dict(_dict(event).get("payload")) or _dict(event)
+    for payload in handoff_payloads:
         handoff_id = _string(payload.get("handoff_id") or payload.get("id"))
         status = _string(payload.get("status")).lower()
+        if status in _OPEN_HANDOFF_STATUSES:
+            if handoff_id and handoff_id in closed_handoff_ids:
+                continue
+            destinations = [_string(agent) for agent in payload.get("destination_agent_ids") or [] if _string(agent)]
+            if destinations and all(agent in replied_agents for agent in destinations):
+                # Every destination has replied, so the handoff is complete (D-074).
+                status = "returned"
         if status in _OPEN_HANDOFF_STATUSES:
             blockers.append({"kind": "handoff_event", "id": handoff_id, "status": status, "reason": "open_handoff"})
         elif status in _DISCLOSURE_REQUIRED_STATUSES and not _has_disclosure(disclosures, "handoff_event", handoff_id):
@@ -167,6 +184,21 @@ def _dict(value: Any) -> dict[str, Any]:
 
 def _string(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _replied_agent_ids(result_messages: list[Mapping[str, Any]], reply_obligations: list[Any]) -> set[str]:
+    agents = {
+        _string(msg.get("from") or msg.get("from_agent"))
+        for msg in result_messages
+        if _string(msg.get("type") or msg.get("message_type")) in _REPLY_MESSAGE_TYPES
+    }
+    agents.update(
+        _string(_field(obligation, "target_agent_id", "targetAgentId"))
+        for obligation in reply_obligations
+        if _string(_field(obligation, "status")).lower() == "answered"
+    )
+    agents.discard("")
+    return agents
 
 
 def _has_disclosure(disclosures: list[dict[str, Any]], kind: str, item_id: Any) -> bool:

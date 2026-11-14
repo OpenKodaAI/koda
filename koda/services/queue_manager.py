@@ -6885,6 +6885,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             evaluate_synthesis_readiness,
             get_squad_task_store,
             get_squad_thread_store,
+            record_squad_handoff_event,
             synthesis_gate_metric,
         )
 
@@ -6984,6 +6985,38 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
         if not readiness.ready:
             return
+        # Mark each handoff whose destinations have all replied as returned (D-074).
+        returned_ids = {
+            ref.get("id")
+            for ref in readiness.evidence_refs
+            if ref.get("kind") == "handoff_event" and ref.get("status") == "returned"
+        }
+        closed_ids = {
+            event["payload"].get("handoff_id")
+            for event in handoff_events
+            if str(event["payload"].get("status") or "").lower() not in {"requested", "accepted"}
+        }
+        for event in handoff_events:
+            handoff = event["payload"]
+            handoff_id = handoff.get("handoff_id")
+            if handoff_id not in returned_ids or handoff_id in closed_ids:
+                continue
+            closed_ids.add(handoff_id)
+            await record_squad_handoff_event(
+                thread_store,
+                thread_id=ctx.squad_thread_id,
+                source_agent_id=str(handoff.get("source_agent_id") or thread.coordinator_agent_id),
+                destination_agent_ids=list(handoff.get("destination_agent_ids") or []),
+                reason=str(handoff.get("reason") or ""),
+                handoff_kind=str(handoff.get("handoff_kind") or "consult"),
+                context_policy=handoff.get("context_policy") or {},
+                deadline=handoff.get("deadline"),
+                return_criteria=list(handoff.get("return_criteria") or []),
+                status="returned",
+                parent_message_id=handoff.get("parent_message_id"),
+                correlation_id=handoff.get("correlation_id"),
+                handoff_id=str(handoff_id),
+            )
         visible_results_block = "\n\n".join(visible_results)
         confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
         timeout_block = ""

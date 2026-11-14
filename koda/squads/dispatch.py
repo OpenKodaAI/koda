@@ -205,7 +205,9 @@ async def record_squad_handoff_event(
     status: str = "requested",
     parent_message_id: str | None = None,
     correlation_id: str | None = None,
+    handoff_id: str | None = None,
 ) -> int | None:
+    """Persist a handoff_event.v1. Pass ``handoff_id`` to record a status change of an existing handoff."""
     event_id_seed = {
         "thread_id": thread_id,
         "source_agent_id": source_agent_id,
@@ -215,7 +217,7 @@ async def record_squad_handoff_event(
         "parent_message_id": parent_message_id,
         "correlation_id": correlation_id,
     }
-    handoff_id = (
+    handoff_id = handoff_id or (
         "handoff-"
         + hashlib.sha256(
             repr(sorted(event_id_seed.items())).encode("utf-8"),
