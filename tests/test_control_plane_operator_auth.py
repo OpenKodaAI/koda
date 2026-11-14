@@ -8,7 +8,10 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from aiohttp import web
+from aiohttp.test_utils import TestClient, TestServer
 
+from koda.control_plane import api as control_plane_api
 from koda.control_plane import operator_auth as operator_auth_mod
 from koda.control_plane import operator_profile_photos
 
@@ -756,10 +759,59 @@ def test_normalize_recovery_code_is_canonical_issued_format() -> None:
     assert normalize("ab-cd--efgh_jk.lm") == "ABCD-EFGH-JKLM"
     assert normalize("ABCD-EFGH-JKLM") == "ABCD-EFGH-JKLM"
     assert normalize(None) == ""
+    # Non-ASCII characters are dropped, never case-folded into ASCII look-alikes
+    # (U+017F long s upper-cases to "S", "ß" to "SS", the "ﬆ" ligature to "ST").
+    assert normalize("abſd-efgh-jklm") == "ABDE-FGHJ-KLM"
+    assert normalize("aßcd-efgh-jklm") == "ACDE-FGHJ-KLM"
+    assert normalize("ﬆcd-efgh-jklm") == "CDEF-GHJK-LM"
+    assert normalize("ＡＢＣＤ-efgh-jklm") == "EFGH-JKLM"
     # Issued codes are already canonical, so hashes stored before this
     # normalization existed keep matching.
     issued = operator_auth_mod._random_code()
     assert normalize(issued) == issued
+
+
+async def test_password_recover_route_accepts_lowercase_compact_code(
+    fake_operator_db: FakeOperatorAuthDb,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End to end through the aiohttp handler and the control-plane middlewares."""
+    service = operator_auth_mod.OperatorAuthService()
+    issued = _create_owner(service)["recovery_codes"][0]
+    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
+
+    app = web.Application(
+        middlewares=[
+            control_plane_api.control_plane_error_middleware,
+            control_plane_api.control_plane_auth_middleware,
+        ]
+    )
+    app.router.add_post("/api/control-plane/auth/password/recover", control_plane_api.auth_password_recover)
+    app.router.add_post("/api/control-plane/auth/login", control_plane_api.auth_login)
+
+    async with TestClient(TestServer(app)) as client:
+        recovered = await client.post(
+            "/api/control-plane/auth/password/recover",
+            json={
+                "identifier": "owner",
+                "recovery_code": issued.lower().replace("-", ""),
+                "new_password": ANOTHER_STRONG_PASSWORD,
+            },
+        )
+        assert recovered.status == 200, await recovered.text()
+        assert await recovered.json() == {"ok": True}
+
+        stale = await client.post(
+            "/api/control-plane/auth/login",
+            json={"identifier": "owner", "password": STRONG_PASSWORD},
+        )
+        assert stale.status == 400
+        fresh = await client.post(
+            "/api/control-plane/auth/login",
+            json={"identifier": "owner", "password": ANOTHER_STRONG_PASSWORD},
+        )
+        assert fresh.status == 200, await fresh.text()
+        assert (await fresh.json())["operator"]["username"] == "owner"
 
 
 def test_password_reset_revokes_all_existing_sessions(fake_operator_db: FakeOperatorAuthDb) -> None:

@@ -144,7 +144,7 @@ export const generatedUiResources = {
         "uploaded_22edaf89": "Uploaded",
         "use_your_current_password_before_setting_a_n_983775d3": "Use your current password before setting a new one.",
         "username_153446d0": "Username",
-        "xxxx_xxxx_xxxx_d457e3cb": "xxxx-xxxx-xxxx"
+        "xxxx_xxxx_xxxx_d457e3cb": "XXXX-XXXX-XXXX"
       },
       "common": {
         "chat_081921a7": "Chat"
@@ -2124,7 +2124,7 @@ export const generatedUiResources = {
         "uploaded_22edaf89": "Enviado",
         "use_your_current_password_before_setting_a_n_983775d3": "Use sua senha atual antes de definir uma nova.",
         "username_153446d0": "Nome de usuário",
-        "xxxx_xxxx_xxxx_d457e3cb": "xxxx-xxxx-xxxx"
+        "xxxx_xxxx_xxxx_d457e3cb": "XXXX-XXXX-XXXX"
       },
       "common": {
         "chat_081921a7": "Bate-papo"
@@ -4104,7 +4104,7 @@ export const generatedUiResources = {
         "uploaded_22edaf89": "Subido",
         "use_your_current_password_before_setting_a_n_983775d3": "Utilice su contraseña actual antes de establecer una nueva.",
         "username_153446d0": "Nombre de usuario",
-        "xxxx_xxxx_xxxx_d457e3cb": "xxxx-xxxx-xxxx"
+        "xxxx_xxxx_xxxx_d457e3cb": "XXXX-XXXX-XXXX"
       },
       "common": {
         "chat_081921a7": "Charlar"
@@ -6084,7 +6084,7 @@ export const generatedUiResources = {
         "uploaded_22edaf89": "Téléchargé",
         "use_your_current_password_before_setting_a_n_983775d3": "Utilisez votre mot de passe actuel avant d'en définir un nouveau.",
         "username_153446d0": "Nom d'utilisateur",
-        "xxxx_xxxx_xxxx_d457e3cb": "xxxx-xxxx-xxxx"
+        "xxxx_xxxx_xxxx_d457e3cb": "XXXX-XXXX-XXXX"
       },
       "common": {
         "chat_081921a7": "Discuter"
@@ -8064,7 +8064,7 @@ export const generatedUiResources = {
         "uploaded_22edaf89": "Hochgeladen",
         "use_your_current_password_before_setting_a_n_983775d3": "Verwenden Sie Ihr aktuelles Passwort, bevor Sie ein neues festlegen.",
         "username_153446d0": "Benutzername",
-        "xxxx_xxxx_xxxx_d457e3cb": "xxxx-xxxx-xxxx"
+        "xxxx_xxxx_xxxx_d457e3cb": "XXXX-XXXX-XXXX"
       },
       "common": {
         "chat_081921a7": "Chatten"

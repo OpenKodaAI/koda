@@ -119,13 +119,15 @@ their stronger password checks.
 - Codes are 12 uppercase characters (`XXXX-XXXX-XXXX`) from the `BOOTSTRAP_ALPHABET`
   (no `I`, `O`, `0`, `1`).
 - Codes are stored as a SHA-256 hash of that canonical `XXXX-XXXX-XXXX` form. The control
-  plane is the authority on matching: before hashing a submitted code it upper-cases it,
-  drops whitespace and every non-alphanumeric separator, and regroups the remaining
-  characters in fours (`_normalize_recovery_code` in `koda/control_plane/operator_auth.py`).
+  plane is the authority on matching: before hashing a submitted code it keeps only the
+  ASCII letters and digits (whitespace, separators and any non-ASCII character are
+  dropped, not case-folded), upper-cases them, and regroups them in fours
+  (`_normalize_recovery_code` in `koda/control_plane/operator_auth.py`).
   `abcd efgh jklm`, `ABCDEFGHJKLM` and ` abcd-efgh-jklm ` all match the issued
-  `ABCD-EFGH-JKLM`; a code with a missing or wrong character still fails with the generic
-  error. The `/forgot-password` screen upper-cases the field as the user types so the input
-  matches the printed code, but correctness does not depend on the client.
+  `ABCD-EFGH-JKLM`; a code with a missing, wrong or non-ASCII look-alike character (for
+  example `ſ` in place of `S`) still fails with the generic error. The `/forgot-password`
+  screen shows the field in uppercase and submits it upper-cased so the input matches the
+  printed code, but correctness does not depend on the client.
 - Each code can be used exactly once, enforced by `consumed_at` and `generation` matching
   against `cp_operator_users.recovery_generation`.
 - After a successful `POST /api/control-plane/auth/password/recover`:

@@ -112,11 +112,14 @@ def _normalize_recovery_code(value: Any) -> str:
     """Return the canonical ``XXXX-XXXX-XXXX`` form of a typed recovery code.
 
     Codes are issued by :func:`_random_code` in exactly this form and stored as
-    its hash, so the user's input is upper-cased, stripped of whitespace and
-    any separator characters, then re-grouped in fours before hashing. Issued
-    codes are already canonical, which keeps previously stored hashes valid.
+    its hash, so only the ASCII letters and digits of the user's input are
+    kept (whitespace, separators and any non-ASCII character are dropped),
+    upper-cased, then re-grouped in fours before hashing. Filtering happens
+    before upper-casing so Unicode case mapping can never turn a non-ASCII
+    character into an ASCII one (``ſ`` -> ``S``, ``ß`` -> ``SS``). Issued codes
+    are already canonical, which keeps previously stored hashes valid.
     """
-    compact = "".join(ch for ch in str(value or "").upper() if ch.isascii() and ch.isalnum())
+    compact = "".join(ch for ch in str(value or "") if ch.isascii() and ch.isalnum()).upper()
     return "-".join(compact[index : index + 4] for index in range(0, len(compact), 4))
 
 
