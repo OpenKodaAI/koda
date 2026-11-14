@@ -289,6 +289,16 @@ def test_timestamptz_codec_accepts_strings_and_datetimes() -> None:
     # Non-ISO strings fall through: Postgres's own parser decides (or rejects)
     assert encoder("now") == "now"
 
+    # Reads decode Postgres ISO text to datetimes, like asyncpg's default codec
+    # (D-076): aware values in UTC, naive TIMESTAMP values unchanged.
+    from datetime import UTC
+
+    decoder = conn.codecs["timestamptz"]["decoder"]
+    assert decoder("2026-04-20 09:00:00.5-03") == datetime(2026, 4, 20, 12, 0, 0, 500000, tzinfo=UTC)
+    assert decoder("2026-04-20 12:00:00").tzinfo is None
+    assert decoder("infinity") == datetime.max
+    assert decoder("-infinity") == datetime.min
+
 
 def test_timestamptz_codec_swallows_driver_errors() -> None:
     """If asyncpg's ``set_type_codec`` fails (e.g. the connection is in an

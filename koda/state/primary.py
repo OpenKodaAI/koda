@@ -8,7 +8,7 @@ import contextlib
 import os
 import re
 import threading
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 
 import koda.config as config_module
@@ -257,6 +257,11 @@ async def _install_timestamptz_str_codec(conn: Any) -> None:
     ``datetime`` on read. TEXT columns are unaffected — they keep storing
     the original string — because this codec is registered only for the
     ``timestamptz`` / ``timestamp`` Postgres types.
+
+    The shared backend installs it once per connection, when the connection
+    opens (``KnowledgeV2PostgresBackend._init_connection``): the pool is
+    shared with knowledge-backend queries, which need ``datetime`` values,
+    and asyncpg drops the statement cache whenever a codec is set (D-076).
     """
 
     def _encode(value: Any) -> str:
@@ -284,11 +289,16 @@ async def _install_timestamptz_str_codec(conn: Any) -> None:
             return value
         raise TypeError(f"timestamptz column expects datetime, date, or ISO-8601 string, got {type(value).__name__}")
 
-    def _decode(value: str) -> str:
-        # Return the textual value as-is; upstream normalizers already convert
-        # ISO strings when needed. We keep text format end-to-end so the
-        # codec does the smallest amount of work.
-        return value
+    def _decode(value: str) -> datetime:
+        # Decode like asyncpg's default codec: TIMESTAMPTZ as an aware UTC
+        # datetime, TIMESTAMP as a naive one, and +/-infinity as the max/min
+        # datetime. The connection's ``DateStyle=ISO`` fixes the text form.
+        if value == "infinity":
+            return datetime.max
+        if value == "-infinity":
+            return datetime.min
+        parsed = datetime.fromisoformat(value)
+        return parsed if parsed.tzinfo is None else parsed.astimezone(UTC)
 
     for type_name in ("timestamptz", "timestamp"):
         # Codec registration is best-effort: if the driver can't install
@@ -331,8 +341,6 @@ async def primary_fetch_all(
         _fail_missing_backend("fetch_all")
         return []
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        await _install_timestamptz_str_codec(conn)
-        await conn.execute(f'SET search_path TO "{backend.schema}"')
         rows = await conn.fetch(_normalize_qmark_placeholders(query), *tuple(params))
     return [_normalize_primary_value(dict(row)) for row in rows]
 
@@ -348,8 +356,6 @@ async def primary_fetch_one(
         _fail_missing_backend("fetch_one")
         return None
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        await _install_timestamptz_str_codec(conn)
-        await conn.execute(f'SET search_path TO "{backend.schema}"')
         row = await conn.fetchrow(_normalize_qmark_placeholders(query), *tuple(params))
     if row is None:
         return None
@@ -367,8 +373,6 @@ async def primary_fetch_val(
         _fail_missing_backend("fetch_val")
         return None
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        await _install_timestamptz_str_codec(conn)
-        await conn.execute(f'SET search_path TO "{backend.schema}"')
         value = await conn.fetchval(_normalize_qmark_placeholders(query), *tuple(params))
     return _normalize_primary_value(value)
 
@@ -384,8 +388,6 @@ async def primary_execute(
         _fail_missing_backend("execute")
         return 0
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        await _install_timestamptz_str_codec(conn)
-        await conn.execute(f'SET search_path TO "{backend.schema}"')
         status = await conn.execute(_normalize_qmark_placeholders(query), *tuple(params))
     try:
         return int(str(status).rsplit(" ", 1)[-1])
