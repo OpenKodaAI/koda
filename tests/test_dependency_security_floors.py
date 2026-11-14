@@ -33,11 +33,15 @@ SECURITY_FLOORS: dict[str, tuple[str, str]] = {
         "3.14.4",
         "22 advisories, among them GHSA-5wr8-gcqf-gqf3, GHSA-2g87-pp6c-29x5 and GHSA-cq5v-8q36-5273",
     ),
+    "anyio": ("4.14.2", "GHSA-82r6-8w77-94w6, GHSA-5p39-cfhj-2xmp"),
     "asyncssh": ("2.24.0", "GHSA-2wxc-x7rj-hg8f, GHSA-rw4j-r22c-9gc3"),
     # 2026.10.18 fixes the advisory but also drops the unaffected emSign roots,
     # which 2026.10.19 restores.
     "certifi": ("2026.10.19", "GHSA-6q48-6c7w-9gw2"),
     "cryptography": ("48.0.1", "GHSA-537c-gmf6-5ccf"),
+    "fsspec": ("2026.6.0", "GHSA-27vj-qcqg-25rc"),
+    # dev group only (pip-audit -> cachecontrol); the images export with --no-dev.
+    "msgpack": ("1.2.3", "GHSA-6v7p-g79w-8964, GHSA-j586-36cw-2gc2"),
     "multidict": ("6.9.1", "GHSA-54p9-h82j-f925"),
     "pillow": ("13.0.0", "55 advisories, among them GHSA-78g4-xqwv-q3g8 and GHSA-cp9v-662q-vvx9"),
     # The dev group's pip (via pip-audit) and the pip each Python image pins.
