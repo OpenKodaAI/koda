@@ -1,12 +1,36 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  INSECURE_TRANSPORT_LOG_INTERVAL_MS,
+  INSECURE_TRANSPORT_LOG_MAX_ORIGINS,
   insecureCookieTransport,
   isLoopbackHostname,
   secureCookiesEnabled,
 } from "@/lib/cookie-transport";
 
+// Where insecureCookieTransport() keeps the origins it has logged, shared by
+// every bundle of the module in one process.
+const LOG_STATE_KEY = Symbol.for("koda.web.insecure-cookie-transport-log");
+type LogStateHost = typeof globalThis & { [LOG_STATE_KEY]?: unknown };
+let savedLogState: unknown;
+
+beforeEach(() => {
+  // A developer or CI shell may export either switch; every test sets the one it needs.
+  vi.stubEnv("SECURE_COOKIES", "");
+  vi.stubEnv("ALLOW_INSECURE_COOKIES", "");
+  // Start each test with nothing logged, and keep its warnings out of the output.
+  const host = globalThis as LogStateHost;
+  savedLogState = host[LOG_STATE_KEY];
+  delete host[LOG_STATE_KEY];
+  vi.spyOn(console, "warn").mockImplementation(() => {});
+});
+
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
+  const host = globalThis as LogStateHost;
+  if (savedLogState === undefined) delete host[LOG_STATE_KEY];
+  else host[LOG_STATE_KEY] = savedLogState;
 });
 
 function production() {
@@ -161,5 +185,73 @@ describe("insecureCookieTransport", () => {
     expect(insecureCookieTransport(plainHttp("192.168.1.10:3000"))).toEqual({
       origin: "http://192.168.1.10:3000",
     });
+  });
+});
+
+describe("the [cookie-transport] warning", () => {
+  function warnings(): string[] {
+    return vi.mocked(console.warn).mock.calls.map((call) => call.map(String).join(" "));
+  }
+
+  it("is logged once for an origin, naming it, however many requests it makes", () => {
+    production();
+    insecureCookieTransport(plainHttp("192.168.1.10:3000"));
+    insecureCookieTransport(plainHttp("192.168.1.10:3000"));
+
+    expect(warnings()).toHaveLength(1);
+    expect(warnings()[0]).toContain("[cookie-transport]");
+    expect(warnings()[0]).toContain("http://192.168.1.10:3000");
+  });
+
+  it("is logged for each origin, so a scanner's spoofed Host does not hide the operator's address", () => {
+    production();
+    insecureCookieTransport(plainHttp("scanner.example:3000"));
+    insecureCookieTransport(plainHttp("192.168.1.10:3000"));
+    insecureCookieTransport(plainHttp("scanner.example:3000"));
+
+    expect(warnings()).toHaveLength(2);
+    expect(warnings()[0]).toContain("http://scanner.example:3000");
+    expect(warnings()[1]).toContain("http://192.168.1.10:3000");
+  });
+
+  it("is logged again for an origin after the interval", () => {
+    production();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-14T12:00:00Z"));
+    insecureCookieTransport(plainHttp("192.168.1.10:3000"));
+
+    vi.advanceTimersByTime(INSECURE_TRANSPORT_LOG_INTERVAL_MS - 1);
+    insecureCookieTransport(plainHttp("192.168.1.10:3000"));
+    expect(warnings()).toHaveLength(1);
+
+    vi.advanceTimersByTime(1);
+    insecureCookieTransport(plainHttp("192.168.1.10:3000"));
+    expect(warnings()).toHaveLength(2);
+  });
+
+  it("names a bounded number of origins per interval, so spoofed hosts cannot flood the log", () => {
+    production();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-14T12:00:00Z"));
+    for (let index = 0; index <= INSECURE_TRANSPORT_LOG_MAX_ORIGINS; index += 1) {
+      // Still refused, logged or not.
+      expect(insecureCookieTransport(plainHttp(`10.0.${index}.1:3000`))).toEqual({
+        origin: `http://10.0.${index}.1:3000`,
+      });
+    }
+    expect(warnings()).toHaveLength(INSECURE_TRANSPORT_LOG_MAX_ORIGINS);
+
+    vi.advanceTimersByTime(INSECURE_TRANSPORT_LOG_INTERVAL_MS);
+    insecureCookieTransport(plainHttp("192.168.1.10:3000"));
+    expect(warnings()).toHaveLength(INSECURE_TRANSPORT_LOG_MAX_ORIGINS + 1);
+    expect(warnings().at(-1)).toContain("http://192.168.1.10:3000");
+  });
+
+  it("is not logged for a request whose browser keeps the cookies", () => {
+    production();
+    insecureCookieTransport(plainHttp("127.0.0.1:3000"));
+    insecureCookieTransport(plainHttp("koda.example.com", { origin: "https://koda.example.com" }));
+
+    expect(warnings()).toHaveLength(0);
   });
 });

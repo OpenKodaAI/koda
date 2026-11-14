@@ -1,5 +1,9 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  OWNER_EXISTS_HINT_COOKIE,
+  WEB_OPERATOR_SESSION_COOKIE,
+} from "@/lib/web-operator-session-constants";
 
 const upstreamFetch = vi.fn();
 
@@ -87,7 +91,11 @@ describe("POST /api/control-plane/auth/login", () => {
 
     expect(viaHttps.status).toBe(200);
     expect(upstreamFetch).toHaveBeenCalledTimes(1);
-    expect(viaHttps.headers.get("set-cookie")).toContain("Secure");
+    // Each cookie is Secure on its own; one Secure cookie in the joined header
+    // would hide a session cookie that lost the flag.
+    expect(viaHttps.cookies.get(WEB_OPERATOR_SESSION_COOKIE)?.secure).toBe(true);
+    expect(viaHttps.cookies.get(WEB_OPERATOR_SESSION_COOKIE)?.httpOnly).toBe(true);
+    expect(viaHttps.cookies.get(OWNER_EXISTS_HINT_COOKIE)?.secure).toBe(true);
   });
 
   it("forwards the browser address so the control plane rate limits each client separately", async () => {

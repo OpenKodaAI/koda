@@ -938,6 +938,56 @@ def test_web_image_has_no_secure_cookies_build_arg() -> None:
             assert "SECURE_COOKIES" not in (args or {}), f"{compose_file.name}: {name}"
 
 
+def _plain_http_section() -> str:
+    """The "Plain HTTP" section of the auth doc, with its line breaks folded."""
+    text = (ROOT / "docs" / "security" / "authentication.md").read_text(encoding="utf-8")
+    start = text.index("### Plain HTTP")
+    end = text.index("\n## ", start)
+    return " ".join(text[start:end].split())
+
+
+def test_auth_doc_lists_every_dashboard_surface_that_refuses_plain_http() -> None:
+    """The doc names each page and route that refuses plain HTTP from a LAN address (J-14)."""
+    app_dir = ROOT / "apps" / "web" / "src" / "app"
+    routes = sorted(
+        "/" + route.parent.relative_to(app_dir).as_posix()
+        for route in app_dir.rglob("route.ts")
+        if "insecureCookieTransportResponse(" in route.read_text(encoding="utf-8")
+    )
+    pages = sorted(
+        "/" + page.parent.relative_to(app_dir).as_posix()
+        for page in app_dir.rglob("page.tsx")
+        if "<InsecureTransportScreen" in page.read_text(encoding="utf-8")
+    )
+    # Every route that takes a credential or a one-time code before any session exists.
+    assert routes == [
+        "/api/control-plane/auth/login",
+        "/api/control-plane/auth/password/recover",
+        "/api/control-plane/auth/register-owner",
+    ]
+    assert pages == ["/forgot-password", "/login", "/setup"]
+
+    section = _plain_http_section()
+    for route in routes:
+        assert f"`POST {route}`" in section, route
+    for page in pages:
+        assert f"`{page}`" in section, page
+    assert "still works" not in section
+
+
+def test_auth_doc_quotes_the_forwarded_proto_the_bundled_nginx_sends() -> None:
+    """The bundled nginx.conf forwards `$scheme`, which is `http` until its server block terminates TLS."""
+    nginx = (ROOT / "packages" / "cli" / "release" / "bundle" / "proxy" / "nginx.conf").read_text(encoding="utf-8")
+    assert set(re.findall(r"proxy_set_header X-Forwarded-Proto (\S+);", nginx)) == {"$scheme"}
+
+    sentences = [
+        sentence for sentence in re.split(r"(?<=\.)\s", _plain_http_section()) if "proxy/nginx.conf" in sentence
+    ]
+    assert sentences
+    for sentence in sentences:
+        assert "`X-Forwarded-Proto $scheme`" in sentence, sentence
+
+
 def test_runtime_dockerfile_exports_locked_python_dependencies() -> None:
     app_dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 

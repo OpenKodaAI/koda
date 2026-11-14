@@ -196,9 +196,9 @@ With an external S3-compatible store, create the new keys there and put them in 
 - Object storage errors: check `seaweedfs` and `seaweedfs-init`.
 - The dashboard shows "HTTPS required", or sign-in does not stick: session cookies are `Secure`,
   so a browser keeps them only over HTTPS or on a localhost address. Opening
-  `http://<host-ip>:3000` from another machine cannot keep a session, and `/login` says so instead
-  of signing you in. Put a TLS-terminating reverse proxy in front (see
-  [VPS install](vps.md)), or reach the dashboard through an SSH tunnel
+  `http://<host-ip>:3000` from another machine cannot keep a session, and `/login`, `/setup` and
+  `/forgot-password` say so instead of showing their forms. Put a TLS-terminating reverse proxy
+  in front (see [VPS install](vps.md)), or reach the dashboard through an SSH tunnel
   (`ssh -L 3000:127.0.0.1:3000 <host>`, then open `http://localhost:3000`). See
   [Authentication](../security/authentication.md#plain-http).
 - Signed out after every restart: `WEB_OPERATOR_SESSION_SECRET` changed; keep it stable in `.env`.

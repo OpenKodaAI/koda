@@ -4,6 +4,7 @@ import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { ForgotPasswordScreen } from "@/components/auth/forgot-password-screen";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { ApiError } from "@/lib/errors";
 
 const replaceMock = vi.fn();
 
@@ -39,6 +40,51 @@ describe("ForgotPasswordScreen", () => {
     expect(screen.getByLabelText(/email|usuário|username/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/recovery|recuperação|recuperaci/i)).toBeInTheDocument();
     expect(screen.getAllByLabelText(/password|senha/i).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("says HTTPS is required when the dashboard refuses recovery over plain HTTP", async () => {
+    // The refusal is decided from the transport before the recovery details
+    // are read, so naming it reveals nothing about accounts or codes.
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Recovery needs HTTPS.", 403, { reason: "INSECURE_TRANSPORT" }),
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|username/i), "owner");
+    await user.type(screen.getByLabelText(/recovery/i), "aaaa-bbbb-cccc");
+    const passwordFields = screen.getAllByLabelText(/password/i);
+    await user.type(passwordFields[0], "BrandNewPassw0rd!Now");
+    await user.type(passwordFields[1], "BrandNewPassw0rd!Now");
+    await user.click(screen.getByRole("button", { name: /reset/i }));
+
+    expect(await screen.findByText(/over plain HTTP/i)).toBeInTheDocument();
+    expect(screen.queryByText(/invalid or expired/i)).not.toBeInTheDocument();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the generic message for any other refusal", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Invalid recovery details.", 403),
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|username/i), "owner");
+    await user.type(screen.getByLabelText(/recovery/i), "aaaa-bbbb-cccc");
+    const passwordFields = screen.getAllByLabelText(/password/i);
+    await user.type(passwordFields[0], "BrandNewPassw0rd!Now");
+    await user.type(passwordFields[1], "BrandNewPassw0rd!Now");
+    await user.click(screen.getByRole("button", { name: /reset/i }));
+
+    expect(await screen.findByText(/invalid or expired/i)).toBeInTheDocument();
+    expect(screen.queryByText(/over plain HTTP/i)).not.toBeInTheDocument();
   });
 
   it("rejects short passwords before calling the API", async () => {

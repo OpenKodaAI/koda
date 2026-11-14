@@ -1,4 +1,6 @@
+import type { NextResponse } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WEB_OPERATOR_SESSION_COOKIE } from "@/lib/web-operator-session-constants";
 import { config, proxy } from "./proxy";
 
 describe("web proxy auth gate", () => {
@@ -117,17 +119,40 @@ describe("web proxy auth gate", () => {
     );
   });
 
-  function pageRequest(url: string, headers: Record<string, string>) {
+  function pageRequest(url: string, headers: Record<string, string>, cookies: Record<string, string> = {}) {
     const nextUrl = new URL(url);
     return {
       nextUrl: Object.assign(nextUrl, {
         clone: () => new URL(nextUrl.toString()),
       }),
       method: "GET",
-      cookies: { get: () => undefined },
+      cookies: {
+        get: (name: string) => (name in cookies ? { value: cookies[name] } : undefined),
+      },
       headers: new Headers(headers),
     } as never;
   }
+
+  it.each([
+    ["production", true],
+    ["development", false],
+  ] as const)("in %s clears a malformed session cookie with Secure=%s", (nodeEnv, secure) => {
+    vi.stubEnv("NODE_ENV", nodeEnv);
+    vi.stubEnv("SECURE_COOKIES", "");
+    vi.stubEnv("ALLOW_INSECURE_COOKIES", "");
+    const https = { host: "koda.example.com", "x-forwarded-proto": "https" };
+
+    const response = proxy(
+      pageRequest("http://koda.example.com/executions", https, {
+        [WEB_OPERATOR_SESSION_COOKIE]: "not-a-sealed-token",
+      }),
+    ) as NextResponse;
+
+    const cleared = response.cookies.get(WEB_OPERATOR_SESSION_COOKIE);
+    expect(cleared?.value).toBe("");
+    expect(cleared?.maxAge).toBe(0);
+    expect(cleared?.secure).toBe(secure);
+  });
 
   it("sends a page over plain HTTP from a LAN address to /login once, and /login then renders (J-14)", () => {
     vi.stubEnv("NODE_ENV", "production");
@@ -144,6 +169,13 @@ describe("web proxy auth gate", () => {
     const second = proxy(pageRequest("http://192.168.1.10:3000/login?next=%2Fexecutions", lan));
     expect(second.status).toBe(200);
     expect(second.headers.get("location")).toBeNull();
+
+    // /setup and /forgot-password render their own explanation too.
+    for (const page of ["/setup", "/forgot-password"]) {
+      const direct = proxy(pageRequest(`http://192.168.1.10:3000${page}`, lan));
+      expect(direct.status).toBe(200);
+      expect(direct.headers.get("location")).toBeNull();
+    }
 
     // Loopback keeps the first-run redirect: browsers keep Secure cookies there.
     const loopback = proxy(

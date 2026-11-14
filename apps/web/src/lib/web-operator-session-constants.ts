@@ -21,9 +21,10 @@ export const PENDING_RECOVERY_COOKIE = "koda_setup_pending_recovery";
 export const PENDING_RECOVERY_MAX_AGE_SECONDS = 60 * 30;
 
 /**
- * `error.code` of the refusal the login and register-owner routes return when
- * the browser reached the dashboard over plain HTTP from a non-loopback host,
- * where it drops the Secure session cookie (`@/lib/cookie-transport`). It is
- * decided before any credential is read, so it says nothing about accounts.
+ * `error.code` of the refusal the login, register-owner and password-recover
+ * routes return when the browser reached the dashboard over plain HTTP from a
+ * non-loopback host, where it drops the Secure session cookie
+ * (`@/lib/cookie-transport`). It is decided before any credential is read, so
+ * it says nothing about accounts.
  */
 export const INSECURE_TRANSPORT_ERROR_CODE = "INSECURE_TRANSPORT";

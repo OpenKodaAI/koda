@@ -11,10 +11,11 @@ interface InsecureTransportScreenProps {
 }
 
 /**
- * Shown by /login and /setup instead of their forms when the browser reached
- * the dashboard over plain HTTP from a non-loopback host. The session cookies
- * are Secure there, so the browser would drop them and every sign-in would end
- * back on /setup (J-14). Nothing here submits.
+ * Shown by /login, /setup and /forgot-password instead of their forms when the
+ * browser reached the dashboard over plain HTTP from a non-loopback host. The
+ * session cookies are Secure there, so the browser would drop them and every
+ * sign-in would end back on /setup (J-14), and a recovery code would cross the
+ * network in clear text. Nothing here submits.
  */
 export function InsecureTransportScreen({ origin }: InsecureTransportScreenProps) {
   const { t } = useAppI18n();

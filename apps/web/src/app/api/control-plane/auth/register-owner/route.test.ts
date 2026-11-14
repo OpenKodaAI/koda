@@ -1,5 +1,10 @@
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  OWNER_EXISTS_HINT_COOKIE,
+  PENDING_RECOVERY_COOKIE,
+  WEB_OPERATOR_SESSION_COOKIE,
+} from "@/lib/web-operator-session-constants";
 
 const upstreamFetch = vi.fn();
 
@@ -81,7 +86,12 @@ describe("POST /api/control-plane/auth/register-owner", () => {
 
     expect(response.status).toBe(201);
     expect(upstreamFetch).toHaveBeenCalledTimes(1);
-    expect(response.headers.get("set-cookie")).toBeTruthy();
+    // Production marks each cookie Secure on its own.
+    expect(response.cookies.get(WEB_OPERATOR_SESSION_COOKIE)?.value).toBeTruthy();
+    expect(response.cookies.get(WEB_OPERATOR_SESSION_COOKIE)?.secure).toBe(true);
+    expect(response.cookies.get(WEB_OPERATOR_SESSION_COOKIE)?.httpOnly).toBe(true);
+    expect(response.cookies.get(OWNER_EXISTS_HINT_COOKIE)?.secure).toBe(true);
+    expect(response.cookies.get(PENDING_RECOVERY_COOKIE)?.secure).toBe(true);
   });
 
   function forwardedForSentUpstream(): string | null {

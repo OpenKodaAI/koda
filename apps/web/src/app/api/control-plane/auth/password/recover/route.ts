@@ -7,6 +7,7 @@ import {
   upstreamFetch,
 } from "@/lib/api-utils";
 import { forwardedClientIpHeaders } from "@/lib/client-ip";
+import { insecureCookieTransport, insecureCookieTransportResponse } from "@/lib/cookie-transport";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 
 const CONTROL_PLANE_BASE_URL = process.env.CONTROL_PLANE_BASE_URL || "http://127.0.0.1:8090";
@@ -25,6 +26,14 @@ export async function POST(request: NextRequest) {
       { error: "Cross-site dashboard mutations are blocked." },
       { status: 403, headers: { "Cache-Control": "no-store" } },
     );
+  }
+  // Over plain HTTP from a non-loopback host the recovery code and the new
+  // password would cross the network in clear text, and the reset would end on
+  // a /login that cannot sign in from this browser. Refuse before the control
+  // plane consumes the code and revokes every session (J-14).
+  const insecureTransport = insecureCookieTransport(request.headers, request.nextUrl);
+  if (insecureTransport) {
+    return insecureCookieTransportResponse(insecureTransport);
   }
   try {
     const payload = parseSchemaOrThrow(

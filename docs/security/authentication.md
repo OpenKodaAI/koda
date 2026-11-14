@@ -171,26 +171,35 @@ address, such as `http://192.168.1.10:3000` on a LAN or a tailnet IP, it drops t
 cookie without an error, so a sign-in the control plane accepted would leave no session. The
 dashboard therefore fails explicitly there instead of bouncing the operator back to `/setup`:
 
-- `/login` and `/setup` show an "HTTPS required" screen in place of their forms, naming the
-  address that was used and the two ways in: HTTPS through a reverse proxy, or a localhost
-  address on the host (for example through an SSH tunnel). Any other page sends a signed-out
-  visitor to `/login` once, not to `/setup`, because the owner hint cookie cannot be stored
-  either.
-- `POST /api/control-plane/auth/login` and `POST /api/control-plane/auth/register-owner`
-  answer `403` with `error.code: "INSECURE_TRANSPORT"` before they contact the control
-  plane. Owner registration therefore never spends the setup code or issues recovery codes
-  for a session the browser would throw away. The refusal depends only on the transport, never
-  on the credentials, so the screens show their own message for it and every credential
-  failure keeps the single generic message. Password recovery sets no cookie and still works.
-- The web container logs a `[cookie-transport]` warning naming the address, once per process.
+- `/login`, `/setup` and `/forgot-password` show an "HTTPS required" screen in place of their
+  forms, naming the address that was used and the two ways in: HTTPS through a reverse proxy,
+  or a localhost address on the host (for example through an SSH tunnel). Any other page sends
+  a signed-out visitor to `/login` once, not to `/setup`, because the owner hint cookie cannot
+  be stored either.
+- `POST /api/control-plane/auth/login`, `POST /api/control-plane/auth/register-owner` and
+  `POST /api/control-plane/auth/password/recover` answer `403` with
+  `error.code: "INSECURE_TRANSPORT"` before they contact the control plane. Owner
+  registration therefore never spends the setup code or issues recovery codes for a session
+  the browser would throw away. Recovery sets no cookie, but over plain HTTP it would send the
+  recovery code and the new password across the network in clear text, consume the code,
+  revoke every session, and still end on a `/login` that cannot sign in from that browser; it
+  works over HTTPS and on a localhost address. The refusal depends only on the transport,
+  never on the credentials, so the screens show their own message for it and every
+  credential failure keeps the single generic message.
+- The web container logs a `[cookie-transport]` warning naming the address, once per address
+  per hour, for at most 32 addresses within an hour. The address comes from the request's
+  `Host` or `X-Forwarded-Host` header, which any client can set, so one line per address keeps
+  a scanner's request from standing in for the operator's own, and the cap keeps a stream of
+  made-up hosts from flooding the log.
 
 The dashboard decides from the request, and refuses only when it is sure: the browser's
 `Origin` header when it sent one; otherwise no refusal when the request carries Fetch Metadata
 headers (`Sec-Fetch-Site`, `Sec-Fetch-Mode`), which browsers send only to HTTPS and loopback
 pages; otherwise the scheme and host from `X-Forwarded-Proto` and `X-Forwarded-Host` (or
 `Host`), which Next.js fills from the socket when no proxy set them. A TLS-terminating proxy
-should send `X-Forwarded-Proto: https`, as the bundled `proxy/nginx.conf`, Caddy and Traefik
-do; without it an older browser that sends no Fetch Metadata would be refused.
+should forward `X-Forwarded-Proto $scheme`, as the bundled `proxy/nginx.conf` does, which
+becomes `https` once its server block terminates TLS; Caddy and Traefik send it by default.
+Without it an older browser that sends no Fetch Metadata would be refused.
 
 ## Profile data
 
@@ -330,7 +339,9 @@ client from spending everyone else's budget.
   code`.
 - Responses use a single generic error (`"Invalid credentials."`, or equivalent) without
   leaking whether the identifier exists. The i18n layer binds every failure mode to the same
-  message in every language.
+  message in every language. The one exception is the plain-HTTP refusal
+  (`error.code: "INSECURE_TRANSPORT"`), which the dashboard decides from the transport before
+  it reads any credential; see [Plain HTTP](#plain-http).
 - The structured logging pipeline redacts `password`, `new_password`, `current_password`,
   `recovery_code`, `session_token`, `registration_token`, `bootstrap_code`, `code`,
   `totp_secret`, `api_key`, `secret`, `token`, `authorization`, and `cookie` keys.

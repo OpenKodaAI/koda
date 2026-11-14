@@ -9,9 +9,9 @@ import { INSECURE_TRANSPORT_ERROR_CODE } from "@/lib/web-operator-session-consta
  * page or a loopback host (`localhost`, `*.localhost`, `127.0.0.0/8`,
  * `[::1]`). Over plain HTTP from any other host it drops the cookie without an
  * error, so a sign-in the control plane accepted leaves no session and the
- * next page sends the operator back to `/setup` (D-085, J-14). The auth pages
- * and the routes that set the session cookie ask `insecureCookieTransport()`
- * first and explain instead.
+ * next page sends the operator back to `/setup` (D-085, J-14). The auth pages,
+ * the routes that set the session cookie and the password-recover route ask
+ * `insecureCookieTransport()` first and explain instead.
  */
 
 type HeaderReader = { get(name: string): string | null | undefined };
@@ -80,10 +80,35 @@ function plainHttpOrigin(headers: HeaderReader, requestUrl?: RequestUrl): URL | 
   return parseWebOrigin(`${proto}://${host}`);
 }
 
+/** How long one origin's `[cookie-transport]` warning stands for its later requests. */
+export const INSECURE_TRANSPORT_LOG_INTERVAL_MS = 60 * 60 * 1000;
+/** Most origins named per interval, so spoofed `Host` headers cannot flood the log. */
+export const INSECURE_TRANSPORT_LOG_MAX_ORIGINS = 32;
+
 // Next.js bundles this module separately for the proxy, the pages and each
-// route, so the "logged once" flag lives on globalThis to hold per process.
-const LOGGED_KEY = Symbol.for("koda.web.insecure-cookie-transport-logged");
-type LoggedFlagHost = typeof globalThis & { [LOGGED_KEY]?: boolean };
+// route, so the origins already logged live on globalThis, one map per process.
+const LOG_STATE_KEY = Symbol.for("koda.web.insecure-cookie-transport-log");
+type LogStateHost = typeof globalThis & { [LOG_STATE_KEY]?: Map<string, number> };
+
+/**
+ * Warn once per origin per interval. The origin comes from the request's
+ * headers, which any client can set, so one line per origin keeps a scanner's
+ * request from standing in for the operator's own address, and the cap bounds
+ * what a stream of made-up hosts can write.
+ */
+function logInsecureTransport(origin: string): void {
+  const host = globalThis as LogStateHost;
+  const loggedAt = (host[LOG_STATE_KEY] ??= new Map<string, number>());
+  const now = Date.now();
+  for (const [logged, at] of loggedAt) {
+    if (now - at >= INSECURE_TRANSPORT_LOG_INTERVAL_MS) loggedAt.delete(logged);
+  }
+  if (loggedAt.has(origin) || loggedAt.size >= INSECURE_TRANSPORT_LOG_MAX_ORIGINS) return;
+  loggedAt.set(origin, now);
+  console.warn(
+    `[cookie-transport] A browser opened the dashboard over plain HTTP at ${origin}. Session cookies are Secure, so sign-in is refused there; serve the dashboard over HTTPS through a reverse proxy, or open it at a localhost address.`,
+  );
+}
 
 /**
  * The plain-HTTP origin of a request whose browser will drop the operator
@@ -99,21 +124,17 @@ export function insecureCookieTransport(
   if (!secureCookiesEnabled()) return null;
   const url = plainHttpOrigin(headers, requestUrl);
   if (!url || url.protocol !== "http:" || isLoopbackHostname(url.hostname)) return null;
-  const flagHost = globalThis as LoggedFlagHost;
-  if (!flagHost[LOGGED_KEY]) {
-    flagHost[LOGGED_KEY] = true;
-    console.warn(
-      `[cookie-transport] A browser opened the dashboard over plain HTTP at ${url.origin}. Session cookies are Secure, so sign-in is refused there; serve the dashboard over HTTPS through a reverse proxy, or open it at a localhost address.`,
-    );
-  }
+  logInsecureTransport(url.origin);
   return { origin: url.origin };
 }
 
 /**
- * The refusal a route that sets the session cookie returns over plain HTTP,
- * before it contacts the control plane: signing in or registering the owner
- * there would start a session the browser throws away, and registration would
- * spend the one-time setup code. `code` lets the screens show their own copy.
+ * The refusal an auth route returns over plain HTTP, before it contacts the
+ * control plane: signing in or registering the owner there would start a
+ * session the browser throws away, registration would spend the one-time setup
+ * code, and recovery would send the recovery code and the new password in clear
+ * text only to end on a sign-in that cannot last. `code` lets the screens show
+ * their own copy.
  */
 export function insecureCookieTransportResponse(transport: InsecureCookieTransport): NextResponse {
   return NextResponse.json(
