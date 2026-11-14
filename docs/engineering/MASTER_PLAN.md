@@ -78,10 +78,13 @@ jump ahead of high-severity items in a later milestone just because of their mil
 **Started early.** A task that began before its dependencies were done carries the flag *started early:
 real-path regression test required before done* on its status line. The done check (M0-E1-T4) refuses to
 mark it `done` until VALIDATION_REPORT.md names a regression test that runs the real path without patching
-the code under test.
+the code under test. The test is named in a section whose heading contains the task ID (batch evidence
+gets a sub-heading that lists its task IDs), on a line that says "regression test" and gives the test ID as
+`<file>::<test>`, for example `Real-path regression test: tests/test_queue.py::test_cancel_stops_task`.
 
-**Evidence rule.** No task is `done` while its Evidence field reads "—". The plan lint (M0-E1-T4) enforces
-this, together with the status rules above, on every change to this file.
+**Evidence rule.** No task is `done` while its Evidence field reads "—". A field that starts with a dash,
+such as "— pending", counts as "—". The plan lint (M0-E1-T4) enforces this, together with the status rules
+above, on every change to this file.
 
 **Gate.**
 
@@ -395,10 +398,22 @@ report (O-3).
 
 ## 6. Backlog
 
-Task format: the heading gives the ID and title. The next line gives owner, risk, gate, status and
-dependencies. The bullets give addresses, files, expected implementation ("Do"), acceptance criteria
-("Done when"), required tests and the evidence slot. Line numbers in Files come from the audit tree and
-drift; search for the symbol.
+Task format: the heading, `#### <ID> · Title`, gives the ID and title. The next line gives owner, risk,
+gate, status and dependencies. The bullets give addresses, files, expected implementation ("Do"),
+acceptance criteria ("Done when"), required tests and the evidence slot. Line numbers in Files come from the
+audit tree and drift; search for the symbol.
+
+A heading that names several IDs, such as `#### M5-E3-T5, M5-E3-T12 to M5-E3-T17 · Title`, shares its
+bullets with a table that has `Task` and `Status` columns and exactly one row per named ID. Each row also
+takes the heading's Deps. A row's evidence is an `<ID>: <evidence>` entry in the heading's Evidence field
+(entries are separated by `;`), unless the table has an `Evidence` column.
+
+The Deps field lists hard dependencies only: every task ID in it must be `done` before the task is
+`ready`. A bare `T<n>` continues the milestone and epic of the ID before it (`M1-E1-T13, T14`). Text
+that names no task, such as `DEFECT-BATCH-1 (D-003) merged`, is not checked. Tasks that only share files
+go in a `coordinate with …` note, which runs to the next `;` or the end of the field. The note is a
+scheduling hint (section 8), not a dependency. The plan lint (M0-E1-T4) checks these forms, and reports a
+heading that starts with a task ID but follows neither heading form.
 
 ### M0 — Baseline repair and safety net
 

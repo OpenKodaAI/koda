@@ -257,7 +257,7 @@ def test_done_after_starting_early_needs_a_regression_test_in_the_report() -> No
     )
     missing = (
         "28: M0-E1-T4: is done and was started early, but no VALIDATION_REPORT.md section headed "
-        "M0-E1-T4 names its real-path regression test"
+        "M0-E1-T4 names its real-path regression test by test ID ('<file>::<test>')"
     )
 
     assert problems_for(plan) == [missing]
@@ -314,6 +314,166 @@ def test_malformed_tasks_are_reported(old: str, new: str, expected: str) -> None
     problems = problems_for(seed(old, new))
 
     assert any(problem.startswith(expected) for problem in problems), problems
+
+
+# A done task without evidence that nothing depends on: only the heading check can catch it.
+HIDDEN_TASK = "Owner QA · Risk low · Gate none · **done** · Deps —\n- **Tests:** G · **Evidence:** —\n\n"
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        pytest.param("#### M0-E1-T9 — Hidden task", id="em-dash"),
+        pytest.param("#### M0-E1-T9 – Hidden task", id="en-dash"),
+        pytest.param("### M0-E1-T9 · Hidden task", id="level-3"),
+        pytest.param("##### M0-E1-T9 · Hidden task", id="level-5"),
+        pytest.param("#### M0-E1-T9 (was M7-E2-T1) · Hidden task", id="text-before-separator"),
+        pytest.param("#### M0-E1-T9 to M0-E1-T7 · Hidden tasks", id="backwards-range"),
+        pytest.param("#### M0-E1-T9 ·", id="no-title"),
+    ],
+)
+def test_task_heading_in_another_form_is_reported(heading: str) -> None:
+    plan = seed("## 7. Dependency graph", f"{heading}\n{HIDDEN_TASK}## 7. Dependency graph")
+    line = plan.splitlines().index(heading) + 1
+
+    tasks, problems = load_module().lint(plan, REPORT)
+
+    assert problems == [
+        f"{line}: heading starts with a task ID but is not '#### <ID> · Title' "
+        f"or '#### <ID>, <ID> to <ID> · Title' (section 6): {heading!r}"
+    ]
+    assert "M0-E1-T9" not in tasks
+
+
+def test_group_heading_names_exactly_its_table_rows() -> None:
+    missing_row = seed("| M1-E1-T3 | Autonomy policy | **pending** | M1-E1-T2 |\n", "")
+    assert problems_for(missing_row) == [
+        "34: M1-E1-T1, M1-E1-T2 to M1-E1-T3: names M1-E1-T3, but no task table row under it defines it"
+    ]
+
+    extra_row = seed(
+        "| M1-E1-T3 | Autonomy policy | **pending** | M1-E1-T2 |\n",
+        "| M1-E1-T3 | Autonomy policy | **pending** | M1-E1-T2 |\n| M1-E1-T5 | Extra policy | **pending** | — |\n",
+    )
+    assert problems_for(extra_row) == ["43: M1-E1-T5: task table row is not named by its heading at line 34"]
+
+    no_table = seed(
+        "| Task | Store | Status | Deps |\n|---|---|---|---|\n"
+        "| M1-E1-T1 | Tool policy | **ready** | — |\n"
+        "| M1-E1-T2 | Model policy | **pending** | M1-E1-T1 |\n"
+        "| M1-E1-T3 | Autonomy policy | **pending** | M1-E1-T2 |\n",
+        "",
+    )
+    assert problems_for(no_table) == [
+        f"34: M1-E1-T1, M1-E1-T2 to M1-E1-T3: names {task_id}, but no task table row under it defines it"
+        for task_id in ("M1-E1-T1", "M1-E1-T2", "M1-E1-T3")
+    ]
+
+    # A range may end in a bare "T<n>" that continues the milestone and epic of its start.
+    shorthand = seed("#### M1-E1-T1, M1-E1-T2 to M1-E1-T3 ·", "#### M1-E1-T1 to T3 ·")
+    assert problems_for(shorthand) == []
+
+
+def test_plan_without_tasks_fails(tmp_path: Path) -> None:
+    no_tasks = ["1: no tasks found; expected '#### <ID> · Title' headings (section 6)"]
+    assert problems_for("") == no_tasks
+    assert problems_for(PLAN.split("## 6. Backlog")[0]) == no_tasks
+
+    plan_path = tmp_path / "MASTER_PLAN.md"
+    plan_path.write_text("", encoding="utf-8")
+    assert load_module().main(["--plan", str(plan_path), "--report", str(tmp_path / "missing.md")]) == 1
+
+
+# Section 6: Deps lists hard dependencies; a "coordinate with" note names tasks that only share files.
+def test_coordinate_with_note_is_not_a_dependency() -> None:
+    # The M1-E3-T8 pattern: a defect batch must merge first, and three tasks share its files.
+    plan = seed(
+        "**ready** · Deps M0-E1-T1",
+        "**ready** · Deps DEFECT-BATCH-1 (D-003) merged; coordinate with M0-E1-T3, M0-E1-T4 and M1-E1-T2 (same files)",
+    )
+
+    tasks, problems = load_module().lint(plan, REPORT)
+
+    assert problems == []
+    assert tasks["M0-E1-T2"].deps == []
+    assert tasks["M0-E1-T2"].coordinates == ["M0-E1-T3", "M0-E1-T4", "M1-E1-T2"]
+
+
+def test_dependencies_after_a_coordinate_note_still_count() -> None:
+    plan = seed(
+        "**pending** · Deps M0-E1-T2",
+        "**pending** · Deps M0-E1-T1; coordinate with M1-E1-T3, T2 (same files); M0-E1-T2",
+    )
+
+    tasks, problems = load_module().lint(plan, REPORT)
+
+    assert problems == []
+    assert tasks["M0-E1-T3"].deps == ["M0-E1-T1", "M0-E1-T2"]
+    assert tasks["M0-E1-T3"].coordinates == ["M1-E1-T3", "M1-E1-T2"]
+
+    still_hard = seed("**pending** · Deps M0-E1-T1;", "**ready** · Deps M0-E1-T1;", plan)
+    assert problems_for(still_hard) == ["24: M0-E1-T3: is ready but depends on unfinished M0-E1-T2 (ready)"]
+
+
+def test_coordinate_note_ids_must_exist() -> None:
+    plan = seed("**ready** · Deps M0-E1-T1", "**ready** · Deps M0-E1-T1; coordinate with M0-E1-T9 (same files)")
+
+    assert problems_for(plan) == ["20: M0-E1-T2: coordination note names M0-E1-T9, which does not exist"]
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    ["— pending", "—; CI run pending", "– pending", "- pending", "— (CI run pending)", "(CI run pending) —", ""],
+)
+def test_evidence_that_starts_with_a_dash_is_missing(evidence: str) -> None:
+    plan = seed('**Evidence:** VALIDATION_REPORT.md "M0-E1-T1"', f"**Evidence:** {evidence}")
+
+    assert problems_for(plan) == ["15: M0-E1-T1: is done but its Evidence field reads '—'"]
+
+
+def test_group_evidence_counts_the_entry_that_names_the_row() -> None:
+    done_row = seed("| M1-E1-T1 | Tool policy | **ready** |", "| M1-E1-T1 | Tool policy | **done** |")
+
+    after_dash = seed(
+        "**Evidence:** — (one entry per task)",
+        '**Evidence:** — (one entry per task); M1-E1-T1: VALIDATION_REPORT.md "M1-E1-T1"',
+        done_row,
+    )
+    assert problems_for(after_dash) == []
+
+    labelled_dash = seed("**Evidence:** — (one entry per task)", "**Evidence:** M1-E1-T1: — (CI run pending)", done_row)
+    assert problems_for(labelled_dash) == ["40: M1-E1-T1: is done but its Evidence field reads '—'"]
+
+
+def test_started_early_regression_test_needs_a_test_id_in_a_section_headed_by_the_task() -> None:
+    plan = seed(f"**in-progress**{STARTED_EARLY_FLAG}", f"**done**{STARTED_EARLY_FLAG}")
+    plan = seed(
+        "- **Tests:** G · **Evidence:** —\n\n### M1",
+        '- **Tests:** G · **Evidence:** VALIDATION_REPORT.md "M0-E1-T4"\n\n### M1',
+        plan,
+    )
+    missing = [
+        "28: M0-E1-T4: is done and was started early, but no VALIDATION_REPORT.md section headed "
+        "M0-E1-T4 names its real-path regression test by test ID ('<file>::<test>')"
+    ]
+
+    negative = "\n## M0-E1-T4 — x\n\nNo regression test was written; all mocked.\n"
+    assert problems_for(plan, REPORT + negative) == missing
+    # The test ID must be on the line that names the regression test.
+    apart = "\n## M0-E1-T4 — x\n\nA regression test exists.\n\nUnit test: `tests/test_x.py::test_mocked`\n"
+    assert problems_for(plan, REPORT + apart) == missing
+    # Batch evidence counts only under a heading that names the task.
+    batch = (
+        "\n## DEFECT-BATCH-1 — batch\n\n| Task | Fix |\n|---|---|\n"
+        "| M0-E1-T4 | Real-path regression test: `tests/test_x.py::test_real_path` |\n"
+    )
+    assert problems_for(plan, REPORT + batch) == missing
+
+    batch_subsection = (
+        "\n## DEFECT-BATCH-1 — batch\n\n### M0-E1-T4, M0-E1-T3 — real-path tests\n\n"
+        "- Real-path regression test: `tests/test_x.py::test_real_path`\n"
+    )
+    assert problems_for(plan, REPORT + batch_subsection) == []
 
 
 def test_cli_prints_counts_and_exit_code(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
