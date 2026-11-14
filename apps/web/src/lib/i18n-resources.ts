@@ -656,6 +656,12 @@ export const resources = {
             bootstrap_hint_generic: "Provide the bootstrap code issued for this instance.",
             submit: "Create account",
             submitting: "Creating...",
+            strength: {
+              weak: "Weak",
+              fair: "Fair",
+              good: "Good",
+              strong: "Strong",
+            },
             errors: {
               bootstrap_required: "The bootstrap code is required.",
               email_invalid: "Enter a valid email address.",
@@ -691,6 +697,18 @@ export const resources = {
             regenerate_codes: "Regenerate recovery codes",
             codes_remaining: "{{count}} recovery codes remaining",
           },
+        },
+        insecure_transport: {
+          title: "HTTPS required",
+          subtitle: "This dashboard was opened over plain HTTP at {{origin}}.",
+          reason: "Its sign-in cookies are marked Secure, so this browser will not keep them over this connection and no sign-in here could last.",
+          fix_proxy: "Serve the dashboard over HTTPS through a reverse proxy such as Caddy, Traefik, nginx or tailscale serve.",
+          fix_localhost: "Or open it on the host itself at a localhost address, for example through an SSH tunnel.",
+          form_error: "This browser will not keep the session cookie over plain HTTP. Open the dashboard over HTTPS or at a localhost address.",
+        },
+        rate_limited: {
+          with_wait: "Too many attempts. Wait {{duration}} and try again.",
+          no_wait: "Too many attempts. Wait a moment and try again.",
         },
         session_expired: "Your session has expired. Sign in again to continue.",
         account_menu: {
@@ -1352,6 +1370,12 @@ export const resources = {
             bootstrap_hint_generic: "Informe o código de bootstrap emitido para esta instância.",
             submit: "Criar conta",
             submitting: "Criando...",
+            strength: {
+              weak: "Fraca",
+              fair: "Razoável",
+              good: "Boa",
+              strong: "Forte",
+            },
             errors: {
               bootstrap_required: "O código de bootstrap é obrigatório.",
               email_invalid: "Informe um endereço de e-mail válido.",
@@ -1387,6 +1411,18 @@ export const resources = {
             regenerate_codes: "Regenerar códigos de recuperação",
             codes_remaining: "{{count}} códigos de recuperação restantes",
           },
+        },
+        insecure_transport: {
+          title: "HTTPS obrigatório",
+          subtitle: "Este painel foi aberto por HTTP simples em {{origin}}.",
+          reason: "Os cookies de acesso são marcados como Secure, então este navegador não os guarda nesta conexão e nenhum login aqui se mantém.",
+          fix_proxy: "Sirva o painel por HTTPS através de um proxy reverso, como Caddy, Traefik, nginx ou tailscale serve.",
+          fix_localhost: "Ou abra-o no próprio host por um endereço localhost, por exemplo através de um túnel SSH.",
+          form_error: "Este navegador não guarda o cookie de sessão por HTTP simples. Abra o painel por HTTPS ou por um endereço localhost.",
+        },
+        rate_limited: {
+          with_wait: "Muitas tentativas. Aguarde {{duration}} e tente novamente.",
+          no_wait: "Muitas tentativas. Aguarde um momento e tente novamente.",
         },
         session_expired: "Sua sessão expirou. Entre novamente para continuar.",
         account_menu: {
@@ -2049,6 +2085,12 @@ export const resources = {
             bootstrap_hint_generic: "Proporciona el código de bootstrap emitido para esta instancia.",
             submit: "Crear cuenta",
             submitting: "Creando...",
+            strength: {
+              weak: "Débil",
+              fair: "Aceptable",
+              good: "Buena",
+              strong: "Fuerte",
+            },
             errors: {
               bootstrap_required: "El código de bootstrap es obligatorio.",
               email_invalid: "Introduce un correo válido.",
@@ -2084,6 +2126,18 @@ export const resources = {
             regenerate_codes: "Regenerar códigos de recuperación",
             codes_remaining: "{{count}} códigos de recuperación restantes",
           },
+        },
+        insecure_transport: {
+          title: "Se requiere HTTPS",
+          subtitle: "Este panel se abrió por HTTP sin cifrar en {{origin}}.",
+          reason: "Sus cookies de acceso están marcadas como Secure, así que este navegador no las conserva en esta conexión y ningún inicio de sesión aquí puede durar.",
+          fix_proxy: "Sirve el panel por HTTPS a través de un proxy inverso como Caddy, Traefik, nginx o tailscale serve.",
+          fix_localhost: "O ábrelo en el propio host con una dirección localhost, por ejemplo a través de un túnel SSH.",
+          form_error: "Este navegador no conserva la cookie de sesión por HTTP sin cifrar. Abre el panel por HTTPS o con una dirección localhost.",
+        },
+        rate_limited: {
+          with_wait: "Demasiados intentos. Espera {{duration}} y vuelve a intentarlo.",
+          no_wait: "Demasiados intentos. Espera un momento y vuelve a intentarlo.",
         },
         session_expired: "Tu sesión ha caducado. Inicia sesión de nuevo para continuar.",
         account_menu: {
@@ -2750,6 +2804,12 @@ export const resources = {
             bootstrap_hint_generic: "Fournissez le code de bootstrap émis pour cette instance.",
             submit: "Créer le compte",
             submitting: "Création...",
+            strength: {
+              weak: "Faible",
+              fair: "Moyen",
+              good: "Bon",
+              strong: "Fort",
+            },
             errors: {
               bootstrap_required: "Le code de bootstrap est requis.",
               email_invalid: "Saisissez une adresse e-mail valide.",
@@ -2785,6 +2845,18 @@ export const resources = {
             regenerate_codes: "Régénérer les codes de récupération",
             codes_remaining: "{{count}} codes de récupération restants",
           },
+        },
+        insecure_transport: {
+          title: "HTTPS requis",
+          subtitle: "Ce tableau de bord a été ouvert en HTTP non chiffré sur {{origin}}.",
+          reason: "Ses cookies de connexion sont marqués Secure : ce navigateur ne les conserve pas sur cette connexion et aucune connexion ici ne peut durer.",
+          fix_proxy: "Servez le tableau de bord en HTTPS via un proxy inverse comme Caddy, Traefik, nginx ou tailscale serve.",
+          fix_localhost: "Ou ouvrez-le sur l'hôte lui-même avec une adresse localhost, par exemple via un tunnel SSH.",
+          form_error: "Ce navigateur ne conserve pas le cookie de session en HTTP non chiffré. Ouvrez le tableau de bord en HTTPS ou avec une adresse localhost.",
+        },
+        rate_limited: {
+          with_wait: "Trop de tentatives. Patientez {{duration}} puis réessayez.",
+          no_wait: "Trop de tentatives. Patientez un instant puis réessayez.",
         },
         session_expired: "Votre session a expiré. Connectez-vous à nouveau pour continuer.",
         account_menu: {
@@ -3451,6 +3523,12 @@ export const resources = {
             bootstrap_hint_generic: "Geben Sie den für diese Instanz ausgegebenen Bootstrap-Code ein.",
             submit: "Konto erstellen",
             submitting: "Erstellen...",
+            strength: {
+              weak: "Schwach",
+              fair: "Mittel",
+              good: "Gut",
+              strong: "Stark",
+            },
             errors: {
               bootstrap_required: "Der Bootstrap-Code ist erforderlich.",
               email_invalid: "Geben Sie eine gültige E-Mail-Adresse ein.",
@@ -3486,6 +3564,18 @@ export const resources = {
             regenerate_codes: "Wiederherstellungscodes neu generieren",
             codes_remaining: "{{count}} Wiederherstellungscodes verbleibend",
           },
+        },
+        insecure_transport: {
+          title: "HTTPS erforderlich",
+          subtitle: "Dieses Dashboard wurde über unverschlüsseltes HTTP unter {{origin}} geöffnet.",
+          reason: "Seine Anmelde-Cookies sind als Secure markiert, daher speichert dieser Browser sie über diese Verbindung nicht und keine Anmeldung hier kann bestehen bleiben.",
+          fix_proxy: "Stellen Sie das Dashboard über HTTPS hinter einem Reverse Proxy wie Caddy, Traefik, nginx oder tailscale serve bereit.",
+          fix_localhost: "Oder öffnen Sie es auf dem Host selbst über eine localhost-Adresse, zum Beispiel über einen SSH-Tunnel.",
+          form_error: "Dieser Browser speichert das Sitzungs-Cookie über unverschlüsseltes HTTP nicht. Öffnen Sie das Dashboard über HTTPS oder über eine localhost-Adresse.",
+        },
+        rate_limited: {
+          with_wait: "Zu viele Versuche. Bitte {{duration}} warten und erneut versuchen.",
+          no_wait: "Zu viele Versuche. Bitte einen Moment warten und erneut versuchen.",
         },
         session_expired: "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
         account_menu: {
@@ -17578,36 +17668,54 @@ for (const [language, labels] of Object.entries(sidebarEvaluationLabels)) {
   };
 }
 
+// `titleOne` and `descriptionOne` read for a single key; `title` and
+// `description` for several. The banner picks the form from the key count.
 const placeholderSecretsBannerLabels: Record<
   string,
-  { title: string; description: string; action: string }
+  { titleOne: string; title: string; descriptionOne: string; description: string; action: string }
 > = {
   "en-US": {
+    titleOne: "A database or object-storage secret is still a placeholder",
     title: "Database and object-storage secrets are still placeholders",
+    descriptionOne:
+      "{{keys}} still uses the public example value from .env.example, so anyone who can reach Postgres or object storage can use it. Koda keeps running; rotate it to secure this install.",
     description:
       "{{keys}} still use the public example values from .env.example, so anyone who can reach Postgres or object storage can use them. Koda keeps running; rotate them to secure this install.",
     action: "Rotation steps",
   },
   "pt-BR": {
+    titleOne: "Um segredo do banco de dados ou do armazenamento de objetos ainda é um placeholder",
     title: "Os segredos do banco de dados e do armazenamento de objetos ainda são placeholders",
+    descriptionOne:
+      "{{keys}} ainda usa o valor público de exemplo do .env.example, então qualquer pessoa que alcance o Postgres ou o armazenamento de objetos pode usá-lo. O Koda continua funcionando; troque-o para proteger esta instalação.",
     description:
       "{{keys}} ainda usam os valores públicos de exemplo do .env.example, então qualquer pessoa que alcance o Postgres ou o armazenamento de objetos pode usá-los. O Koda continua funcionando; troque-os para proteger esta instalação.",
     action: "Passos de rotação",
   },
   "es-ES": {
+    titleOne:
+      "Un secreto de la base de datos o del almacenamiento de objetos sigue siendo un marcador de posición",
     title: "Los secretos de la base de datos y del almacenamiento de objetos siguen siendo marcadores de posición",
+    descriptionOne:
+      "{{keys}} sigue usando el valor público de ejemplo de .env.example, así que cualquiera que llegue a Postgres o al almacenamiento de objetos puede usarlo. Koda sigue funcionando; rótalo para proteger esta instalación.",
     description:
       "{{keys}} siguen usando los valores públicos de ejemplo de .env.example, así que cualquiera que llegue a Postgres o al almacenamiento de objetos puede usarlos. Koda sigue funcionando; rótalos para proteger esta instalación.",
     action: "Pasos de rotación",
   },
   "fr-FR": {
+    titleOne: "Un secret de la base de données ou du stockage objet est encore une valeur d'exemple",
     title: "Les secrets de la base de données et du stockage objet sont encore des valeurs d'exemple",
+    descriptionOne:
+      "{{keys}} utilise encore la valeur d'exemple publique de .env.example : toute personne qui peut joindre Postgres ou le stockage objet peut s'en servir. Koda continue de fonctionner ; changez-la pour sécuriser cette installation.",
     description:
       "{{keys}} utilisent encore les valeurs d'exemple publiques de .env.example : toute personne qui peut joindre Postgres ou le stockage objet peut s'en servir. Koda continue de fonctionner ; changez-les pour sécuriser cette installation.",
     action: "Étapes de rotation",
   },
   "de-DE": {
+    titleOne: "Ein Datenbank- oder Objektspeicher-Geheimnis ist noch ein Platzhalter",
     title: "Datenbank- und Objektspeicher-Geheimnisse sind noch Platzhalter",
+    descriptionOne:
+      "{{keys}} verwendet noch den öffentlichen Beispielwert aus .env.example, daher kann jeder, der Postgres oder den Objektspeicher erreicht, ihn nutzen. Koda läuft weiter; rotiere ihn, um diese Installation abzusichern.",
     description:
       "{{keys}} verwenden noch die öffentlichen Beispielwerte aus .env.example, daher kann jeder, der Postgres oder den Objektspeicher erreicht, sie nutzen. Koda läuft weiter; rotiere sie, um diese Installation abzusichern.",
     action: "Schritte zur Rotation",

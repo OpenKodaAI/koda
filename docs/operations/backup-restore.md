@@ -83,8 +83,9 @@ docker run --rm -v koda-restore_koda-state:/data \
 #    start (see "Master key recovery" below) instead of creating a new key.
 docker compose -p koda-restore up -d
 
-# 6. Run doctor against the restored stack
-python3 scripts/doctor.py --base-url http://127.0.0.1:18090
+# 6. Run doctor against the restored stack. COMPOSE_PROJECT_NAME makes its
+#    Postgres and object-storage probes run in this project's app container.
+COMPOSE_PROJECT_NAME=koda-restore python3 scripts/doctor.py --base-url http://127.0.0.1:18090
 
 # 7. Verify a representative agent answers a known query
 curl -X POST http://127.0.0.1:18090/api/control-plane/agents/.../send \

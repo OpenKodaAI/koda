@@ -13,6 +13,7 @@ type AppErrorOptions = {
   cause?: unknown;
   retryable?: boolean;
   exposeMessage?: boolean;
+  reason?: string;
 };
 
 export class AppError extends Error {
@@ -21,6 +22,8 @@ export class AppError extends Error {
   cause?: unknown;
   retryable: boolean;
   exposeMessage: boolean;
+  /** Machine-readable `error.code` the route put in its response body, if any. */
+  reason?: string;
 
   constructor(message: string, options: AppErrorOptions = {}) {
     super(message);
@@ -30,6 +33,7 @@ export class AppError extends Error {
     this.cause = options.cause;
     this.retryable = options.retryable ?? false;
     this.exposeMessage = options.exposeMessage ?? false;
+    this.reason = options.reason;
   }
 }
 
@@ -53,10 +57,18 @@ export class ValidationError extends AppError {
   }
 }
 
+type ApiErrorOptions = Omit<AppErrorOptions, "code" | "status"> & {
+  retryAfterSeconds?: number | null;
+};
+
 export class ApiError extends AppError {
-  constructor(message: string, status = 500, options: Omit<AppErrorOptions, "code" | "status"> = {}) {
+  /** Seconds the response's `Retry-After` asked the client to wait, or `null` when it named none. */
+  retryAfterSeconds: number | null;
+
+  constructor(message: string, status = 500, options: ApiErrorOptions = {}) {
+    const { retryAfterSeconds = null, ...appErrorOptions } = options;
     super(message, {
-      ...options,
+      ...appErrorOptions,
       code: status === 401
         ? "UNAUTHORIZED"
         : status === 403
@@ -69,6 +81,7 @@ export class ApiError extends AppError {
       exposeMessage: true,
     });
     this.name = "ApiError";
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 

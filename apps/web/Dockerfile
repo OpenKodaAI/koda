@@ -41,9 +41,6 @@ COPY --from=deps /workspace/apps/web/node_modules ./apps/web/node_modules
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/web ./apps/web
 
-ARG SECURE_COOKIES=true
-ENV SECURE_COOKIES=${SECURE_COOKIES}
-
 RUN pnpm --filter koda-web build
 
 FROM node:26-slim AS runner

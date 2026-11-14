@@ -85,6 +85,18 @@ token is resolved by `OperatorAuthService.resolve_bearer_token`, which accepts s
 (`cp_operator_sessions`) and the break-glass `CONTROL_PLANE_API_TOKEN(S)`. Anything else
 returns `401`.
 
+During a rotation, `CONTROL_PLANE_API_TOKEN` holds a comma-separated list (`new-token,old-token`)
+and each token in it authenticates on its own. `koda auth issue-code` (and `koda install`, which
+calls it) sends the first token of that list that is not a placeholder, never the whole list.
+`scripts/doctor.py --provider` does the same, its `control_plane_api_token` check passes while one
+such token remains, and `--strict` requires every such token to be at least 32 characters. Doctor
+sends that token straight to the control plane and ignores `http_proxy` and `https_proxy`, so a
+proxy never sees it, and it never follows a redirect with it: a `3xx` from `--base-url` fails the
+provider check instead of carrying the token to the host the redirect names. It sends the token over
+plain HTTP only to loopback (`127.0.0.0/8`, `[::1]`, `localhost`), where the CLI sends it; a plain-HTTP
+`--base-url` on another host fails the provider check before any connection carries the token. Use
+an SSH tunnel or an `https://` URL from another machine.
+
 Unedited `.env.example` placeholders (values starting with `replace-with-`) never
 authenticate: they are dropped from `CONTROL_PLANE_API_TOKEN(S)` and treated as an unset
 `RUNTIME_LOCAL_UI_TOKEN`, and the supervisor logs `control_plane_api_token_placeholder_ignored`
@@ -200,9 +212,60 @@ every field and the operator's profile.
 - TTL: `CONTROL_PLANE_OPERATOR_SESSION_TTL_SECONDS` (default: 7 days).
 - Transport: session token is sealed into the `koda_operator_session` cookie with AES-256-GCM
   using `WEB_OPERATOR_SESSION_SECRET`. Cookie flags: `HttpOnly; Secure; SameSite=Strict`.
+  The dashboard's production build always sets `Secure` on its cookies; there is no switch
+  for it (`ALLOW_INSECURE_COOKIES` only works in development). See
+  [Plain HTTP](#plain-http) for what happens when the browser cannot keep them.
 - Revocation: logout revokes the current session. Password _change_ revokes every other
   session for the same user and keeps the initiating session alive. Password _reset_ via
   recovery code revokes **all** sessions for the user.
+
+### Plain HTTP
+
+A browser keeps a `Secure` cookie only on a secure context: an `https://` page, or a loopback
+host (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`). Over plain HTTP from any other
+address, such as `http://192.168.1.10:3000` on a LAN or a tailnet IP, it drops the session
+cookie without an error, so a sign-in the control plane accepted would leave no session. The
+dashboard therefore fails explicitly there instead of bouncing the operator back to `/setup`:
+
+- `/login`, `/setup` and `/forgot-password` show an "HTTPS required" screen in place of their
+  forms, naming the address that was used and the two ways in: HTTPS through a reverse proxy,
+  or a localhost address on the host (for example through an SSH tunnel). Any other page sends
+  a signed-out visitor to `/login` once, not to `/setup`, because the owner hint cookie cannot
+  be stored either.
+- `POST /api/control-plane/auth/login`, `POST /api/control-plane/auth/register-owner` and
+  `POST /api/control-plane/auth/password/recover` answer `403` with
+  `error.code: "INSECURE_TRANSPORT"` before they contact the control plane. Owner
+  registration therefore never spends the setup code or issues recovery codes for a session
+  the browser would throw away. Recovery sets no cookie, but over plain HTTP it would send the
+  recovery code and the new password across the network in clear text, consume the code,
+  revoke every session, and still end on a `/login` that cannot sign in from that browser; it
+  works over HTTPS and on a localhost address. The refusal depends only on the transport,
+  never on the credentials, so the screens show their own message for it and every
+  credential failure keeps the single generic message.
+- The web container logs a `[cookie-transport]` warning naming the address (scheme, host and
+  port), once per address per hour, for at most 32 addresses within an hour; each hour starts
+  with the first warning after the previous one ended. The address comes from the request's
+  `Origin`, `X-Forwarded-Host` or `Host` header, which any client can set, so one line per
+  address keeps a scanner's made-up address from standing in for the operator's own unless 32
+  of them arrive first. Past 32 addresses in that hour the rest are counted but not named: one
+  line says so when the first of them arrives, and the first plain-HTTP request after the hour
+  logs how many requests went unnamed. Those requests are refused like any other; only their
+  address is left out of the log, so a stream of made-up hosts cannot flood it.
+
+The dashboard decides from the request, and refuses only when it is sure: no refusal when the
+request carries Fetch Metadata headers (`Sec-Fetch-Site`, `Sec-Fetch-Mode`), which only
+browsers send and only to HTTPS and loopback pages, so they outrank an `Origin` that a proxy
+rewrote to its plain-HTTP upstream; otherwise the browser's `Origin` header when it sent one;
+otherwise the scheme and host from `X-Forwarded-Proto` and `X-Forwarded-Host` (or `Host`),
+which Next.js fills from the socket when no proxy set them. A TLS-terminating proxy should
+forward `X-Forwarded-Proto $scheme`, as the bundled `proxy/nginx.conf` does, which becomes
+`https` once its server block terminates TLS; Caddy and Traefik send it by default. Without it
+an older browser that sends no Fetch Metadata would be refused.
+
+The refusal spares the operator a sign-in that cannot last; it is not access control. A
+non-browser client on a plain-HTTP address that sets `Sec-Fetch-Site` itself is not refused,
+and it gains nothing by it: it already holds the credentials it sends, and a page script cannot
+set that header in a browser. Cross-site mutations are still blocked before this check.
 
 ## Profile data
 
@@ -258,22 +321,41 @@ one of them is compromised the whole sheet has to be rotated.
 
 ## Rate limits (bucket budgets)
 
-Per client address, enforced in `koda/control_plane/rate_limit.py`:
+Per client address, enforced in `koda/control_plane/rate_limit.py`. A bucket allows its
+whole budget as a burst and frees capacity evenly over its window, so once a burst has used
+it up, the next request is allowed after the window divided by the budget:
 
-| Endpoint                                            | Budget               |
-| --------------------------------------------------- | -------------------- |
-| `POST /auth/login`                                  | 10 requests / 5 min  |
-| `POST /auth/password/recover`                       | 10 requests / hour   |
-| `POST /auth/password/change`                        | 20 requests / hour   |
-| `PATCH /auth/profile`                               | 60 requests / hour   |
-| `POST /auth/register-owner`                         | 30 requests / hour   |
-| `POST /auth/recovery-codes/regenerate`              | 10 requests / hour   |
-| `POST /auth/bootstrap/exchange`                     | 30 requests / hour   |
-| `POST /auth/bootstrap/codes`                        | 10 requests / hour   |
+| Endpoint                               | Budget              | Wait after a burst |
+| -------------------------------------- | ------------------- | ------------------ |
+| `POST /auth/login`                     | 10 requests / 5 min | 30 s               |
+| `POST /auth/password/recover`          | 10 requests / hour  | 6 min              |
+| `POST /auth/password/change`           | 20 requests / hour  | 3 min              |
+| `PATCH /auth/profile`                  | 60 requests / hour  | 1 min              |
+| `POST /auth/register-owner`            | 30 requests / hour  | 2 min              |
+| `POST /auth/recovery-codes/regenerate` | 10 requests / hour  | 6 min              |
+| `POST /auth/bootstrap/exchange`        | 30 requests / hour  | 2 min              |
+| `POST /auth/bootstrap/codes`           | 10 requests / hour  | 6 min              |
 
 Plus the per-address general bucket (`CONTROL_PLANE_RATE_LIMIT`, default 120/min) and
 the stricter auth-failure bucket (`CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT`, default 5/min
-triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
+triggered on any 401/403). A value below 1 refuses every request that bucket covers, with
+`Retry-After: 60`, and the control plane logs `control_plane_rate_limit_refuses_every_request`
+at startup. An exhausted bucket returns `429` with `Retry-After` set to the
+whole seconds, rounded up, until the bucket that refused the request takes the next one:
+`Retry-After: 30` for login after a burst, `360` for recovery, `120` for setup. A bucket
+does not draw from a request it refuses, so retrying early does not extend its wait. The
+value follows only the client address's own requests, so it reveals nothing about an
+account.
+
+The dashboard's login, setup and recovery routes pass the `429` and its `Retry-After`
+through (`apps/web/src/lib/auth-rate-limited-response.ts`), and the `/login`, `/setup` and
+`/forgot-password` screens show a localized message with that wait, such as "Too many
+attempts. Wait 6 minutes and try again." (ADR-038). These buckets count requests per client
+address and answer the same way for existing and unknown accounts, so the message reveals
+nothing about an account. The dashboard's own per-client window (`apps/web/src/proxy.ts`,
+120 requests a minute) answers `429` with `Retry-After: 60`, the length of its window, and
+the screens show the same message. The `/settings/account` screen and its password-change
+and recovery-code routes do not show the wait yet.
 
 ### Which address a request is charged to
 
@@ -334,16 +416,26 @@ Account-level lockout remains on top of the rate limits: after
 `CONTROL_PLANE_OPERATOR_LOGIN_MAX_FAILURES` failed attempts, the row locks for
 `CONTROL_PLANE_OPERATOR_LOGIN_LOCKOUT_SECONDS`. This lockout is per account, not per client,
 so anyone who knows the identifier can still trigger it; the per-client buckets only stop one
-client from spending everyone else's budget.
+client from spending everyone else's budget. A locked account is not a `429`: it answers
+exactly like a wrong password, and the screens show the generic error, because a lockout
+message would reveal that the account exists.
 
 ## Side-channel mitigations
 
-- All auth-failure paths pad to a 300 ms floor (`_FAILURE_TIMING_FLOOR_SECONDS`) so the
-  caller cannot distinguish `user not found` from `wrong password` from `invalid recovery
-  code`.
+- Planned, not yet in place (timing floor pending M1-E1-T13): every auth-failure path pads
+  to a 300 ms floor (`_FAILURE_TIMING_FLOOR_SECONDS`) so the caller cannot distinguish
+  `user not found` from `wrong password` from `invalid recovery code` by response time.
+  Today the constant is `0.0` and nothing applies it: a login for an unknown identifier or a
+  locked account fails before any password hash is checked, so it answers faster than a
+  wrong password for an existing account.
 - Responses use a single generic error (`"Invalid credentials."`, or equivalent) without
-  leaking whether the identifier exists. The i18n layer binds every failure mode to the same
-  message in every language.
+  leaking whether the identifier exists. The i18n layer binds every failure mode (wrong
+  password, unknown user, locked account, invalid recovery code) to the same message in
+  every language. Two answers get their own message, because neither depends on the account:
+  the per-client `429`, which shows the wait since it is the same for every identifier (see
+  [Rate limits](#rate-limits-bucket-budgets)), and the plain-HTTP refusal
+  (`error.code: "INSECURE_TRANSPORT"`), which the dashboard decides from the transport before
+  it reads any credential (see [Plain HTTP](#plain-http)).
 - The structured logging pipeline redacts `password`, `new_password`, `current_password`,
   `recovery_code`, `session_token`, `registration_token`, `bootstrap_code`, `code`,
   `totp_secret`, `api_key`, `secret`, `token`, `authorization`, and `cookie` keys.

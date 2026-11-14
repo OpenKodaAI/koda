@@ -1,7 +1,9 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { InsecureTransportScreen } from "@/components/auth/insecure-transport-screen";
 import { LoginScreen } from "@/components/auth/login-screen";
 import { ControlPlaneRequestError, getControlPlaneAuthStatus } from "@/lib/control-plane";
+import { insecureCookieTransport } from "@/lib/cookie-transport";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
 import { WEB_OPERATOR_SESSION_COOKIE } from "@/lib/web-operator-session-constants";
 
@@ -17,6 +19,14 @@ function pickNext(value: string | string[] | undefined): string | null {
 }
 
 export default async function LoginPage({ searchParams }: LoginPageProps) {
+  // Over plain HTTP from a non-loopback host the browser drops the Secure
+  // session cookie, so no sign-in here could last. Explain that instead of
+  // showing a form that ends back on /setup (J-14).
+  const insecureTransport = insecureCookieTransport(await headers());
+  if (insecureTransport) {
+    return <InsecureTransportScreen origin={insecureTransport.origin} />;
+  }
+
   const params = await searchParams;
   const nextParam = pickNext(params?.next);
 

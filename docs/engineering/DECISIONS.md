@@ -764,7 +764,7 @@ Rules:
   - Two limits exist: a per-client bucket (`429` with `Retry-After`) that behaves identically for existing and unknown accounts, and a per-account lockout that only an existing account can trigger.
 - **Decision:**
   - The per-client `429` gets its own localized message with the wait time. It reveals only that this client is throttled, never anything about an account.
-  - Per-account lockout, wrong password, unknown user and invalid recovery code stay on the single generic key, and the backend keeps its timing floor.
+  - Per-account lockout, wrong password, unknown user and invalid recovery code stay on the single generic key. (Status note, WAVE-4 merge: the backend has no timing floor yet, `_FAILURE_TIMING_FLOOR_SECONDS` is 0.0; the floor is M1-E1-T13, D-136.)
   - The rule in `apps/web/CLAUDE.md` and `docs/security/authentication.md` is amended in the same change, with tests.
 - **Alternatives considered:**
   - Keep the generic message for `429`: no enumeration benefit, worse recovery for real users.

@@ -8,18 +8,27 @@ import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Input } from "@/components/ui/input";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { rateLimitedAuthMessage } from "@/lib/auth-rate-limit-message";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
-import { translate } from "@/lib/i18n";
+import { type AppTranslator, translate } from "@/lib/i18n";
+import { INSECURE_TRANSPORT_ERROR_CODE } from "@/lib/web-operator-session-constants";
 
-// Mirror LoginScreen / ForgotPasswordScreen: 4xx auth-flow errors fold into
-// one generic message (CLAUDE.md auth contract), only 5xx / network reach
-// the operator as a distinct "service unavailable" copy.
+// Mirror LoginScreen / ForgotPasswordScreen: the per-client rate limit (429)
+// says how long to wait (ADR-038), and 5xx / network reach the operator as a
+// distinct "service unavailable" copy.
 function isUpstreamFailure(error: unknown): boolean {
   if (error instanceof ApiError) {
     return error.status >= 500 || error.status === 0;
   }
   return true;
+}
+
+// Over plain HTTP from a non-loopback host the register-owner route refuses
+// before the setup code is spent, because the browser would drop the Secure
+// session cookie. Show the translated reason rather than the route's English.
+function isInsecureTransportRefusal(error: unknown): boolean {
+  return error instanceof ApiError && error.reason === INSECURE_TRANSPORT_ERROR_CODE;
 }
 
 export interface StepCreateAccountProps {
@@ -43,9 +52,29 @@ export interface RegisterOwnerResponse {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_LENGTH = 12;
 
-function scorePassword(password: string): { score: number; label: string; toneClass: string } {
+type PasswordStrength = "weak" | "fair" | "good" | "strong";
+
+// One literal key per strength, so the i18n contract test can check each one.
+function strengthLabel(t: AppTranslator, strength: PasswordStrength): string {
+  switch (strength) {
+    case "weak":
+      return t("auth.setup.create_account.strength.weak");
+    case "fair":
+      return t("auth.setup.create_account.strength.fair");
+    case "good":
+      return t("auth.setup.create_account.strength.good");
+    case "strong":
+      return t("auth.setup.create_account.strength.strong");
+  }
+}
+
+function scorePassword(password: string): {
+  score: number;
+  label: PasswordStrength | null;
+  toneClass: string;
+} {
   if (!password) {
-    return { score: 0, label: "", toneClass: "bg-[var(--surface-hover)]" };
+    return { score: 0, label: null, toneClass: "bg-[var(--surface-hover)]" };
   }
   let score = 0;
   if (password.length >= MIN_LENGTH) score += 1;
@@ -66,7 +95,7 @@ export function StepCreateAccount({
   bootstrapFilePath,
   onRegistered,
 }: StepCreateAccountProps) {
-  const { t } = useAppI18n();
+  const { t, language } = useAppI18n();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -123,7 +152,12 @@ export function StepCreateAccount({
       }
       onRegistered(payload);
     } catch (submitError) {
-      if (isUpstreamFailure(submitError)) {
+      const rateLimited = rateLimitedAuthMessage(submitError, t, language);
+      if (isInsecureTransportRefusal(submitError)) {
+        setError(t("auth.insecure_transport.form_error"));
+      } else if (rateLimited) {
+        setError(rateLimited);
+      } else if (isUpstreamFailure(submitError)) {
         setError(
           t("auth.setup.create_account.errors.service_unavailable", undefined),
         );
@@ -175,7 +209,7 @@ export function StepCreateAccount({
             placeholder={t("auth.setup.create_account.password_hint", { n: MIN_LENGTH })}
             className="auth-input"
           />
-          {password ? (
+          {passwordMeter.label ? (
             <div className="mt-2 flex items-center gap-2">
               <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-[var(--surface-hover)]">
                 <div
@@ -184,7 +218,7 @@ export function StepCreateAccount({
                 />
               </div>
               <span className="text-[10.5px] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                {t(`auth.setup.create_account.strength.${passwordMeter.label}`)}
+                {strengthLabel(t, passwordMeter.label)}
               </span>
             </div>
           ) : null}

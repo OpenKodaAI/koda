@@ -1,6 +1,7 @@
 "use client";
 
 import { ApiError } from "@/lib/errors";
+import { parseRetryAfterSeconds } from "@/lib/retry-after";
 
 const FORCE_SIGN_OUT_EVENT = "koda:force-sign-out";
 
@@ -40,11 +41,7 @@ export async function readJsonResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export async function parseResponseError(
-  response: Response,
-  fallback: string,
-) {
-  const payload = await response.json().catch(() => null);
+function errorMessageFromPayload(payload: unknown, fallback: string): string {
   if (payload && typeof payload === "object" && "error" in payload) {
     const error = payload.error;
     if (error && typeof error === "object" && "message" in error) {
@@ -55,6 +52,23 @@ export async function parseResponseError(
     return String(error);
   }
   return fallback;
+}
+
+/** `error.code` of a structured error body (`{ error: { code, message } }`). */
+function errorReasonFromPayload(payload: unknown): string | undefined {
+  if (!payload || typeof payload !== "object" || !("error" in payload)) return undefined;
+  const error = payload.error;
+  if (!error || typeof error !== "object" || !("code" in error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && code.trim() ? code.trim() : undefined;
+}
+
+export async function parseResponseError(
+  response: Response,
+  fallback: string,
+) {
+  const payload = await response.json().catch(() => null);
+  return errorMessageFromPayload(payload, fallback);
 }
 
 export async function requestJson<T = unknown>(
@@ -73,12 +87,14 @@ export async function requestJson<T = unknown>(
     if (response.status === 401) {
       dispatchForceSignOut(init.method, path);
     }
+    const payload = await response.json().catch(() => null);
     throw new ApiError(
-      await parseResponseError(
-        response,
-        `Request failed with status ${response.status}`,
-      ),
+      errorMessageFromPayload(payload, `Request failed with status ${response.status}`),
       response.status,
+      {
+        reason: errorReasonFromPayload(payload),
+        retryAfterSeconds: parseRetryAfterSeconds(response.headers.get("Retry-After")),
+      },
     );
   }
 

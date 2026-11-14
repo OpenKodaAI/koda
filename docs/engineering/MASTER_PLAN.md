@@ -723,20 +723,20 @@ Owner SEC (OPS) · Risk low · Gate none · **pending** · Deps M0-E3-T1
 - **Tests:** route matrix; unit test; G · **Evidence:** —
 
 #### M1-E1-T6 · Secret-handling correctness fixes
-Owner SEC · Risk low · Gate none · **in-progress** (`wf_3b822fa2-abc`, wave 4) · Deps —
+Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-083, SM-10, F-GOV-21, F-SET-10, F-PLT-23; ES items: empty HMAC key accepted, CLI comma-list token, doctor S3 key name
 - **Files:** `koda/services/runtime_access_service.py:50`, `packages/cli/bin/koda.mjs:629`, `scripts/doctor.py:76`
 - **Do:** `RuntimeAccessService` raises on an empty key. CLI recovery sends the first token of the `CONTROL_PLANE_API_TOKEN` list. Doctor builds the DSN from `POSTGRES_*`, reads `S3_*`, probes the published ports and honours `OBJECT_STORAGE_REQUIRED`.
 - **Done when:** doctor passes the storage and DSN checks on a generated `.env`, and CLI recovery works during a `new,old` token rotation.
-- **Tests:** service unit test; CLI test with a fake docker; doctor test; G · **Evidence:** —
+- **Tests:** service unit test; CLI test with a fake docker; doctor test; G · **Evidence:** VALIDATION_REPORT.md "WAVE-4": RuntimeAccessService refuses an empty key; CLI recovery sends the first non-placeholder token of the list (fake-docker test, `new,old` rotation); doctor builds the DSN from `POSTGRES_*`, reads `S3_*`, honours `OBJECT_STORAGE_REQUIRED`, probes a native `.env` from this host only, ignores proxies, never follows a redirect and never sends the bearer over plain HTTP off loopback; gates at aa5947f
 
 #### M1-E1-T7 · Explicit failure for session cookies over plain HTTP
-Owner FE (SEC) · Risk low · Gate none · **in-progress** (`wf_3b822fa2-abc`, wave 4) · Deps —
+Owner FE (SEC) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-085, SM-04, F-SET-14, J-14, TD-173 (the `SECURE_COOKIES` arg)
 - **Files:** `apps/web/src/lib/web-operator-session.ts`, `apps/web/src/proxy.ts`, the login screen, the troubleshooting doc, the web Dockerfile and compose build args
 - **Do:** in production, detect plain HTTP from a non-loopback host. Show a clear error that HTTPS or a reverse proxy is required, instead of bouncing to `/setup`. Fix the troubleshooting entry and remove the build arg nothing reads.
 - **Done when:** a J-14 replay shows the explicit message with no redirect loop.
-- **Tests:** web unit tests for the detection; G · **Evidence:** —
+- **Tests:** web unit tests for the detection; G · **Evidence:** VALIDATION_REPORT.md "WAVE-4": J-14 replay on the production build (Chromium 153, three runs, final code ca2e14e): plain HTTP from a non-loopback address shows "HTTPS required" after exactly one 307, no loop, no password field, `Cache-Control: no-store`; loopback setup and sign-in work; sign-in through an Origin-rewriting HTTPS proxy works. Firefox and Safari stay in the out-of-sandbox J-14 checklist (browsers not installable here)
 
 #### M1-E1-T8 · Auth contract doc and OpenAPI security parity
 Owner SEC (PROD) · Risk low · Gate none · **pending** · Deps M1-E1-T2, M1-E1-T3, M1-E1-T4, M1-E1-T5, M1-E1-T6, M1-E1-T7, M1-E1-T13, M1-E1-T14, M1-E1-T15
@@ -795,13 +795,13 @@ Owner SEC · Risk low · Gate none · **done** · Deps DEFECT-BATCH-1 (D-018) me
 - **Tests:** unit tests; route test; G · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (setup codes typed lowercase, compact or with spaces register the owner; a wrong code keeps the generic error; seeds are never logged)
 
 #### M1-E1-T18 · Account-independent rate-limit message on auth screens
-Owner FE (SEC) · Risk low · Gate none · **in-progress** (`wf_3b822fa2-abc`, wave 4) · Deps DEFECT-BATCH-1 (D-004) merged
+Owner FE (SEC) · Risk low · Gate none · **done** · Deps DEFECT-BATCH-1 (D-004) merged
 - **Addresses:** D-004 (remainder: a rate-limited login still shows "Invalid credentials."), SM-02
 - **Decision:** the per-client `429` is independent of whether the account exists, so a distinct "Too many attempts, wait N minutes" message reveals nothing about accounts. Per-account lockout and every identity error stay on the single generic key. Amend the "Auth screens" rule in `apps/web/CLAUDE.md` accordingly (DECISIONS.md entry).
 - **Files:** `apps/web/src/app/api/control-plane/auth/*/route.ts`, the auth screen components and i18n resources, `apps/web/CLAUDE.md`, `docs/security/authentication.md`
 - **Do:** pass `429` and `Retry-After` through the auth routes and show a localized, generic "too many attempts" message with the wait time; keep every other failure on the generic key.
 - **Done when:** a rate-limited login, setup or recovery attempt shows the wait message in every locale, and a locked account still shows the generic error.
-- **Tests:** route tests; component tests; i18n contract; G · **Evidence:** —
+- **Tests:** route tests; component tests; i18n contract; G · **Evidence:** VALIDATION_REPORT.md "WAVE-4": 429 on /login, /setup and /forgot-password shows the per-client wait from `Retry-After` through one helper; the auth-error contract test scans the screens and every module they import; ADR-038; gates at aa5947f
 
 #### M1-E2 — Agent-native tool governance (ADR-002, Option C approved)
 

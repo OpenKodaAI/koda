@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, type ReactNode } from "react";
+import { Children, createContext, type ReactNode, useContext, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -97,50 +97,82 @@ function renderMentionChildren(
   });
 }
 
-function createMarkdownComponents(options: MentionRenderOptions | null): Components {
-  return {
-    a: ({ href, children, ...props }) => (
-      <ExternalLink href={href ?? "#"} {...props}>
-        {children}
-      </ExternalLink>
-    ),
-    table: ({ children }) => (
-      <div className="session-richtext__table-wrap">
-        <table>{children}</table>
-      </div>
-    ),
-    p: ({ children }) => (
-      <p>{renderMentionChildren(children, options, "p")}</p>
-    ),
-    li: ({ children }) => (
-      <li>{renderMentionChildren(children, options, "li")}</li>
-    ),
-    h1: ({ children }) => (
-      <h1>{renderMentionChildren(children, options, "h1")}</h1>
-    ),
-    h2: ({ children }) => (
-      <h2>{renderMentionChildren(children, options, "h2")}</h2>
-    ),
-    h3: ({ children }) => (
-      <h3>{renderMentionChildren(children, options, "h3")}</h3>
-    ),
-    h4: ({ children }) => (
-      <h4>{renderMentionChildren(children, options, "h4")}</h4>
-    ),
-    h5: ({ children }) => (
-      <h5>{renderMentionChildren(children, options, "h5")}</h5>
-    ),
-    h6: ({ children }) => (
-      <h6>{renderMentionChildren(children, options, "h6")}</h6>
-    ),
-    th: ({ children, align }) => (
-      <th align={align}>{renderMentionChildren(children, options, "th")}</th>
-    ),
-    td: ({ children, align }) => (
-      <td align={align}>{renderMentionChildren(children, options, "td")}</td>
-    ),
-  };
+// The mention options reach the markdown components through context, so the components
+// themselves are created once. ReactMarkdown renders each element with the component given
+// for its tag; a component created during render is a new type every time, and React would
+// then replace every paragraph, list item, heading, cell and link of the message on each
+// re-render of the thread.
+const MentionOptionsContext = createContext<MentionRenderOptions | null>(null);
+
+function WithMentions({ tag, children }: { tag: string; children: ReactNode }) {
+  const options = useContext(MentionOptionsContext);
+  return <>{renderMentionChildren(children, options, tag)}</>;
 }
+
+const MARKDOWN_COMPONENTS: Components = {
+  a: ({ href, children, ...props }) => (
+    <ExternalLink href={href ?? "#"} {...props}>
+      {children}
+    </ExternalLink>
+  ),
+  table: ({ children }) => (
+    <div className="session-richtext__table-wrap">
+      <table>{children}</table>
+    </div>
+  ),
+  p: ({ children }) => (
+    <p>
+      <WithMentions tag="p">{children}</WithMentions>
+    </p>
+  ),
+  li: ({ children }) => (
+    <li>
+      <WithMentions tag="li">{children}</WithMentions>
+    </li>
+  ),
+  h1: ({ children }) => (
+    <h1>
+      <WithMentions tag="h1">{children}</WithMentions>
+    </h1>
+  ),
+  h2: ({ children }) => (
+    <h2>
+      <WithMentions tag="h2">{children}</WithMentions>
+    </h2>
+  ),
+  h3: ({ children }) => (
+    <h3>
+      <WithMentions tag="h3">{children}</WithMentions>
+    </h3>
+  ),
+  h4: ({ children }) => (
+    <h4>
+      <WithMentions tag="h4">{children}</WithMentions>
+    </h4>
+  ),
+  h5: ({ children }) => (
+    <h5>
+      <WithMentions tag="h5">{children}</WithMentions>
+    </h5>
+  ),
+  h6: ({ children }) => (
+    <h6>
+      <WithMentions tag="h6">{children}</WithMentions>
+    </h6>
+  ),
+  th: ({ children, align }) => (
+    <th align={align}>
+      <WithMentions tag="th">{children}</WithMentions>
+    </th>
+  ),
+  td: ({ children, align }) => (
+    <td align={align}>
+      <WithMentions tag="td">{children}</WithMentions>
+    </td>
+  ),
+};
+
+const REMARK_PLUGINS = [remarkGfm, remarkBreaks];
 
 export function SessionRichText({
   content,
@@ -149,10 +181,13 @@ export function SessionRichText({
   mentionsByToken,
   mentionVariant = "badge",
 }: SessionRichTextProps) {
-  const mentionOptions =
-    mentionsByToken && mentionsByToken.size > 0
-      ? { mentionsByToken, variant: mentionVariant }
-      : null;
+  const mentionOptions = useMemo(
+    () =>
+      mentionsByToken && mentionsByToken.size > 0
+        ? { mentionsByToken, variant: mentionVariant }
+        : null,
+    [mentionsByToken, mentionVariant],
+  );
   return (
     <div
       className={cn(
@@ -161,12 +196,11 @@ export function SessionRichText({
         className
       )}
     >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        components={createMarkdownComponents(mentionOptions)}
-      >
-        {normalizeSessionMarkdown(content)}
-      </ReactMarkdown>
+      <MentionOptionsContext.Provider value={mentionOptions}>
+        <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={MARKDOWN_COMPONENTS}>
+          {normalizeSessionMarkdown(content)}
+        </ReactMarkdown>
+      </MentionOptionsContext.Provider>
     </div>
   );
 }

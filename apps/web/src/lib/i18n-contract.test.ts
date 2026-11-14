@@ -29,6 +29,8 @@ const SMOKE_KEYS = [
   "common.search",
   "routeMeta.runtime.title",
   "auth.login.submit",
+  "auth.rate_limited.with_wait",
+  "auth.rate_limited.no_wait",
   "account.profile.photo.choose",
   "settings.sections.models.label",
   "runtime.attach.terminalTimeout",
@@ -106,6 +108,42 @@ function literalText(node: ts.Node) {
   return null;
 }
 
+/**
+ * Keys that sources pass to the translator although no locale defines them, so
+ * the screen shows the raw key or a hard-coded `defaultValue`. They predate
+ * this check and belong to other features; remove an entry when its key is
+ * added. A new key must be added to the resources instead.
+ */
+const KNOWN_UNRESOLVED_KEYS = new Set([
+  "common.command",
+  "common.createdAt",
+  "costs.page.distributionEyebrow",
+  "costs.page.distributionTitle",
+  "executions.detail.redactions",
+  "runtime.overview.searching",
+  "runtime.overview.sources.environment",
+  "runtime.overview.sources.queue",
+  "runtime.overview.table.agent",
+  "runtime.overview.table.source",
+  "runtime.overview.table.summary",
+  "runtime.overview.table.task",
+  "runtime.overview.table.updated",
+  "runtime.room.sourceRootMissing",
+  "sessions.artifacts.csvTruncated",
+  // Template keys, by their fixed head.
+  "controlPlane.create.title.",
+  "controlPlane.create.type.",
+  "sessions.artifacts.kind.",
+]);
+
+/** The translation key a call passes: `t(key)`, `translate(key)`, `translateForLanguage(language, key)`. */
+function translationKeyArgument(node: ts.CallExpression, sourceFile: ts.SourceFile) {
+  const callee = node.expression.getText(sourceFile);
+  if (callee === "t" || callee === "translate") return node.arguments[0];
+  if (callee === "translateForLanguage") return node.arguments[1];
+  return undefined;
+}
+
 function propertyNameText(name: ts.PropertyName) {
   if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) {
     return name.text;
@@ -148,6 +186,73 @@ describe("i18n contract", () => {
         expect(translated, `${language}.${key}`).not.toBe(key);
       }
     }
+  });
+
+  it("gives the per-client rate limit its own message, with the wait, in every language (ADR-038)", () => {
+    for (const language of SUPPORTED_LANGUAGES) {
+      const withWait = translateForLanguage(language, "auth.rate_limited.with_wait", {
+        duration: "__WAIT__",
+      });
+      const noWait = translateForLanguage(language, "auth.rate_limited.no_wait");
+      const credentialErrors = [
+        translateForLanguage(language, "auth.login.generic_error"),
+        translateForLanguage(language, "auth.forgot.generic_error"),
+        translateForLanguage(language, "auth.setup.create_account.errors.generic"),
+      ];
+
+      expect(withWait, `${language} with_wait`).toContain("__WAIT__");
+      expect(noWait, `${language} no_wait`).not.toBe("auth.rate_limited.no_wait");
+      expect(noWait, `${language} no_wait`).not.toContain("{{");
+      expect(credentialErrors, `${language} with_wait`).not.toContain(withWait);
+      expect(credentialErrors, `${language} no_wait`).not.toContain(noWait);
+    }
+  });
+
+  it("defines every key that a source passes to the translator", () => {
+    const keys = flattenResources(resources["en-US"].translation);
+    const unresolved = new Set<string>();
+    const where: string[] = [];
+
+    for (const filePath of listSourceFiles(UI_SOURCE_ROOT)) {
+      const source = fs.readFileSync(filePath, "utf8");
+      const sourceFile = ts.createSourceFile(
+        filePath,
+        source,
+        ts.ScriptTarget.Latest,
+        true,
+        filePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+      );
+
+      function visit(node: ts.Node) {
+        const key = ts.isCallExpression(node) ? translationKeyArgument(node, sourceFile) : undefined;
+        // A literal key must name a string; a template key such as
+        // `strength.${label}` must at least name a namespace that exists.
+        let missing: string | null = null;
+        if (key && (ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key))) {
+          if (!keys.has(key.text)) missing = key.text;
+        } else if (key && ts.isTemplateExpression(key)) {
+          const head = key.head.text;
+          if (!Array.from(keys.keys()).some((name) => name.startsWith(head))) missing = head;
+        }
+        if (missing !== null) {
+          unresolved.add(missing);
+          if (!KNOWN_UNRESOLVED_KEYS.has(missing)) {
+            const { line } = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+            where.push(`${path.relative(process.cwd(), filePath)}:${line + 1} ${missing}`);
+          }
+        }
+        ts.forEachChild(node, visit);
+      }
+
+      visit(sourceFile);
+    }
+
+    expect(where, "keys no locale defines").toEqual([]);
+    // The known gaps only shrink: once a key is defined, drop it from the list.
+    expect(
+      Array.from(KNOWN_UNRESOLVED_KEYS).filter((key) => !unresolved.has(key)),
+      "KNOWN_UNRESOLVED_KEYS entries that now resolve",
+    ).toEqual([]);
   });
 
   it("does not ship fixed frontend copy as source literals", () => {
