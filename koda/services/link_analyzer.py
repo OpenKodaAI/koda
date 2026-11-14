@@ -12,6 +12,19 @@ from koda.utils.url_detector import LinkType, classify_url, extract_youtube_id, 
 
 log = get_logger(__name__)
 
+_YOUTUBE_VIDEO_ID = re.compile(r"[A-Za-z0-9_-]{11}")
+
+
+def _youtube_watch_url(youtube_id: str) -> str:
+    """Build the only URL yt-dlp is ever given.
+
+    yt-dlp resolves DNS and follows redirects by itself, outside the SSRF guard
+    in :mod:`koda.services.http_client`, so it must never receive the user's URL.
+    """
+    if not _YOUTUBE_VIDEO_ID.fullmatch(youtube_id):
+        raise ValueError(f"Invalid YouTube video ID: {youtube_id!r}")
+    return f"https://www.youtube.com/watch?v={youtube_id}"
+
 
 @dataclass
 class LinkMetadata:
@@ -117,7 +130,7 @@ async def _fetch_youtube_metadata(meta: LinkMetadata) -> None:
             "--dump-json",
             "--no-download",
             "--no-playlist",
-            meta.url,
+            _youtube_watch_url(meta.youtube_id or ""),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -156,10 +169,16 @@ async def _fetch_youtube_metadata(meta: LinkMetadata) -> None:
         await _fetch_og_metadata(meta)
 
 
-async def fetch_youtube_transcript(url: str, lang: str = "pt") -> str | None:
-    """Fetch YouTube transcript using yt-dlp subtitles."""
+async def fetch_youtube_transcript(youtube_id: str, lang: str = "pt") -> str | None:
+    """Fetch the transcript of a YouTube video, by video ID, using yt-dlp subtitles."""
     import tempfile
     from pathlib import Path
+
+    try:
+        watch_url = _youtube_watch_url(youtube_id)
+    except ValueError:
+        log.warning("transcript_invalid_youtube_id", youtube_id=youtube_id[:64])
+        return None
 
     with tempfile.TemporaryDirectory() as tmpdir:
         output_template = str(Path(tmpdir) / "sub")
@@ -174,7 +193,7 @@ async def fetch_youtube_transcript(url: str, lang: str = "pt") -> str | None:
                 "vtt",
                 "-o",
                 output_template,
-                url,
+                watch_url,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

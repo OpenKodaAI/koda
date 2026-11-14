@@ -105,13 +105,15 @@ class TestCallbackLinkAnalysis:
                 "koda.services.link_analyzer.fetch_youtube_transcript",
                 new_callable=AsyncMock,
                 return_value="[00:00] Hello world\n[00:05] This is a test",
-            ),
+            ) as mock_transcript,
             patch(
                 "koda.services.queue_manager.enqueue_link_analysis",
                 new_callable=AsyncMock,
             ) as mock_enqueue,
         ):
             await callback_link_analysis(mock_callback_update, mock_context)
+            # yt-dlp is driven by the video ID, never by the stored user URL
+            mock_transcript.assert_awaited_once_with("abc12345678")
             # Should NOT go through provider execution
             mock_enqueue.assert_not_called()
             # Should send message directly

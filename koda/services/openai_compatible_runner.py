@@ -24,7 +24,7 @@ import aiohttp
 
 from koda.config import AGENT_ID, MODEL_PRICING_USD
 from koda.logging_config import get_logger
-from koda.services.http_client import _check_url_safety
+from koda.services.http_client import _check_url_safety, public_only_connector
 from koda.services.provider_auth import (
     PROVIDER_API_KEY_ENV_KEYS,
     PROVIDER_BASE_URL_ENV_KEYS,
@@ -125,9 +125,8 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
         )
 
     base_url = _resolve_base_url(profile, env)
-    safe_base = _check_url_safety(
-        base_url, allow_private=profile.allow_private_base_url or _looks_like_override(profile, env)
-    )
+    allow_private = _allows_private_base_url(profile, env)
+    safe_base = _check_url_safety(base_url, allow_private=allow_private)
     if safe_base is not None:
         return ProviderCapabilities(
             provider=profile.provider_id,
@@ -146,8 +145,8 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
     headers = _profile_headers(profile, api_key, env)
     try:
         async with (
-            aiohttp.ClientSession(timeout=timeout) as session,
-            session.get(probe_url, headers=headers) as resp,
+            _provider_session(timeout, allow_private=allow_private) as session,
+            session.get(probe_url, headers=headers, allow_redirects=allow_private) as resp,
         ):
             status = resp.status
             body = (await resp.text(encoding="utf-8", errors="replace"))[:512]
@@ -281,9 +280,8 @@ async def run_openai_compatible(
         )
 
     base_url = _resolve_base_url(profile, env)
-    safe_error = _check_url_safety(
-        base_url, allow_private=profile.allow_private_base_url or _looks_like_override(profile, env)
-    )
+    allow_private = _allows_private_base_url(profile, env)
+    safe_error = _check_url_safety(base_url, allow_private=allow_private)
     if safe_error is not None:
         return _error_result(
             profile,
@@ -311,9 +309,14 @@ async def run_openai_compatible(
     timeout = aiohttp.ClientTimeout(total=profile.request_timeout_seconds)
     chat_url = _join_with_base(base_url, profile.chat_path)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with _provider_session(timeout, allow_private=allow_private) as session:
             request_task: asyncio.Task[aiohttp.ClientResponse] = asyncio.create_task(
-                session.post(chat_url, headers=_profile_headers(profile, api_key, env), json=payload)
+                session.post(
+                    chat_url,
+                    headers=_profile_headers(profile, api_key, env),
+                    json=payload,
+                    allow_redirects=allow_private,
+                )
             )
             if process_holder is not None:
                 process_holder["task"] = request_task
@@ -353,7 +356,7 @@ async def run_openai_compatible(
             retryable=True,
         )
 
-    if status >= 400:
+    if status >= 300:  # an unfollowed redirect is an error, not an empty answer
         kind, retryable = _classify_http_error(status, body_text)
         snippet = _short_error_snippet(body_text)
         return _error_result(
@@ -458,9 +461,8 @@ async def run_openai_compatible_streaming(
         return
 
     base_url = _resolve_base_url(profile, env)
-    safe_error = _check_url_safety(
-        base_url, allow_private=profile.allow_private_base_url or _looks_like_override(profile, env)
-    )
+    allow_private = _allows_private_base_url(profile, env)
+    safe_error = _check_url_safety(base_url, allow_private=allow_private)
     if safe_error is not None:
         if metadata_collector is not None:
             metadata_collector["error"] = True
@@ -495,12 +497,17 @@ async def run_openai_compatible_streaming(
 
     try:
         async with (
-            aiohttp.ClientSession(timeout=request_timeout) as session,
-            session.post(chat_url, headers=_profile_headers(profile, api_key, env), json=payload) as resp,
+            _provider_session(request_timeout, allow_private=allow_private) as session,
+            session.post(
+                chat_url,
+                headers=_profile_headers(profile, api_key, env),
+                json=payload,
+                allow_redirects=allow_private,
+            ) as resp,
         ):
             if process_holder is not None:
                 process_holder["task"] = asyncio.current_task()
-            if resp.status >= 400:
+            if resp.status >= 300:  # an unfollowed redirect is an error, not an empty stream
                 body_text = await resp.text(encoding="utf-8", errors="replace")
                 kind, retryable = _classify_http_error(resp.status, body_text)
                 if metadata_collector is not None:
@@ -645,6 +652,25 @@ def _looks_like_override(profile: ProviderHttpProfile, env: dict[str, str]) -> b
         return False
     override = str(env.get(base_url_env) or os.environ.get(base_url_env) or "").strip()
     return bool(override) and override != profile.base_url
+
+
+def _allows_private_base_url(profile: ProviderHttpProfile, env: dict[str, str]) -> bool:
+    """Operator-set base URLs (and profiles flagged for it) may point at private hosts."""
+    return profile.allow_private_base_url or _looks_like_override(profile, env)
+
+
+def _provider_session(timeout: aiohttp.ClientTimeout, *, allow_private: bool) -> aiohttp.ClientSession:
+    """Open the session for one provider call.
+
+    Unless private base URLs are allowed, DNS answers are re-checked at connect
+    time so the host cannot rebind to a private address after
+    :func:`_check_url_safety` passed.  Those requests also pass
+    ``allow_redirects=False``: aiohttp would follow a redirect (307/308 keep the
+    POST and its auth headers) without that check.
+    """
+    if allow_private:
+        return aiohttp.ClientSession(timeout=timeout)
+    return aiohttp.ClientSession(timeout=timeout, connector=public_only_connector())
 
 
 def _join_with_base(base_url: str, path: str) -> str:

@@ -7,11 +7,13 @@ import pytest
 
 from koda.services.link_analyzer import (
     LinkMetadata,
+    _fetch_youtube_metadata,
     _parse_vtt,
     build_analysis_prompt,
     build_link_keyboard,
     dict_to_meta,
     fetch_link_metadata,
+    fetch_youtube_transcript,
     meta_to_dict,
 )
 from koda.utils.url_detector import LinkType
@@ -79,6 +81,80 @@ class TestFetchYoutubeMetadata:
 
         assert meta.title == "Fallback Title"
         assert meta.youtube_id == "abc12345678"
+
+
+def _finished_ytdlp(stdout: bytes = b"") -> AsyncMock:
+    proc = AsyncMock()
+    proc.communicate = AsyncMock(return_value=(stdout, b""))
+    proc.returncode = 0
+    return proc
+
+
+class TestYtDlpOnlySeesCanonicalYoutubeUrls:
+    """yt-dlp resolves DNS and follows redirects itself, outside the SSRF guard.
+
+    It must therefore never be handed the user's URL, only a watch URL built
+    from a validated video ID.
+    """
+
+    @pytest.mark.asyncio
+    async def test_private_url_embedding_a_youtube_id_never_reaches_ytdlp(self):
+        from koda.services import http_client
+
+        url = "http://169.254.169.254/latest/meta-data/?youtu.be/AAAAAAAAAAA"
+        with (
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as spawn,
+            patch.object(http_client, "fetch_url", wraps=http_client.fetch_url) as fetch,
+        ):
+            meta = await fetch_link_metadata(url)
+
+        spawn.assert_not_called()
+        fetch.assert_awaited_once_with(url)  # the guarded fetch, which refuses the metadata address
+        assert meta.youtube_id is None
+        assert meta.link_type == LinkType.ARTICLE
+        assert meta.title == ""
+
+    @pytest.mark.asyncio
+    async def test_metadata_lookup_passes_canonical_watch_url(self):
+        meta = LinkMetadata(
+            url="http://127.0.0.1:2375/containers/json",
+            link_type=LinkType.VIDEO,
+            youtube_id="abc12345678",
+        )
+        with patch(
+            "asyncio.create_subprocess_exec", return_value=_finished_ytdlp(json.dumps({"title": "T"}).encode())
+        ) as spawn:
+            await _fetch_youtube_metadata(meta)
+
+        args = spawn.call_args.args
+        assert args[0] == "yt-dlp"
+        assert args[-1] == "https://www.youtube.com/watch?v=abc12345678"
+        assert meta.url not in args
+        assert meta.title == "T"
+
+    @pytest.mark.asyncio
+    async def test_youtube_link_is_looked_up_by_id_not_by_the_raw_url(self):
+        with patch("asyncio.create_subprocess_exec", return_value=_finished_ytdlp(b"{}")) as spawn:
+            await fetch_link_metadata("https://www.youtube.com/watch?v=abc12345678&feature=share#t=1")
+
+        assert spawn.call_args.args[-1] == "https://www.youtube.com/watch?v=abc12345678"
+
+    @pytest.mark.asyncio
+    async def test_transcript_lookup_passes_canonical_watch_url(self):
+        with patch("asyncio.create_subprocess_exec", return_value=_finished_ytdlp()) as spawn:
+            assert await fetch_youtube_transcript("abc12345678") is None  # no .vtt was written
+
+        args = spawn.call_args.args
+        assert args[0] == "yt-dlp"
+        assert args[-1] == "https://www.youtube.com/watch?v=abc12345678"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("bad_id", ["", "abc", "--exec=id x", "http://127.0.0.1:2375/xx"])
+    async def test_transcript_lookup_rejects_malformed_ids(self, bad_id):
+        with patch("asyncio.create_subprocess_exec", new_callable=AsyncMock) as spawn:
+            assert await fetch_youtube_transcript(bad_id) is None
+
+        spawn.assert_not_called()
 
 
 class TestParseVtt:
