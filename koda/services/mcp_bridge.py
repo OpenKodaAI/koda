@@ -367,7 +367,7 @@ async def _lazy_start_mcp_server(server_key: str, agent_id: str) -> McpServerIns
     """Start an MCP server on-demand using catalog + connection config."""
     try:
         from koda.services.mcp_bootstrap import (
-            _connection_env_values,
+            _decrypt_connection_env,
             _load_agent_mcp_connections,
             _load_catalog_entry,
         )
@@ -387,7 +387,7 @@ async def _lazy_start_mcp_server(server_key: str, agent_id: str) -> McpServerIns
         command_list = conn.get("command_override") or conn.get("command") or catalog.get("command") or []
         command = command_list if isinstance(command_list, list) else None
         url = conn.get("url_override") or conn.get("url") or catalog.get("remote_url") or catalog.get("url")
-        env_values = _connection_env_values(conn)
+        env_values = _decrypt_connection_env(conn)
         headers = conn.get("headers") if isinstance(conn.get("headers"), dict) else None
 
         instance = await mcp_server_manager.ensure_started(

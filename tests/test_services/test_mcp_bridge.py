@@ -185,6 +185,35 @@ async def test_handle_mcp_tool_call_server_not_started():
 
 
 @pytest.mark.asyncio
+async def test_lazy_start_passes_the_bootstrap_env_helper_values_to_the_server():
+    """The bridge imports the bootstrap helpers inside a broad ``try``; a renamed
+    helper would only log ``mcp_lazy_start_failed``. Pin the names it imports."""
+    from koda.services.mcp_bridge import _lazy_start_mcp_server
+
+    instance = MagicMock()
+    instance.cached_tools = []
+    with (
+        patch(
+            "koda.services.mcp_bootstrap._load_catalog_entry",
+            return_value={"server_key": "github", "transport_type": "stdio", "command": ["mcp-github"]},
+        ),
+        patch(
+            "koda.services.mcp_bootstrap._load_agent_mcp_connections",
+            return_value=[{"server_key": "github", "enabled": True}],
+        ),
+        patch("koda.services.mcp_bootstrap._decrypt_connection_env", return_value={"API_TOKEN": "value"}),
+        patch("koda.services.mcp_bridge.mcp_server_manager") as mock_manager,
+        patch("koda.services.mcp_bridge.register_mcp_tools_for_agent"),
+    ):
+        mock_manager.ensure_started = AsyncMock(return_value=instance)
+        started = await _lazy_start_mcp_server("github", "agent-1")
+
+    assert started is instance
+    mock_manager.ensure_started.assert_awaited_once()
+    assert mock_manager.ensure_started.await_args.kwargs["env"] == {"API_TOKEN": "value"}
+
+
+@pytest.mark.asyncio
 async def test_handle_mcp_tool_call_invalid_tool_id():
     result = await handle_mcp_tool_call("web_search", {}, "agent-1")
     assert result["success"] is False

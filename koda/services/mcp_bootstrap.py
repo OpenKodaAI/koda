@@ -55,7 +55,7 @@ async def bootstrap_mcp_for_agent(agent_id: str) -> dict[str, Any]:
             command_list = conn.get("command_override") or conn.get("command") or catalog.get("command") or []
             command = command_list if isinstance(command_list, list) else None
             url = conn.get("url_override") or conn.get("url") or catalog.get("remote_url") or catalog.get("url")
-            env_values = _connection_env_values(conn)
+            env_values = _decrypt_connection_env(conn)
             headers = conn.get("headers") if isinstance(conn.get("headers"), dict) else None
 
             # Token freshness check for OAuth connections
@@ -71,7 +71,7 @@ async def bootstrap_mcp_for_agent(agent_id: str) -> dict[str, Any]:
                     # Re-load env values since they may have been refreshed
                     refreshed_conn = _load_single_connection(agent_id, server_key)
                     if refreshed_conn:
-                        env_values = _connection_env_values(refreshed_conn)
+                        env_values = _decrypt_connection_env(refreshed_conn)
                         headers = (
                             refreshed_conn.get("headers")
                             if isinstance(refreshed_conn.get("headers"), dict)
@@ -246,7 +246,7 @@ def _load_single_connection(agent_id: str, server_key: str) -> dict[str, Any] | 
         return None
 
 
-def _connection_env_values(conn: dict[str, Any]) -> dict[str, str]:
+def _decrypt_connection_env(conn: dict[str, Any]) -> dict[str, str]:
     """Extract environment values from a connection.
 
     Runtime snapshots may inline already-decrypted values under ``env_values``.
