@@ -17,6 +17,10 @@ This module pins one authorization decision per route:
   token while the worker has no secret. WebSocket routes refuse the upgrade.
 * A read-only token cannot call a ``mutate`` or ``attach`` route.
 * A token that holds exactly the required capability passes the check.
+
+Known gap, pinned as a strict xfail (``_EMPTY_AGENT_SCOPE_GAP``): the agent
+check is skipped when the token has no agent scope or the worker has no
+``AGENT_ID``, so such a token passes on every route.
 """
 
 from __future__ import annotations
@@ -265,6 +269,24 @@ class Rejection(NamedTuple):
     headers: dict[str, str]
     error: str
     worker_secret: str = _SECRET
+    worker_agent: str | None = _AGENT
+
+
+# ``RuntimeAccessService.authorize`` compares agent scopes only when both sides
+# have one: ``if envelope.agent_scope and agent_scope not in {"", envelope.agent_scope}``.
+_EMPTY_AGENT_SCOPE_GAP = pytest.mark.xfail(
+    strict=True,
+    raises=AssertionError,
+    reason=(
+        "New defect found in the M0-E3-T9 review, not yet registered (no D- id or owning task; it needs a new "
+        "SEC task, and M1-E1-T6 already changes koda/services/runtime_access_service.py): "
+        "RuntimeAccessService.authorize treats an empty agent scope as a wildcard on both sides. A token "
+        "signed without an agent scope passes on every worker, and a worker without AGENT_ID accepts a token "
+        "for any agent. RUNTIME_LOCAL_UI_TOKEN is one global secret, so the agent scope is the only boundary "
+        "between agents. No issuer signs an empty scope today and the supervisor always sets AGENT_ID. "
+        "The fix must also re-sign the tokens in tests/test_services/runtime/test_api.py, which use an empty scope."
+    ),
+)
 
 
 def _rejection(case: str, required: str) -> Rejection:
@@ -291,6 +313,21 @@ def _rejection(case: str, required: str) -> Rejection:
             _ERRORS["unconfigured"],
             worker_secret="",
         )
+    if case == "token-without-agent-scope":
+        return Rejection({"X-Runtime-Token": _token(*all_caps, agent="")}, _ERRORS["invalid"])
+    if case == "worker-without-agent-id":
+        return Rejection(
+            {"X-Runtime-Token": _token(*all_caps, agent=_OTHER_AGENT)},
+            _ERRORS["invalid"],
+            worker_agent=None,
+        )
+    if case == "worker-with-empty-agent-id":
+        # ``AGENT_ID=`` in the environment gives an empty string, not None.
+        return Rejection(
+            {"X-Runtime-Token": _token(*all_caps, agent=_OTHER_AGENT)},
+            _ERRORS["invalid"],
+            worker_agent="",
+        )
     raise AssertionError(f"unknown rejection case {case}")
 
 
@@ -303,12 +340,19 @@ _REJECTION_CASES = (
     "other-agent",
     "lacks-capability",
     "worker-without-secret",
+    pytest.param("token-without-agent-scope", marks=_EMPTY_AGENT_SCOPE_GAP, id="token-without-agent-scope"),
+    pytest.param("worker-without-agent-id", marks=_EMPTY_AGENT_SCOPE_GAP, id="worker-without-agent-id"),
+    pytest.param("worker-with-empty-agent-id", marks=_EMPTY_AGENT_SCOPE_GAP, id="worker-with-empty-agent-id"),
 )
 
 
 # --------------------------------------------------------------------------- #
 # Fixtures and request helper
 # --------------------------------------------------------------------------- #
+
+
+class _RuntimeReached(RuntimeError):
+    """Raised by the runtime controller stub when a request should never have reached it."""
 
 
 @pytest.fixture
@@ -418,6 +462,10 @@ async def test_route_rejects_a_request_without_a_valid_token(
 ) -> None:
     rejection = _rejection(case, decision.capability)
     monkeypatch.setattr(runtime_api, "RUNTIME_LOCAL_UI_TOKEN", rejection.worker_secret)
+    monkeypatch.setattr(runtime_api, "AGENT_ID", rejection.worker_agent)
+    # A request that wrongly passes the check stops at the runtime (aiohttp answers
+    # 500) instead of running the rest of the handler against a stub.
+    controller_factory.side_effect = _RuntimeReached(f"{method} {path} reached the runtime")
 
     status, body = await _send(client, method, path, decision, rejection.headers)
 
@@ -539,18 +587,37 @@ def _scope_headers(case: str) -> dict[str, str]:
         return {"X-Runtime-Access-Scope": _token(READ, agent=_OTHER_AGENT, sensitive=True)}
     if case == "forged-signature":
         return {"X-Runtime-Access-Scope": _token(READ, secret=_FOREIGN_SECRET, sensitive=True)}
+    if case == "scope-without-agent-scope":
+        return {"X-Runtime-Access-Scope": _token(READ, agent="", sensitive=True)}
     raise AssertionError(f"unknown scope case {case}")
 
 
-@pytest.mark.parametrize("case", ["no-scope-token", "scope-not-sensitive", "other-agent", "forged-signature"])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "no-scope-token",
+        "scope-not-sensitive",
+        "other-agent",
+        "forged-signature",
+        pytest.param("scope-without-agent-scope", marks=_EMPTY_AGENT_SCOPE_GAP, id="scope-without-agent-scope"),
+    ],
+)
 async def test_task_detail_sensitive_view_requires_a_sensitive_scope_token(
     client: TestClient,
     controller_factory: MagicMock,
+    monkeypatch: pytest.MonkeyPatch,
     case: str,
 ) -> None:
     controller = controller_factory.return_value
     controller.store.get_task_runtime.return_value = {"id": 7, "agent_id": _AGENT}
     headers = {"X-Runtime-Token": _token(READ), **_scope_headers(case)}
+    real_check = runtime_api._authorize_sensitive_runtime_access
+
+    def _stop_after_the_check(request: web.Request, *, agent_scope: str) -> web.Response:
+        # A scope the real check accepts ends the handler here, before the sensitive reads.
+        return real_check(request, agent_scope=agent_scope) or web.json_response({"sensitive": "authorized"})
+
+    monkeypatch.setattr(runtime_api, "_authorize_sensitive_runtime_access", _stop_after_the_check)
 
     async with client.get("/api/runtime/tasks/7?include_sensitive=true", headers=headers) as response:
         assert response.status == 403
