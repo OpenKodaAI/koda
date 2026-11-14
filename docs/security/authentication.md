@@ -196,14 +196,15 @@ dashboard therefore fails explicitly there instead of bouncing the operator back
   logs how many requests went unnamed. Those requests are refused like any other; only their
   address is left out of the log, so a stream of made-up hosts cannot flood it.
 
-The dashboard decides from the request, and refuses only when it is sure: the browser's
-`Origin` header when it sent one; otherwise no refusal when the request carries Fetch Metadata
-headers (`Sec-Fetch-Site`, `Sec-Fetch-Mode`), which browsers send only to HTTPS and loopback
-pages; otherwise the scheme and host from `X-Forwarded-Proto` and `X-Forwarded-Host` (or
-`Host`), which Next.js fills from the socket when no proxy set them. A TLS-terminating proxy
-should forward `X-Forwarded-Proto $scheme`, as the bundled `proxy/nginx.conf` does, which
-becomes `https` once its server block terminates TLS; Caddy and Traefik send it by default.
-Without it an older browser that sends no Fetch Metadata would be refused.
+The dashboard decides from the request, and refuses only when it is sure: no refusal when the
+request carries Fetch Metadata headers (`Sec-Fetch-Site`, `Sec-Fetch-Mode`), which only
+browsers send and only to HTTPS and loopback pages, so they outrank an `Origin` that a proxy
+rewrote to its plain-HTTP upstream; otherwise the browser's `Origin` header when it sent one;
+otherwise the scheme and host from `X-Forwarded-Proto` and `X-Forwarded-Host` (or `Host`),
+which Next.js fills from the socket when no proxy set them. A TLS-terminating proxy should
+forward `X-Forwarded-Proto $scheme`, as the bundled `proxy/nginx.conf` does, which becomes
+`https` once its server block terminates TLS; Caddy and Traefik send it by default. Without it
+an older browser that sends no Fetch Metadata would be refused.
 
 ## Profile data
 

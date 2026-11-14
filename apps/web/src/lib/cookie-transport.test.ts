@@ -3,6 +3,7 @@ import {
   INSECURE_TRANSPORT_LOG_INTERVAL_MS,
   INSECURE_TRANSPORT_LOG_MAX_ORIGINS,
   insecureCookieTransport,
+  insecureCookieTransportResponse,
   isLoopbackHostname,
   secureCookiesEnabled,
 } from "@/lib/cookie-transport";
@@ -66,7 +67,8 @@ describe("secureCookiesEnabled", () => {
 });
 
 describe("isLoopbackHostname", () => {
-  it.each(["localhost", "LOCALHOST", "koda.localhost", "127.0.0.1", "127.8.9.10", "[::1]"])(
+  // A trailing dot names the same host; URL keeps it in `hostname`.
+  it.each(["localhost", "LOCALHOST", "localhost.", "koda.localhost", "koda.localhost.", "127.0.0.1", "127.8.9.10", "[::1]"])(
     "treats %s as loopback",
     (hostname) => {
       expect(isLoopbackHostname(hostname)).toBe(true);
@@ -109,7 +111,7 @@ describe("insecureCookieTransport", () => {
     expect(insecureCookieTransport(headers)).toEqual({ origin: "http://koda.lan" });
   });
 
-  it.each(["localhost:3000", "127.0.0.1:3000", "[::1]:3000", "koda.localhost:3000"])(
+  it.each(["localhost:3000", "localhost.:3000", "127.0.0.1:3000", "[::1]:3000", "koda.localhost:3000"])(
     "accepts plain HTTP on the loopback host %s, which browsers treat as secure",
     (host) => {
       production();
@@ -152,6 +154,36 @@ describe("insecureCookieTransport", () => {
     expect(insecureCookieTransport(proxied)).toEqual({ origin: "http://koda.lan" });
   });
 
+  it("believes Fetch Metadata over an Origin that a proxy rewrote to its plain-HTTP upstream", () => {
+    // A browser on https://koda.example.com behind a proxy that sets
+    // `Origin $scheme://$host` for its upstream. Only a browser sends
+    // Sec-Fetch-*, and only to a URL it treats as secure, so it keeps the
+    // Secure cookies whatever the rewritten Origin says.
+    production();
+    const signIn = new Headers({
+      host: "koda-web:3000",
+      origin: "http://koda-web:3000",
+      "x-forwarded-proto": "https",
+      "sec-fetch-site": "same-origin",
+      "sec-fetch-mode": "cors",
+    });
+    expect(insecureCookieTransport(signIn)).toBeNull();
+    expect(
+      insecureCookieTransport(
+        new Headers({ host: "192.168.1.10:3000", origin: "http://192.168.1.10:3000", "sec-fetch-site": "same-origin" }),
+      ),
+    ).toBeNull();
+    // The page that shows the form agrees with the route that takes it.
+    const navigation = new Headers({
+      host: "koda-web:3000",
+      "x-forwarded-proto": "https",
+      "sec-fetch-site": "none",
+      "sec-fetch-mode": "navigate",
+    });
+    expect(insecureCookieTransport(navigation)).toBeNull();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
   it("ignores an opaque Origin and falls back to the forwarded headers", () => {
     production();
     expect(insecureCookieTransport(plainHttp("10.0.0.5:3000", { origin: "null" }))).toEqual({
@@ -185,6 +217,20 @@ describe("insecureCookieTransport", () => {
     expect(insecureCookieTransport(plainHttp("192.168.1.10:3000"))).toEqual({
       origin: "http://192.168.1.10:3000",
     });
+  });
+});
+
+describe("insecureCookieTransportResponse", () => {
+  it("refuses with INSECURE_TRANSPORT, names the origin and is never cached", async () => {
+    const response = insecureCookieTransportResponse({ origin: "http://192.168.1.10:3000" });
+    const body = (await response.json()) as { error: { code: string; message: string; user_action: string } };
+
+    expect(response.status).toBe(403);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(body.error.code).toBe("INSECURE_TRANSPORT");
+    expect(body.error.message).toContain("http://192.168.1.10:3000");
+    expect(body.error.user_action).toMatch(/HTTPS/);
   });
 });
 

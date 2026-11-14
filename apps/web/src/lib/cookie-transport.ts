@@ -59,14 +59,17 @@ function firstHop(value: string | null | undefined): string {
 
 /** The origin in the browser's address bar, or null when it is secure or unknown. */
 function plainHttpOrigin(headers: HeaderReader, requestUrl?: RequestUrl): URL | null {
-  // A browser names its own origin on every POST and cross-origin request.
+  // Fetch Metadata headers are sent only by a browser and only to a
+  // potentially trustworthy URL, so the page that sent them keeps Secure
+  // cookies, even behind a TLS proxy that sends no X-Forwarded-Proto or that
+  // rewrites Origin to its plain-HTTP upstream. They are checked first because
+  // a proxy can rewrite Origin but does not add them.
+  if (headers.get("sec-fetch-site") || headers.get("sec-fetch-mode")) return null;
+
+  // Without them, a browser names its own origin on every POST and
+  // cross-origin request.
   const origin = headers.get("origin")?.trim();
   if (origin && origin !== "null") return parseWebOrigin(origin);
-
-  // Fetch Metadata headers are sent only to a potentially trustworthy URL, so
-  // the page that sent them keeps Secure cookies, even behind a TLS proxy that
-  // sends no X-Forwarded-Proto.
-  if (headers.get("sec-fetch-site") || headers.get("sec-fetch-mode")) return null;
 
   // Otherwise the scheme and host the request arrived with. Next.js fills in
   // X-Forwarded-Proto and X-Forwarded-Host from the socket and the Host header
@@ -157,9 +160,10 @@ function logInsecureTransport(origin: string): void {
 /**
  * The plain-HTTP origin of a request whose browser will drop the operator
  * cookies, or null when they will be kept or the transport cannot be told.
- * What the browser says (Origin, Fetch Metadata) outranks the forwarded
- * headers, so a current browser behind a TLS proxy is not refused even when
- * the proxy sends no X-Forwarded-Proto.
+ * What the browser says outranks the forwarded headers: Fetch Metadata first,
+ * which only a browser on a secure URL sends, then Origin. So a current
+ * browser behind a TLS proxy is not refused even when the proxy sends no
+ * X-Forwarded-Proto or rewrites Origin to its plain-HTTP upstream.
  */
 export function insecureCookieTransport(
   headers: HeaderReader,
