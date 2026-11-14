@@ -3633,6 +3633,24 @@ class KnowledgeV2PostgresBackend:
                            ADD COLUMN IF NOT EXISTS dispatched_at TEXT""",
                 ),
             ),
+            _Migration(
+                "048_control_plane_master_key_fingerprint",
+                (
+                    # One row binding the control-plane master key to this
+                    # database: an HMAC of a fixed label under the key, never
+                    # the key (ADR-002 §2.5, AG-05). The control plane records
+                    # it at startup and refuses to run with a different key.
+                    # Additive: older releases ignore the table, and reverting
+                    # is dropping it.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_master_key_fingerprint" (
+                            key_name TEXT PRIMARY KEY,
+                            fingerprint TEXT NOT NULL,
+                            recorded_reason TEXT NOT NULL,
+                            created_at TEXT NOT NULL,
+                            updated_at TEXT NOT NULL
+                        )""",
+                ),
+            ),
         )
 
     async def upsert_skill_package_lock(self, agent_id: str, lock: dict[str, Any]) -> None:

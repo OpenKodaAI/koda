@@ -9,7 +9,7 @@ A backup that has never been restored is not a backup.
 |---|---|---|
 | Postgres database | Control plane, agents, audit log, queue items, knowledge graph | ≤ 1 h |
 | Object store (S3-compatible / SeaweedFS) | Artifacts, embeddings, snapshots | ≤ 24 h |
-| `${STATE_ROOT_DIR}/control_plane/.master.key` | Decrypts every secret in `cp_secret_values` | Permanent — losing this loses every stored secret |
+| `${STATE_ROOT_DIR}/control_plane/.master.key` | Decrypts every stored secret (`cp_secret_values`, MCP env values and OAuth tokens). Postgres records its fingerprint, so the control plane refuses to start without it once secrets exist | Permanent — losing this loses every stored secret. Keep it apart from the Postgres dumps |
 | `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` | Operator setup recovery | Permanent — single-use after install |
 | `.env` file | Bootstrap configuration (DSNs, ports, ALLOWED_USER_IDS) | Permanent |
 
@@ -77,7 +77,10 @@ docker run --rm -v koda-restore_koda-state:/data \
     -v /backup:/backup:ro \
     alpine sh -c "cd /data && tar xzf /backup/koda-state-YYYY-MM-DD.tar.gz"
 
-# 5. Boot the rest of the stack
+# 5. Boot the rest of the stack. The control plane checks the restored
+#    key against the fingerprint in the restored database: if step 4 is
+#    skipped or restores a key from another backup set, it refuses to
+#    start (see "Master key recovery" below) instead of creating a new key.
 docker compose -p koda-restore up -d
 
 # 6. Run doctor against the restored stack
@@ -93,13 +96,72 @@ fix in this file.
 
 ## Master key recovery
 
-If `${STATE_ROOT_DIR}/control_plane/.master.key` is lost, every row
-in `cp_secret_values` is unrecoverable. Mitigations:
+If `${STATE_ROOT_DIR}/control_plane/.master.key` is lost, every
+stored secret is unrecoverable. Mitigations:
 
 - Store the key in an off-host secret manager (Vault, AWS KMS, GCP
   KMS, 1Password, sealed-secrets). The `.env` file or compose
   override mounts it back into the supervisor at boot.
-- For rotation, see the [hardening](hardening.md) runbook.
+- For rotation, see the [hardening](hardening.md#master-key-rotation) runbook.
+
+### How the control plane guards the key
+
+The control plane creates the key only on a fresh install: when it starts
+with no key file, no fingerprint in Postgres and no encrypted data. No other
+process creates one; an agent worker or CLI without the key file fails with
+`MasterKeyUnavailable`. On every start the control plane compares the key
+with the fingerprint recorded in `cp_master_key_fingerprint` (an HMAC of a
+fixed label under the key, never the key). On the first start after an
+upgrade from a release without that table, it records the fingerprint of
+the key it finds and changes nothing else.
+
+A lost or wrong key therefore stops the control plane at startup, with a
+log line starting `koda control plane refused to start:`:
+
+| The message says | Cause | Fix |
+|---|---|---|
+| `master key not found ... this database recorded a master key (fingerprint ...)` | The key file is missing | Restore the key file from backup |
+| `master key not found ... the database holds encrypted secrets` | The key file is missing on an install whose fingerprint was never recorded | Restore the key file from backup |
+| `... is not the key this database recorded` | Another key: a backup from another set, another volume, or a cluster replica with its own key | Restore the key whose fingerprint matches; when rotating, follow [hardening](hardening.md#master-key-rotation) |
+| `... is not a valid Fernet key` | The file is damaged or is not a Fernet key | Restore the key file from backup |
+
+To find which backup holds the right key, compare fingerprint prefixes. The
+recorded one (adjust the schema if you changed `KNOWLEDGE_V2_POSTGRES_SCHEMA`):
+
+```bash
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -t -c \
+    "SELECT left(fingerprint, 12), recorded_reason, updated_at FROM knowledge_v2.cp_master_key_fingerprint"
+```
+
+A candidate key file:
+
+```bash
+python3 -c 'import hashlib, hmac, sys
+key = open(sys.argv[1], "rb").read().strip()
+print(hmac.new(key, b"koda.control_plane.master_key.fingerprint.v1", hashlib.sha256).hexdigest()[:12])' candidate.key
+```
+
+### If the key is permanently lost
+
+The encrypted secrets cannot be recovered. To run again with a new key,
+deliberately and only after a Postgres backup:
+
+1. Write a new key file. The app container keeps restarting while it
+   refuses, so use a one-off container:
+
+   ```bash
+   docker compose run --rm --no-deps app sh -c 'mkdir -p "$STATE_ROOT_DIR/control_plane" &&
+       cd "$STATE_ROOT_DIR/control_plane" && umask 077 &&
+       python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" > .master.key'
+   ```
+
+2. If a fingerprint is recorded, delete it:
+   `DELETE FROM knowledge_v2.cp_master_key_fingerprint;`. This removes only
+   the check; the old ciphertext stays in place.
+3. Start the control plane. It records the new key's fingerprint
+   (`reason=upgrade`).
+4. Re-enter every secret, MCP credential and OAuth connection in the
+   dashboard; the old values stay undecryptable until they are overwritten.
 
 ## RTO target
 
