@@ -286,7 +286,38 @@ async def test_path_rules_decide_what_file_and_ls_read(command, args, mock_updat
 
 
 def test_path_rules_evaluate_the_path_of_every_gated_file_command():
-    from koda.agent_contract import _FILE_COMMAND_PATH_TOOLS
+    from koda.agent_contract import FILE_COMMAND_ACCESS_LEVELS, resolve_action_paths
     from koda.utils.files import FILE_COMMANDS
 
-    assert _FILE_COMMAND_PATH_TOOLS == FILE_COMMANDS
+    assert set(FILE_COMMAND_ACCESS_LEVELS) == FILE_COMMANDS
+    for command in FILE_COMMANDS:
+        assert resolve_action_paths(command, {"path": "/srv/work/x"}) == ("/srv/work/x",)
+
+
+def test_a_file_command_is_named_in_one_place():
+    """``FILE_COMMAND_ACCESS_LEVELS`` is the one list of file commands.
+
+    The approval gate (``koda.utils.files.FILE_COMMANDS``), the grant's ``fileops`` action
+    and the paths the execution-policy rules see all follow it, so a command added there
+    is gated, mapped and path-checked; a copy that missed it would leave the gate indexing
+    a level that does not exist. Run in a fresh interpreter, where the new command is added
+    before the file layer is imported.
+    """
+    import subprocess
+    import sys
+
+    script = "\n".join(
+        [
+            "import koda.agent_contract as contract",
+            "contract.FILE_COMMAND_ACCESS_LEVELS['touch'] = 'write'",
+            "from koda.utils.files import FILE_COMMANDS",
+            "assert 'touch' in FILE_COMMANDS, sorted(FILE_COMMANDS)",
+            "paths = contract.resolve_action_paths('touch', {'path': '/srv/work/x'})",
+            "assert paths == ('/srv/work/x',), paths",
+            "assert contract.resolve_integration_action('touch', {'path': '/srv/work/x'}).action_id == 'fileops.touch'",
+        ]
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script], cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True
+    )
+    assert completed.returncode == 0, completed.stderr

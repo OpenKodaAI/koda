@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from koda.agent_contract import FILE_COMMAND_ACCESS_LEVELS
 from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS, FILEOPS_BLOCKED_EXTENSIONS
 from koda.logging_config import get_logger
 from koda.utils.workdir import control_plane_state_dir_for, sensitive_dir_for
@@ -140,8 +141,12 @@ def work_path_location(path_str: str, work_dir: str) -> str:
     return os.path.realpath(os.path.join(os.path.realpath(work_dir), os.path.expanduser(path_str)))
 
 
-FILE_COMMANDS: frozenset[str] = frozenset({"cat", "file", "ls", "write", "edit", "rm", "mkdir"})
-"""Telegram commands that act on one path in the work dir, grant-gated by the approval layer."""
+FILE_COMMANDS: frozenset[str] = frozenset(FILE_COMMAND_ACCESS_LEVELS)
+"""Telegram commands that act on one path in the work dir, grant-gated by the approval layer.
+
+They are the commands of ``koda.agent_contract.FILE_COMMAND_ACCESS_LEVELS``, which gives
+each its ``fileops`` access level.
+"""
 
 _FILE_COMMANDS_WITH_CONTENT: frozenset[str] = frozenset({"write", "edit"})
 

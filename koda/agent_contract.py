@@ -1303,7 +1303,12 @@ FILE_COMMAND_ACCESS_LEVELS: dict[str, str] = {
     "mkdir": "write",
     "rm": "destructive",
 }
-"""Telegram file commands (``/cat``, ``/file``, ``/ls``, ...) as ``fileops.<command>`` actions."""
+"""Telegram file commands (``/cat``, ``/file``, ``/ls``, ...) as ``fileops.<command>`` actions.
+
+The one list of file commands: the approval gate (``koda.utils.files.FILE_COMMANDS``), the
+``fileops`` action catalog and the paths execution-policy rules evaluate
+(:func:`resolve_action_paths`) all follow it.
+"""
 _CACHE_ACTION_LEVELS: dict[str, str] = {
     "lookup": "read",
     "stats": "read",
@@ -2024,10 +2029,6 @@ destination. Execution-policy path rules therefore also match these calls below 
 paths (koda.services.execution_policy).
 """
 
-# The operator file commands whose ``path`` (set by the approval gate to the path the
-# command acts on, koda.utils.files.file_command_path) path rules evaluate.
-_FILE_COMMAND_PATH_TOOLS = frozenset({"write", "edit", "rm", "mkdir", "cat", "file", "ls"})
-
 
 def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> tuple[str, ...]:
     """Return the paths execution-policy ``path`` rules evaluate for one call, exactly as the params give them.
@@ -2052,7 +2053,9 @@ def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> 
     tool = str(tool_id or "").strip()
     payload = params or {}
     keys: tuple[str, ...]
-    if tool in _FILE_COMMAND_PATH_TOOLS or tool.startswith("agent_"):
+    # The operator file commands (FILE_COMMAND_ACCESS_LEVELS): the approval gate sets their
+    # ``path`` to the path the command acts on (koda.utils.files.file_command_path).
+    if tool in FILE_COMMAND_ACCESS_LEVELS or tool.startswith("agent_"):
         keys = ("path",)
     elif tool.startswith("file_"):
         keys = ("path", "source", "destination")
