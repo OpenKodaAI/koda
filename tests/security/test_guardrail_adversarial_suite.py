@@ -1298,6 +1298,96 @@ async def test_file_grep_never_prints_a_cli_credential_store(
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "destination", "moved_store"),
+    [
+        (".codex", "codex-bak", "codex-bak/auth.json"),
+        (".gemini", "gem", "gem/oauth_creds.json"),
+        (".config", "cfg", "cfg/gh/hosts.yml"),
+        (".config", "cfg", "cfg/gcloud/application_default_credentials.json"),
+        (".config/gh", "gh", "gh/hosts.yml"),
+        (".docker", "dock", "dock/config.json"),
+        (".kube", "kube", "kube/config"),
+    ],
+)
+async def test_file_move_cannot_rename_a_credential_store_out_of_its_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, destination: str, moved_store: str
+) -> None:
+    """Some credential stores are recognised by their parent's name (``.codex/auth.json``).
+
+    file_move must not rename that parent, or the store would sit under a name the policy
+    does not recognise and file_read, which needs no approval, would return it.
+    """
+    from koda.services.tool_dispatcher import ToolContext, _handle_file_move, _handle_file_read
+
+    home = _docker_home(tmp_path, monkeypatch)
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(home),
+        user_data={"work_dir": str(home)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        moved = await _handle_file_move({"source": source, "destination": destination}, ctx)
+        read = await _handle_file_read({"path": moved_store}, ctx)
+
+    assert not moved.success, moved.output
+    assert "credential store" in moved.output, moved.output
+    assert (home / source).is_dir()
+    assert not (home / destination).exists()
+    assert not read.success
+    assert "canary" not in read.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "destination", "moved_secret"),
+    [
+        ("src", "lib", None),
+        ("project", "project-old", "project-old/.env"),
+        ("project", "archive/project", "archive/project/.env"),
+        (".codex", "backup/.codex", "backup/.codex/auth.json"),
+        (".codex", "archive", "archive/.codex/auth.json"),
+        (".claude", "claude-bak", "claude-bak/.credentials.json"),
+    ],
+)
+async def test_file_move_still_moves_a_directory_whose_secrets_stay_recognised(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, destination: str, moved_secret: str | None
+) -> None:
+    """A directory holding a secret moves when every secret below it keeps a refused name."""
+    from koda.services.tool_dispatcher import ToolContext, _handle_file_move, _handle_file_read
+
+    home = _docker_home(tmp_path, monkeypatch)
+    (home / "project").mkdir()
+    (home / "project" / ".env").write_text("TOKEN=canary-env\n", encoding="utf-8")
+    (home / "archive").mkdir()
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(home),
+        user_data={"work_dir": str(home)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        moved = await _handle_file_move({"source": source, "destination": destination}, ctx)
+        read = await _handle_file_read({"path": moved_secret}, ctx) if moved_secret else None
+
+    assert moved.success, moved.output
+    assert (home / destination).is_dir()
+    assert not (home / source).exists()
+    if read is not None:
+        assert not read.success
+        assert "canary" not in read.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
 @pytest.mark.parametrize("swapped", ["a validated work dir", "the configured DEFAULT_WORK_DIR"])
 @pytest.mark.parametrize(
     ("tool", "params"),

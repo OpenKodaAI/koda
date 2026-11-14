@@ -85,6 +85,49 @@ def secret_file_refusal(path: str) -> str | None:
     return None
 
 
+def _children_named(directory: str, name: str) -> list[str]:
+    """Return the entries of ``directory`` named ``name``, ignoring case as the policy compares names."""
+    try:
+        with os.scandir(directory) as entries:
+            return [entry.path for entry in entries if entry.name.lower() == name]
+    except OSError:
+        return []
+
+
+def secret_move_refusal(source: str, destination: str) -> str | None:
+    """Return why moving ``source`` to ``destination`` would unblock a secret below it, or None.
+
+    Both paths are absolute and resolved, and each passed :func:`resolve_work_path`, so
+    neither is a secret file itself. ``destination`` is where ``source`` ends up (for
+    ``shutil.move`` into an existing directory, the path inside it). A blocked extension or
+    ``.env`` name goes with the file wherever it moves, and so does a credential entry that
+    lies wholly below ``source``. But a credential entry with several components is also
+    matched on the names of the directories above the file (``.codex/auth.json``,
+    ``.config/gh/hosts.yml``, ``.config/gcloud/``). When ``source`` ends with the first
+    components of such an entry and holds the rest, moving or renaming ``source`` could
+    leave that store under a name the policy does not recognise, and the read tools would
+    return it. So each such path below ``source`` must still be refused
+    (:func:`secret_file_refusal`) at its new place.
+    """
+    source = source.rstrip(os.sep) or os.sep
+    source_parts = [part.lower() for part in source.split(os.sep) if part]
+    for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS:
+        entry_parts = [part.lower() for part in entry.split("/") if part]
+        for split in range(1, len(entry_parts)):
+            if source_parts[-split:] != entry_parts[:split]:
+                continue
+            below = [source]
+            for name in entry_parts[split:]:
+                below = [child for directory in below for child in _children_named(directory, name)]
+            for path in below:
+                refusal = secret_file_refusal(path)
+                moved = destination.rstrip(os.sep) + path[len(source) :]
+                if refusal is not None and secret_file_refusal(moved) is None:
+                    inner = os.path.relpath(path, os.path.dirname(source))
+                    return f"the move would take '{inner}' out of the name that blocks it ({refusal})"
+    return None
+
+
 def work_path_location(path_str: str, work_dir: str) -> str:
     """Return the absolute, symlink-resolved path that ``path_str`` names under ``work_dir``.
 

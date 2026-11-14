@@ -44,6 +44,7 @@ from koda.utils.files import (
     blocked_credential_path,
     resolve_work_path,
     secret_file_refusal,
+    secret_move_refusal,
     work_path_location,
 )
 from koda.utils.workdir import SensitiveDirs, validate_work_dir
@@ -2741,6 +2742,14 @@ async def _handle_file_move(params: dict, ctx: ToolContext) -> AgentToolResult:
     resolved_dst = str(dst_resolution.path)
     if not os.path.exists(resolved_src):
         return AgentToolResult(tool="file_move", success=False, output=f"Source not found: {source}")
+    # shutil.move puts the source inside an existing destination directory.
+    landing = (
+        os.path.join(resolved_dst, os.path.basename(resolved_src)) if os.path.isdir(resolved_dst) else resolved_dst
+    )
+    move_refusal = secret_move_refusal(resolved_src, landing)
+    if move_refusal is not None:
+        _audit_blocked("file_move", "credential_store_rename", user_id=ctx.user_id)
+        return AgentToolResult(tool="file_move", success=False, output=f"Access denied: {move_refusal}.")
     try:
         os.makedirs(os.path.dirname(resolved_dst), exist_ok=True)
         shutil.move(resolved_src, resolved_dst)
