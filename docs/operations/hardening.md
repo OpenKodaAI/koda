@@ -20,6 +20,65 @@ Every item below is verifiable. The matching checks live in
 - [ ] Backups (Postgres dumps, state tarballs) are encrypted at-rest
       via filesystem-level encryption (LUKS / EBS / GCS CMEK).
 
+## Process hygiene (built in)
+
+Nothing to configure. On Linux, each agent worker (`python -m koda`) and
+the runtime kernel (`koda-runtime-kernel`) make themselves non-dumpable
+(`PR_SET_DUMPABLE=0`) and set the core-file limit to 0. The kernel does
+this first thing in `main`. The worker does it in the first statement of
+`koda/__main__.py`, which runs only after Python itself has started (see
+the startup window below). If either step fails, the process refuses to
+start.
+
+- The processes a worker or the kernel starts (provider CLIs, MCP servers,
+  governed shell commands) run as the same user. Once the worker or the
+  kernel has hardened itself, they get `Permission denied` on
+  `/proc/<pid>/environ`, `mem` and `fd` of that process, and cannot attach
+  a debugger to it, so they cannot read the secrets in its environment or
+  memory. Root with `CAP_SYS_PTRACE` still can, so do not add that
+  capability to the `runtime-kernel` container.
+- **Residual: the worker's startup window.** From the moment the kernel
+  starts a worker until `koda/__main__.py` runs, the worker is still
+  dumpable while Python starts up (the interpreter, `site` and `.pth`
+  processing, `koda/__init__.py`). That takes tens of milliseconds. A
+  same-uid process that keeps polling `/proc/*/environ` reliably reads a
+  starting worker's whole environment in that window: the Postgres DSN, the
+  S3 secret, granted secrets and runtime tokens. It does not have to wait
+  for a restart either. Being non-dumpable does not stop signals, so a
+  same-uid process can kill a worker, and the kernel starts it again on the
+  supervisor's next reconcile (every 5 seconds by default). Workers also
+  restart when a new version is published and after a crash. Nothing stops
+  this until ADR-002's L2 confinement runs, under Landlock, every process
+  that shares the worker's uid: a Landlock-confined process cannot read
+  `/proc/<pid>/environ` of a process outside its domain, whether that
+  process is dumpable or not. It takes three tasks to get there, and the
+  window stays open until all of them have shipped:
+  - AG-14: provider CLIs, governed shell and git that the worker starts;
+  - AG-15: the tasks and commands the runtime kernel starts for a worker
+    (`StartTask`, `ExecuteCommand`);
+  - AG-16: MCP stdio servers, yt-dlp, ffmpeg, ffprobe and Playwright
+    chromium (ADR-002's process class U).
+
+  Even then it stays open wherever L2 is not enforced: with
+  `RUNTIME_CONFINEMENT=off`, and for class U processes on a host without
+  Landlock, which ADR-002 still runs, unconfined, with only a health
+  warning. Keeping secrets out of the exec environment altogether is a
+  follow-up: the kernel would pass only non-secret variables and hand the
+  rest to the worker through an inherited file descriptor that the worker
+  reads after it has hardened. The kernel
+  itself has no such window in practice: it is the first process in its
+  container and hardens itself before any worker or command exists.
+- The processes the worker and the kernel start inherit the zero core-file
+  limit and cannot raise it. They are not non-dumpable themselves: once a process runs its
+  own program it is dumpable again, so it is protected only by what is
+  kept out of its environment.
+- Debugging tools such as `py-spy`, `gdb -p` or `cat /proc/<pid>/environ`
+  need root with `CAP_SYS_PTRACE` against these processes, for example
+  `docker compose exec --privileged -u root runtime-kernel ...`.
+- To check a running process: `grep 'core file' /proc/<pid>/limits` shows
+  `0 0`, and `stat -c %U /proc/<pid>/environ` shows `root` even though the
+  process runs as `botuser`.
+
 ## Auth
 
 - [ ] `CONTROL_PLANE_API_TOKEN` is at least 32 random bytes (use

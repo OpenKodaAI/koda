@@ -1,5 +1,15 @@
 """Entry point for koda."""
 
+# First statement on purpose (ADR-002 §2.4 L1, AG-04): the processes this worker
+# starts share its uid, so before anything else in this module runs it becomes
+# non-dumpable (a sibling cannot read /proc/<pid>/environ or mem) and disables
+# core dumps. Raises instead of running unhardened. Python's own startup comes
+# before this line, and until then a same-uid process can read the environment:
+# see "startup window" in docs/operations/hardening.md, which says what closes it.
+from koda.process_hygiene import harden_process
+
+harden_process()
+
 import argparse
 import asyncio
 import contextlib
