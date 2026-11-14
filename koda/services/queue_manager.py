@@ -4169,6 +4169,14 @@ async def _run_fallback(
             progress_msg = await progress_task
             if progress_msg is not None:
                 await progress_msg.delete()
+        except asyncio.CancelledError:
+            # The indicator ends cancelled when the cancel lands before its own handler: it
+            # never got a step (a provider call that returned without yielding), or it was
+            # still sending its first message. That is this cleanup, not a cancel of the run,
+            # so the result stands; only a cancellation of this task itself propagates.
+            current = asyncio.current_task()
+            if current is not None and current.cancelling():
+                raise
         except Exception:
             pass
 

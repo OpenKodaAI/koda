@@ -37,6 +37,7 @@ from koda.services.queue_manager import (
     _process_queue,
     _recover_provider_error_with_completed_output,
     _resolve_provider_context,
+    _run_fallback,
     _run_result_has_native_tool_calls,
     _run_streaming,
     _run_with_provider_fallback,
@@ -2505,3 +2506,128 @@ class TestQueueOrdering:
             _queue_workers.pop(user_id, None)
             _user_tasks.pop(user_id, None)
             _user_queues.pop(user_id, None)
+
+
+class TestRunFallbackProgressCleanup:
+    """``_run_fallback`` cancels its progress indicator when the provider run ends.
+
+    The indicator can end cancelled before its own handler runs: when it never got a step,
+    or while it still sends the first "Processing..." message. That is the cleanup of this
+    run, not a cancel of it, so the provider's result must still be returned. Only a cancel
+    of the run itself propagates.
+    """
+
+    @staticmethod
+    def _ctx() -> QueryContext:
+        return QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+        )
+
+    @staticmethod
+    def _llm_result() -> dict:
+        return {"result": "the answer", "session_id": "prov-1", "cost_usd": 0.01, "_stop_reason": "completed"}
+
+    @pytest.mark.asyncio
+    async def test_result_is_returned_when_the_provider_answers_before_the_indicator_starts(self):
+        context = MagicMock()
+        context.bot = AsyncMock()
+        # Returns without yielding to the event loop, so the indicator never gets a step.
+        run_llm = AsyncMock(return_value=self._llm_result())
+
+        with patch("koda.services.queue_manager.run_llm", new=run_llm):
+            result = await _run_fallback(self._ctx(), QueueItem(chat_id=111, query_text="hello"), 111, 111, context)
+
+        run_llm.assert_awaited_once()
+        assert result.result == "the answer"
+        assert result.error is False
+        context.bot.send_message.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_result_is_returned_when_the_provider_answers_while_the_first_message_is_sent(self):
+        sending = asyncio.Event()
+
+        async def _slow_send_message(**_kwargs):
+            sending.set()
+            await asyncio.sleep(60)
+
+        context = MagicMock()
+        context.bot = AsyncMock()
+        context.bot.send_message = AsyncMock(side_effect=_slow_send_message)
+
+        async def _run_llm(**_kwargs):
+            await sending.wait()
+            return self._llm_result()
+
+        with patch("koda.services.queue_manager.run_llm", new=_run_llm):
+            result = await asyncio.wait_for(
+                _run_fallback(self._ctx(), QueueItem(chat_id=111, query_text="hello"), 111, 111, context),
+                timeout=10,
+            )
+
+        assert result.result == "the answer"
+        context.bot.send_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_progress_message_is_deleted_after_the_result(self):
+        progress_msg = MagicMock()
+        progress_msg.delete = AsyncMock()
+        sent = asyncio.Event()
+
+        async def _send_message(**_kwargs):
+            sent.set()
+            return progress_msg
+
+        context = MagicMock()
+        context.bot = AsyncMock()
+        context.bot.send_message = AsyncMock(side_effect=_send_message)
+
+        async def _run_llm(**_kwargs):
+            await sent.wait()
+            await asyncio.sleep(0)
+            return self._llm_result()
+
+        with patch("koda.services.queue_manager.run_llm", new=_run_llm):
+            result = await _run_fallback(self._ctx(), QueueItem(chat_id=111, query_text="hello"), 111, 111, context)
+
+        assert result.result == "the answer"
+        progress_msg.delete.assert_awaited_once()
+
+    @pytest.mark.parametrize("indicator_started", [False, True])
+    @pytest.mark.asyncio
+    async def test_cancelling_the_run_still_propagates(self, indicator_started: bool):
+        sending = asyncio.Event()
+        provider_running = asyncio.Event()
+
+        async def _slow_send_message(**_kwargs):
+            sending.set()
+            await asyncio.sleep(60)
+
+        context = MagicMock()
+        context.bot = AsyncMock()
+        context.bot.send_message = AsyncMock(side_effect=_slow_send_message)
+
+        async def _run_llm(**_kwargs):
+            provider_running.set()
+            await asyncio.sleep(60)
+            return self._llm_result()
+
+        with patch("koda.services.queue_manager.run_llm", new=_run_llm):
+            run = asyncio.create_task(
+                _run_fallback(self._ctx(), QueueItem(chat_id=111, query_text="hello"), 111, 111, context)
+            )
+            await asyncio.wait_for(provider_running.wait(), timeout=10)
+            if indicator_started:
+                await asyncio.wait_for(sending.wait(), timeout=10)
+            run.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(run, timeout=10)
+
+        assert run.cancelled()
