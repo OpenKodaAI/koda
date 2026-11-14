@@ -347,9 +347,9 @@ def test_simulator_feature_flags_equal_those_of_the_worker_the_supervisor_starts
     """The simulator's flags equal koda.config's in the worker built by the real snapshot and supervisor steps.
 
     The worker env is the snapshot env scoped by the manager (``KEY`` and ``<AGENT_ID>_KEY``), with
-    the supervisor's own infrastructure keys forced over the plain ``KEY`` only, and koda.config
-    reads ``<AGENT_ID>_KEY`` first. So a snapshot that sets INTER_AGENT_ENABLED wins over the
-    supervisor's value, and the supervisor's value applies only where the snapshot sets none.
+    the supervisor's own infrastructure keys forced over both, and koda.config reads
+    ``<AGENT_ID>_KEY`` first. So the supervisor's INTER_AGENT_ENABLED wins over the snapshot's and
+    the ``.env`` file's, and the snapshot's applies only where the supervisor sets none.
     koda.config then loads the install's ``.env`` without override, so the file fills only the keys
     the worker env lacks (unless the worker env sets ``PYTHON_DOTENV_DISABLED``).
     """
@@ -415,8 +415,8 @@ def test_simulator_feature_flags_equal_those_of_the_worker_the_supervisor_starts
     started = _workers_started_with(workers)
 
     assert simulated == [worker["flags"] for worker in started]
-    assert [flags["inter_agent"] for flags in simulated[:5]] == [True, False, True, True, False]
+    assert [flags["inter_agent"] for flags in simulated[:5]] == [False, True, False, True, False]
     assert [flags["shell"] for flags in simulated[9:]] == [False, True, False, True, True, True, True, True, True]
-    assert [flags["inter_agent"] for flags in simulated[12:16]] == [True, True, False, False]
+    assert [flags["inter_agent"] for flags in simulated[12:16]] == [True, False, False, False]
     # The simulator reads the file koda.config loads in the worker.
     assert {path for worker in started for path in worker["loaded_paths"]} == {install_dotenv_path}

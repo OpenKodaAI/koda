@@ -1255,8 +1255,8 @@ def _agent_scoped_env(agent_id: str, env: dict[str, str]) -> dict[str, str]:
     return scoped
 
 
-# Feature-flag settings the supervisor copies from its own environment onto every worker, over the
-# plain ``KEY`` only: the flag settings among supervisor._SYSTEM_ENV_KEYS (a test keeps the two equal).
+# Feature-flag settings the supervisor copies from its own environment onto every worker, as ``KEY``
+# and ``<AGENT_ID>_KEY``: the flag settings among supervisor._SYSTEM_ENV_KEYS (a test keeps the two equal).
 _SUPERVISOR_FORCED_FEATURE_FLAG_KEYS: tuple[str, ...] = ("INTER_AGENT_ENABLED",)
 # The values of PYTHON_DOTENV_DISABLED with which python-dotenv's load_dotenv loads nothing.
 _DOTENV_DISABLED_VALUES = frozenset({"1", "true", "t", "yes", "y"})
@@ -1266,22 +1266,24 @@ def _worker_feature_flags(agent_id: str, snapshot: dict[str, Any]) -> dict[str, 
     """Return the execution feature flags that the agent's worker computes from its environment.
 
     The worker's environment is built as the runtime snapshot and the supervisor
-    build it: the snapshot's env scoped by :func:`_agent_scoped_env`, the plain
-    ``KEY`` of each setting the supervisor forces set from the supervisor's own
-    environment, and ``AGENT_ID``. koda.config then loads the install's ``.env``
-    (:data:`koda.config.DOTENV_PATH`) without override, so the file fills every key
-    that environment lacks, ``<AGENT_ID>_KEY`` entries included, unless the
-    environment sets ``PYTHON_DOTENV_DISABLED``; ``${VAR}`` expansion inside the
-    file is not simulated. koda.config reads ``<AGENT_ID>_KEY`` first, so a value
-    the snapshot sets wins over the supervisor's and over the file's. The flags of
-    the control-plane process itself can differ: operator settings such as
-    ``shell_enabled`` reach workers only through their env.
+    build it: the snapshot's env scoped by :func:`_agent_scoped_env`, each setting
+    the supervisor forces set, as ``KEY`` and ``<AGENT_ID>_KEY``, from the
+    supervisor's own environment when that sets it, and ``AGENT_ID``. koda.config
+    then loads the install's ``.env`` (:data:`koda.config.DOTENV_PATH`) without
+    override, so the file fills every key that environment lacks, ``<AGENT_ID>_KEY``
+    entries included, unless the environment sets ``PYTHON_DOTENV_DISABLED``;
+    ``${VAR}`` expansion inside the file is not simulated. koda.config reads
+    ``<AGENT_ID>_KEY`` first, so a value the supervisor forces wins over the
+    snapshot's and the file's, and otherwise a value the snapshot sets wins over the
+    file's. The flags of the control-plane process itself can differ: operator
+    settings such as ``shell_enabled`` reach workers only through their env.
     """
     env = {key: _stringify_env_value(value) for key, value in _safe_json_object(snapshot.get("env")).items()}
     worker_env = _agent_scoped_env(agent_id, env)
     for key in _SUPERVISOR_FORCED_FEATURE_FLAG_KEYS:
         if key in os.environ:
             worker_env[key] = os.environ[key]
+            worker_env[f"{agent_id}_{key}"] = os.environ[key]
     worker_env["AGENT_ID"] = agent_id
     if worker_env.get("PYTHON_DOTENV_DISABLED", "").casefold() not in _DOTENV_DISABLED_VALUES:
         for key, value in dotenv_values(DOTENV_PATH).items():

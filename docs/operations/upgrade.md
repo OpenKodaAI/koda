@@ -102,11 +102,22 @@ existing rules are validated and simulated:
   computes them as the worker does: from the environment the supervisor
   gives it, that is the agent's environment (for example the
   `shell_enabled` and `browser_enabled` settings), where an agent-scoped
-  `<AGENT_ID>_<KEY>` entry comes first, and the supervisor's own
-  `INTER_AGENT_ENABLED` only when the agent's environment does not set
-  it; then from the install's `.env` file, which fills only the settings
-  that environment lacks. So a flag set in `.env` after the first
-  bootstrap applies in the simulator as it does in the worker.
+  `<AGENT_ID>_<KEY>` entry comes first; then from the install's `.env`
+  file, which fills only the settings that environment lacks. So a flag
+  set in `.env` after the first bootstrap applies in the simulator as it
+  does in the worker. The supervisor's own `INTER_AGENT_ENABLED`, when it
+  sets one, wins over the agent's and the file's.
+- **The supervisor's infrastructure settings win in every worker.** The
+  supervisor copies its own infrastructure settings (database and object
+  storage addresses, the sidecar gRPC targets, `STATE_ROOT_DIR`,
+  `RUNTIME_EPHEMERAL_ROOT`, `INTER_AGENT_ENABLED` and the other keys in
+  `koda/control_plane/supervisor.py::_SYSTEM_ENV_KEYS`) onto each worker
+  as `<KEY>` and as `<AGENT_ID>_<KEY>`. It used to set only `<KEY>`, so an
+  agent environment that still carried one of these settings, for
+  example from an older install's `.env` imported at the first
+  bootstrap, kept it in that worker, because the worker reads
+  `<AGENT_ID>_<KEY>` first. A value the supervisor's environment does
+  not set still comes from the agent's environment.
 
 After the upgrade, send the calls you care about to the simulator to see
 what each agent's rules now decide.

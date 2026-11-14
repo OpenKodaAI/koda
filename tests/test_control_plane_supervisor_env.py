@@ -135,3 +135,87 @@ def test_security_guard_fallback_warns_when_target_set(monkeypatch) -> None:
     warnings = [record for record in records if record.levelno >= logging.WARNING]
     assert warnings, "expected WARNING when SECURITY_GRPC_TARGET is set but unreachable"
     assert any("security_guard_rpc_unavailable" in record.getMessage() for record in warnings)
+
+
+_WORKER_CONFIG_SCRIPT = """
+import json, os, sys
+os.environ.clear()
+os.environ.update(json.loads(sys.argv[1]))
+import koda.config as config
+print(json.dumps({
+    "SECURITY_GRPC_TARGET": config.SECURITY_GRPC_TARGET,
+    "POSTGRES_URL": config.POSTGRES_URL,
+    "STATE_ROOT_DIR": str(config.STATE_ROOT_DIR),
+    "RUNTIME_EPHEMERAL_ROOT": str(config.RUNTIME_EPHEMERAL_ROOT),
+    "INTER_AGENT_ENABLED": config.INTER_AGENT_ENABLED,
+}))
+"""
+
+
+def test_the_hosts_infrastructure_settings_win_over_a_snapshots_agent_scoped_keys(tmp_path) -> None:
+    """A stale snapshot sets an infrastructure key; the worker koda.config must read the host's value.
+
+    The manager scopes every snapshot key as ``KEY`` and ``<AGENT_ID>_KEY``, and koda.config
+    reads ``<AGENT_ID>_KEY`` first, so forcing only the plain ``KEY`` from the supervisor's
+    environment would leave the snapshot's value in force. The worker env is built by the
+    real steps (the manager's scoping and ``ControlPlaneSupervisor._build_spec``) and read
+    by koda.config in a fresh process, with the install's ``.env`` left out.
+    """
+    import json
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from koda.control_plane import supervisor as supervisor_mod
+    from koda.control_plane.manager import ControlPlaneManager, RuntimeSnapshot
+
+    agent_id = "AGENT_A"
+    stale = {
+        "SECURITY_GRPC_TARGET": "stale-security:50065",
+        "POSTGRES_URL": "postgresql://stale@stale-db/koda",
+        "STATE_ROOT_DIR": str(tmp_path / "stale-state"),
+        "RUNTIME_EPHEMERAL_ROOT": str(tmp_path / "stale-runtime"),
+        "INTER_AGENT_ENABLED": "true",
+    }
+    host = {
+        "SECURITY_GRPC_TARGET": "security:50065",
+        "POSTGRES_URL": "postgresql://koda@postgres/koda",
+        "STATE_ROOT_DIR": str(tmp_path / "state"),
+        "RUNTIME_EPHEMERAL_ROOT": str(tmp_path / "runtime"),
+        "INTER_AGENT_ENABLED": "false",
+    }
+    assert set(host) <= supervisor_mod._SYSTEM_ENV_KEYS
+    runtime = RuntimeSnapshot(
+        agent_id=agent_id,
+        version=1,
+        runtime_dir=Path(tmp_path),
+        process_env=ControlPlaneManager._scoped_env(MagicMock(), agent_id, stale),
+        connection_refs=[],
+        health_url="http://127.0.0.1:9001/health",
+        runtime_base_url="http://127.0.0.1:9001",
+        state_backend="postgres",
+        db_file_name="",
+    )
+    supervisor = SimpleNamespace(
+        _manager=MagicMock(**{"get_provider_connection.return_value": {}}),
+        _link=SimpleNamespace(target="unix:///tmp/koda-test.sock"),
+        _workspace_id_for_agent=lambda _agent_id: "default",
+    )
+    with patch.dict(os.environ, host):
+        spec = supervisor_mod.ControlPlaneSupervisor._build_spec(supervisor, agent_id, 1, runtime)
+    worker_env = {**spec.environment, "PYTHON_DOTENV_DISABLED": "true", "KODA_SKIP_SECURITY_GUARD_SERVICE": "1"}
+
+    completed = subprocess.run(
+        [sys.executable, "-c", _WORKER_CONFIG_SCRIPT, json.dumps(worker_env)],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=Path(__file__).resolve().parents[1],
+        timeout=120,
+    )
+    worker = json.loads(completed.stdout.strip().splitlines()[-1])
+
+    assert worker == {**host, "INTER_AGENT_ENABLED": False}
