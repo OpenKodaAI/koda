@@ -64,7 +64,7 @@ const buttonVariants = cva(
         icon: "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-0",
         link: "h-auto rounded-none border-transparent bg-transparent p-0 text-[var(--text-primary)] hover:bg-transparent",
         input:
-          "justify-start font-normal focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-[var(--accent-muted)]",
+          "justify-start font-normal focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
       },
       placeholder: {
         true: "text-[var(--text-quaternary)]",

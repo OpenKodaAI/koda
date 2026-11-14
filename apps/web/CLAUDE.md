@@ -54,6 +54,12 @@ Tokens live in [`apps/web/src/app/globals.css`](src/app/globals.css):
 - Radius tokens: `--radius-chip: 8` · `--radius-panel-sm: 10` · `--radius-panel: 12` · `--radius-shell: 14` · `--radius-input: 14` · `--radius-pill: 999`.
 - Shadows barely-there: `--shadow-xs: 0 1px 0 rgba(0,0,0,0.25)`, `--shadow-floating: 0 8px 28px rgba(0,0,0,0.45)`. No stacked `inset + outer` shadows.
 
+### Focus (mandatory)
+
+- Keyboard focus is always visible, in both themes. `--focus-ring` (`#8A8A8A` dark, `#6F685F` light) keeps at least 3:1 contrast against every surface token (`--canvas` … `--surface-elevated-soft`) and against the accent CTA fill. `src/components/ui/focus-ring-contract.test.tsx` enforces it.
+- The flat-design reset near the bottom of `globals.css` (`box-shadow: none !important`) is scoped to `html body *:not(:focus-visible)` (decision M8-E1-T1, D-114). Shadows stay off everywhere except on the element that holds keyboard focus, so focus rings drawn with `box-shadow` (Tailwind `ring-*`, component `:focus-visible` rules) paint. Do not widen the reset back to every element, and do not add another `box-shadow: none !important` that matches focused elements.
+- Non-text controls get the global 2px `--focus-ring` outline. A component that suppresses the outline must draw its own ring in `--focus-ring` or `--accent`. Text-entry primitives recolor their border and add a 1px ring (see Input below). Never use a translucent token such as `--accent-muted` as the only focus indicator.
+
 ### Glass-blur (mandatory for every overlay)
 
 Every floating surface that overlays another surface MUST get glass-blur. There are exactly four canonical classes — the only correct way to ship an overlay is to apply one of them. The `backdrop-filter` rule on each is `!important` and must stay that way; do not introduce new bg/blur stacks.
@@ -136,7 +142,7 @@ Rules:
 Primitives live under `apps/web/src/components/ui/` and `apps/web/src/components/dashboard/`.
 
 - **Button** heights: `lg` 36 / `md` 32 / `sm` 28. Radius `--radius-panel-sm`. Variants: `primary`, `accent`, `mono`, `destructive`, `secondary`, `outline`, `ghost`, `dim`, `foreground`.
-- **Input / Select**: default `h-9` (36px), radius `--radius-input` (14px), bg `--panel-soft`, focus ring `--accent` with `box-shadow: 0 0 0 1px var(--accent-muted)`.
+- **Input / Textarea / Select**: default `h-9` (36px), radius `--radius-input` (14px), bg `--panel-soft`; on focus the border turns `--focus-ring` and a 1px `--focus-ring` ring is added (`focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]`).
 - **SoftTabs** ([`ui/soft-tabs.tsx`](src/components/ui/soft-tabs.tsx)): outer `h-9 p-0.5 rounded-pill`, inner buttons `h-8 px-3`.
 - **Tooltip**: `max-w-220`, `text-[0.75rem]`, radius-chip 8. Glass surface — `--overlay-floating-bg` + `--overlay-floating-filter`.
 - **Modal / Drawer** ([`ui/drawer.tsx`](src/components/ui/drawer.tsx)): Radix Dialog wrapper. Drawers use `modal={false}` by default to preserve context behind. Single panel, radius-shell 14. Glass surface — `--overlay-modal-bg` + `--overlay-modal-filter`; the backdrop scrim uses `--overlay-backdrop-*`.
