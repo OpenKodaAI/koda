@@ -603,7 +603,7 @@ def test_subscription_login_flows_refuse_providers_without_a_cli_login(monkeypat
     with pytest.raises(ValueError, match="does not support subscription login"):
         provider_auth.provider_login_command(provider)
     assert provider_auth.provider_logout_command(provider) is None
-    assert provider_auth.run_provider_logout(provider) == (False, "logout not supported")
+    assert provider_auth.run_provider_logout(provider) == (False, "logout not supported", False)
 
 
 def test_logout_resolves_only_clis_that_have_a_logout(monkeypatch):
@@ -612,5 +612,6 @@ def test_logout_resolves_only_clis_that_have_a_logout(monkeypatch):
     # Gemini has no logout subcommand: nothing is resolved, so a missing CLI is not an error.
     assert provider_auth.provider_logout_command("gemini") is None
     # A missing Claude or Codex CLI is reported, not raised, so a disconnect can still wipe keys.
-    assert provider_auth.run_provider_logout("claude") == (False, "claude not found on PATH")
-    assert provider_auth.run_provider_logout("codex") == (False, "codex not found on PATH")
+    # ``attempted`` stays False: with no CLI there is nothing to log out.
+    assert provider_auth.run_provider_logout("claude") == (False, "claude not found on PATH", False)
+    assert provider_auth.run_provider_logout("codex") == (False, "codex not found on PATH", False)

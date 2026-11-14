@@ -20,7 +20,7 @@ from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, NamedTuple, cast
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
@@ -308,6 +308,12 @@ def provider_supports_api_key(provider_id: str) -> bool:
     return provider_id.strip().lower() in (*MANAGED_PROVIDER_IDS,)
 
 
+# Providers whose CLI has its own subscription login (claude.ai, ChatGPT, Google account), and
+# the subcommand that logs each one out where the CLI has one (Gemini has none).
+SUBSCRIPTION_LOGIN_PROVIDER_IDS = frozenset({"claude", "codex", "gemini"})
+_LOGOUT_SUBCOMMANDS: dict[str, tuple[str, ...]] = {"claude": ("auth", "logout"), "codex": ("logout",)}
+
+
 def provider_supports_subscription_login(provider_id: str) -> bool:
     # Claude Code ships ``claude setup-token`` for headless environments: it
     # prints the OAuth URL, accepts the authorization code on stdin and writes
@@ -315,7 +321,7 @@ def provider_supports_subscription_login(provider_id: str) -> bool:
     # relays the URL to the UI and forwards the pasted code to stdin, so the
     # browser step still happens against Anthropic directly — Koda only wraps
     # the subprocess stdio, which the CLI is explicitly designed for.
-    return provider_id.strip().lower() in {"claude", "codex", "gemini"}
+    return provider_id.strip().lower() in SUBSCRIPTION_LOGIN_PROVIDER_IDS
 
 
 def provider_supports_local_connection(provider_id: str) -> bool:
@@ -424,10 +430,6 @@ def _provider_command_env(base_env: dict[str, str] | None = None) -> dict[str, s
 
 # Providers Koda runs as a local CLI, and the setting that names the executable when one does.
 _CLI_PROVIDER_IDS = frozenset({"claude", "codex", "gemini", "ollama"})
-# Providers whose CLI has its own subscription login (claude.ai, ChatGPT, Google account), and
-# the subcommand that logs each one out where the CLI has one (Gemini has none).
-SUBSCRIPTION_LOGIN_PROVIDER_IDS = frozenset({"claude", "codex", "gemini"})
-_LOGOUT_SUBCOMMANDS: dict[str, tuple[str, ...]] = {"claude": ("auth", "logout"), "codex": ("logout",)}
 _PROVIDER_EXECUTABLE_SETTINGS: dict[str, tuple[str, str]] = {
     "codex": ("CODEX_BIN", "codex"),
     "gemini": ("GEMINI_BIN", "gemini"),
@@ -786,19 +788,34 @@ def parse_login_session_state(session_id: str, handle: _ProviderLoginProcess) ->
     )
 
 
+class ProviderLogoutResult(NamedTuple):
+    """Outcome of a provider CLI logout.
+
+    ``attempted`` is True only when a logout command ran; it is False when the provider's CLI
+    has no logout or is not installed, which leaves nothing to log out locally.
+    """
+
+    performed: bool
+    message: str
+    attempted: bool
+
+
+LOGOUT_NOT_SUPPORTED = "logout not supported"
+
+
 def run_provider_logout(
     provider_id: ProviderId,
     *,
     base_env: dict[str, str] | None = None,
     work_dir: str | None = None,
-) -> tuple[bool, str]:
+) -> ProviderLogoutResult:
     try:
         command = provider_logout_command(provider_id, base_env=base_env)
     except FileNotFoundError as exc:
         # A missing CLI must not stop a disconnect: the caller still wipes stored credentials.
-        return False, f"{exc.args[0] if exc.args else provider_id} not found on PATH"
+        return ProviderLogoutResult(False, f"{exc.args[0] if exc.args else provider_id} not found on PATH", False)
     if command is None:
-        return False, "logout not supported"
+        return ProviderLogoutResult(False, LOGOUT_NOT_SUPPORTED, False)
     env = build_provider_process_env(
         provider_id,
         auth_mode="subscription_login",
@@ -816,11 +833,11 @@ def run_provider_logout(
             check=False,
         )
     except FileNotFoundError:
-        return False, f"{command[0]} not found on PATH"
+        return ProviderLogoutResult(False, f"{command[0]} not found on PATH", False)
     except subprocess.TimeoutExpired:
-        return False, f"{provider_id} logout timed out"
+        return ProviderLogoutResult(False, f"{provider_id} logout timed out", True)
     output = strip_ansi(proc.stdout or "").strip()
-    return proc.returncode == 0, output
+    return ProviderLogoutResult(proc.returncode == 0, output, True)
 
 
 _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES: dict[str, dict[str, Any]] = {

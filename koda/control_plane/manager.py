@@ -89,6 +89,7 @@ from koda.services.kokoro_manager import (
 from koda.services.mcp_connection_broker import decrypt_env_values, resolve_mcp_runtime_connection
 from koda.services.prompt_budget import PromptSegment, preview_compiled_prompt, preview_modeled_runtime_prompt
 from koda.services.provider_auth import (
+    LOGOUT_NOT_SUPPORTED,
     MANAGED_PROVIDER_IDS,
     PROVIDER_API_KEY_ENV_KEYS,
     PROVIDER_AUTH_MODE_ENV_KEYS,
@@ -1568,6 +1569,16 @@ def _parse_dashboard_appearance() -> dict[str, dict[str, str]]:
             "color_rgb": color_rgb,
         }
     return appearance
+
+
+# Where each provider CLI stores its login, relative to its config folder. Checked against the
+# pinned CLIs (packages/provider-clis): Claude Code ``.credentials.json``, Codex ``auth.json``,
+# Gemini CLI ``oauth_creds.json``, ``google_accounts.json`` and ``mcp-oauth-tokens.json``.
+_PROVIDER_CREDENTIAL_FILES: dict[str, tuple[str, ...]] = {
+    "claude": (".credentials.json",),
+    "codex": ("auth.json",),
+    "gemini": ("oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json"),
+}
 
 
 class ControlPlaneManager:
@@ -7749,12 +7760,20 @@ class ControlPlaneManager:
         # leak a PTY when the operator restarts the wizard.
         self._terminate_provider_login_sessions(normalized)
 
-        handle, state = start_login_process(
-            cast(Any, normalized),
-            project_id=project_id,
-            base_env=self._merged_global_env(),
-            work_dir=self._provider_auth_work_dir(normalized),
-        )
+        try:
+            handle, state = start_login_process(
+                cast(Any, normalized),
+                project_id=project_id,
+                base_env=self._merged_global_env(),
+                work_dir=self._provider_auth_work_dir(normalized),
+            )
+        except FileNotFoundError as exc:
+            # A missing CLI is an operator-fixable state, not a server error (it used to be a 500).
+            title = PROVIDER_TITLES.get(cast(Any, normalized), normalized)
+            missing = exc.args[0] if exc.args else normalized
+            raise ValueError(
+                f"{title} CLI is not installed: '{missing}' was not found. Install the pinned CLI to log in."
+            ) from exc
         self._provider_login_processes[state.session_id] = handle
         self._persist_provider_connection_row(
             normalized,
@@ -8068,13 +8087,12 @@ class ControlPlaneManager:
             )
             self._persist_provider_login_session(cancelled)
 
-        logout_performed, logout_message = run_provider_logout(
+        logout = run_provider_logout(
             cast(Any, normalized),
             base_env=self._merged_global_env(),
             work_dir=self._provider_auth_work_dir(normalized),
         )
-        if not logout_performed and logout_message == "logout not supported":
-            logout_message = ""
+        logout_message = "" if logout.message == LOGOUT_NOT_SUPPORTED else logout.message
 
         self._wipe_provider_credential_files(normalized)
         self._purge_provider_global_secrets(normalized)
@@ -8085,16 +8103,9 @@ class ControlPlaneManager:
                 (normalized,),
             )
 
-        reset_auth_mode = (
-            "api_key"
-            if normalized == "elevenlabs"
-            # Ollama is a self-hosted endpoint; Claude is authenticated out-of-band
-            # by the operator via ``claude auth login`` on the container shell.
-            # Both start in ``local`` mode after a reset.
-            else "local"
-            if normalized in {"ollama", "claude"}
-            else "subscription_login"
-        )
+        # A reset returns the provider to the mode a fresh install starts in: ``local`` for Ollama
+        # and Claude, ``subscription_login`` for the other CLI providers, ``api_key`` otherwise.
+        reset_auth_mode = self._default_provider_connection_row(normalized)["auth_mode"]
 
         self._persist_provider_connection_row(
             normalized,
@@ -8108,13 +8119,15 @@ class ControlPlaneManager:
             # everything that was persisted".
             project_id="",
             last_verified_at="",
-            last_error="" if logout_performed or not logout_message else logout_message,
+            # Only a logout that ran and failed is an error: with no CLI (or no logout subcommand)
+            # there is nothing to log out, and the credential files are removed above.
+            last_error=logout.message if logout.attempted and not logout.performed else "",
         )
         del row  # old row snapshot is no longer authoritative after the wipe above
         return {
             "connection": self.get_provider_connection(normalized),
             "logout": {
-                "performed": logout_performed,
+                "performed": logout.performed,
                 "message": logout_message,
             },
         }
@@ -8141,14 +8154,14 @@ class ControlPlaneManager:
             self._persist_global_sections({})  # flush the provider-section drift
 
     def _wipe_provider_credential_files(self, provider_id: str) -> None:
-        """Best-effort removal of CLI-managed credential files on disk.
+        """Best-effort removal of the files where a provider CLI keeps its login.
 
-        Claude Code / Codex CLIs keep OAuth tokens under the runtime HOME.
-        ``*_auth logout`` is supposed to clear them, but failures or older
-        CLI versions leave the tokens behind. Wipe the known paths so the
-        next login starts from a clean slate.
+        ``*_auth logout`` is supposed to clear them, but failures or older CLI versions leave
+        the tokens behind. Only the credential files are removed (names checked against the
+        pinned CLIs, see ``_PROVIDER_CREDENTIAL_FILES``). The rest of the folder (settings,
+        history, memory, project files) is never touched: on a native install it is the
+        operator's own CLI configuration.
         """
-        import shutil
         from pathlib import Path
 
         home = os.environ.get("HOME") or ""
@@ -8170,14 +8183,9 @@ class ControlPlaneManager:
                 config_dirs.append(Path(home) / ".gemini")
 
         for directory in config_dirs:
-            with contextlib.suppress(Exception):
-                if directory.is_dir():
-                    for child in directory.iterdir():
-                        with contextlib.suppress(Exception):
-                            if child.is_dir():
-                                shutil.rmtree(child)
-                            else:
-                                child.unlink(missing_ok=True)
+            for name in _PROVIDER_CREDENTIAL_FILES.get(provider_id, ()):
+                with contextlib.suppress(OSError):
+                    (directory / name).unlink(missing_ok=True)
 
     def get_agent_spec(self, agent_id: str, *, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
         normalized = _normalize_agent_id(agent_id)

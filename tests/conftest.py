@@ -34,6 +34,26 @@ os.environ["STATE_BACKEND"] = "postgres"
 _GUARD = None if _security_guard.guard_disabled() else _security_guard.select_guard_target()
 
 
+_REAL_HOME = os.path.expanduser("~")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_home(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch):
+    """Give every test its own empty HOME, so no test reads or deletes the files of whoever runs it.
+
+    Provider disconnects remove CLI login files under ``$HOME/.claude``, ``.codex`` and
+    ``.gemini`` (and under ``CLAUDE_CONFIG_DIR`` / ``CODEX_HOME``). Before this fixture a full run
+    deleted the real ones. The Rust toolchain keeps its real location so a test that spawns
+    ``cargo`` still finds it; session fixtures (the guard, release builds) run before this.
+    """
+    for key, default in (("CARGO_HOME", ".cargo"), ("RUSTUP_HOME", ".rustup")):
+        if key not in os.environ:
+            monkeypatch.setenv(key, os.path.join(_REAL_HOME, default))
+    monkeypatch.setenv("HOME", str(tmp_path_factory.mktemp("home")))
+    for key in ("CLAUDE_CONFIG_DIR", "CODEX_HOME"):
+        monkeypatch.delenv(key, raising=False)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_runtime_env():
     """Keep runtime-scoped env vars from leaking across tests."""

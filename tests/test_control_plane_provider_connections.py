@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
+import pwd
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -16,6 +19,7 @@ from koda.services.provider_auth import (
     MANAGED_PROVIDER_IDS,
     PROVIDER_API_KEY_ENV_KEYS,
     ProviderLoginSessionState,
+    ProviderLogoutResult,
     ProviderVerificationResult,
     provider_login_command,
 )
@@ -496,7 +500,11 @@ def test_api_key_provider_round_trip_resets_to_local(monkeypatch):
             details={"provider": provider_id},
         ),
     )
-    monkeypatch.setattr(manager_mod, "run_provider_logout", lambda provider_id, base_env=None, work_dir="": (True, ""))
+    monkeypatch.setattr(
+        manager_mod,
+        "run_provider_logout",
+        lambda provider_id, base_env=None, work_dir="": ProviderLogoutResult(True, "", True),
+    )
 
     connection = manager_mod.ControlPlaneManager.put_provider_api_key_connection(
         manager,
@@ -544,7 +552,7 @@ def test_ollama_local_connection_round_trip_preserves_local_mode(monkeypatch):
     monkeypatch.setattr(
         manager_mod,
         "run_provider_logout",
-        lambda provider_id, base_env=None, work_dir="": (False, "logout not supported"),
+        lambda provider_id, base_env=None, work_dir="": ProviderLogoutResult(False, "logout not supported", False),
     )
 
     connection = manager_mod.ControlPlaneManager.put_provider_local_connection(
@@ -1014,7 +1022,11 @@ def test_start_provider_login_tracks_session_and_disconnect_cancels_it(monkeypat
         )
 
     manager._sync_provider_login_session = fake_sync_provider_login_session  # type: ignore[attr-defined]
-    monkeypatch.setattr(manager_mod, "run_provider_logout", lambda provider_id, base_env=None, work_dir="": (True, ""))
+    monkeypatch.setattr(
+        manager_mod,
+        "run_provider_logout",
+        lambda provider_id, base_env=None, work_dir="": ProviderLogoutResult(True, "", True),
+    )
 
     started = manager_mod.ControlPlaneManager.start_provider_login(manager, "codex", {})
     assert started["connection"]["auth_mode"] == "subscription_login"
@@ -1847,18 +1859,22 @@ def test_purge_provider_global_secrets_wipes_every_scoped_env_key(monkeypatch):
     assert "CLAUDE_CONNECTION_VERIFIED" in deleted
 
 
-def test_wipe_provider_credential_files_clears_known_dirs(monkeypatch, tmp_path):
-    """Claude Code CLI persists OAuth tokens under ``CLAUDE_CONFIG_DIR``.
-    A CLI ``logout`` normally clears them, but older versions (or a
-    mid-logout crash) leave tokens on disk. The disconnect path must wipe
-    the known credential directories so the next login starts fresh.
+def test_wipe_provider_credential_files_removes_only_the_token_file(monkeypatch, tmp_path):
+    """Claude Code keeps its OAuth tokens in ``.credentials.json`` under ``CLAUDE_CONFIG_DIR``.
+
+    A CLI ``logout`` normally clears them, but older versions (or a mid-logout crash) leave
+    tokens on disk, so the disconnect path removes that file. Everything else in the folder
+    (``.claude.json`` preferences and project trust, backups, history) is the operator's own
+    configuration and stays.
     """
     import koda.control_plane.manager as manager_mod
 
     config_dir = tmp_path / "claude-config"
     config_dir.mkdir()
-    leftover = config_dir / ".claude.json"
-    leftover.write_text('{"oauth": "stale-token"}')
+    credentials = config_dir / ".credentials.json"
+    credentials.write_text('{"claudeAiOauth": {"accessToken": "stale-token"}}')
+    settings = config_dir / ".claude.json"
+    settings.write_text('{"projects": {}}')
     (config_dir / "backups").mkdir()
     (config_dir / "backups" / "old.json").write_text("{}")
 
@@ -1868,12 +1884,9 @@ def test_wipe_provider_credential_files_clears_known_dirs(monkeypatch, tmp_path)
     manager = object.__new__(manager_mod.ControlPlaneManager)
     manager._wipe_provider_credential_files("claude")
 
-    assert not leftover.exists()
-    # The config_dir itself is kept (CLI will recreate children); only
-    # children are removed so we don't stomp on a path owned by volume
-    # mounts.
-    assert config_dir.is_dir()
-    assert list(config_dir.iterdir()) == []
+    assert not credentials.exists()
+    assert settings.read_text() == '{"projects": {}}'
+    assert (config_dir / "backups" / "old.json").exists()
 
 
 @pytest.mark.parametrize("provider", ["perplexity", "groq", "openrouter", "elevenlabs", "gemini"])
@@ -1889,6 +1902,61 @@ def test_disconnect_runs_the_real_logout_and_removes_the_stored_key(monkeypatch,
     monkeypatch.setenv("PATH", str(tmp_path))
     secrets[provider] = "sk-test"
 
-    manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, provider)
+    result = manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, provider)
 
     assert provider not in secrets
+    # A provider with no CLI logout (or no CLI here) has nothing to log out: not an error.
+    assert result["connection"]["last_error"] == ""
+    # The reset matches a fresh install: API-key providers go back to api_key.
+    assert result["connection"]["auth_mode"] == manager._default_provider_connection_row(provider)["auth_mode"]
+
+
+@pytest.mark.parametrize(
+    ("provider", "config_dir", "credentials"),
+    [
+        ("claude", ".claude", [".credentials.json"]),
+        ("codex", ".codex", ["auth.json"]),
+        ("gemini", ".gemini", ["oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json"]),
+    ],
+)
+def test_disconnect_removes_only_the_cli_credential_files(monkeypatch, tmp_path, provider, config_dir, credentials):
+    """Review: disconnect emptied the whole CLI folder, which on a native install is the operator's own."""
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, _meta, secrets, _sessions = _make_manager(monkeypatch)
+    monkeypatch.setenv("PATH", str(tmp_path / "no-clis"))
+    folder = Path(os.environ["HOME"]) / config_dir
+    (folder / "projects" / "demo").mkdir(parents=True)
+    kept = [folder / "settings.json", folder / "CLAUDE.md", folder / "projects" / "demo" / "history.jsonl"]
+    for path in kept:
+        path.write_text("keep")
+    for name in credentials:
+        (folder / name).write_text("token")
+    secrets[provider] = "sk-test"
+
+    manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, provider)
+
+    assert [name for name in credentials if (folder / name).exists()] == []
+    assert all(path.read_text() == "keep" for path in kept)
+
+
+def test_tests_never_see_the_real_home():
+    """tests/conftest.py gives each test its own HOME, so disconnect tests cannot reach real files."""
+    assert os.path.realpath(os.environ["HOME"]) != os.path.realpath(pwd.getpwuid(os.getuid()).pw_dir)
+    assert "CLAUDE_CONFIG_DIR" not in os.environ
+    assert "CODEX_HOME" not in os.environ
+
+
+@pytest.mark.parametrize("provider", ["claude", "codex", "gemini"])
+def test_login_without_the_cli_is_a_clear_client_error(monkeypatch, tmp_path, provider):
+    """Review: a missing CLI raised FileNotFoundError, which the API answered with a 500."""
+    import koda.control_plane.manager as manager_mod
+
+    manager, rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    manager._terminate_provider_login_sessions = lambda provider_id: None
+    monkeypatch.setenv("PATH", str(tmp_path / "no-clis"))
+    before = dict(rows[provider])
+
+    with pytest.raises(ValueError, match="CLI is not installed"):
+        manager_mod.ControlPlaneManager.start_provider_login(manager, provider)
+    assert rows[provider] == before
