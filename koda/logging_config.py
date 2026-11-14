@@ -138,10 +138,13 @@ def setup_logging(json_output: bool | None = None) -> None:
         structlog.processors.UnicodeDecoder(),
     ]
 
+    renderers: list[structlog.types.Processor]
     if json_output:
-        renderer: structlog.types.Processor = structlog.processors.JSONRenderer()
+        # format_exc_info puts a plain traceback string (frames and source lines, never local
+        # variables) under "exception". structlog's dict_tracebacks would add the locals.
+        renderers = [structlog.processors.format_exc_info, structlog.processors.JSONRenderer()]
     else:
-        renderer = structlog.dev.ConsoleRenderer(exception_formatter=structlog.dev.plain_traceback)
+        renderers = [structlog.dev.ConsoleRenderer(exception_formatter=structlog.dev.plain_traceback)]
 
     structlog.configure(
         processors=[
@@ -154,9 +157,16 @@ def setup_logging(json_output: bool | None = None) -> None:
     )
 
     formatter = structlog.stdlib.ProcessorFormatter(
+        # Records from the standard logging module (third-party libraries) get the same level,
+        # logger and timestamp keys as structlog events.
+        foreign_pre_chain=[
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.add_logger_name,
+            structlog.processors.TimeStamper(fmt="iso"),
+        ],
         processors=[
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            renderer,
+            *renderers,
         ],
     )
 

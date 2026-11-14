@@ -52,6 +52,11 @@ async def supervisor_stand_in():
         fail_with(code)
     except RuntimeError:
         log.exception("supervisor_crashed")
+    # A library logs its own crashes through the standard logging module, as aiohttp's server does.
+    try:
+        raise KeyError("agent-123 missing")
+    except KeyError:
+        logging.getLogger("aiohttp.server").exception("Error handling request from 127.0.0.1")
     # An OAuth callback carries its authorization code in the query string.
     logging.getLogger("aiohttp.access").info("GET /oauth/callback?code=oauth-code-value 200")
 
@@ -107,7 +112,13 @@ def test_log_format_json_takes_effect_and_redacts(entrypoint: str, tmp_path: Pat
     assert code not in stdout
     events = _json_lines(stdout)
     names = [event.get("event") for event in events]
-    expected = ["supervisor_started", "bootstrap_file_written", "operator_login_attempt", "supervisor_crashed"]
+    expected = [
+        "supervisor_started",
+        "bootstrap_file_written",
+        "operator_login_attempt",
+        "supervisor_crashed",
+        "Error handling request from 127.0.0.1",
+    ]
     if entrypoint == "python -m koda.control_plane":
         expected.insert(0, "browser_bootstrap_checked")
     assert names == expected
@@ -120,6 +131,32 @@ def test_log_format_json_takes_effect_and_redacts(entrypoint: str, tmp_path: Pat
     for secret in _SECRETS:
         assert secret not in stdout
         assert secret not in stderr
+
+
+@pytest.mark.parametrize("entrypoint", sorted(_ENTRYPOINTS))
+def test_json_lines_carry_the_exception_without_traceback_locals(entrypoint: str, tmp_path: Path) -> None:
+    stdout, _stderr, code = _run(entrypoint, tmp_path, "json")
+    events = {event["event"]: event for event in _json_lines(stdout)}
+
+    # A structlog log.exception keeps its type, message and stack, as a plain traceback string.
+    crashed = events["supervisor_crashed"]
+    assert "exc_info" not in crashed
+    assert crashed["level"] == "error"
+    assert crashed["exception"].startswith("Traceback (most recent call last):")
+    assert "in fail_with" in crashed["exception"]
+    assert crashed["exception"].rstrip().endswith("RuntimeError: supervisor failed")
+
+    # A record from the standard logging module gets the same keys as a structlog one.
+    library = events["Error handling request from 127.0.0.1"]
+    assert "exc_info" not in library
+    assert library["level"] == "error"
+    assert library["logger"] == "aiohttp.server"
+    assert library["timestamp"]
+    assert library["exception"].rstrip().endswith("KeyError: 'agent-123 missing'")
+
+    # The tracebacks list frames and source lines only: no local variable reaches the log.
+    assert code not in stdout
+    assert "locals" not in stdout
 
 
 @pytest.mark.parametrize("entrypoint", sorted(_ENTRYPOINTS))

@@ -454,11 +454,12 @@ message would reveal that the account exists.
   in any case: `password`, `new_password`, `current_password`, `recovery_code`, `session_token`,
   `registration_token`, `bootstrap_code`, `code`, `totp_secret`, `api_key`, `apikey`, `secret`,
   `private_key`, `token`, `authorization` and `cookie`. It does not look inside nested values, and
-  records from the standard `logging` module, such as third-party libraries', are formatted but
-  not redacted. Console lines print tracebacks without local variables; a JSON line marks an
-  exception with `"exc_info": true` and carries no traceback. In the control plane, aiohttp's
-  access log stays off, because its request lines carry query strings such as the authorization
-  code of an MCP OAuth callback.
+  records from the standard `logging` module, such as third-party libraries', are formatted (with
+  the same `level`, `logger` and `timestamp` keys) but not redacted. Both formats print an
+  exception's plain traceback, its type, message and stack, without local variables: a console
+  line prints it below the event, and a JSON line carries it as a string in its `exception` key.
+  In the control plane, aiohttp's access log stays off, because its request lines carry query
+  strings such as the authorization code of an MCP OAuth callback.
 
 ## Security headers
 
