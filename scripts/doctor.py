@@ -8,7 +8,7 @@ import json
 import socket
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -63,12 +63,58 @@ def fetch_status(url: str, *, timeout: float = 5.0, headers: dict[str, str] | No
 
 
 PLACEHOLDER_SECRET_PREFIX = "replace-with-"
+# Copy of koda.config.STORAGE_SECRET_ENV_SOURCES: doctor runs on the host without
+# Koda's dependencies. tests/test_doctor_strict.py keeps the two in sync.
+STORAGE_SECRET_ENV_SOURCES: dict[str, tuple[str, ...]] = {
+    "POSTGRES_PASSWORD": ("POSTGRES_PASSWORD", "KNOWLEDGE_V2_POSTGRES_DSN"),
+    "S3_ACCESS_KEY_ID": ("S3_ACCESS_KEY_ID", "KNOWLEDGE_V2_S3_ACCESS_KEY_ID"),
+    "S3_SECRET_ACCESS_KEY": ("S3_SECRET_ACCESS_KEY", "KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY"),
+}
+PLACEHOLDER_SECRET_ROTATION_COMMAND = "python3 scripts/generate_env_secrets.py --all"
+PLACEHOLDER_SECRET_ROTATION_DOC = "docs/install/local.md#rotating-placeholder-postgres-and-object-storage-secrets"
+
+
+def _is_placeholder(value: str | None) -> bool:
+    return str(value or "").strip().lower().startswith(PLACEHOLDER_SECRET_PREFIX)
 
 
 def _is_real_secret(value: str) -> bool:
     """True for a configured value that is not an unedited .env.example placeholder."""
     cleaned = str(value or "").strip()
-    return bool(cleaned) and not cleaned.lower().startswith(PLACEHOLDER_SECRET_PREFIX)
+    return bool(cleaned) and not _is_placeholder(cleaned)
+
+
+def _dsn_password(dsn: str | None) -> str:
+    try:
+        return unquote(urlparse(str(dsn or "").strip()).password or "")
+    except ValueError:
+        return ""
+
+
+def check_storage_secrets(env: dict[str, str]) -> dict[str, Any]:
+    """Fail while POSTGRES_PASSWORD or an S3_* secret is a placeholder. Reports names, never values."""
+    placeholder_keys: list[str] = []
+    for name, sources in STORAGE_SECRET_ENV_SOURCES.items():
+        for source in sources:
+            value = env.get(source)
+            if source.endswith("_DSN"):
+                value = _dsn_password(value)
+            if _is_placeholder(value):
+                placeholder_keys.append(name)
+                break
+    check: dict[str, Any] = {
+        "name": "storage_secrets_not_placeholders",
+        "ok": not placeholder_keys,
+        "placeholder_keys": placeholder_keys,
+    }
+    if placeholder_keys:
+        check["rotation_command"] = PLACEHOLDER_SECRET_ROTATION_COMMAND
+        check["user_action"] = (
+            f"{', '.join(placeholder_keys)} still use the public .env.example placeholder. Replace them with "
+            f"`{PLACEHOLDER_SECRET_ROTATION_COMMAND}`. On an install that has already started, Postgres keeps "
+            f"the old password: follow {PLACEHOLDER_SECRET_ROTATION_DOC} to apply the new one before restarting."
+        )
+    return check
 
 
 def run_doctor(
@@ -102,6 +148,7 @@ def run_doctor(
         {"name": "object_storage_bucket", "ok": bool(object_storage_bucket), "value": object_storage_bucket},
         {"name": "object_storage_access_key", "ok": bool(object_storage_access_key)},
         {"name": "object_storage_secret_key", "ok": bool(object_storage_secret_key)},
+        check_storage_secrets(env),
     ]
 
     if postgres_dsn:

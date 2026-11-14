@@ -10469,6 +10469,51 @@
         "description": "Stable Koda control-plane route. See linked architecture and runbook docs for domain behavior."
       }
     },
+    "/api/control-plane/system-settings/placeholder-secrets": {
+      "get": {
+        "summary": "Postgres and object-storage secrets still on .env.example placeholders",
+        "description": "Operator-only. Lists the .env names (POSTGRES_PASSWORD, S3_ACCESS_KEY_ID, S3_SECRET_ACCESS_KEY) whose values, or the runtime settings derived from them, still start with replace-with-. Never returns secret values. The dashboard shows a warning banner while the list is not empty.",
+        "tags": [
+          "System Settings"
+        ],
+        "responses": {
+          "200": {
+            "description": "Placeholder key names and the link to the rotation steps.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": [
+                    "placeholder_keys",
+                    "rotation_url"
+                  ],
+                  "properties": {
+                    "placeholder_keys": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "enum": [
+                          "POSTGRES_PASSWORD",
+                          "S3_ACCESS_KEY_ID",
+                          "S3_SECRET_ACCESS_KEY"
+                        ]
+                      }
+                    },
+                    "rotation_url": {
+                      "type": "string",
+                      "format": "uri"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Operator session is required."
+          }
+        }
+      }
+    },
     "/api/control-plane/system-settings/secrets/{secret_key}": {
       "get": {
         "summary": "Get system settings secrets",

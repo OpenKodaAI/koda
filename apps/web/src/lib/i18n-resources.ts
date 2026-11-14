@@ -17563,4 +17563,49 @@ for (const [language, labels] of Object.entries(sidebarEvaluationLabels)) {
   };
 }
 
+const placeholderSecretsBannerLabels: Record<
+  string,
+  { title: string; description: string; action: string }
+> = {
+  "en-US": {
+    title: "Database and object-storage secrets are still placeholders",
+    description:
+      "{{keys}} still use the public example values from .env.example, so anyone who can reach Postgres or object storage can use them. Koda keeps running; rotate them to secure this install.",
+    action: "Rotation steps",
+  },
+  "pt-BR": {
+    title: "Os segredos do banco de dados e do armazenamento de objetos ainda são placeholders",
+    description:
+      "{{keys}} ainda usam os valores públicos de exemplo do .env.example, então qualquer pessoa que alcance o Postgres ou o armazenamento de objetos pode usá-los. O Koda continua funcionando; troque-os para proteger esta instalação.",
+    action: "Passos de rotação",
+  },
+  "es-ES": {
+    title: "Los secretos de la base de datos y del almacenamiento de objetos siguen siendo marcadores de posición",
+    description:
+      "{{keys}} siguen usando los valores públicos de ejemplo de .env.example, así que cualquiera que llegue a Postgres o al almacenamiento de objetos puede usarlos. Koda sigue funcionando; rótalos para proteger esta instalación.",
+    action: "Pasos de rotación",
+  },
+  "fr-FR": {
+    title: "Les secrets de la base de données et du stockage objet sont encore des valeurs d'exemple",
+    description:
+      "{{keys}} utilisent encore les valeurs d'exemple publiques de .env.example : toute personne qui peut joindre Postgres ou le stockage objet peut s'en servir. Koda continue de fonctionner ; changez-les pour sécuriser cette installation.",
+    action: "Étapes de rotation",
+  },
+  "de-DE": {
+    title: "Datenbank- und Objektspeicher-Geheimnisse sind noch Platzhalter",
+    description:
+      "{{keys}} verwenden noch die öffentlichen Beispielwerte aus .env.example, daher kann jeder, der Postgres oder den Objektspeicher erreicht, sie nutzen. Koda läuft weiter; rotiere sie, um diese Installation abzusichern.",
+    action: "Schritte zur Rotation",
+  },
+};
+
+for (const [language, labels] of Object.entries(placeholderSecretsBannerLabels)) {
+  const translation = mutableResources[language]?.translation;
+  if (!translation) continue;
+  translation.securityBanner = {
+    ...(translation.securityBanner ?? {}),
+    placeholderSecrets: labels,
+  };
+}
+
 export type ResourceLanguages = keyof typeof resources;

@@ -9,6 +9,7 @@ check. A future refactor that drops a check would surface immediately.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 
@@ -148,3 +149,62 @@ def test_basic_token_checks_do_not_accept_placeholders(doctor_module, monkeypatc
     result = doctor_module.run_doctor(env=env, base_url="http://127.0.0.1:1")
     assert _by_name(result["checks"], "control_plane_api_token")["ok"] is False
     assert _by_name(result["checks"], "runtime_local_ui_token")["ok"] is False
+
+
+def _offline_doctor(doctor_module, monkeypatch: pytest.MonkeyPatch, env: dict[str, str]) -> dict:
+    # Socket probes are irrelevant here; HTTP probes hit a closed local port and fail fast.
+    monkeypatch.setattr(doctor_module, "check_socket", lambda *_args, **_kwargs: {"ok": False})
+    return doctor_module.run_doctor(env=env, base_url="http://127.0.0.1:1")
+
+
+def test_doctor_fails_on_placeholder_postgres_and_s3_secrets(
+    doctor_module, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "POSTGRES_PASSWORD=replace-with-a-random-postgres-password\n"
+        "S3_ACCESS_KEY_ID=replace-with-a-random-object-storage-access-key\n"
+        "S3_SECRET_ACCESS_KEY='REPLACE-WITH-a-random-object-storage-secret'\n"
+    )
+    result = _offline_doctor(doctor_module, monkeypatch, doctor_module.load_env_file(env_file))
+
+    check = _by_name(result["checks"], "storage_secrets_not_placeholders")
+    assert check["ok"] is False
+    assert result["ok"] is False
+    assert check["placeholder_keys"] == ["POSTGRES_PASSWORD", "S3_ACCESS_KEY_ID", "S3_SECRET_ACCESS_KEY"]
+    assert check["rotation_command"] == "python3 scripts/generate_env_secrets.py --all"
+    assert check["rotation_command"] in check["user_action"]
+    assert "docs/install/local.md#rotating-placeholder-postgres-and-object-storage-secrets" in check["user_action"]
+    # Names only: the check never echoes a secret value.
+    assert "replace-with-" not in json.dumps(check).lower()
+
+
+def test_doctor_reads_the_derived_runtime_storage_settings(doctor_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    env = {
+        "KNOWLEDGE_V2_POSTGRES_DSN": "postgresql://koda:replace-with-a-random-postgres-password@db:5432/koda",
+        "KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY": "replace-with-a-random-object-storage-secret",
+    }
+    check = _by_name(_offline_doctor(doctor_module, monkeypatch, env)["checks"], "storage_secrets_not_placeholders")
+    assert check["ok"] is False
+    assert check["placeholder_keys"] == ["POSTGRES_PASSWORD", "S3_SECRET_ACCESS_KEY"]
+
+
+def test_doctor_storage_secret_check_passes_for_generated_values(
+    doctor_module, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = {
+        "POSTGRES_PASSWORD": "4b1f0c2e9d8a7f6e5d4c3b2a19081726",
+        "S3_ACCESS_KEY_ID": "a1b2c3d4e5f6a7b8c9d0",
+        "S3_SECRET_ACCESS_KEY": "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+    }
+    check = _by_name(_offline_doctor(doctor_module, monkeypatch, env)["checks"], "storage_secrets_not_placeholders")
+    assert check == {"name": "storage_secrets_not_placeholders", "ok": True, "placeholder_keys": []}
+
+
+def test_doctor_storage_secret_sources_match_the_runtime_config(doctor_module) -> None:
+    """doctor runs on the host without Koda's dependencies, so it keeps its own copy of the table."""
+    from koda import config as config_mod
+
+    assert doctor_module.STORAGE_SECRET_ENV_SOURCES == config_mod.STORAGE_SECRET_ENV_SOURCES
+    assert doctor_module.PLACEHOLDER_SECRET_PREFIX == config_mod.PLACEHOLDER_SECRET_PREFIX
+    assert config_mod.PLACEHOLDER_SECRET_ROTATION_URL.endswith(doctor_module.PLACEHOLDER_SECRET_ROTATION_DOC)

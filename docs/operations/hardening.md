@@ -13,6 +13,9 @@ Every item below is verifiable. The matching checks live in
 - [ ] `STATE_ROOT_DIR` permissions are `0700` (owner-only).
 - [ ] `${STATE_ROOT_DIR}/control_plane/.master.key` is `0600`.
 - [ ] `.env` file is `0600` and excluded from git via `.gitignore`.
+- [ ] `POSTGRES_PASSWORD`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` are not `.env.example`
+      placeholders (the basic doctor check `storage_secrets_not_placeholders`; rotation steps in
+      [`../install/local.md`](../install/local.md#rotating-placeholder-postgres-and-object-storage-secrets)).
 - [ ] `bootstrap.txt` is single-use; delete after first login.
 - [ ] Backups (Postgres dumps, state tarballs) are encrypted at-rest
       via filesystem-level encryption (LUKS / EBS / GCS CMEK).

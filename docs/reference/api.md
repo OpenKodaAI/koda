@@ -38,7 +38,7 @@ The control plane owns product configuration and operator-facing management. The
 | Self-improvement | `improvement_proposal.v1` list/create/detail plus approve, reject, validate, apply, and rollback |
 | Quality cockpit | quality overview, per-agent quality, and failure-to-proposal |
 | Providers | provider connection state, API-key/local/subscription-login flows, verification, disconnect, Ollama, ElevenLabs, Kokoro, Supertonic, Whisper, embedding model downloads/select/delete, active download jobs, and cancellation |
-| System settings | global defaults, system settings, general settings, global secrets, and persistence diagnostics |
+| System settings | global defaults, system settings, general settings, global secrets, placeholder-secret status (names only, for the dashboard warning banner), and persistence diagnostics |
 | Channel gateway | `channel_gateway.v1` state, pairing codes, unknown senders, approve, block, revoke |
 | Connections and MCP | system defaults, per-agent connections, tool discovery/policies, OAuth start/status/refresh/revoke, resources, prompts, capability policies, MCP catalog, custom MCP servers, and Claude Desktop MCP import |
 

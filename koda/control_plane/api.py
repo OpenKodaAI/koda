@@ -3137,6 +3137,15 @@ async def get_persistence_diagnostics(request: web.Request) -> web.Response:
     return web.json_response(_manager().get_persistence_diagnostics())
 
 
+async def get_placeholder_secrets(request: web.Request) -> web.Response:
+    """Names (never values) of Postgres/object-storage secrets still on ``.env.example`` placeholders."""
+    from koda.config import PLACEHOLDER_SECRET_ROTATION_URL, placeholder_storage_secrets
+
+    return web.json_response(
+        {"placeholder_keys": placeholder_storage_secrets(), "rotation_url": PLACEHOLDER_SECRET_ROTATION_URL}
+    )
+
+
 async def put_general_system_settings(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
     try:
@@ -5469,6 +5478,7 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_put("/api/control-plane/system-settings", put_system_settings)
     app.router.add_get("/api/control-plane/system-settings/general", get_general_system_settings)
     app.router.add_put("/api/control-plane/system-settings/general", put_general_system_settings)
+    app.router.add_get("/api/control-plane/system-settings/placeholder-secrets", get_placeholder_secrets)
     app.router.add_get("/api/control-plane/_diag/persistence", get_persistence_diagnostics)
     app.router.add_get("/api/control-plane/providers/{provider_id}/connection", get_provider_connection)
     app.router.add_put(
