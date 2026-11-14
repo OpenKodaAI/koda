@@ -78,8 +78,8 @@ existing rules are validated and simulated:
   spellings, the higher priority (then the lower name) decides, as for
   any other tie.
 - **A path rule also covers a listing, search, grep or move of an
-  ancestor.** `file_list`, `file_search`, `file_grep` and `file_move`
-  act on everything below their path (a moved directory takes its
+  ancestor.** `file_list`, `file_search`, `file_grep`, `file_move` and
+  `/ls` act on everything below their path (a moved directory takes its
   contents along, and a move can create a directory's contents at its
   destination). For these tools a `deny`, `require_approval` or
   `allow_with_preview` path rule now also matches when its path lies
@@ -166,7 +166,11 @@ These changes apply with or without rules:
   under the work dir as the command resolves it. They used to see the
   first shell word, so `/rm x /../secrets/key` was checked as `x` while
   it deleted `secrets/key`. A path with a quote in it, such as
-  `/cat it's.txt`, no longer fails before the check.
+  `/cat it's.txt`, no longer fails before the check. Path rules now also
+  see the path of `/file` and `/ls` (the work dir for `/ls` alone), which
+  they used to skip, so a deny path rule keeps `/file` from sending a file
+  it covers, as it keeps `/cat` from showing it, and `/ls` of a directory
+  that holds a gated path is decided by that rule.
 - **An `approve scope` grant covers only calls on the same paths.** A
   grant now records every path that path rules evaluate, both ends of a
   `file_move` included, so it no longer covers a move from the same

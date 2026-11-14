@@ -22,14 +22,15 @@ Rule semantics:
   directory for ``file_list``, ``file_search`` and ``file_grep`` without a
   ``path``; the ``path`` of an ``agent_*`` tool (``agent_set_workdir``); and the
   path an operator file command (``/write``, ``/edit``, ``/rm``, ``/mkdir``,
-  ``/cat``) acts on, resolved under the work dir as the command resolves it. No
+  ``/cat``, ``/file``, ``/ls``) acts on, resolved under the work dir as the
+  command resolves it. No
   other param is a path to these rules: an MCP tool's params,
   ``browser_upload``'s ``file_path``, ``plugin_install``'s ``path``, the ``path``
   of ``git_diff`` and ``git_log`` and ``job_create``'s ``work_dir`` are not
   evaluated, nor is anything a shell command touches, so a path rule does not
   keep those tools out of a directory (owner: AG-12).
-* ``file_list``, ``file_search``, ``file_grep`` and both ends of ``file_move`` act
-  on everything below their path (:data:`koda.agent_contract.SUBTREE_PATH_TOOLS`).
+* ``file_list``, ``file_search``, ``file_grep``, both ends of ``file_move`` and
+  ``/ls`` act on everything below their path (:data:`koda.agent_contract.SUBTREE_PATH_TOOLS`).
   For them a deny, require_approval or allow_with_preview path rule also matches
   when its path lies below a spelling of the call's path, so a listing, search,
   grep or move of an ancestor of the rule's directory does not step around it. A

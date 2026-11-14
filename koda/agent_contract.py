@@ -2001,14 +2001,19 @@ def _infer_mcp_access_level(tool_name: str) -> str:
 # (``params.get("path", ctx.work_dir)`` in koda.services.tool_dispatcher).
 _WORK_DIR_DEFAULT_PATH_TOOLS = frozenset({"file_list", "file_search", "file_grep"})
 
-SUBTREE_PATH_TOOLS: frozenset[str] = frozenset({"file_list", "file_search", "file_grep", "file_move"})
+SUBTREE_PATH_TOOLS: frozenset[str] = frozenset({"file_list", "file_search", "file_grep", "file_move", "ls"})
 """Tools that act on everything below each path they are given, not on that path alone.
 
-``file_list`` lists the entries below its path, ``file_search`` and ``file_grep`` walk the
-whole tree below it, and ``file_move`` moves a directory source with everything below it
-and can create everything below its destination. Execution-policy path rules therefore
-also match these calls below their paths (koda.services.execution_policy).
+``file_list`` and the operator command ``/ls`` list the entries below their path,
+``file_search`` and ``file_grep`` walk the whole tree below it, and ``file_move`` moves a
+directory source with everything below it and can create everything below its
+destination. Execution-policy path rules therefore also match these calls below their
+paths (koda.services.execution_policy).
 """
+
+# The operator file commands whose ``path`` (set by the approval gate to the path the
+# command acts on, koda.utils.files.file_command_path) path rules evaluate.
+_FILE_COMMAND_PATH_TOOLS = frozenset({"write", "edit", "rm", "mkdir", "cat", "file", "ls"})
 
 
 def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> tuple[str, ...]:
@@ -2023,8 +2028,9 @@ def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> 
     working directory, returned as the relative path ``.``, for ``file_list``,
     ``file_search`` and ``file_grep`` without a ``path``; the ``path`` of an
     ``agent_*`` tool (``agent_set_workdir``); and the ``path`` of the operator file
-    commands ``write``, ``edit``, ``rm``, ``mkdir`` and ``cat``, which the approval
-    gate sets to the file the command acts on. No other param is returned, though
+    commands ``write``, ``edit``, ``rm``, ``mkdir``, ``cat``, ``file`` and ``ls``,
+    which the approval gate sets to the path the command acts on (the work dir for
+    ``/ls`` alone). No other param is returned, though
     some name paths: an MCP tool's params, ``browser_upload``'s ``file_path``,
     ``plugin_install``'s ``path``, the ``path`` of ``git_diff`` and ``git_log`` and
     ``job_create``'s ``work_dir`` (owner: AG-12). An approval grant's resource
@@ -2033,7 +2039,7 @@ def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> 
     tool = str(tool_id or "").strip()
     payload = params or {}
     keys: tuple[str, ...]
-    if tool in {"write", "edit", "rm", "mkdir", "cat"} or tool.startswith("agent_"):
+    if tool in _FILE_COMMAND_PATH_TOOLS or tool.startswith("agent_"):
         keys = ("path",)
     elif tool.startswith("file_"):
         keys = ("path", "source", "destination")

@@ -247,3 +247,46 @@ async def test_path_rules_decide_the_path_the_file_command_acts_on(
     assert mock_update.message.reply_text.call_args.args[0] == "Matched execution-policy rule."
     assert "reply_markup" not in mock_update.message.reply_text.call_args.kwargs
     assert _tree(work_dir) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        ("file", ["x", "/../secrets/key"]),
+        ("ls", ["x", "/../secrets"]),
+        # /ls alone lists the work dir, which holds the denied directory.
+        ("ls", []),
+    ],
+)
+async def test_path_rules_decide_what_file_and_ls_read(command, args, mock_update, mock_context, tmp_path, monkeypatch):
+    """/file sends a file and /ls lists a directory; a deny path rule keeps both out of it, as it keeps /cat out."""
+    from koda.handlers.commands import cmd_file, cmd_ls
+
+    work_dir = tmp_path.resolve()
+    (work_dir / "secrets").mkdir()
+    (work_dir / "secrets" / "key").write_text("SECRET")
+    policy = {
+        "version": 1,
+        "rules": [
+            {"name": f"allow-{command}", "match": {"tool_id": command}, "decision": "allow"},
+            {"name": "deny-secrets", "match": {"path": str(work_dir / "secrets")}, "decision": "deny"},
+        ],
+    }
+    monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+    mock_context.user_data["work_dir"] = str(work_dir)
+    mock_context.args = args
+
+    with patch("koda.handlers.commands.send_long_message", new_callable=AsyncMock) as mock_send:
+        await {"file": cmd_file, "ls": cmd_ls}[command](mock_update, mock_context)
+
+    mock_send.assert_not_called()
+    mock_update.message.reply_document.assert_not_called()
+    assert mock_update.message.reply_text.call_args.args[0] == "Matched execution-policy rule."
+
+
+def test_path_rules_evaluate_the_path_of_every_gated_file_command():
+    from koda.agent_contract import _FILE_COMMAND_PATH_TOOLS
+    from koda.utils.files import FILE_COMMANDS
+
+    assert _FILE_COMMAND_PATH_TOOLS == FILE_COMMANDS
