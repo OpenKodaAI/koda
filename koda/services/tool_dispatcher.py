@@ -38,7 +38,7 @@ from koda.knowledge.types import EffectiveExecutionPolicy
 from koda.logging_config import get_logger
 from koda.services import blocked_patterns as _blocked_patterns_module
 from koda.services.execution_policy import PolicyEvaluation, evaluate_execution_policy
-from koda.utils.files import PathResolution, blocked_file_suffix, resolve_work_path
+from koda.utils.files import PathResolution, blocked_file_suffix, resolve_work_path, work_path_location
 from koda.utils.workdir import sensitive_dir_for, validate_work_dir
 
 log = get_logger(__name__)
@@ -468,8 +468,35 @@ def _record_runtime_integration_health(
         return
 
 
+_FILE_TOOL_PATH_PARAMS: tuple[str, ...] = ("path", "source", "destination")
+_FILE_TOOLS_DEFAULTING_TO_WORK_DIR: frozenset[str] = frozenset({"file_list", "file_search", "file_grep"})
+
+
+def _file_tool_policy_params(tool: str, params: dict[str, object], work_dir: str) -> dict[str, object]:
+    """Show the policy and grant gate the paths a file tool will touch, as the commands do.
+
+    The approval layer gives the policy the resolved path of ``/cat``, ``/write`` and the
+    other file commands, so each file-tool path param is replaced the same way, by the
+    absolute, symlink-resolved path it names under the work dir (``src/main.py`` and
+    ``<work>/src/../src/main.py`` both become ``<work>/src/main.py``). ``file_list``,
+    ``file_search`` and ``file_grep`` read the work dir when ``path`` is omitted, so they
+    are checked against it. The handlers still apply :func:`resolve_work_path` themselves.
+    """
+    canonical = dict(params)
+    if tool in _FILE_TOOLS_DEFAULTING_TO_WORK_DIR and "path" not in canonical:
+        canonical["path"] = work_dir
+    for key in _FILE_TOOL_PATH_PARAMS:
+        value = canonical.get(key)
+        if isinstance(value, str) and value.strip():
+            with contextlib.suppress(OSError, ValueError):
+                canonical[key] = work_path_location(value, work_dir)
+    return canonical
+
+
 def _policy_params_for_call(call: AgentToolCall, ctx: ToolContext) -> dict[str, object]:
     policy_params: dict[str, object] = dict(call.params)
+    if call.tool.startswith("file_"):
+        policy_params = _file_tool_policy_params(call.tool, policy_params, ctx.work_dir)
     if call.tool.startswith("browser_"):
         try:
             from koda.services.browser_manager import browser_manager
@@ -1948,9 +1975,16 @@ async def _handle_browser_upload(params: dict, ctx: ToolContext) -> AgentToolRes
         return AgentToolResult(tool="browser_upload", success=False, output="Missing required param: 'file_path'.")
     if not selector:
         selector = 'input[type="file"]'
+    # The file the page receives follows the file-tool path policy: relative to the work
+    # dir, inside it, and never a secret file such as .env.
+    resolution = _resolve_file_path(file_path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="browser_upload", success=False, output=resolution.error or "Access denied.")
     from koda.services.browser_manager import browser_manager
 
-    result = await browser_manager.upload_file(_browser_scope_id(ctx), selector, file_path, allowed_root=ctx.work_dir)
+    result = await browser_manager.upload_file(
+        _browser_scope_id(ctx), selector, str(resolution.path), allowed_root=ctx.work_dir
+    )
     success = not result.startswith("Error")
     return AgentToolResult(tool="browser_upload", success=success, output=result)
 

@@ -143,6 +143,80 @@ async def test_cat_command_and_file_read_reach_the_same_path_decision(
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "allowed"),
+    [
+        ("src/main.py", True),
+        ("src/../src/main.py", True),
+        ("{work}/src/main.py", True),
+        ("{work}/src/../.git/config", False),
+        ("src/../.git/config", False),
+        ("top.txt", False),
+        ("src/link-to-top.txt", False),
+    ],
+)
+async def test_cat_command_and_file_read_reach_the_same_grant_decision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_update: Any,
+    mock_context: Any,
+    path: str,
+    allowed: bool,
+) -> None:
+    """A path-scoped fileops grant sees the resolved path from /cat and from file_read alike."""
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.tool_dispatcher import AgentToolCall, ToolContext, execute_tool
+
+    work = (tmp_path / "work").resolve()
+    (work / "src").mkdir(parents=True)
+    (work / ".git").mkdir()
+    (work / "src" / "main.py").write_text("granted-source", encoding="utf-8")
+    (work / ".git" / "config").write_text("canary-git-config", encoding="utf-8")
+    (work / "top.txt").write_text("canary-top", encoding="utf-8")
+    (work / "src" / "link-to-top.txt").symlink_to(work / "top.txt")
+    monkeypatch.chdir(tmp_path)
+    requested = path.format(work=work)
+    policy = {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(work / "src")]}}}
+
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = [requested]
+    with (
+        patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", policy),
+        patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send,
+    ):
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with (
+        patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", policy),
+        patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["file_read"]}),
+        patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+        patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+    ):
+        result = await execute_tool(AgentToolCall("file_read", {"path": requested}, ""), ctx)
+
+    assert not any("canary" in text for text in shown)
+    assert "canary" not in result.output
+    cat_allowed = any("granted-source" in text for text in shown)
+    assert cat_allowed == allowed
+    assert result.success == allowed
+    if not allowed:
+        assert any("outside the granted scope" in text for text in shown)
+        assert "outside the granted scope" in result.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
 async def test_background_shell_handle_is_user_scoped() -> None:
     mgr = BackgroundProcessManager()
     process = MagicMock()
@@ -290,6 +364,47 @@ async def test_browser_upload_rejects_path_outside_workdir(tmp_path: Path) -> No
 
     assert result.startswith("Error:")
     assert "outside allowed browser upload root" in result
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", [".env", "{work}/.env", "config/.env.local", "linked-env.txt", "../outside.txt"])
+async def test_browser_upload_refuses_what_file_read_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    from koda.services.browser_manager import browser_manager
+    from koda.services.tool_dispatcher import ToolContext, _handle_browser_upload, _handle_file_read
+
+    work = (tmp_path / "work").resolve()
+    (work / "config").mkdir(parents=True)
+    (work / ".env").write_text("TOKEN=canary-secret\n", encoding="utf-8")
+    (work / "config" / ".env.local").write_text("TOKEN=canary-secret\n", encoding="utf-8")
+    (work / "linked-env.txt").symlink_to(work / ".env")
+    (tmp_path / "outside.txt").write_text("canary-outside", encoding="utf-8")
+    monkeypatch.chdir(work)
+    requested = path.format(work=work)
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        read = await _handle_file_read({"path": requested}, ctx)
+    with (
+        patch("koda.services.tool_dispatcher._check_browser_available", new_callable=AsyncMock, return_value=None),
+        patch.object(browser_manager, "upload_file", new_callable=AsyncMock, return_value="Uploaded") as upload,
+    ):
+        result = await _handle_browser_upload({"file_path": requested}, ctx)
+
+    assert not read.success
+    assert not result.success
+    assert result.output == read.output
+    upload.assert_not_awaited()
 
 
 class _RedirectResponse:

@@ -47,6 +47,17 @@ def blocked_file_suffix(name: str) -> str | None:
     return None
 
 
+def work_path_location(path_str: str, work_dir: str) -> str:
+    """Return the absolute, symlink-resolved path that ``path_str`` names under ``work_dir``.
+
+    This is the path :func:`resolve_work_path` checks: ``~`` is expanded, a relative path
+    is joined with ``work_dir`` (never the process CWD), and symlinks are resolved. It
+    makes no access decision. Raises ``OSError`` or ``ValueError`` for a path that cannot
+    be resolved.
+    """
+    return os.path.realpath(os.path.join(os.path.realpath(work_dir), os.path.expanduser(path_str)))
+
+
 def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool = True) -> PathResolution:
     """Resolve a path for the file commands and the agent file tools.
 
@@ -55,7 +66,7 @@ def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool
     the same decision everywhere:
 
     - ``~`` is expanded, a relative path is joined with ``work_dir`` (never the process
-      CWD), and symlinks are resolved;
+      CWD), and symlinks are resolved (:func:`work_path_location`);
     - the result must be ``work_dir`` or inside it (``path_outside_workdir``);
     - it must not be inside a sensitive system directory (``path_sensitive_dir``);
     - neither the requested name nor the name it resolves to may be a blocked secret
@@ -71,7 +82,7 @@ def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool
     try:
         root = os.path.realpath(work_dir)
         requested = os.path.expanduser(path_str)
-        resolved = os.path.realpath(os.path.join(root, requested))
+        resolved = work_path_location(path_str, root)
     except (OSError, ValueError):
         return _refuse(path_str, work_dir, "path_invalid", f"Access denied: '{path_str}' is not a valid path.")
     if resolved != root and not resolved.startswith(root.rstrip(os.sep) + os.sep):

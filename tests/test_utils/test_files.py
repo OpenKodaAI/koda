@@ -1,9 +1,10 @@
 """Tests for file operations with path traversal protection."""
 
+from unittest.mock import patch
+
 import pytest
 
 import koda.utils.files as files_module
-import koda.utils.workdir as workdir_module
 from koda.utils.files import list_directory, resolve_work_path, safe_delete, safe_read, safe_write
 from koda.utils.workdir import sensitive_dir_for
 
@@ -190,21 +191,22 @@ class TestResolveWorkPathMatrix:
         assert sensitive_dir_for("/etcetera/notes.txt") is None
         assert sensitive_dir_for("/srv/project") is None
 
-    def test_sensitive_roots_are_resolved_once_not_on_every_check(self, monkeypatch):
-        """file_grep checks every file it walks, so the deny roots must not be re-resolved each time."""
+    def test_sensitive_roots_are_resolved_on_each_check(self, tmp_path, monkeypatch):
+        """A deny root that becomes a symlink later is matched in its new resolved form."""
+        real = tmp_path / "real-run"
+        (real / "app").mkdir(parents=True)
+        alias = tmp_path / "var-run"
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(alias)}))
+        assert sensitive_dir_for(str(real / "app")) is None
+        alias.symlink_to(real)
+        assert sensitive_dir_for(str(real / "app")) == str(alias)
+
+    def test_a_check_under_a_patched_realpath_does_not_leak_into_later_checks(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({"/etc", str(tmp_path / "unused")}))
+        with patch("os.path.realpath", return_value="/workspace/projects"):
+            sensitive_dir_for("/srv/project")
+        assert sensitive_dir_for("/workspace/projects") is None
         assert sensitive_dir_for("/etc/ssh") == "/etc"
-        resolved: list[str | None] = []
-        real_normalize = workdir_module.normalize_work_dir
-
-        def counting_normalize(path):
-            resolved.append(path)
-            return real_normalize(path)
-
-        monkeypatch.setattr(workdir_module, "normalize_work_dir", counting_normalize)
-        for _ in range(3):
-            assert sensitive_dir_for("/etc/ssh") == "/etc"
-            assert sensitive_dir_for("/srv/project") is None
-        assert resolved == []
 
     def test_patched_sensitive_dirs_still_take_effect(self, tmp_path, monkeypatch):
         real = tmp_path / "real-run"

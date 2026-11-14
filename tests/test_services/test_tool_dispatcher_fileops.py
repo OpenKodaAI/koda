@@ -543,3 +543,95 @@ class TestDocumentedRelativePathsResolveUnderWorkDir:
         result = await self._call("_handle_file_read", {"path": "../decoy/temp.txt"}, work)
         assert not result.success
         assert "outside" in result.output
+
+
+class TestPathScopedGrantsSeeResolvedFileToolPaths:
+    """A fileops ``allowed_paths`` grant sees the path a file tool touches, as /cat's gate does."""
+
+    @pytest.fixture
+    def work(self, tmp_path, monkeypatch):
+        work = (tmp_path / "work").resolve()
+        (work / "src").mkdir(parents=True)
+        (work / "src" / "main.py").write_text("TOKEN = 'granted'\n")
+        (work / "top.txt").write_text("TOKEN = 'canary-outside-grant'\n")
+        monkeypatch.chdir(tmp_path)
+        return work
+
+    @staticmethod
+    def _grant(*allowed_paths) -> dict:
+        return {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(p) for p in allowed_paths]}}}
+
+    async def _execute(self, tool: str, params: dict, work, *allowed_paths):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", self._grant(*allowed_paths)),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(str(work)))
+
+    def test_policy_params_carry_the_resolved_paths(self, work):
+        from koda.services.tool_dispatcher import AgentToolCall, _policy_params_for_call
+
+        ctx = _make_ctx(str(work))
+        read = _policy_params_for_call(AgentToolCall("file_read", {"path": "src/../src/main.py", "offset": 2}, ""), ctx)
+        assert read == {"path": str(work / "src" / "main.py"), "offset": 2}
+        move = _policy_params_for_call(
+            AgentToolCall("file_move", {"source": "src/main.py", "destination": "out/main.py"}, ""), ctx
+        )
+        assert move == {"source": str(work / "src" / "main.py"), "destination": str(work / "out" / "main.py")}
+        assert _policy_params_for_call(AgentToolCall("file_list", {}, ""), ctx) == {"path": str(work)}
+
+    @pytest.mark.asyncio
+    async def test_relative_path_inside_the_grant_is_allowed(self, work):
+        result = await self._execute("file_grep", {"pattern": "TOKEN", "path": "src"}, work, work / "src")
+        assert result.success, result.output
+        assert "granted" in result.output
+        assert "canary-outside-grant" not in result.output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [("file_list", {}), ("file_search", {"pattern": "*.txt"}), ("file_grep", {"pattern": "TOKEN"})],
+    )
+    async def test_tools_that_default_to_the_work_dir_are_checked_against_it(self, work, tool, params):
+        refused = await self._execute(tool, params, work, work / "src")
+        assert not refused.success
+        assert "outside the granted scope" in refused.output
+        assert "top.txt" not in refused.output
+
+        granted = await self._execute(tool, params, work, work)
+        assert granted.success, granted.output
+        assert "top.txt" in granted.output
+
+    def test_file_move_grant_covers_both_ends(self, work):
+        from koda.agent_contract import evaluate_integration_grant
+
+        grant = self._grant(work / "src")
+        inside = evaluate_integration_grant(
+            "file_move", {"source": str(work / "src" / "main.py"), "destination": str(work / "src" / "b.py")}, grant
+        )
+        assert inside.allowed
+        out_of_grant = evaluate_integration_grant(
+            "file_move", {"source": str(work / "src" / "main.py"), "destination": str(work / "main.py")}, grant
+        )
+        assert not out_of_grant.allowed
+        assert out_of_grant.reason == "path_not_granted"
+        into_grant = evaluate_integration_grant(
+            "file_move", {"source": str(work / "top.txt"), "destination": str(work / "src" / "top.txt")}, grant
+        )
+        assert not into_grant.allowed
+        assert into_grant.reason == "path_not_granted"
+
+    @pytest.mark.asyncio
+    async def test_file_move_out_of_the_grant_is_refused(self, work):
+        """The source is inside the grant; the destination is not."""
+        result = await self._execute(
+            "file_move", {"source": str(work / "src" / "main.py"), "destination": "main.py"}, work, work / "src"
+        )
+        assert not result.success
+        assert "outside the granted scope" in result.output
+        assert (work / "src" / "main.py").exists()
+        assert not (work / "main.py").exists()

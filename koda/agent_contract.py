@@ -1624,6 +1624,19 @@ def _path_allowed(path: str | None, allowed_paths: list[str]) -> bool:
     return False
 
 
+def _grant_scoped_paths(resolution: IntegrationActionResolution, params: dict[str, Any]) -> list[str]:
+    """Return every path an action touches that a grant's ``allowed_paths`` must cover.
+
+    That is the envelope path, except for ``file_move``, which writes its destination as
+    well as reading its source, so both ends are checked.
+    """
+    if resolution.tool_id == "file_move":
+        ends = [str(params.get(key) or "").strip() for key in ("source", "destination")]
+        if any(ends):
+            return [end for end in ends if end]
+    return [resolution.path] if resolution.path else []
+
+
 def _action_level_from_tokens(action_token: str, *, read_actions: frozenset[str]) -> str:
     normalized_action = str(action_token or "").strip().lower()
     if normalized_action in read_actions:
@@ -2390,7 +2403,9 @@ def evaluate_integration_grant(
         )
 
     allowed_paths = [str(item) for item in grant.get("allowed_paths") or []]
-    if allowed_paths and resolution.path and not _path_allowed(resolution.path, allowed_paths):
+    if allowed_paths and any(
+        not _path_allowed(path, allowed_paths) for path in _grant_scoped_paths(resolution, params or {})
+    ):
         return IntegrationGrantDecision(
             allowed=False,
             integration_id=resolution.integration_id,

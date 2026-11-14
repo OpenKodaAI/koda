@@ -41,7 +41,7 @@ class TestCmdSetdirSecurity:
         update, context = setup
         context.args = [path]
 
-        with patch("os.path.isdir", return_value=True), patch("os.path.realpath", return_value=path):
+        with patch("os.path.isdir", return_value=True):
             from koda.handlers.commands import cmd_setdir
 
             await cmd_setdir(update, context)
@@ -56,7 +56,7 @@ class TestCmdSetdirSecurity:
         update, context = setup
         context.args = ["/etc/ssh"]
 
-        with patch("os.path.isdir", return_value=True), patch("os.path.realpath", return_value="/etc/ssh"):
+        with patch("os.path.isdir", return_value=True):
             from koda.handlers.commands import cmd_setdir
 
             await cmd_setdir(update, context)
@@ -65,32 +65,27 @@ class TestCmdSetdirSecurity:
         assert "Access denied" in call_args[0][0]
 
     @pytest.mark.asyncio
-    async def test_normal_dir_allowed(self, setup):
+    async def test_normal_dir_allowed(self, setup, tmp_path):
         update, context = setup
-        context.args = ["/workspace/projects"]
+        projects = tmp_path / "workspace" / "projects"
+        projects.mkdir(parents=True)
+        context.args = [str(projects)]
 
-        with (
-            patch("os.path.isdir", return_value=True),
-            patch("os.path.realpath", return_value="/workspace/projects"),
-            patch("os.path.expanduser", return_value="/workspace/projects"),
-        ):
-            from koda.handlers.commands import cmd_setdir
+        from koda.handlers.commands import cmd_setdir
 
-            await cmd_setdir(update, context)
+        await cmd_setdir(update, context)
 
-        assert context.user_data["work_dir"] == "/workspace/projects"
+        assert context.user_data["work_dir"] == str(projects.resolve())
 
     @pytest.mark.asyncio
-    async def test_symlink_to_sensitive_dir_blocked(self, setup):
+    async def test_symlink_to_sensitive_dir_blocked(self, setup, tmp_path):
         """Symlinks resolving to sensitive dirs should be blocked."""
         update, context = setup
-        context.args = ["/tmp/link-to-etc"]
+        link = tmp_path / "link-to-etc"
+        link.symlink_to("/etc")
+        context.args = [str(link)]
 
-        with (
-            patch("os.path.isdir", return_value=True),
-            patch("os.path.realpath", return_value="/etc"),
-            patch("os.path.expanduser", return_value="/tmp/link-to-etc"),
-        ):
+        with patch("os.path.isdir", return_value=True):
             from koda.handlers.commands import cmd_setdir
 
             await cmd_setdir(update, context)
@@ -115,10 +110,7 @@ class TestCallbackSetdirSecurity:
         context = MagicMock()
         context.user_data = {"work_dir": "/tmp"}
 
-        with (
-            patch("os.path.realpath", return_value="/etc"),
-            patch("koda.handlers.callbacks.auth_check", return_value=True),
-        ):
+        with patch("koda.handlers.callbacks.auth_check", return_value=True):
             from koda.handlers.callbacks import callback_setdir
 
             await callback_setdir(update, context)
