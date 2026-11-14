@@ -10,7 +10,7 @@ from typing import Any
 from koda.agent_contract import FILE_COMMAND_ACCESS_LEVELS
 from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS, FILEOPS_BLOCKED_EXTENSIONS
 from koda.logging_config import get_logger
-from koda.utils.workdir import protected_dir_for, sensitive_dir_for
+from koda.utils.workdir import protected_dir_for, protected_dir_within, sensitive_dir_for
 
 log = get_logger(__name__)
 
@@ -127,6 +127,36 @@ def secret_move_refusal(source: str, destination: str) -> str | None:
                 if refusal is not None and secret_file_refusal(moved) is None:
                     inner = os.path.relpath(path, os.path.dirname(source))
                     return f"the move would take '{inner}' out of the name that blocks it ({refusal})"
+    return None
+
+
+def protected_move_refusal(source: str, destination: str) -> str | None:
+    """Return why moving ``source`` to ``destination`` would move a protected directory, or None.
+
+    Both paths are absolute and resolved. ``source`` and the destination the caller named
+    passed :func:`resolve_work_path`, so neither lies inside one of the
+    :func:`koda.utils.workdir.protected_dirs` (the control-plane state directory, the
+    browser's saved sessions, and ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` where the
+    environment sets them). ``destination`` is where ``source`` ends up (for ``shutil.move``
+    into an existing directory, the path inside it). A protected directory is recognised by
+    its location, not its name, so the move is refused
+    (:func:`koda.utils.workdir.protected_dir_within`):
+
+    - when ``source`` is, or contains, a protected directory (``.koda-state`` holds
+      ``control_plane``): the move would take its data to a path no check recognises, and
+      the read tools would return it there;
+    - when ``destination`` is, contains or lies inside a protected directory: the move would
+      put the moved data where Koda or a CLI reads that directory from, such as a planted
+      bootstrap code or browser session.
+
+    Every other move is left to :func:`secret_move_refusal`.
+    """
+    moved = protected_dir_within(source)
+    if moved is not None:
+        return f"'{moved}' is a sensitive system directory, and the move would take it out of its place"
+    target = protected_dir_for(destination) or protected_dir_within(destination)
+    if target is not None:
+        return f"'{target}' is a sensitive system directory, and the move would put data in its place"
     return None
 
 

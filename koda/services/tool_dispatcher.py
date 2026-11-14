@@ -44,6 +44,7 @@ from koda.services.execution_policy import PolicyEvaluation, evaluate_execution_
 from koda.utils.files import (
     PathResolution,
     blocked_credential_path,
+    protected_move_refusal,
     resolve_work_path,
     secret_file_refusal,
     secret_move_refusal,
@@ -2762,6 +2763,10 @@ async def _handle_file_move(params: dict, ctx: ToolContext) -> AgentToolResult:
     landing = (
         os.path.join(resolved_dst, os.path.basename(resolved_src)) if os.path.isdir(resolved_dst) else resolved_dst
     )
+    protected_refusal = protected_move_refusal(resolved_src, landing)
+    if protected_refusal is not None:
+        _audit_blocked("file_move", "protected_dir_move", user_id=ctx.user_id)
+        return AgentToolResult(tool="file_move", success=False, output=f"Access denied: {protected_refusal}.")
     move_refusal = secret_move_refusal(resolved_src, landing)
     if move_refusal is not None:
         _audit_blocked("file_move", "credential_store_rename", user_id=ctx.user_id)

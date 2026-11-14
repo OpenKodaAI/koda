@@ -239,6 +239,33 @@ class TestTheCredentialDirsBelowTheRuntimeRootStayRefused:
         assert browser_manager._get_session_dir(222) == str(tmp_path / "sessions" / "browser_sessions" / "222")
         assert validate_work_dir(str(tmp_path / "sessions" / "browser_sessions")).blocked
 
+    @pytest.mark.parametrize(
+        ("source", "destination", "protected"),
+        [
+            ("image-scratch", "scratch-old", "image-scratch/browser_sessions"),
+            ("image-scratch", "home/project/image-scratch", "image-scratch/browser_sessions"),
+            ("image-scratch/browser_sessions", "home/sessions", "image-scratch/browser_sessions"),
+            ("claude-config", "home/claude-old", "claude-config"),
+            ("home/project", "image-scratch/browser_sessions", "image-scratch/browser_sessions"),
+            ("home/project", "claude-config/projects/q", "claude-config"),
+            ("tasks", "claude-config", "claude-config"),
+            ("home/project", "tasks/7/project", None),
+            ("image-scratch/111_42.txt", "home/scratch.txt", None),
+            ("home/project", "image-scratch/project", None),
+        ],
+    )
+    def test_a_move_neither_takes_them_out_of_their_place_nor_puts_data_there(
+        self, runtime: Path, source: str, destination: str, protected: str | None
+    ) -> None:
+        from koda.utils.files import protected_move_refusal
+
+        refusal = protected_move_refusal(str(runtime / source), str(runtime / destination))
+        if protected is None:
+            assert refusal is None
+        else:
+            assert refusal is not None
+            assert f"'{runtime / protected}' is a sensitive system directory" in refusal
+
     @_SURFACES
     @pytest.mark.parametrize("path", ["image-scratch/111_42.txt", "home/project/main.py", "tasks/7"])
     def test_the_rest_of_the_runtime_root_stays_reachable(

@@ -128,6 +128,22 @@ def protected_dir_for(path: str) -> str | None:
     return None
 
 
+def protected_dir_within(path: str) -> str | None:
+    """Return the one of :func:`protected_dirs` that is ``path`` or lies below it, or None.
+
+    ``path`` is absolute and resolved; each directory is compared as configured and
+    resolved, by whole path component, as :func:`protected_dir_for` compares them. A
+    protected directory is recognised by its location alone, so moving ``path`` would take
+    that directory to a path no check recognises, and putting something at ``path`` would
+    put it where Koda or a CLI reads that directory from
+    (:func:`koda.utils.files.protected_move_refusal`).
+    """
+    for protected in protected_dirs():
+        if any(_is_within(root, path) for root in _sensitive_roots(protected)):
+            return protected
+    return None
+
+
 def _waived_sensitive_roots(work_dir: str | None) -> frozenset[str]:
     """Return the sensitive roots that do not deny the paths resolved in ``work_dir``.
 

@@ -1572,6 +1572,186 @@ async def test_file_move_still_moves_a_directory_whose_secrets_stay_recognised(
         assert "canary" not in read.output
 
 
+def _work_dir_holding_the_protected_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """A work dir that holds every kind of protected directory, each below a parent the agent can move.
+
+    The control-plane state dir sits in ``.koda-state`` as the native ``~/.koda-state`` does,
+    the browser's saved sessions in ``image-scratch`` as below the Docker runtime root, and
+    the dirs that ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` name in ``tools`` and ``cli``.
+    """
+    import koda.utils.workdir as workdir
+
+    root = tmp_path.resolve()
+    work = root / "work"
+    (work / "src").mkdir(parents=True)
+    (work / "src" / "main.py").write_text("print('visible')\n", encoding="utf-8")
+    (work / "notes.txt").write_text("visible\n", encoding="utf-8")
+    control_plane = work / ".koda-state" / "control_plane"
+    control_plane.mkdir(parents=True)
+    (control_plane / "bootstrap.txt").write_text("canary-bootstrap\n", encoding="utf-8")
+    (work / ".koda-state" / "logs").mkdir()
+    (work / ".koda-state" / "logs" / "run.log").write_text("visible log\n", encoding="utf-8")
+    sessions = work / "image-scratch" / "browser_sessions" / "111"
+    sessions.mkdir(parents=True)
+    (sessions / "bank.json").write_text('{"cookies": [{"value": "canary-cookie"}]}\n', encoding="utf-8")
+    (work / "image-scratch" / "111_42.txt").write_text("visible scratch\n", encoding="utf-8")
+    claude_config = work / "tools" / "claude-config"
+    (claude_config / "projects" / "p").mkdir(parents=True)
+    (claude_config / "projects" / "p" / "s.jsonl").write_text('{"canary": "transcript"}\n', encoding="utf-8")
+    (work / "tools" / "lint.sh").write_text("echo visible\n", encoding="utf-8")
+    codex_home = work / "cli" / "codex-home"
+    codex_home.mkdir(parents=True)
+    (codex_home / "auth.json").write_text('{"tokens": {"access_token": "canary-codex"}}\n', encoding="utf-8")
+    monkeypatch.setitem(vars(workdir), "SENSITIVE_DIRS", frozenset({str(root / "etc")}))
+    monkeypatch.setitem(vars(workdir), "DEFAULT_WORK_DIR", str(work))
+    monkeypatch.setitem(vars(workdir), "RUNTIME_ROOT_DIR", work)
+    monkeypatch.setitem(vars(workdir), "RUNTIME_EPHEMERAL_ROOT", work)
+    monkeypatch.setitem(vars(workdir), "STATE_ROOT_DIR", work / ".koda-state")
+    monkeypatch.setitem(vars(workdir), "IMAGE_TEMP_DIR", work / "image-scratch")
+    monkeypatch.setitem(vars(workdir), "BROWSER_SESSION_DIR", "")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_config))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    monkeypatch.chdir(root)
+    return work
+
+
+def _file_tool_context(work: Path) -> Any:
+    from koda.services.tool_dispatcher import ToolContext
+
+    return ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "destination", "moved_data"),
+    [
+        (".koda-state", "state-old", ["state-old/control_plane/bootstrap.txt"]),
+        ("image-scratch", "scratch-old", ["scratch-old/browser_sessions/111/bank.json"]),
+        ("tools", "tools-old", ["tools-old/claude-config/projects/p/s.jsonl"]),
+        ("cli", "src", ["src/cli/codex-home/auth.json"]),
+        ("tools/claude-config", "claude-old", ["claude-old/projects/p/s.jsonl"]),
+    ],
+)
+async def test_file_move_cannot_move_a_protected_dir_out_of_its_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, destination: str, moved_data: list[str]
+) -> None:
+    """A protected directory is recognised by its location, so file_move must not move it or a directory above it.
+
+    Moving ``.koda-state`` (which holds the control-plane state dir), ``image-scratch``
+    (the browser's saved sessions) or the parent of ``CLAUDE_CONFIG_DIR`` or ``CODEX_HOME``
+    would put the bootstrap code, the cookies or a CLI login at a path no check recognises,
+    and file_read, which needs no approval, would return them there.
+    """
+    from koda.services.tool_dispatcher import _handle_file_move, _handle_file_read
+
+    work = _work_dir_holding_the_protected_dirs(tmp_path, monkeypatch)
+    ctx = _file_tool_context(work)
+    before = sorted(str(path.relative_to(work)) for path in work.rglob("*"))
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        moved = await _handle_file_move({"source": source, "destination": destination}, ctx)
+        reads = [await _handle_file_read({"path": path}, ctx) for path in moved_data]
+
+    assert not moved.success, moved.output
+    assert "sensitive system directory" in moved.output, moved.output
+    assert sorted(str(path.relative_to(work)) for path in work.rglob("*")) == before
+    for read in reads:
+        assert not read.success, read.output
+        assert "canary" not in read.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("absent", "planted", "source", "destination", "protected"),
+    [
+        (".koda-state/control_plane", "control_plane/bootstrap.txt", "control_plane", ".koda-state", "control_plane"),
+        (".koda-state", "staged/control_plane/bootstrap.txt", "staged", ".koda-state", "control_plane"),
+        (
+            "image-scratch/browser_sessions",
+            "browser_sessions/111/bank.json",
+            "browser_sessions",
+            "image-scratch",
+            "browser_sessions",
+        ),
+        ("cli", "staged/codex-home/auth.json", "staged", "cli", "codex-home"),
+    ],
+)
+async def test_file_move_cannot_put_data_where_a_protected_dir_belongs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    absent: str,
+    planted: str,
+    source: str,
+    destination: str,
+    protected: str,
+) -> None:
+    """A protected directory that does not exist yet cannot be planted by a move either.
+
+    The landing (inside an existing destination directory for shutil.move) would be the
+    protected directory itself, or a directory above it, so the move would put a bootstrap
+    code, a browser session or a CLI login where Koda or the CLI reads it from.
+    """
+    import shutil
+
+    from koda.services.tool_dispatcher import _handle_file_move
+
+    work = _work_dir_holding_the_protected_dirs(tmp_path, monkeypatch)
+    shutil.rmtree(work / absent)
+    (work / planted).parent.mkdir(parents=True, exist_ok=True)
+    (work / planted).write_text("attacker-data\n", encoding="utf-8")
+    ctx = _file_tool_context(work)
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        moved = await _handle_file_move({"source": source, "destination": destination}, ctx)
+
+    assert not moved.success, moved.output
+    assert "sensitive system directory" in moved.output, moved.output
+    assert protected in moved.output, moved.output
+    assert (work / planted).read_text(encoding="utf-8") == "attacker-data\n"
+    assert not (work / absent).exists()
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("source", "destination", "landing"),
+    [
+        ("src", "lib", "lib/main.py"),
+        ("notes.txt", "archive/notes.txt", "archive/notes.txt"),
+        ("notes.txt", ".koda-state", ".koda-state/notes.txt"),
+        (".koda-state/logs", "logs-old", "logs-old/run.log"),
+        ("image-scratch/111_42.txt", "scratch.txt", "scratch.txt"),
+        ("tools/lint.sh", "lint.sh", "lint.sh"),
+        ("src", "tools", "tools/src/main.py"),
+    ],
+)
+async def test_file_move_still_moves_what_holds_no_protected_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source: str, destination: str, landing: str
+) -> None:
+    """Beside the protected directories, and into their parents, everything else still moves."""
+    from koda.services.tool_dispatcher import _handle_file_move
+
+    work = _work_dir_holding_the_protected_dirs(tmp_path, monkeypatch)
+    ctx = _file_tool_context(work)
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        moved = await _handle_file_move({"source": source, "destination": destination}, ctx)
+
+    assert moved.success, moved.output
+    assert (work / landing).is_file()
+    assert not (work / source).exists()
+    assert (work / ".koda-state" / "control_plane" / "bootstrap.txt").is_file()
+
+
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
