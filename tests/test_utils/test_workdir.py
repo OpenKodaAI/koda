@@ -435,6 +435,34 @@ class TestTheComposeClaudeConfigDirIsRefusedWithoutItsVariable:
         assert "canary" not in grep.output
         assert "tasks/7/result.txt:1: visible" in grep.output
 
+    def test_every_listing_of_the_protected_dirs_names_it(self) -> None:
+        """The docs that list the protected dirs name the compose dir, which the code refuses in every process.
+
+        A listing that names only the dirs ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` name in the
+        environment tells its reader that a worker without ``CLAUDE_CONFIG_DIR`` can read,
+        move or upload from ``claude-config``, which ``browser_upload`` and the file tools refuse.
+        """
+        from koda.config import COMPOSE_PROVIDER_CLI_CONFIG_DIRS
+        from koda.utils import files
+
+        matrix = (ROOT / "docs" / "security" / "guardrail-test-matrix.md").read_text(encoding="utf-8")
+        rows = {line.split(" | ", 1)[0]: line for line in matrix.splitlines() if line.startswith("| ")}
+        listings = {
+            "guardrail matrix, File operations row": rows["| File operations"],
+            "guardrail matrix, Browser row": rows["| Browser"],
+            "resolve_work_path": files.resolve_work_path.__doc__ or "",
+            "protected_move_refusal": files.protected_move_refusal.__doc__ or "",
+        }
+        flat = {name: " ".join(text.split()) for name, text in listings.items()}
+        assert [name for name, text in flat.items() if "CLAUDE_CONFIG_DIR" not in text] == []
+        missing = [
+            (name, directory)
+            for name, text in flat.items()
+            for directory in COMPOSE_PROVIDER_CLI_CONFIG_DIRS
+            if directory not in text
+        ]
+        assert missing == []
+
 
 class TestControlPlaneStateIsRefusedInsideAWorkDir:
     """Outside Docker the state root (~/.koda-state) sits inside the default work dir (~)."""

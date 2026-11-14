@@ -254,7 +254,9 @@ def protected_move_refusal(source: str, destination: str) -> str | None:
     passed :func:`resolve_work_path`, so neither lies inside one of the
     :func:`koda.utils.workdir.protected_dirs` (the control-plane state directory, the
     browser's saved sessions, ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` where the environment
-    sets them, and the Anthropic profile credential dirs it names). ``destination`` is where
+    sets them, the Claude Code config dir the compose files configure,
+    ``/var/lib/koda/runtime/claude-config``, in every process whatever its environment sets,
+    and the Anthropic profile credential dirs the environment names). ``destination`` is where
     ``source`` ends up (for ``shutil.move`` into an existing directory, the path inside it).
     A protected directory is recognised by its location, not its name, compared ignoring
     case, so the move is refused (:func:`koda.utils.workdir.protected_dir_within`):
@@ -399,7 +401,9 @@ def resolve_work_path(
       :func:`koda.utils.workdir.sensitive_dir_for` and
       :func:`koda.utils.workdir.protected_dirs`: the control-plane state directory, the
       browser's saved sessions, ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` where the
-      environment sets them, and the Anthropic profile credential dirs it names, all
+      environment sets them, the Claude Code config dir the compose files configure,
+      ``/var/lib/koda/runtime/claude-config``, in every process whatever its environment
+      sets, and the Anthropic profile credential dirs the environment names, all
       compared ignoring case), except the sensitive directories one of Koda's runtime roots
       is configured under, when ``work_dir`` is that runtime root or below it: the Docker
       default ``HOME`` under ``/var/lib`` and the paths inside it stay usable;
