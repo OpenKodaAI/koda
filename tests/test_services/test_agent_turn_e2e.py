@@ -33,7 +33,7 @@ import pytest
 
 from tests.fakes.provider import ProviderCall, ProviderTurn, StubProvider
 from tests.fakes.telegram import FakeApplication, FakeBot, fake_text_update
-from tests.postgres_fixtures import reset_squad_runtime_tables
+from tests.postgres_fixtures import reset_squad_runtime_tables, stop_primary_bridge
 
 pytestmark = [pytest.mark.postgres]
 
@@ -52,30 +52,6 @@ _TABLES = (
 )
 _TURN_TIMEOUT_S = 30.0
 _USER_IDS = frozenset({910001, 910002, 910003, 910004, 910005, 910006})
-
-
-def _stop_primary_bridge() -> None:
-    """Stop the sync->async bridge thread the runtime starts, so later tests run without it."""
-    from koda.knowledge.v2 import common as common_mod
-    from koda.state import primary as primary_mod
-
-    loop = primary_mod._active_bridge_loop()
-    if loop is not None:
-        for backend in list(common_mod._SHARED_POSTGRES_BACKENDS.values()):
-            future = asyncio.run_coroutine_threadsafe(backend.close(), loop)
-            try:
-                future.result(timeout=10)
-            except Exception:
-                future.cancel()
-        loop.call_soon_threadsafe(loop.stop)
-        thread = primary_mod._BRIDGE_THREAD
-        if thread is not None:
-            thread.join(timeout=10)
-        with primary_mod._BRIDGE_LOCK:
-            primary_mod._BRIDGE_LOOP = None
-            primary_mod._BRIDGE_THREAD = None
-            primary_mod._BRIDGE_OWNER_PID = None
-    common_mod._SHARED_POSTGRES_BACKENDS.clear()
 
 
 async def _drain_background_work() -> None:
@@ -116,7 +92,7 @@ async def agent_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) -> A
         yield migrated_postgres
     finally:
         await _drain_background_work()
-        _stop_primary_bridge()
+        stop_primary_bridge()
 
 
 @pytest.fixture
@@ -282,11 +258,12 @@ async def test_success_delivers_the_answer_and_persists_the_completed_task(
     # The streaming progress message showed the partial output, then was removed.
     assert progress.edits and "Paris is the capital of France." in progress.edits[-1]
     assert progress.deleted is True
-    # The answer is the only visible message: a reply to the user's message, with the cost footer.
+    # The answer is the only visible message, with the cost footer. In a private chat PTB's
+    # Message.reply_text sends it as a plain message, not a quote of the user's message.
     assert bot.visible(chat_id) == [answer]
     assert answer.text is not None
     assert answer.text.startswith("Paris is the capital of France.\n\n———\n<i>Cost: $0.0125 | Total: $0.0125 | claude")
-    assert answer.kwargs["reply_to_message_id"] == 1
+    assert answer.reply_to is None
     assert str(answer.kwargs["parse_mode"]) == "HTML"
 
     row = await _task_row(agent_db, task_id)
@@ -367,7 +344,7 @@ async def test_retryable_provider_error_is_retried_then_dead_lettered(
     assert notice.text is not None
     assert notice.text.startswith(f"Task #{task_id} falhou:\n")
     assert "<b>Overloaded</b>" in notice.text
-    assert notice.kwargs["reply_to_message_id"] == 1
+    assert notice.reply_to is None
 
     events = await _audit_event_types(agent_db, task_id, until_present="task.dead_letter")
     assert events.count("task.retried") == 2
@@ -482,7 +459,8 @@ class _CancelScenario:
             f"Reference: #{self.second_id}."
         )
         assert answer.text is not None and answer.text.startswith("Here is the short answer.")
-        assert answer.kwargs["reply_to_message_id"] == 2
+        # Private chat: neither message quotes the user's message (PTB's reply_text default).
+        assert (feedback.reply_to, answer.reply_to) == (None, None)
         [logged] = await _fetch_all(dsn, f'SELECT * FROM {_SCHEMA}."query_history" WHERE user_id = $1', self.user_id)
         assert logged["query_text"] == "Quick question"
         return cancelled
@@ -518,9 +496,12 @@ class RuntimeStoreCannotSeeTask(AssertionError):
     strict=True,
     raises=RuntimeStoreCannotSeeTask,
     reason=(
-        "New finding (agent_id casing, see D-061/TD-009 and M2-E3-T5): history_store writes tasks.agent_id "
-        "upper-cased ('AGENT_A') while PostgresRuntimeStore reads it lower-cased ('agent_a'), so "
-        "RuntimeController.cancel_task finds no task and /cancel <id> answers 'not found'."
+        "New defect found by M0-E3-T2, not yet registered (no D- id or owning task; D-061 and M2-E3-T5 cover "
+        "the memory-engine join, not this): koda/state/history_store.py _current_agent_scope writes "
+        "tasks.agent_id upper-cased ('AGENT_A') while koda/services/runtime/postgres_store.py _agent_scope "
+        "reads it lower-cased ('agent_a'). Every RuntimeController task lookup on Postgres misses, so "
+        "/cancel <id> answers 'Task #N not found.' and bare /cancel answers 'Nothing running.' while the "
+        "task keeps running and delivers its answer: the D-009 fix is unreachable from /cancel on Postgres."
     ),
 )
 async def test_cancel_command_stops_the_running_light_task_on_postgres(

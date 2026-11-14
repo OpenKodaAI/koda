@@ -6,7 +6,8 @@ the messages it returns support the follow-up calls the delivery path makes
 ``koda.services.queue_manager.build_runtime_context`` reads, and
 ``fake_text_update`` builds the incoming-message update a Telegram handler
 passes to ``enqueue``; its replies go through the same fake bot, as PTB's
-``Message.reply_*`` helpers do.
+``Message.reply_*`` helpers do, and quote the user's message only when PTB
+would (``tests/test_fakes_telegram.py`` checks this against PTB itself).
 """
 
 from __future__ import annotations
@@ -16,6 +17,19 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
+
+from telegram import ReplyParameters
+
+
+def chat_type_for(chat_id: int) -> str:
+    """The chat type Telegram uses for ``chat_id``.
+
+    Private chats have the user's (positive) id, supergroups and channels a
+    ``-100`` prefix, and basic groups any other negative id.
+    """
+    if chat_id > 0:
+        return "private"
+    return "supergroup" if str(chat_id).startswith("-100") else "group"
 
 
 @dataclass
@@ -30,6 +44,20 @@ class FakeMessage:
     kwargs: dict[str, Any] = field(default_factory=dict)
     edits: list[str] = field(default_factory=list)
     deleted: bool = False
+    chat_type: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.chat_type:
+            self.chat_type = chat_type_for(self.chat_id)
+
+    @property
+    def reply_to(self) -> int | None:
+        """The message this one was sent as a reply to, or ``None`` for a plain message."""
+        reply_parameters = self.kwargs.get("reply_parameters")
+        if reply_parameters is not None:
+            return int(reply_parameters.message_id)
+        reply_to_message_id = self.kwargs.get("reply_to_message_id")
+        return None if reply_to_message_id is None else int(reply_to_message_id)
 
     async def edit_text(self, text: str, **kwargs: Any) -> FakeMessage:
         self.edits.append(text)
@@ -39,19 +67,70 @@ class FakeMessage:
     async def delete(self) -> bool:
         return await self.bot.delete_message(chat_id=self.chat_id, message_id=self.message_id)
 
-    async def reply_text(self, text: str, **kwargs: Any) -> FakeMessage:
+    def _reply_parameters(
+        self,
+        do_quote: bool | None,
+        reply_to_message_id: int | None,
+        reply_parameters: ReplyParameters | None,
+    ) -> ReplyParameters | None:
+        """PTB 22's ``Message._parse_quote_arguments`` with no ``Defaults(do_quote=...)`` set.
+
+        An explicit target wins; otherwise ``do_quote`` decides; otherwise the
+        message is quoted only outside private chats.
+        """
+        if reply_parameters is not None:
+            return reply_parameters
+        if reply_to_message_id is not None:
+            return ReplyParameters(message_id=reply_to_message_id)
+        quote = do_quote if do_quote is not None else self.chat_type != "private"
+        return ReplyParameters(message_id=self.message_id) if quote else None
+
+    async def reply_text(
+        self,
+        text: str,
+        *,
+        do_quote: bool | None = None,
+        reply_to_message_id: int | None = None,
+        reply_parameters: ReplyParameters | None = None,
+        **kwargs: Any,
+    ) -> FakeMessage:
         return await self.bot.send_message(
-            chat_id=self.chat_id, text=text, reply_to_message_id=self.message_id, **kwargs
+            chat_id=self.chat_id,
+            text=text,
+            reply_parameters=self._reply_parameters(do_quote, reply_to_message_id, reply_parameters),
+            **kwargs,
         )
 
-    async def reply_document(self, document: Any = None, **kwargs: Any) -> FakeMessage:
+    async def reply_document(
+        self,
+        document: Any = None,
+        *,
+        do_quote: bool | None = None,
+        reply_to_message_id: int | None = None,
+        reply_parameters: ReplyParameters | None = None,
+        **kwargs: Any,
+    ) -> FakeMessage:
         return await self.bot.send_document(
-            chat_id=self.chat_id, document=document, reply_to_message_id=self.message_id, **kwargs
+            chat_id=self.chat_id,
+            document=document,
+            reply_parameters=self._reply_parameters(do_quote, reply_to_message_id, reply_parameters),
+            **kwargs,
         )
 
-    async def reply_voice(self, voice: Any = None, **kwargs: Any) -> FakeMessage:
+    async def reply_voice(
+        self,
+        voice: Any = None,
+        *,
+        do_quote: bool | None = None,
+        reply_to_message_id: int | None = None,
+        reply_parameters: ReplyParameters | None = None,
+        **kwargs: Any,
+    ) -> FakeMessage:
         return await self.bot.send_voice(
-            chat_id=self.chat_id, voice=voice, reply_to_message_id=self.message_id, **kwargs
+            chat_id=self.chat_id,
+            voice=voice,
+            reply_parameters=self._reply_parameters(do_quote, reply_to_message_id, reply_parameters),
+            **kwargs,
         )
 
 
@@ -128,14 +207,27 @@ class FakeApplication:
         self.job_queue = None
 
 
-def fake_text_update(bot: FakeBot, *, user_id: int, chat_id: int, text: str, message_id: int = 1) -> Any:
-    """An incoming private text message, shaped like the update ``enqueue`` receives."""
-    message = FakeMessage(bot=bot, chat_id=chat_id, message_id=message_id, text=text)
+def fake_text_update(
+    bot: FakeBot,
+    *,
+    user_id: int,
+    chat_id: int,
+    text: str,
+    message_id: int = 1,
+    chat_type: str | None = None,
+) -> Any:
+    """An incoming text message, shaped like the update ``enqueue`` receives.
+
+    The chat type defaults to the one Telegram uses for ``chat_id``
+    (``chat_type_for``): a positive id is a private chat.
+    """
+    resolved_chat_type = chat_type or chat_type_for(chat_id)
+    message = FakeMessage(bot=bot, chat_id=chat_id, message_id=message_id, text=text, chat_type=resolved_chat_type)
     return SimpleNamespace(
         update_id=message_id,
         message=message,
         effective_message=message,
-        effective_chat=SimpleNamespace(id=chat_id, type="private"),
+        effective_chat=SimpleNamespace(id=chat_id, type=resolved_chat_type),
         effective_user=SimpleNamespace(id=user_id, first_name="Test", username="test_user"),
         callback_query=None,
     )

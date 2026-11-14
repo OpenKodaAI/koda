@@ -46,6 +46,24 @@ def test_testcontainers_available_returns_false_when_lib_missing() -> None:
         assert postgres_fixtures._testcontainers_available() is False
 
 
+def test_stop_primary_bridge_stops_the_bridge_thread_and_forgets_it() -> None:
+    """Postgres tests share one teardown for the sync->async bridge the runtime starts."""
+    from koda.state import primary as primary_mod
+
+    loop = primary_mod._ensure_bridge_loop()
+    thread = primary_mod._BRIDGE_THREAD
+    assert thread is not None and thread.is_alive()
+    assert primary_mod._active_bridge_loop() is loop
+
+    postgres_fixtures.stop_primary_bridge()
+
+    assert not thread.is_alive()
+    assert primary_mod._active_bridge_loop() is None
+    assert (primary_mod._BRIDGE_LOOP, primary_mod._BRIDGE_THREAD, primary_mod._BRIDGE_OWNER_PID) == (None, None, None)
+    # Idempotent: a test whose run never started the bridge tears down cleanly too.
+    postgres_fixtures.stop_primary_bridge()
+
+
 @pytest.mark.postgres
 def test_postgres_marker_is_registered() -> None:
     """If this test runs, real Postgres is available and the

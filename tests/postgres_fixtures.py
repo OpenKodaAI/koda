@@ -25,6 +25,7 @@ without paying the full migration cost.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from collections.abc import AsyncIterator
@@ -85,6 +86,38 @@ def _clear_shared_postgres_backends() -> None:
     from koda.knowledge.v2 import common as knowledge_common
 
     knowledge_common._SHARED_POSTGRES_BACKENDS.clear()
+
+
+def stop_primary_bridge() -> None:
+    """Stop the sync->async bridge thread the runtime starts, so later tests run without it.
+
+    Runtime code that writes Postgres from synchronous call sites starts
+    ``koda.state.primary``'s bridge loop on a daemon thread and caches shared
+    backends on it. Postgres tests that drive the runtime call this in their
+    teardown: the shared backends are closed on the bridge loop, the loop is
+    stopped and its thread joined, and the module forgets both. Safe to call
+    when no bridge is running.
+    """
+    from koda.knowledge.v2 import common as common_mod
+    from koda.state import primary as primary_mod
+
+    loop = primary_mod._active_bridge_loop()
+    if loop is not None:
+        for backend in list(common_mod._SHARED_POSTGRES_BACKENDS.values()):
+            future = asyncio.run_coroutine_threadsafe(backend.close(), loop)
+            try:
+                future.result(timeout=10)
+            except Exception:
+                future.cancel()
+        loop.call_soon_threadsafe(loop.stop)
+        thread = primary_mod._BRIDGE_THREAD
+        if thread is not None:
+            thread.join(timeout=10)
+        with primary_mod._BRIDGE_LOCK:
+            primary_mod._BRIDGE_LOOP = None
+            primary_mod._BRIDGE_THREAD = None
+            primary_mod._BRIDGE_OWNER_PID = None
+    common_mod._SHARED_POSTGRES_BACKENDS.clear()
 
 
 def _koda_modules_holding_dsn() -> list[Any]:
