@@ -579,6 +579,51 @@ def test_url_safety_judges_ip_literals_without_trusting_dns(url):
         assert _check_url_safety("http://8.8.8.8/") is None
 
 
+# URLs the pre-check cannot parse or resolve: yarl rejects the first two, and the
+# stdlib IDNA codec inside getaddrinfo rejects a label longer than 63 characters
+# before any lookup is made.
+_MALFORMED_URLS = {
+    "unclosed_ipv6_bracket": ("http://[::1/", "Invalid URL."),
+    "port_out_of_range": ("http://example.com:99999/", "Invalid URL."),
+    "label_too_long": ("http://" + "a" * 64 + ".com/", "Could not resolve hostname"),
+}
+
+
+def test_label_too_long_fails_idna_encoding_in_getaddrinfo():
+    """Precondition for the label_too_long case: the stdlib raises UnicodeError, not gaierror."""
+    import socket as socket_module
+
+    with pytest.raises(UnicodeError):
+        socket_module.getaddrinfo("a" * 64 + ".com", None)
+
+
+@pytest.mark.parametrize("allow_private", [False, True])
+@pytest.mark.parametrize("case", sorted(_MALFORMED_URLS))
+def test_url_safety_reports_malformed_urls_instead_of_raising(case, allow_private):
+    url, expected = _MALFORMED_URLS[case]
+
+    result = _check_url_safety(url, allow_private=allow_private)
+
+    assert result is not None
+    assert expected in result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("allow_private", [False, True])
+@pytest.mark.parametrize("entry_point", sorted(_ENTRY_POINTS))
+@pytest.mark.parametrize("case", sorted(_MALFORMED_URLS))
+async def test_entry_points_report_malformed_urls_instead_of_raising(case, entry_point, allow_private):
+    """The pre-check runs outside each entry point's try block, so it must return an error, not raise."""
+    url, expected = _MALFORMED_URLS[case]
+
+    with patch("koda.services.http_client._get_session", side_effect=AssertionError("no request expected")):
+        result = await _ENTRY_POINTS[entry_point](url, allow_private=allow_private)
+
+    assert isinstance(result, str)
+    assert result.startswith("Error:")
+    assert expected in result
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entry_point", sorted(_ENTRY_POINTS))
 @pytest.mark.parametrize("host", _IDNA_MAPPED_LOOPBACK_HOSTS)
