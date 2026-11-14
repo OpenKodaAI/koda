@@ -289,6 +289,61 @@ def test_setup_code_without_ascii_letters_or_digits_never_matches(
 
 
 @pytest.mark.postgres
+@pytest.mark.parametrize("source", ["cli", "bootstrap_file"])
+@pytest.mark.parametrize(
+    "transform",
+    [
+        pytest.param(lambda code: code + "é", id="added-non-ascii"),
+        pytest.param(lambda code: code.replace("-", "\u2013"), id="en-dashes"),
+        pytest.param(lambda code: code + "\u00a0", id="trailing-nbsp"),
+    ],
+)
+def test_setup_code_ignores_characters_that_are_not_ascii_letters_or_digits(
+    operator_db: Path, source: str, transform: Any
+) -> None:
+    """Only ASCII letters and digits count, so an added non-ASCII character or separator is ignored."""
+    service = operator_auth_mod.OperatorAuthService()
+    code = _setup_code(service, source)
+
+    _register_with_setup_code(service, transform(code))
+
+    assert service.has_owner() is True
+
+
+@pytest.mark.parametrize(
+    "seed", ["!@#$%^&*()_+1", "!!!!a!!!!", "Tr0ub4dor&3!", "ÄÖÜ-ÄÖÜ", "CUST-OMSE-EDCD", "abſd ＡＢＣＤ efgh"]
+)
+def test_seed_strength_counts_only_what_setup_code_matching_keeps(seed: str) -> None:
+    """The weak-seed warning in ``bootstrap_file`` counts exactly the characters the canonicalizer keeps."""
+    canonical = operator_auth_mod._normalize_bootstrap_code(seed)
+    assert bootstrap_file_mod._seed_significant_characters(seed) == len(canonical.replace("-", ""))
+
+
+def test_seed_punctuation_and_non_ascii_add_nothing_to_the_setup_code() -> None:
+    normalize = operator_auth_mod._normalize_bootstrap_code
+    assert normalize("Tr0ub4dor&3!") == "TR0U-B4DO-R3"
+    assert normalize("!!!!a!!!!") == normalize("a") == "A"
+    assert normalize("!@#$%^&*()_+1") == "1"
+
+
+_AUTH_DOC = Path(__file__).resolve().parents[1] / "docs" / "security" / "authentication.md"
+
+
+def test_auth_doc_states_which_setup_code_characters_count() -> None:
+    """The security contract must not overstate what a setup code rejects (D-221 review)."""
+    text = _AUTH_DOC.read_text(encoding="utf-8")
+    start = text.index("## Account creation")
+    section = " ".join(text[start : text.index("\n## ", start)].split())
+    # An added non-ASCII character is dropped, not rejected; only a look-alike in place of a character fails.
+    assert "non-ASCII character fails" not in section
+    assert "any other non-ASCII character, so `ABCD-EFGH-JKLMé` matches too" in section
+    assert "or a non-ASCII look-alike typed in place of one (for example `ſ` in place of `S`), fails" in section
+    # A seed's punctuation no longer counts, and a short seed is flagged.
+    assert "seed: only its ASCII letters and digits count towards its strength" in section
+    assert "`bootstrap_code_seed_weak` warning" in section
+
+
+@pytest.mark.postgres
 def test_loopback_rejected_when_flag_disabled(
     operator_db: Path,
     monkeypatch: pytest.MonkeyPatch,

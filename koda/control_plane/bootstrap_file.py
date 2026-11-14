@@ -10,7 +10,9 @@ supported (in priority order):
    false in production (enforced in settings.py at boot).
 2. **Env var** — `CONTROL_PLANE_BOOTSTRAP_CODE` seeds the code instead of autogen.
    The file keeps the seed as configured; `operator_auth` canonicalizes both the
-   stored and the typed code, so only its ASCII letters and digits count.
+   stored and the typed code, so only its ASCII letters and digits count. A seed
+   with fewer than 12 of them (a generated code has 12) is still used, but logs a
+   `bootstrap_code_seed_weak` warning when the file is written.
 3. **Disk file** — `state/control_plane/bootstrap.txt` (mode 0600) written on first
    boot if no owner exists. The operator SSHs in and reads it.
 
@@ -37,6 +39,8 @@ log = get_logger(__name__)
 
 _BOOTSTRAP_FILE_PATH: Path = STATE_ROOT_DIR / "control_plane" / "bootstrap.txt"
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+# A generated code has 12 letters and digits; a seed with fewer is weaker than the default.
+_SEED_MIN_SIGNIFICANT_CHARACTERS = 12
 
 
 def bootstrap_file_path() -> Path:
@@ -46,6 +50,16 @@ def bootstrap_file_path() -> Path:
 def _generate_code() -> str:
     chunks = ["".join(secrets.choice(_BOOTSTRAP_ALPHABET) for _ in range(4)) for _ in range(3)]
     return "-".join(chunks)
+
+
+def _seed_significant_characters(seed: str) -> int:
+    """Count the characters of a seed that setup-code matching keeps.
+
+    ``operator_auth._normalize_bootstrap_code`` keeps only ASCII letters and
+    digits, on the stored and on the typed side, so separators, punctuation and
+    non-ASCII characters add nothing to a seed's secrecy.
+    """
+    return sum(1 for ch in seed if ch.isascii() and ch.isalnum())
 
 
 def _parse_expires_at(value: str) -> datetime | None:
@@ -113,6 +127,18 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
     with contextlib.suppress(OSError):
         os.chmod(str(_BOOTSTRAP_FILE_PATH), 0o600)
     log.info("bootstrap_file_written", path=str(_BOOTSTRAP_FILE_PATH), code=code, expires_at=expires_at.isoformat())
+    if CONTROL_PLANE_BOOTSTRAP_CODE_SEED:
+        significant = _seed_significant_characters(CONTROL_PLANE_BOOTSTRAP_CODE_SEED)
+        if significant < _SEED_MIN_SIGNIFICANT_CHARACTERS:
+            log.warning(
+                "bootstrap_code_seed_weak",
+                significant_characters=significant,
+                minimum=_SEED_MIN_SIGNIFICANT_CHARACTERS,
+                hint=(
+                    "Setup codes match on ASCII letters and digits only. Give CONTROL_PLANE_BOOTSTRAP_CODE "
+                    f"at least {_SEED_MIN_SIGNIFICANT_CHARACTERS} of them, or unset it to get a generated code."
+                ),
+            )
     return code
 
 
