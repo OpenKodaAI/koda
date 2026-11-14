@@ -44,8 +44,9 @@
   sends the `server_name` for a request without a `Host` (an HTTP/1.0 health check), keeps idle
   runtime event streams open, and accepts request bodies of up to 13 MiB on the two photo upload
   routes (`/api/control-plane/auth/profile/photo` and
-  `/api/control-plane/dashboard/squads/threads/<id>/photo`), where nginx's default of 1 MiB
-  refused photo uploads over 1 MiB. Every other route keeps that default.
+  `/api/control-plane/dashboard/squads/threads/<id>/photo`) for API-token uploads, which go to
+  the API, where nginx's default of 1 MiB refused photo uploads over 1 MiB. Every request the
+  dashboard gets, its own photo uploads (a cropped JPEG) included, keeps that default.
   `koda update` does not change a copy installed in nginx:
   replace that copy with the new template, keeping your `server_name` and TLS settings, then run
   `nginx -t` and reload nginx.

@@ -8,15 +8,20 @@ checks tell the two apart (apps/web/src/proxy.ts, the dashboard's auth routes an
 apps/web/server.mjs; koda/control_plane/api.py), so a request routed to the wrong one fails.
 
 The real-nginx tests need an nginx binary: ``KODA_TEST_NGINX``, else ``nginx`` on PATH or
-``/usr/sbin/nginx``. Without one they skip; the docker smoke still runs the same checks in CI,
-against the real stack.
+``/usr/sbin/nginx``. Without one they skip. The docker smoke runs ``proxy_smoke.run_checks``
+through the pinned nginx in CI, against the real stack: the routing checks, and the body limits
+(a 12 MiB API-token photo upload with a Content-Length and chunked, and nginx's 413 for a body over
+1 MiB to the sign-in route and to a photo route without a token). The cases only these tests run
+are the extra body-limit ones in test_the_bundled_proxy_passes_the_largest_upload_in_a_real_nginx
+(the room photo route, a session cookie, a body over the photo limit, the internal upload location
+and the paths next to the photo routes), the previous template, and the extra Host checks (a page
+without a Host, a Host with a port); tests/test_release_proxy_routing.py checks the config's shape
+for every route either way.
 """
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import http.client
 import json
 import os
 import secrets
@@ -135,9 +140,27 @@ def test_the_checks_cover_browser_login_the_relay_and_api_token_calls() -> None:
         "relay: WebSocket upgrade reaches the dashboard relay",
         "api-token: GET /api/control-plane/agents",
         "api-token: POST with a body",
+        "api-token: a 12 MiB photo upload reaches the API",
         "api: GET /openapi/control-plane.json",
         "health: HTTP/1.0 request without a Host reaches the dashboard",
+        "body limit: a sign-in body over 1 MiB gets nginx's 413",
+        "body limit: a photo over 1 MiB without an API token gets nginx's 413",
     ]
+
+
+def test_the_body_limit_checks_follow_the_app_and_nginx() -> None:
+    """The smoke is standard-library only, so it keeps its own copy of the limits; they must agree."""
+    from koda.control_plane import operator_profile_photos
+    from koda.control_plane.operator_profile_photos import InvalidProfilePhotoError, save_operator_profile_photo
+
+    assert proxy_smoke.LARGEST_PHOTO_BYTES == operator_profile_photos.MAX_INPUT_BYTES
+    # nginx's client_max_body_size when the config sets none, which every dashboard request keeps.
+    assert proxy_smoke.DEFAULT_BODY_LIMIT_BYTES == 1024 * 1024
+    # The smoke's photo is no image: the API refuses it with this answer, before it stores anything.
+    body, _ = proxy_smoke.multipart_photo(64)
+    with pytest.raises(InvalidProfilePhotoError) as refused:
+        save_operator_profile_photo("proxy-smoke", body)
+    assert str(refused.value).startswith(proxy_smoke.API_UNDECODABLE_PHOTO)
 
 
 def test_render_replaces_the_listen_address_and_upstreams() -> None:
@@ -184,6 +207,8 @@ class Stack:
     dashboard_sessions: set[str] = field(default_factory=set)
     # (upstream, method, path, headers) of every request that reached an upstream.
     seen: list[tuple[str, str, str, dict[str, str]]] = field(default_factory=list)
+    # (upstream, path, bytes read) of every photo upload body an upstream read.
+    uploads: list[tuple[str, str, int]] = field(default_factory=list)
 
     def remember(self, upstream: str, request: web.Request) -> None:
         self.seen.append((upstream, request.method, request.path_qs, dict(request.headers)))
@@ -288,6 +313,15 @@ def api_app(stack: Stack) -> web.Application:
     async def control_plane(request: web.Request) -> web.Response:
         stack.remember("api", request)
         path = request.match_info["path"]
+        if path == "auth/profile/photo" and request.method == "POST":
+            # The API reads the whole multipart body, then checks the token and decodes the photo.
+            size = 0
+            async for chunk in request.content.iter_chunked(64 * 1024):
+                size += len(chunk)
+            stack.uploads.append(("api", request.path, size))
+            if request.headers.get("Authorization", "").removeprefix("Bearer ").strip() != stack.api_token:
+                return _json({"error": "operator session is required"}, 400)
+            return _json({"error": f"{proxy_smoke.API_UNDECODABLE_PHOTO}: cannot identify image file"}, 400)
         if path in ("auth/login", "auth/register-owner") and request.method == "POST":
             body = await request.json()
             if path == "auth/register-owner":
@@ -342,7 +376,7 @@ def _nginx_binary() -> str | None:
 def nginx_binary() -> str:
     binary = _nginx_binary()
     if binary is None:
-        pytest.skip("no nginx binary (set KODA_TEST_NGINX); the docker smoke runs these checks in CI")
+        pytest.skip("no nginx binary (set KODA_TEST_NGINX); the docker smoke runs proxy_smoke.run_checks in CI")
     return binary
 
 
@@ -440,8 +474,15 @@ async def test_the_bundled_proxy_passes_the_smoke_in_a_real_nginx(nginx_binary: 
     assert [path for upstream, _, path in reached if upstream == "api"] == [
         "/api/control-plane/agents",
         "/api/control-plane/auth/login",
+        proxy_smoke.PROFILE_PHOTO_PATH,
+        proxy_smoke.PROFILE_PHOTO_PATH,
         "/openapi/control-plane.json",
     ]
+    # The API read both 12 MiB photos whole, sent with a Content-Length and chunked; no body over
+    # 1 MiB reached the dashboard.
+    photo, _ = proxy_smoke.multipart_photo(proxy_smoke.LARGEST_PHOTO_BYTES)
+    assert stack.uploads == [("api", proxy_smoke.PROFILE_PHOTO_PATH, len(photo))] * 2
+    assert ("dashboard", "POST", proxy_smoke.PROFILE_PHOTO_PATH) not in reached
     assert any(upstream == "dashboard" and path.startswith("/api/runtime/relay/") for upstream, _, path in reached)
     for _, _, _, headers in stack.seen:
         assert headers["X-Forwarded-For"] == "127.0.0.1"
@@ -487,24 +528,14 @@ async def test_the_smoke_rejects_the_previous_template(nginx_binary: str, tmp_pa
         "browser: API call with the session cookie",
         "relay: WebSocket upgrade reaches the dashboard relay",
         "api-token: POST with a body",
+        # nginx's default of 1m everywhere: the API never saw a 12 MiB photo.
+        "api-token: a 12 MiB photo upload reaches the API",
     }
 
 
 # ---------------------------------------------------------------------------
 # Upload size
 # ---------------------------------------------------------------------------
-
-
-def _multipart_photo(size: int) -> tuple[bytes, str]:
-    """A multipart/form-data body carrying one ``photo`` file of *size* bytes, as the dashboard sends it."""
-    boundary = secrets.token_hex(16)
-    head = (
-        f"--{boundary}\r\n"
-        'Content-Disposition: form-data; name="photo"; filename="photo.jpg"\r\n'
-        "Content-Type: image/jpeg\r\n\r\n"
-    ).encode("ascii")
-    tail = f"\r\n--{boundary}--\r\n".encode("ascii")
-    return head + b"\xff" * size + tail, f"multipart/form-data; boundary={boundary}"
 
 
 def _upload_app(upstream: str, received: list[tuple[str, str, int]]) -> web.Application:
@@ -514,7 +545,7 @@ def _upload_app(upstream: str, received: list[tuple[str, str, int]]) -> web.Appl
         size = 0
         async for chunk in request.content.iter_chunked(64 * 1024):
             size += len(chunk)
-        received.append((upstream, request.path, size))
+        received.append((upstream, request.path_qs, size))
         return _json({"received": size})
 
     app = web.Application()
@@ -524,53 +555,47 @@ def _upload_app(upstream: str, received: list[tuple[str, str, int]]) -> web.Appl
 
 def _post(proxy_url: str, path: str, body: bytes, headers: dict[str, str], *, chunked: bool = False) -> int:
     """POST *body* with a Content-Length, or with ``chunked=True`` as a chunked body (no length declared)."""
-    proxy = proxy_smoke.Proxy(proxy_url, timeout=60)
-    connection = http.client.HTTPConnection(proxy.host, proxy.port, timeout=60)
-    step = 256 * 1024
-    payload: bytes | Iterator[bytes] = (
-        (body[index : index + step] for index in range(0, len(body), step)) if chunked else body
-    )
-    try:
-        # nginx may answer 413 before the whole body is sent; its answer is still read below.
-        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
-            connection.request("POST", path, body=payload, headers={"Host": proxy.netloc, **headers})
-        response = connection.getresponse()
-        response.read()
-        return response.status
-    finally:
-        connection.close()
+    response = proxy_smoke.Proxy(proxy_url, timeout=60).post_bytes(path, body, headers=headers, chunked=chunked)
+    if response.status == 413:
+        # nginx's own answer, not an upstream's: the refused body reached neither.
+        assert proxy_smoke.NGINX_TOO_LARGE in response.body, response.summary()
+    return response.status
 
 
 async def test_the_bundled_proxy_passes_the_largest_upload_in_a_real_nginx(nginx_binary: str, tmp_path: Path) -> None:
-    """Only the photo routes take more than nginx's default client_max_body_size of 1m.
+    """Only an API-token photo upload takes more than nginx's default client_max_body_size of 1m.
 
-    A profile or room photo may be 12 MiB, so those routes pass one, from the dashboard and with an
-    API token, with a Content-Length or chunked (nginx checks a chunked body in the location that
-    reads it, the named API location for a token). Every other route answers 413 to a body over
-    1 MiB before any upstream sees it: a client without a session cannot push large bodies at the
-    sign-in or setup routes, which the dashboard would buffer before any check.
-
-    The dashboard here is a stand-in, so "full body received" proves nginx only. The real
-    dashboard's Next.js proxy keeps at most proxyClientMaxBodySize (10 MiB in next 16.2.6, not
-    overridden in apps/web/next.config.ts) of a body; its photo editor uploads a cropped image of
-    about 1 MB, and an API token's upload goes to the API, which reads the whole multipart body.
+    A profile or room photo may be 12 MiB, so an API-token client can upload one to the API, with a
+    Content-Length or chunked: the server block's rewrite sends it to an internal location with the
+    photo limit before nginx checks a declared length, and nginx reads a chunked body in that same
+    location. Every request the dashboard gets answers 413 over 1 MiB before any upstream sees it,
+    the photo routes without a token included: a client without a session cannot push large bodies
+    at the dashboard, which buffers them (up to 10 MiB in next 16.2.6) before any check. The
+    dashboard's own photo upload, a cropped 512-pixel JPEG, fits within 1 MiB
+    (tests/test_release_proxy_routing.py), and a client cannot ask for the upload location itself.
     """
     from koda.control_plane import operator_profile_photos
     from koda.squads import room_photos
 
     largest = max(operator_profile_photos.MAX_INPUT_BYTES, room_photos.MAX_INPUT_BYTES)
-    body, content_type = _multipart_photo(largest)
+    body, content_type = proxy_smoke.multipart_photo(largest)
     # tests/test_release_proxy_routing.py keeps the limit within 1 MiB above the largest photo.
-    oversized, _ = _multipart_photo(largest + 1024 * 1024)
-    # Over nginx's default of 1m, which every other route keeps.
-    over_default, _ = _multipart_photo(1024 * 1024 + 1)
+    oversized, _ = proxy_smoke.multipart_photo(largest + 1024 * 1024)
+    # Over nginx's default of 1m, which every other request keeps.
+    over_default, _ = proxy_smoke.multipart_photo(1024 * 1024)
+    # A crop of exactly 1 MiB with its form: as much as the dashboard may get.
+    framing = len(proxy_smoke.multipart_photo(0)[0])
+    at_default, _ = proxy_smoke.multipart_photo(1024 * 1024 - framing)
+    assert len(at_default) == 1024 * 1024 < len(over_default)
     received: list[tuple[str, str, int]] = []
     template = TEMPLATE.read_text(encoding="utf-8")
     anonymous = {"Content-Type": content_type}
     browser = {**anonymous, "Cookie": f"{proxy_smoke.SESSION_COOKIE}=sealed"}
+    basic = {**browser, "Authorization": "Basic b3BlcmF0b3I6cGFzcw=="}
     api_token = {**anonymous, "Authorization": "Bearer koda-api-token"}
     profile = "/api/control-plane/auth/profile/photo"
     room = "/api/control-plane/dashboard/squads/threads/t-1/photo"
+    internal = "/koda-api-photo-upload/auth/profile/photo"
 
     async with serve(_upload_app("dashboard", received)) as dashboard, serve(_upload_app("api", received)) as api:
         moved = template.replace(proxy_smoke.TEMPLATE_DASHBOARD, f"http://{dashboard}").replace(
@@ -578,36 +603,55 @@ async def test_the_bundled_proxy_passes_the_largest_upload_in_a_real_nginx(nginx
         )
         with running_nginx(nginx_binary, tmp_path, moved) as proxy_url:
             accepted = [
-                await asyncio.to_thread(_post, proxy_url, profile, body, browser),
-                await asyncio.to_thread(_post, proxy_url, profile, body, api_token),
-                await asyncio.to_thread(_post, proxy_url, room, body, browser),
-                await asyncio.to_thread(_post, proxy_url, room, body, api_token),
-                await asyncio.to_thread(_post, proxy_url, profile, body, browser, chunked=True),
-                await asyncio.to_thread(_post, proxy_url, profile, body, api_token, chunked=True),
+                await asyncio.to_thread(_post, proxy_url, path, payload, headers, chunked=chunked)
+                for path, payload, headers, chunked in [
+                    (profile, body, api_token, False),
+                    (room, body, api_token, False),
+                    (profile, body, api_token, True),
+                    (room, body, api_token, True),
+                    (f"{profile}?source=cli", body, api_token, False),
+                    (profile, at_default, browser, False),
+                    (room, at_default, browser, True),
+                ]
             ]
             refused = {
                 (path, kind): await asyncio.to_thread(_post, proxy_url, path, payload, headers, chunked=chunked)
                 for path, payload, headers, kind, chunked in [
-                    (profile, oversized, browser, "photo over 13m", False),
+                    (profile, oversized, api_token, "photo over 13m, API token", False),
                     (profile, oversized, api_token, "photo over 13m, chunked, API token", True),
+                    (profile, over_default, browser, "session cookie", False),
+                    (profile, over_default, browser, "session cookie, chunked", True),
+                    (profile, over_default, anonymous, "no session", False),
+                    (profile, over_default, anonymous, "no session, chunked", True),
+                    (profile, over_default, basic, "HTTP Basic, not a token", False),
+                    (room, over_default, browser, "session cookie", False),
+                    (room, over_default, anonymous, "no session, chunked", True),
                     ("/api/control-plane/auth/login", over_default, anonymous, "no session", False),
                     ("/api/control-plane/auth/login", over_default, anonymous, "no session, chunked", True),
                     ("/setup", over_default, anonymous, "no session", False),
                     ("/api/runtime/agents", over_default, browser, "session cookie", False),
                     ("/api/control-plane/agents", over_default, api_token, "API token", False),
                     ("/api/control-plane/agents", over_default, api_token, "API token, chunked", True),
+                    (f"{profile}/", over_default, api_token, "near the photo route, API token", False),
                     (f"{profile}/", over_default, anonymous, "near the photo route", False),
                 ]
             }
+            not_found = [
+                await asyncio.to_thread(_post, proxy_url, internal, at_default, headers)
+                for headers in (anonymous, browser, api_token)
+            ]
 
-    assert accepted == [200] * 6
+    assert accepted == [200] * 7
     assert refused == dict.fromkeys(refused, 413)
-    # The full body reached the upstream that serves each caller; no refused body reached either.
+    assert not_found == [404] * 3
+    # The full body reached the upstream that serves each caller, under the path the client sent;
+    # no refused body reached either.
     assert received == [
-        ("dashboard", profile, len(body)),
         ("api", profile, len(body)),
-        ("dashboard", room, len(body)),
         ("api", room, len(body)),
-        ("dashboard", profile, len(body)),
         ("api", profile, len(body)),
+        ("api", room, len(body)),
+        ("api", f"{profile}?source=cli", len(body)),
+        ("dashboard", profile, len(at_default)),
+        ("dashboard", room, len(at_default)),
     ]

@@ -13,15 +13,17 @@ The routing follows the auth model in docs/install/vps.md ("Reverse Proxy"):
   settings charge rate limits to the real client;
 - every request reaches the upstream with a ``Host``: the browser's, port included, or the server
   name when the client sent none;
-- the photo upload routes take a body as large as the largest photo the app accepts (12 MiB in a
-  multipart form), where nginx's default ``client_max_body_size`` of 1m would refuse it; every
-  other route, the sign-in and setup routes included, keeps that default, so a client without a
-  session cannot push large bodies at the dashboard.
+- an API-token photo upload takes a body as large as the largest photo the app accepts (12 MiB in
+  a multipart form), where nginx's default ``client_max_body_size`` of 1m would refuse it; every
+  request the dashboard gets keeps that default, its own photo uploads (a cropped 512-pixel JPEG)
+  and the sign-in and setup routes included, so a client without a session cannot push large
+  bodies at the dashboard, which buffers them before it checks anything.
 
-The config is parsed and routed by a small model of nginx: exact, longest-prefix and regex
-``location`` matching in nginx's order, ``if`` with ``return``, ``error_page ... = @named``,
-``map`` without regexes, ``client_max_body_size`` as each location inherits it, and the
-variables the config uses. Anything outside that model fails the test instead of being skipped,
+The config is parsed and routed by a small model of nginx: a server-level ``if`` with
+``rewrite ... last`` (run before a location is selected), exact, longest-prefix and regex
+``location`` matching in nginx's order, ``internal`` locations, ``if`` with ``return``,
+``error_page ... = @named``, ``map`` without regexes, ``client_max_body_size`` as each location
+inherits it, and the variables the config uses. Anything outside that model fails the test instead of being skipped,
 so a change to the config either stays inside it or extends it. The runtime proof is
 ``scripts/proxy_smoke.py``: ``scripts/docker_smoke.sh`` (the CI docker-smoke jobs) loads this
 config into a real nginx in front of the Compose stack and runs it there (browser login, the relay
@@ -148,11 +150,20 @@ def _parse(tokens: list[tuple[str, str]]) -> tuple[Directive, ...]:
 
 # Directives the model understands in the `server` block and inside a `location`; anything else
 # fails the test.
-_SERVER_DIRECTIVES = {"client_max_body_size", "error_page", "listen", "location", "proxy_set_header", "server_name"}
+_SERVER_DIRECTIVES = {
+    "client_max_body_size",
+    "error_page",
+    "if",
+    "listen",
+    "location",
+    "proxy_set_header",
+    "server_name",
+}
 _LOCATION_DIRECTIVES = {
     "client_max_body_size",
     "error_page",
     "if",
+    "internal",
     "proxy_http_version",
     "proxy_pass",
     "proxy_read_timeout",
@@ -173,6 +184,24 @@ _NGINX_DEFAULT_HEADERS = {
     "upgrade": "",
 }
 _VARIABLE = re.compile(r"\$(\w+)")
+_CAPTURE = re.compile(r"\$(\d)")
+
+
+class Refused(Exception):
+    """nginx answers the request itself, with *status*, before any upstream sees it."""
+
+    def __init__(self, status: int, reason: str) -> None:
+        super().__init__(f"{status}: {reason}")
+        self.status = status
+
+
+@dataclass(frozen=True)
+class ServerRewrite:
+    """``if (<condition>) { rewrite <pattern> <replacement> last; }`` in the server block."""
+
+    condition: tuple[str, ...]
+    pattern: re.Pattern[str]
+    replacement: str
 
 
 @dataclass(frozen=True)
@@ -239,10 +268,25 @@ class NginxModel:
         assert servers[0].block is not None
         self.server = servers[0].block
         for directive in self.server:
-            # TLS settings do not change routing; a server-level rewrite, return or if would.
+            # TLS settings do not change routing; a server-level rewrite or return would.
             assert directive.name in _SERVER_DIRECTIVES or directive.name.startswith("ssl_"), (
                 f"server: {directive.name} is outside the model"
             )
+        # nginx runs the server block's rewrite directives before it selects a location, so before it
+        # checks a declared Content-Length against that location's client_max_body_size.
+        self.server_rewrites: list[ServerRewrite] = []
+        for directive in self.server:
+            if directive.name != "if":
+                continue
+            assert directive.block is not None
+            for inner in directive.block:
+                assert inner.name == "rewrite" and len(inner.args) == 3 and inner.args[2] == "last", (
+                    f"server if: {inner.name} {inner.args} is outside the model (only rewrite ... last)"
+                )
+                pattern, replacement, _ = inner.args
+                assert replacement.startswith("/") and "?" not in replacement, f"rewrite to {replacement}"
+                assert set(_VARIABLE.findall(replacement)) <= set("123456789"), f"rewrite to {replacement}"
+                self.server_rewrites.append(ServerRewrite(directive.args, re.compile(pattern), replacement))
         self.scheme = "https" if any("ssl" in d.args for d in self.server if d.name == "listen") else "http"
         names = [d for d in self.server if d.name == "server_name"]
         assert len(names) == 1 and names[0].args, "expected one server_name directive"
@@ -282,7 +326,7 @@ class NginxModel:
 
     # -- variables ---------------------------------------------------------
 
-    def variable(self, name: str, request: Request, location: Location) -> str:
+    def variable(self, name: str, request: Request, location: Location | None) -> str:
         if name in self.maps:
             source, table = self.maps[name]
             key = self.expand(source, request, location).lower()
@@ -300,12 +344,13 @@ class NginxModel:
             forwarded = request.headers.get("x-forwarded-for")
             return f"{forwarded}, {request.remote_addr}" if forwarded else request.remote_addr
         if name == "proxy_host":
+            assert location is not None, "$proxy_host outside a location"
             return self.upstream(location)[0].removeprefix("http://")
         if name.startswith("http_"):
             return request.headers.get(name.removeprefix("http_").replace("_", "-"), "")
         raise AssertionError(f"${name} is outside the model")
 
-    def expand(self, value: str, request: Request, location: Location) -> str:
+    def expand(self, value: str, request: Request, location: Location | None) -> str:
         return _VARIABLE.sub(lambda match: self.variable(match.group(1), request, location), value)
 
     # -- phases ------------------------------------------------------------
@@ -324,7 +369,7 @@ class NginxModel:
                 return location
         return self.prefixes[max(matches, key=len)]
 
-    def condition(self, args: tuple[str, ...], request: Request, location: Location) -> bool:
+    def condition(self, args: tuple[str, ...], request: Request, location: Location | None) -> bool:
         words = list(args)
         assert words and words[0].startswith("("), f"if {args}"
         words[0] = words[0][1:]
@@ -345,6 +390,20 @@ class NginxModel:
         if operator in ("~", "~*"):
             return re.search(pattern, value, re.IGNORECASE if operator == "~*" else 0) is not None
         raise AssertionError(f"if operator {operator} is outside the model")
+
+    def server_rewrite(self, path: str, request: Request) -> str | None:
+        """Run the server block's rewrites; return the changed request URI (with its query), or None."""
+        uri, separator, args = path.partition("?")
+        for rewrite in self.server_rewrites:
+            if not self.condition(rewrite.condition, request, None):
+                continue
+            match = rewrite.pattern.search(uri)
+            if match is None:
+                continue
+            changed = _CAPTURE.sub(lambda ref, found=match: found.group(int(ref.group(1))) or "", rewrite.replacement)
+            # `last` stops the rewrites; nginx keeps the query string after the changed URI.
+            return f"{changed}{separator}{args}"
+        return None
 
     def rewrite(self, location: Location, request: Request) -> int | None:
         """Run the location's `if` blocks; return the status of a `return`, or None."""
@@ -386,7 +445,12 @@ class NginxModel:
         """Route a request; ``host=None`` sends it without a Host header, as an HTTP/1.0 client may."""
         defaults = {"Host": host} if host is not None else {}
         request = Request(path, {name.lower(): value for name, value in {**defaults, **(headers or {})}.items()})
+        rewritten = self.server_rewrite(path, request)
+        path = rewritten or path
         location = self.select(path)
+        if location.all("internal") and rewritten is None:
+            # A client cannot ask for an internal location; only a rewrite or a jump enters it.
+            raise Refused(404, f"{location.label} is internal")
         content_length_limit = self.body_limit(location)
         status = self.rewrite(location, request)
         if status is not None:
@@ -467,7 +531,7 @@ DASHBOARD_ROUTES: list[tuple[str, dict[str, str]]] = [
     # The /api/runtime/* routes exist only in the dashboard, whatever the caller sends.
     ("/api/runtime/agents", BEARER),
     ("/api/runtime/relay/relay-1", {}),
-    # The photo uploads have a location of their own.
+    # The dashboard's own photo uploads (a cropped JPEG) go there too, with nginx's default body limit.
     ("/api/control-plane/auth/profile/photo", SESSION_COOKIE),
     ("/api/control-plane/dashboard/squads/threads/thread-1/photo", SESSION_COOKIE),
 ]
@@ -511,21 +575,23 @@ def test_api_token_calls_and_the_openapi_document_reach_the_api(
 
 def test_only_bearer_requests_and_the_openapi_document_can_reach_the_api(nginx: NginxModel) -> None:
     to_api = {location.label for location in nginx.locations() if nginx.upstream(location)[0] == API}
-    assert to_api == {"= /openapi/control-plane.json", "@koda_control_plane_api", "@koda_control_plane_api_upload"}
+    assert to_api == {"= /openapi/control-plane.json", "@koda_control_plane_api", PHOTO_UPLOAD_LOCATION}
 
-    # The named locations are entered only from /api/control-plane/ and from the photo upload
-    # location under it, when the request carries a bearer token; every other location proxies
-    # to the dashboard.
+    # The named location is entered only from /api/control-plane/, when the request carries a
+    # bearer token; the photo upload location is internal and entered only through the server
+    # block's rewrite, which runs only for a bearer token. Every other location proxies to the
+    # dashboard.
     entered_from = {
         (location.label, directive.args[-1])
         for location in nginx.locations()
         for directive in location.all("error_page")
         if directive.args[-1].startswith("@")
     }
-    assert entered_from == {
-        ("/api/control-plane/", "@koda_control_plane_api"),
-        (f"~ {PHOTO_UPLOAD_LOCATION}", "@koda_control_plane_api_upload"),
-    }
+    assert entered_from == {("/api/control-plane/", "@koda_control_plane_api")}
+    assert [(rewrite.condition, rewrite.replacement.split("$", 1)[0]) for rewrite in nginx.server_rewrites] == [
+        (("($http_authorization", "~*", "^Bearer\\s", ")"), PHOTO_UPLOAD_LOCATION)
+    ]
+    assert {location.label for location in nginx.locations() if location.all("internal")} == {PHOTO_UPLOAD_LOCATION}
     assert nginx.route("/api/control-plane/agents", {}).upstream == DASHBOARD
     assert nginx.route("/api/control-plane/agents", BEARER).upstream == API
     for location in nginx.locations():
@@ -622,16 +688,19 @@ def test_every_route_sends_a_host_when_the_client_sent_none(
     assert routed.headers["x-forwarded-for"] == CLIENT
 
 
-# The photo upload routes, from the dashboard (session cookie) and from API-token clients: the only
-# routes that accept a body over nginx's default of 1m.
-PHOTO_UPLOAD_ROUTES: list[tuple[str, dict[str, str]]] = [
-    ("/api/control-plane/auth/profile/photo", SESSION_COOKIE),
-    ("/api/control-plane/auth/profile/photo", BEARER),
-    ("/api/control-plane/dashboard/squads/threads/thread-1/photo", SESSION_COOKIE),
-    ("/api/control-plane/dashboard/squads/threads/thread-1/photo", BEARER),
+PHOTO_PATHS = ["/api/control-plane/auth/profile/photo", "/api/control-plane/dashboard/squads/threads/thread-1/photo"]
+# API-token photo uploads, which go to the API: the only requests that accept a body over nginx's
+# default of 1m.
+PHOTO_UPLOAD_ROUTES: list[tuple[str, dict[str, str]]] = [(path, BEARER) for path in PHOTO_PATHS]
+# The internal location that gives them the larger limit, entered through the server block's rewrite.
+PHOTO_UPLOAD_LOCATION = "/koda-api-photo-upload/"
+# The same routes without a bearer token reach the dashboard and keep the default limit: from a
+# signed-in browser, from a client without a session, and from a browser behind HTTP Basic auth.
+DASHBOARD_PHOTO_UPLOAD_ROUTES: list[tuple[str, dict[str, str]]] = [
+    (path, headers)
+    for path in PHOTO_PATHS
+    for headers in ({}, SESSION_COOKIE, {**SESSION_COOKIE, "Authorization": "Basic b3BlcmF0b3I6cGFzcw=="})
 ]
-# The location that gives them the larger limit.
-PHOTO_UPLOAD_LOCATION = "^/api/control-plane/(auth/profile/photo|dashboard/squads/threads/[^/]+/photo)$"
 # Other uploads, all within nginx's default limit.
 SMALL_UPLOAD_ROUTES: list[tuple[str, dict[str, str]]] = [
     ("/api/control-plane/providers/supertonic/voices/import", SESSION_COOKIE),
@@ -651,6 +720,7 @@ NEAR_PHOTO_PATHS = [
 ]
 DEFAULT_LIMIT_ROUTES: list[tuple[str, dict[str, str]]] = [
     *[route for route in ALL_ROUTES if route not in PHOTO_UPLOAD_ROUTES],
+    *[route for route in DASHBOARD_PHOTO_UPLOAD_ROUTES if route not in ALL_ROUTES],
     *SMALL_UPLOAD_ROUTES,
     *[(path, headers) for path in NEAR_PHOTO_PATHS for headers in ({}, SESSION_COOKIE, BEARER)],
 ]
@@ -667,24 +737,26 @@ def largest_photo_bytes() -> int:
 
 
 @pytest.mark.parametrize("route", PHOTO_UPLOAD_ROUTES, ids=[_route_id(route) for route in PHOTO_UPLOAD_ROUTES])
-def test_photo_upload_routes_accept_the_largest_photo_the_app_accepts(
+def test_api_token_photo_uploads_accept_the_largest_photo_the_app_accepts(
     nginx: NginxModel, route: tuple[str, dict[str, str]]
 ) -> None:
     """nginx answers 413 to a body over client_max_body_size before any upstream sees it.
 
     Its default is 1m, but a profile or room photo may be 12 MiB (``MAX_INPUT_BYTES`` in
     koda/control_plane/operator_profile_photos.py and koda/squads/room_photos.py), sent as
-    multipart/form-data. The limit leaves room for the multipart framing around such a file and
-    stays within 1 MiB above it, so it follows the app's own limit. It holds where nginx checks a
-    declared Content-Length and, after an API token's jump to the named location, where it reads a
-    chunked body.
+    multipart/form-data by an API-token client. The limit leaves room for the multipart framing
+    around such a file and stays within 1 MiB above it, so it follows the app's own limit. It holds
+    where nginx checks a declared Content-Length (once the server block's rewrite has picked the
+    upload location) and where it reads a chunked body (in that same location).
     """
     path, headers = route
     largest = largest_photo_bytes()
 
     routed = nginx.route(path, headers)
 
-    assert routed.location.label in {f"~ {PHOTO_UPLOAD_LOCATION}", "@koda_control_plane_api_upload"}
+    assert routed.location.label == PHOTO_UPLOAD_LOCATION
+    assert routed.upstream == API
+    assert routed.target == path
     assert routed.content_length_limit >= largest + MULTIPART_FRAMING_BYTES
     assert routed.read_limit >= largest + MULTIPART_FRAMING_BYTES
     assert max(routed.content_length_limit, routed.read_limit) <= largest + 1024 * 1024
@@ -694,10 +766,12 @@ def test_photo_upload_routes_accept_the_largest_photo_the_app_accepts(
 def test_every_other_route_keeps_nginx_default_body_limit(nginx: NginxModel, route: tuple[str, dict[str, str]]) -> None:
     """Only the photo routes need more than 1m, and only for an API token's raw upload.
 
-    A larger limit anywhere else reaches the dashboard before any authentication: the sign-in, setup
-    and runtime routes, and every page. The dashboard's Next.js proxy buffers each body ahead of
-    its route handlers and rate limiter, so a client without a session could make it hold about
-    10 MiB per request where nginx answered 413 at 1 MiB.
+    A larger limit on any request the dashboard gets reaches it before any authentication: the
+    photo routes without a bearer token, the sign-in, setup and runtime routes, and every page. The
+    dashboard's Next.js proxy buffers each body ahead of its route handlers and rate limiter (up to
+    proxyClientMaxBodySize, 10 MiB in next 16.2.6), so a client without a session could make it hold
+    about 10 MiB per request where nginx answers 413 at 1 MiB. The dashboard's own photo uploads fit
+    the default (test_the_dashboard_photo_editors_fit_nginx_default_body_limit).
     """
     path, headers = route
 
@@ -717,7 +791,7 @@ def test_other_uploads_fit_nginx_default_body_limit() -> None:
 
 
 def test_the_photo_upload_location_covers_the_photo_routes_the_api_registers(nginx: NginxModel) -> None:
-    """The routes that take a photo are the ones the larger limit covers, and no others."""
+    """The routes that take a photo are the ones the larger limit covers, for an API token only."""
     from aiohttp import web
 
     from koda.control_plane import api
@@ -733,12 +807,77 @@ def test_the_photo_upload_location_covers_the_photo_routes_the_api_registers(ngi
 
     assert registered == {path for path, _ in PHOTO_UPLOAD_ROUTES}
     for path in registered:
-        assert nginx.select(path).label == f"~ {PHOTO_UPLOAD_LOCATION}", path
+        assert nginx.route(path, BEARER).location.label == PHOTO_UPLOAD_LOCATION, path
+        assert nginx.route(path, SESSION_COOKIE).location.label == "/api/control-plane/", path
+
+
+@pytest.mark.parametrize("headers", [{}, SESSION_COOKIE, BEARER], ids=["no headers", "cookie", "bearer"])
+@pytest.mark.parametrize("path", PHOTO_PATHS)
+def test_a_client_cannot_ask_for_the_photo_upload_location(
+    nginx: NginxModel, path: str, headers: dict[str, str]
+) -> None:
+    """The upload location is internal: only the server block's bearer-token rewrite enters it."""
+    direct = PHOTO_UPLOAD_LOCATION + path.removeprefix("/api/control-plane/")
+
+    with pytest.raises(Refused) as refused:
+        nginx.route(direct, headers)
+
+    assert refused.value.status == 404
+
+
+def test_a_query_string_survives_the_photo_upload_rewrite(nginx: NginxModel) -> None:
+    routed = nginx.route("/api/control-plane/auth/profile/photo?source=cli", BEARER)
+
+    assert routed.location.label == PHOTO_UPLOAD_LOCATION
+    assert routed.target == "/api/control-plane/auth/profile/photo?source=cli"
+
+
+_WEB_COMPONENTS = ROOT / "apps" / "web" / "src" / "components"
+PHOTO_EDITORS = [
+    _WEB_COMPONENTS / "account" / "profile-photo-editor.tsx",
+    _WEB_COMPONENTS / "sessions" / "chat" / "room-photo-editor.tsx",
+]
+
+
+def _photo_editor_output(editor: Path) -> tuple[int, int]:
+    """The side in pixels and the JPEG quality (0-100) of the crop a dashboard photo editor uploads."""
+    source = editor.read_text(encoding="utf-8")
+    side = re.search(r"^const OUTPUT_PX = (\d+);$", source, re.MULTILINE)
+    quality = re.search(r"^const OUTPUT_QUALITY = (0\.\d+|1);$", source, re.MULTILINE)
+    assert side and quality, f"{editor.name} no longer declares OUTPUT_PX and OUTPUT_QUALITY"
+    # renderCroppedJpeg draws the crop on an OUTPUT_PX square canvas and encodes it as a JPEG.
+    render = source[source.index("async function renderCroppedJpeg(") :]
+    assert "canvas.width = OUTPUT_PX;" in render and "canvas.height = OUTPUT_PX;" in render
+    assert re.search(r'"image/jpeg",\s*OUTPUT_QUALITY,', render), f"{editor.name} no longer uploads a JPEG"
+    assert "renderCroppedJpeg(picked, zoom, offset)" in source, f"{editor.name} no longer uploads the crop"
+    return int(side.group(1)), round(float(quality.group(1)) * 100)
+
+
+@pytest.mark.parametrize("editor", PHOTO_EDITORS, ids=[editor.name for editor in PHOTO_EDITORS])
+def test_the_dashboard_photo_editors_fit_nginx_default_body_limit(editor: Path) -> None:
+    """The dashboard uploads a cropped JPEG, never the photo the operator picked.
+
+    The largest such JPEG is random noise without chroma subsampling, which no browser encoder
+    beats at the same size and quality; with its multipart form around it, it fits nginx's
+    default limit, so the dashboard's photo routes need no more.
+    """
+    import io
+    import random
+
+    from PIL import Image
+
+    side, quality = _photo_editor_output(editor)
+    noise = Image.frombytes("RGB", (side, side), random.Random(0).randbytes(side * side * 3))
+    encoded = io.BytesIO()
+    noise.save(encoded, "JPEG", quality=quality, subsampling=0)
+
+    assert len(encoded.getvalue()) + MULTIPART_FRAMING_BYTES <= _size(_NGINX_DEFAULT_BODY_LIMIT)
 
 
 def test_upload_routes_reach_the_upstream_that_serves_them(nginx: NginxModel) -> None:
-    for path, headers in [*PHOTO_UPLOAD_ROUTES, *SMALL_UPLOAD_ROUTES]:
-        expected = API if "authorization" in {name.lower() for name in headers} else DASHBOARD
+    for path, headers in [*PHOTO_UPLOAD_ROUTES, *DASHBOARD_PHOTO_UPLOAD_ROUTES, *SMALL_UPLOAD_ROUTES]:
+        bearer = any(value.lower().startswith("bearer ") for value in headers.values())
+        expected = API if bearer else DASHBOARD
         routed = nginx.route(path, headers)
         assert routed.upstream == expected, (path, headers)
         assert routed.target == path

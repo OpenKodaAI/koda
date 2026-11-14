@@ -16,7 +16,11 @@ Proxy") and each one tells the two upstreams apart, so a request that reaches th
   ``/openapi/control-plane.json``;
 - a request without a Host (HTTP/1.0 allows it; HAProxy's default ``option httpchk`` health check
   is one) still gets the dashboard's ``/api/health`` answer: nginx proxies it as HTTP/1.1, which the
-  dashboard's Node server refuses without a Host.
+  dashboard's Node server refuses without a Host;
+- body limits: an API-token photo upload of 12 MiB (the largest photo the API accepts) reaches the
+  API, which decodes it, with a Content-Length and chunked; a body over 1 MiB to the sign-in route,
+  or to a photo route without an API token, gets nginx's own 413 (the dashboard buffers a body
+  before it checks anything, so nothing larger may reach it).
 
 ``render`` writes the template with the ``listen`` address (and, for tests, the upstream addresses)
 replaced. Only the standard library is used, so the script runs on a bare CI runner. Secrets are
@@ -37,7 +41,7 @@ import re
 import secrets
 import socket
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -54,6 +58,17 @@ DASHBOARD_NO_SESSION = "Operator session is required."
 RELAY_NOT_FOUND = (4404, "relay_not_found")
 WEBSOCKET_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 TIMEOUT_SECONDS = 15.0
+
+PROFILE_PHOTO_PATH = "/api/control-plane/auth/profile/photo"
+# MAX_INPUT_BYTES in koda/control_plane/operator_profile_photos.py (tests/test_proxy_smoke.py holds
+# the two together): the largest photo the API accepts, and nginx's default client_max_body_size.
+LARGEST_PHOTO_BYTES = 12 * 1024 * 1024
+DEFAULT_BODY_LIMIT_BYTES = 1024 * 1024
+# The API's answer to photo bytes that are not an image (operator_profile_photos.py); only the API
+# decodes a photo, so this answer can come from nowhere else.
+API_UNDECODABLE_PHOTO = "could not decode image"
+# nginx's own error page; an upstream's 413 would be its own (JSON) answer.
+NGINX_TOO_LARGE = b"413 Request Entity Too Large"
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +156,25 @@ class Proxy:
         connection = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
         try:
             connection.request(method, path, body=data, headers=sent)
+            response = connection.getresponse()
+            return Response(response.status, response.msg, response.read())
+        finally:
+            connection.close()
+
+    def post_bytes(
+        self, path: str, body: bytes, *, headers: Mapping[str, str] | None = None, chunked: bool = False
+    ) -> Response:
+        """POST *body* with a Content-Length, or with ``chunked=True`` as a chunked body (no length declared)."""
+        sent = {"Host": self.netloc, **(headers or {})}
+        step = 256 * 1024
+        payload: bytes | Iterator[bytes] = (
+            (body[index : index + step] for index in range(0, len(body), step)) if chunked else body
+        )
+        connection = http.client.HTTPConnection(self.host, self.port, timeout=self.timeout)
+        try:
+            # nginx may answer 413 and close before the whole body is sent; its answer is still read.
+            with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+                connection.request("POST", path, body=payload, headers=sent)
             response = connection.getresponse()
             return Response(response.status, response.msg, response.read())
         finally:
@@ -378,6 +412,66 @@ def _request_without_host(proxy: Proxy) -> str:
     return "200 from the dashboard"
 
 
+def multipart_photo(size: int) -> tuple[bytes, str]:
+    """A multipart/form-data body with one ``photo`` file of *size* bytes (not an image), and its type."""
+    boundary = secrets.token_hex(16)
+    head = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="photo"; filename="photo.jpg"\r\n'
+        "Content-Type: image/jpeg\r\n\r\n"
+    ).encode("ascii")
+    tail = f"\r\n--{boundary}--\r\n".encode("ascii")
+    return head + b"\xff" * size + tail, f"multipart/form-data; boundary={boundary}"
+
+
+def _refused_by_the_proxy(response: Response) -> bool:
+    return response.status == 413 and NGINX_TOO_LARGE in response.body and response.json() is None
+
+
+def _api_token_photo_upload(proxy: Proxy, api_token: str, session: Session) -> str:
+    _expect(bool(api_token), "no API token was provided")
+    # The break-glass token acts as the owner, so the API reads and decodes the photo.
+    _expect(session.registered, "needs the owner registered through the proxy")
+    body, content_type = multipart_photo(LARGEST_PHOTO_BYTES)
+    headers = {"Accept": "application/json", "Authorization": f"Bearer {api_token}", "Content-Type": content_type}
+    for chunked in (False, True):
+        response = proxy.post_bytes(PROFILE_PHOTO_PATH, body, headers=headers, chunked=chunked)
+        payload = response.json()
+        sent = "chunked" if chunked else "with a Content-Length"
+        _expect(not _refused_by_the_proxy(response), f"nginx refused the photo {sent}: {response.summary()}")
+        # The bytes are no image: the API answers 400 and stores nothing.
+        _expect(
+            response.status == 400
+            and isinstance(payload, dict)
+            and str(payload.get("error", "")).startswith(API_UNDECODABLE_PHOTO),
+            f"expected the API's {API_UNDECODABLE_PHOTO!r} for the photo {sent}, got {response.summary()}",
+        )
+    return f"{LARGEST_PHOTO_BYTES} bytes reached the API, with a Content-Length and chunked"
+
+
+def _too_large_without_token(proxy: Proxy, path: str, body: bytes, content_type: str) -> str:
+    headers = {"Accept": "application/json", "Origin": proxy.origin, "Content-Type": content_type}
+    for chunked in (False, True):
+        response = proxy.post_bytes(path, body, headers=headers, chunked=chunked)
+        sent = "chunked" if chunked else "with a Content-Length"
+        _expect(
+            _refused_by_the_proxy(response),
+            f"expected nginx's 413 for {len(body)} bytes {sent}, got {response.summary()}",
+        )
+    return f"413 from nginx for {len(body)} bytes, with a Content-Length and chunked"
+
+
+def _sign_in_body_over_default(proxy: Proxy) -> str:
+    return _too_large_without_token(
+        proxy, "/api/control-plane/auth/login", b"{" + b" " * DEFAULT_BODY_LIMIT_BYTES + b"}", "application/json"
+    )
+
+
+def _photo_over_default_without_token(proxy: Proxy) -> str:
+    body, content_type = multipart_photo(DEFAULT_BODY_LIMIT_BYTES)
+    return _too_large_without_token(proxy, PROFILE_PHOTO_PATH, body, content_type)
+
+
 def run_checks(proxy_url: str, *, api_token: str, bootstrap_code: str) -> list[Result]:
     proxy = Proxy(proxy_url)
     session = Session()
@@ -394,8 +488,17 @@ def run_checks(proxy_url: str, *, api_token: str, bootstrap_code: str) -> list[R
         ("relay: WebSocket upgrade reaches the dashboard relay", lambda: _relay_websocket(proxy)),
         ("api-token: GET /api/control-plane/agents", lambda: _api_token_get(proxy, api_token)),
         ("api-token: POST with a body", lambda: _api_token_post(proxy, api_token, session)),
+        (
+            "api-token: a 12 MiB photo upload reaches the API",
+            lambda: _api_token_photo_upload(proxy, api_token, session),
+        ),
         ("api: GET /openapi/control-plane.json", lambda: _openapi(proxy)),
         ("health: HTTP/1.0 request without a Host reaches the dashboard", lambda: _request_without_host(proxy)),
+        ("body limit: a sign-in body over 1 MiB gets nginx's 413", lambda: _sign_in_body_over_default(proxy)),
+        (
+            "body limit: a photo over 1 MiB without an API token gets nginx's 413",
+            lambda: _photo_over_default_without_token(proxy),
+        ),
     ]
     results: list[Result] = []
     for name, check in checks:

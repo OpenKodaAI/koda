@@ -41,16 +41,20 @@ from the network until a reverse proxy publishes it. A reverse proxy should:
   dashboard refuses an HTTP/1.1 request without one
 - send to the control-plane API only the `/api/control-plane/*` requests that carry
   `Authorization: Bearer` (API-token clients), and `/openapi/control-plane.json`
+- keep request bodies the dashboard gets to 1 MiB, nginx's default `client_max_body_size`: the
+  dashboard buffers a request body (up to 10 MiB) before it checks the session, so a larger limit
+  lets clients without a session make it hold large bodies. The dashboard's own photo uploads fit,
+  as its photo editors send a cropped 512-pixel JPEG
 - accept request bodies of up to 13 MiB on the two photo upload routes,
   `/api/control-plane/auth/profile/photo` and
-  `/api/control-plane/dashboard/squads/threads/<id>/photo`: a profile or room photo may be
-  12 MiB, sent as a multipart form. nginx refuses anything over 1 MiB unless
-  `client_max_body_size` says otherwise. Keep the smaller limit everywhere else: the dashboard
-  buffers a request body before it checks the session, so a large limit on the sign-in or setup
-  routes lets clients without a session make it hold large bodies. The bundled
-  `proxy/nginx.conf` sets `client_max_body_size 13m;` in a location for those two routes only,
-  and in the named location that sends them to the API with a token (nginx checks a chunked
-  body there)
+  `/api/control-plane/dashboard/squads/threads/<id>/photo`, only when they carry
+  `Authorization: Bearer` and go to the API: an API-token client may upload a profile or room
+  photo of up to 12 MiB, sent as a multipart form, and the API checks the token before it reads
+  the body. nginx checks a declared `Content-Length` against the location it selects, before an
+  `if` inside that location runs, so the bundled `proxy/nginx.conf` checks the token in the
+  `server` block: a rewrite sends those requests to an internal location with
+  `client_max_body_size 13m;` (where nginx also checks a chunked body), and every other request
+  keeps the default
 - optionally keep `/control-plane/setup` as a compatibility redirect to `/setup`
 - add the address each request came from to `X-Forwarded-For`, appended or replacing the header
   (see the rate-limit notes below)
