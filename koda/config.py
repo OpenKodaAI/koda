@@ -695,6 +695,12 @@ PROVIDER_CLI_CREDENTIAL_FILES: dict[str, tuple[str, tuple[str, ...]]] = {
     "codex": (".codex", ("auth.json",)),
     "gemini": (".gemini", ("oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json")),
 }
+# The environment variable that moves a provider CLI's config dir out of HOME, under any
+# name: provider id -> variable. Where the process environment sets one, that dir holds the
+# CLI's login (the files above), its settings and its session transcripts. Disconnecting the
+# provider deletes the credential files there too (koda/control_plane/manager.py), and the
+# file layer refuses the whole dir in every work dir (koda/utils/workdir.py::protected_dirs).
+PROVIDER_CLI_CONFIG_DIR_ENV_KEYS: dict[str, str] = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
 # Credential stores that the provider and developer CLIs keep in HOME, which is also the
 # default Docker work dir (HOME=/var/lib/koda/runtime/home). The file commands, the agent
 # file tools and browser_upload refuse them like a blocked extension. An entry ending in

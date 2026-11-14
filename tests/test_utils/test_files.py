@@ -443,6 +443,46 @@ class TestCredentialStoresAreSecretFiles:
             assert blocked_credential_path(f"/srv/koda-user/{config_dir}/{name}") == f"{config_dir}/{name}"
         assert set(_PROVIDER_CREDENTIAL_FILES) == {"claude", "codex", "gemini"}
 
+    @pytest.mark.parametrize(("provider", "env_key"), [("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")])
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"deny_sensitive_dirs": False}, {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True}],
+        ids=["the file tools", "the file commands", "browser_upload"],
+    )
+    def test_where_the_environment_moves_a_cli_config_dir_its_login_is_refused_there_too(
+        self, tmp_path, monkeypatch, provider, env_key, options
+    ):
+        """``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` move a CLI's login out of HOME, under any name.
+
+        Koda's own logout deletes the credential files there, so the file layer refuses them
+        there too, with the rest of that config dir (settings, session transcripts).
+        """
+        import koda.control_plane.manager as manager_mod
+        from koda.control_plane.manager import _PROVIDER_CREDENTIAL_FILES
+
+        home = tmp_path.resolve() / "home"
+        config_dir = home / f"{provider}-home"
+        (config_dir / "sessions").mkdir(parents=True)
+        (config_dir / "sessions" / "rollout.jsonl").write_text('{"canary": "transcript"}\n')
+        (home / "notes.txt").write_text("visible\n")
+        names = _PROVIDER_CREDENTIAL_FILES[provider]
+        for name in names:
+            (config_dir / name).write_text('{"tokens": {"access_token": "canary-token"}}\n')
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv(env_key, str(config_dir))
+
+        for path in (*(f"{provider}-home/{name}" for name in names), f"{provider}-home/sessions/rollout.jsonl"):
+            resolution = resolve_work_path(path, str(home), **options)
+            assert resolution.path is None, path
+            assert resolution.reason in {"path_sensitive_dir", "path_blocked_file"}, path
+        assert resolve_work_path("notes.txt", str(home), **options).path == home / "notes.txt"
+        assert validate_work_dir(str(config_dir)).blocked
+
+        manager = object.__new__(manager_mod.ControlPlaneManager)
+        manager._wipe_provider_credential_files(provider)
+        assert [name for name in names if (config_dir / name).exists()] == []
+        assert (config_dir / "sessions" / "rollout.jsonl").exists()
+
     @pytest.mark.parametrize("deny_sensitive_dirs", [True, False])
     def test_both_surfaces_refuse_them(self, tmp_path, deny_sensitive_dirs):
         work = tmp_path.resolve()

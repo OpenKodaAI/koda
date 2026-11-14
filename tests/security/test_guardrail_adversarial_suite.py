@@ -1429,6 +1429,62 @@ async def test_file_grep_never_prints_a_cli_credential_store(
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
+async def test_a_codex_login_moved_out_of_home_by_codex_home_is_refused_where_the_logout_deletes_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CODEX_HOME can name any directory in the work dir; the file tools and the upload refuse the login there.
+
+    Disconnecting Codex deletes ``$CODEX_HOME/auth.json``, and the file layer recognised
+    ``auth.json`` only under a directory named ``.codex``, so ``file_read`` (no approval once
+    the fileops grant exists), ``file_grep`` and ``browser_upload`` returned the OAuth tokens.
+    """
+    import koda.control_plane.manager as manager_mod
+    from koda.services.browser_manager import browser_manager
+    from koda.services.tool_dispatcher import (
+        ToolContext,
+        _handle_browser_upload,
+        _handle_file_grep,
+        _handle_file_read,
+    )
+
+    home = _docker_home(tmp_path, monkeypatch)
+    codex_home = home / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "auth.json").write_text('{"tokens": {"access_token": "canary-codex"}}\n', encoding="utf-8")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("CODEX_HOME", str(codex_home))
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(home),
+        user_data={"work_dir": str(home)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        read = await _handle_file_read({"path": "codex-home/auth.json"}, ctx)
+        grep = await _handle_file_grep({"pattern": "canary|visible"}, ctx)
+    with (
+        patch("koda.services.tool_dispatcher._check_browser_available", new_callable=AsyncMock, return_value=None),
+        patch.object(browser_manager, "upload_file", new_callable=AsyncMock, return_value="Uploaded") as upload,
+    ):
+        uploaded = await _handle_browser_upload({"file_path": "codex-home/auth.json"}, ctx)
+
+    assert not read.success, read.output
+    assert not uploaded.success, uploaded.output
+    assert "canary" not in read.output + uploaded.output + grep.output
+    upload.assert_not_awaited()
+    assert "src/main.py:1: print('visible')" in grep.output
+
+    manager_mod.ControlPlaneManager._wipe_provider_credential_files(
+        object.__new__(manager_mod.ControlPlaneManager), "codex"
+    )
+    assert not (codex_home / "auth.json").exists()
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("source", "destination", "moved_store"),
     [

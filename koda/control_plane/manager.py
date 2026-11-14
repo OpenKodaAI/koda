@@ -33,7 +33,14 @@ from koda.agent_contract import (
     resolve_feature_filtered_tools,
     serialize_connection_profile,
 )
-from koda.config import AGENT_ID, DOTENV_PATH, PROVIDER_CLI_CREDENTIAL_FILES, SHARED_PLATFORM_PROMPT, STATE_BACKEND
+from koda.config import (
+    AGENT_ID,
+    DOTENV_PATH,
+    PROVIDER_CLI_CONFIG_DIR_ENV_KEYS,
+    PROVIDER_CLI_CREDENTIAL_FILES,
+    SHARED_PLATFORM_PROMPT,
+    STATE_BACKEND,
+)
 from koda.internal_rpc.retrieval_engine import build_retrieval_engine_client
 from koda.knowledge.config import (
     KNOWLEDGE_V2_EMBEDDING_DIMENSION,
@@ -8215,29 +8222,23 @@ class ControlPlaneManager:
 
         ``*_auth logout`` is supposed to clear them, but failures or older CLI versions leave
         the tokens behind. Only the credential files are removed (names checked against the
-        pinned CLIs, see ``_PROVIDER_CREDENTIAL_FILES``). The rest of the folder (settings,
-        history, memory, project files) is never touched: on a native install it is the
-        operator's own CLI configuration.
+        pinned CLIs, see ``_PROVIDER_CREDENTIAL_FILES``), in the CLI's config dir under HOME
+        and in the one its environment variable names (``PROVIDER_CLI_CONFIG_DIR_ENV_KEYS``:
+        ``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``), which the file layer refuses for the same
+        reason. The rest of the folder (settings, history, memory, project files) is never
+        touched: on a native install it is the operator's own CLI configuration.
         """
         from pathlib import Path
 
         home = os.environ.get("HOME") or ""
         config_dirs: list[Path] = []
-        if provider_id == "claude":
-            claude_config = os.environ.get("CLAUDE_CONFIG_DIR")
-            if claude_config:
-                config_dirs.append(Path(claude_config))
-            if home:
-                config_dirs.append(Path(home) / ".claude")
-        elif provider_id == "codex":
-            codex_home = os.environ.get("CODEX_HOME")
-            if codex_home:
-                config_dirs.append(Path(codex_home))
-            if home:
-                config_dirs.append(Path(home) / ".codex")
-        elif provider_id == "gemini":
-            if home:
-                config_dirs.append(Path(home) / ".gemini")
+        env_key = PROVIDER_CLI_CONFIG_DIR_ENV_KEYS.get(provider_id)
+        moved = os.environ.get(env_key) if env_key else None
+        if moved:
+            config_dirs.append(Path(moved))
+        home_dir = PROVIDER_CLI_CREDENTIAL_FILES.get(provider_id, ("", ()))[0]
+        if home and home_dir:
+            config_dirs.append(Path(home) / home_dir)
 
         for directory in config_dirs:
             for name in _PROVIDER_CREDENTIAL_FILES.get(provider_id, ()):

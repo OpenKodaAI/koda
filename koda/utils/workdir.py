@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from dataclasses import dataclass
 
-from koda.config import DEFAULT_WORK_DIR, RUNTIME_EPHEMERAL_ROOT, RUNTIME_ROOT_DIR, SENSITIVE_DIRS, STATE_ROOT_DIR
+from koda.config import (
+    BROWSER_SESSION_DIR,
+    DEFAULT_WORK_DIR,
+    IMAGE_TEMP_DIR,
+    PROVIDER_CLI_CONFIG_DIR_ENV_KEYS,
+    RUNTIME_EPHEMERAL_ROOT,
+    RUNTIME_ROOT_DIR,
+    SENSITIVE_DIRS,
+    STATE_ROOT_DIR,
+)
 
 
 @dataclass(slots=True)
@@ -54,24 +64,67 @@ def runtime_roots() -> tuple[str, ...]:
 def control_plane_state_dir() -> str:
     """Return the control-plane state directory as configured (``STATE_ROOT_DIR/control_plane``).
 
-    It holds the master key and the bootstrap code, so it is never a work dir, and the file
-    tools, the file commands and ``browser_upload`` refuse every path inside it, whatever
-    the work dir (:class:`SensitiveDirs`, :func:`control_plane_state_dir_for`).
+    It holds the master key and the bootstrap code, so it is one of the
+    :func:`protected_dirs`.
     """
     return _configured_path(os.path.join(os.fspath(STATE_ROOT_DIR), "control_plane"))
 
 
-def control_plane_state_dir_for(path: str) -> str | None:
-    """Return :func:`control_plane_state_dir` when ``path`` lies inside it, or None.
+def browser_sessions_dir() -> str:
+    """Return the directory where the browser saves each chat scope's sessions, as configured.
 
-    ``path`` is absolute and resolved; the directory is compared as configured and
-    resolved, by whole path component. It is never waived, so every caller of the shared
+    It is ``browser_sessions`` in ``BROWSER_SESSION_DIR`` or, when that is unset, in
+    ``IMAGE_TEMP_DIR`` (``RUNTIME_EPHEMERAL_ROOT/image-scratch`` by default), and holds one
+    directory per chat scope with the cookies and localStorage of each saved session
+    (:meth:`koda.services.browser_manager.BrowserManager.save_session`). So it is one of the
+    :func:`protected_dirs`.
+    """
+    return _configured_path(os.path.join(BROWSER_SESSION_DIR or os.fspath(IMAGE_TEMP_DIR), "browser_sessions"))
+
+
+def provider_cli_config_dirs(environ: Mapping[str, str] | None = None) -> tuple[str, ...]:
+    """Return the provider CLI config dirs that the environment moves out of HOME, as configured.
+
+    They are the directories named by ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME``
+    (``koda.config.PROVIDER_CLI_CONFIG_DIR_ENV_KEYS``) in ``environ``, by default this
+    process's environment, which is the one the CLIs it starts inherit
+    (:func:`koda.services.provider_env.build_llm_subprocess_env`). Each holds that CLI's
+    login, settings and session transcripts, under any name, so they are among the
+    :func:`protected_dirs`. A variable that is unset or blank names none.
+    """
+    env = os.environ if environ is None else environ
+    configured = (env.get(key, "") for key in PROVIDER_CLI_CONFIG_DIR_ENV_KEYS.values())
+    return tuple(dict.fromkeys(_configured_path(value) for value in configured if value.strip()))
+
+
+def protected_dirs() -> tuple[str, ...]:
+    """Return the directories that hold Koda's or a provider CLI's credentials, as configured now.
+
+    They are the control-plane state directory (:func:`control_plane_state_dir`: the master
+    key and the bootstrap code), the browser's saved sessions of every chat scope
+    (:func:`browser_sessions_dir`), and the provider CLI config dirs the environment moves
+    out of HOME (:func:`provider_cli_config_dirs`). In the Docker layout the last two sit
+    below ``RUNTIME_EPHEMERAL_ROOT`` (``image-scratch/browser_sessions``, and
+    ``claude-config`` where ``CLAUDE_CONFIG_DIR`` is set as the app container sets it),
+    which is a valid work dir, and outside Docker the state directory sits in the default
+    work dir ``~``. None of them is Koda's work area: none is ever a work dir, and the file
+    tools, the file commands and ``browser_upload`` refuse every path inside them, whatever
+    the work dir and its waiver (:class:`SensitiveDirs`, :func:`protected_dir_for`).
+    """
+    return tuple(dict.fromkeys((control_plane_state_dir(), browser_sessions_dir(), *provider_cli_config_dirs())))
+
+
+def protected_dir_for(path: str) -> str | None:
+    """Return the one of :func:`protected_dirs` that contains ``path``, or None.
+
+    ``path`` is absolute and resolved; each directory is compared as configured and
+    resolved, by whole path component. They are never waived, so every caller of the shared
     path policy applies this check, also those that skip ``SENSITIVE_DIRS``
     (:func:`koda.utils.files.resolve_work_path` with ``deny_sensitive_dirs=False``).
     """
-    control_plane = control_plane_state_dir()
-    if any(_is_within(path, root) for root in _sensitive_roots(control_plane)):
-        return control_plane
+    for protected in protected_dirs():
+        if any(_is_within(path, root) for root in _sensitive_roots(protected)):
+            return protected
     return None
 
 
@@ -120,8 +173,9 @@ class SensitiveDirs:
     def for_work_dir(cls, work_dir: str | None = None) -> SensitiveDirs:
         """Resolve the sensitive roots now, without the ones waived for ``work_dir``.
 
-        The control-plane state directory (:func:`control_plane_state_dir`) is a deny root
-        too, and is never waived.
+        The :func:`protected_dirs` (the control-plane state directory, the browser's saved
+        sessions and the provider CLI config dirs moved out of HOME) are deny roots too, and
+        are never waived.
         """
         waived = _waived_sensitive_roots(work_dir)
         deny = tuple(
@@ -130,8 +184,8 @@ class SensitiveDirs:
             for root in _sensitive_roots(sensitive)
             if root not in waived
         )
-        control_plane = control_plane_state_dir()
-        return cls(deny + tuple((control_plane, root) for root in _sensitive_roots(control_plane)))
+        protected = tuple((directory, root) for directory in protected_dirs() for root in _sensitive_roots(directory))
+        return cls(deny + protected)
 
     def containing(self, path: str) -> str | None:
         """Return the ``SENSITIVE_DIRS`` entry whose directory contains ``path``, or None."""
@@ -159,8 +213,9 @@ def sensitive_dir_for(path: str, *, work_dir: str | None = None) -> str | None:
     :func:`_waived_sensitive_roots`), so the Docker default
     ``HOME=/var/lib/koda/runtime/home`` and the paths inside it stay usable. Every other
     sensitive directory still matches, including one inside the work dir (a work dir of
-    ``/`` contains ``/etc``), and so does the control-plane state directory
-    (:func:`control_plane_state_dir`), wherever it is.
+    ``/`` contains ``/etc``), and so do the :func:`protected_dirs` (the control-plane state
+    directory, the browser's saved sessions and the provider CLI config dirs moved out of
+    HOME), wherever they are.
     """
     return SensitiveDirs.for_work_dir(work_dir).containing(path)
 
@@ -173,10 +228,11 @@ def validate_work_dir(
     """Validate a work directory against existence and sensitive-path rules.
 
     The candidate is resolved (``~`` expanded, symlinks resolved) and refused when it is
-    inside a sensitive directory (:func:`sensitive_dir_for`) or the control-plane state
-    directory. Koda's own runtime roots (:func:`runtime_roots`) and the directories below
-    them are valid work dirs, also when a runtime root is configured under a sensitive
-    directory, as the Docker layout puts ``/var/lib/koda/runtime`` under ``/var/lib``.
+    inside a sensitive directory (:func:`sensitive_dir_for`) or one of the
+    :func:`protected_dirs`. Koda's own runtime roots (:func:`runtime_roots`) and the
+    directories below them are valid work dirs, also when a runtime root is configured
+    under a sensitive directory, as the Docker layout puts ``/var/lib/koda/runtime`` under
+    ``/var/lib``, except the protected dirs below them.
     """
     candidate = normalize_work_dir(path)
     if sensitive_dir_for(candidate, work_dir=candidate) is not None:

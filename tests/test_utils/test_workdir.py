@@ -60,6 +60,9 @@ def docker_layout(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: p
     # The compose files set neither, so DEFAULT_WORK_DIR is HOME and RUNTIME_ROOT_DIR is RUNTIME_EPHEMERAL_ROOT.
     assert "DEFAULT_WORK_DIR" not in environment
     assert "RUNTIME_ROOT_DIR" not in environment
+    # Nor these, so the browser keeps its sessions in RUNTIME_EPHEMERAL_ROOT/image-scratch/browser_sessions.
+    assert "IMAGE_TEMP_DIR" not in environment
+    assert "BROWSER_SESSION_DIR" not in environment
     layout = DockerLayout(tmp_path.resolve() / "host", environment)
     home = layout.place(environment["HOME"])
     runtime = layout.place(environment["RUNTIME_EPHEMERAL_ROOT"])
@@ -82,6 +85,8 @@ def docker_layout(request: pytest.FixtureRequest, tmp_path: Path, monkeypatch: p
         RUNTIME_EPHEMERAL_ROOT=runtime,
         RUNTIME_ROOT_DIR=runtime,
         STATE_ROOT_DIR=state,
+        IMAGE_TEMP_DIR=runtime / "image-scratch",
+        BROWSER_SESSION_DIR="",
     )
     return layout
 
@@ -152,6 +157,138 @@ class TestDockerRuntimeRootsAreWorkDirs:
         home.symlink_to(docker_layout.place("/etc"))
         assert validate_work_dir(str(home)).blocked
         assert resolve_work_path("passwd", str(home)).reason == "path_sensitive_dir"
+
+
+_SURFACES = pytest.mark.parametrize(
+    "options",
+    [{}, {"deny_sensitive_dirs": False}, {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True}],
+    ids=["the file tools", "the file commands", "browser_upload"],
+)
+
+
+class TestTheCredentialDirsBelowTheRuntimeRootStayRefused:
+    """A work dir at RUNTIME_EPHEMERAL_ROOT is valid, but the credential dirs below it are not Koda's work area.
+
+    The compose layout keeps there the browser's saved sessions of every chat scope
+    (``image-scratch/browser_sessions/<scope>/<name>.json``, with cookies and localStorage)
+    and, for a process whose environment sets the app container's ``CLAUDE_CONFIG_DIR``,
+    Claude Code's config dir (``claude-config``: its login, session transcripts and
+    ``.claude.json``). Like the control-plane state dir, they are never waived.
+    """
+
+    @pytest.fixture
+    def runtime(self, docker_layout: DockerLayout, monkeypatch: pytest.MonkeyPatch) -> Path:
+        runtime = docker_layout.place(docker_layout.environment["RUNTIME_EPHEMERAL_ROOT"])
+        sessions = runtime / "image-scratch" / "browser_sessions" / "222"
+        sessions.mkdir(parents=True)
+        (sessions / "bank.json").write_text('{"cookies": [{"name": "sid", "value": "canary-cookie"}]}\n')
+        (runtime / "image-scratch" / "111_42.txt").write_text("visible scratch\n")
+        claude_config = docker_layout.place(docker_layout.environment["CLAUDE_CONFIG_DIR"])
+        assert claude_config.parent == runtime
+        (claude_config / "projects" / "p").mkdir(parents=True)
+        (claude_config / "projects" / "p" / "s.jsonl").write_text('{"canary": "transcript"}\n')
+        (claude_config / ".claude.json").write_text('{"canary": "settings"}\n')
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(claude_config))
+        return runtime
+
+    @pytest.mark.parametrize(
+        ("work_dir", "valid"),
+        [
+            ("", True),
+            ("image-scratch", True),
+            ("image-scratch/browser_sessions", False),
+            ("image-scratch/browser_sessions/222", False),
+            ("claude-config", False),
+            ("claude-config/projects/p", False),
+        ],
+    )
+    def test_they_are_not_work_dirs(self, runtime: Path, work_dir: str, valid: bool) -> None:
+        validation = validate_work_dir(str(runtime / work_dir))
+        assert validation.ok is valid, validation.reason
+        assert validation.blocked is not valid
+
+    @_SURFACES
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "image-scratch/browser_sessions/222/bank.json",
+            "image-scratch/browser_sessions",
+            "claude-config/projects/p/s.jsonl",
+            "claude-config/.claude.json",
+            "{runtime}/claude-config",
+            "home/../claude-config/.claude.json",
+        ],
+    )
+    def test_a_work_dir_at_the_runtime_root_does_not_reach_them(
+        self, runtime: Path, options: dict[str, bool], path: str
+    ) -> None:
+        resolution = resolve_work_path(path.format(runtime=runtime), str(runtime), **options)
+        assert resolution.path is None
+        assert resolution.reason == "path_sensitive_dir"
+
+    def test_the_browser_saves_its_sessions_in_the_dir_they_refuse(
+        self, runtime: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from koda.services.browser_manager import browser_manager
+
+        sessions = runtime / "image-scratch" / "browser_sessions"
+        assert browser_manager._get_session_dir(222) == str(sessions / "222")
+        assert workdir.protected_dir_for(str(sessions / "222" / "bank.json")) == str(sessions)
+
+        _set_layout(monkeypatch, BROWSER_SESSION_DIR=str(tmp_path / "sessions"))
+        assert browser_manager._get_session_dir(222) == str(tmp_path / "sessions" / "browser_sessions" / "222")
+        assert validate_work_dir(str(tmp_path / "sessions" / "browser_sessions")).blocked
+
+    @_SURFACES
+    @pytest.mark.parametrize("path", ["image-scratch/111_42.txt", "home/project/main.py", "tasks/7"])
+    def test_the_rest_of_the_runtime_root_stays_reachable(
+        self, runtime: Path, options: dict[str, bool], path: str
+    ) -> None:
+        assert resolve_work_path(path, str(runtime), **options).path == runtime / path
+
+    @pytest.mark.asyncio
+    async def test_the_agent_tools_neither_read_grep_nor_upload_them(self, runtime: Path) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from koda.services.browser_manager import browser_manager
+        from koda.services.tool_dispatcher import (
+            ToolContext,
+            _handle_browser_upload,
+            _handle_file_grep,
+            _handle_file_list,
+            _handle_file_read,
+        )
+
+        ctx = ToolContext(
+            user_id=111,
+            chat_id=111,
+            work_dir=str(runtime),
+            user_data={"work_dir": str(runtime)},
+            agent=AsyncMock(),
+            agent_mode="autonomous",
+        )
+        session = "image-scratch/browser_sessions/222/bank.json"
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            reads = [
+                await _handle_file_read({"path": path}, ctx)
+                for path in (session, "claude-config/projects/p/s.jsonl", "claude-config/.claude.json")
+            ]
+            listing = await _handle_file_list({"path": "image-scratch/browser_sessions"}, ctx)
+            grep = await _handle_file_grep({"pattern": "canary|visible"}, ctx)
+        with (
+            patch("koda.services.tool_dispatcher._check_browser_available", new_callable=AsyncMock, return_value=None),
+            patch.object(browser_manager, "upload_file", new_callable=AsyncMock, return_value="Uploaded") as upload,
+        ):
+            uploaded = await _handle_browser_upload({"file_path": session}, ctx)
+
+        for result in (*reads, listing, uploaded):
+            assert not result.success, result.output
+            assert "sensitive system directory" in result.output
+            assert "canary" not in result.output
+        upload.assert_not_awaited()
+        assert grep.success, grep.output
+        assert "canary" not in grep.output
+        assert "image-scratch/111_42.txt:1: visible scratch" in grep.output
 
 
 class TestControlPlaneStateIsRefusedInsideAWorkDir:

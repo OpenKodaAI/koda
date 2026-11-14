@@ -10,7 +10,7 @@ from typing import Any
 from koda.agent_contract import FILE_COMMAND_ACCESS_LEVELS
 from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS, FILEOPS_BLOCKED_EXTENSIONS
 from koda.logging_config import get_logger
-from koda.utils.workdir import control_plane_state_dir_for, sensitive_dir_for
+from koda.utils.workdir import protected_dir_for, sensitive_dir_for
 
 log = get_logger(__name__)
 
@@ -207,11 +207,14 @@ def resolve_work_path(
     - ``~`` is expanded, a relative path is joined with ``work_dir`` (never the process
       CWD), and symlinks are resolved (:func:`work_path_location`);
     - the result must be ``work_dir`` or inside it (``path_outside_workdir``);
-    - it must not be inside a sensitive system directory or the control-plane state
-      directory (``path_sensitive_dir``, see :func:`koda.utils.workdir.sensitive_dir_for`),
-      except the sensitive directories one of Koda's runtime roots is configured under,
-      when ``work_dir`` is that runtime root or below it: the Docker default ``HOME`` under
-      ``/var/lib`` and the paths inside it stay usable;
+    - it must not be inside a sensitive system directory or a directory that holds Koda's
+      or a provider CLI's credentials (``path_sensitive_dir``, see
+      :func:`koda.utils.workdir.sensitive_dir_for` and
+      :func:`koda.utils.workdir.protected_dirs`: the control-plane state directory, the
+      browser's saved sessions, and ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` where the
+      environment sets them), except the sensitive directories one of Koda's runtime roots
+      is configured under, when ``work_dir`` is that runtime root or below it: the Docker
+      default ``HOME`` under ``/var/lib`` and the paths inside it stay usable;
     - neither the requested path nor the path it resolves to may be a secret file
       (``path_blocked_file``, see :func:`secret_file_refusal`): a blocked extension, a
       ``.env`` dotfile, or a CLI credential store such as ``.ssh/`` or ``.netrc``.
@@ -221,8 +224,8 @@ def resolve_work_path(
     ``DEFAULT_WORK_DIR``.
 
     ``deny_sensitive_dirs=False`` skips only the ``SENSITIVE_DIRS`` check, never the
-    control-plane state directory, which is refused for every caller
-    (:func:`koda.utils.workdir.control_plane_state_dir_for`). The file commands and
+    protected directories, which are refused for every caller
+    (:func:`koda.utils.workdir.protected_dir_for`). The file commands and
     ``browser_upload`` pass it: they have never applied that check, and anything else
     inside the work dir stays uploadable. It changes a decision only for a path inside a
     sensitive directory that is not waived: one inside the work dir (a work dir of ``/``
@@ -248,8 +251,8 @@ def resolve_work_path(
     if deny_sensitive_dirs:
         sensitive = sensitive_dir_for(resolved, work_dir=root)
     else:
-        # The control-plane state directory is never waived, whatever the caller skips.
-        sensitive = control_plane_state_dir_for(resolved)
+        # The protected directories are never waived, whatever the caller skips.
+        sensitive = protected_dir_for(resolved)
         if sensitive is None and deny_sensitive_work_dir:
             sensitive = sensitive_dir_for(root, work_dir=root)
     if sensitive is not None:

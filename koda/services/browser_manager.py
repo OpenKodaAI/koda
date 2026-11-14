@@ -1204,13 +1204,16 @@ class BrowserManager:
     # --- Session persistence ---
 
     def _get_session_dir(self, scope_id: int) -> str:
-        """Get the session storage directory for a scope."""
+        """Get the session storage directory for a scope.
+
+        It is inside :func:`koda.utils.workdir.browser_sessions_dir`, which the file tools,
+        the file commands and ``browser_upload`` refuse in every work dir.
+        """
         import os
 
-        from koda.config import BROWSER_SESSION_DIR, IMAGE_TEMP_DIR
+        from koda.utils.workdir import browser_sessions_dir
 
-        base = BROWSER_SESSION_DIR if BROWSER_SESSION_DIR else str(IMAGE_TEMP_DIR)
-        return os.path.join(base, "browser_sessions", str(scope_id))
+        return os.path.join(browser_sessions_dir(), str(scope_id))
 
     async def save_session(self, scope_id: int, name: str) -> str:
         """Save the current browser session (cookies, localStorage) to disk."""
