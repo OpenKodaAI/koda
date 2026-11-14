@@ -2,11 +2,29 @@
 
 import os
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
 from koda.logging_config import get_logger
 
 log = get_logger(__name__)
+
+# The operator file commands (koda.handlers.fileops) and the ones whose path is their first argument.
+FILE_COMMANDS = frozenset({"write", "edit", "rm", "mkdir", "cat"})
+_FIRST_ARGUMENT_PATH_COMMANDS = frozenset({"write", "edit"})
+
+
+def file_command_path_argument(command: str, args: Sequence[str]) -> str:
+    """Return the path the operator file command ``/<command>`` acts on, from its arguments.
+
+    ``/write`` and ``/edit`` take the path as their first argument and the content
+    after it; ``/rm``, ``/mkdir`` and ``/cat`` take the whole argument string as the
+    path, spaces included. The handlers and the approval gate both read the path
+    here, so the execution policy decides the path the command acts on.
+    """
+    if command in _FIRST_ARGUMENT_PATH_COMMANDS:
+        return str(args[0]) if args else ""
+    return " ".join(str(arg) for arg in args)
 
 
 def safe_resolve(path_str: str, work_dir: str) -> Path | None:

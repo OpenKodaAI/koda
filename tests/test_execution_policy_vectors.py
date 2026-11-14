@@ -158,6 +158,8 @@ async def _simulate_route_payload(
         payload["policy"] = vector["policy"]
     with (
         patch.object(runtime_policy, "AGENT_ID", ""),
+        # The vectors' workers have no .env file (os.devnull is not one), and a developer's must not leak in.
+        patch("koda.control_plane.manager.DOTENV_PATH", Path(os.devnull), create=True),
         patch("koda.control_plane.manager.get_control_plane_manager", return_value=_control_plane_store(agent)),
         patch("koda.control_plane.api._manager", return_value=manager),
     ):
@@ -293,24 +295,41 @@ async def test_simulate_route_uses_the_agents_worker_flags_not_its_own_process_f
 _WORKER_FLAGS_SCRIPT = """
 import importlib, json, os, sys
 import dotenv
-dotenv.load_dotenv = lambda *args, **kwargs: False  # a developer's .env must not leak into the comparison
+real_load_dotenv = dotenv.load_dotenv
+case = {"dotenv_file": None}
+loaded_paths = []
+
+
+def load_dotenv(dotenv_path=None, *args, **kwargs):
+    # Record the file koda.config loads, and load the case's file in its place, with koda.config's own
+    # arguments: a developer's .env must not leak into the comparison.
+    loaded_paths.append(str(dotenv_path))
+    return real_load_dotenv(case["dotenv_file"], *args, **kwargs) if case["dotenv_file"] else False
+
+
+dotenv.load_dotenv = load_dotenv
 import koda.config
 import koda.services.execution_policy as runtime_policy
 results = []
-for worker_env in json.loads(sys.argv[1]):
+for worker_env, dotenv_file in json.loads(sys.argv[1]):
+    case["dotenv_file"] = dotenv_file
+    del loaded_paths[:]
     os.environ.clear()
     os.environ.update(worker_env)
     importlib.reload(koda.config)
     importlib.reload(runtime_policy)
-    results.append(runtime_policy._configured_feature_flags())
+    results.append({"flags": runtime_policy._configured_feature_flags(), "loaded_paths": list(loaded_paths)})
 print(json.dumps(results))
 """
 
 
-def _flags_of_workers_started_with(worker_envs: list[dict[str, str]]) -> list[dict[str, bool]]:
-    """The feature flags koda.config computes in a fresh process for each worker environment."""
+def _workers_started_with(workers: list[tuple[dict[str, str], str]]) -> list[dict[str, Any]]:
+    """What koda.config does in a fresh process for each (worker environment, .env file) pair.
+
+    Each result holds the feature flags it computes and the paths it passes to ``load_dotenv``.
+    """
     completed = subprocess.run(
-        [sys.executable, "-c", _WORKER_FLAGS_SCRIPT, json.dumps(worker_envs)],
+        [sys.executable, "-c", _WORKER_FLAGS_SCRIPT, json.dumps(workers)],
         capture_output=True,
         text=True,
         check=True,
@@ -318,11 +337,12 @@ def _flags_of_workers_started_with(worker_envs: list[dict[str, str]]) -> list[di
         env={key: value for key, value in os.environ.items() if key in {"PATH", "HOME", "LANG"}},
         timeout=120,
     )
-    return cast(list[dict[str, bool]], json.loads(completed.stdout.strip().splitlines()[-1]))
+    return cast(list[dict[str, Any]], json.loads(completed.stdout.strip().splitlines()[-1]))
 
 
 def test_simulator_feature_flags_equal_those_of_the_worker_the_supervisor_starts(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """The simulator's flags equal koda.config's in the worker built by the real snapshot and supervisor steps.
 
@@ -330,7 +350,10 @@ def test_simulator_feature_flags_equal_those_of_the_worker_the_supervisor_starts
     the supervisor's own infrastructure keys forced over the plain ``KEY`` only, and koda.config
     reads ``<AGENT_ID>_KEY`` first. So a snapshot that sets INTER_AGENT_ENABLED wins over the
     supervisor's value, and the supervisor's value applies only where the snapshot sets none.
+    koda.config then loads the install's ``.env`` without override, so the file fills only the keys
+    the worker env lacks (unless the worker env sets ``PYTHON_DOTENV_DISABLED``).
     """
+    from koda.control_plane import manager as manager_module
     from koda.control_plane.manager import _SUPERVISOR_FORCED_FEATURE_FLAG_KEYS
 
     # The supervisor forces these flag settings from its own environment, and copies no other one.
@@ -338,21 +361,41 @@ def test_simulator_feature_flags_equal_those_of_the_worker_the_supervisor_starts
         runtime_policy.FEATURE_FLAG_ENV_KEYS & supervisor_module._SYSTEM_ENV_KEYS
     )
     assert runtime_policy.FEATURE_FLAG_ENV_KEYS.isdisjoint(supervisor_module._SAFE_RUNTIME_PARENT_ENV_KEYS)
+    install_dotenv_path = str(getattr(manager_module, "DOTENV_PATH", None))
     agent_id = "AGENT_A"
-    cases: list[tuple[dict[str, Any], dict[str, str]]] = [
-        ({"INTER_AGENT_ENABLED": "true"}, {"INTER_AGENT_ENABLED": "false"}),
-        ({"INTER_AGENT_ENABLED": "false"}, {"INTER_AGENT_ENABLED": "true"}),
-        ({"inter_agent_enabled": "true"}, {"INTER_AGENT_ENABLED": "false"}),
-        ({}, {"INTER_AGENT_ENABLED": "true"}),
-        ({}, {}),
-        ({"SHELL_ENABLED": False, "BROWSER_ENABLED": True}, {"SHELL_ENABLED": "true", "BROWSER_ENABLED": "false"}),
-        ({"SHELL_ENABLED": "true", "AGENT_A_SHELL_ENABLED": "false"}, {}),
-        ({"AGENT_A_SHELL_ENABLED": "false", "SHELL_ENABLED": "true"}, {}),
-        ({"AGENT_A_INTER_AGENT_ENABLED": "true"}, {"INTER_AGENT_ENABLED": "false"}),
+    # (snapshot env, supervisor env, the install's .env file)
+    cases: list[tuple[dict[str, Any], dict[str, str], str]] = [
+        ({"INTER_AGENT_ENABLED": "true"}, {"INTER_AGENT_ENABLED": "false"}, ""),
+        ({"INTER_AGENT_ENABLED": "false"}, {"INTER_AGENT_ENABLED": "true"}, ""),
+        ({"inter_agent_enabled": "true"}, {"INTER_AGENT_ENABLED": "false"}, ""),
+        ({}, {"INTER_AGENT_ENABLED": "true"}, ""),
+        ({}, {}, ""),
+        (
+            {"SHELL_ENABLED": False, "BROWSER_ENABLED": True},
+            {"SHELL_ENABLED": "true", "BROWSER_ENABLED": "false"},
+            "",
+        ),
+        ({"SHELL_ENABLED": "true", "AGENT_A_SHELL_ENABLED": "false"}, {}, ""),
+        ({"AGENT_A_SHELL_ENABLED": "false", "SHELL_ENABLED": "true"}, {}, ""),
+        ({"AGENT_A_INTER_AGENT_ENABLED": "true"}, {"INTER_AGENT_ENABLED": "false"}, ""),
+        # A setting the snapshot leaves unset comes from the install's .env.
+        ({}, {}, "SHELL_ENABLED=false\n"),
+        ({}, {}, "export BROWSER_ENABLED=true\n# a comment\nGIT_ENABLED='false'\nFILEOPS_ENABLED=\"false\"\n"),
+        ({}, {}, "AGENT_A_SHELL_ENABLED=false\nSHELL_ENABLED=true\n"),
+        ({}, {}, "INTER_AGENT_ENABLED=true\n"),
+        ({}, {"INTER_AGENT_ENABLED": "false"}, "AGENT_A_INTER_AGENT_ENABLED=true\n"),
+        # A setting the worker env has wins over the .env, and a key without a value sets nothing.
+        ({"SHELL_ENABLED": "true"}, {}, "SHELL_ENABLED=false\nAGENT_A_SHELL_ENABLED=false\n"),
+        ({}, {"INTER_AGENT_ENABLED": "false"}, "INTER_AGENT_ENABLED=true\n"),
+        ({}, {}, "SHELL_ENABLED\n"),
+        # A worker env that disables python-dotenv ignores the file.
+        ({"PYTHON_DOTENV_DISABLED": "true"}, {}, "SHELL_ENABLED=false\n"),
     ]
-    worker_envs: list[dict[str, str]] = []
+    workers: list[tuple[dict[str, str], str]] = []
     simulated: list[dict[str, bool]] = []
-    for snapshot_env, supervisor_env in cases:
+    for index, (snapshot_env, supervisor_env, dotenv_text) in enumerate(cases):
+        dotenv_file = tmp_path / f"case-{index}.env"
+        dotenv_file.write_text(dotenv_text, encoding="utf-8")
         manager = MagicMock()
         manager.build_draft_snapshot.return_value = {"agent": {"id": agent_id}, "env": snapshot_env}
         manager.get_agent_spec.return_value = {}
@@ -362,11 +405,18 @@ def test_simulator_feature_flags_equal_those_of_the_worker_the_supervisor_starts
             monkeypatch.delenv(key, raising=False)
         with (
             patch.dict(os.environ, supervisor_env),
+            patch("koda.control_plane.manager.DOTENV_PATH", dotenv_file, create=True),
             patch("koda.control_plane.manager.simulate_execution_policy", return_value={}) as simulate,
         ):
-            worker_envs.append(_worker_env(agent_id, snapshot_env))
+            workers.append((_worker_env(agent_id, snapshot_env), str(dotenv_file)))
             ControlPlaneManager.evaluate_execution_policy(manager, agent_id, {"action": {"tool_id": "agent_send"}})
         simulated.append(simulate.call_args.kwargs["feature_flags"])
 
-    assert simulated == _flags_of_workers_started_with(worker_envs)
+    started = _workers_started_with(workers)
+
+    assert simulated == [worker["flags"] for worker in started]
     assert [flags["inter_agent"] for flags in simulated[:5]] == [True, False, True, True, False]
+    assert [flags["shell"] for flags in simulated[9:]] == [False, True, False, True, True, True, True, True, True]
+    assert [flags["inter_agent"] for flags in simulated[12:16]] == [True, True, False, False]
+    # The simulator reads the file koda.config loads in the worker.
+    assert {path for worker in started for path in worker["loaded_paths"]} == {install_dotenv_path}

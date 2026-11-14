@@ -641,6 +641,11 @@ def test_no_spelling_of_a_path_steps_around_a_restrictive_path_rule_beside_a_bro
         "/SRV/PROD/config.yml",
         "/srv/prod",
         "/srv/prod/",
+        # Only the as-written spelling is below /srv/prod. When /srv/prod is a symlink, the tool's realpath
+        # resolves the link before the ``..``, so the call can land anywhere the link points.
+        "/srv/prod/../other/config.yml",
+        "/SRV/PROD/../other/config.yml",
+        "/srv/prod/x/../../other/config.yml",
         # Paths the engine cannot place: the tools expand ``~`` and resolve a relative path (or one with
         # leading whitespace) against the working directory, so each could be /srv/prod/config.yml.
         "~/prod/config.yml",
@@ -870,3 +875,136 @@ def test_a_file_tool_without_a_path_acts_on_the_working_directory_which_the_engi
 
         assert (no_path.decision, no_path.rule_id) == ("deny", "deny-secrets"), tool_id
         assert (elsewhere.decision, elsewhere.rule_id) == ("allow", "allow-file-tools"), tool_id
+
+
+# Path-like params of dispatcher tools that path rules do not evaluate. The docs name each (owner: AG-12).
+_PATH_PARAMS_NOT_EVALUATED_BY_PATH_RULES = (
+    ("browser_upload", "file_path"),
+    ("plugin_install", "path"),
+    ("git_diff", "path"),
+    ("git_log", "path"),
+    ("job_create", "work_dir"),
+    ("mcp_filesystem__read_file", "path"),
+)
+
+
+def test_path_rules_evaluate_exactly_the_file_tool_agent_and_operator_file_command_paths() -> None:
+    from koda.agent_contract import DISPATCHER_TOOL_IDS, resolve_action_paths
+
+    operator_file_commands = {"write", "edit", "rm", "mkdir", "cat"}
+    tools = sorted(DISPATCHER_TOOL_IDS | operator_file_commands | {"mcp_filesystem__read_file"})
+    path_like_keys = ("path", "source", "destination", "file_path", "work_dir")
+
+    evaluated = {
+        (tool_id, key)
+        for tool_id in tools
+        for key in path_like_keys
+        if "/srv/x" in resolve_action_paths(tool_id, {key: "/srv/x"})
+    }
+
+    file_tool_paths = {
+        (tool_id, key) for tool_id in tools if tool_id.startswith("file_") for key in ("path", "source", "destination")
+    }
+    other_paths = {(tool_id, "path") for tool_id in tools if tool_id.startswith("agent_")} | {
+        (command, "path") for command in operator_file_commands
+    }
+    assert evaluated == file_tool_paths | other_paths
+    assert evaluated.isdisjoint(_PATH_PARAMS_NOT_EVALUATED_BY_PATH_RULES)
+
+
+def _section(text: str, start: str, end: str) -> str:
+    return text[text.index(start) : text.index(end, text.index(start))]
+
+
+def _path_rule_contract_texts() -> dict[str, str]:
+    """Every place that states which paths path rules evaluate."""
+    import json
+    from pathlib import Path
+
+    import koda.services.execution_policy as runtime_policy
+    from koda.agent_contract import resolve_action_paths
+
+    root = Path(__file__).resolve().parents[2]
+    api = (root / "docs/reference/api.md").read_text(encoding="utf-8")
+    upgrade = (root / "docs/operations/upgrade.md").read_text(encoding="utf-8")
+    matrix = (root / "docs/security/guardrail-test-matrix.md").read_text(encoding="utf-8")
+    vectors = json.loads((root / "tests/fixtures/execution_policy_vectors.json").read_text(encoding="utf-8"))
+    return {
+        "koda/services/execution_policy.py": str(runtime_policy.__doc__),
+        "resolve_action_paths": str(resolve_action_paths.__doc__),
+        "docs/reference/api.md": _section(api, "### Execution-policy simulator", "## Runtime API"),
+        "docs/operations/upgrade.md": _section(upgrade, "### Execution-policy rules", "## Step 1"),
+        "docs/security/guardrail-test-matrix.md": _section(matrix, "| Execution policy |", "\n"),
+        "tests/fixtures/execution_policy_vectors.json": vectors["description"],
+    }
+
+
+def test_the_path_rule_docs_name_exactly_the_paths_the_engine_evaluates() -> None:
+    for name, text in _path_rule_contract_texts().items():
+        flat = " ".join(text.split())
+        for overclaim in ("every path the call acts on", "every path a call acts on", "every filesystem path"):
+            assert overclaim not in flat, (name, overclaim)
+        for tool_id in ("file_move", "agent_set_workdir", "browser_upload", "plugin_install", "git_diff", "git_log"):
+            assert tool_id in flat, (name, tool_id)
+        for required in ("job_create", "work_dir", "MCP", "AG-12"):
+            assert required in flat, (name, required)
+
+
+def _file_operation_examples() -> list[tuple[str, dict[str, object]]]:
+    """Every ``Params`` example of the File Operations section of the agent's tool prompt."""
+    import json
+    import re
+
+    from koda.services.tool_prompt import build_agent_tools_prompt
+
+    allow_file_tools = {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"}
+    with patch("koda.services.tool_prompt.FILEOPS_ENABLED", True):
+        prompt = build_agent_tools_prompt(
+            execution_policy={"version": 1, "rules": [allow_file_tools]}, feature_flags={"fileops": True}
+        )
+    section = _section(prompt, "### File Operations", "#### File Operations Best Practices")
+    examples: list[tuple[str, dict[str, object]]] = []
+    for bullet in section.split("\n- `")[1:]:
+        tool_id = bullet.split("`", 1)[0]
+        for candidate in re.findall(r"`(\{[^`]*\})`", bullet):
+            try:
+                examples.append((tool_id, json.loads(candidate)))
+            except json.JSONDecodeError:
+                continue  # ``{"...", "replace_all": true}`` elides the required params
+    return examples
+
+
+def test_the_tool_prompts_own_file_examples_are_gated_by_an_unrelated_restrictive_path_rule() -> None:
+    """The prompt teaches relative paths, which the engine cannot place, so one restrictive path rule gates them."""
+    allow_file_tools = {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"}
+    deny_etc = {"name": "deny-etc", "match": {"path": "/etc"}, "decision": "deny"}
+    examples = _file_operation_examples()
+    assert {tool_id for tool_id, _params in examples} == {
+        "file_read",
+        "file_write",
+        "file_edit",
+        "file_list",
+        "file_search",
+        "file_grep",
+        "file_delete",
+        "file_move",
+        "file_info",
+    }
+
+    for tool_id, params in examples:
+        evaluation = _evaluate_file_call(tool_id, params, allow_file_tools, deny_etc)
+
+        assert (evaluation.decision, evaluation.rule_id) == ("deny", "deny-etc"), (tool_id, params)
+    absolute = _evaluate_file_call("file_read", {"path": "/srv/work/src/main.py"}, allow_file_tools, deny_etc)
+    assert (absolute.decision, absolute.rule_id) == ("allow", "allow-file-tools")
+
+
+def test_the_upgrade_notes_say_the_tool_prompts_relative_paths_are_gated_until_the_safe_path_resolver() -> None:
+    from pathlib import Path
+
+    upgrade = (Path(__file__).resolve().parents[2] / "docs/operations/upgrade.md").read_text(encoding="utf-8")
+    flat = " ".join(_section(upgrade, "### Execution-policy rules", "## Step 1").split())
+
+    assert "give file tools absolute paths" not in flat
+    for required in ("tool prompt", "relative paths", '{"path": "src/main.py"}', "M1-E4-T13"):
+        assert required in flat, required

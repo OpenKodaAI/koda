@@ -11,7 +11,7 @@ import functools
 import secrets
 import shlex
 import time
-from collections.abc import Callable, Coroutine
+from collections.abc import Callable, Coroutine, Sequence
 from dataclasses import asdict, dataclass
 from typing import Any, Concatenate, ParamSpec, Protocol, TypeVar, cast
 
@@ -49,7 +49,7 @@ from koda.state.pending_approvals import (
 )
 from koda.telegram_types import BotContext, MessageUpdate
 from koda.utils.command_helpers import ensure_canonical_session_id, require_message, require_user_data, require_user_id
-from koda.utils.files import safe_resolve
+from koda.utils.files import FILE_COMMANDS, file_command_path_argument, safe_resolve
 from koda.utils.formatting import escape_html
 
 log = get_logger(__name__)
@@ -530,7 +530,18 @@ def _resolve_operational_command(
     raw_args: str,
     *,
     work_dir: str | None = None,
+    command_args: Sequence[str] | None = None,
 ) -> _OperationalActionResolution | None:
+    """Resolve an operator command to its integration action, or to the reason it is blocked.
+
+    ``command_args`` are the command's arguments as its handler receives them
+    (Telegram's ``context.args``); without them, ``raw_args`` is split on whitespace
+    as Telegram splits it. A file command's path is the one its handler acts on
+    (:func:`koda.utils.files.file_command_path_argument`), resolved under
+    ``work_dir`` as the handler resolves it, so path rules decide the file the
+    command touches. Without a work dir the path stays as written, and a relative
+    one then fails closed.
+    """
     command = str(command_name or "").strip().lower()
     if command not in _OPS_COMMANDS:
         return None
@@ -566,6 +577,14 @@ def _resolve_operational_command(
             access_level="write",
             deny_reason="npm_blocked_pattern",
             deny_message="Blocked: this npm command is not allowed for safety reasons.",
+        )
+
+    if command in FILE_COMMANDS:
+        return _resolve_file_command(
+            command,
+            args,
+            path_argument=file_command_path_argument(command, args.split() if command_args is None else command_args),
+            work_dir=work_dir,
         )
 
     tokens = shlex.split(args)
@@ -641,29 +660,6 @@ def _resolve_operational_command(
             deny_message="npm subcommand is not allowed by the registry.",
         )
 
-    if command in {"write", "edit", "rm", "mkdir", "cat"}:
-        if not tokens:
-            return None
-        resolved_path = None
-        if work_dir:
-            resolved = safe_resolve(tokens[0], work_dir)
-            resolved_path = str(resolved) if resolved is not None else None
-        action_id = f"fileops.{command}"
-        if resolved_path is None and work_dir:
-            return _OperationalActionResolution(
-                integration_id="fileops",
-                action_id=action_id,
-                access_level="write" if command != "cat" else "read",
-                path=None,
-                deny_reason="path_outside_workdir",
-                deny_message="Access denied: path is outside working directory.",
-            )
-        return _operational_resolution_from_contract(
-            command,
-            raw_args=args,
-            path=resolved_path,
-        )
-
     if command == "http_request":
         tokens = args.split(maxsplit=2)
         if len(tokens) < 2:
@@ -685,6 +681,30 @@ def _resolve_operational_command(
         )
 
     return None
+
+
+def _resolve_file_command(
+    command: str,
+    args: str,
+    *,
+    path_argument: str,
+    work_dir: str | None,
+) -> _OperationalActionResolution | None:
+    if not path_argument:
+        return None
+    if not work_dir:
+        return _operational_resolution_from_contract(command, raw_args=args, path=path_argument)
+    resolved = safe_resolve(path_argument, work_dir)
+    if resolved is None:
+        return _OperationalActionResolution(
+            integration_id="fileops",
+            action_id=f"fileops.{command}",
+            access_level="write" if command != "cat" else "read",
+            path=None,
+            deny_reason="path_outside_workdir",
+            deny_message="Access denied: path is outside working directory.",
+        )
+    return _operational_resolution_from_contract(command, raw_args=args, path=str(resolved))
 
 
 def _canonical_operational_request(command_name: str, raw_args: str) -> tuple[str, str]:
@@ -1194,6 +1214,7 @@ def with_approval(
                     policy_command_name,
                     policy_raw_args,
                     work_dir=str(user_data.get("work_dir") or "").strip() or None,
+                    command_args=context_args,
                 )
                 policy_params = _policy_params_for_manual_command(
                     policy_command_name,

@@ -16,24 +16,35 @@ Rule semantics:
   case-insensitively. An ``effect_tags`` selector needs every listed pattern to
   match a tag.
 * A ``path`` selector also covers everything below the path. Path rules are
-  evaluated against every path the call acts on, exactly as the tool receives
-  it (:func:`koda.agent_contract.resolve_action_paths`): both ends of a
-  ``file_move``, and the working directory for ``file_list``, ``file_search``
-  and ``file_grep`` without a ``path``. An absolute path is evaluated once for
-  each of its spellings: lexically normalized (``.``, ``..`` and repeated ``/``
-  resolved) and as written, each compared with case and ignoring case. A path
-  that is not absolute (``~``-prefixed, relative, the working directory, or with
-  leading whitespace) cannot be placed, because the tools expand ``~`` and
-  resolve relative paths in the worker: every deny, require_approval and
-  allow_with_preview path rule counts as matching it, and no allow path rule
-  does. The decision is the most restrictive over all of these evaluations,
-  counting the no-match fallback as an outcome, and the deciding rule is the
-  highest-priority, then lowest-name rule with that decision that matched any
-  of them. So no ``.``, ``..``, repeated ``/`` or other-case spelling, ``~`` or
-  relative path, and neither end of a move, steps around a deny,
-  require_approval or allow_with_preview path rule, and an allow path rule
-  covers a call only when it covers every spelling of every path. Symlinks are
-  not resolved here (the safe-path resolver, M1-E4-T13).
+  evaluated against the paths :func:`koda.agent_contract.resolve_action_paths`
+  returns, exactly as the tool receives them: a ``file_*`` tool's ``path``,
+  ``source`` and ``destination`` (both ends of a ``file_move``); the working
+  directory for ``file_list``, ``file_search`` and ``file_grep`` without a
+  ``path``; the ``path`` of an ``agent_*`` tool (``agent_set_workdir``); and the
+  path an operator file command (``/write``, ``/edit``, ``/rm``, ``/mkdir``,
+  ``/cat``) acts on, resolved under the work dir as the command resolves it. No
+  other param is a path to these rules: an MCP tool's params,
+  ``browser_upload``'s ``file_path``, ``plugin_install``'s ``path``, the ``path``
+  of ``git_diff`` and ``git_log`` and ``job_create``'s ``work_dir`` are not
+  evaluated, nor is anything a shell command touches, so a path rule does not
+  keep those tools out of a directory (owner: AG-12).
+* An absolute path is evaluated once for each of its spellings: lexically
+  normalized (``.``, ``..`` and repeated ``/`` resolved) and as written, each
+  compared with case and ignoring case. The as-written spelling is the one
+  below a rule's path in a call such as ``<rule path>/../other``: when the
+  rule's path is a symlink, the tool's realpath resolves the link before the
+  ``..``. A path that is not absolute (``~``-prefixed, relative, the working
+  directory, or with leading whitespace) cannot be placed, because the tools
+  expand ``~`` and resolve relative paths in the worker: every deny,
+  require_approval and allow_with_preview path rule counts as matching it, and
+  no allow path rule does. The decision is the most restrictive over all of
+  these evaluations, counting the no-match fallback as an outcome, and the
+  deciding rule is the highest-priority, then lowest-name rule with that
+  decision that matched any of them. So no ``.``, ``..``, repeated ``/`` or
+  other-case spelling, ``~`` or relative path, and neither end of a move, steps
+  around a deny, require_approval or allow_with_preview path rule, and an allow
+  path rule covers a call only when it covers each spelling of each of its
+  paths. Symlinks are not resolved here (the safe-path resolver, M1-E4-T13).
 * A rule's ``path`` patterns are normalized as call paths are (repeated ``/``,
   ``.`` and ``..`` resolved). A pattern must be absolute or start with ``*``
   (any depth): ``~`` and relative patterns could never match a call, and

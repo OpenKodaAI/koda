@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Execution-policy parity vectors (ADR-002 AG-06, ADR-008 step 1). Each vector is one tool call evaluated against one policy. tests/test_execution_policy_vectors.py runs every vector through the runtime engine, the way an agent worker calls it, and through the control-plane simulate route (POST /api/control-plane/agents/{agent_id}/execution-policy/evaluate); both must return the expected decision, reason_code and rule_id, and the same approval scope and preview. The file is also the shared input for the ADR-008 offline replay (M5-E3-T2). Rule semantics: among the rules that match a call, the most restrictive decision wins (deny > require_approval > allow_with_preview > allow), then the highest priority, then the lowest name; patterns are fnmatch globs compared case-insensitively; a path selector also covers everything below the path; path rules are evaluated against every path the call acts on (a file tool's path, source and destination, and the working directory for file_list, file_search and file_grep without a path), an absolute path once per spelling (lexically normalized, with . .. and repeated / resolved, and as written; each with case and ignoring case), while a path that is not absolute (~, relative, the working directory) counts as matching every deny, require_approval and allow_with_preview path rule and no allow path rule; the decision is the most restrictive outcome over all of these, the no-match fallback included, and the deciding rule is the highest priority, then lowest name, rule with that decision that matched any of them; rule path patterns are normalized like call paths and must be absolute or start with *; every listed effect tag must be present; a selector the engine cannot evaluate (unknown key, empty value, mapping value, non-boolean value on a boolean selector, ^regex, a path pattern that cannot be normalized) is skipped in a deny rule and makes any other rule not match. agent.env is the agent's snapshot environment: the simulator evaluates with the feature flags a worker started with it computes.",
+  "description": "Execution-policy parity vectors (ADR-002 AG-06, ADR-008 step 1). Each vector is one tool call evaluated against one policy. tests/test_execution_policy_vectors.py runs every vector through the runtime engine, the way an agent worker calls it, and through the control-plane simulate route (POST /api/control-plane/agents/{agent_id}/execution-policy/evaluate); both must return the expected decision, reason_code and rule_id, and the same approval scope and preview. The file is also the shared input for the ADR-008 offline replay (M5-E3-T2). Rule semantics: among the rules that match a call, the most restrictive decision wins (deny > require_approval > allow_with_preview > allow), then the highest priority, then the lowest name; patterns are fnmatch globs compared case-insensitively; a path selector also covers everything below the path; path rules are evaluated against the paths koda.agent_contract.resolve_action_paths returns (a file tool's path, source and destination, so both ends of a file_move; the working directory for file_list, file_search and file_grep without a path; the path of agent_set_workdir; and the file an operator file command acts on) and against no other param, so not against MCP tool params, browser_upload's file_path, plugin_install's path, the path of git_diff and git_log or job_create's work_dir (owner: AG-12); an absolute path is evaluated once per spelling (lexically normalized, with . .. and repeated / resolved, and as written, which catches a call through a symlinked directory under the rule; each with case and ignoring case), while a path that is not absolute (~, relative, the working directory) counts as matching every deny, require_approval and allow_with_preview path rule and no allow path rule; the decision is the most restrictive outcome over all of these, the no-match fallback included, and the deciding rule is the highest priority, then lowest name, rule with that decision that matched any of them; rule path patterns are normalized like call paths and must be absolute or start with *; every listed effect tag must be present; a selector the engine cannot evaluate (unknown key, empty value, mapping value, non-boolean value on a boolean selector, ^regex, a path pattern that cannot be normalized) is skipped in a deny rule and makes any other rule not match. agent.env is the agent's snapshot environment: the simulator evaluates with the feature flags a worker started with it, and with no .env file, computes.",
   "agent_id": "AGENT_VECTORS",
   "agent_defaults": {
     "tool_policy": {},
@@ -664,6 +664,48 @@
       "expected": {"decision": "deny", "reason_code": "secure_default_block", "rule_id": null}
     },
     {
+      "id": "path-deny-catches-a-call-through-a-directory-under-it-as-written",
+      "description": "A deny path rule beside a broader allow, where only the as-written spelling is below the rule's path: /srv/work/link/../other/key is below /srv/work/link, its normalized form /srv/work/other/key is not. When /srv/work/link is a symlink, the tool's realpath resolves the link before the .., so the call can land anywhere the link points; the as-written spelling keeps the deny deciding.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "deny-link", "match": {"path": "/srv/work/link"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/work/link/../other/key", "content": "x"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-link"}
+    },
+    {
+      "id": "path-approval-catches-a-call-through-a-directory-under-it-as-written",
+      "description": "A require_approval path rule beside a broader allow, where only the as-written spelling /srv/work/link/../other/key is below the rule's path /srv/work/link: the approval still applies.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "approve-link", "match": {"path": "/srv/work/link"}, "decision": "require_approval"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/work/link/../other/key", "content": "x"}},
+      "expected": {"decision": "require_approval", "reason_code": "rule_match", "rule_id": "approve-link"}
+    },
+    {
+      "id": "path-preview-catches-a-call-through-a-directory-under-it-as-written",
+      "description": "An allow_with_preview path rule beside a broader allow, where only the as-written spelling /srv/work/link/../other/key is below the rule's path /srv/work/link: the preview still applies.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "preview-link", "match": {"path": "/srv/work/link"}, "decision": "allow_with_preview"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/work/link/../other/key", "content": "x"}},
+      "expected": {"decision": "allow_with_preview", "reason_code": "rule_match", "rule_id": "preview-link"}
+    },
+    {
       "id": "non-boolean-value-in-deny-rule-is-skipped",
       "description": "A deny rule skips a boolean selector whose stored value is not true or false (a typo such as ture), so it can only match more calls.",
       "policy": {
@@ -903,6 +945,33 @@
       },
       "action": {"tool_id": "file_grep", "params": {"pattern": "PRIVATE KEY"}},
       "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-secrets"}
+    },
+    {
+      "id": "path-rules-do-not-evaluate-an-mcp-tools-params",
+      "description": "Path rules evaluate only the paths koda.agent_contract.resolve_action_paths returns. An MCP tool's params are the server's, so a path param of an MCP tool is not one of them, and a deny path rule does not keep the tool out of the directory (owner: AG-12).",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-mcp-tools", "match": {"tool_id": "mcp_*"}, "decision": "allow"},
+          {"name": "deny-etc", "match": {"path": "/etc"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "mcp_filesystem__read_file", "params": {"path": "/etc/shadow"}},
+      "expected": {"decision": "allow", "reason_code": "rule_match", "rule_id": "allow-mcp-tools"}
+    },
+    {
+      "id": "path-rules-do-not-evaluate-browser-upload-file-path",
+      "description": "browser_upload reads its file_path and uploads it, but file_path is not a path that path rules evaluate (nor are plugin_install's path, the path of git_diff and git_log, or job_create's work_dir; owner: AG-12), so the deny path rule does not decide the call and the human-factor overlay does.",
+      "agent": {"resource_access_policy": {"integration_grants": {"browser": {"allow_actions": ["*"]}}}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-browser", "match": {"tool_id": "browser_*"}, "decision": "allow"},
+          {"name": "deny-secrets", "match": {"path": "/srv/work/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "browser_upload", "params": {"selector": "#file", "file_path": "/srv/work/secrets/key.pem"}},
+      "expected": {"decision": "require_approval", "reason_code": "human_factor_required", "rule_id": null}
     }
   ]
 }

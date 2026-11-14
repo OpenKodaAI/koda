@@ -1800,12 +1800,20 @@ def _resolve_resource_scope(
     *,
     server_key: str | None,
 ) -> dict[str, Any]:
+    """Return what one call acts on; an approval grant of kind ``scope`` covers calls with the same scope.
+
+    ``paths`` holds every path execution-policy path rules evaluate
+    (:func:`resolve_action_paths`), so a scope grant issued for one ``file_move``
+    does not cover a move from the same source to another destination, which a
+    different path rule can gate.
+    """
     scope: dict[str, Any] = {
         "integration_id": resolution.integration_id,
         "action_id": resolution.action_id,
         "resource_method": resolution.resource_method,
         "domain": resolution.domain,
         "path": resolution.path,
+        "paths": list(resolve_action_paths(resolution.tool_id, params)),
         "db_env": resolution.db_env,
         "server_key": server_key,
     }
@@ -1944,16 +1952,21 @@ _WORK_DIR_DEFAULT_PATH_TOOLS = frozenset({"file_list", "file_search", "file_grep
 
 
 def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> tuple[str, ...]:
-    """Return every filesystem path a tool call acts on, exactly as the tool receives it.
+    """Return the paths execution-policy ``path`` rules evaluate for one call, exactly as the tool receives them.
 
-    The execution-policy engine evaluates ``path`` rules against each of these, so
-    they are not trimmed or normalized: the tools expand ``~`` and resolve a relative
-    path against the worker's working directory, and the engine must see what the
-    tool sees. A file tool's ``path``, ``source`` and ``destination`` params all
-    count, so a ``file_move`` yields its source and its destination. ``file_list``,
-    ``file_search`` and ``file_grep`` act on the working directory when the call has
-    no ``path``, which is returned as the relative path ``.``. Only the tools whose
-    resolution carries a path (:func:`resolve_integration_action`) have paths here.
+    They are not trimmed or normalized: the tools expand ``~`` and resolve a
+    relative path against the worker's working directory, and the engine must see
+    what the tool sees. They are a ``file_*`` tool's ``path``, ``source`` and
+    ``destination`` (so a ``file_move`` yields its source and its destination); the
+    working directory, returned as the relative path ``.``, for ``file_list``,
+    ``file_search`` and ``file_grep`` without a ``path``; the ``path`` of an
+    ``agent_*`` tool (``agent_set_workdir``); and the ``path`` of the operator file
+    commands ``write``, ``edit``, ``rm``, ``mkdir`` and ``cat``, which the approval
+    gate sets to the file the command acts on. No other param is returned, though
+    some name paths: an MCP tool's params, ``browser_upload``'s ``file_path``,
+    ``plugin_install``'s ``path``, the ``path`` of ``git_diff`` and ``git_log`` and
+    ``job_create``'s ``work_dir`` (owner: AG-12). An approval grant's resource
+    scope holds these paths too (:func:`_resolve_resource_scope`).
     """
     tool = str(tool_id or "").strip()
     payload = params or {}
