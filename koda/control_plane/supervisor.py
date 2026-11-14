@@ -57,6 +57,8 @@ _CRASH_LOOP_THRESHOLD: int = 5
 
 # Forced from parent env onto each worker's spec.environment so a stale
 # manager snapshot can never override the host's infrastructure addresses.
+# Each is forced as ``KEY`` and as ``<AGENT_ID>_KEY``: the manager scopes every
+# snapshot key both ways and koda.config reads ``<AGENT_ID>_KEY`` first.
 _SYSTEM_ENV_KEYS = frozenset(
     {
         "STATE_BACKEND",
@@ -521,6 +523,7 @@ class ControlPlaneSupervisor:
             parent_val = os.environ.get(key)
             if parent_val is not None:
                 env[key] = parent_val
+                env[f"{agent_id}_{key}"] = parent_val
         try:
             from koda.provider_models import (
                 resolve_api_key_extra_model_ids,

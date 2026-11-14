@@ -66,7 +66,7 @@ jump ahead of high-severity items in a later milestone just because of their mil
 | `TD-NNN` | Debt item in TECHNICAL_DEBT.md Part 2 |
 | `SM-NN` | Runtime-smoke defect FEATURE_MATRIX.md §3.4 `D-NN` (renamed here to avoid a clash with `D-NNN`) |
 | `J-NN` | Journey in FEATURE_MATRIX.md §3.2 |
-| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-26 are added in section 5. |
+| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-27 are added in section 5. |
 | `P<n>` | Design principle in REFERENCE_RESEARCH.md §6 |
 | `ADR-NNN` | Entry in DECISIONS.md |
 | `R-NN` | Entry in REMAINING_RISKS.md |
@@ -84,10 +84,13 @@ jump ahead of high-severity items in a later milestone just because of their mil
 **Started early.** A task that began before its dependencies were done carries the flag *started early:
 real-path regression test required before done* on its status line. The done check (M0-E1-T4) refuses to
 mark it `done` until VALIDATION_REPORT.md names a regression test that runs the real path without patching
-the code under test.
+the code under test. The test is named in a section whose heading contains the task ID (batch evidence
+gets a sub-heading that lists its task IDs), on a line that says "regression test" and gives the test ID as
+`<file>::<test>`, for example `Real-path regression test: tests/test_queue.py::test_cancel_stops_task`.
 
-**Evidence rule.** No task is `done` while its Evidence field reads "—". The plan lint (M0-E1-T4) enforces
-this, together with the status rules above, on every change to this file.
+**Evidence rule.** No task is `done` while its Evidence field reads "—". A field that starts with a dash,
+such as "— pending", counts as "—". The plan lint (M0-E1-T4) enforces this, together with the status rules
+above, on every change to this file.
 
 **Gate.**
 
@@ -280,6 +283,7 @@ in `koda/knowledge`). Both are cheap to leave; revisit only if the code is touch
 | Q-24 | Keep the reranker? (TD-103) | Keep only if the M9-E1-T6 eval shows a measurable gain | open | M9-E1-T6, M9-E1-T2 |
 | Q-25 | Should provider failover ask the operator before switching? (P22) | No: keep the automatic switch, and M6-E3-T8 makes it visible | open (§13: changes configured fallback behaviour) | none until decided |
 | Q-26 | Structured operator questions with options? (P21) | No, until a requirement exists | open | none |
+| Q-27 | Project-scope MCP configs (`.mcp.json`, `.gemini/settings.json`, `.codex/config.toml`, `.codex/*.config.toml`) are refused by the file tools and `/cat` wherever they sit, as `.env` and `*.pem` are (WAVE-2A) | Keep: they hold MCP secrets in clear text; the alternative refuses only the HOME copies and needs a path-anchored rule | open (§13: changes what agents and operators can read in a project) | none |
 
 ### 5.2 Approvals required
 
@@ -415,10 +419,22 @@ report (O-3).
 
 ## 6. Backlog
 
-Task format: the heading gives the ID and title. The next line gives owner, risk, gate, status and
-dependencies. The bullets give addresses, files, expected implementation ("Do"), acceptance criteria
-("Done when"), required tests and the evidence slot. Line numbers in Files come from the audit tree and
-drift; search for the symbol.
+Task format: the heading, `#### <ID> · Title`, gives the ID and title. The next line gives owner, risk,
+gate, status and dependencies. The bullets give addresses, files, expected implementation ("Do"),
+acceptance criteria ("Done when"), required tests and the evidence slot. Line numbers in Files come from the
+audit tree and drift; search for the symbol.
+
+A heading that names several IDs, such as `#### M5-E3-T5, M5-E3-T12 to M5-E3-T17 · Title`, shares its
+bullets with a table that has `Task` and `Status` columns and exactly one row per named ID. Each row also
+takes the heading's Deps. A row's evidence is an `<ID>: <evidence>` entry in the heading's Evidence field
+(entries are separated by `;`), unless the table has an `Evidence` column.
+
+The Deps field lists hard dependencies only: every task ID in it must be `done` before the task is
+`ready`. A bare `T<n>` continues the milestone and epic of the ID before it (`M1-E1-T13, T14`). Text
+that names no task, such as `DEFECT-BATCH-1 (D-003) merged`, is not checked. Tasks that only share files
+go in a `coordinate with …` note, which runs to the next `;` or the end of the field. The note is a
+scheduling hint (section 8), not a dependency. The plan lint (M0-E1-T4) checks these forms, and reports a
+heading that starts with a task ID but follows neither heading form.
 
 ### M0 — Baseline repair and safety net
 
@@ -452,7 +468,7 @@ Owner OPS · Risk low · Gate operator-action · **blocked** · Deps M0-E1-T2
 - **Tests:** none · **Evidence:** —
 
 #### M0-E1-T4 · Plan status lint
-Owner QA (ARCH) · Risk low · Gate none · **ready** · Deps —
+Owner QA (ARCH) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** review finding "done without evidence" (M1-E1-T1); status drift; section 1 evidence and started-early rules
 - **Files:** new `scripts/check_master_plan.py`, new `tests/test_master_plan_lint.py`, `.github/workflows/pr-quality.yml`
 - **Do:** parse every task heading and status line in `docs/engineering/MASTER_PLAN.md`. Fail when:
@@ -465,7 +481,7 @@ Owner QA (ARCH) · Risk low · Gate none · **ready** · Deps —
 
   Print the per-milestone status counts, so that section 3 can be refreshed from the output.
 - **Done when:** the lint runs in pr-quality, passes on HEAD, and fails on each of four seeded violations in the test.
-- **Tests:** the new test; G · **Evidence:** —
+- **Tests:** the new test; G · **Evidence:** VALIDATION_REPORT.md "WAVE-2A": `scripts/check_master_plan.py` runs in pr-quality and passes on HEAD (353 tasks consistent); `tests/test_master_plan_lint.py` fails each seeded violation. Its first catch on the merged tree was a false task-level cycle M1-E2-T2 <-> M1-E2-T3, fixed in cee7b41
 
 #### M0-E1-T5 · Provision CI test credentials and infrastructure
 Owner OPS (QA, SEC) · Risk low · Gate operator-action; needs-approval (§13: paid service, for the provider key) · **blocked** · Deps —
@@ -558,7 +574,7 @@ Owner SEC (QA) · Risk low · Gate none · **done** · Deps —
 - **Tests:** the new test; G · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (tests/test_control_plane_auth_matrix.py covers every registered route from the router, compares with the route-based public table and the OpenAPI, and pins anonymous root routes; a new unauthenticated route fails it)
 
 #### M0-E3-T2 · Agent-turn characterisation tests on real Postgres
-Owner QA (BE) · Risk low · Gate none · **ready** · Deps —
+Owner QA (BE) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-021, F-QA-21, TD-027 (part), F-ORC-01, F-ORC-21
 - **Files:** new `tests/test_services/test_agent_turn_e2e.py`; a stub provider runner and fake bot under `tests/fakes/`
 - **Do:** drive `_execute_single_task` with a stub provider at the adapter boundary, a fake bot and real Postgres. Cover:
@@ -570,7 +586,7 @@ Owner QA (BE) · Risk low · Gate none · **ready** · Deps —
 
   Do not patch `_execute_single_task` or `_run_with_provider_fallback`.
 - **Done when:** the scenarios run with no mock on the orchestration path.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "WAVE-2A": agent-turn scenarios on real Postgres with no mock on the orchestration path; the squad deadlock scenario is a strict xfail owned by M3-E6-T1
 
 #### M0-E3-T3 · Worker entrypoint and handler-registration test
 Owner QA · Risk low · Gate none · **ready** · Deps —
@@ -952,12 +968,12 @@ Owner SEC · Risk med · Gate none · **done** · Deps DEFECT-BATCH-1 (D-003) me
 #### M1-E4 — Tool execution and prompt-injection safety
 
 #### M1-E4-T1 · Block git option injection
-Owner SEC · Risk low · Gate none · **ready** · Deps —
+Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-026, F-SKL-07
 - **Files:** `koda/services/tool_dispatcher.py` (`_validate_git_args` ~2861)
 - **Do:** reject ref, target, remote, branch and start_point values that start with `-`. Use `--end-of-options`. Deny `--output`, `--receive-pack`, `--upload-pack` and `--exec`.
 - **Done when:** the injection probes are rejected and normal git tool calls pass.
-- **Tests:** unit matrix; G · **Evidence:** —
+- **Tests:** unit matrix; G · **Evidence:** VALIDATION_REPORT.md "WAVE-2A": option-injection probes rejected for every git tool and `/git`; normal git calls pass; gates at c0ab8c6
 
 #### M1-E4-T2 · Frame tool output as untrusted data
 Owner SEC (AIM) · Risk med · Gate none · **ready** · Deps —
@@ -1032,7 +1048,7 @@ Owner SEC (BE) · Risk med · Gate none (Q-20 default) · **pending** · Deps M0
 - **Tests:** unit tests plus an agent-turn scenario; G · **Evidence:** —
 
 #### M1-E4-T9 · Interim policy-evaluator parity
-Owner SEC · Risk med · Gate none · **in-progress** (`wf_b38ba6c2-6ca`, as ADR-002 AG-06) · Deps AG-09 (for the replay)
+Owner SEC · Risk med · Gate none · **in-review** · Deps AG-09 (for the replay)
 - **Addresses:** D-024, F-GOV-03, F-GOV-01, TD-031 (prerequisite)
 - **Files:** `koda/services/execution_policy.py` (~236), `koda/control_plane/execution_policy.py`, the control-plane evaluate and simulate route
 - **Amended by ADR-039:** AG-06 implements this task as one engine with fnmatch for every rule, and AG-09 runs the replay before AG-10 delivers rules. The list below is the original ADR-008 step 1 design, kept for traceability. The done-when items still apply.
@@ -1047,23 +1063,23 @@ Owner SEC · Risk med · Gate none · **in-progress** (`wf_b38ba6c2-6ca`, as ADR
   - a `mcp_*__delete_*` deny is enforced at runtime;
   - the replay over every stored policy on a seeded copy shows no call that was denied before and is allowed after;
   - the preview equals the runtime decision for every vector.
-- **Tests:** parity unit tests; replay test on a seeded copy; G · **Evidence:** —
+- **Tests:** parity unit tests; replay test on a seeded copy; G · **Evidence:** VALIDATION_REPORT.md "WAVE-2A": AG-06 merged (one engine, fnmatch for every rule; a `mcp_*__delete_*` deny is enforced at runtime; preview equals runtime for every shared vector). The replay over stored policies is AG-09 and is still pending, so the task is not done
 
 #### M1-E4-T10 · Governed background shell
-Owner SEC (BE) · Risk med · Gate none · **ready** · Deps —
+Owner SEC (BE) · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-162, reclassified here from low reliability to **high security**: `shell_bg` bypasses both the runtime kernel (its cgroups) and `check_execution_approved`, so it is a live bypass today while `shell_execute` fails closed. F-SKL-06. TECHNICAL_DEBT.md is corrected at the next status refresh (M10-E1-T4).
 - **Files:** `koda/services/shell_tools.py` (~66), `koda/services/shell_runner.py`
 - **Do:** run background commands through the kernel `ExecuteCommand` path and the same approval check and command guard as `shell_execute`. Call `cleanup_finished` periodically, and kill the whole process group. Until M3-E3-T1 lands, `shell_bg` fails closed exactly like `shell_execute`.
 - **Done when:** an adversarial test shows that a command denied for `shell_execute` is denied for `shell_bg` by the same guard and policy, that an allowed one runs through the kernel path, and that no process is left after a kill.
-- **Tests:** unit tests; adversarial guardrail cases; G; changelog entry (tool behaviour) · **Evidence:** —
+- **Tests:** unit tests; adversarial guardrail cases; G; changelog entry (tool behaviour) · **Evidence:** VALIDATION_REPORT.md "WAVE-2A": `shell_bg` goes through the same guard and policy as `shell_execute` (adversarial suite), allowed commands run through the kernel path, and a cancelled ExecuteCommand kills the whole process group (Rust test); cargo fmt, clippy and kernel tests at c0ab8c6
 
 #### M1-E4-T13 · One safe-path resolver
-Owner SEC · Risk med · Gate none · **ready** · Deps —
+Owner SEC · Risk med · Gate none · **done** · Deps —
 - **Addresses:** TD-033, D-066, F-SKL-05; formerly M5-E3-T7, pulled forward because M3-E3-T1 needs `/cat .env` and `file_read .env` to agree before shell goes live
 - **Files:** `koda/utils/files.safe_resolve`, `tool_dispatcher._validate_file_path` (~2394), `koda/utils/workdir.validate_work_dir`, `provider_env.validate_runtime_file_path`
 - **Do:** one resolver, relative to `work_dir`, with one extension and secret-file policy, used by the commands and the file tools.
 - **Done when:** `/cat .env` and `file_read .env` give the same decision, and documented relative paths resolve under the work dir.
-- **Tests:** unit matrix; G · **Evidence:** —
+- **Tests:** unit matrix; G · **Evidence:** VALIDATION_REPORT.md "WAVE-2A": one safe-path resolver for the file tools, the file commands and browser_upload; `/cat .env` and `file_read .env` give the same decision; relative paths resolve under the work dir; credential stores of the pinned CLIs refused with their temp copies
 
 #### M1-E5 — Multi-agent authorization
 

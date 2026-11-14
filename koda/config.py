@@ -12,7 +12,9 @@ from urllib.parse import unquote, urlsplit
 from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(SCRIPT_DIR / ".env")
+# The install's .env. It is loaded without override, so it only fills settings the environment lacks.
+DOTENV_PATH = SCRIPT_DIR / ".env"
+load_dotenv(DOTENV_PATH)
 
 # --- Multi-agent support ---
 AGENT_ID: str | None = os.environ.get("AGENT_ID")
@@ -684,6 +686,293 @@ FILEOPS_MAX_READ_SIZE: int = int(_env("FILEOPS_MAX_READ_SIZE", "1048576"))  # 1M
 FILEOPS_BLOCKED_EXTENSIONS: frozenset[str] = frozenset(
     {".env", ".key", ".pem", ".p12", ".pfx", ".jks", ".keystore", ".secret", ".credentials"}
 )
+# The credential files each provider CLI that Koda logs in keeps in its config dir under
+# HOME: provider id -> (that dir's name in HOME, the files, relative to it). They are the
+# files that hold the CLI's sign-ins, as the pinned CLIs (packages/provider-clis) name them:
+# Claude Code's login (.credentials.json, which also holds the MCP servers' OAuth tokens and
+# the OAuth client secrets an operator gives `claude mcp add --client-secret`, under
+# mcpOAuthClientConfig: signing in again does not give those back, but `claude auth logout`
+# deletes the whole file too, so the disconnect does what the CLI's own logout does);
+# Codex's login (auth.json), the MCP servers' OAuth tokens where it keeps them in a file
+# (.credentials.json: mcp_oauth_credentials_store "file", or "auto" with no OS keyring, as in
+# Docker), a gateway model provider's OAuth tokens (secrets/gateway_oauth.json: its
+# gateway_oauth credentials_store "file"; `codex logout` keeps them), and the same three in
+# its encrypted secrets store, whose key only an OS keyring holds (secrets/codex_auth.age,
+# secrets/mcp_oauth.age, secrets/gateway_oauth.age); and Gemini CLI's OAuth login, its
+# account list and the MCP servers' and A2A agents' OAuth tokens (oauth_creds.json,
+# google_accounts.json, mcp-oauth-tokens.json, a2a-oauth-tokens.json; inside the macOS
+# sandbox the last three sit in ~/.cache/.gemini instead, PROVIDER_CLI_RUNTIME_CREDENTIAL_FILES
+# below, and with encrypted storage on, the login and the MCP and A2A tokens sit in its
+# keychain instead, GEMINI_CLI_FILE_KEYCHAIN below).
+# Disconnecting a provider deletes exactly these, with the temp copies of each that
+# FILEOPS_CREDENTIAL_TEMP_COPIES names beside it (koda/control_plane/manager.py), and the
+# file layer refuses them (FILEOPS_BLOCKED_CREDENTIAL_PATHS below), so the two lists cannot
+# drift apart. Apart from Claude Code's login, none of them holds anything a sign-in does not
+# give back. A file that also holds the CLI's settings, the secrets the operator stored or a
+# key other files are signed with is not one of them, since on a native install it is the
+# operator's own CLI configuration: the file layer alone refuses those
+# (CLAUDE_CODE_CREDENTIAL_PATHS, GEMINI_CLI_CREDENTIAL_PATHS and CODEX_CREDENTIAL_PATHS below).
+PROVIDER_CLI_CREDENTIAL_FILES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "claude": (".claude", (".credentials.json",)),
+    "codex": (
+        ".codex",
+        (
+            "auth.json",
+            ".credentials.json",
+            "secrets/gateway_oauth.json",
+            "secrets/codex_auth.age",
+            "secrets/mcp_oauth.age",
+            "secrets/gateway_oauth.age",
+        ),
+    ),
+    "gemini": (
+        ".gemini",
+        ("oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json", "a2a-oauth-tokens.json"),
+    ),
+}
+# The sign-in files of PROVIDER_CLI_CREDENTIAL_FILES that a provider CLI keeps in a second dir
+# under HOME: provider id -> (that dir, relative to HOME, the files there). Gemini CLI 0.68.0
+# keeps its account list and the MCP servers' and A2A agents' OAuth tokens in its runtime dir
+# (Storage.getGlobalRuntimeDir), which is ~/.cache/.gemini inside the macOS seatbelt sandbox
+# (SANDBOX=sandbox-exec, which the CLI sets when it relaunches itself there) and ~/.gemini
+# otherwise; its OAuth login stays in ~/.gemini. The disconnect deletes these there too, with
+# their temp copies, and the file layer refuses them by the .gemini/ entries of
+# PROVIDER_CLI_CREDENTIAL_FILES, since a file entry matches the last components of a path.
+PROVIDER_CLI_RUNTIME_CREDENTIAL_FILES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "gemini": (".cache/.gemini", ("google_accounts.json", "mcp-oauth-tokens.json", "a2a-oauth-tokens.json")),
+}
+# Gemini CLI's encrypted file keychain, relative to HOME, as the pinned CLI (0.68.0, FileKeychain)
+# names it: where no OS keychain works, as in Docker, its keychain is this one file, written in
+# place with mode 0600 and encrypted (AES-256-GCM, iv:tag:ciphertext in hex) with a key the CLI
+# derives with scrypt from the host and user names, so whoever reads the file can decrypt it.
+# It maps a service to its accounts and their secrets. The file layer refuses it as a whole
+# (GEMINI_CLI_CREDENTIAL_PATHS below).
+GEMINI_CLI_FILE_KEYCHAIN = ".gemini/gemini-credentials.json"
+# The services of that keychain whose entries are sign-ins: gemini-cli-oauth holds the OAuth
+# login (account main-account) and, by server name, the MCP servers' OAuth tokens, and
+# gemini-cli-a2a the A2A agents' OAuth tokens. The CLI keeps them there instead of in the
+# sign-in files above when GEMINI_FORCE_ENCRYPTED_FILE_STORAGE is true (in the environment or
+# in ~/.gemini/.env, which the CLI loads itself), and in Docker the file is their only copy.
+# Disconnecting the provider removes these services from the file, as it deletes the files in
+# the plain mode, and keeps the rest encrypted under the same key: an API key entered in the
+# CLI (gemini-cli-api-key), the extension integrity key and the extensions' secret settings.
+# A file left with no entry is deleted, as the CLI's own FileKeychain does. A file Koda cannot
+# decrypt (another host or user name) is left as it is: the CLI cannot read it either. A login
+# the CLI keeps in an OS keychain is out of Koda's reach.
+GEMINI_CLI_KEYCHAIN_SIGN_IN_SERVICES: tuple[str, ...] = ("gemini-cli-oauth", "gemini-cli-a2a")
+# The environment variable that moves a provider CLI's config dir out of HOME, under any
+# name: provider id -> variable. Where the process environment sets one, that dir holds the
+# CLI's login (the files above), its settings and its session transcripts. Disconnecting the
+# provider deletes the credential files there too (koda/control_plane/manager.py), and the
+# file layer refuses the whole dir in every work dir (koda/utils/workdir.py::protected_dirs).
+PROVIDER_CLI_CONFIG_DIR_ENV_KEYS: dict[str, str] = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
+# The provider CLI config dirs that the shipped compose files give the app container
+# (CLAUDE_CONFIG_DIR in docker-compose.yml and in the release bundle's compose file; a test
+# keeps this list equal to them). The supervisor does not pass that variable on to a worker, so a
+# worker whose agent environment lacks it does not know the dir, and a work dir at
+# RUNTIME_EPHEMERAL_ROOT reaches it there. The file layer refuses each one as a whole in
+# every process all the same, as it refuses the dirs the environment names
+# (koda/utils/workdir.py::protected_dirs).
+COMPOSE_PROVIDER_CLI_CONFIG_DIRS: tuple[str, ...] = ("/var/lib/koda/runtime/claude-config",)
+# Claude Code's global config, as the pinned CLI (packages/provider-clis, 2.1.325) names it
+# in HOME (in CLAUDE_CONFIG_DIR where that is set, a protected dir as a whole): .claude.json,
+# or .claude-<env>-oauth.json for another OAuth environment (CLAUDE_CODE_CUSTOM_OAUTH_URL
+# selects -custom-oauth), and the legacy .claude/.config.json it still reads when present.
+# Each holds the /login managed API key (primaryApiKey) and the MCP servers' env and headers.
+CLAUDE_CODE_GLOBAL_CONFIG_FILES: tuple[str, ...] = (
+    *(f".claude{suffix}.json" for suffix in ("", "-staging-oauth", "-local-oauth", "-custom-oauth")),
+    ".claude/.config.json",
+)
+# Claude Code's Anthropic profile store, as the pinned CLI resolves it: the profile config
+# dir is ANTHROPIC_CONFIG_DIR, else $XDG_CONFIG_HOME/anthropic, else ~/.config/anthropic,
+# and its credentials/ dir holds each profile's user OAuth tokens (credentials/<profile>.json,
+# rewritten with the new access and refresh token on every refresh) and the federation token
+# cache (credentials/federation/, or CLAUDE_CODE_FEDERATION_CACHE_DIR where that is set).
+# The default location is one of CLAUDE_CODE_CREDENTIAL_PATHS below; where the process
+# environment names another, the file layer refuses each one it names in every work dir
+# (koda/utils/workdir.py::anthropic_profile_credential_dirs), whichever of them a CLI uses.
+ANTHROPIC_PROFILE_CONFIG_DIR_ENV_KEY = "ANTHROPIC_CONFIG_DIR"
+ANTHROPIC_FEDERATION_CACHE_DIR_ENV_KEY = "CLAUDE_CODE_FEDERATION_CACHE_DIR"
+# The other files that hold a Claude Code credential in HOME, besides its login
+# (.claude/.credentials.json above, which also holds the MCP servers' OAuth tokens and client
+# secrets), as the pinned CLI names them: the project-scope MCP config (.mcp.json, where
+# `claude mcp add -s project` writes each MCP server's env and HTTP headers as literal values,
+# in the dir it runs in, through .mcp.json.tmp.<pid>.<hex>, refused as a copy by
+# FILEOPS_CREDENTIAL_COPY_SUFFIXES below: with the work dir as that dir, ~/.mcp.json, and the
+# CLI's own sandbox lists the name among its credential files wherever it sits); the global
+# config (with each MCP server's env and headers that `claude mcp add` writes there for the
+# local and user scopes), whose copies (<name>.backup beside it, and
+# <name>.backup.<ts> and <name>.corrupted.<ts> in its config dir's backups/) are refused by
+# FILEOPS_CREDENTIAL_COPY_SUFFIXES below wherever they sit, and .claude/backups/ as a
+# whole; the device private keys it keeps where no keychain holds them (.device-keys.json,
+# in its config dir); its background sessions' daemon dir as a whole (.claude/daemon/,
+# which the CLI's own sandbox denies its commands as a whole: their auth snapshots in
+# auth/, the roster.json that holds every worker's socket paths and socket tokens, rvAuth
+# and ptyAuth, the dispatch records in dispatch/, the sign-in/ state, and the control.key
+# and pipe.key, also as a temp copy a crash leaves); the IDE lockfiles (.claude/ide/<port>.lock,
+# each with the authToken the CLI opens the IDE's MCP connection with; the CLI reads
+# ~/.claude/ide also where CLAUDE_CONFIG_DIR is set); the server-supplied MCP configs, with
+# their auth headers, that the remote-control bridge writes for each session it spawns
+# (.claude/bridge-spawn/, always in HOME); the HFI auth file an earlier CLI wrote, which
+# this one only deletes once it is older than its cleanup period (.claude/hfi-auth.json);
+# a remote session's OAuth token and API key (.claude/remote/, which the CLI keeps at a
+# fixed path in a remote session's home, only with CLAUDE_CODE_REMOTE set; its session
+# ingress token beside them is refused by name, FILEOPS_CREDENTIAL_NAME_PREFIXES below);
+# and the Anthropic profile store's OAuth tokens in its default location
+# (.config/anthropic/credentials/). Disconnecting the provider does not delete them: the
+# global config is also the operator's settings and project list. The CLI's other keys
+# (.claude/sessions/*.key) are refused by extension, with their copies.
+CLAUDE_CODE_CREDENTIAL_PATHS: tuple[str, ...] = (
+    ".mcp.json",
+    *CLAUDE_CODE_GLOBAL_CONFIG_FILES,
+    ".claude/backups/",
+    ".device-keys.json",
+    ".claude/daemon/",
+    ".claude/ide/",
+    ".claude/bridge-spawn/",
+    ".claude/hfi-auth.json",
+    ".claude/remote/.oauth_token",
+    ".claude/remote/.api_key",
+    ".config/anthropic/credentials/",
+)
+# The other files that hold a Gemini CLI secret in HOME, besides the sign-ins above, as the
+# pinned CLI (packages/provider-clis, 0.68.0) names them: the encrypted file keychain
+# (GEMINI_CLI_FILE_KEYCHAIN above), which holds an API key entered in the CLI, the OAuth
+# login and the MCP servers' and A2A agents' tokens where GEMINI_FORCE_ENCRYPTED_FILE_STORAGE
+# is set, the extensions' secret settings and the key that signs the extension integrity
+# store; its settings (.gemini/settings.json, written through .settings.json.<pid>.<ms>.<n>.tmp,
+# FILEOPS_CREDENTIAL_TEMP_COPIES below), where `gemini mcp add` writes each MCP server's env
+# (-e) and HTTP headers (-H, such as Authorization: Bearer) and which holds the MCP servers'
+# OAuth client secrets an operator configures (oauth.clientSecret); and the browser agent's
+# Chrome profile, with the cookies and saved logins of the sites it visits
+# (.gemini/cli-browser-profile/: the agent is off by default, and this is its profile in the
+# default persistent session mode). A file entry matches wherever it sits, so a project's own
+# .gemini/settings.json, where `gemini mcp add` writes by default (its project scope), is
+# refused too, as a project's .mcp.json and .codex/config.toml are: a name cannot tell a
+# committed file with no secret from one a CLI wrote a secret into. Disconnecting the provider
+# does not delete them: the settings and the
+# extensions' secrets are the operator's, and without the keychain's integrity key every
+# installed extension fails its integrity check; it removes only the sign-ins from the
+# keychain (GEMINI_CLI_KEYCHAIN_SIGN_IN_SERVICES). Where the keychain fails, the CLI keeps that
+# key in .gemini/integrity.key, refused by its .key extension.
+GEMINI_CLI_CREDENTIAL_PATHS: tuple[str, ...] = (
+    GEMINI_CLI_FILE_KEYCHAIN,
+    ".gemini/settings.json",
+    ".gemini/cli-browser-profile/",
+)
+# The other files that hold a Codex secret in CODEX_HOME (~/.codex; where CODEX_HOME is set,
+# a protected dir as a whole), besides the sign-ins above, as the pinned CLI (packages/provider-clis,
+# 0.169.0) lays them out: its config (.codex/config.toml, written through .tmp<random> beside
+# it and renamed over it, FILEOPS_CREDENTIAL_TEMP_COPIES below), where `codex mcp add` writes
+# each MCP server's env (--env) and the OAuth client secret of a pre-registered client
+# (--oauth-client-secret), and which holds the HTTP headers an operator gives an MCP server or
+# a model provider; the profile configs beside it (.codex/<name>.config.toml, "*" below
+# standing for the name), which `codex --profile <name>` layers on top of config.toml, with
+# the same MCP servers' env, headers and client secrets, and where Codex itself tells the
+# operator to move a legacy [profiles.<name>] table (Codex takes a name of ASCII letters,
+# digits, "-" and "_"; the entry refuses any name before .config.toml there); and its secrets
+# dir as a whole: the gateway OAuth file store and its lock (secrets/gateway_oauth.json,
+# gateway_oauth.lock), the encrypted secrets store (secrets/local.age, the secrets the operator
+# stores with Codex, and codex_auth.age, mcp_oauth.age and gateway_oauth.age) and the temp
+# copies each is written through. Everything in the secrets dir is a secret, so it is refused
+# as a whole. A file entry matches wherever it sits, so a project's own .codex/config.toml is
+# refused too. Disconnecting the provider deletes only the sign-ins
+# (PROVIDER_CLI_CREDENTIAL_FILES): the config and the profiles are the operator's.
+CODEX_CREDENTIAL_PATHS: tuple[str, ...] = (".codex/config.toml", ".codex/*.config.toml", ".codex/secrets/")
+# Credential stores that the provider and developer CLIs keep in HOME, which is also the
+# default Docker work dir (HOME=/var/lib/koda/runtime/home). The file commands, the agent
+# file tools and browser_upload refuse them like a blocked extension. An entry ending in
+# "/" is a directory, refused with everything below it wherever it appears in a path; any
+# other entry is a file, matched by the last components of the path, together with the
+# copies of it named by FILEOPS_CREDENTIAL_COPY_SUFFIXES and the temp copies beside it that
+# FILEOPS_CREDENTIAL_TEMP_COPIES names. A file entry's name may hold "*", one or more
+# characters (.codex/*.config.toml), and "?", one ASCII letter or digit; the dirs above it
+# are matched by their names. The names of FILEOPS_CREDENTIAL_NAME_PREFIXES are refused with
+# them. Case-insensitive.
+FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
+    ".ssh/",
+    ".gnupg/",
+    ".aws/",
+    ".azure/",
+    ".config/gcloud/",
+    *(f"{config_dir}/{name}" for config_dir, names in PROVIDER_CLI_CREDENTIAL_FILES.values() for name in names),
+    *CLAUDE_CODE_CREDENTIAL_PATHS,
+    *GEMINI_CLI_CREDENTIAL_PATHS,
+    *CODEX_CREDENTIAL_PATHS,
+    ".config/gh/hosts.yml",
+    ".docker/config.json",
+    ".kube/config",
+    ".git-credentials",
+    ".netrc",
+    "_netrc",
+    ".pgpass",
+    ".npmrc",
+    ".pypirc",
+)
+# The copies Claude Code writes of a credential file, which hold the same secret: the file
+# name followed by one of these and, optionally, a dot and any further suffix. Claude Code keeps
+# <name>.backup beside its global config to recover from, writes <name>.backup.<ts> and
+# <name>.corrupted.<ts> into its config dir's backups/ ($CLAUDE_CONFIG_DIR/backups/ where
+# that is set), and writes each file through <name>.tmp.<hex> (or <name>.tmp.<pid>.<hex>),
+# which a crash mid-write leaves beside it. The CLI itself recognises them by that name,
+# whatever dir holds them. So each file entry of FILEOPS_BLOCKED_CREDENTIAL_PATHS also
+# refuses <entry>.backup, <entry>.backup.1763100000000 and <entry>.tmp.a1b2c3d4, but not
+# <entry>.example or <entry>.backupx. The copies of a file whose extension is blocked
+# (FILEOPS_BLOCKED_EXTENSIONS) are refused as that file is, since their own extension is
+# the copy's suffix: Claude Code's control.key.tmp.a1b2c3d4 and key.pem.tmp.4242, or
+# prod.env.backup. A name whose final extension is a template suffix is a committed template,
+# not a copy, also with a copy suffix before it (.env.backup.example, prod.env.backup.dist).
+# The other provider CLIs name their temp copies otherwise: FILEOPS_CREDENTIAL_TEMP_COPIES,
+# which also names Claude Code's temp copy of the login, for the logout.
+FILEOPS_CREDENTIAL_COPY_SUFFIXES: tuple[str, ...] = (".backup", ".corrupted", ".tmp")
+# The temp copies a provider CLI writes a credential file of PROVIDER_CLI_CREDENTIAL_FILES,
+# GEMINI_CLI_CREDENTIAL_PATHS or CODEX_CREDENTIAL_PATHS through, in the same dir, before it
+# renames the copy over the file: file entry of FILEOPS_BLOCKED_CREDENTIAL_PATHS -> the names
+# of those copies, where "*" stands for one or more characters and "?" for one ASCII letter or
+# digit. A copy holds the same secret, and a CLI killed between the write and the rename (a
+# Koda cancel or timeout, a container restart, OOM) leaves it beside the file, where no CLI
+# ever removes it. As the pinned CLIs (packages/provider-clis) name them: Claude Code 2.1.325
+# writes .credentials.json through .credentials.json.tmp.<hex> (its atomic write; the file
+# layer refuses that name anywhere already, by its .credentials stem); Gemini CLI 0.68.0
+# writes the merged OAuth login, access and refresh token, through
+# .oauth_creds.json.<pid>.<ms>.<n>.tmp on every token refresh (cacheCredentials), and its
+# settings, with the MCP servers' env and headers, through .settings.json.<pid>.<ms>.<n>.tmp
+# (strace of `gemini mcp add`); Codex 0.169.0 writes through Rust tempfiles, whose name is a
+# prefix and six random ASCII letters and digits (.tmpTICjQR, .tmpmcry9f, .auth-wQZHMQ): it
+# replaces auth.json through .auth-<six>, its atomic credential replacement, config.toml,
+# with the MCP servers' env and client secrets, through .tmp<six> (strace of `codex mcp add`)
+# and its gateway OAuth file store through secrets/.tmp<six> (a tempfile it renames over
+# secrets/gateway_oauth.json), and each file of its encrypted secrets store through
+# secrets/.<name>.tmp-<a>-<b>. They write the other files of PROVIDER_CLI_CREDENTIAL_FILES and
+# GEMINI_CLI_CREDENTIAL_PATHS in place. So .gemini/.oauth_creds.json.4242.1763100000000.0.tmp,
+# .gemini/.settings.json.4242.1763100000000.0.tmp, .codex/.auth-wQZHMQ, .codex/.tmpafU0fU and
+# .codex/secrets/.tmpafU0fU are refused as .gemini/oauth_creds.json, .gemini/settings.json,
+# .codex/auth.json, .codex/config.toml and .codex/secrets/gateway_oauth.json are, but not in
+# another dir, and .gemini/.oauth_creds.json.bak, .codex/auth-x, .codex/.auth-x.example and
+# .codex/.tmpl are not. The file layer compares them case-insensitively, like the entries.
+# Disconnecting a provider deletes the copies of each file it deletes, beside it, by these
+# names exactly as written (koda/utils/files.py::credential_temp_copies), and no other file:
+# the copies of the settings it keeps stay with them.
+FILEOPS_CREDENTIAL_TEMP_COPIES: dict[str, tuple[str, ...]] = {
+    ".claude/.credentials.json": (".credentials.json.tmp.*",),
+    ".gemini/oauth_creds.json": (".oauth_creds.json.*.tmp",),
+    ".gemini/settings.json": (".settings.json.*.tmp",),
+    ".codex/auth.json": (".auth-??????",),
+    ".codex/config.toml": (".tmp??????",),
+    ".codex/secrets/gateway_oauth.json": (".tmp??????",),
+    ".codex/secrets/codex_auth.age": (".codex_auth.age.tmp-*",),
+    ".codex/secrets/mcp_oauth.age": (".mcp_oauth.age.tmp-*",),
+    ".codex/secrets/gateway_oauth.age": (".gateway_oauth.age.tmp-*",),
+}
+# Credential files that a CLI names with a fixed prefix and a further suffix, refused by
+# that name wherever they sit: a file whose name is one of these, or one of these followed
+# by a dot and any further suffix. Claude Code keeps a remote session's ingress token as
+# .claude/remote/.session_ingress_token, and a self-hosted runner writes each session's as
+# .session_ingress_token.e<epoch>, through .session_ingress_token.e<epoch>.tmp.<n>, into that
+# session's config dir below the runner's base dir (<base-dir>/_sessions/<id>.claude-config/,
+# wherever --base-dir puts it). The CLI itself treats every name with this prefix as a
+# credential. .session_ingress_tokens and .session_ingress_token_old are not refused.
+FILEOPS_CREDENTIAL_NAME_PREFIXES: tuple[str, ...] = (".session_ingress_token",)
 BLOCKED_SHELL_PATTERN: re.Pattern = re.compile(
     # Destructive filesystem operations
     r"rm\s+-rf|mkfs|dd\s+if=|shutdown|reboot|chmod\s+777\s+/"

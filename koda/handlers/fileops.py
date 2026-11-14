@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 
 from koda.utils.approval import with_approval
 from koda.utils.command_helpers import authorized
-from koda.utils.files import safe_resolve
+from koda.utils.files import NO_WORK_DIR_MESSAGE, file_command_path, file_command_work_dir, resolve_work_path
 from koda.utils.messaging import send_long_message
 
 
@@ -18,9 +18,12 @@ async def cmd_write(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Usage: /write <path> <content>")
         return
 
-    path_arg = args[0]
+    path_arg = file_command_path("write", args)
     content = " ".join(args[1:])
-    work_dir = context.user_data["work_dir"]
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
+        return
 
     from koda.utils.files import safe_write
 
@@ -37,14 +40,18 @@ async def cmd_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Usage: /edit <path> <content to append>")
         return
 
-    path_arg = args[0]
+    path_arg = file_command_path("edit", args)
     content = " ".join(args[1:])
-    work_dir = context.user_data["work_dir"]
-
-    target = safe_resolve(path_arg, work_dir)
-    if target is None:
-        await update.message.reply_text("Access denied: path is outside working directory.")
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
         return
+
+    resolution = resolve_work_path(path_arg, work_dir, deny_sensitive_dirs=False)
+    if resolution.path is None:
+        await update.message.reply_text(resolution.error or "Access denied.")
+        return
+    target = resolution.path
 
     if not target.exists():
         await update.message.reply_text(f"File not found: {path_arg}")
@@ -62,12 +69,15 @@ async def cmd_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 @with_approval("rm")
 async def cmd_rm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Delete a file: /rm <path>."""
-    path_arg = " ".join(context.args) if context.args else ""
+    path_arg = file_command_path("rm", context.args)
     if not path_arg:
         await update.message.reply_text("Usage: /rm <path>")
         return
 
-    work_dir = context.user_data["work_dir"]
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
+        return
 
     from koda.utils.files import safe_delete
 
@@ -79,16 +89,20 @@ async def cmd_rm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 @with_approval("mkdir")
 async def cmd_mkdir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Create a directory: /mkdir <path>."""
-    path_arg = " ".join(context.args) if context.args else ""
+    path_arg = file_command_path("mkdir", context.args)
     if not path_arg:
         await update.message.reply_text("Usage: /mkdir <path>")
         return
 
-    work_dir = context.user_data["work_dir"]
-    target = safe_resolve(path_arg, work_dir)
-    if target is None:
-        await update.message.reply_text("Access denied: path is outside working directory.")
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
         return
+    resolution = resolve_work_path(path_arg, work_dir, deny_sensitive_dirs=False)
+    if resolution.path is None:
+        await update.message.reply_text(resolution.error or "Access denied.")
+        return
+    target = resolution.path
 
     if target.exists():
         await update.message.reply_text(f"Already exists: {path_arg}")
@@ -105,12 +119,15 @@ async def cmd_mkdir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 @with_approval("cat")
 async def cmd_cat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Read and display file contents: /cat <path>."""
-    path_arg = " ".join(context.args) if context.args else ""
+    path_arg = file_command_path("cat", context.args)
     if not path_arg:
         await update.message.reply_text("Usage: /cat <path>")
         return
 
-    work_dir = context.user_data["work_dir"]
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
+        return
 
     from koda.utils.files import safe_read
 

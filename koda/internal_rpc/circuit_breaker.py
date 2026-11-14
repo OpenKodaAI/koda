@@ -111,6 +111,31 @@ class CircuitBreaker:
         cool-down expires, exactly one half-open call is permitted —
         success closes the breaker, failure re-opens it.
         """
+        return await self._call(fn, args, kwargs, is_expected=None)
+
+    async def run_allowing(
+        self,
+        is_expected: Callable[[Exception], bool],
+        fn: Callable[..., Awaitable[T]],
+        *args: Any,
+        **kwargs: Any,
+    ) -> T:
+        """Like :meth:`run`, for a call that can fail without the upstream being at fault.
+
+        An exception for which ``is_expected`` returns true is the call's own
+        outcome, such as the upstream refusing a command it will not run. It
+        still propagates, but counts neither as a failure nor as a success.
+        """
+        return await self._call(fn, args, kwargs, is_expected=is_expected)
+
+    async def _call(
+        self,
+        fn: Callable[..., Awaitable[T]],
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+        *,
+        is_expected: Callable[[Exception], bool] | None,
+    ) -> T:
         if self._state.state is State.OPEN:
             await self._maybe_transition_after_cooldown()
             if self._state.state is State.OPEN:
@@ -120,7 +145,9 @@ class CircuitBreaker:
                 )
         try:
             result = await fn(*args, **kwargs)
-        except Exception:
+        except Exception as exc:
+            if is_expected is not None and is_expected(exc):
+                raise
             await self._record_failure()
             raise
         else:

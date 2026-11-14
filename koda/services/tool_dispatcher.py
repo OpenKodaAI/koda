@@ -12,7 +12,10 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from koda.agent_contract import (
+    FILE_TOOL_PATH_PARAMS,
+    WORK_DIR_DEFAULT_PATH_TOOLS,
     evaluate_integration_grant,
+    is_known_dispatcher_tool,
     resolve_integration_action,
 )
 from koda.config import (
@@ -21,7 +24,6 @@ from koda.config import (
     ALLOWED_GIT_CMDS,
     BROWSER_FEATURES_ENABLED,
     BROWSER_TOOL_TIMEOUT,
-    FILEOPS_BLOCKED_EXTENSIONS,
     FILEOPS_ENABLED,
     FILEOPS_MAX_READ_SIZE,
     GIT_ENABLED,
@@ -39,7 +41,19 @@ from koda.knowledge.types import EffectiveExecutionPolicy
 from koda.logging_config import get_logger
 from koda.services import blocked_patterns as _blocked_patterns_module
 from koda.services.execution_policy import PolicyEvaluation, evaluate_execution_policy
-from koda.utils.workdir import validate_work_dir
+from koda.utils.files import (
+    PathResolution,
+    blocked_credential_path,
+    linked_landing_refusal,
+    move_landing,
+    planted_secret_refusal,
+    protected_move_refusal,
+    resolve_work_path,
+    secret_file_refusal,
+    secret_move_refusal,
+    work_path_location,
+)
+from koda.utils.workdir import SensitiveDirs, validate_work_dir
 
 log = get_logger(__name__)
 
@@ -239,9 +253,13 @@ def _configured_resource_access_policy() -> dict[str, object]:
 
 
 def is_known_tool(tool_id: str) -> bool:
-    if tool_id in _TOOL_HANDLERS:
-        return True
-    if tool_id.startswith("mcp_"):
+    """Return whether the policy gate treats ``tool_id`` as a known tool.
+
+    Handler and MCP tools are decided by ``is_known_dispatcher_tool``, the same
+    predicate the control-plane simulator uses. This worker also accepts the
+    tools in its plugin registry.
+    """
+    if is_known_dispatcher_tool(tool_id):
         return True
     if PLUGIN_SYSTEM_ENABLED:
         try:
@@ -468,8 +486,33 @@ def _record_runtime_integration_health(
         return
 
 
+def _file_tool_policy_params(tool: str, params: dict[str, object], work_dir: str) -> dict[str, object]:
+    """Show the policy and grant gate the paths a file tool will touch, as the commands do.
+
+    The approval layer gives the policy the resolved path of ``/cat``, ``/write`` and the
+    other file commands, so each file-tool path param is replaced the same way, by the
+    absolute, symlink-resolved path it names under the work dir (``src/main.py`` and
+    ``<work>/src/../src/main.py`` both become ``<work>/src/main.py``), for each param of
+    ``koda.agent_contract.FILE_TOOL_PATH_PARAMS``. The tools of
+    ``koda.agent_contract.WORK_DIR_DEFAULT_PATH_TOOLS`` (``file_list``, ``file_search`` and
+    ``file_grep``) read the work dir when ``path`` is omitted, so they are checked against
+    it. The handlers still apply :func:`resolve_work_path` themselves.
+    """
+    canonical = dict(params)
+    if tool in WORK_DIR_DEFAULT_PATH_TOOLS and "path" not in canonical:
+        canonical["path"] = work_dir
+    for key in FILE_TOOL_PATH_PARAMS:
+        value = canonical.get(key)
+        if isinstance(value, str) and value.strip():
+            with contextlib.suppress(OSError, ValueError):
+                canonical[key] = work_path_location(value, work_dir)
+    return canonical
+
+
 def _policy_params_for_call(call: AgentToolCall, ctx: ToolContext) -> dict[str, object]:
     policy_params: dict[str, object] = dict(call.params)
+    if call.tool.startswith("file_"):
+        policy_params = _file_tool_policy_params(call.tool, policy_params, ctx.work_dir)
     if call.tool.startswith("browser_"):
         try:
             from koda.services.browser_manager import browser_manager
@@ -1948,9 +1991,20 @@ async def _handle_browser_upload(params: dict, ctx: ToolContext) -> AgentToolRes
         return AgentToolResult(tool="browser_upload", success=False, output="Missing required param: 'file_path'.")
     if not selector:
         selector = 'input[type="file"]'
+    # The file the page receives follows the shared path policy: relative to the work dir,
+    # inside it, and never a secret file such as .env or a file in the control-plane state
+    # dir. Like the file commands, uploads skip the SENSITIVE_DIRS check for the paths inside
+    # the work dir and keep their reach, anything else inside it; unlike them, a work dir
+    # that itself resolves into a sensitive directory it is not waived for (one swapped for
+    # a symlink into /etc) is refused.
+    resolution = _resolve_file_path(file_path, ctx.work_dir, deny_sensitive_dirs=False, deny_sensitive_work_dir=True)
+    if resolution.path is None:
+        return AgentToolResult(tool="browser_upload", success=False, output=resolution.error or "Access denied.")
     from koda.services.browser_manager import browser_manager
 
-    result = await browser_manager.upload_file(_browser_scope_id(ctx), selector, file_path, allowed_root=ctx.work_dir)
+    result = await browser_manager.upload_file(
+        _browser_scope_id(ctx), selector, str(resolution.path), allowed_root=ctx.work_dir
+    )
     success = not result.startswith("Error")
     return AgentToolResult(tool="browser_upload", success=success, output=result)
 
@@ -2386,25 +2440,22 @@ async def _check_fileops_available(tool: str) -> AgentToolResult | None:
     return None
 
 
-def _validate_file_path(path: str, work_dir: str) -> str | None:
-    """Validate file path is within work_dir and not a sensitive file. Returns error string or None."""
-    import os
-
-    if not path:
-        return "Missing required param: 'path'."
-    resolved = os.path.realpath(os.path.expanduser(path))
-    work_resolved = os.path.realpath(work_dir)
-    if not resolved.startswith(work_resolved + os.sep) and resolved != work_resolved:
-        return f"Path '{path}' is outside the working directory."
-    from koda.config import SENSITIVE_DIRS
-
-    for sensitive in SENSITIVE_DIRS:
-        if resolved.startswith(sensitive):
-            return f"Access to '{sensitive}' is not allowed."
-    _, ext = os.path.splitext(resolved)
-    if ext.lower() in FILEOPS_BLOCKED_EXTENSIONS:
-        return f"Files with extension '{ext}' are blocked for safety."
-    return None
+def _resolve_file_path(
+    path: Any,
+    work_dir: str,
+    *,
+    deny_sensitive_dirs: bool = True,
+    deny_sensitive_work_dir: bool = False,
+) -> PathResolution:
+    """Resolve a file-tool path with the policy the file commands use (relative to ``work_dir``)."""
+    if not isinstance(path, str) or not path.strip():
+        return PathResolution(None, "path_missing", "Missing required param: 'path'.")
+    return resolve_work_path(
+        path,
+        work_dir,
+        deny_sensitive_dirs=deny_sensitive_dirs,
+        deny_sensitive_work_dir=deny_sensitive_work_dir,
+    )
 
 
 async def _handle_file_read(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -2412,12 +2463,12 @@ async def _handle_file_read(params: dict, ctx: ToolContext) -> AgentToolResult:
     if err:
         return err
     path = params.get("path", "")
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_read", success=False, output=path_err)
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_read", success=False, output=resolution.error or "Access denied.")
     import os
 
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolved = str(resolution.path)
     if not os.path.isfile(resolved):
         return AgentToolResult(tool="file_read", success=False, output=f"File not found: {path}")
     try:
@@ -2452,12 +2503,12 @@ async def _handle_file_write(params: dict, ctx: ToolContext) -> AgentToolResult:
     content = params.get("content")
     if content is None:
         return AgentToolResult(tool="file_write", success=False, output="Missing required param: 'content'.")
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_write", success=False, output=path_err)
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_write", success=False, output=resolution.error or "Access denied.")
     import os
 
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolved = str(resolution.path)
     try:
         os.makedirs(os.path.dirname(resolved), exist_ok=True)
         with open(resolved, "w") as f:
@@ -2477,12 +2528,12 @@ async def _handle_file_edit(params: dict, ctx: ToolContext) -> AgentToolResult:
     new_string = params.get("new_string", "")
     if not old_string:
         return AgentToolResult(tool="file_edit", success=False, output="Missing required param: 'old_string'.")
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_edit", success=False, output=path_err)
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_edit", success=False, output=resolution.error or "Access denied.")
     import os
 
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolved = str(resolution.path)
     if not os.path.isfile(resolved):
         return AgentToolResult(tool="file_edit", success=False, output=f"File not found: {path}")
     try:
@@ -2517,10 +2568,10 @@ async def _handle_file_list(params: dict, ctx: ToolContext) -> AgentToolResult:
     import os
 
     path = params.get("path", ctx.work_dir)
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_list", success=False, output=path_err)
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_list", success=False, output=resolution.error or "Access denied.")
+    resolved = str(resolution.path)
     if not os.path.isdir(resolved):
         return AgentToolResult(tool="file_list", success=False, output=f"Not a directory: {path}")
     try:
@@ -2542,6 +2593,26 @@ async def _handle_file_list(params: dict, ctx: ToolContext) -> AgentToolResult:
         return AgentToolResult(tool="file_list", success=False, output=f"Error listing directory: {e}")
 
 
+def _searchable_subdirs(root: str, dirs: list[str], sensitive_dirs: SensitiveDirs) -> list[str]:
+    """Return the subdirectories of ``root`` that ``file_search`` and ``file_grep`` descend into.
+
+    Hidden directories are skipped, and so is every directory the file layer refuses to
+    read: one inside a sensitive directory that is not waived for the work dir or inside a
+    protected directory (``sensitive_dirs``, see :func:`koda.utils.workdir.protected_dirs`),
+    and a credential-store directory (:func:`blocked_credential_path`). So neither tool
+    names or reads a file that ``file_list`` and ``file_read`` would refuse to show.
+    """
+    import os
+
+    return [
+        name
+        for name in dirs
+        if not name.startswith(".")
+        and sensitive_dirs.containing(os.path.join(root, name)) is None
+        and blocked_credential_path(os.path.join(root, name)) is None
+    ]
+
+
 async def _handle_file_search(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_fileops_available("file_search")
     if err:
@@ -2553,14 +2624,15 @@ async def _handle_file_search(params: dict, ctx: ToolContext) -> AgentToolResult
     if not pattern:
         return AgentToolResult(tool="file_search", success=False, output="Missing required param: 'pattern'.")
     search_path = params.get("path", ctx.work_dir)
-    path_err = _validate_file_path(search_path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_search", success=False, output=path_err)
-    resolved = os.path.realpath(os.path.expanduser(search_path))
+    resolution = _resolve_file_path(search_path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_search", success=False, output=resolution.error or "Access denied.")
+    resolved = str(resolution.path)
     try:
         matches: list[str] = []
+        sensitive_dirs = SensitiveDirs.for_work_dir(ctx.work_dir)
         for root, dirs, files in os.walk(resolved):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            dirs[:] = _searchable_subdirs(root, dirs, sensitive_dirs)
             for name in files:
                 if fnmatch.fnmatch(name, pattern):
                     rel = os.path.relpath(os.path.join(root, name), resolved)
@@ -2589,10 +2661,10 @@ async def _handle_file_grep(params: dict, ctx: ToolContext) -> AgentToolResult:
     if not pattern:
         return AgentToolResult(tool="file_grep", success=False, output="Missing required param: 'pattern'.")
     search_path = params.get("path", ctx.work_dir)
-    path_err = _validate_file_path(search_path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_grep", success=False, output=path_err)
-    resolved = os.path.realpath(os.path.expanduser(search_path))
+    resolution = _resolve_file_path(search_path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_grep", success=False, output=resolution.error or "Access denied.")
+    resolved = str(resolution.path)
     try:
         regex = re_mod.compile(pattern, re_mod.IGNORECASE if params.get("ignore_case") else 0)
     except re_mod.error as e:
@@ -2601,12 +2673,27 @@ async def _handle_file_grep(params: dict, ctx: ToolContext) -> AgentToolResult:
         glob_filter = params.get("glob", "*")
         results: list[str] = []
         total_matches = 0
+        # Every file read follows the file-tool policy and stays inside the search root,
+        # which is resolved and checked above (by a path-scoped grant too). os.walk does not
+        # descend into directory symlinks, so below it a regular file is inside the root and
+        # only the secret-file policy is left to check; the directories file_search skips are
+        # pruned (_searchable_subdirs). A file symlink goes through the full resolver in the
+        # work dir and must also land inside the search root, so a link to a file elsewhere
+        # in the work dir is skipped.
+        sensitive_dirs = SensitiveDirs.for_work_dir(ctx.work_dir)
+        search_root = resolved.rstrip(os.sep) + os.sep
         for root, dirs, files in os.walk(resolved):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            dirs[:] = _searchable_subdirs(root, dirs, sensitive_dirs)
             for name in files:
                 if not fnmatch.fnmatch(name, glob_filter):
                     continue
                 fpath = os.path.join(root, name)
+                if secret_file_refusal(fpath) is not None:
+                    continue
+                if os.path.islink(fpath):
+                    target = resolve_work_path(fpath, ctx.work_dir).path
+                    if target is None or not str(target).startswith(search_root):
+                        continue
                 rel = os.path.relpath(fpath, resolved)
                 try:
                     with open(fpath, errors="replace") as f:
@@ -2637,10 +2724,10 @@ async def _handle_file_delete(params: dict, ctx: ToolContext) -> AgentToolResult
     import os
 
     path = params.get("path", "")
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_delete", success=False, output=path_err)
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_delete", success=False, output=resolution.error or "Access denied.")
+    resolved = str(resolution.path)
     if not os.path.exists(resolved):
         return AgentToolResult(tool="file_delete", success=False, output=f"File not found: {path}")
     if os.path.isdir(resolved):
@@ -2665,16 +2752,34 @@ async def _handle_file_move(params: dict, ctx: ToolContext) -> AgentToolResult:
         return AgentToolResult(
             tool="file_move", success=False, output="Missing required params: 'source' and 'destination'."
         )
-    src_err = _validate_file_path(source, ctx.work_dir)
-    if src_err:
-        return AgentToolResult(tool="file_move", success=False, output=src_err)
-    dst_err = _validate_file_path(destination, ctx.work_dir)
-    if dst_err:
-        return AgentToolResult(tool="file_move", success=False, output=dst_err)
-    resolved_src = os.path.realpath(os.path.expanduser(source))
-    resolved_dst = os.path.realpath(os.path.expanduser(destination))
+    src_resolution = _resolve_file_path(source, ctx.work_dir)
+    if src_resolution.path is None:
+        return AgentToolResult(tool="file_move", success=False, output=src_resolution.error or "Access denied.")
+    dst_resolution = _resolve_file_path(destination, ctx.work_dir)
+    if dst_resolution.path is None:
+        return AgentToolResult(tool="file_move", success=False, output=dst_resolution.error or "Access denied.")
+    resolved_src = str(src_resolution.path)
+    resolved_dst = str(dst_resolution.path)
     if not os.path.exists(resolved_src):
         return AgentToolResult(tool="file_move", success=False, output=f"Source not found: {source}")
+    # shutil.move puts the source inside an existing destination directory.
+    landing = move_landing(resolved_src, resolved_dst)
+    link_refusal = linked_landing_refusal(landing)
+    if link_refusal is not None:
+        _audit_blocked("file_move", "linked_landing", user_id=ctx.user_id)
+        return AgentToolResult(tool="file_move", success=False, output=f"Access denied: {link_refusal}.")
+    protected_refusal = protected_move_refusal(resolved_src, landing)
+    if protected_refusal is not None:
+        _audit_blocked("file_move", "protected_dir_move", user_id=ctx.user_id)
+        return AgentToolResult(tool="file_move", success=False, output=f"Access denied: {protected_refusal}.")
+    move_refusal = secret_move_refusal(resolved_src, landing)
+    if move_refusal is not None:
+        _audit_blocked("file_move", "credential_store_rename", user_id=ctx.user_id)
+        return AgentToolResult(tool="file_move", success=False, output=f"Access denied: {move_refusal}.")
+    plant_refusal = planted_secret_refusal(resolved_src, landing)
+    if plant_refusal is not None:
+        _audit_blocked("file_move", "credential_store_plant", user_id=ctx.user_id)
+        return AgentToolResult(tool="file_move", success=False, output=f"Access denied: {plant_refusal}.")
     try:
         os.makedirs(os.path.dirname(resolved_dst), exist_ok=True)
         shutil.move(resolved_src, resolved_dst)
@@ -2692,10 +2797,10 @@ async def _handle_file_info(params: dict, ctx: ToolContext) -> AgentToolResult:
     from datetime import datetime as _datetime
 
     path = params.get("path", "")
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_info", success=False, output=path_err)
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_info", success=False, output=resolution.error or "Access denied.")
+    resolved = str(resolution.path)
     if not os.path.exists(resolved):
         return AgentToolResult(tool="file_info", success=False, output=f"Not found: {path}")
     try:
@@ -2727,15 +2832,8 @@ async def _check_shell_available(tool: str) -> AgentToolResult | None:
     return None
 
 
-async def _handle_shell_execute(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_shell_available("shell_execute")
-    if err:
-        return err
-    command = params.get("command", "")
-    if not command:
-        return AgentToolResult(tool="shell_execute", success=False, output="Missing required param: 'command'.")
-
-    # Token-level command blocking (defense-in-depth)
+def _blocked_shell_token(tool: str, command: str, ctx: ToolContext) -> AgentToolResult | None:
+    """Token-level command blocking (defense-in-depth), shared by shell_execute and shell_bg."""
     from koda.config import BLOCKED_COMMAND_TOKENS
 
     try:
@@ -2745,9 +2843,9 @@ async def _handle_shell_execute(params: dict, ctx: ToolContext) -> AgentToolResu
         for token in tokens:
             base = token.rsplit("/", 1)[-1]  # handle absolute paths like /usr/bin/sudo
             if base.lower() in BLOCKED_COMMAND_TOKENS:
-                _audit_blocked("shell_execute", f"blocked_command_token:{base}", user_id=ctx.user_id)
+                _audit_blocked(tool, f"blocked_command_token:{base}", user_id=ctx.user_id)
                 return AgentToolResult(
-                    tool="shell_execute",
+                    tool=tool,
                     success=False,
                     output=f"Command blocked: '{base}' is not allowed.",
                     metadata={"category": "shell", "blocked": True},
@@ -2756,6 +2854,19 @@ async def _handle_shell_execute(params: dict, ctx: ToolContext) -> AgentToolResu
         # shlex parse error on malformed input — regex check still applies.
         # Log for operator visibility so potential evasion attempts are detectable.
         log.warning("shell_token_check_shlex_error", command=command[:200], user_id=ctx.user_id)
+    return None
+
+
+async def _handle_shell_execute(params: dict, ctx: ToolContext) -> AgentToolResult:
+    err = await _check_shell_available("shell_execute")
+    if err:
+        return err
+    command = params.get("command", "")
+    if not command:
+        return AgentToolResult(tool="shell_execute", success=False, output="Missing required param: 'command'.")
+    blocked = _blocked_shell_token("shell_execute", command, ctx)
+    if blocked:
+        return blocked
 
     timeout = int(params.get("timeout", SHELL_TIMEOUT))
     timeout = min(max(1, timeout), 300)  # cap at 5 minutes
@@ -2773,10 +2884,14 @@ async def _handle_shell_bg(params: dict, ctx: ToolContext) -> AgentToolResult:
     command = params.get("command", "")
     if not command:
         return AgentToolResult(tool="shell_bg", success=False, output="Missing required param: 'command'.")
+    blocked = _blocked_shell_token("shell_bg", command, ctx)
+    if blocked:
+        return blocked
     timeout = int(params.get("timeout", SHELL_TIMEOUT))
     timeout = min(max(1, timeout), 600)
     from koda.services.shell_tools import bg_process_manager
 
+    # Same approval gate, command guard and runtime-kernel path as shell_execute.
     handle_id, error = await bg_process_manager.start(command, ctx.work_dir, ctx.user_id, timeout=timeout)
     if error:
         return AgentToolResult(tool="shell_bg", success=False, output=error)
@@ -2859,11 +2974,41 @@ async def _check_git_available(tool: str) -> AgentToolResult | None:
     return None
 
 
+# Options that write files (``diff``/``log --output``) or run a command (``push --receive-pack``/``--exec``,
+# ``pull``/``fetch --upload-pack``). git also accepts unambiguous abbreviations such as ``--outp`` or ``--receive``.
+_GIT_DENIED_OPTIONS = ("output", "receive-pack", "upload-pack", "exec")
+_GIT_END_OF_OPTIONS = "--end-of-options"
+
+
+def _is_denied_git_option(arg: str) -> bool:
+    if not arg.startswith("--"):
+        return False
+    name = arg[2:].split("=", 1)[0]
+    return bool(name) and any(denied.startswith(name) or name.startswith(denied) for denied in _GIT_DENIED_OPTIONS)
+
+
 def _validate_git_args(args: list[str]) -> str | None:
-    """Validate git arguments for injection. Returns error or None."""
+    """Validate git arguments for injection. Returns error or None.
+
+    The handlers reject model-supplied refs, branches, remotes, targets and start points that start
+    with ``-`` and pass them after ``--end-of-options`` where git honours it. As a backstop, the denied
+    options are refused wherever they appear: ``git pull`` hands its operands to ``git fetch`` without
+    the marker, so a position after it is no guarantee.
+    """
     for arg in args:
         if GIT_META_CHARS.search(arg):
             return "Blocked: argument contains disallowed characters."
+        if _is_denied_git_option(arg):
+            return f"Blocked: git option '{arg.split('=', 1)[0]}' is not allowed."
+    return None
+
+
+def _git_leading_dash_error(tool: str, params: dict, *names: str) -> AgentToolResult | None:
+    """Reject model-supplied values that git would parse as options."""
+    for name in names:
+        value = params.get(name)
+        if value and str(value).startswith("-"):
+            return AgentToolResult(tool=tool, success=False, output=f"Blocked: '{name}' must not start with '-'.")
     return None
 
 
@@ -2911,18 +3056,18 @@ async def _handle_git_status(params: dict, ctx: ToolContext) -> AgentToolResult:
 
 
 async def _handle_git_diff(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_git_available("git_diff")
+    err = await _check_git_available("git_diff") or _git_leading_dash_error("git_diff", params, "ref")
     if err:
         return err
     args: list[str] = []
     if params.get("staged"):
         args.append("--cached")
-    if params.get("ref"):
-        args.append(str(params["ref"]))
-    if params.get("path"):
-        args.extend(["--", str(params["path"])])
     if params.get("stat"):
         args.append("--stat")
+    if params.get("ref"):
+        args.extend([_GIT_END_OF_OPTIONS, str(params["ref"])])
+    if params.get("path"):
+        args.extend(["--", str(params["path"])])
     return await _run_git("diff", args, ctx)
 
 
@@ -2949,20 +3094,23 @@ async def _handle_git_commit(params: dict, ctx: ToolContext) -> AgentToolResult:
     message = params.get("message", "")
     if not message:
         return AgentToolResult(tool="git_commit", success=False, output="Missing required param: 'message'.")
-    args = ["-m", message]
+    # Attached to the option, so the text is never read as an option or matched against the denied ones.
+    args = [f"--message={message}"]
     if params.get("all"):
         args.insert(0, "-a")
     return await _run_git("commit", args, ctx)
 
 
 async def _handle_git_branch(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_git_available("git_branch")
+    err = await _check_git_available("git_branch") or _git_leading_dash_error(
+        "git_branch", params, "name", "start_point"
+    )
     if err:
         return err
     name = params.get("name")
     if name:
         # Create branch
-        args = [str(name)]
+        args = [_GIT_END_OF_OPTIONS, str(name)]
         if params.get("start_point"):
             args.append(str(params["start_point"]))
         return await _run_git("branch", args, ctx)
@@ -2974,7 +3122,10 @@ async def _handle_git_branch(params: dict, ctx: ToolContext) -> AgentToolResult:
 
 
 async def _handle_git_checkout(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_git_available("git_checkout")
+    # git checkout reads --end-of-options as a pathspec, so the leading-dash check is its guard.
+    err = await _check_git_available("git_checkout") or _git_leading_dash_error(
+        "git_checkout", params, "target", "start_point"
+    )
     if err:
         return err
     target = params.get("target", "")
@@ -2993,10 +3144,10 @@ async def _handle_git_checkout(params: dict, ctx: ToolContext) -> AgentToolResul
 
 
 async def _handle_git_push(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_git_available("git_push")
+    err = await _check_git_available("git_push") or _git_leading_dash_error("git_push", params, "remote", "branch")
     if err:
         return err
-    args: list[str] = []
+    args: list[str] = [_GIT_END_OF_OPTIONS]
     remote = params.get("remote", "origin")
     branch = params.get("branch")
     args.append(str(remote))
@@ -3008,14 +3159,15 @@ async def _handle_git_push(params: dict, ctx: ToolContext) -> AgentToolResult:
 
 
 async def _handle_git_pull(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_git_available("git_pull")
+    # git pull hands its operands to git fetch without --end-of-options, so the leading-dash check is its guard.
+    err = await _check_git_available("git_pull") or _git_leading_dash_error("git_pull", params, "remote", "branch")
     if err:
         return err
     args: list[str] = []
     remote = params.get("remote")
     branch = params.get("branch")
     if remote:
-        args.append(str(remote))
+        args.extend([_GIT_END_OF_OPTIONS, str(remote)])
         if branch:
             args.append(str(branch))
     if params.get("rebase"):

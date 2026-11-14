@@ -110,14 +110,24 @@ def wait_for_grpc_ready(target: str, *, timeout_s: float = 15.0) -> None:
 
 
 @pytest.fixture
-def spawn_rust_binary(cargo_build_release):
+def spawn_rust_binary(request: pytest.FixtureRequest):
     """Yield a callable ``spawn(crate, env) -> Popen`` that launches
     a Rust binary with the given env vars and waits for the gRPC
-    server to be ready. The process is killed at fixture teardown."""
+    server to be ready. The process is killed at fixture teardown.
+
+    ``binary`` launches an already built binary instead of building
+    the crate with ``cargo_build_release``."""
     procs: list[subprocess.Popen] = []
 
-    def spawn(crate: str, *, env: dict[str, str], grpc_target: str) -> subprocess.Popen:
-        binary = cargo_build_release(crate)
+    def spawn(
+        crate: str,
+        *,
+        env: dict[str, str],
+        grpc_target: str,
+        binary: Path | None = None,
+    ) -> subprocess.Popen:
+        if binary is None:
+            binary = request.getfixturevalue("cargo_build_release")(crate)
         full_env = {**os.environ, **env}
         proc = subprocess.Popen(  # noqa: S603 — local test helper
             [str(binary)],

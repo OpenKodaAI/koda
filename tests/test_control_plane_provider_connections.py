@@ -1915,22 +1915,55 @@ def test_disconnect_runs_the_real_logout_and_removes_the_stored_key(monkeypatch,
     ("provider", "config_dir", "credentials"),
     [
         ("claude", ".claude", [".credentials.json"]),
-        ("codex", ".codex", ["auth.json"]),
-        ("gemini", ".gemini", ["oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json"]),
+        (
+            "codex",
+            ".codex",
+            [
+                "auth.json",
+                ".credentials.json",
+                "secrets/gateway_oauth.json",
+                "secrets/codex_auth.age",
+                "secrets/mcp_oauth.age",
+                "secrets/gateway_oauth.age",
+            ],
+        ),
+        (
+            "gemini",
+            ".gemini",
+            ["oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json", "a2a-oauth-tokens.json"],
+        ),
     ],
 )
 def test_disconnect_removes_only_the_cli_credential_files(monkeypatch, tmp_path, provider, config_dir, credentials):
-    """Review: disconnect emptied the whole CLI folder, which on a native install is the operator's own."""
+    """Review: disconnect emptied the whole CLI folder, which on a native install is the operator's own.
+
+    It deletes the CLIs' sign-in files, as the pinned CLIs name them: Codex's MCP OAuth tokens
+    (``.credentials.json``), its gateway OAuth tokens (``secrets/gateway_oauth.json``, which
+    ``codex logout`` keeps) and the same three in its encrypted secrets store, and Gemini
+    CLI's A2A OAuth tokens beside its MCP ones. The settings and the secrets the operator
+    stored (Gemini's ``settings.json`` and Codex's ``config.toml`` with the MCP servers' env,
+    headers and client secrets, Codex ``secrets/local.age``, Gemini's file keychain) stay.
+    """
     import koda.control_plane.manager as manager_mod
 
     manager, _rows, _meta, secrets, _sessions = _make_manager(monkeypatch)
     monkeypatch.setenv("PATH", str(tmp_path / "no-clis"))
     folder = Path(os.environ["HOME"]) / config_dir
     (folder / "projects" / "demo").mkdir(parents=True)
-    kept = [folder / "settings.json", folder / "CLAUDE.md", folder / "projects" / "demo" / "history.jsonl"]
+    kept = [
+        folder / "settings.json",
+        folder / "config.toml",
+        folder / "CLAUDE.md",
+        folder / "projects" / "demo" / "history.jsonl",
+        folder / "secrets" / "local.age",
+        folder / "secrets" / "gateway_oauth.lock",
+        folder / "gemini-credentials.json",
+    ]
     for path in kept:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("keep")
     for name in credentials:
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
         (folder / name).write_text("token")
     secrets[provider] = "sk-test"
 
@@ -1938,6 +1971,287 @@ def test_disconnect_removes_only_the_cli_credential_files(monkeypatch, tmp_path,
 
     assert [name for name in credentials if (folder / name).exists()] == []
     assert all(path.read_text() == "keep" for path in kept)
+
+
+# The temp copies each pinned CLI writes a credential file of the disconnect list through,
+# beside it, before renaming the copy over it (a CLI killed in between leaves the copy), and
+# names beside them that are no such copy: another file's temp copy, a near miss, a case variant.
+# The temp copies of the settings the disconnect keeps (Codex's config.toml through .tmp<random>,
+# Gemini CLI's settings.json through .settings.json.<pid>.<ms>.<n>.tmp) stay with them: the file
+# layer refuses them, and they hold the operator's settings, not a sign-in.
+_LOGIN_TEMP_COPIES = {
+    "claude": (
+        [".credentials.json.tmp.a1b2c3d4", ".credentials.json.tmp.4242.a1b2c3d4e5f6"],
+        [".claude.json.tmp.a1b2c3d4", ".credentials.json.backup", ".credentials.json.tmp", ".CREDENTIALS.JSON.TMP.A1"],
+    ),
+    "codex": (
+        [
+            ".auth-wQZHMQ",
+            "secrets/.tmpafU0fU",
+            "secrets/.codex_auth.age.tmp-4242-1763100000000",
+            "secrets/.mcp_oauth.age.tmp-4242-1763100000000",
+            "secrets/.gateway_oauth.age.tmp-4242-1763100000000",
+        ],
+        [
+            ".auth-",
+            "auth-wQZHMQ",
+            ".AUTH-WQZHMQ",
+            ".auth-wQZHM",
+            ".auth-wQZHMQ7",
+            ".auth-x.example",
+            ".tmpafU0fU",
+            "secrets/.local.age.tmp-4242-1763100000000",
+            "secrets/.tmp",
+            "secrets/.tmpl",
+            "secrets/.tmp-notes.md",
+            "secrets/.tmpafU0fU7",
+            "secrets/notes.txt",
+        ],
+    ),
+    "gemini": (
+        [".oauth_creds.json.4242.1763100000000.0.tmp", ".oauth_creds.json.1.1763100000000.137.tmp"],
+        [
+            ".oauth_creds.json.4242.bak",
+            ".settings.json.15792.1794689666313.0.tmp",
+            ".google_accounts.json.4242.1763100000000.0.tmp",
+            ".projects.json.4242.tmp",
+            "trustedFolders.json.tmp.f0b6be2a",
+            "gemini-credentials.json",
+        ],
+    ),
+}
+
+
+@pytest.mark.parametrize("moved", [False, True], ids=["in HOME", "where the environment moves the dir"])
+@pytest.mark.parametrize("provider", ["claude", "codex", "gemini"])
+def test_disconnect_removes_the_temp_copies_of_the_files_it_deletes_and_nothing_else(
+    monkeypatch, tmp_path, provider, moved
+):
+    """Review: a login's temp copy, which a CLI killed mid-write leaves, outlived the disconnect.
+
+    The copy holds the same tokens as the login it would have replaced, and no CLI removes it.
+    The disconnect deletes each copy beside each file it deletes, by the exact name the pinned
+    CLI gives it (``koda.config.FILEOPS_CREDENTIAL_TEMP_COPIES``), and every other file stays.
+    """
+    import koda.control_plane.manager as manager_mod
+    from koda.config import PROVIDER_CLI_CONFIG_DIR_ENV_KEYS, PROVIDER_CLI_CREDENTIAL_FILES
+
+    env_key = PROVIDER_CLI_CONFIG_DIR_ENV_KEYS.get(provider)
+    if moved and env_key is None:
+        pytest.skip("this CLI has no config dir variable")
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    monkeypatch.setenv("PATH", str(tmp_path / "no-clis"))
+    folder = Path(os.environ["HOME"]) / PROVIDER_CLI_CREDENTIAL_FILES[provider][0]
+    if moved:
+        assert env_key is not None
+        folder = tmp_path / "moved-config"
+        monkeypatch.setenv(env_key, str(folder))
+    copies, others = _LOGIN_TEMP_COPIES[provider]
+    for name in [*copies, *others]:
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text('{"refresh_token": "1//canary-refresh"}')
+    (folder / "secrets" / ".tmpdIr0a1").mkdir(parents=True)
+
+    manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, provider)
+
+    assert [name for name in copies if (folder / name).exists()] == []
+    assert [name for name in others if not (folder / name).is_file()] == []
+    assert (folder / "secrets" / ".tmpdIr0a1").is_dir()
+
+
+def test_disconnect_deletes_claude_codes_login_file_with_the_mcp_client_secrets_as_its_logout_does(
+    monkeypatch, tmp_path
+):
+    """Claude Code 2.1.325 keeps an MCP server's pre-registered OAuth client secret in its login file.
+
+    ``claude mcp add --client-id X --client-secret`` stores the secret in
+    ``.claude/.credentials.json`` (``mcpOAuthClientConfig.<server>|<hash>.clientSecret``),
+    which signing in again does not give back, and ``claude auth logout`` deletes the whole
+    file. The disconnect deletes it as that logout does, so the operator enters the secret
+    again after reconnecting; the guardrail matrix says so. The MCP server's headers in the
+    global config ``.claude.json`` stay.
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    monkeypatch.setenv("PATH", str(tmp_path / "no-clis"))
+    home = Path(os.environ["HOME"])
+    credentials = home / ".claude" / ".credentials.json"
+    credentials.parent.mkdir(parents=True)
+    credentials.write_text(json.dumps({"mcpOAuthClientConfig": {"cfoo|197b8758861e399c": {"clientSecret": "FAKE-cs"}}}))
+    global_config = home / ".claude.json"
+    global_config.write_text(json.dumps({"mcpServers": {"cfoo": {"headers": {"X-Api-Key": "FAKE-hdr"}}}}))
+
+    manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, "claude")
+
+    assert not credentials.exists()
+    assert json.loads(global_config.read_text())["mcpServers"]["cfoo"]["headers"] == {"X-Api-Key": "FAKE-hdr"}
+
+
+def test_disconnect_removes_the_gemini_sign_ins_from_its_sandbox_runtime_dir(monkeypatch, tmp_path):
+    """Review: inside the macOS seatbelt sandbox the disconnect left three of Gemini CLI's sign-ins behind.
+
+    Under ``SANDBOX=sandbox-exec`` Gemini CLI 0.68.0 keeps its account list and the MCP
+    servers' and A2A agents' OAuth tokens in ``~/.cache/.gemini/`` (its runtime dir) and its
+    OAuth login in ``~/.gemini/``. The disconnect deletes them in both, and keeps the rest
+    of the runtime dir.
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    monkeypatch.setenv("PATH", str(tmp_path / "no-clis"))
+    home = Path(os.environ["HOME"])
+    sign_ins = [
+        ".gemini/oauth_creds.json",
+        ".cache/.gemini/google_accounts.json",
+        ".cache/.gemini/mcp-oauth-tokens.json",
+        ".cache/.gemini/a2a-oauth-tokens.json",
+    ]
+    kept = [".cache/.gemini/installation_id", ".cache/.gemini/trustedFolders.json", ".cache/.gemini/tmp/p/logs.json"]
+    for path in [*sign_ins, *kept]:
+        (home / path).parent.mkdir(parents=True, exist_ok=True)
+        (home / path).write_text('[{"token": {"refreshToken": "1//canary-refresh"}}]')
+
+    manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, "gemini")
+
+    assert [path for path in sign_ins if (home / path).exists()] == []
+    assert [path for path in kept if not (home / path).is_file()] == []
+
+
+# Gemini CLI 0.68.0's encrypted file keychain, as the pinned CLI wrote it with
+# GEMINI_FORCE_ENCRYPTED_FILE_STORAGE=true and no OS keychain, through its own KeychainTokenStorage,
+# MCPOAuthTokenStorage and KeychainService, for the host name and user name below (its key is
+# derived from them). The first holds a fake OAuth login (gemini-cli-oauth/main-account), an
+# MCP server's and an A2A agent's OAuth tokens, an API key, the extension integrity key and an
+# extension's secret setting; the second only the login and the MCP server's tokens.
+_GEMINI_KEYCHAIN_FIXTURES = Path(__file__).parent / "fixtures" / "provider_cli"
+_GEMINI_KEYCHAIN_IDENTITY = ("koda-test-host", "koda")
+
+
+def _decrypt_gemini_keychain(text: str, hostname: str, username: str) -> dict[str, dict[str, str]]:
+    """Decrypt a Gemini CLI file keychain as the pinned CLI does (FileKeychain.decrypt)."""
+    import hashlib
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    iv, tag, encrypted = text.split(":")
+    salt = f"{hostname}-{username}-gemini-cli".encode()
+    key = hashlib.scrypt(b"gemini-cli-oauth", salt=salt, n=16384, r=8, p=1, dklen=32)
+    plain = AESGCM(key).decrypt(bytes.fromhex(iv), bytes.fromhex(encrypted) + bytes.fromhex(tag), None)
+    return cast(dict[str, dict[str, str]], json.loads(plain))
+
+
+def _gemini_keychain(monkeypatch, tmp_path, fixture: str, identity: tuple[str, str]) -> tuple[Any, Path]:
+    import koda.utils.gemini_keychain as keychain_mod
+
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    monkeypatch.setenv("PATH", str(tmp_path / "no-clis"))
+    monkeypatch.setattr(keychain_mod, "current_identity", lambda: identity)
+    keychain = Path(os.environ["HOME"]) / ".gemini" / "gemini-credentials.json"
+    keychain.parent.mkdir(parents=True)
+    keychain.write_text((_GEMINI_KEYCHAIN_FIXTURES / fixture).read_text())
+    keychain.chmod(0o600)
+    return manager, keychain
+
+
+def test_disconnect_removes_the_gemini_sign_ins_from_its_file_keychain_and_keeps_the_rest(monkeypatch, tmp_path):
+    """Review: with encrypted storage on, Gemini CLI stayed signed in after the disconnect.
+
+    With ``GEMINI_FORCE_ENCRYPTED_FILE_STORAGE=true`` (which Gemini CLI also reads from
+    ``~/.gemini/.env``), Gemini CLI 0.68.0 keeps its OAuth login, the MCP servers' and the A2A
+    agents' OAuth tokens in its keychain, and where no OS keychain works, as in Docker, that is
+    the encrypted file ``.gemini/gemini-credentials.json``, their only copy. The disconnect
+    removes those entries (the services ``gemini-cli-oauth`` and ``gemini-cli-a2a``), as it
+    deletes ``oauth_creds.json``, ``mcp-oauth-tokens.json`` and ``a2a-oauth-tokens.json`` in
+    the plain-file mode, and keeps the rest (an API key entered in the CLI, the extension
+    integrity key, the extensions' secret settings), encrypted again under the same key and
+    still readable only by the owner.
+    """
+    import stat
+
+    import koda.control_plane.manager as manager_mod
+
+    manager, keychain = _gemini_keychain(
+        monkeypatch, tmp_path, "gemini-0.68.0-gemini-credentials.json", _GEMINI_KEYCHAIN_IDENTITY
+    )
+    before = _decrypt_gemini_keychain(keychain.read_text(), *_GEMINI_KEYCHAIN_IDENTITY)
+    assert sorted(before["gemini-cli-oauth"]) == ["main-account", "probe_mcp"]
+    assert sorted(before["gemini-cli-a2a"]) == ["probe-agent"]
+
+    manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, "gemini")
+
+    after = _decrypt_gemini_keychain(keychain.read_text(), *_GEMINI_KEYCHAIN_IDENTITY)
+    assert sorted(after) == [
+        "Gemini CLI Extensions probe-ext 0123abcd",
+        "gemini-cli-api-key",
+        "gemini-cli-extension-integrity",
+    ]
+    assert after == {service: before[service] for service in after}
+    assert stat.S_IMODE(keychain.stat().st_mode) == 0o600
+    assert sorted(path.name for path in keychain.parent.iterdir()) == ["gemini-credentials.json"]
+
+
+def test_disconnect_never_rewrites_a_gemini_file_keychain_in_place(monkeypatch, tmp_path):
+    """Review: no test held the disconnect to its atomic rewrite of the keychain.
+
+    The keychain is the only copy of the API key entered in the CLI, the extensions' secrets
+    and the extension integrity key. Written in place, a Koda killed mid-write would leave a
+    truncated file, which the CLI refuses to open ("Corrupted credentials file"), and every
+    one of them would be lost. Written to a complete copy that is then renamed over it, the
+    old file is never touched: a reader that opened the keychain before the disconnect reads
+    all of the old keychain to the end, and the path then names another file, which holds
+    the rest of the keychain.
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager, keychain = _gemini_keychain(
+        monkeypatch, tmp_path, "gemini-0.68.0-gemini-credentials.json", _GEMINI_KEYCHAIN_IDENTITY
+    )
+    with keychain.open("rb") as before:
+        written = before.read()
+        old_file = os.fstat(before.fileno())
+
+        manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, "gemini")
+
+        before.seek(0)
+        assert before.read() == written
+        assert os.fstat(before.fileno()).st_size == old_file.st_size
+    new_file = keychain.stat()
+    assert (new_file.st_dev, new_file.st_ino) != (old_file.st_dev, old_file.st_ino)
+    after = _decrypt_gemini_keychain(keychain.read_text(), *_GEMINI_KEYCHAIN_IDENTITY)
+    assert "gemini-cli-oauth" not in after
+    assert "gemini-cli-api-key" in after
+    assert sorted(path.name for path in keychain.parent.iterdir()) == ["gemini-credentials.json"]
+
+
+def test_disconnect_deletes_a_gemini_file_keychain_that_held_only_sign_ins(monkeypatch, tmp_path):
+    """A file keychain left with no entry is deleted, as the pinned CLI's FileKeychain.deletePassword does."""
+    import koda.control_plane.manager as manager_mod
+
+    manager, keychain = _gemini_keychain(
+        monkeypatch, tmp_path, "gemini-0.68.0-gemini-credentials-sign-ins-only.json", _GEMINI_KEYCHAIN_IDENTITY
+    )
+    assert sorted(_decrypt_gemini_keychain(keychain.read_text(), *_GEMINI_KEYCHAIN_IDENTITY)) == ["gemini-cli-oauth"]
+
+    manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, "gemini")
+
+    assert not keychain.exists()
+    assert list(keychain.parent.iterdir()) == []
+
+
+def test_disconnect_leaves_a_gemini_file_keychain_it_cannot_decrypt(monkeypatch, tmp_path):
+    """A keychain written on another host or for another user opens for neither Koda nor the CLI: it stays as it is."""
+    import koda.control_plane.manager as manager_mod
+
+    manager, keychain = _gemini_keychain(
+        monkeypatch, tmp_path, "gemini-0.68.0-gemini-credentials.json", ("another-host", "koda")
+    )
+    written = keychain.read_bytes()
+
+    manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, "gemini")
+
+    assert keychain.read_bytes() == written
+    assert sorted(path.name for path in keychain.parent.iterdir()) == ["gemini-credentials.json"]
 
 
 def test_tests_never_see_the_real_home():

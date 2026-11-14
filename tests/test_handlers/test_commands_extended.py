@@ -64,6 +64,17 @@ class TestCmdFile:
         mock_update.message.reply_document.assert_called_once()
 
     @pytest.mark.asyncio
+    async def test_secret_file_refused(self, mock_update, mock_context, tmp_path):
+        (tmp_path / ".env").write_text("TOKEN=canary-secret\n")
+        mock_context.args = [".env"]
+        mock_context.user_data["work_dir"] = str(tmp_path)
+        init_user_data(mock_context.user_data)
+        await cmd_file(mock_update, mock_context)
+        mock_update.message.reply_document.assert_not_called()
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert "blocked" in call_text.lower()
+
+    @pytest.mark.asyncio
     async def test_directory_rejected(self, mock_update, mock_context, tmp_path):
         sub = tmp_path / "subdir"
         sub.mkdir()

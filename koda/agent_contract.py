@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import os
 import re
 import shlex
 from dataclasses import dataclass
@@ -615,6 +616,53 @@ _CORE_TOOL_DEFINITIONS: tuple[CoreToolDefinition, ...] = (
 
 CORE_TOOL_CATALOG: dict[str, CoreToolDefinition] = {definition.id: definition for definition in _CORE_TOOL_DEFINITIONS}
 CORE_TOOL_IDS: tuple[str, ...] = tuple(CORE_TOOL_CATALOG)
+
+# Tools the worker's dispatcher handles that the core catalog does not list.
+_DISPATCHER_ONLY_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "image_generate",
+        "job_update",
+        "request_skill",
+        "squad_artifact_list",
+        "squad_capabilities",
+        "squad_context",
+        "squad_coordinator_demote",
+        "squad_coordinator_elect",
+        "squad_coordinator_get",
+        "squad_dashboard_overview",
+        "squad_inbox_drain",
+        "squad_post",
+        "squad_router_tick",
+        "squad_task_claim",
+        "squad_task_complete",
+        "squad_task_create",
+        "squad_task_escalate",
+        "squad_task_list",
+        "squad_task_update",
+        "squad_telegram_bind",
+        "squad_telegram_binding_get",
+        "squad_telegram_post",
+        "squad_telegram_unbind",
+        "squad_thread_create",
+        "squad_thread_history",
+        "squad_thread_overview",
+    }
+)
+# Every tool id with a handler in ``koda.services.tool_dispatcher._TOOL_HANDLERS``;
+# tests/test_execution_policy_vectors.py keeps the two equal.
+DISPATCHER_TOOL_IDS: frozenset[str] = frozenset(CORE_TOOL_CATALOG) | _DISPATCHER_ONLY_TOOL_IDS
+
+
+def is_known_dispatcher_tool(tool_id: str) -> bool:
+    """Return whether ``tool_id`` is a known tool without consulting a plugin registry.
+
+    A tool is known when the worker's dispatcher has a handler for it or it is an
+    MCP tool (``mcp_<server>__<tool>``). The worker's ``is_known_tool`` also accepts
+    the tools in its plugin registry. The control-plane simulator cannot see that
+    registry, so it uses this predicate alone and reports plugin tools as unknown.
+    """
+    return tool_id in DISPATCHER_TOOL_IDS or tool_id.startswith("mcp_")
+
 
 _CORE_PROVIDER_DEFINITIONS: tuple[CoreProviderDefinition, ...] = (
     CoreProviderDefinition(
@@ -1246,6 +1294,21 @@ _SCRIPT_LIBRARY_ACTION_LEVELS: dict[str, str] = {
     "delete": "destructive",
     "auto_extract": "write",
 }
+FILE_COMMAND_ACCESS_LEVELS: dict[str, str] = {
+    "cat": "read",
+    "file": "read",
+    "ls": "read",
+    "write": "write",
+    "edit": "write",
+    "mkdir": "write",
+    "rm": "destructive",
+}
+"""Telegram file commands (``/cat``, ``/file``, ``/ls``, ...) as ``fileops.<command>`` actions.
+
+The one list of file commands: the approval gate (``koda.utils.files.FILE_COMMANDS``), the
+``fileops`` action catalog and the paths execution-policy rules evaluate
+(:func:`resolve_action_paths`) all follow it.
+"""
 _CACHE_ACTION_LEVELS: dict[str, str] = {
     "lookup": "read",
     "stats": "read",
@@ -1521,7 +1584,7 @@ def resolve_core_integration_action_catalog() -> dict[str, list[dict[str, Any]]]
         "fileops": _action_catalog(
             "fileops",
             {
-                "fileops.cat": "read",
+                **{f"fileops.{command}": level for command, level in FILE_COMMAND_ACCESS_LEVELS.items()},
                 "fileops.read": "read",
                 "fileops.list": "read",
                 "fileops.search": "read",
@@ -1530,8 +1593,6 @@ def resolve_core_integration_action_catalog() -> dict[str, list[dict[str, Any]]]
                 "fileops.write": "write",
                 "fileops.edit": "write",
                 "fileops.move": "write",
-                "fileops.mkdir": "write",
-                "fileops.rm": "destructive",
                 "fileops.delete": "destructive",
             },
         ),
@@ -1611,17 +1672,76 @@ def _domain_allowed(host: str | None, allowed_domains: list[str]) -> bool:
     return False
 
 
-def _path_allowed(path: str | None, allowed_paths: list[str]) -> bool:
-    normalized_path = str(path or "").strip()
-    if not normalized_path:
+def canonical_grant_path(path: str) -> str | None:
+    """Return ``path`` in the form the file layer acts on it, or None when it cannot be placed.
+
+    ``~`` is expanded, then an absolute path is lexically normalized and symlink-resolved
+    (``os.path.realpath``), as :func:`koda.utils.files.work_path_location` gives the file
+    tools and the file commands their path. A path that is not absolute after ``~``
+    expansion (a relative path, or one with leading whitespace) cannot be placed:
+    resolving it here would join it with the process CWD, not the caller's work dir.
+    """
+    expanded = os.path.expanduser(path)
+    if not os.path.isabs(expanded):
+        return None
+    try:
+        return os.path.realpath(expanded)
+    except (OSError, ValueError):
+        return None
+
+
+def path_in_allowed_paths(path: str | None, allowed_paths: list[str]) -> bool:
+    """Return whether ``path`` is one of ``allowed_paths`` or below one, by path component.
+
+    The one ``allowed_paths`` check for integration grants, shared by the policy gate
+    (:func:`evaluate_integration_grant`) and the Telegram command approval layer. Both
+    sides are compared in canonical form (:func:`canonical_grant_path`), whoever passes the
+    path: the worker hands the grant resolved paths, but the execution-policy simulator
+    evaluates a path as the operator wrote it. So ``<root>/../etc/x`` and a link inside
+    the grant root are compared where they land, an entry written through a symlink (a
+    symlinked project dir, macOS ``/tmp``) still covers the paths below it, and a call
+    path or an entry that is not absolute covers nothing.
+    """
+    call_path = canonical_grant_path(str(path or ""))
+    if call_path is None:
         return False
     for allowed in allowed_paths:
-        candidate = str(allowed or "").strip()
-        if not candidate:
+        candidate = canonical_grant_path(str(allowed or "").strip())
+        if candidate is None:
             continue
-        if normalized_path == candidate or normalized_path.startswith(candidate.rstrip("/") + "/"):
+        if call_path == candidate or call_path.startswith(candidate.rstrip("/") + "/"):
             return True
     return False
+
+
+def given_path(value: object) -> str | None:
+    """Return a path param exactly as given, or None when it is missing or blank.
+
+    The integration grant and the execution policy decide the path the handler acts on,
+    and the handlers do not trim it, so neither is it trimmed here: ``<work>/src `` (its
+    name ends in a space) is a sibling of ``<work>/src``, not that directory. Whitespace
+    only decides whether a path was given at all.
+    """
+    text = str(value or "")
+    return text if text.strip() else None
+
+
+def _grant_scoped_paths(resolution: IntegrationActionResolution, params: dict[str, Any]) -> list[str]:
+    """Return every path an action touches that a grant's ``allowed_paths`` must cover.
+
+    For a ``file_*`` tool these are the paths the execution policy evaluates
+    (:func:`resolve_action_paths`): each path param it is given
+    (:data:`FILE_TOOL_PATH_PARAMS`), so both ends of a ``file_move``, and for a tool that
+    reads the work dir when the call gives no ``path`` (:data:`WORK_DIR_DEFAULT_PATH_TOOLS`)
+    the relative ``.``, which no ``allowed_paths`` entry covers. The worker's dispatcher
+    sets such a call's ``path`` to the work dir first, so ``.`` is checked only where no
+    work dir is known, as in the execution-policy simulator, which may then deny a call
+    the worker allows but never allows one it denies. For any other tool it is the
+    envelope path. Each is the param as given (:func:`given_path`).
+    """
+    if resolution.tool_id.startswith("file_"):
+        return [path for path in resolve_action_paths(resolution.tool_id, params) if given_path(path) is not None]
+    return [resolution.path] if resolution.path else []
 
 
 def _action_level_from_tokens(action_token: str, *, read_actions: frozenset[str]) -> str:
@@ -1753,12 +1873,20 @@ def _resolve_resource_scope(
     *,
     server_key: str | None,
 ) -> dict[str, Any]:
+    """Return what one call acts on; an approval grant of kind ``scope`` covers calls with the same scope.
+
+    ``paths`` holds every path execution-policy path rules evaluate
+    (:func:`resolve_action_paths`), so a scope grant issued for one ``file_move``
+    does not cover a move from the same source to another destination, which a
+    different path rule can gate.
+    """
     scope: dict[str, Any] = {
         "integration_id": resolution.integration_id,
         "action_id": resolution.action_id,
         "resource_method": resolution.resource_method,
         "domain": resolution.domain,
         "path": resolution.path,
+        "paths": list(resolve_action_paths(resolution.tool_id, params)),
         "db_env": resolution.db_env,
         "server_key": server_key,
     }
@@ -1825,7 +1953,7 @@ def build_action_envelope(
         tool_id in CORE_TOOL_CATALOG
         or parsed_mcp_tool is not None
         or tool_id in {"shell", "git", "docker", "pip", "npm"}
-        or tool_id in {"write", "edit", "rm", "mkdir", "cat"}
+        or tool_id in FILE_COMMAND_ACCESS_LEVELS
     )
     return ActionEnvelope(
         tool_id=tool_id,
@@ -1889,6 +2017,78 @@ def _infer_mcp_access_level(tool_name: str) -> str:
     if not action_token:
         return "write"
     return _action_level_from_tokens(action_token, read_actions=_MCP_READ_ACTION_TOKENS)
+
+
+FILE_TOOL_PATH_PARAMS: tuple[str, ...] = ("path", "source", "destination")
+"""The params in which a ``file_*`` tool names a path it acts on.
+
+The worker's dispatcher resolves each of them under the work dir before the policy and
+the grant see the call (``koda.services.tool_dispatcher._file_tool_policy_params``), and
+the execution policy and the grant evaluate each of them (:func:`resolve_action_paths`).
+"""
+
+WORK_DIR_DEFAULT_PATH_TOOLS: frozenset[str] = frozenset({"file_list", "file_search", "file_grep"})
+"""The ``file_*`` tools that act on the work dir when the call gives no ``path``.
+
+Their handlers read ``params.get("path", ctx.work_dir)``; the worker's dispatcher hands
+the policy and the grant the work dir for them, and where no work dir is known the
+execution policy and the grant check the unplaceable ``.`` (:func:`resolve_action_paths`).
+"""
+
+SUBTREE_PATH_TOOLS: frozenset[str] = frozenset({"file_search", "file_grep", "file_move"})
+"""Tools that act on everything below each path they are given, not on that path alone.
+
+``file_search`` and ``file_grep`` walk the whole tree below their path, and ``file_move``
+moves a directory source with everything below it and can create everything below its
+destination (or, into an existing directory, below it). The policy cannot tell whether a
+move's source is a directory, so both ends of every move count. Execution-policy path
+rules therefore also match these calls below their paths (koda.services.execution_policy).
+"""
+
+ENTRY_LISTING_PATH_TOOLS: frozenset[str] = frozenset({"file_list", "ls"})
+"""Tools that read the direct entries of their path (each one's name, kind and size), and nothing deeper.
+
+``file_list`` and the operator command ``/ls`` list one directory. Execution-policy path
+rules therefore also match these calls on a direct entry of their path, never deeper
+(koda.services.execution_policy).
+"""
+
+
+def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """Return the paths execution-policy ``path`` rules evaluate for one call, exactly as the params give them.
+
+    They are not trimmed or normalized here. In the worker the dispatcher has
+    already replaced a file tool's paths with the absolute, symlink-resolved paths
+    its handler acts on (``koda.services.tool_dispatcher._file_tool_policy_params``);
+    other callers, such as the simulate route, pass params as written, and the
+    engine fails closed on a path it cannot place. They are a ``file_*`` tool's ``path``, ``source`` and
+    ``destination`` (so a ``file_move`` yields its source and its destination); the
+    working directory, returned as the relative path ``.``, for ``file_list``,
+    ``file_search`` and ``file_grep`` without a ``path``; the ``path`` of an
+    ``agent_*`` tool (``agent_set_workdir``); and the ``path`` of the operator file
+    commands ``write``, ``edit``, ``rm``, ``mkdir``, ``cat``, ``file`` and ``ls``,
+    which the approval gate sets to the path the command acts on (the work dir for
+    ``/ls`` alone). No other param is returned, though
+    some name paths: an MCP tool's params, ``browser_upload``'s ``file_path``,
+    ``plugin_install``'s ``path``, the ``path`` of ``git_diff`` and ``git_log`` and
+    ``job_create``'s ``work_dir`` (owner: AG-12). An approval grant's resource
+    scope holds these paths too (:func:`_resolve_resource_scope`).
+    """
+    tool = str(tool_id or "").strip()
+    payload = params or {}
+    keys: tuple[str, ...]
+    # The operator file commands (FILE_COMMAND_ACCESS_LEVELS): the approval gate sets their
+    # ``path`` to the path the command acts on (koda.utils.files.file_command_path).
+    if tool in FILE_COMMAND_ACCESS_LEVELS or tool.startswith("agent_"):
+        keys = ("path",)
+    elif tool.startswith("file_"):
+        keys = FILE_TOOL_PATH_PARAMS
+    else:
+        return ()
+    paths = tuple(str(payload[key]) for key in keys if payload.get(key) not in (None, ""))
+    if tool in WORK_DIR_DEFAULT_PATH_TOOLS and "path" not in payload:
+        return (".", *paths)
+    return paths
 
 
 def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = None) -> IntegrationActionResolution:
@@ -2117,16 +2317,10 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             resource_method=action_id,
         )
 
-    if tool in {"write", "edit", "rm", "mkdir", "cat"}:
+    if tool in FILE_COMMAND_ACCESS_LEVELS:
         integration = _integration_defaults("fileops")
         action_id = f"fileops.{tool}"
-        access_level = {
-            "cat": "read",
-            "write": "write",
-            "edit": "write",
-            "mkdir": "write",
-            "rm": "destructive",
-        }.get(tool, "write")
+        access_level = FILE_COMMAND_ACCESS_LEVELS[tool]
         return IntegrationActionResolution(
             integration_id=integration.id,
             action_id=action_id,
@@ -2136,7 +2330,7 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             default_approval_mode=integration.default_approval_mode,
             tool_id=tool,
             auth_modes=integration.auth_modes,
-            path=str(payload.get("path") or "").strip() or None,
+            path=given_path(payload.get("path")),
             resource_method=action_id,
         )
 
@@ -2155,7 +2349,7 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             "move": "write",
             "delete": "destructive",
         }.get(action_suffix, "write")
-        path = str(payload.get("path") or payload.get("source") or payload.get("destination") or "").strip() or None
+        path = given_path(next((payload[key] for key in FILE_TOOL_PATH_PARAMS if payload.get(key)), None))
         return IntegrationActionResolution(
             integration_id=integration.id,
             action_id=action_id,
@@ -2196,7 +2390,7 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             default_approval_mode=integration.default_approval_mode,
             tool_id=tool,
             auth_modes=integration.auth_modes,
-            path=str(payload.get("path") or "").strip() or None,
+            path=given_path(payload.get("path")),
             resource_method=action_id,
         )
 
@@ -2390,7 +2584,9 @@ def evaluate_integration_grant(
         )
 
     allowed_paths = [str(item) for item in grant.get("allowed_paths") or []]
-    if allowed_paths and resolution.path and not _path_allowed(resolution.path, allowed_paths):
+    if allowed_paths and any(
+        not path_in_allowed_paths(path, allowed_paths) for path in _grant_scoped_paths(resolution, params or {})
+    ):
         return IntegrationGrantDecision(
             allowed=False,
             integration_id=resolution.integration_id,

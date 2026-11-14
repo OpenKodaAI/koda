@@ -28,6 +28,30 @@ def _stringify_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]
     return {str(key): str(value) for key, value in dict(metadata or {}).items()}
 
 
+# Seconds the ExecuteCommand deadline allows beyond the command's own timeout. A command that
+# outlives its timeout, or leaves a process holding its output open past it, gets SIGTERM, then
+# SIGKILL after a 2 s grace period, and its output readers get 1 s more (commands.rs in
+# koda-runtime-kernel); the rest covers sending the reply. A call that still runs out its
+# deadline means the kernel is not answering, and counts as a kernel failure.
+EXECUTE_COMMAND_DEADLINE_GRACE_SECONDS = 5
+
+
+def is_command_refusal(exc: BaseException) -> bool:
+    """True when ``exc`` is ExecuteCommand refusing the command before anything ran.
+
+    The kernel answers INVALID_ARGUMENT when its command check refuses a command and
+    PERMISSION_DENIED when its network policy does. That is the command's outcome, not the
+    kernel failing, so it stays off the circuit breaker. An authentication failure must use
+    UNAUTHENTICATED to keep counting as a kernel failure.
+    """
+    import grpc
+
+    if not isinstance(exc, grpc.RpcError):
+        return False
+    code = getattr(exc, "code", None)
+    return callable(code) and code() in {grpc.StatusCode.INVALID_ARGUMENT, grpc.StatusCode.PERMISSION_DENIED}
+
+
 RUNTIME_KERNEL_CAPABILITY_DEFAULTS: tuple[str, ...] = (
     "workspace-provisioning",
     "workspace-cleanup",
@@ -532,7 +556,12 @@ class GrpcRuntimeKernelClient:
                 "ready": bool(health.get("ready", False)),
                 "authoritative": bool(health.get("authoritative", False)),
             }
-        response = await self._breaker.run(self._stub.ExecuteCommand, 
+        # The kernel enforces at least one second; the deadline leaves it room to stop the command
+        # and answer, so a command timeout comes back as the kernel's own timed_out result.
+        command_budget_seconds = max(1, int(timeout_seconds))
+        response = await self._breaker.run_allowing(
+            is_command_refusal,
+            self._stub.ExecuteCommand,
             self._build_request(
                 self._runtime_pb2.ExecuteCommandRequest,
                 _rpc_task_id=None,
@@ -550,7 +579,7 @@ class GrpcRuntimeKernelClient:
                 env_labels=_stringify_metadata(env_labels),
                 start_new_session=start_new_session,
             ),
-            timeout=max(1, int(timeout_seconds or config.INTERNAL_RPC_DEADLINE_MS / 1000)),
+            timeout=command_budget_seconds + EXECUTE_COMMAND_DEADLINE_GRACE_SECONDS,
             metadata=self._rpc_metadata(),
         )
         return {

@@ -442,3 +442,21 @@ async def test_agent_set_workdir_rejects_paths_outside_active_workspace_roots(tm
     assert blocked.success is False
     assert "active runtime workspace" in blocked.output
     assert allowed.success is True
+
+
+def test_validate_workspace_root_refuses_resolved_form_of_sensitive_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Workspace roots use the shared work-dir check, which matches /var/run as /run too."""
+    real = tmp_path / "real-run"
+    (real / "app").mkdir(parents=True)
+    alias = tmp_path / "var-run"
+    alias.symlink_to(real)
+    (tmp_path / "project").mkdir()
+    monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(alias)}))
+
+    with pytest.raises(ValueError, match="sensitive system directory"):
+        workspace_import_mod.validate_workspace_root(str(real / "app"))
+    with pytest.raises(ValueError, match="sensitive system directory"):
+        workspace_import_mod.validate_workspace_root(str(alias))
+    assert workspace_import_mod.validate_workspace_root(str(tmp_path / "project")) == (tmp_path / "project").resolve()

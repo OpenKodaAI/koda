@@ -79,6 +79,11 @@ Fixtures that reset Koda's shared Postgres backends call `close_shared_postgres_
 same module, which closes their connection pools; clearing the cache directly leaves those
 connections open until the server refuses new clients.
 
+The end-to-end agent-turn tests in `tests/test_services/test_agent_turn_e2e.py` run real turns
+through the queue worker and replace only the provider adapter (`tests/fakes/provider.py`) and
+Telegram (`tests/fakes/telegram.py`). Reuse those fakes for new end-to-end tests instead of
+patching the orchestration path.
+
 To run the same local gate from one command:
 
 ```bash
@@ -120,6 +125,7 @@ When a CI failure happens:
 - read `pytest.xml` and `coverage.xml` artifacts for Python regressions
 - read the `vitest.junit.xml` artifact for web test failures
 - read the uploaded SARIF or Security tab findings for dependency, secret, static-analysis, or container issues
+- run `python3 scripts/check_master_plan.py` when `repo-hygiene` reports a status, evidence or dependency problem in `docs/engineering/MASTER_PLAN.md`; it names the line and the rule it breaks
 - read the `docker-smoke` artifact logs when the stack fails to boot in CI
 
 ## Pull Request Expectations

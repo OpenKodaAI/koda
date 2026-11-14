@@ -1,10 +1,12 @@
 """Tests for file operation command handlers."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from koda.handlers.fileops import cmd_cat, cmd_edit, cmd_mkdir, cmd_rm, cmd_write
+from koda.utils.files import resolve_work_path
 
 
 @pytest.mark.asyncio
@@ -112,3 +114,242 @@ async def test_cat_no_args(mock_update, mock_context):
     mock_context.args = []
     await cmd_cat(mock_update, mock_context)
     assert "Usage" in mock_update.message.reply_text.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cat_refuses_dotenv(mock_update, mock_context, tmp_path):
+    (tmp_path / ".env").write_text("TOKEN=canary-secret\n")
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = [".env"]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in mock_send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+    assert shown
+    assert not any("canary-secret" in text for text in shown)
+    assert any("blocked" in text.lower() for text in shown)
+
+
+@pytest.mark.asyncio
+async def test_write_dotenv_is_refused_before_approval(mock_update, mock_context, tmp_path):
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = [".env", "TOKEN=x"]
+    await cmd_write(mock_update, mock_context)
+    reply = mock_update.message.reply_text.call_args.args[0]
+    assert "blocked" in reply.lower()
+    assert "Confirmacao necessaria" not in reply
+    assert not (tmp_path / ".env").exists()
+
+
+@pytest.mark.asyncio
+async def test_rm_secret_file_is_refused_before_approval(mock_update, mock_context, tmp_path):
+    secret = tmp_path / "prod.env"
+    secret.write_text("TOKEN=x\n")
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = ["prod.env"]
+    await cmd_rm(mock_update, mock_context)
+    reply = mock_update.message.reply_text.call_args.args[0]
+    assert "blocked" in reply.lower()
+    assert "Confirmacao necessaria" not in reply
+    assert secret.exists()
+
+
+@pytest.mark.asyncio
+async def test_cat_relative_path_resolves_under_work_dir(mock_update, mock_context, tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    (work / "src").mkdir(parents=True)
+    (work / "src" / "main.py").write_text("work tree")
+    decoy = tmp_path / "decoy"
+    (decoy / "src").mkdir(parents=True)
+    (decoy / "src" / "main.py").write_text("decoy tree")
+    monkeypatch.chdir(decoy)
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = ["src/main.py"]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_cat(mock_update, mock_context)
+    assert "work tree" in mock_send.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_cat_reads_a_name_the_shell_cannot_split(mock_update, mock_context, tmp_path):
+    """The approval gate checks the path /cat reads; it does not shell-split it, so a quote is just a character."""
+    (tmp_path / "it's.txt").write_text("quoted name")
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = ["it's.txt"]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_cat(mock_update, mock_context)
+    assert "quoted name" in mock_send.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_write_gate_checks_the_path_the_handler_writes(mock_update, mock_context, tmp_path):
+    """/write takes ``<path> <content>``: the grant checks the first arg, which the gate does not unquote either.
+
+    Shell-splitting ``"src/a ../../top.txt" body`` would show the grant ``<work>/src/top.txt``
+    while the handler writes ``<work>/"src/a``, outside the grant.
+    """
+    work = tmp_path.resolve()
+    (work / "src").mkdir()
+    grant = {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(work / "src")]}}}
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.user_data["_approved"] = True
+    mock_context.args = ['"src/a', '../../top.txt"', "body"]
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", grant):
+        await cmd_write(mock_update, mock_context)
+    assert "outside the granted scope" in mock_update.message.reply_text.call_args.args[0]
+    assert not (work / '"src').exists()
+
+
+def _tree(root: Path) -> dict[str, str | None]:
+    return {
+        str(path.relative_to(root)): path.read_text() if path.is_file() else None for path in sorted(root.rglob("*"))
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "handler", "args", "acted_on"),
+    [
+        # /rm, /mkdir and /cat act on the whole argument string, spaces included.
+        ("rm", cmd_rm, ["x", "/../secrets/key"], "secrets/key"),
+        ("mkdir", cmd_mkdir, ["x", "/../secrets/new"], "secrets/new"),
+        ("cat", cmd_cat, ["x", "/../secrets/key"], "secrets/key"),
+        # /write and /edit act on their first argument, whatever a shell would make of the quote in it.
+        ("write", cmd_write, ['x/../secrets/key"', '/../../elsewhere"', "content"], 'secrets/key"'),
+        ("edit", cmd_edit, ['x/../secrets/key"', '/../../elsewhere"', "line"], 'secrets/key"'),
+    ],
+)
+async def test_path_rules_decide_the_path_the_file_command_acts_on(
+    command, handler, args, acted_on, mock_update, mock_context, tmp_path, monkeypatch
+):
+    work_dir = tmp_path.resolve()
+    (work_dir / "secrets").mkdir()
+    (work_dir / "secrets" / "key").write_text("SECRET")
+    (work_dir / "secrets" / 'key"').write_text("SECRET\n")
+    handler_path = args[0] if command in {"write", "edit"} else " ".join(args)
+    assert resolve_work_path(handler_path, str(work_dir)).path == work_dir / acted_on
+    policy = {
+        "version": 1,
+        "rules": [
+            {"name": f"allow-{command}", "match": {"tool_id": command}, "decision": "allow"},
+            {"name": "deny-secrets", "match": {"path": str(work_dir / "secrets")}, "decision": "deny"},
+        ],
+    }
+    monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+    before = _tree(work_dir)
+    mock_context.user_data["work_dir"] = str(work_dir)
+    mock_context.args = args
+
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await handler(mock_update, mock_context)
+
+    mock_send.assert_not_called()
+    assert mock_update.message.reply_text.call_args.args[0] == "Matched execution-policy rule."
+    assert "reply_markup" not in mock_update.message.reply_text.call_args.kwargs
+    assert _tree(work_dir) == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        ("file", ["x", "/../secrets/key"]),
+        ("ls", ["x", "/../secrets"]),
+        # /ls alone lists the work dir, which holds the denied directory.
+        ("ls", []),
+    ],
+)
+async def test_path_rules_decide_what_file_and_ls_read(command, args, mock_update, mock_context, tmp_path, monkeypatch):
+    """/file sends a file and /ls lists a directory; a deny path rule keeps both out of it, as it keeps /cat out."""
+    from koda.handlers.commands import cmd_file, cmd_ls
+
+    work_dir = tmp_path.resolve()
+    (work_dir / "secrets").mkdir()
+    (work_dir / "secrets" / "key").write_text("SECRET")
+    policy = {
+        "version": 1,
+        "rules": [
+            {"name": f"allow-{command}", "match": {"tool_id": command}, "decision": "allow"},
+            {"name": "deny-secrets", "match": {"path": str(work_dir / "secrets")}, "decision": "deny"},
+        ],
+    }
+    monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+    mock_context.user_data["work_dir"] = str(work_dir)
+    mock_context.args = args
+
+    with patch("koda.handlers.commands.send_long_message", new_callable=AsyncMock) as mock_send:
+        await {"file": cmd_file, "ls": cmd_ls}[command](mock_update, mock_context)
+
+    mock_send.assert_not_called()
+    mock_update.message.reply_document.assert_not_called()
+    assert mock_update.message.reply_text.call_args.args[0] == "Matched execution-policy rule."
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("args", [[], ["."], ["src"]])
+async def test_a_deny_deeper_than_the_listed_entries_does_not_decide_ls(
+    args, mock_update, mock_context, tmp_path, monkeypatch
+):
+    """/ls shows its directory's direct entries only, so a rule on a path deeper than them leaves it to run."""
+    from koda.handlers.commands import cmd_ls
+
+    work_dir = tmp_path.resolve()
+    (work_dir / "src" / "pkg" / "secrets").mkdir(parents=True)
+    (work_dir / "src" / "pkg" / "secrets" / "key").write_text("SECRET")
+    (work_dir / "src" / "main.py").write_text("print('visible')\n")
+    policy = {
+        "version": 1,
+        "rules": [
+            {"name": "allow-ls", "match": {"tool_id": "ls"}, "decision": "allow"},
+            {"name": "deny-secrets", "match": {"path": str(work_dir / "src" / "pkg" / "secrets")}, "decision": "deny"},
+        ],
+    }
+    monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+    mock_context.user_data["work_dir"] = str(work_dir)
+    mock_context.args = args
+
+    with patch("koda.handlers.commands.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_ls(mock_update, mock_context)
+
+    mock_send.assert_called_once()
+    listing = mock_send.call_args.args[1]
+    assert "SECRET" not in listing
+    assert ("main.py" in listing) is (args == ["src"])
+
+
+def test_path_rules_evaluate_the_path_of_every_gated_file_command():
+    from koda.agent_contract import FILE_COMMAND_ACCESS_LEVELS, resolve_action_paths
+    from koda.utils.files import FILE_COMMANDS
+
+    assert set(FILE_COMMAND_ACCESS_LEVELS) == FILE_COMMANDS
+    for command in FILE_COMMANDS:
+        assert resolve_action_paths(command, {"path": "/srv/work/x"}) == ("/srv/work/x",)
+
+
+def test_a_file_command_is_named_in_one_place():
+    """``FILE_COMMAND_ACCESS_LEVELS`` is the one list of file commands.
+
+    The approval gate (``koda.utils.files.FILE_COMMANDS``), the grant's ``fileops`` action
+    and the paths the execution-policy rules see all follow it, so a command added there
+    is gated, mapped and path-checked; a copy that missed it would leave the gate indexing
+    a level that does not exist. Run in a fresh interpreter, where the new command is added
+    before the file layer is imported.
+    """
+    import subprocess
+    import sys
+
+    script = "\n".join(
+        [
+            "import koda.agent_contract as contract",
+            "contract.FILE_COMMAND_ACCESS_LEVELS['touch'] = 'write'",
+            "from koda.utils.files import FILE_COMMANDS",
+            "assert 'touch' in FILE_COMMANDS, sorted(FILE_COMMANDS)",
+            "paths = contract.resolve_action_paths('touch', {'path': '/srv/work/x'})",
+            "assert paths == ('/srv/work/x',), paths",
+            "assert contract.resolve_integration_action('touch', {'path': '/srv/work/x'}).action_id == 'fileops.touch'",
+        ]
+    )
+    completed = subprocess.run(
+        [sys.executable, "-c", script], cwd=Path(__file__).resolve().parents[2], capture_output=True, text=True
+    )
+    assert completed.returncode == 0, completed.stderr

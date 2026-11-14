@@ -375,8 +375,18 @@ async def test_port_allocation_isolated_per_agent(runtime_db: str) -> None:
 
 
 async def test_runtime_events_query_uses_index(runtime_db: str) -> None:
-    """When list_events scans by (agent_id, task_id, seq), the planner should
-    use idx_runtime_events_task and not seq scan."""
+    """When list_events scans by (agent_id, task_id, id), the planner uses
+    idx_runtime_events_task and not a seq scan, whatever autoanalyze did.
+
+    A plan is chosen from the table's statistics. With only one task's 50
+    events in the table, the planner took the primary key while the table had
+    no statistics, and a Seq Scan plus a Sort once autoanalyze had run, which
+    it can do at any moment of a full run: the test failed at random, and it
+    never checked idx_runtime_events_task. So the task's events sit among other
+    agents' and tasks' events, as they do in use, and the statistics are taken
+    here, from every row (ANALYZE reads them all below its sample size), which
+    an autoanalyze before the EXPLAIN takes again unchanged.
+    """
     await _seed_task(runtime_db, agent_id="agent_a", task_id=1)
     store = _build_store("agent_a")
     for i in range(50):
@@ -385,6 +395,16 @@ async def test_runtime_events_query_uses_index(runtime_db: str) -> None:
     # Direct EXPLAIN against the same query shape.
     conn = await asyncpg.connect(runtime_db)
     try:
+        await conn.execute(
+            """
+            INSERT INTO knowledge_v2.runtime_events
+                (agent_id, task_id, attempt, phase, event_type, severity, created_at)
+            SELECT CASE WHEN g % 2 = 0 THEN 'agent_a' ELSE 'agent_b' END, 2 + g % 100, 1, 'x',
+                   'background', 'info', '2026-05-01T00:00:00+00:00'
+            FROM generate_series(1, 5000) AS g
+            """
+        )
+        await conn.execute("ANALYZE knowledge_v2.runtime_events")
         plan_rows: list[Any] = await conn.fetch(
             """
             EXPLAIN
@@ -399,5 +419,6 @@ async def test_runtime_events_query_uses_index(runtime_db: str) -> None:
     finally:
         await conn.close()
     plan_text = "\n".join(str(r[0]) for r in plan_rows).lower()
-    # Either Index Scan or Bitmap Index Scan — never bare Seq Scan with no qualifier.
-    assert "index" in plan_text or "bitmap" in plan_text, f"unexpected plan: {plan_text}"
+    # An Index Scan or a Bitmap Index Scan on the task's index, never a Seq Scan.
+    assert "idx_runtime_events_task" in plan_text, f"unexpected plan: {plan_text}"
+    assert "seq scan" not in plan_text, f"unexpected plan: {plan_text}"

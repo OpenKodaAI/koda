@@ -5,10 +5,19 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from koda.services import tool_dispatcher
 from koda.services.tool_dispatcher import (
     ToolContext,
-    _validate_file_path,
+    _resolve_file_path,
 )
+
+
+@pytest.fixture(autouse=True)
+def _fresh_tool_rate_window():
+    """execute_tool counts calls per user and minute; each test starts with an empty window."""
+    tool_dispatcher._tool_rate_windows.clear()
+    yield
+    tool_dispatcher._tool_rate_windows.clear()
 
 
 def _make_ctx(work_dir: str, **overrides) -> ToolContext:
@@ -30,20 +39,20 @@ def _make_ctx(work_dir: str, **overrides) -> ToolContext:
     return ToolContext(**defaults)
 
 
-class TestValidateFilePath:
+class TestResolveFilePath:
     def test_empty_path(self):
-        assert _validate_file_path("", "/tmp/work") is not None
+        assert _resolve_file_path("", "/tmp/work").error is not None
 
     def test_path_within_workdir(self, tmp_path):
-        assert _validate_file_path(str(tmp_path / "foo.txt"), str(tmp_path)) is None
+        assert _resolve_file_path(str(tmp_path / "foo.txt"), str(tmp_path)).error is None
 
     def test_path_outside_workdir(self, tmp_path):
-        err = _validate_file_path("/etc/passwd", str(tmp_path))
+        err = _resolve_file_path("/etc/passwd", str(tmp_path)).error
         assert err is not None
         assert "outside" in err or "not allowed" in err
 
     def test_blocked_extension(self, tmp_path):
-        err = _validate_file_path(str(tmp_path / "secrets.env"), str(tmp_path))
+        err = _resolve_file_path(str(tmp_path / "secrets.env"), str(tmp_path)).error
         assert err is not None
         assert "blocked" in err.lower()
 
@@ -284,3 +293,1074 @@ class TestFileInfoHandler:
         with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
             result = await _handle_file_info({"path": str(tmp_path / "nope.txt")}, ctx)
         assert not result.success
+
+
+class TestSecretFilesAreBlocked:
+    def test_dotenv_absolute_path_is_blocked(self, tmp_path):
+        err = _resolve_file_path(str(tmp_path / ".env"), str(tmp_path)).error
+        assert err is not None
+        assert "blocked" in err.lower()
+
+    def test_dotenv_variant_is_blocked(self, tmp_path):
+        err = _resolve_file_path(str(tmp_path / ".env.production"), str(tmp_path)).error
+        assert err is not None
+        assert "blocked" in err.lower()
+
+    @pytest.mark.asyncio
+    async def test_file_read_refuses_dotenv(self, tmp_path):
+        (tmp_path / ".env").write_text("TOKEN=canary-secret\n")
+        from koda.services.tool_dispatcher import _handle_file_read
+
+        ctx = _make_ctx(str(tmp_path))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_read({"path": str(tmp_path / ".env")}, ctx)
+        assert not result.success
+        assert "canary-secret" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_grep_skips_secret_files_and_symlink_escapes(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (work / ".env").write_text("TOKEN=canary-env\n")
+        (work / "prod.env").write_text("TOKEN=canary-prod\n")
+        (outside / "secret.txt").write_text("TOKEN=canary-outside\n")
+        (work / "linked.txt").symlink_to(outside / "secret.txt")
+        (work / "code.py").write_text("TOKEN = read_from_vault()\n")
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(work))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_grep({"pattern": "TOKEN", "path": "."}, ctx)
+        assert result.success
+        assert "code.py" in result.output
+        assert "canary" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_grep_skips_secret_files_in_subdirectories_and_secret_named_symlinks(self, tmp_path):
+        work = tmp_path / "work"
+        (work / "config").mkdir(parents=True)
+        (work / "config" / "server.pem").write_text("TOKEN=canary-pem\n")
+        (work / "config" / ".env.local").write_text("TOKEN=canary-local\n")
+        (work / "notes.txt").write_text("TOKEN=canary-via-link\n")
+        (work / "alias.key").symlink_to(work / "notes.txt")
+        (work / "safe-link.txt").symlink_to(work / "config" / "server.pem")
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(work))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_grep({"pattern": "TOKEN", "path": "."}, ctx)
+        assert result.success
+        assert "canary-pem" not in result.output
+        assert "canary-local" not in result.output
+        assert "notes.txt:1:" in result.output
+        assert "alias.key" not in result.output
+        assert "safe-link.txt" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_grep_prunes_sensitive_directories_below_the_search_root(self, tmp_path, monkeypatch):
+        work = tmp_path / "work"
+        (work / "etc").mkdir(parents=True)
+        (work / "src").mkdir()
+        (work / "etc" / "shadow.txt").write_text("TOKEN=canary-sensitive\n")
+        (work / "src" / "app.py").write_text("TOKEN = vault()\n")
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(work / "etc")}))
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(work))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_grep({"pattern": "TOKEN", "path": "."}, ctx)
+        assert result.success
+        assert "app.py" in result.output
+        assert "canary-sensitive" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_grep_runs_the_full_resolver_only_for_symlinked_files(self, tmp_path):
+        """A regular file below the checked root needs only the name check; the walk stays cheap."""
+        work = tmp_path / "work"
+        (work / "pkg").mkdir(parents=True)
+        for index in range(40):
+            (work / "pkg" / f"mod{index}.py").write_text(f"VALUE = {index}\n")
+        (work / "linked.py").symlink_to(work / "pkg" / "mod0.py")
+        from koda.services import tool_dispatcher
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(work))
+        with (
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+            patch.object(tool_dispatcher, "resolve_work_path", wraps=tool_dispatcher.resolve_work_path) as resolver,
+        ):
+            result = await _handle_file_grep({"pattern": "VALUE", "path": "."}, ctx)
+        assert result.success
+        assert "pkg/mod39.py:1: VALUE = 39" in result.output
+        assert "linked.py:1: VALUE = 0" in result.output
+        # One call for the search root, one for the symlinked file; none per regular file.
+        assert [call.args[0] for call in resolver.call_args_list] == [".", str(work / "linked.py")]
+
+    @pytest.mark.asyncio
+    async def test_grep_does_not_log_a_warning_per_skipped_secret_file(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        for index in range(20):
+            (work / f"fixture{index}.pem").write_text("-----BEGIN-----\n")
+        (work / "code.py").write_text("x = 1\n")
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(work))
+        with (
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+            patch("koda.utils.files.log") as files_log,
+        ):
+            result = await _handle_file_grep({"pattern": "BEGIN", "path": "."}, ctx)
+        assert result.success
+        assert "No matches" in result.output
+        files_log.warning.assert_not_called()
+
+
+class TestEnvTemplatesStayEditable:
+    """`.env.example` is the committed template, not the secret: agents must keep updating it."""
+
+    @pytest.mark.asyncio
+    async def test_file_read_and_edit_allow_env_example(self, tmp_path):
+        (tmp_path / ".env.example").write_text("TOKEN=\n")
+        from koda.services.tool_dispatcher import _handle_file_edit, _handle_file_read
+
+        ctx = _make_ctx(str(tmp_path))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            read = await _handle_file_read({"path": ".env.example"}, ctx)
+            edit = await _handle_file_edit(
+                {"path": ".env.example", "old_string": "TOKEN=\n", "new_string": "TOKEN=\nNEW_SETTING=\n"}, ctx
+            )
+        assert read.success, read.output
+        assert "TOKEN=" in read.output
+        assert edit.success, edit.output
+        assert (tmp_path / ".env.example").read_text() == "TOKEN=\nNEW_SETTING=\n"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("template", [".env.backup.example", ".env.tmp.sample", "prod.env.backup.dist"])
+    async def test_file_read_and_edit_allow_a_template_named_like_a_copy(self, tmp_path, template):
+        """A copy suffix before the template suffix does not make the template a secret's copy."""
+        (tmp_path / template).write_text("TOKEN=\n")
+        from koda.services.tool_dispatcher import _handle_file_edit, _handle_file_read
+
+        ctx = _make_ctx(str(tmp_path))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            read = await _handle_file_read({"path": template}, ctx)
+            edit = await _handle_file_edit(
+                {"path": template, "old_string": "TOKEN=\n", "new_string": "TOKEN=\nNEW_SETTING=\n"}, ctx
+            )
+        assert read.success, read.output
+        assert "TOKEN=" in read.output
+        assert edit.success, edit.output
+        assert (tmp_path / template).read_text() == "TOKEN=\nNEW_SETTING=\n"
+
+    @pytest.mark.asyncio
+    async def test_grep_searches_env_example_but_not_env(self, tmp_path):
+        (tmp_path / ".env.example").write_text("TOKEN=placeholder\n")
+        (tmp_path / ".env").write_text("TOKEN=canary-secret\n")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / ".env.sample").write_text("TOKEN=sample\n")
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(tmp_path))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_grep({"pattern": "TOKEN", "path": "."}, ctx)
+        assert result.success
+        assert ".env.example:1: TOKEN=placeholder" in result.output
+        assert "sub/.env.sample:1: TOKEN=sample" in result.output
+        assert "canary-secret" not in result.output
+
+
+class TestDocumentedRelativePathsResolveUnderWorkDir:
+    """The tool prompt documents paths relative to the work directory (D-066)."""
+
+    @pytest.fixture
+    def work(self, tmp_path, monkeypatch):
+        work = tmp_path / "work"
+        (work / "src").mkdir(parents=True)
+        (work / "src" / "main.py").write_text("# TODO: work tree\nfoo = 1\n")
+        (work / "temp.txt").write_text("temp")
+        (work / "old.txt").write_text("old")
+        # The process CWD holds a decoy tree with the same layout.
+        decoy = tmp_path / "decoy"
+        (decoy / "src").mkdir(parents=True)
+        (decoy / "src" / "main.py").write_text("# TODO: decoy tree\nfoo = 1\n")
+        (decoy / "temp.txt").write_text("decoy")
+        (decoy / "old.txt").write_text("decoy")
+        monkeypatch.chdir(decoy)
+        return work
+
+    async def _call(self, handler_name: str, params: dict, work):
+        from koda.services import tool_dispatcher
+
+        handler = getattr(tool_dispatcher, handler_name)
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            return await handler(params, _make_ctx(str(work)))
+
+    @pytest.mark.asyncio
+    async def test_file_read(self, work):
+        result = await self._call("_handle_file_read", {"path": "src/main.py"}, work)
+        assert result.success, result.output
+        assert "work tree" in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_write(self, work, tmp_path):
+        result = await self._call("_handle_file_write", {"path": "output.txt", "content": "Hello world"}, work)
+        assert result.success, result.output
+        assert (work / "output.txt").read_text() == "Hello world"
+        assert not (tmp_path / "decoy" / "output.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_file_edit(self, work, tmp_path):
+        result = await self._call(
+            "_handle_file_edit", {"path": "src/main.py", "old_string": "foo = 1", "new_string": "foo = 2"}, work
+        )
+        assert result.success, result.output
+        assert "foo = 2" in (work / "src" / "main.py").read_text()
+        assert "foo = 1" in (tmp_path / "decoy" / "src" / "main.py").read_text()
+
+    @pytest.mark.asyncio
+    async def test_file_list(self, work):
+        result = await self._call("_handle_file_list", {"path": "src/"}, work)
+        assert result.success, result.output
+        assert "main.py" in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_list_defaults_to_work_dir(self, work):
+        result = await self._call("_handle_file_list", {}, work)
+        assert result.success, result.output
+        assert "[d] src" in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_search(self, work):
+        result = await self._call("_handle_file_search", {"pattern": "*.py", "path": "src/"}, work)
+        assert result.success, result.output
+        assert "main.py" in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_grep(self, work):
+        result = await self._call("_handle_file_grep", {"pattern": "TODO", "path": "src/", "glob": "*.py"}, work)
+        assert result.success, result.output
+        assert "work tree" in result.output
+        assert "decoy" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_delete(self, work, tmp_path):
+        result = await self._call("_handle_file_delete", {"path": "temp.txt"}, work)
+        assert result.success, result.output
+        assert not (work / "temp.txt").exists()
+        assert (tmp_path / "decoy" / "temp.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_file_move(self, work, tmp_path):
+        result = await self._call("_handle_file_move", {"source": "old.txt", "destination": "new.txt"}, work)
+        assert result.success, result.output
+        assert (work / "new.txt").read_text() == "old"
+        assert (tmp_path / "decoy" / "old.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_file_info(self, work):
+        result = await self._call("_handle_file_info", {"path": "src/main.py"}, work)
+        assert result.success, result.output
+        assert f"Path: {(work / 'src' / 'main.py').resolve()}" in result.output
+
+    @pytest.mark.asyncio
+    async def test_relative_traversal_is_still_refused(self, work):
+        result = await self._call("_handle_file_read", {"path": "../decoy/temp.txt"}, work)
+        assert not result.success
+        assert "outside" in result.output
+
+
+class TestPathScopedGrantsSeeResolvedFileToolPaths:
+    """A fileops ``allowed_paths`` grant sees the path a file tool touches, as /cat's gate does."""
+
+    @pytest.fixture
+    def work(self, tmp_path, monkeypatch):
+        work = (tmp_path / "work").resolve()
+        (work / "src").mkdir(parents=True)
+        (work / "src" / "main.py").write_text("TOKEN = 'granted'\n")
+        (work / "top.txt").write_text("TOKEN = 'canary-outside-grant'\n")
+        monkeypatch.chdir(tmp_path)
+        return work
+
+    @staticmethod
+    def _grant(*allowed_paths) -> dict:
+        return {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(p) for p in allowed_paths]}}}
+
+    async def _execute(self, tool: str, params: dict, work, *allowed_paths):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", self._grant(*allowed_paths)),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(str(work)))
+
+    def test_policy_params_carry_the_resolved_paths(self, work):
+        from koda.services.tool_dispatcher import AgentToolCall, _policy_params_for_call
+
+        ctx = _make_ctx(str(work))
+        read = _policy_params_for_call(AgentToolCall("file_read", {"path": "src/../src/main.py", "offset": 2}, ""), ctx)
+        assert read == {"path": str(work / "src" / "main.py"), "offset": 2}
+        move = _policy_params_for_call(
+            AgentToolCall("file_move", {"source": "src/main.py", "destination": "out/main.py"}, ""), ctx
+        )
+        assert move == {"source": str(work / "src" / "main.py"), "destination": str(work / "out" / "main.py")}
+        assert _policy_params_for_call(AgentToolCall("file_list", {}, ""), ctx) == {"path": str(work)}
+
+    @pytest.mark.asyncio
+    async def test_relative_path_inside_the_grant_is_allowed(self, work):
+        result = await self._execute("file_grep", {"pattern": "TOKEN", "path": "src"}, work, work / "src")
+        assert result.success, result.output
+        assert "granted" in result.output
+        assert "canary-outside-grant" not in result.output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [("file_list", {}), ("file_search", {"pattern": "*.txt"}), ("file_grep", {"pattern": "TOKEN"})],
+    )
+    async def test_tools_that_default_to_the_work_dir_are_checked_against_it(self, work, tool, params):
+        refused = await self._execute(tool, params, work, work / "src")
+        assert not refused.success
+        assert "outside the granted scope" in refused.output
+        assert "top.txt" not in refused.output
+
+        granted = await self._execute(tool, params, work, work)
+        assert granted.success, granted.output
+        assert "top.txt" in granted.output
+
+    def test_file_move_grant_covers_both_ends(self, work):
+        from koda.agent_contract import evaluate_integration_grant
+
+        grant = self._grant(work / "src")
+        inside = evaluate_integration_grant(
+            "file_move", {"source": str(work / "src" / "main.py"), "destination": str(work / "src" / "b.py")}, grant
+        )
+        assert inside.allowed
+        out_of_grant = evaluate_integration_grant(
+            "file_move", {"source": str(work / "src" / "main.py"), "destination": str(work / "main.py")}, grant
+        )
+        assert not out_of_grant.allowed
+        assert out_of_grant.reason == "path_not_granted"
+        into_grant = evaluate_integration_grant(
+            "file_move", {"source": str(work / "top.txt"), "destination": str(work / "src" / "top.txt")}, grant
+        )
+        assert not into_grant.allowed
+        assert into_grant.reason == "path_not_granted"
+
+    @pytest.mark.asyncio
+    async def test_file_move_out_of_the_grant_is_refused(self, work):
+        """The source is inside the grant; the destination is not."""
+        result = await self._execute(
+            "file_move", {"source": str(work / "src" / "main.py"), "destination": "main.py"}, work, work / "src"
+        )
+        assert not result.success
+        assert "outside the granted scope" in result.output
+        assert (work / "src" / "main.py").exists()
+        assert not (work / "main.py").exists()
+
+    @pytest.mark.asyncio
+    async def test_grep_does_not_follow_a_symlink_out_of_the_granted_search_root(self, work):
+        """A link inside the grant to a file elsewhere in the work dir is refused, as /cat and file_read refuse it."""
+        (work / "src" / "link-to-top.txt").symlink_to(work / "top.txt")
+        (work / "src" / "alias.py").symlink_to(work / "src" / "main.py")
+        result = await self._execute("file_grep", {"pattern": "TOKEN", "path": "src"}, work, work / "src")
+        assert result.success, result.output
+        assert "canary-outside-grant" not in result.output
+        assert "link-to-top.txt" not in result.output
+        assert "main.py:1: TOKEN = 'granted'" in result.output
+        # A link that stays inside the search root is still followed.
+        assert "alias.py:1: TOKEN = 'granted'" in result.output
+        refused = await self._execute("file_read", {"path": "src/link-to-top.txt"}, work, work / "src")
+        assert not refused.success
+        assert "outside the granted scope" in refused.output
+
+    @pytest.mark.asyncio
+    async def test_grep_keeps_every_file_it_reads_inside_the_search_root(self, work):
+        """Without a grant too: the search root, not only the work dir, bounds what grep prints."""
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        (work / "src" / "link-to-top.txt").symlink_to(work / "top.txt")
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            scoped = await _handle_file_grep({"pattern": "TOKEN", "path": "src"}, _make_ctx(str(work)))
+            whole = await _handle_file_grep({"pattern": "TOKEN", "path": "."}, _make_ctx(str(work)))
+        assert scoped.success, scoped.output
+        assert "canary-outside-grant" not in scoped.output
+        assert "src/link-to-top.txt:1: TOKEN = 'canary-outside-grant'" in whole.output
+
+
+class TestGrantRootsWrittenThroughASymlink:
+    """``allowed_paths`` entries are canonicalised like the call path, so a symlinked grant root still matches."""
+
+    @pytest.fixture
+    def linked_work(self, tmp_path, monkeypatch):
+        real = (tmp_path / "work").resolve()
+        (real / "src").mkdir(parents=True)
+        (real / "src" / "main.py").write_text("granted-source\n")
+        (real / "top.txt").write_text("canary-top\n")
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        monkeypatch.chdir(tmp_path)
+        return link
+
+    @staticmethod
+    def _grant(*allowed_paths) -> dict:
+        return {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(p) for p in allowed_paths]}}}
+
+    async def _read(self, path: str, link, *allowed_paths):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", self._grant(*allowed_paths)),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["file_read"]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall("file_read", {"path": path}, ""), _make_ctx(str(link)))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["{link}/src/main.py", "src/main.py", "src/../src/main.py"])
+    async def test_paths_inside_a_symlinked_grant_root_are_granted(self, linked_work, path):
+        result = await self._read(path.format(link=linked_work), linked_work, linked_work / "src")
+        assert result.success, result.output
+        assert "granted-source" in result.output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["{link}/top.txt", "src/../top.txt"])
+    async def test_paths_outside_a_symlinked_grant_root_are_still_refused(self, linked_work, path):
+        result = await self._read(path.format(link=linked_work), linked_work, linked_work / "src")
+        assert not result.success
+        assert "outside the granted scope" in result.output
+        assert "canary-top" not in result.output
+
+    def test_the_contract_grant_check_canonicalises_entries(self, linked_work):
+        from koda.agent_contract import evaluate_integration_grant
+
+        real = linked_work.resolve()
+        grant = self._grant(linked_work / "src")
+        assert evaluate_integration_grant("file_read", {"path": str(real / "src" / "main.py")}, grant).allowed
+        refused = evaluate_integration_grant("file_read", {"path": str(real / "top.txt")}, grant)
+        assert not refused.allowed
+        assert refused.reason == "path_not_granted"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("path", "granted"), [("src/main.py", True), ("top.txt", False)])
+    async def test_a_home_relative_entry_is_expanded_then_canonicalised(
+        self, linked_work, monkeypatch, tmp_path, path, granted
+    ):
+        """``~/link/src`` is ``<HOME>/link/src``, a grant root written through a symlink."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        result = await self._read(path, linked_work, "~/link/src")
+        assert result.success == granted, result.output
+        if not granted:
+            assert "outside the granted scope" in result.output
+
+    def test_a_relative_entry_is_not_resolved_against_the_process_cwd(self, linked_work):
+        """The CWD is the parent of ``link``: resolving ``link/src`` there would widen the grant."""
+        from koda.agent_contract import evaluate_integration_grant
+
+        real = linked_work.resolve()
+        grant = self._grant("link/src")
+        decision = evaluate_integration_grant("file_read", {"path": str(real / "src" / "main.py")}, grant)
+        assert not decision.allowed
+        assert decision.reason == "path_not_granted"
+
+
+class TestGrantChecksTheCanonicalCallPath:
+    """``allowed_paths`` compares the call path in the form the file layer acts on, whoever passes it.
+
+    The worker hands the grant resolved paths, but the execution-policy simulator and any
+    other caller pass a path as written. ``/srv/allowed/../etc/x`` starts with
+    ``/srv/allowed/`` and lands in ``/srv/etc``; a link inside the grant root lands where it
+    points; a path that is not absolute cannot be placed.
+    """
+
+    @pytest.fixture
+    def roots(self, tmp_path):
+        root = tmp_path.resolve()
+        (root / "allowed" / "sub").mkdir(parents=True)
+        (root / "other").mkdir()
+        (root / "allowed" / "link").symlink_to(root / "other")
+        return root
+
+    @pytest.mark.parametrize(
+        ("path", "covered"),
+        [
+            ("{root}/allowed/sub/x", True),
+            ("{root}/allowed/./sub//x", True),
+            ("{root}/allowed/sub/../x", True),
+            ("{root}/allowed/../other/x", False),
+            ("{root}/allowed/sub/../../other/x", False),
+            ("{root}/allowed/link/x", False),
+            ("allowed/sub/x", False),
+            (" {root}/allowed/sub/x", False),
+        ],
+    )
+    def test_the_call_path_is_compared_where_it_lands(self, roots, path, covered):
+        from koda.agent_contract import path_in_allowed_paths
+
+        assert path_in_allowed_paths(path.format(root=roots), [str(roots / "allowed")]) is covered
+        assert path_in_allowed_paths(path.format(root=roots), ["allowed"]) is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["{root}/allowed/../other/x", "{root}/allowed/link/x"])
+    async def test_the_simulator_and_the_worker_refuse_a_path_that_leaves_the_grant(self, roots, path):
+        from koda.knowledge.task_policy_defaults import default_execution_policy
+        from koda.services.execution_policy import evaluate_execution_policy
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        (roots / "other" / "x").write_text("canary-other\n")
+        grant = {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(roots / "allowed")]}}}
+        params = {"path": path.format(root=roots)}
+        # The simulate route evaluates the params as the operator wrote them.
+        evaluation = evaluate_execution_policy(
+            "file_read",
+            params,
+            task_kind="general",
+            effective_policy=default_execution_policy("general"),
+            resource_access_policy=grant,
+            tool_policy={"allowed_tool_ids": ["file_read"]},
+            known_tool=True,
+        )
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", grant),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["file_read"]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            worker = await execute_tool(AgentToolCall("file_read", params, ""), _make_ctx(str(roots)))
+
+        assert (evaluation.decision, evaluation.reason_code) == ("deny", "path_not_granted")
+        assert not worker.success
+        assert "outside the granted scope" in worker.output
+        assert "canary-other" not in worker.output
+
+
+class TestGrantChecksThePathWithItsWhitespace:
+    """``allowed_paths`` decides the path the handler acts on, whitespace included.
+
+    ``<work>/src `` (its name ends in a space) is a sibling of the grant root ``<work>/src``,
+    and ``notes.txt `` a sibling of the granted ``notes.txt``. The dispatcher hands the grant
+    each file-tool path resolved but not trimmed, so trimming it there would grant the
+    sibling as its whitespace-less twin.
+    """
+
+    @pytest.fixture
+    def work(self, tmp_path, monkeypatch):
+        work = (tmp_path / "work").resolve()
+        (work / "src").mkdir(parents=True)
+        (work / "src" / "a.txt").write_text("TOKEN = 'granted'\n")
+        (work / "src ").mkdir()
+        (work / "src " / "secret.txt").write_text("TOKEN = 'canary-outside-grant'\n")
+        (work / "notes.txt").write_text("granted-notes\n")
+        (work / "notes.txt ").write_text("canary-outside-grant\n")
+        monkeypatch.chdir(tmp_path)
+        return work
+
+    @staticmethod
+    def _grant(*allowed_paths) -> dict:
+        return {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(p) for p in allowed_paths]}}}
+
+    async def _execute(self, tool: str, params: dict, work_dir: str, *allowed_paths):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", self._grant(*allowed_paths)),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(work_dir))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [
+            ("file_grep", {"pattern": "TOKEN", "path": "src "}),
+            ("file_list", {"path": "src "}),
+            ("file_search", {"pattern": "*", "path": "src "}),
+            ("file_read", {"path": "notes.txt "}),
+            ("file_read", {"path": "src /secret.txt"}),
+            ("file_write", {"path": "src\t", "content": "x"}),
+            ("file_move", {"source": "src/a.txt", "destination": "src\n"}),
+        ],
+    )
+    async def test_a_whitespace_suffixed_sibling_of_a_grant_root_is_outside_it(self, work, tool, params):
+        result = await self._execute(tool, params, str(work), work / "src", work / "notes.txt")
+
+        assert not result.success, result.output
+        assert "outside the granted scope" in result.output
+        assert "canary-outside-grant" not in result.output
+        assert "secret.txt" not in result.output
+        assert (work / "src" / "a.txt").exists()
+        assert not (work / "src\t").exists()
+        assert not (work / "src\n").exists()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [("file_grep", {"pattern": "TOKEN"}), ("file_list", {}), ("file_search", {"pattern": "*"})],
+    )
+    async def test_a_work_dir_whose_name_ends_in_a_space_is_the_one_the_grant_checks(self, work, tool, params):
+        from koda.utils.workdir import validate_work_dir
+
+        validation = validate_work_dir(str(work / "src "))
+        assert validation.ok
+        assert validation.path == f"{work}/src "
+
+        refused = await self._execute(tool, params, validation.path, work / "src")
+        assert not refused.success, refused.output
+        assert "outside the granted scope" in refused.output
+        assert "secret.txt" not in refused.output
+
+        # A grant entry is trimmed like the rest of the policy, so a grant on the parent covers it.
+        granted = await self._execute(tool, params, validation.path, work)
+        assert granted.success, granted.output
+        assert "secret.txt" in granted.output
+
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [
+            ("file_read", {"path": "{work}/notes.txt "}),
+            ("file_move", {"source": "{work}/src/a.txt", "destination": "{work}/src "}),
+            ("file_move", {"source": "{work}/src ", "destination": "{work}/src/b"}),
+            ("cat", {"path": "{work}/src "}),
+            ("ls", {"path": "{work}/src "}),
+        ],
+    )
+    def test_the_contract_grant_check_keeps_the_whitespace(self, work, tool, params):
+        from koda.agent_contract import evaluate_integration_grant, resolve_integration_action
+
+        call = {key: value.format(work=work) for key, value in params.items()}
+        decision = evaluate_integration_grant(tool, call, self._grant(work / "src", work / "notes.txt"))
+
+        assert not decision.allowed
+        assert decision.reason == "path_not_granted"
+        first = call.get("path") or call["source"]
+        assert resolve_integration_action(tool, call).path == first
+
+    @pytest.mark.parametrize("tool", ["file_read", "cat", "agent_set_workdir"])
+    @pytest.mark.parametrize("path", ["", "   ", "\n"])
+    def test_a_blank_path_is_still_no_path(self, tool, path):
+        from koda.agent_contract import resolve_integration_action
+
+        assert resolve_integration_action(tool, {"path": path}).path is None
+
+
+class TestTheSimulatorIsNeverLooserThanTheWorkerOnAGrantScope:
+    """A path-scoped fileops grant decides ``file_list``, ``file_search`` and ``file_grep`` without a path too.
+
+    In the worker the dispatcher hands the grant the work dir for them, the directory they
+    read. The simulate route has no work dir, so it checks the unplaceable ``.``, which no
+    ``allowed_paths`` entry covers: it may deny a call the worker allows, never allow one
+    the worker denies.
+    """
+
+    @pytest.fixture
+    def work(self, tmp_path, monkeypatch):
+        work = (tmp_path / "work").resolve()
+        (work / "src").mkdir(parents=True)
+        (work / "src" / "main.py").write_text("TOKEN = 'granted'\n")
+        (work / "secret.txt").write_text("TOKEN = 'canary-outside-grant'\n")
+        monkeypatch.chdir(tmp_path)
+        return work
+
+    @staticmethod
+    def _grant(*allowed_paths) -> dict:
+        return {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(p) for p in allowed_paths]}}}
+
+    @staticmethod
+    def _simulate(tool: str, params: dict, grant: dict) -> dict:
+        from koda.control_plane.execution_policy import simulate_execution_policy
+        from koda.services.execution_policy import feature_flags_from_env
+
+        return simulate_execution_policy(
+            {},
+            {"tool_id": tool, "params": params},
+            agent_id="AGENT_A",
+            agent_spec={"tool_policy": {"allowed_tool_ids": [tool]}, "resource_access_policy": grant},
+            feature_flags=feature_flags_from_env({"FILEOPS_ENABLED": "true"}),
+        )
+
+    @staticmethod
+    async def _execute(tool: str, params: dict, work_dir: str, grant: dict):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", grant),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(work_dir))
+
+    _PATHLESS_CALLS = [("file_list", {}), ("file_grep", {"pattern": "TOKEN"}), ("file_search", {"pattern": "*"})]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("tool", "params"), _PATHLESS_CALLS)
+    async def test_a_call_without_a_path_outside_the_grant_is_denied_on_both_sides(self, work, tool, params):
+        grant = self._grant(work / "src")
+
+        simulated = self._simulate(tool, params, grant)
+        worker = await self._execute(tool, params, str(work), grant)
+
+        assert (simulated["decision"], simulated["reason_code"]) == ("deny", "path_not_granted")
+        assert not worker.success, worker.output
+        assert "outside the granted scope" in worker.output
+        assert "secret.txt" not in worker.output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("tool", "params"), _PATHLESS_CALLS)
+    async def test_where_the_grant_covers_the_work_dir_only_the_simulator_denies(self, work, tool, params):
+        grant = self._grant(work)
+
+        simulated = self._simulate(tool, params, grant)
+        worker = await self._execute(tool, params, str(work), grant)
+
+        assert (simulated["decision"], simulated["reason_code"]) == ("deny", "path_not_granted")
+        assert worker.success, worker.output
+        assert "secret.txt" in worker.output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("tool", "params"), _PATHLESS_CALLS)
+    async def test_the_same_call_with_the_work_dir_as_its_path_is_decided_alike(self, work, tool, params):
+        call = {**params, "path": str(work)}
+
+        for grant, allowed in ((self._grant(work / "src"), False), (self._grant(work), True)):
+            simulated = self._simulate(tool, call, grant)
+            worker = await self._execute(tool, call, str(work), grant)
+            assert (simulated["decision"] == "allow") is allowed, simulated
+            assert worker.success is allowed, worker.output
+
+    def test_the_contract_grant_check_places_a_pathless_call_nowhere(self):
+        from koda.agent_contract import evaluate_integration_grant
+
+        for tool, params in self._PATHLESS_CALLS:
+            decision = evaluate_integration_grant(tool, params, self._grant("/"))
+            assert (decision.allowed, decision.reason) == (False, "path_not_granted"), tool
+            assert evaluate_integration_grant(tool, params, self._grant()).allowed, tool
+
+
+class TestOneListOfFileToolPaths:
+    """Which file tools act on the work dir without a ``path``, and which params name a path, is listed once.
+
+    ``koda.agent_contract`` holds both lists. The worker's dispatcher hands the policy and
+    the grant the work dir for the first (``_file_tool_policy_params``), the policy engine
+    evaluates ``.`` for them (``resolve_action_paths``), the grant refuses ``.`` under
+    ``allowed_paths``, and the handlers' own default must agree.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_handlers_default_to_the_work_dir_exactly_for_the_listed_tools(self, tmp_path):
+        from koda.agent_contract import WORK_DIR_DEFAULT_PATH_TOOLS
+        from koda.services.tool_dispatcher import _TOOL_HANDLERS
+
+        work = tmp_path.resolve()
+        (work / "notes.txt").write_text("notes visible\n")
+        params = {"pattern": "notes*", "content": "x", "old_text": "notes", "new_text": "x"}
+        acted_on_the_work_dir = set()
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            for tool in sorted(name for name in _TOOL_HANDLERS if name.startswith("file_")):
+                result = await _TOOL_HANDLERS[tool](dict(params), _make_ctx(str(work)))
+                if result.success:
+                    assert "notes" in result.output, (tool, result.output)
+                    acted_on_the_work_dir.add(tool)
+                else:
+                    assert "Missing" in result.output, (tool, result.output)
+
+        assert acted_on_the_work_dir == WORK_DIR_DEFAULT_PATH_TOOLS
+        assert sorted(os.listdir(work)) == ["notes.txt"]
+        assert (work / "notes.txt").read_text() == "notes visible\n"
+
+    def test_the_dispatcher_and_the_policy_paths_read_the_same_lists(self, tmp_path):
+        from koda.agent_contract import FILE_TOOL_PATH_PARAMS, WORK_DIR_DEFAULT_PATH_TOOLS, resolve_action_paths
+        from koda.services.tool_dispatcher import _TOOL_HANDLERS, _file_tool_policy_params
+
+        work = tmp_path.resolve()
+        file_tools = sorted(name for name in _TOOL_HANDLERS if name.startswith("file_"))
+        assert WORK_DIR_DEFAULT_PATH_TOOLS.issubset(file_tools)
+        assert len(WORK_DIR_DEFAULT_PATH_TOOLS) < len(file_tools)
+        for tool in file_tools:
+            worker = _file_tool_policy_params(tool, {"pattern": "*"}, str(work))
+            engine = resolve_action_paths(tool, {"pattern": "*"})
+            if tool in WORK_DIR_DEFAULT_PATH_TOOLS:
+                assert worker["path"] == str(work), tool
+                assert engine == (".",), tool
+            else:
+                assert "path" not in worker, tool
+                assert engine == (), tool
+
+        written = {key: f"sub/../{key}.txt" for key in FILE_TOOL_PATH_PARAMS}
+        canonical = _file_tool_policy_params("file_move", written, str(work))
+        assert {key: canonical[key] for key in FILE_TOOL_PATH_PARAMS} == {
+            key: str(work / f"{key}.txt") for key in FILE_TOOL_PATH_PARAMS
+        }
+        assert resolve_action_paths("file_move", written) == tuple(written[key] for key in FILE_TOOL_PATH_PARAMS)
+
+
+class TestPathRulesCoverWhatASubtreeToolReads:
+    """A restrictive path rule on a directory decides a grep, search, listing or move of an ancestor of it."""
+
+    @pytest.fixture
+    def work(self, tmp_path, monkeypatch):
+        work = tmp_path.resolve() / "work"
+        (work / "secrets").mkdir(parents=True)
+        (work / "secrets" / "notes.txt").write_text("PRIVATE canary-secret\n")
+        (work / "src").mkdir()
+        (work / "src" / "main.py").write_text("PRIVATE visible\n")
+        monkeypatch.chdir(tmp_path)
+        policy = {
+            "version": 1,
+            "rules": [
+                {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+                {"name": "deny-secrets", "match": {"path": str(work / "secrets")}, "decision": "deny"},
+            ],
+        }
+        monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+        return work
+
+    _GRANT = {"integration_grants": {"fileops": {"allow_actions": ["fileops.*"]}}}
+
+    async def _execute(self, tool: str, params: dict, work):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", self._GRANT),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(str(work)))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [
+            ("file_grep", {"pattern": "PRIVATE", "path": "{work}"}),
+            ("file_grep", {"pattern": "PRIVATE", "path": "."}),
+            ("file_grep", {"pattern": "PRIVATE"}),
+            ("file_search", {"pattern": "*.txt", "path": "{work}"}),
+            ("file_list", {"path": "{work}"}),
+            ("file_move", {"source": "{work}", "destination": "{work}/../moved"}),
+        ],
+    )
+    async def test_naming_an_ancestor_does_not_step_around_the_deny(self, work, tool, params):
+        result = await self._execute(tool, {k: v.format(work=work) for k, v in params.items()}, work)
+
+        assert not result.success, result.output
+        assert result.output == "Matched execution-policy rule."
+        assert "canary-secret" not in result.output
+        assert (work / "secrets" / "notes.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_a_grep_beside_the_denied_directory_still_runs(self, work):
+        result = await self._execute("file_grep", {"pattern": "PRIVATE", "path": str(work / "src")}, work)
+
+        assert result.success, result.output
+        assert "visible" in result.output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("params", [{}, {"path": "."}, {"path": "{work}"}])
+    async def test_a_listing_above_the_entry_that_holds_a_denied_path_runs(self, work, monkeypatch, params):
+        """file_list shows its direct entries only: ``secrets`` is listed, nothing inside it is read."""
+        policy = {
+            "version": 1,
+            "rules": [
+                {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+                {"name": "deny-notes", "match": {"path": str(work / "secrets" / "notes.txt")}, "decision": "deny"},
+            ],
+        }
+        monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+
+        listed = await self._execute("file_list", {k: v.format(work=work) for k, v in params.items()}, work)
+        inside = await self._execute("file_list", {"path": "secrets"}, work)
+
+        assert listed.success, listed.output
+        assert "[d] secrets" in listed.output
+        assert "notes.txt" not in listed.output
+        assert not inside.success
+        assert inside.output == "Matched execution-policy rule."
+
+
+class TestRestrictivePathRulesWrittenThroughASymlink:
+    """The worker hands the policy the resolved path, so a restrictive rule is also matched in its resolved form.
+
+    ``/srv/app`` links to ``/srv/releases/v42``; a deny rule written for
+    ``/srv/app/config/secrets`` must still decide a read of ``config/secrets/key.txt`` in the
+    work dir ``/srv/app``, whose resolved path is under ``/srv/releases/v42``. An allow rule is
+    not resolved: the agent could repoint a link inside its work dir and widen it.
+    """
+
+    _GRANT = {"integration_grants": {"fileops": {"allow_actions": ["fileops.*"]}}}
+
+    @pytest.fixture
+    def app(self, tmp_path, monkeypatch):
+        real = tmp_path.resolve() / "releases" / "v42"
+        (real / "config" / "secrets").mkdir(parents=True)
+        (real / "config" / "secrets" / "key.txt").write_text("canary-secret\n")
+        (real / "config" / "app.toml").write_text("visible\n")
+        (real / "src").mkdir()
+        app = tmp_path.resolve() / "app"
+        app.symlink_to(real)
+        monkeypatch.chdir(tmp_path)
+        return app
+
+    async def _execute(self, tool: str, params: dict, app, rules: list[dict]):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        policy = {"version": 1, "rules": rules}
+        with (
+            patch("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy),
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", self._GRANT),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(str(app)))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("decision", ["deny", "require_approval"])
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [
+            ("file_read", {"path": "config/secrets/key.txt"}),
+            ("file_read", {"path": "{app}/config/secrets/key.txt"}),
+            ("file_grep", {"pattern": "canary", "path": "config"}),
+        ],
+    )
+    async def test_a_restrictive_rule_decides_the_resolved_path(self, app, decision, tool, params):
+        rules = [
+            {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+            {"name": "gate-secrets", "match": {"path": str(app / "config" / "secrets")}, "decision": decision},
+        ]
+        result = await self._execute(tool, {k: v.format(app=app) for k, v in params.items()}, app, rules)
+
+        assert not result.success, result.output
+        expected = {"deny": "Matched execution-policy rule.", "require_approval": "Human approval required"}
+        assert result.output.startswith(expected[decision]), result.output
+        assert "canary-secret" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_a_read_beside_the_rule_still_runs(self, app):
+        rules = [
+            {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+            {"name": "deny-secrets", "match": {"path": str(app / "config" / "secrets")}, "decision": "deny"},
+        ]
+        result = await self._execute("file_read", {"path": "config/app.toml"}, app, rules)
+
+        assert result.success, result.output
+        assert "visible" in result.output
+
+    def test_an_allow_rule_is_not_resolved(self, app):
+        from koda.knowledge.task_policy_defaults import default_execution_policy
+        from koda.services.execution_policy import evaluate_execution_policy
+
+        (app / "public").symlink_to(app.resolve() / "src")
+        policy = {
+            "version": 1,
+            "rules": [{"name": "allow-public-writes", "match": {"path": str(app / "public")}, "decision": "allow"}],
+        }
+        evaluation = evaluate_execution_policy(
+            "file_write",
+            {"path": str(app.resolve() / "src" / "x.txt"), "content": "x"},
+            effective_policy=default_execution_policy("general"),
+            resource_access_policy=self._GRANT,
+            tool_policy={"allowed_tool_ids": ["file_write"]},
+            execution_policy=policy,
+        )
+        assert evaluation.rule_id != "allow-public-writes"
+
+
+class TestWorkDirUnderASensitiveRoot:
+    """The Docker default work dir (HOME=/var/lib/koda/runtime/home) is under /var/lib, a SENSITIVE_DIRS root.
+
+    The file tools must work there: the work dir and the paths inside it are allowed, a
+    sensitive root that does not contain the work dir stays denied, and secret names stay
+    blocked.
+    """
+
+    @pytest.fixture
+    def docker_work(self, tmp_path, monkeypatch):
+        root = tmp_path.resolve()
+        sensitive = root / "var-lib"
+        work = sensitive / "koda" / "runtime" / "home"
+        (work / "src" / "pkg").mkdir(parents=True)
+        (work / "src" / "main.py").write_text("TOKEN = 'top-level'\n")
+        (work / "src" / "pkg" / "mod.py").write_text("TOKEN = 'nested'\n")
+        (work / ".env").write_text("TOKEN=canary-secret\n")
+        (root / "etc").mkdir()
+        (root / "etc" / "passwd").write_text("TOKEN=canary-passwd\n")
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(root / "etc")}))
+        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(work))
+        monkeypatch.chdir(root)
+        return work
+
+    async def _execute(self, tool: str, params: dict, work):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        fileops_enabled = {"integration_grants": {"fileops": {"enabled": True}}}
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", fileops_enabled),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(str(work)))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["src/main.py", "{work}/src/main.py"])
+    async def test_file_read_works_inside_the_work_dir(self, docker_work, path):
+        result = await self._execute("file_read", {"path": path.format(work=docker_work)}, docker_work)
+        assert result.success, result.output
+        assert "top-level" in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_write_and_list_work_inside_the_work_dir(self, docker_work):
+        from koda.services.tool_dispatcher import _handle_file_write
+
+        # file_write needs a human approval through execute_tool; the handler applies the path policy.
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            written = await _handle_file_write(
+                {"path": "notes/todo.md", "content": "ship"}, _make_ctx(str(docker_work))
+            )
+        assert written.success, written.output
+        assert (docker_work / "notes" / "todo.md").read_text() == "ship"
+        listed = await self._execute("file_list", {}, docker_work)
+        assert listed.success, listed.output
+        assert "src" in listed.output
+
+    @pytest.mark.asyncio
+    async def test_file_grep_descends_into_subdirectories(self, docker_work):
+        result = await self._execute("file_grep", {"pattern": "TOKEN"}, docker_work)
+        assert result.success, result.output
+        assert "src/main.py:1: TOKEN = 'top-level'" in result.output
+        assert "src/pkg/mod.py:1: TOKEN = 'nested'" in result.output
+        assert "canary" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_secret_files_and_other_sensitive_roots_stay_refused(self, docker_work):
+        secret = await self._execute("file_read", {"path": ".env"}, docker_work)
+        assert not secret.success
+        assert "blocked" in secret.output
+        passwd = docker_work.parents[3] / "etc" / "passwd"
+        outside = await self._execute("file_read", {"path": str(passwd)}, docker_work)
+        assert not outside.success
+        assert "canary" not in outside.output
+
+    @pytest.mark.asyncio
+    async def test_grep_still_prunes_a_sensitive_root_inside_the_work_dir(self, docker_work, monkeypatch):
+        (docker_work / "etc").mkdir()
+        (docker_work / "etc" / "shadow.txt").write_text("TOKEN=canary-inner\n")
+        sensitive = docker_work.parents[2]
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(docker_work / "etc")}))
+        result = await self._execute("file_grep", {"pattern": "TOKEN"}, docker_work)
+        assert result.success, result.output
+        assert "src/pkg/mod.py" in result.output
+        assert "canary-inner" not in result.output
+        read = await self._execute("file_read", {"path": "etc/shadow.txt"}, docker_work)
+        assert not read.success
+        assert "sensitive system directory" in read.output

@@ -91,6 +91,7 @@ from koda.utils.command_helpers import (
 )
 from koda.utils.formatting import escape_html
 from koda.utils.messaging import split_message
+from koda.utils.workdir import validate_work_dir
 
 log = get_logger(__name__)
 
@@ -218,19 +219,20 @@ async def callback_setdir(update: Update, context: BotContext) -> None:
 
     init_user_data(context.user_data, user_id=update.effective_user.id)
     path = (query.data or "").removeprefix("setdir:")
+    if not path:
+        await query.edit_message_text("Directory not found: <code></code>", parse_mode=ParseMode.HTML)
+        return
 
-    # Block sensitive system directories
-    resolved = os.path.realpath(path)
-    from koda.config import SENSITIVE_DIRS
-
-    if any(resolved == s or resolved.startswith(s + "/") for s in SENSITIVE_DIRS):
+    # The same work-dir check as /setdir and agent_set_workdir (sensitive dirs, resolved).
+    validation = validate_work_dir(path)
+    if validation.blocked:
         await query.edit_message_text("Access denied: sensitive system directory.")
         return
 
-    if os.path.isdir(path):
-        context.user_data["work_dir"] = path
+    if validation.ok:
+        context.user_data["work_dir"] = validation.path
         await query.edit_message_text(
-            f"Working directory set to: <code>{escape_html(path)}</code>", parse_mode=ParseMode.HTML
+            f"Working directory set to: <code>{escape_html(validation.path)}</code>", parse_mode=ParseMode.HTML
         )
     else:
         await query.edit_message_text(

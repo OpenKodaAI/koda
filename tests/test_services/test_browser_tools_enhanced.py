@@ -112,6 +112,29 @@ class TestBrowserUpload:
             result = await _handle_browser_upload({"file_path": "/tmp/doc.pdf"}, _make_ctx())
         assert result.success
 
+    @pytest.mark.asyncio
+    async def test_relative_path_resolves_under_the_work_dir(self, tmp_path, monkeypatch):
+        from koda.services.tool_dispatcher import _handle_browser_upload
+
+        work = (tmp_path / "work").resolve()
+        (work / "docs").mkdir(parents=True)
+        (work / "docs" / "report.pdf").write_bytes(b"%PDF-1.4")
+        decoy = tmp_path / "decoy"
+        (decoy / "docs").mkdir(parents=True)
+        (decoy / "docs" / "report.pdf").write_bytes(b"%PDF-decoy")
+        monkeypatch.chdir(decoy)
+        with (
+            _patch_browser_available(),
+            patch("koda.services.browser_manager.browser_manager") as mock_bm,
+        ):
+            mock_bm.upload_file = AsyncMock(return_value="Uploaded file to 'input'")
+            result = await _handle_browser_upload(
+                {"file_path": "docs/report.pdf"}, _make_ctx(work_dir=str(work), user_data={"work_dir": str(work)})
+            )
+        assert result.success
+        assert mock_bm.upload_file.await_args.args[2] == str(work / "docs" / "report.pdf")
+        assert mock_bm.upload_file.await_args.kwargs["allowed_root"] == str(work)
+
 
 class TestBrowserSetViewport:
     @pytest.mark.asyncio

@@ -509,3 +509,35 @@ Gates at aa5947f (integrate/wave-4 with the session branch merged in), run by th
 - `pnpm lint:web`: 0 errors, 40 warnings.
 - `pnpm test:web`: 181 files, 1055 tests passed.
 - `pnpm build:web`: ok.
+
+## WAVE-2A — tool governance, safe paths and the agent-turn safety net (integrate/wave-2a)
+
+Tasks: M1-E4-T1 (git option injection), M1-E4-T10 (governed background shell, runtime-kernel process-group kill), M1-E4-T13 (one safe-path resolver), M1-E4-T9 through ADR-002 AG-06 (one policy engine, fnmatch for every rule), M0-E3-T2 (agent-turn characterisation on real Postgres), M0-E1-T4 (plan status lint). Each task went through reviews of its own. M1-E4-T13 and AG-06 needed a fourth round.
+
+Integration (`wf_801ef49f-493`, then the pre-merge review `wf_7421780a-c99` and the final round `wf_1fa2157a-37f`):
+- M1-E4-T13's resolver is kept. AG-06's duplicate file-command parsing was dropped, but its fail-closed no-work-dir rule stays.
+- Covered by the integration fixes:
+  - the Docker work-dir policy and canonical grant paths;
+  - scoped system env keys;
+  - landings that are symlinks or hard links, refused by `file_move`;
+  - credential-store plants refused at the landing.
+- The credential-store coverage was built up over the final rounds, each checked against the pinned CLIs with strace and their bundles:
+  - temp copies of each CLI's login: Gemini `.oauth_creds.json.<pid>.<ms>.<n>.tmp`, Codex `.auth-<random>`;
+  - Gemini's file keychain and a2a tokens, and Codex's gateway OAuth;
+  - the MCP secrets in `~/.gemini/settings.json` and `~/.codex/config.toml` and their temp copies;
+  - Claude's project `.mcp.json` and Codex profile configs.
+- Disconnect deletes only pure credential files (the D-230 lesson) and their temp copies.
+- Project-scope MCP configs are refused wherever they sit, as `.env` is. The operator can relax this through Q-27.
+- The flaky EXPLAIN index test was made deterministic (e9a01d0).
+- Final round 3: 0 blocking, 1 minor and 4 doc nits left. The minor is the sessions-page test flake under load, whose root cause 8a0451c came in with the main merge. The nits are recorded as D-258.
+
+Gates at c0ab8c6 (integrate/wave-2a with the session branch merged in):
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: 743 files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 361 source files.
+- `pytest --cov=koda`: 8198 passed, 1 failed, 27 skipped, 172 xfailed; 67 % coverage. The failure is the plan lint, which caught a false task-level cycle between M1-E2-T2 and M1-E2-T3 (fixed in cee7b41). At 0db9862, `tests/test_master_plan_lint.py` and the hygiene tests pass (52 passed), and the plan lint reports 353 tasks consistent.
+- `pytest -m postgres`: 274 passed, 2 skipped, 2 xfailed.
+- Rust: `cargo fmt --check` ok; `cargo clippy --workspace --all-targets -D warnings` ok; `cargo test -p koda-runtime-kernel` ok.
+- Web: `pnpm lint:web` 0 errors, 40 warnings; `pnpm test:web` 181 files, 1055 tests passed; `pnpm build:web` ok.
+
+M1-E4-T9 stays in review: its done-when needs the replay over stored policies, which is AG-09.
