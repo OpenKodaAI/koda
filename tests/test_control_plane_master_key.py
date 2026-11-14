@@ -10,7 +10,11 @@ Pinned guarantees:
     fingerprint and no ciphertext.
   * An existing install with a key and secrets but no fingerprint upgrades
     cleanly: the fingerprint is recorded from the present key and the key is
-    not touched.
+    not touched, provided that key (or the previous key) decrypts at least
+    one of the newest stored values. A key that decrypts none of them, such
+    as one a pre-AG-05 loader created after the real key was lost, is
+    refused and not recorded, unless the operator's acknowledgement file
+    names that key's fingerprint (the documented lost-key procedure).
   * A mismatch, or a missing key while a fingerprint or ciphertext exists,
     refuses startup with guidance.
   * Rotation keeps working: a previous key that matches the recorded
@@ -46,6 +50,8 @@ class _FakeFingerprintStore:
         self.fingerprint: str | None = None
         self.reason: str | None = None
         self.ciphertext = False
+        # Fernet tokens the newest rows of the ciphertext stores hold.
+        self.samples: list[str] = []
         self.writes: list[tuple[str, str]] = []
         self.audit: list[dict[str, Any]] = []
 
@@ -68,6 +74,9 @@ class _FakeFingerprintStore:
 
     def ciphertext_exists(self) -> bool:
         return self.ciphertext
+
+    def ciphertext_samples(self) -> list[str]:
+        return list(self.samples)
 
     def record_audit_event(self, agent_id: str, *, event_type: str, details: dict[str, Any] | None = None) -> None:
         self.audit.append({"agent_id": agent_id, "event_type": event_type, "details": dict(details or {})})
@@ -95,6 +104,7 @@ def store(monkeypatch: pytest.MonkeyPatch) -> _FakeFingerprintStore:
     monkeypatch.setattr(crypto, "_insert_fingerprint", fake.insert)
     monkeypatch.setattr(crypto, "_replace_fingerprint", fake.replace)
     monkeypatch.setattr(crypto, "_ciphertext_exists", fake.ciphertext_exists)
+    monkeypatch.setattr(crypto, "_ciphertext_samples", fake.ciphertext_samples)
     monkeypatch.setattr(crypto, "record_audit_event", fake.record_audit_event)
     return fake
 
@@ -229,6 +239,7 @@ def test_existing_install_without_fingerprint_upgrades_from_present_key(
     key = Fernet.generate_key()
     _write_key(key_paths.key_file, key)
     store.ciphertext = True
+    store.samples = [Fernet(key).encrypt(b"pre-upgrade").decode()]
 
     assert crypto.ensure_master_key() == "upgrade"
 
@@ -248,6 +259,161 @@ def test_present_key_without_fingerprint_or_secrets_records_fingerprint(
     assert crypto.ensure_master_key() == "upgrade"
     assert key_paths.key_file.read_bytes() == key
     assert store.fingerprint == crypto.master_key_fingerprint(key)
+
+
+def _acknowledgement(key_paths: SimpleNamespace) -> Path:
+    return key_paths.key_file.parent / ".master.key.accept-undecryptable"
+
+
+def test_upgrade_with_a_key_that_decrypts_no_stored_secret_refuses_and_records_nothing(
+    key_paths: SimpleNamespace, store: _FakeFingerprintStore
+) -> None:
+    """A pre-AG-05 loader replaced a lost key K1 with K2: K2 must not become the recorded key.
+
+    Otherwise restoring K1 from backup would later be refused as a mismatch.
+    """
+    original = Fernet.generate_key()
+    regenerated = Fernet.generate_key()
+    _write_key(key_paths.key_file, regenerated)
+    store.ciphertext = True
+    store.samples = [Fernet(original).encrypt(f"secret-{n}".encode()).decode() for n in range(3)]
+
+    with pytest.raises(crypto.MasterKeyMismatch) as excinfo:
+        crypto.ensure_master_key()
+
+    message = str(excinfo.value)
+    assert "decrypts none of the 3" in message
+    assert crypto.master_key_fingerprint(regenerated)[:12] in message
+    assert "backup" in message
+    assert str(_acknowledgement(key_paths)) in message
+    assert regenerated.decode() not in message
+    assert store.fingerprint is None
+    assert store.writes == []
+    assert store.audit == []
+    assert key_paths.key_file.read_bytes() == regenerated
+
+    # The operator restores the original key: it is accepted and recorded.
+    key_paths.key_file.write_bytes(original)
+    crypto.clear_fernet_cache()
+    assert crypto.ensure_master_key() == "upgrade"
+    assert store.fingerprint == crypto.master_key_fingerprint(original)
+    assert crypto.ensure_master_key() == "verified"
+
+
+def test_upgrade_accepts_a_key_that_decrypts_any_newest_sample(
+    key_paths: SimpleNamespace, store: _FakeFingerprintStore
+) -> None:
+    """Rows a still older key left behind do not block the key the install was last using."""
+    key = Fernet.generate_key()
+    _write_key(key_paths.key_file, key)
+    store.samples = [
+        Fernet(Fernet.generate_key()).encrypt(b"stale").decode(),
+        Fernet(key).encrypt(b"current").decode(),
+    ]
+
+    assert crypto.ensure_master_key() == "upgrade"
+    assert store.fingerprint == crypto.master_key_fingerprint(key)
+
+
+def test_upgrade_accepts_a_key_when_the_previous_key_decrypts(
+    key_paths: SimpleNamespace, store: _FakeFingerprintStore
+) -> None:
+    """An install from before AG-05 in the middle of a rotation: the new key is recorded."""
+    old_key = Fernet.generate_key()
+    new_key = Fernet.generate_key()
+    _write_key(key_paths.key_file, new_key)
+    _write_key(key_paths.previous_file, old_key)
+    store.samples = [Fernet(old_key).encrypt(b"pre-rotation").decode()]
+
+    assert crypto.ensure_master_key() == "upgrade"
+    assert store.fingerprint == crypto.master_key_fingerprint(new_key)
+
+
+def test_upgrade_ignores_an_invalid_previous_key(key_paths: SimpleNamespace, store: _FakeFingerprintStore) -> None:
+    _write_key(key_paths.key_file, Fernet.generate_key())
+    _write_key(key_paths.previous_file, bytes(range(32)))
+    store.samples = [Fernet(Fernet.generate_key()).encrypt(b"value").decode()]
+
+    with pytest.raises(crypto.MasterKeyMismatch, match="decrypts none"):
+        crypto.ensure_master_key()
+    assert store.writes == []
+
+
+def test_lost_key_acknowledgement_records_the_named_key_and_is_removed(
+    key_paths: SimpleNamespace, store: _FakeFingerprintStore
+) -> None:
+    new_key = Fernet.generate_key()
+    _write_key(key_paths.key_file, new_key)
+    store.samples = [Fernet(Fernet.generate_key()).encrypt(b"lost").decode()]
+    _acknowledgement(key_paths).write_text(crypto.master_key_fingerprint(new_key)[:12].upper() + "\n")
+
+    assert crypto.ensure_master_key() == "lost_key_reset"
+
+    assert store.fingerprint == crypto.master_key_fingerprint(new_key)
+    assert store.reason == "lost_key_reset"
+    assert [event["details"]["reason"] for event in store.audit] == ["lost_key_reset"]
+    assert new_key.decode() not in repr(store.audit)
+    assert not _acknowledgement(key_paths).exists()
+    assert key_paths.key_file.read_bytes() == new_key
+
+
+@pytest.mark.parametrize(
+    "content",
+    ["another-key", "short", ""],
+    ids=["other_key", "too_short", "empty"],
+)
+def test_lost_key_acknowledgement_for_another_key_does_not_apply(
+    key_paths: SimpleNamespace, store: _FakeFingerprintStore, content: str
+) -> None:
+    key = Fernet.generate_key()
+    _write_key(key_paths.key_file, key)
+    store.samples = [Fernet(Fernet.generate_key()).encrypt(b"lost").decode()]
+    prefix = crypto.master_key_fingerprint(key)[:12]
+    if content == "another-key":
+        content = crypto.master_key_fingerprint(Fernet.generate_key())[:12]
+    elif content == "short":
+        content = prefix[:6]
+    _acknowledgement(key_paths).write_text(content)
+
+    with pytest.raises(crypto.MasterKeyMismatch) as excinfo:
+        crypto.ensure_master_key()
+
+    assert "does not name this key" in str(excinfo.value)
+    assert store.writes == []
+    assert _acknowledgement(key_paths).read_text() == content
+
+
+def test_lost_key_acknowledgement_does_not_override_a_recorded_fingerprint(
+    key_paths: SimpleNamespace, store: _FakeFingerprintStore
+) -> None:
+    recorded = crypto.master_key_fingerprint(Fernet.generate_key())
+    store.fingerprint = recorded
+    key = Fernet.generate_key()
+    _write_key(key_paths.key_file, key)
+    _acknowledgement(key_paths).write_text(crypto.master_key_fingerprint(key)[:12])
+
+    with pytest.raises(crypto.MasterKeyMismatch, match="is not the key this database recorded"):
+        crypto.ensure_master_key()
+
+    assert store.fingerprint == recorded
+    assert store.writes == []
+    assert _acknowledgement(key_paths).exists()
+
+
+def test_fernet_tokens_are_found_in_every_store_format() -> None:
+    fernet = Fernet(Fernet.generate_key())
+    token = fernet.encrypt(b"value").decode()
+    other = fernet.encrypt(b"other").decode()
+
+    assert crypto._fernet_tokens(token) == [token]
+    assert crypto._fernet_tokens(f"  {token}\n") == [token]
+    assert crypto._fernet_tokens(f'{{"API_TOKEN": "{token}", "EMPTY": ""}}') == [token]
+    assert crypto._fernet_tokens(f'{{"status": "pending", "encrypted_details": "{token}"}}') == [token]
+    snapshot = f'{{"secrets": {{"A": {{"encrypted_value": "{token}"}}, "B": {{"encrypted_value": "{other}"}}}}}}'
+    assert sorted(crypto._fernet_tokens(snapshot)) == sorted([token, other])
+    # Values that are not Fernet tokens are not evidence of a wrong key.
+    for value in (None, "", "gAAAA-ciphertext", "plain text", "{not json", "[1, 2]", token[:-8], token + "!"):
+        assert crypto._fernet_tokens(value) == [], value
 
 
 def test_missing_key_while_secrets_exist_refuses_and_creates_nothing(

@@ -11,6 +11,10 @@ Pinned guarantees, through the production store and migration code:
   * Upgrade: an install with a key and ciphertext but no fingerprint row
     records the fingerprint from the present key; the ciphertext row is
     byte-identical afterwards and still decrypts.
+  * Upgrade with a key that decrypts none of the stored ciphertext, in any
+    store, is refused and records nothing; restoring the original key then
+    upgrades. The lost-key acknowledgement records the new key once, with an
+    audit event, and is removed.
   * Mismatch, or a missing key while a fingerprint or ciphertext exists,
     refuses startup and creates no key file.
 """
@@ -193,6 +197,124 @@ async def test_existing_install_upgrades_without_touching_ciphertext(key_db: Sim
     assert [row["encrypted_value"] for row in stored] == [ciphertext]
     assert crypto.decrypt_secret(ciphertext) == "pre-upgrade-secret"
     assert key_db.key_file.read_bytes() == key
+
+
+def _write_key_file(path: Path, key: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(key)
+    path.chmod(0o600)
+
+
+async def test_upgrade_with_a_key_that_decrypts_no_stored_secret_refuses(key_db: SimpleNamespace) -> None:
+    """A key that a pre-AG-05 loader created after the real one was lost must not be recorded.
+
+    Recording it would make the control plane refuse the original key when the
+    operator later restores it from backup.
+    """
+    original = Fernet.generate_key()
+    await _insert_secret(key_db.dsn, Fernet(original).encrypt(b"pre-upgrade-secret").decode())
+    regenerated = Fernet.generate_key()
+    _write_key_file(key_db.key_file, regenerated)
+
+    with pytest.raises(crypto.MasterKeyMismatch, match="decrypts none") as excinfo:
+        crypto.ensure_master_key()
+
+    assert crypto.master_key_fingerprint(regenerated)[:12] in str(excinfo.value)
+    assert regenerated.decode() not in str(excinfo.value)
+    assert await _fingerprint_rows(key_db.dsn) == []
+    assert key_db.key_file.read_bytes() == regenerated
+
+    # Restoring the original key from backup now starts, and records that key.
+    key_db.key_file.write_bytes(original)
+    crypto.clear_fernet_cache()
+    assert crypto.ensure_master_key() == "upgrade"
+    rows = await _fingerprint_rows(key_db.dsn)
+    assert [row["fingerprint"] for row in rows] == [crypto.master_key_fingerprint(original)]
+
+
+@pytest.mark.parametrize(
+    "seed_sql",
+    [
+        """INSERT INTO "{schema}"."cp_mcp_oauth_tokens" (agent_id, server_key, access_token_encrypted)
+           VALUES ('AGENT_A', 'srv', '{token}')""",
+        """INSERT INTO "{schema}"."cp_mcp_oauth_tokens" (agent_id, server_key, refresh_token_encrypted)
+           VALUES ('AGENT_A', 'srv', '{token}')""",
+        """INSERT INTO "{schema}"."cp_mcp_agent_connections"
+               (agent_id, server_key, env_values_json, created_at, updated_at)
+           VALUES ('AGENT_A', 'srv', '{{"TOKEN": "{token}"}}', 'now', 'now')""",
+        """INSERT INTO "{schema}"."cp_provider_login_sessions" (id, provider_id, details_json, created_at, updated_at)
+           VALUES ('sess', 'claude', '{{"status": "pending", "encrypted_details": "{token}"}}', 'now', 'now')""",
+        """INSERT INTO "{schema}"."cp_agent_config_versions"
+               (agent_id, version, snapshot_json, created_at, published_at)
+           VALUES ('AGENT_A', 1,
+                   '{{"secrets": {{"K": {{"scope": "agent", "encrypted_value": "{token}"}}}}}}', 'now', 'now')""",
+    ],
+    ids=["mcp_oauth_access", "mcp_oauth_refresh", "mcp_connection_env", "provider_login_session", "published_snapshot"],
+)
+async def test_every_ciphertext_store_is_checked_on_upgrade(key_db: SimpleNamespace, seed_sql: str) -> None:
+    original = Fernet.generate_key()
+    token = Fernet(original).encrypt(b"value").decode()
+    await _query(key_db.dsn, seed_sql.format(schema=_SCHEMA, token=token))
+    _write_key_file(key_db.key_file, Fernet.generate_key())
+
+    with pytest.raises(crypto.MasterKeyMismatch, match="decrypts none"):
+        crypto.ensure_master_key()
+    assert await _fingerprint_rows(key_db.dsn) == []
+
+    key_db.key_file.write_bytes(original)
+    crypto.clear_fernet_cache()
+    assert crypto.ensure_master_key() == "upgrade"
+
+
+async def test_upgrade_accepts_a_key_when_the_previous_key_decrypts(
+    key_db: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An install from before AG-05 in the middle of a rotation upgrades cleanly."""
+    old_key = Fernet.generate_key()
+    new_key = Fernet.generate_key()
+    await _insert_secret(key_db.dsn, Fernet(old_key).encrypt(b"pre-rotation").decode())
+    _write_key_file(key_db.key_file, new_key)
+    previous_file = key_db.key_file.parent / ".master-previous.key"
+    _write_key_file(previous_file, old_key)
+    monkeypatch.setattr(crypto, "CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE", previous_file)
+    crypto.clear_fernet_cache()
+
+    assert crypto.ensure_master_key() == "upgrade"
+
+    rows = await _fingerprint_rows(key_db.dsn)
+    assert [row["fingerprint"] for row in rows] == [crypto.master_key_fingerprint(new_key)]
+
+
+async def test_lost_key_acknowledgement_records_the_new_key_once(key_db: SimpleNamespace) -> None:
+    """The documented lost-key procedure: a new key, then the explicit acknowledgement file."""
+    await _insert_secret(key_db.dsn, Fernet(Fernet.generate_key()).encrypt(b"lost-for-good").decode())
+    new_key = Fernet.generate_key()
+    _write_key_file(key_db.key_file, new_key)
+    prefix = crypto.master_key_fingerprint(new_key)[:12]
+
+    with pytest.raises(crypto.MasterKeyMismatch) as excinfo:
+        crypto.ensure_master_key()
+    acknowledgement = key_db.key_file.parent / ".master.key.accept-undecryptable"
+    assert str(acknowledgement) in str(excinfo.value)
+    assert await _fingerprint_rows(key_db.dsn) == []
+
+    acknowledgement.write_text(f"{prefix}\n")
+    assert crypto.ensure_master_key() == "lost_key_reset"
+
+    rows = await _fingerprint_rows(key_db.dsn)
+    assert [(row["fingerprint"], row["recorded_reason"]) for row in rows] == [
+        (crypto.master_key_fingerprint(new_key), "lost_key_reset")
+    ]
+    audit = await _query(
+        key_db.dsn,
+        f"""SELECT details_json::text AS details FROM "{_SCHEMA}"."audit_events"
+             WHERE event_type = 'security.master_key_fingerprint_recorded'""",
+    )
+    assert len(audit) == 1
+    assert "lost_key_reset" in audit[0]["details"]
+    assert new_key.decode() not in audit[0]["details"]
+    assert not acknowledgement.exists()
+    assert crypto.ensure_master_key() == "verified"
 
 
 async def test_missing_key_while_secrets_exist_refuses(key_db: SimpleNamespace) -> None:

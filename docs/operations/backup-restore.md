@@ -112,8 +112,12 @@ process creates one; an agent worker or CLI without the key file fails with
 `MasterKeyUnavailable`. On every start the control plane compares the key
 with the fingerprint recorded in `cp_master_key_fingerprint` (an HMAC of a
 fixed label under the key, never the key). On the first start after an
-upgrade from a release without that table, it records the fingerprint of
-the key it finds and changes nothing else.
+upgrade from a release without that table, it first checks that the key it
+finds, or the previous key during a rotation, decrypts at least one of the
+newest stored encrypted values. Releases before this check created a new
+key whenever the key file was missing, and such a key must not become the
+recorded one. It then records the key's fingerprint and changes nothing
+else.
 
 A lost or wrong key therefore stops the control plane at startup, with a
 log line starting `koda control plane refused to start:`:
@@ -123,6 +127,7 @@ log line starting `koda control plane refused to start:`:
 | `master key not found ... this database recorded a master key (fingerprint ...)` | The key file is missing | Restore the key file from backup |
 | `master key not found ... the database holds encrypted secrets` | The key file is missing on an install whose fingerprint was never recorded | Restore the key file from backup |
 | `... is not the key this database recorded` | Another key: a backup from another set, another volume, or a cluster replica with its own key | Restore the key whose fingerprint matches; when rotating, follow [hardening](hardening.md#master-key-rotation) |
+| `... decrypts none of the ... newest encrypted values in this database` | First start after an upgrade, with a key that did not encrypt the stored secrets. Releases before this check created a new key whenever the key file was missing, for example after `koda-state` was lost or not restored | Restore the original key file from backup. To keep the key found as well, put the original in the previous-key slot, as in a [rotation](hardening.md#master-key-rotation). If the original is permanently lost, see [below](#if-the-key-is-permanently-lost) |
 | `... is not a valid Fernet key` | The file is damaged or is not a Fernet key | Restore the key file from backup |
 
 To find which backup holds the right key, compare fingerprint prefixes. The
@@ -158,9 +163,27 @@ deliberately and only after a Postgres backup:
 2. If a fingerprint is recorded, delete it:
    `DELETE FROM knowledge_v2.cp_master_key_fingerprint;`. This removes only
    the check; the old ciphertext stays in place.
-3. Start the control plane. It records the new key's fingerprint
-   (`reason=upgrade`).
-4. Re-enter every secret, MCP credential and OAuth connection in the
+3. Let the control plane start (`docker compose up -d app`) and read
+   `docker compose logs app`. While encrypted secrets are stored, it refuses
+   with `... decrypts none of the ... newest encrypted values in this
+   database`. The message names the new key's fingerprint prefix and an
+   acknowledgement file next to the key file
+   (`.master.key.accept-undecryptable`). If it starts instead, nothing stored
+   needed the old key; go to step 5.
+4. Accept the new key explicitly: write that prefix into the file the
+   message names.
+
+   ```bash
+   docker compose run --rm --no-deps app sh -c \
+       'echo <prefix> > "$STATE_ROOT_DIR/control_plane/.master.key.accept-undecryptable"'
+   ```
+
+   On the next start, the control plane records the new key's fingerprint
+   (`reason=lost_key_reset`, audit event
+   `security.master_key_fingerprint_recorded`) and deletes the file. The file
+   counts only for the key whose fingerprint it names, and only while no
+   fingerprint is recorded.
+5. Re-enter every secret, MCP credential and OAuth connection in the
    dashboard; the old values stay undecryptable until they are overwritten.
 
 ## RTO target
