@@ -20,7 +20,7 @@ Most control-plane routes require one of:
 - a bearer token created by `/api/control-plane/auth/tokens`
 - the break-glass `CONTROL_PLANE_API_TOKEN`, when configured
 
-Public or bootstrap routes are explicitly marked with `security: []` in the OpenAPI. Auth-adjacent routes are rate-limited more strictly than normal operator routes.
+Public or bootstrap routes are explicitly marked with `security: []` in the OpenAPI; `tests/test_control_plane_auth_matrix.py` checks that mark against what every registered route does without a session. Auth-adjacent routes are rate-limited more strictly than normal operator routes.
 
 ## Control Plane
 

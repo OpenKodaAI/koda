@@ -82,6 +82,16 @@ proxy at `5174` is defence in depth, not the only line of defence: `apps/web/src
 unseals the operator-session cookie and forwards the bearer token to the backend, so the
 normal dashboard flow is unaffected.
 
+The whitelist matches an entry or any sub-path of it: `/auth/login/x` skips the bearer check
+too, and answers `404` because no route is registered there. The middleware checks only
+`/api/control-plane/*`. The supervisor's other routes (`/`, `/setup`, `/health`,
+`/openapi/control-plane.json` and the `/cluster/*` deploy hooks) answer without a session.
+`tests/test_control_plane_auth_matrix.py` sends a request to every route the supervisor
+registers, without a session and with one. It fails when a route answers without a session
+and the OpenAPI document does not mark it `security: []`. It also fails when this whitelist
+differs from the OpenAPI `security: []` set or from the dashboard list in
+`apps/web/src/proxy.ts`.
+
 ## Session model
 
 - Session secret: 32-byte URL-safe random, hashed with SHA-256 before persistence in
