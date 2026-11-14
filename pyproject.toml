@@ -31,7 +31,7 @@ dependencies = [
     # it is installed. It reached the images only through the dev group until the
     # Dockerfiles exported with --no-dev, so it is declared here.
     "defusedxml>=0.7.1,<1.0",
-    "pillow>=12.2.0,<13.0",
+    "pillow>=13.0.0,<14.0",
     "pypdf>=6.21.4,<7.0.0",
     "soundfile>=0.13.1,<1.0",
     "python-docx>=1.2.0,<2.0",

@@ -39,6 +39,7 @@ SECURITY_FLOORS: dict[str, tuple[str, str]] = {
     "certifi": ("2026.10.19", "GHSA-6q48-6c7w-9gw2"),
     "cryptography": ("48.0.1", "GHSA-537c-gmf6-5ccf"),
     "multidict": ("6.9.1", "GHSA-54p9-h82j-f925"),
+    "pillow": ("13.0.0", "55 advisories, among them GHSA-78g4-xqwv-q3g8 and GHSA-cp9v-662q-vvx9"),
     # The dev group's pip (via pip-audit) and the pip each Python image pins.
     "pip": ("26.2", "GHSA-qwm4-qh6w-59xr, GHSA-wf93-45jw-7689"),
     "pypdf": ("6.21.4", "45 advisories, among them GHSA-5849-834g-hvw5 and GHSA-jr96-gvgh-j3r4"),
@@ -102,7 +103,7 @@ def test_direct_dependency_lower_bounds_meet_security_floors() -> None:
 
     # The direct dependencies whose floors this task raised; a rename or a
     # dropped entry must not make the check above vacuous.
-    assert {"aiohttp", "asyncssh", "cryptography", "pypdf", "urllib3"} <= set(checked)
+    assert {"aiohttp", "asyncssh", "cryptography", "pillow", "pypdf", "urllib3"} <= set(checked)
 
 
 @pytest.mark.parametrize("dockerfile", PYTHON_IMAGE_DOCKERFILES)
