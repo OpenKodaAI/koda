@@ -897,6 +897,92 @@ async def test_onboarding_status_with_an_operator_credential_returns_the_full_pa
     assert manager.get_onboarding_status.call_count == 2
 
 
+def _serve_auth_status(monkeypatch: pytest.MonkeyPatch, service: Any) -> TestServer:
+    """The auth status route behind the real control-plane middlewares."""
+    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
+    app = web.Application(
+        middlewares=[
+            control_plane_api.control_plane_error_middleware,
+            control_plane_api.control_plane_auth_middleware,
+        ]
+    )
+    app.router.add_get("/api/control-plane/auth/status", control_plane_api.auth_status)
+    return TestServer(app)
+
+
+_ANONYMOUS_AUTH_STATUS_KEYS = {
+    "has_owner",
+    "bootstrap_required",
+    "auth_mode",
+    "session_required",
+    "onboarding_complete",
+    "authenticated",
+    "session_subject",
+    "operator",
+}
+
+
+@pytest.mark.parametrize("owner_exists", [False, True], ids=["before-setup", "after-setup"])
+async def test_auth_status_without_a_session_names_the_bootstrap_file_only_before_setup(
+    fake_operator_db: FakeOperatorAuthDb,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    owner_exists: bool,
+) -> None:
+    """The setup screen gets the bootstrap file path; once an owner exists nobody anonymous does (D-050, R-36)."""
+    monkeypatch.setattr(operator_auth_mod, "ALLOW_LOOPBACK_BOOTSTRAP", True)
+    service = operator_auth_mod.OperatorAuthService()
+    if owner_exists:
+        _create_owner(service)
+    server = _serve_auth_status(monkeypatch, service)
+
+    async with TestClient(server) as client:
+        anonymous = await client.get("/api/control-plane/auth/status")
+        unknown_token = await client.get(
+            "/api/control-plane/auth/status",
+            headers={"Authorization": "Bearer kodas_not-a-live-session"},
+        )
+
+        for response in (anonymous, unknown_token):
+            assert response.status == 200, await response.text()
+            payload = await response.json()
+            assert payload["authenticated"] is False
+            assert payload["operator"] is None
+            assert payload["has_owner"] is owner_exists
+            assert payload["bootstrap_required"] is not owner_exists
+            if owner_exists:
+                assert set(payload) == _ANONYMOUS_AUTH_STATUS_KEYS
+            else:
+                assert set(payload) == _ANONYMOUS_AUTH_STATUS_KEYS | {"bootstrap_file_path", "loopback_trust_enabled"}
+                assert payload["bootstrap_file_path"] == str(tmp_path / "bootstrap.txt")
+                assert payload["loopback_trust_enabled"] is True
+
+
+async def test_auth_status_with_an_operator_credential_keeps_the_server_flags(
+    fake_operator_db: FakeOperatorAuthDb,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    monkeypatch.setattr(operator_auth_mod, "ALLOW_LOOPBACK_BOOTSTRAP", True)
+    service = operator_auth_mod.OperatorAuthService()
+    session_token = _create_owner(service)["session_token"]
+    server = _serve_auth_status(monkeypatch, service)
+
+    async with TestClient(server) as client:
+        for token in (session_token, "legacy-break-glass"):
+            response = await client.get(
+                "/api/control-plane/auth/status",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status == 200, await response.text()
+            payload = await response.json()
+            assert payload["authenticated"] is True
+            assert payload["has_owner"] is True
+            assert payload["recovery_available"] is True
+            assert payload["loopback_trust_enabled"] is True
+            assert payload["bootstrap_file_path"] == str(tmp_path / "bootstrap.txt")
+
+
 def test_password_reset_revokes_all_existing_sessions(fake_operator_db: FakeOperatorAuthDb) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)

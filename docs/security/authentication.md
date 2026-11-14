@@ -112,6 +112,26 @@ dashboard, a caller without a session gets the same two fields, or a plain `503`
 control plane is unreachable: the dashboard's empty "upstream unavailable" stand-in payloads are
 served only to signed-in operators.
 
+### Auth status before login
+
+`GET /api/control-plane/auth/status` is public as well, on `:8090` and through the dashboard:
+the login and setup screens read it before anyone has a session. Without a valid operator
+credential it returns `has_owner`, `bootstrap_required`, `auth_mode`, `session_required`,
+`onboarding_complete` and `authenticated: false`, plus two fields that only apply while no owner
+exists:
+
+- `bootstrap_file_path`, the absolute path of the setup-code file on the server. The setup
+  screen tells the operator to read the code from it, and `koda doctor` and `scripts/doctor.py`
+  report it from this route, because onboarding/status no longer does before login.
+- `loopback_trust_enabled`, which tells the setup screen whether a loopback request needs no
+  code.
+
+So until the owner registers, anyone who can reach the control plane learns where the setup-code
+file is, though not the code. Once an owner exists the file is deleted and anonymous callers get
+neither field. `recovery_available` (whether a break-glass token is configured) is returned only
+to an operator. With a valid session, personal API token or break-glass token the route returns
+every field and the operator's profile.
+
 ## Session model
 
 - Session secret: 32-byte URL-safe random, hashed with SHA-256 before persistence in

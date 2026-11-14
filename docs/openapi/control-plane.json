@@ -6691,13 +6691,13 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Current auth mode, owner bootstrap requirements, and active operator session details when authenticated."
+            "description": "Current auth mode, owner bootstrap requirements, and active operator session details when authenticated. Without an operator credential, bootstrap_file_path and loopback_trust_enabled are returned only while no owner exists, and recovery_available is not returned."
           }
         },
         "tags": [
           "Auth"
         ],
-        "description": "Stable Koda control-plane route. See linked architecture and runbook docs for domain behavior."
+        "description": "Public route read by the login and setup screens and by the doctors. Before setup it names the absolute bootstrap file path to any caller, because the setup screen shows it; once an owner exists only an authenticated operator gets it. See docs/security/authentication.md."
       }
     },
     "/api/control-plane/auth/tokens": {
@@ -9423,7 +9423,7 @@
         "tags": [
           "Onboarding"
         ],
-        "description": "Public route with an optional bearer. Agents, owner contact details, the Telegram allowlist, provider connection state and server paths are returned only to an authenticated operator. See docs/security/authentication.md."
+        "description": "Public route with an optional bearer. This route returns agents, owner contact details, the Telegram allowlist, provider connection state and the bootstrap file path only to an authenticated operator. Before an owner exists, the public GET /api/control-plane/auth/status still names the bootstrap file for the setup screen. See docs/security/authentication.md."
       }
     },
     "/api/control-plane/providers/downloads/active": {

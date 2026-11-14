@@ -1333,9 +1333,12 @@ export type ControlPlaneAuthStatus = {
   bootstrap_required: boolean;
   auth_mode: string;
   session_required: boolean;
-  recovery_available: boolean;
+  /** Operators only. */
+  recovery_available?: boolean;
   onboarding_complete?: boolean;
+  /** Before login, sent only while no owner exists. */
   loopback_trust_enabled?: boolean;
+  /** Before login, sent only while no owner exists. */
   bootstrap_file_path?: string;
   session_subject?: string | null;
   operator?: {
