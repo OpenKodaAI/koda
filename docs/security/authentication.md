@@ -91,7 +91,8 @@ calls it) sends the first token of that list that is not a placeholder, never th
 `scripts/doctor.py --provider` does the same, its `control_plane_api_token` check passes while one
 such token remains, and `--strict` requires every such token to be at least 32 characters. Doctor
 sends that token straight to the control plane and ignores `http_proxy` and `https_proxy`, so a
-proxy never sees it.
+proxy never sees it, and it never follows a redirect with it: a `3xx` from `--base-url` fails the
+provider check instead of carrying the token to the host the redirect names.
 
 Unedited `.env.example` placeholders (values starting with `replace-with-`) never
 authenticate: they are dropped from `CONTROL_PLANE_API_TOKEN(S)` and treated as an unset
@@ -257,6 +258,11 @@ which Next.js fills from the socket when no proxy set them. A TLS-terminating pr
 forward `X-Forwarded-Proto $scheme`, as the bundled `proxy/nginx.conf` does, which becomes
 `https` once its server block terminates TLS; Caddy and Traefik send it by default. Without it
 an older browser that sends no Fetch Metadata would be refused.
+
+The refusal spares the operator a sign-in that cannot last; it is not access control. A
+non-browser client on a plain-HTTP address that sets `Sec-Fetch-Site` itself is not refused,
+and it gains nothing by it: it already holds the credentials it sends, and a page script cannot
+set that header in a browser. Cross-site mutations are still blocked before this check.
 
 ## Profile data
 

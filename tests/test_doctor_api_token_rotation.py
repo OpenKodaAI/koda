@@ -16,8 +16,9 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import os
+import sys
 import threading
-import urllib.request
 from collections.abc import AsyncIterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,6 +32,7 @@ from aiohttp.test_utils import TestServer
 from koda.control_plane.settings import parse_api_tokens
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+DOCTOR = REPO_ROOT / "scripts" / "doctor.py"
 PROXY_VARIABLES = ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY", "all_proxy", "ALL_PROXY")
 
 
@@ -190,14 +192,35 @@ class _RecordingProxy(BaseHTTPRequestHandler):
         pass
 
 
+def _write_env_file(tmp_path: Path, *, configured: str, port: int) -> Path:
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                f"CONTROL_PLANE_API_TOKEN={configured}",
+                "RUNTIME_LOCAL_UI_TOKEN=" + "r" * 64,
+                # The control plane's port stands in for Postgres: only the TCP connect is probed.
+                f"KNOWLEDGE_V2_POSTGRES_DSN=postgresql://koda:4b1f0c2e9d8a7f6e5d4c3b2a19081726@127.0.0.1:{port}/koda",
+                "OBJECT_STORAGE_REQUIRED=false",
+                f"STATE_ROOT_DIR={tmp_path / 'state'}",
+                f"RUNTIME_EPHEMERAL_ROOT={tmp_path / 'runtime'}",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return env_file
+
+
 @pytest.mark.parametrize("configured", ["new-break-glass-token,old-break-glass-token"])
 async def test_doctor_never_sends_the_bearer_through_an_http_proxy(
-    doctor: ModuleType, control_plane: _ControlPlane, configured: str, monkeypatch: pytest.MonkeyPatch
+    control_plane: _ControlPlane, configured: str, tmp_path: Path
 ) -> None:
     """An http_proxy without a no_proxy entry for loopback would see the break-glass token in clear text.
 
     Doctor talks only to this install's control plane and dashboard, so it connects to them directly
-    whatever the proxy settings say.
+    whatever the proxy settings say. The documented command runs doctor as a script, so the proxy
+    variables are set before doctor is imported: an opener built from them at import time is caught too.
     """
     seen: list[tuple[str, str]] = []
     proxy = ThreadingHTTPServer(("127.0.0.1", 0), type("Proxy", (_RecordingProxy,), {"seen": seen}))
@@ -205,21 +228,143 @@ async def test_doctor_never_sends_the_bearer_through_an_http_proxy(
     thread.start()
     try:
         proxy_url = f"http://127.0.0.1:{proxy.server_address[1]}"
-        for name in PROXY_VARIABLES:
-            monkeypatch.setenv(name, proxy_url)
-        for name in ("no_proxy", "NO_PROXY"):
-            monkeypatch.delenv(name, raising=False)
-        # urlopen keeps the opener it built from the environment on first use; start from none.
-        monkeypatch.setattr(urllib.request, "_opener", None)
-
-        payload = await _run_doctor(doctor, control_plane, configured)
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in PROXY_VARIABLES and key.lower() != "no_proxy" and key != "PYTHONPATH"
+        }
+        env.update({name: proxy_url for name in PROXY_VARIABLES})
+        env["HOME"] = str(tmp_path / "home")
+        env_file = _write_env_file(tmp_path, configured=configured, port=control_plane.server.port)
+        # `python3 scripts/doctor.py --provider claude`, as docs/install/local.md runs it.
+        process = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-S",
+            str(DOCTOR),
+            "--env-file",
+            str(env_file),
+            "--base-url",
+            control_plane.base_url,
+            "--dashboard-url",
+            control_plane.base_url,
+            "--provider",
+            "claude",
+            cwd=str(tmp_path),
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
     finally:
         proxy.shutdown()
         proxy.server_close()
         thread.join(timeout=5)
 
+    payload = json.loads(stdout)
     assert seen == []
     assert [header for header in control_plane.received if header] == ["Bearer new-break-glass-token"]
-    assert _check(payload, "provider_verification")["ok"] is True
+    assert _check(payload, "provider_verification")["ok"] is True, stderr.decode()
     assert _check(payload, "control_plane_health")["ok"] is True
     assert _check(payload, "web_dashboard")["ok"] is True
+
+
+class _RedirectingControlPlane:
+    """A control plane whose authenticated onboarding/status answers a redirect.
+
+    A forwarding server on 127.0.0.2 (another host) records what reaches it and answers
+    like a control plane that accepts any bearer, so following the redirect would also
+    report the provider as verified.
+    """
+
+    def __init__(self, base_url: str, received: list[str], forwarded: list[str]) -> None:
+        self.base_url = base_url
+        self.received = received
+        self.forwarded = forwarded
+
+
+@pytest.fixture
+async def redirecting_control_plane(request: pytest.FixtureRequest) -> AsyncIterator[_RedirectingControlPlane]:
+    target: str = request.param
+    received: list[str] = []
+    forwarded: list[str] = []
+
+    async def stolen(req: web.Request) -> web.Response:
+        forwarded.append(req.headers.get("Authorization", ""))
+        return web.json_response(
+            {"has_owner": True, "bootstrap_required": False, "providers": [{"provider_id": "claude", "verified": True}]}
+        )
+
+    other_host = web.Application()
+    other_host.router.add_get("/steal", stolen)
+    other_server = TestServer(other_host, host="127.0.0.2")
+    await other_server.start_server()
+
+    async def onboarding_status(req: web.Request) -> web.Response:
+        authorization = req.headers.get("Authorization", "")
+        received.append(authorization)
+        if not authorization:
+            return web.json_response({"has_owner": True, "bootstrap_required": False})
+        location = (
+            f"http://127.0.0.2:{other_server.port}/steal" if target == "other-host" else "/api/control-plane/steal"
+        )
+        raise web.HTTPFound(location)
+
+    async def health(_req: web.Request) -> web.Response:
+        return web.json_response({"status": "healthy"})
+
+    async def dashboard(_req: web.Request) -> web.Response:
+        # The dashboard sends `/` to the sign-in page; doctor still follows that.
+        raise web.HTTPTemporaryRedirect("/login")
+
+    async def login(_req: web.Request) -> web.Response:
+        return web.Response(text="<html></html>", content_type="text/html")
+
+    async def auth_status(_req: web.Request) -> web.Response:
+        return web.json_response({"has_owner": True})
+
+    app = web.Application()
+    app.router.add_get("/health", health)
+    app.router.add_get("/", dashboard)
+    app.router.add_get("/login", login)
+    app.router.add_get("/api/control-plane/onboarding/status", onboarding_status)
+    app.router.add_get("/api/control-plane/steal", stolen)
+    app.router.add_get("/api/control-plane/auth/status", auth_status)
+    server = TestServer(app, host="127.0.0.1")
+    await server.start_server()
+    try:
+        yield _RedirectingControlPlane(f"http://127.0.0.1:{server.port}", received, forwarded)
+    finally:
+        await server.close()
+        await other_server.close()
+
+
+@pytest.mark.parametrize("redirecting_control_plane", ["other-host", "same-host"], indirect=True)
+async def test_doctor_never_sends_the_bearer_to_a_redirect(
+    doctor: ModuleType, redirecting_control_plane: _RedirectingControlPlane
+) -> None:
+    """urllib copies Authorization onto a redirect to any host, so a 3xx could hand the bearer to another server.
+
+    A control plane behind an SSO or edge proxy can answer 302 to an identity provider. Doctor
+    sends the bearer to the URL it was given and to nothing else: it does not follow a redirect
+    of a request that carries it, and the provider check fails and names the redirect instead
+    of reporting what another server answered.
+    """
+    cp = redirecting_control_plane
+    env = {
+        "CONTROL_PLANE_API_TOKEN": "probe-break-glass-token-0123456789abcdef",
+        "RUNTIME_LOCAL_UI_TOKEN": "r" * 64,
+        "KNOWLEDGE_V2_POSTGRES_DSN": "postgresql://koda:4b1f0c2e9d8a7f6e5d4c3b2a19081726@127.0.0.1:5432/koda",
+        "OBJECT_STORAGE_REQUIRED": "false",
+    }
+    payload = await asyncio.to_thread(
+        doctor.run_doctor, env=env, base_url=cp.base_url, dashboard_url=cp.base_url, provider_id="claude"
+    )
+
+    assert [header for header in cp.received if header] == ["Bearer probe-break-glass-token-0123456789abcdef"]
+    assert cp.forwarded == []
+    provider = _check(payload, "provider_verification")
+    assert provider["ok"] is False
+    assert "redirect" in provider["error"]
+    # A request without the bearer still follows a redirect: the dashboard answers `/` with one.
+    assert _check(payload, "web_dashboard")["ok"] is True
+    assert _check(payload, "onboarding_status")["ok"] is True

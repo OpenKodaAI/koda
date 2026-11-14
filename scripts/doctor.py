@@ -11,10 +11,12 @@ import socket
 import subprocess
 import sys
 from collections.abc import Iterable
+from http.client import HTTPMessage
 from pathlib import Path
-from typing import Any
+from typing import IO, Any
+from urllib.error import HTTPError
 from urllib.parse import quote, unquote, urlparse
-from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 # `python3 scripts/doctor.py` puts scripts/ first on sys.path, not the checkout.
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -202,23 +204,62 @@ def probe_service(
     return result
 
 
+class _NoRedirectWithCredentials(HTTPRedirectHandler):
+    """Follow a redirect only for a request that carries no credentials.
+
+    urllib copies every header in ``Request.headers`` onto the redirected
+    request, whatever its host, so a 3xx from a control plane behind an SSO or
+    edge proxy would hand the break-glass bearer to the server it names.
+    Doctor attaches credentials as unredirected headers (``_request``), which
+    urllib never copies, and refuses the redirect of such a request, so the
+    check fails and names the redirect instead of reporting what another
+    server answered.
+    """
+
+    def redirect_request(
+        self, req: Request, fp: IO[bytes], code: int, msg: str, headers: HTTPMessage, newurl: str
+    ) -> Request | None:
+        if isinstance(req, _CredentialedRequest):
+            raise HTTPError(
+                req.full_url,
+                code,
+                f"answered a redirect to {newurl}; doctor does not follow a redirect with the control-plane token",
+                headers,
+                fp,
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 # Doctor talks only to this install's control plane and dashboard, and `--provider` attaches the
 # break-glass bearer. urlopen would honour http_proxy/https_proxy, which also proxy a loopback URL
 # unless no_proxy names it, and the proxy would then see the bearer in clear text. So doctor
-# ignores the proxy settings and always connects directly.
-_DIRECT_OPENER = build_opener(ProxyHandler({}))
+# ignores the proxy settings and always connects directly, and never sends the bearer to a redirect.
+_DIRECT_OPENER = build_opener(ProxyHandler({}), _NoRedirectWithCredentials())
+
+
+class _CredentialedRequest(Request):
+    """A request that carries credentials; ``_NoRedirectWithCredentials`` never redirects it."""
+
+
+def _request(url: str, credentials: dict[str, str] | None) -> Request:
+    if not credentials:
+        return Request(url)
+    request = _CredentialedRequest(url)
+    for name, value in credentials.items():
+        request.add_unredirected_header(name, value)
+    return request
 
 
 def fetch_json(url: str, *, timeout: float = 5.0, headers: dict[str, str] | None = None) -> dict[str, Any]:
-    request = Request(url, headers=headers or {})
-    with _DIRECT_OPENER.open(request, timeout=timeout) as response:
+    """GET a JSON document. ``headers`` carry credentials, which never follow a redirect."""
+    with _DIRECT_OPENER.open(_request(url, headers), timeout=timeout) as response:
         payload: dict[str, Any] = json.loads(response.read().decode("utf-8"))
         return payload
 
 
 def fetch_status(url: str, *, timeout: float = 5.0, headers: dict[str, str] | None = None) -> dict[str, Any]:
-    request = Request(url, headers=headers or {})
-    with _DIRECT_OPENER.open(request, timeout=timeout) as response:
+    """GET ``url`` for its status. ``headers`` carry credentials, which never follow a redirect."""
+    with _DIRECT_OPENER.open(_request(url, headers), timeout=timeout) as response:
         return {
             "status": getattr(response, "status", 200),
             "content_type": response.headers.get("Content-Type", ""),

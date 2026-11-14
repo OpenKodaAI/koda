@@ -2,7 +2,7 @@ import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { InsecureTransportScreen } from "@/components/auth/insecure-transport-screen";
 import { SetupScreen } from "@/components/setup/setup-screen";
-import { ControlPlaneRequestError, getControlPlaneAuthStatus } from "@/lib/control-plane";
+import { getControlPlaneAuthStatus } from "@/lib/control-plane";
 import { insecureCookieTransport } from "@/lib/cookie-transport";
 import { isSafeRedirectTarget, safeRedirectTarget } from "@/lib/safe-redirect";
 import {
@@ -49,12 +49,11 @@ export default async function SetupPage({ searchParams }: SetupPageProps) {
     // control plane enough room on a cold dev stack so returning users are not
     // shown the first-run form by accident.
     authStatus = await getControlPlaneAuthStatus({ timeoutMs: 5000 });
-  } catch (error) {
+  } catch {
+    // Whatever the failure, a browser that has seen an owner goes to sign-in;
+    // any other gets the first-run screen, which re-checks on submit.
     if (hasOwnerHint) {
       redirect(loginTarget(nextParam));
-    }
-    if (error instanceof ControlPlaneRequestError && error.status === 401) {
-      return <SetupScreen authStatus={null} />;
     }
     return <SetupScreen authStatus={null} />;
   }

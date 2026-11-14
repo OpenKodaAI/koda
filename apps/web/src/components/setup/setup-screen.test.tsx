@@ -258,3 +258,30 @@ describe("SetupScreen rate limiting (ADR-038)", () => {
     expect(screen.queryByText(tr("en-US", "auth.rate_limited.no_wait"))).not.toBeInTheDocument();
   });
 });
+
+describe("SetupScreen password strength meter", () => {
+  // One password per strength, by the meter's score (length, character classes, distinct characters).
+  const STRENGTHS = [
+    ["weak", "short"],
+    ["fair", "abcdefghijkl"],
+    ["good", "abcdefghijK1"],
+    ["strong", "abcdefghijklmnK1!"],
+  ] as const;
+
+  it.each(SUPPORTED_LANGUAGES)("names each strength in %s", (language) => {
+    renderSetup({}, language);
+    const password = screen.getByLabelText(
+      translateForLanguage(language, "auth.setup.create_account.password"),
+    );
+
+    for (const [strength, value] of STRENGTHS) {
+      const key = `auth.setup.create_account.strength.${strength}`;
+      const label = translateForLanguage(language, key);
+      fireEvent.change(password, { target: { value } });
+
+      expect(label, `${language} ${strength}`).not.toBe(key);
+      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(document.body.textContent).not.toContain("auth.setup.create_account.strength");
+    }
+  });
+});

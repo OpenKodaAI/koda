@@ -11,7 +11,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { rateLimitedAuthMessage } from "@/lib/auth-rate-limit-message";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
-import { translate } from "@/lib/i18n";
+import { type AppTranslator, translate } from "@/lib/i18n";
 import { INSECURE_TRANSPORT_ERROR_CODE } from "@/lib/web-operator-session-constants";
 
 // Mirror LoginScreen / ForgotPasswordScreen: the per-client rate limit (429)
@@ -52,9 +52,29 @@ export interface RegisterOwnerResponse {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const MIN_LENGTH = 12;
 
-function scorePassword(password: string): { score: number; label: string; toneClass: string } {
+type PasswordStrength = "weak" | "fair" | "good" | "strong";
+
+// One literal key per strength, so the i18n contract test can check each one.
+function strengthLabel(t: AppTranslator, strength: PasswordStrength): string {
+  switch (strength) {
+    case "weak":
+      return t("auth.setup.create_account.strength.weak");
+    case "fair":
+      return t("auth.setup.create_account.strength.fair");
+    case "good":
+      return t("auth.setup.create_account.strength.good");
+    case "strong":
+      return t("auth.setup.create_account.strength.strong");
+  }
+}
+
+function scorePassword(password: string): {
+  score: number;
+  label: PasswordStrength | null;
+  toneClass: string;
+} {
   if (!password) {
-    return { score: 0, label: "", toneClass: "bg-[var(--surface-hover)]" };
+    return { score: 0, label: null, toneClass: "bg-[var(--surface-hover)]" };
   }
   let score = 0;
   if (password.length >= MIN_LENGTH) score += 1;
@@ -189,7 +209,7 @@ export function StepCreateAccount({
             placeholder={t("auth.setup.create_account.password_hint", { n: MIN_LENGTH })}
             className="auth-input"
           />
-          {password ? (
+          {passwordMeter.label ? (
             <div className="mt-2 flex items-center gap-2">
               <div className="relative h-1 flex-1 overflow-hidden rounded-full bg-[var(--surface-hover)]">
                 <div
@@ -198,7 +218,7 @@ export function StepCreateAccount({
                 />
               </div>
               <span className="text-[10.5px] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
-                {t(`auth.setup.create_account.strength.${passwordMeter.label}`)}
+                {strengthLabel(t, passwordMeter.label)}
               </span>
             </div>
           ) : null}

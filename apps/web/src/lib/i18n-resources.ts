@@ -656,6 +656,12 @@ export const resources = {
             bootstrap_hint_generic: "Provide the bootstrap code issued for this instance.",
             submit: "Create account",
             submitting: "Creating...",
+            strength: {
+              weak: "Weak",
+              fair: "Fair",
+              good: "Good",
+              strong: "Strong",
+            },
             errors: {
               bootstrap_required: "The bootstrap code is required.",
               email_invalid: "Enter a valid email address.",
@@ -1364,6 +1370,12 @@ export const resources = {
             bootstrap_hint_generic: "Informe o código de bootstrap emitido para esta instância.",
             submit: "Criar conta",
             submitting: "Criando...",
+            strength: {
+              weak: "Fraca",
+              fair: "Razoável",
+              good: "Boa",
+              strong: "Forte",
+            },
             errors: {
               bootstrap_required: "O código de bootstrap é obrigatório.",
               email_invalid: "Informe um endereço de e-mail válido.",
@@ -2073,6 +2085,12 @@ export const resources = {
             bootstrap_hint_generic: "Proporciona el código de bootstrap emitido para esta instancia.",
             submit: "Crear cuenta",
             submitting: "Creando...",
+            strength: {
+              weak: "Débil",
+              fair: "Aceptable",
+              good: "Buena",
+              strong: "Fuerte",
+            },
             errors: {
               bootstrap_required: "El código de bootstrap es obligatorio.",
               email_invalid: "Introduce un correo válido.",
@@ -2786,6 +2804,12 @@ export const resources = {
             bootstrap_hint_generic: "Fournissez le code de bootstrap émis pour cette instance.",
             submit: "Créer le compte",
             submitting: "Création...",
+            strength: {
+              weak: "Faible",
+              fair: "Moyen",
+              good: "Bon",
+              strong: "Fort",
+            },
             errors: {
               bootstrap_required: "Le code de bootstrap est requis.",
               email_invalid: "Saisissez une adresse e-mail valide.",
@@ -3499,6 +3523,12 @@ export const resources = {
             bootstrap_hint_generic: "Geben Sie den für diese Instanz ausgegebenen Bootstrap-Code ein.",
             submit: "Konto erstellen",
             submitting: "Erstellen...",
+            strength: {
+              weak: "Schwach",
+              fair: "Mittel",
+              good: "Gut",
+              strong: "Stark",
+            },
             errors: {
               bootstrap_required: "Der Bootstrap-Code ist erforderlich.",
               email_invalid: "Geben Sie eine gültige E-Mail-Adresse ein.",

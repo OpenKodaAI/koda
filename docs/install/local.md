@@ -137,7 +137,10 @@ parse error, and doctor does not report it: Compose replaces it with that variab
 string and only a warning, so `POSTGRES_PASSWORD=P@ss$word` reaches the stack as `P@ss`. Keep `$` out
 of hand-set secrets; `scripts/generate_env_secrets.py` writes hex values, which never contain one.
 Doctor connects to the control plane and the dashboard directly and ignores `http_proxy`, `https_proxy`
-and `no_proxy`, so the break-glass token that `--provider` sends never passes through a proxy.
+and `no_proxy`, so the break-glass token that `--provider` sends never passes through a proxy. It sends
+that token only to the `--base-url` it was given: when that request answers a redirect, doctor does not
+follow it, and `provider_verification` fails and names the redirect target. Point `--base-url` at the
+control plane itself, not at an address that redirects to a sign-in page.
 With `OBJECT_STORAGE_REQUIRED=false`, the object-storage checks are still reported, marked
 `"required": false`, and do not fail doctor. An unset value means `true`. An empty value means `true`
 under Compose (`${OBJECT_STORAGE_REQUIRED:-true}`) and `false` on a native install, as Koda reads its own
