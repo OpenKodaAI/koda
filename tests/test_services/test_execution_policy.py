@@ -6,7 +6,9 @@ from unittest.mock import MagicMock, patch
 
 from koda.services.execution_policy import (
     evaluate_execution_policy,
+    normalize_execution_policy,
     resolve_execution_policy_allowed_tool_ids,
+    validate_execution_policy,
 )
 
 
@@ -188,3 +190,185 @@ def test_runtime_rule_match_supports_extended_selector_fields() -> None:
 
     assert evaluation.decision == "allow"
     assert evaluation.rule_id == "allow-local-cli-read"
+
+
+def test_normalizer_migrates_legacy_rule_keys_to_the_canonical_keys() -> None:
+    normalized = normalize_execution_policy(
+        {
+            "version": 1,
+            "rules": [
+                {
+                    "id": "legacy-deny-shell",
+                    "selectors": {"tool_id": ["shell_execute"]},
+                    "action": "deny",
+                    "reason_code": "no_shell",
+                    "priority": "5",
+                },
+                {
+                    "rule_id": "legacy-approve-jobs",
+                    "selectors": {"tool_id": "job_create"},
+                    "decision": "require_approval",
+                },
+            ],
+        }
+    )
+
+    assert normalized["rules"] == [
+        {
+            "name": "legacy-deny-shell",
+            "priority": 5,
+            "match": {"tool_id": ["shell_execute"]},
+            "decision": "deny",
+            "reason": "no_shell",
+        },
+        {
+            "name": "legacy-approve-jobs",
+            "priority": 0,
+            "match": {"tool_id": "job_create"},
+            "decision": "require_approval",
+        },
+    ]
+    for rule in normalized["rules"]:
+        assert not {"id", "rule_id", "selectors", "action", "reason_code"} & set(rule)
+
+
+def test_normalizer_prefers_canonical_keys_over_legacy_aliases() -> None:
+    normalized = normalize_execution_policy(
+        {
+            "rules": [
+                {
+                    "name": "canonical-name",
+                    "id": "legacy-id",
+                    "match": {"tool_id": "web_search"},
+                    "selectors": {"tool_id": "shell_execute"},
+                    "decision": "deny",
+                    "action": "allow",
+                }
+            ]
+        }
+    )
+
+    assert normalized["rules"] == [
+        {"name": "canonical-name", "priority": 0, "match": {"tool_id": "web_search"}, "decision": "deny"}
+    ]
+
+
+def test_normalizer_names_rules_by_index_defaults_decision_and_orders_by_priority_then_name() -> None:
+    normalized = normalize_execution_policy(
+        {
+            "rules": [
+                {"match": {"tool_id": "web_search"}},
+                {"name": "b", "priority": 10, "match": {"tool_id": "file_read"}, "decision": "allow"},
+                {"name": "a", "priority": 10, "match": {"tool_id": "file_list"}, "decision": "allow"},
+            ]
+        }
+    )
+
+    assert [(rule["name"], rule["decision"]) for rule in normalized["rules"]] == [
+        ("a", "allow"),
+        ("b", "allow"),
+        ("rule_0", "require_approval"),
+    ]
+
+
+def test_normalizer_drops_rules_without_selectors_or_with_unknown_decisions() -> None:
+    normalized = normalize_execution_policy(
+        {
+            "version": 1,
+            "rules": [
+                {"name": "catch-all", "match": {}, "decision": "deny"},
+                {"name": "no-match", "decision": "allow"},
+                {"name": "maybe", "match": {"tool_id": "web_search"}, "decision": "maybe"},
+                "not-a-rule",
+            ],
+        }
+    )
+
+    assert normalized == {"version": 1}
+
+
+def test_normalizer_is_idempotent_on_its_own_output() -> None:
+    once = normalize_execution_policy(
+        {
+            "version": 1,
+            "defaults": {"default_approval_mode": "guarded"},
+            "rules": [
+                {
+                    "id": "legacy",
+                    "selectors": {"tool_id": ["shell_execute"], "private_network": "false"},
+                    "action": "deny",
+                },
+                {"name": "preview", "match": {"tool_id": "file_write"}, "decision": "allow_with_preview"},
+            ],
+        }
+    )
+
+    assert normalize_execution_policy(once) == once
+    assert once["rules"][0]["match"] == {"tool_id": ["shell_execute"], "private_network": False}
+
+
+def test_control_plane_normalizer_and_validator_delegate_to_the_runtime_engine() -> None:
+    from koda.control_plane import execution_policy as control_plane_policy
+
+    assert control_plane_policy.normalize_execution_policy is normalize_execution_policy
+    assert control_plane_policy.validate_execution_policy is validate_execution_policy
+
+
+def test_validation_rejects_regex_patterns_with_their_path() -> None:
+    errors, _warnings = validate_execution_policy(
+        {
+            "version": 1,
+            "rules": [
+                {"name": "ok", "match": {"tool_id": "mcp_*__delete_*"}, "decision": "deny"},
+                {"name": "regex", "match": {"tool_id": ["web_search", " ^mcp_.*__delete_.*$"]}, "decision": "deny"},
+            ],
+        }
+    )
+
+    assert len(errors) == 1
+    assert errors[0].startswith("execution_policy.rules[1].match.tool_id")
+    assert "^mcp_.*__delete_.*$" in errors[0]
+    assert "fnmatch" in errors[0]
+
+
+def test_validation_accepts_fnmatch_patterns_and_legacy_selectors() -> None:
+    errors, warnings = validate_execution_policy(
+        {
+            "version": 1,
+            "rules": [
+                {"name": "a", "match": {"tool_id": "mcp_*__delete_*"}, "decision": "deny"},
+                {"name": "b", "match": {"action_id": "http.[pd]*", "path": "/srv/*/secrets"}, "decision": "deny"},
+                {"id": "c", "selectors": {"tool_id": ["file_?ead"]}, "decision": "allow"},
+            ],
+        }
+    )
+
+    assert errors == []
+    assert warnings == []
+
+
+def test_explicit_rule_approval_scope_defaults_to_once_with_rule_ttl() -> None:
+    evaluation = evaluate_execution_policy(
+        "file_write",
+        {"path": "notes.txt", "content": "x"},
+        resource_access_policy={"integration_grants": {"fileops": {"allow_actions": ["fileops.*"]}}},
+        execution_policy={
+            "rules": [
+                {"name": "approve-writes", "match": {"tool_id": "file_write"}, "decision": "require_approval"},
+                {
+                    "name": "approve-writes-scoped",
+                    "priority": -1,
+                    "match": {"tool_id": "file_write"},
+                    "decision": "require_approval",
+                    "approval_scope_kind": "scope",
+                    "approval_ttl_seconds": 5,
+                },
+            ]
+        },
+        known_tool=True,
+    )
+
+    assert evaluation.rule_id == "approve-writes"
+    assert evaluation.approval_scope is not None
+    assert (evaluation.approval_scope.kind, evaluation.approval_scope.ttl_seconds) == ("once", 600)
+    assert evaluation.approval_scope.max_uses == 1

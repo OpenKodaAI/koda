@@ -8,12 +8,22 @@ from typing import Any
 
 from koda.agent_contract import (
     CORE_INTEGRATION_CATALOG,
+    CORE_TOOL_CATALOG,
     build_action_envelope,
     normalize_string_list,
     resolve_feature_filtered_tools,
 )
+from koda.knowledge.task_policy_defaults import default_execution_policy
 
-EXECUTION_POLICY_DECISIONS = frozenset({"allow", "allow_with_preview", "require_approval", "deny"})
+# The runtime engine owns the rule vocabulary, the normalizer and the validator (ADR-002 AG-06).
+from koda.services.execution_policy import (
+    EXECUTION_POLICY_DECISIONS,
+    EXECUTION_POLICY_SELECTOR_KEYS,
+    normalize_execution_policy,
+)
+from koda.services.execution_policy import evaluate_execution_policy as evaluate_runtime_execution_policy
+from koda.services.execution_policy import validate_execution_policy as validate_execution_policy
+
 EXECUTION_POLICY_EFFECT_TAGS = (
     "external_communication",
     "sharing_or_permissions",
@@ -43,26 +53,6 @@ _ALWAYS_APPROVAL_EFFECT_TAGS = frozenset(
         "browser_state_mutation",
         "delegation",
         "identity_admin",
-    }
-)
-EXECUTION_POLICY_SELECTOR_KEYS = frozenset(
-    {
-        "tool_id",
-        "integration_id",
-        "action_id",
-        "server_key",
-        "effect_tags",
-        "access_level",
-        "risk_class",
-        "task_kind",
-        "domain",
-        "path",
-        "db_env",
-        "transport",
-        "private_network",
-        "uses_secrets",
-        "bulk_operation",
-        "external_side_effect",
     }
 )
 _CORE_TOOL_FAMILY_OVERRIDES = {
@@ -548,137 +538,6 @@ def _normalize_selector_value(value: Any, *, key: str) -> Any:
     return value
 
 
-def normalize_execution_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
-    raw = dict(_safe_object(policy))
-    if not raw:
-        return {}
-
-    version = _as_int(raw.get("version")) or 1
-    raw["version"] = version
-
-    default_decision = _trimmed(raw.get("default_decision")).lower()
-    if default_decision in EXECUTION_POLICY_DECISIONS:
-        raw["default_decision"] = default_decision
-
-    default_approval_mode = _trimmed(_safe_object(raw.get("defaults")).get("default_approval_mode")).lower()
-    if default_approval_mode:
-        defaults = dict(_safe_object(raw.get("defaults")))
-        defaults["default_approval_mode"] = default_approval_mode
-        raw["defaults"] = _compact_mapping(defaults)
-
-    normalized_rules: list[dict[str, Any]] = []
-    for index, rule in enumerate(_safe_list(raw.get("rules"))):
-        if not isinstance(rule, dict):
-            continue
-
-        match = _safe_object(rule.get("match"))
-        normalized_match: dict[str, Any] = {}
-        for key, value in match.items():
-            selector = _trimmed(key)
-            if not selector:
-                continue
-            normalized_match[selector] = _normalize_selector_value(value, key=selector)
-
-        decision = _trimmed(rule.get("decision")).lower()
-        if not decision:
-            decision = "require_approval"
-
-        normalized_rule = {
-            "name": _trimmed(rule.get("name")) or f"rule_{index}",
-            "priority": _as_int(rule.get("priority")) or 0,
-            "match": normalized_match,
-            "decision": decision,
-        }
-        reason = _trimmed(rule.get("reason"))
-        if reason:
-            normalized_rule["reason"] = reason
-        preview_fields = normalize_string_list(rule.get("preview_fields"))
-        if preview_fields:
-            normalized_rule["preview_fields"] = preview_fields
-        approval_scope_kind = _trimmed(rule.get("approval_scope_kind"))
-        if approval_scope_kind:
-            normalized_rule["approval_scope_kind"] = approval_scope_kind
-        approval_ttl_seconds = _as_int(rule.get("approval_ttl_seconds"))
-        if approval_ttl_seconds is not None:
-            normalized_rule["approval_ttl_seconds"] = approval_ttl_seconds
-
-        if decision in EXECUTION_POLICY_DECISIONS and normalized_match:
-            normalized_rules.append(_compact_mapping(normalized_rule))
-
-    if normalized_rules:
-        normalized_rules.sort(
-            key=lambda item: (
-                -int(item.get("priority", 0) or 0),
-                str(item.get("name") or ""),
-            )
-        )
-        raw["rules"] = normalized_rules
-    elif "rules" in raw:
-        raw["rules"] = []
-
-    source = _trimmed(raw.get("source")).lower()
-    if source:
-        raw["source"] = source
-
-    return _compact_mapping(raw)
-
-
-def validate_execution_policy(policy: dict[str, Any] | None) -> tuple[list[str], list[str]]:
-    raw = _safe_object(policy)
-    if not raw:
-        return [], []
-
-    errors: list[str] = []
-    warnings: list[str] = []
-
-    version = _as_int(raw.get("version"))
-    if version is not None and version != 1:
-        errors.append(f"execution_policy.version is invalid: {version}")
-
-    rules = _safe_list(raw.get("rules"))
-    if raw.get("rules") is not None and not isinstance(raw.get("rules"), list):
-        errors.append("execution_policy.rules must be a list.")
-        return errors, warnings
-
-    for index, rule in enumerate(rules):
-        if not isinstance(rule, dict):
-            errors.append(f"execution_policy.rules[{index}] must be a mapping.")
-            continue
-
-        decision = _trimmed(rule.get("decision")).lower()
-        if decision and decision not in EXECUTION_POLICY_DECISIONS:
-            errors.append(
-                f"execution_policy.rules[{index}].decision is invalid: {decision}. "
-                f"Expected one of: {', '.join(sorted(EXECUTION_POLICY_DECISIONS))}"
-            )
-
-        match = rule.get("match")
-        if not isinstance(match, dict):
-            errors.append(f"execution_policy.rules[{index}].match must be a mapping.")
-            continue
-
-        unknown_selectors = sorted(str(key) for key in match if str(key).strip() not in EXECUTION_POLICY_SELECTOR_KEYS)
-        if unknown_selectors:
-            warnings.append(
-                f"execution_policy.rules[{index}].match contains unsupported selectors: " + ", ".join(unknown_selectors)
-            )
-
-        for key in ("preview_fields",):
-            value = rule.get(key)
-            if value is None:
-                continue
-            if not isinstance(value, list):
-                errors.append(f"execution_policy.rules[{index}].{key} must be a list.")
-
-        ttl_value = rule.get("approval_ttl_seconds")
-        if ttl_value not in (None, ""):
-            ttl = _as_int(ttl_value)
-            if ttl is None or ttl <= 0:
-                errors.append(f"execution_policy.rules[{index}].approval_ttl_seconds must be a positive integer.")
-
-    return errors, warnings
-
-
 def compile_legacy_execution_policy(
     agent_spec: dict[str, Any],
     *,
@@ -830,6 +689,42 @@ def resolve_execution_policy(
     feature_flags: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     return normalize_execution_policy(_safe_object(agent_spec.get("execution_policy")))
+
+
+def simulate_execution_policy(
+    policy: dict[str, Any] | None,
+    action: dict[str, Any] | None,
+    *,
+    agent_id: str,
+    agent_spec: dict[str, Any],
+) -> dict[str, Any]:
+    """Evaluate one tool call with the runtime engine, as the agent's worker would.
+
+    ``action`` is ``{"tool_id", "params", "task_kind"}``; the runtime derives the
+    action envelope from the tool id and its params. The agent's tool, resource
+    access and autonomy policies are the inputs its worker receives; the task
+    policy is the task kind's default (per-turn runbook and reliability
+    adjustments are not simulated). A tool outside the core catalog that is not
+    an MCP tool is unknown and denied.
+    """
+    raw = _safe_object(action)
+    tool_id = _trimmed(raw.get("tool_id"))
+    task_kind = _trimmed(raw.get("task_kind")).lower() or "general"
+    evaluation = evaluate_runtime_execution_policy(
+        tool_id,
+        _safe_object(raw.get("params")),
+        task_kind=task_kind,
+        effective_policy=default_execution_policy(
+            task_kind,
+            autonomy_policy=_safe_object(agent_spec.get("autonomy_policy")),
+        ),
+        tool_policy=_safe_object(agent_spec.get("tool_policy")),
+        resource_access_policy=_safe_object(agent_spec.get("resource_access_policy")),
+        execution_policy=_safe_object(policy),
+        known_tool=tool_id in CORE_TOOL_CATALOG or tool_id.startswith("mcp_"),
+        agent_id=agent_id,
+    )
+    return evaluation.to_dict()
 
 
 def _group_catalog_actions(actions: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1064,6 +959,12 @@ def evaluate_execution_policy(
     *,
     policy_catalog: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Legacy control-plane evaluator over a declared envelope (first match by priority).
+
+    Nothing serves it any more: the simulate route uses
+    :func:`simulate_execution_policy`, which calls the runtime engine. It is kept
+    only for the ADR-008 offline replay (M5-E3-T2) and is deleted with M5-E3-T3.
+    """
     resolved_policy = normalize_execution_policy(policy)
     catalog = policy_catalog or build_policy_catalog()
     resolved_input = _resolve_catalog_action_payload(_safe_object(envelope), catalog=catalog)

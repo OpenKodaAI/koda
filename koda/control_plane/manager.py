@@ -182,8 +182,9 @@ from .database import (
 from .execution_policy import (
     build_mcp_action_catalog,
     build_policy_catalog,
-    evaluate_execution_policy,
+    normalize_execution_policy,
     resolve_execution_policy,
+    simulate_execution_policy,
 )
 from .settings import (
     AGENT_SECTIONS,
@@ -8663,22 +8664,23 @@ class ControlPlaneManager:
         }
 
     def evaluate_execution_policy(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Simulate one tool call against the agent's draft (or a supplied) policy with the runtime engine."""
         normalized = _normalize_agent_id(agent_id)
         snapshot = self.build_draft_snapshot(normalized)
         feature_flags, _, _ = self._validation_inputs(snapshot)
         agent_spec = self.get_agent_spec(normalized, snapshot=snapshot)
-        policy = _safe_json_object(payload.get("policy")) or resolve_execution_policy(
+        policy = normalize_execution_policy(_safe_json_object(payload.get("policy"))) or resolve_execution_policy(
             agent_spec,
             feature_flags=feature_flags,
         )
         catalog = self._execution_policy_catalog(normalized, snapshot=snapshot)
-        envelope = _safe_json_object(payload.get("action") or payload.get("envelope") or payload)
-        evaluation = evaluate_execution_policy(policy, envelope, policy_catalog=catalog)
+        action = _safe_json_object(payload.get("action") or payload.get("envelope") or payload)
+        evaluation = simulate_execution_policy(policy, action, agent_id=normalized, agent_spec=agent_spec)
         return {
             "agent_id": normalized,
             "policy": policy,
             "catalog": catalog,
-            "action": envelope,
+            "action": action,
             "evaluation": evaluation,
         }
 

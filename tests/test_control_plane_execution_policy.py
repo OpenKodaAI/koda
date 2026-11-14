@@ -236,3 +236,18 @@ def test_setup_control_plane_routes_registers_execution_policy_surfaces() -> Non
     assert "/api/control-plane/agents/{agent_id}/execution-policy" in canonicals
     assert "/api/control-plane/agents/{agent_id}/policy-catalog" in canonicals
     assert "/api/control-plane/agents/{agent_id}/execution-policy/evaluate" in canonicals
+
+
+def test_agent_spec_validation_rejects_regex_execution_policy_patterns() -> None:
+    from koda.control_plane.agent_spec import validate_agent_spec
+
+    report = validate_agent_spec(
+        {
+            "execution_policy": {
+                "version": 1,
+                "rules": [{"name": "deny-deletes", "match": {"tool_id": "^mcp_.*__delete_.*"}, "decision": "deny"}],
+            }
+        }
+    )
+
+    assert any(error.startswith("execution_policy.rules[0].match.tool_id") for error in report["errors"])
