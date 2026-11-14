@@ -703,6 +703,65 @@ def test_recovery_code_resets_password_and_invalidates_all(
     assert logged_in["operator"]["username"] == "owner"
 
 
+@pytest.mark.parametrize(
+    "transform",
+    [
+        pytest.param(str.lower, id="lowercase"),
+        pytest.param(lambda code: code.replace("-", ""), id="no-separators"),
+        pytest.param(lambda code: f"  {code.lower().replace('-', ' ')}\n", id="spaces-and-padding"),
+        pytest.param(lambda code: code.replace("-", "_").lower(), id="underscores"),
+    ],
+)
+def test_recovery_code_accepts_case_and_separator_variants(
+    fake_operator_db: FakeOperatorAuthDb,
+    transform: Any,
+) -> None:
+    """Codes are issued as ``XXXX-XXXX-XXXX``; the server canonicalizes what the user types."""
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    issued = payload["recovery_codes"][0]
+    assert issued == issued.upper()
+
+    service.reset_password_with_recovery_code(
+        identifier="owner",
+        recovery_code=transform(issued),
+        new_password=ANOTHER_STRONG_PASSWORD,
+    )
+    logged_in = service.login(identifier="owner", password=ANOTHER_STRONG_PASSWORD)
+    assert logged_in["operator"]["username"] == "owner"
+
+
+def test_recovery_code_normalization_does_not_accept_other_codes(
+    fake_operator_db: FakeOperatorAuthDb,
+) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    issued = payload["recovery_codes"][0]
+    # Dropping or swapping a character must still fail after canonicalization.
+    for candidate in (issued[:-1], issued[:-1] + ("A" if issued[-1] != "A" else "B"), "", "----"):
+        with pytest.raises(ValueError, match="Invalid identifier or recovery code"):
+            service.reset_password_with_recovery_code(
+                identifier="owner",
+                recovery_code=candidate,
+                new_password=ANOTHER_STRONG_PASSWORD,
+            )
+    assert service.login(identifier="owner", password=STRONG_PASSWORD)["operator"]["username"] == "owner"
+
+
+def test_normalize_recovery_code_is_canonical_issued_format() -> None:
+    normalize = operator_auth_mod._normalize_recovery_code
+    assert normalize("abcd-efgh-jklm") == "ABCD-EFGH-JKLM"
+    assert normalize(" abcd efgh\tjklm ") == "ABCD-EFGH-JKLM"
+    assert normalize("ABCDEFGHJKLM") == "ABCD-EFGH-JKLM"
+    assert normalize("ab-cd--efgh_jk.lm") == "ABCD-EFGH-JKLM"
+    assert normalize("ABCD-EFGH-JKLM") == "ABCD-EFGH-JKLM"
+    assert normalize(None) == ""
+    # Issued codes are already canonical, so hashes stored before this
+    # normalization existed keep matching.
+    issued = operator_auth_mod._random_code()
+    assert normalize(issued) == issued
+
+
 def test_password_reset_revokes_all_existing_sessions(fake_operator_db: FakeOperatorAuthDb) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)

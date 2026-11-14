@@ -74,6 +74,35 @@ describe("ForgotPasswordScreen", () => {
     expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
   });
 
+  it("keeps the recovery code in the issued uppercase format", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true });
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|username/i), "owner");
+    const codeField = screen.getByLabelText(/recovery/i);
+    await user.type(codeField, "  abcd-efgh-jklm ");
+    expect(codeField).toHaveValue("  ABCD-EFGH-JKLM ");
+    const passwordFields = screen.getAllByLabelText(/password/i);
+    await user.type(passwordFields[0], "BrandNewPassw0rd!Now");
+    await user.type(passwordFields[1], "BrandNewPassw0rd!Now");
+    await user.click(screen.getByRole("button", { name: /reset/i }));
+
+    expect(requestJson).toHaveBeenCalledTimes(1);
+    const [url, init] = (requestJson as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe("/api/control-plane/auth/password/recover");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      identifier: "owner",
+      recovery_code: "ABCD-EFGH-JKLM",
+    });
+  });
+
   it("uses a spinner-only visual state while resetting", async () => {
     (requestJson as ReturnType<typeof vi.fn>).mockImplementationOnce(
       () => new Promise(() => {}),

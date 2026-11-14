@@ -131,7 +131,7 @@ export function ForgotPasswordScreen() {
               id="forgot-code"
               type="text"
               value={recoveryCode}
-              onChange={(event) => setRecoveryCode(event.target.value.toLowerCase())}
+              onChange={(event) => setRecoveryCode(event.target.value.toUpperCase())}
               autoCorrect="off"
               spellCheck={false}
               disabled={busy}

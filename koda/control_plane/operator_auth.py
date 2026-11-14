@@ -108,6 +108,18 @@ def _normalize_bootstrap_code(value: Any) -> str:
     return str(value or "").strip().upper()
 
 
+def _normalize_recovery_code(value: Any) -> str:
+    """Return the canonical ``XXXX-XXXX-XXXX`` form of a typed recovery code.
+
+    Codes are issued by :func:`_random_code` in exactly this form and stored as
+    its hash, so the user's input is upper-cased, stripped of whitespace and
+    any separator characters, then re-grouped in fours before hashing. Issued
+    codes are already canonical, which keeps previously stored hashes valid.
+    """
+    compact = "".join(ch for ch in str(value or "").upper() if ch.isascii() and ch.isalnum())
+    return "-".join(compact[index : index + 4] for index in range(0, len(compact), 4))
+
+
 @lru_cache(maxsize=1)
 def _password_hasher() -> PasswordHasher:
     return PasswordHasher()
@@ -390,7 +402,7 @@ class OperatorAuthService:
                 (
                     f"rec_{uuid4().hex}",
                     user_id,
-                    _hash_secret(code),
+                    _hash_secret(_normalize_recovery_code(code)),
                     code[-4:],
                     issued_at,
                     "",
@@ -627,7 +639,7 @@ class OperatorAuthService:
             """,
             (str(row["id"]), generation),
         )
-        code_hash = _hash_secret(recovery_code.strip())
+        code_hash = _hash_secret(_normalize_recovery_code(recovery_code))
         code_row = next(
             (item for item in active_codes if compare_digest(str(item.get("code_hash") or ""), code_hash)),
             None,
