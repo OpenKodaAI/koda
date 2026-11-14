@@ -1,10 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { LoginScreen } from "@/components/auth/login-screen";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { ApiError } from "@/lib/errors";
+import {
+  type AppLanguage,
+  LOCALE_COOKIE_KEY,
+  SUPPORTED_LANGUAGES,
+  translateForLanguage,
+} from "@/lib/i18n";
 
 const replaceMock = vi.fn();
 const refreshMock = vi.fn();
@@ -47,7 +53,7 @@ describe("LoginScreen", () => {
 
   it("shows a generic error when credentials are rejected (4xx)", async () => {
     // Simulates the proxy returning 401 — wrong password / unknown user /
-    // rate-limited all collapse here per the auth contract.
+    // locked account all collapse here per the auth contract.
     (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new ApiError("Invalid credentials.", 401),
     );
@@ -141,5 +147,74 @@ describe("LoginScreen", () => {
     const busyButton = screen.getByRole("button", { name: /signing in/i });
     expect(busyButton).toHaveAttribute("aria-busy", "true");
     expect(screen.queryByText(/signing in/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("LoginScreen rate limiting (ADR-038)", () => {
+  beforeEach(() => {
+    // The i18n provider persists the active language; reset it so each test renders the
+    // language it asks for.
+    window.localStorage.clear();
+    document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
+  });
+
+  function tr(language: AppLanguage, key: string, options?: Record<string, unknown>) {
+    return translateForLanguage(language, key, options);
+  }
+
+  function minutes(language: AppLanguage, value: number) {
+    return new Intl.NumberFormat(language, { style: "unit", unit: "minute", unitDisplay: "long" }).format(value);
+  }
+
+  async function submitLogin(language: AppLanguage) {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage={language}>
+        <LoginScreen />
+      </I18nProvider>,
+    );
+    fireEvent.change(screen.getByLabelText(tr(language, "auth.login.identifier")), {
+      target: { value: "owner" },
+    });
+    fireEvent.change(screen.getByLabelText(tr(language, "auth.login.password")), {
+      target: { value: "wrong-password-attempt-XX" },
+    });
+    await user.click(screen.getByRole("button", { name: tr(language, "auth.login.submit") }));
+  }
+
+  it.each(SUPPORTED_LANGUAGES)("tells a rate-limited client how long to wait in %s", async (language) => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Too many attempts. Try again later.", 429, { retryAfterSeconds: 60 }),
+    );
+
+    await submitLogin(language);
+
+    const expected = tr(language, "auth.rate_limited.with_wait", { duration: minutes(language, 1) });
+    expect(expected).not.toBe("auth.rate_limited.with_wait");
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText(tr(language, "auth.login.generic_error"))).not.toBeInTheDocument();
+  });
+
+  it("asks to wait a moment when the response names no wait", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("rate limit exceeded", 429),
+    );
+
+    await submitLogin("en-US");
+
+    expect(await screen.findByText(tr("en-US", "auth.rate_limited.no_wait"))).toBeInTheDocument();
+    expect(screen.queryByText(tr("en-US", "auth.login.generic_error"))).not.toBeInTheDocument();
+  });
+
+  it.each(SUPPORTED_LANGUAGES)("keeps a locked account on the generic error in %s", async (language) => {
+    // The per-account lockout answers exactly like a wrong password: not a 429.
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Invalid credentials.", 400),
+    );
+
+    await submitLogin(language);
+
+    expect(await screen.findByText(tr(language, "auth.login.generic_error"))).toBeInTheDocument();
+    expect(screen.queryByText(tr(language, "auth.rate_limited.no_wait"))).not.toBeInTheDocument();
   });
 });

@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Input } from "@/components/ui/input";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { rateLimitedAuthMessage } from "@/lib/auth-rate-limit-message";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
 import { isSafeRedirectTarget } from "@/lib/safe-redirect";
@@ -18,7 +19,8 @@ import { translate } from "@/lib/i18n";
 const MIN_LENGTH = 12;
 
 // See LoginScreen — every 4xx auth failure is folded into one generic copy.
-// Only infra failures (5xx / network) get a distinct message.
+// Only the per-client rate limit (429) and infra failures (5xx / network) get
+// a distinct message.
 function isUpstreamFailure(error: unknown): boolean {
   if (error instanceof ApiError) {
     return error.status >= 500 || error.status === 0;
@@ -27,7 +29,7 @@ function isUpstreamFailure(error: unknown): boolean {
 }
 
 export function ForgotPasswordScreen() {
-  const { t } = useAppI18n();
+  const { t, language } = useAppI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [identifier, setIdentifier] = useState("");
@@ -76,7 +78,10 @@ export function ForgotPasswordScreen() {
         router.replace(loginTarget);
       }, 2000);
     } catch (error) {
-      if (isUpstreamFailure(error)) {
+      const rateLimited = rateLimitedAuthMessage(error, t, language);
+      if (rateLimited) {
+        setError(rateLimited);
+      } else if (isUpstreamFailure(error)) {
         setError(
           t("auth.forgot.service_unavailable", undefined),
         );

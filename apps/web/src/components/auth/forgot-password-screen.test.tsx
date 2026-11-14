@@ -1,9 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { ForgotPasswordScreen } from "@/components/auth/forgot-password-screen";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { ApiError } from "@/lib/errors";
+import {
+  type AppLanguage,
+  LOCALE_COOKIE_KEY,
+  SUPPORTED_LANGUAGES,
+  translateForLanguage,
+} from "@/lib/i18n";
 
 const replaceMock = vi.fn();
 
@@ -168,5 +175,75 @@ describe("ForgotPasswordScreen", () => {
     const busyButton = screen.getByRole("button", { name: /resetting/i });
     expect(busyButton).toHaveAttribute("aria-busy", "true");
     expect(screen.queryByText(/resetting/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("ForgotPasswordScreen rate limiting (ADR-038)", () => {
+  beforeEach(() => {
+    // The i18n provider persists the active language; reset it so each test renders the
+    // language it asks for.
+    window.localStorage.clear();
+    document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
+  });
+
+  function tr(language: AppLanguage, key: string, options?: Record<string, unknown>) {
+    return translateForLanguage(language, key, options);
+  }
+
+  function minutes(language: AppLanguage, value: number) {
+    return new Intl.NumberFormat(language, { style: "unit", unit: "minute", unitDisplay: "long" }).format(value);
+  }
+
+  async function submitRecovery(language: AppLanguage) {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage={language}>
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    const fields: Array<[string, string]> = [
+      ["auth.forgot.identifier", "owner"],
+      ["auth.forgot.recovery_code", "aaaa-bbbb-cccc"],
+      ["auth.forgot.new_password", "BrandNewPassw0rd!Now"],
+      ["auth.forgot.confirm_password", "BrandNewPassw0rd!Now"],
+    ];
+    for (const [labelKey, value] of fields) {
+      fireEvent.change(screen.getByLabelText(tr(language, labelKey)), { target: { value } });
+    }
+    await user.click(screen.getByRole("button", { name: tr(language, "auth.forgot.submit") }));
+  }
+
+  it.each(SUPPORTED_LANGUAGES)("tells a rate-limited client how long to wait in %s", async (language) => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Too many attempts. Try again later.", 429, { retryAfterSeconds: 60 }),
+    );
+
+    await submitRecovery(language);
+
+    const expected = tr(language, "auth.rate_limited.with_wait", { duration: minutes(language, 1) });
+    expect(expected).not.toBe("auth.rate_limited.with_wait");
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText(tr(language, "auth.forgot.generic_error"))).not.toBeInTheDocument();
+  });
+
+  it("asks to wait a moment when the response names no wait", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("rate limit exceeded", 429),
+    );
+
+    await submitRecovery("en-US");
+
+    expect(await screen.findByText(tr("en-US", "auth.rate_limited.no_wait"))).toBeInTheDocument();
+  });
+
+  it.each(SUPPORTED_LANGUAGES)("keeps an invalid code or locked account on the generic error in %s", async (language) => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Invalid recovery details.", 400),
+    );
+
+    await submitRecovery(language);
+
+    expect(await screen.findByText(tr(language, "auth.forgot.generic_error"))).toBeInTheDocument();
+    expect(screen.queryByText(tr(language, "auth.rate_limited.no_wait"))).not.toBeInTheDocument();
   });
 });

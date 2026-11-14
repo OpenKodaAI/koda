@@ -229,7 +229,17 @@ Per client address, enforced in `koda/control_plane/rate_limit.py`:
 
 Plus the per-address general bucket (`CONTROL_PLANE_RATE_LIMIT`, default 120/min) and
 the stricter auth-failure bucket (`CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT`, default 5/min
-triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
+triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After: 60`. The
+value is fixed: a bucket frees its next request at its own rate, so after a burst the
+recovery bucket needs about 6 minutes and the setup bucket about 2.
+
+The dashboard's login, setup and recovery routes pass the `429` and its `Retry-After`
+through (`apps/web/src/lib/auth-rate-limited-response.ts`), and the `/login`, `/setup` and
+`/forgot-password` screens show a localized "Too many attempts. Wait 1 minute and try
+again." (ADR-038). These buckets count requests per client address and answer the same way
+for existing and unknown accounts, so the message reveals nothing about an account. The
+dashboard's own per-client window (`apps/web/src/proxy.ts`) answers the same `429` and gets
+the same message.
 
 ### Which address a request is charged to
 
@@ -289,7 +299,9 @@ Account-level lockout remains on top of the rate limits: after
 `CONTROL_PLANE_OPERATOR_LOGIN_MAX_FAILURES` failed attempts, the row locks for
 `CONTROL_PLANE_OPERATOR_LOGIN_LOCKOUT_SECONDS`. This lockout is per account, not per client,
 so anyone who knows the identifier can still trigger it; the per-client buckets only stop one
-client from spending everyone else's budget.
+client from spending everyone else's budget. A locked account is not a `429`: it answers
+exactly like a wrong password, and the screens show the generic error, because a lockout
+message would reveal that the account exists.
 
 ## Side-channel mitigations
 
@@ -297,8 +309,11 @@ client from spending everyone else's budget.
   caller cannot distinguish `user not found` from `wrong password` from `invalid recovery
   code`.
 - Responses use a single generic error (`"Invalid credentials."`, or equivalent) without
-  leaking whether the identifier exists. The i18n layer binds every failure mode to the same
-  message in every language.
+  leaking whether the identifier exists. The i18n layer binds every failure mode (wrong
+  password, unknown user, locked account, invalid recovery code) to the same message in
+  every language. The per-client `429` is the only exception: it gets its own message with
+  the wait, since it is the same for every identifier (see
+  [Rate limits](#rate-limits-bucket-budgets)).
 - The structured logging pipeline redacts `password`, `new_password`, `current_password`,
   `recovery_code`, `session_token`, `registration_token`, `bootstrap_code`, `code`,
   `totp_secret`, `api_key`, `secret`, `token`, `authorization`, and `cookie` keys.

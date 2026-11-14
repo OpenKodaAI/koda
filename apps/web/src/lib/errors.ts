@@ -53,10 +53,18 @@ export class ValidationError extends AppError {
   }
 }
 
+type ApiErrorOptions = Omit<AppErrorOptions, "code" | "status"> & {
+  retryAfterSeconds?: number | null;
+};
+
 export class ApiError extends AppError {
-  constructor(message: string, status = 500, options: Omit<AppErrorOptions, "code" | "status"> = {}) {
+  /** Seconds the response's `Retry-After` asked the client to wait, or `null` when it named none. */
+  retryAfterSeconds: number | null;
+
+  constructor(message: string, status = 500, options: ApiErrorOptions = {}) {
+    const { retryAfterSeconds = null, ...appErrorOptions } = options;
     super(message, {
-      ...options,
+      ...appErrorOptions,
       code: status === 401
         ? "UNAUTHORIZED"
         : status === 403
@@ -69,6 +77,7 @@ export class ApiError extends AppError {
       exposeMessage: true,
     });
     this.name = "ApiError";
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 

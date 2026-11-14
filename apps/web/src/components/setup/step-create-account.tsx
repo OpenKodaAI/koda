@@ -8,13 +8,14 @@ import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Input } from "@/components/ui/input";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { rateLimitedAuthMessage } from "@/lib/auth-rate-limit-message";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
 import { translate } from "@/lib/i18n";
 
-// Mirror LoginScreen / ForgotPasswordScreen: 4xx auth-flow errors fold into
-// one generic message (CLAUDE.md auth contract), only 5xx / network reach
-// the operator as a distinct "service unavailable" copy.
+// Mirror LoginScreen / ForgotPasswordScreen: the per-client rate limit (429)
+// says how long to wait (ADR-038), and 5xx / network reach the operator as a
+// distinct "service unavailable" copy.
 function isUpstreamFailure(error: unknown): boolean {
   if (error instanceof ApiError) {
     return error.status >= 500 || error.status === 0;
@@ -66,7 +67,7 @@ export function StepCreateAccount({
   bootstrapFilePath,
   onRegistered,
 }: StepCreateAccountProps) {
-  const { t } = useAppI18n();
+  const { t, language } = useAppI18n();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -123,7 +124,10 @@ export function StepCreateAccount({
       }
       onRegistered(payload);
     } catch (submitError) {
-      if (isUpstreamFailure(submitError)) {
+      const rateLimited = rateLimitedAuthMessage(submitError, t, language);
+      if (rateLimited) {
+        setError(rateLimited);
+      } else if (isUpstreamFailure(submitError)) {
         setError(
           t("auth.setup.create_account.errors.service_unavailable", undefined),
         );

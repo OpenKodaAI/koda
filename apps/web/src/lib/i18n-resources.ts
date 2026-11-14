@@ -692,6 +692,10 @@ export const resources = {
             codes_remaining: "{{count}} recovery codes remaining",
           },
         },
+        rate_limited: {
+          with_wait: "Too many attempts. Wait {{duration}} and try again.",
+          no_wait: "Too many attempts. Wait a moment and try again.",
+        },
         session_expired: "Your session has expired. Sign in again to continue.",
         account_menu: {
           trigger_label: "Open account menu",
@@ -1387,6 +1391,10 @@ export const resources = {
             regenerate_codes: "Regenerar códigos de recuperação",
             codes_remaining: "{{count}} códigos de recuperação restantes",
           },
+        },
+        rate_limited: {
+          with_wait: "Muitas tentativas. Aguarde {{duration}} e tente novamente.",
+          no_wait: "Muitas tentativas. Aguarde um momento e tente novamente.",
         },
         session_expired: "Sua sessão expirou. Entre novamente para continuar.",
         account_menu: {
@@ -2084,6 +2092,10 @@ export const resources = {
             regenerate_codes: "Regenerar códigos de recuperación",
             codes_remaining: "{{count}} códigos de recuperación restantes",
           },
+        },
+        rate_limited: {
+          with_wait: "Demasiados intentos. Espera {{duration}} y vuelve a intentarlo.",
+          no_wait: "Demasiados intentos. Espera un momento y vuelve a intentarlo.",
         },
         session_expired: "Tu sesión ha caducado. Inicia sesión de nuevo para continuar.",
         account_menu: {
@@ -2786,6 +2798,10 @@ export const resources = {
             codes_remaining: "{{count}} codes de récupération restants",
           },
         },
+        rate_limited: {
+          with_wait: "Trop de tentatives. Patientez {{duration}} puis réessayez.",
+          no_wait: "Trop de tentatives. Patientez un instant puis réessayez.",
+        },
         session_expired: "Votre session a expiré. Connectez-vous à nouveau pour continuer.",
         account_menu: {
           trigger_label: "Ouvrir le menu du compte",
@@ -3486,6 +3502,10 @@ export const resources = {
             regenerate_codes: "Wiederherstellungscodes neu generieren",
             codes_remaining: "{{count}} Wiederherstellungscodes verbleibend",
           },
+        },
+        rate_limited: {
+          with_wait: "Zu viele Versuche. Bitte {{duration}} warten und erneut versuchen.",
+          no_wait: "Zu viele Versuche. Bitte einen Moment warten und erneut versuchen.",
         },
         session_expired: "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
         account_menu: {

@@ -1,6 +1,7 @@
 "use client";
 
 import { ApiError } from "@/lib/errors";
+import { parseRetryAfterSeconds } from "@/lib/retry-after";
 
 const FORCE_SIGN_OUT_EVENT = "koda:force-sign-out";
 
@@ -79,6 +80,7 @@ export async function requestJson<T = unknown>(
         `Request failed with status ${response.status}`,
       ),
       response.status,
+      { retryAfterSeconds: parseRetryAfterSeconds(response.headers.get("Retry-After")) },
     );
   }
 

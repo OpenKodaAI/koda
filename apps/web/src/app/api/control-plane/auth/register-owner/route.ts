@@ -6,6 +6,7 @@ import {
   parseSchemaOrThrow,
   upstreamFetch,
 } from "@/lib/api-utils";
+import { rateLimitedAuthResponse } from "@/lib/auth-rate-limited-response";
 import { clientIpFromHeaders, isLoopbackAddress } from "@/lib/client-ip";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
@@ -62,6 +63,9 @@ export async function POST(request: NextRequest) {
       { label: "Setup service" },
     );
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
+    // The per-client rate limit keeps its 429 and wait so the screen can say how long (ADR-038).
+    const rateLimited = rateLimitedAuthResponse(upstream);
+    if (rateLimited) return rateLimited;
     if (!upstream.ok || typeof data.session_token !== "string" || !data.session_token.trim()) {
       return NextResponse.json(
         { error: String(data.error || "Unable to create the owner account.") },
