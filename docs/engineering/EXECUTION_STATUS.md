@@ -45,6 +45,10 @@ iteration.
 
 ## Active tasks
 
+- DEFECT-BATCH-1 (workflow, isolated worktrees, implement → independent review → address): D-001 + D-016 scheduled jobs / web routines never run; D-003 SSRF guard bypass; D-004 login rate-limiter bypass / shared bucket; D-018 password recovery impossible; D-009 `/cancel` does not stop light tasks; D-020 circuit breakers latch open; D-022 event streams cannot resume past id 1000. Branches are merged by the orchestrator after a full-gate run.
+- AGENT-AUTONOMY-ADR (workflow): design for D-002 (Option C); D-011/D-012 (approvals, supervised shell) fold into it.
+- PHASE-ZERO plan (workflow): MASTER_PLAN / DECISIONS / REMAINING_RISKS being written.
+
 - P0-DISCOVERY — multi-agent subsystem inventory (workflow running; early unverified findings: provider CLIs run tools with permissions bypassed, public break-glass admin token on manual install, retries re-run side-effecting tools, squad post-processing deadlock).
 
 
