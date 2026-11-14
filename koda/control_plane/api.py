@@ -1526,14 +1526,17 @@ async def post_dashboard_squad_thread_message_route(request: web.Request) -> web
                         "tasks": execution.task_ids,
                         "agents": execution.dispatched_agents,
                     }
-                    asyncio.create_task(
-                        _watch_dashboard_squad_delivery_synthesis(
-                            thread_id=thread_id,
-                            parent_message_id=f"msg-{message_id}",
-                            coordinator_agent_id=coordinator_id,
-                            application=request.app.get("telegram_application"),
+                    if execution.decision.mode != "handoff":
+                        # A handoff is synthesised by the post-turn path, which also records its
+                        # outcome; a second synthesiser here would post a second answer (D-074).
+                        asyncio.create_task(
+                            _watch_dashboard_squad_delivery_synthesis(
+                                thread_id=thread_id,
+                                parent_message_id=f"msg-{message_id}",
+                                coordinator_agent_id=coordinator_id,
+                                application=request.app.get("telegram_application"),
+                            )
                         )
-                    )
                     return web.json_response(
                         {"messageId": message_id, "fromAgent": from_agent, "coordination": coordination_payload}
                     )

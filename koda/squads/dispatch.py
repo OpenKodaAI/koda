@@ -191,6 +191,16 @@ async def record_squad_routing_decision(
         return None
 
 
+_HANDOFF_DELIVERY_STATUS: dict[str, str] = {
+    "requested": "waiting_for_replies",
+    "accepted": "waiting_for_replies",
+    "returned": "completed",
+    "failed": "failed",
+    "timed_out": "timed_out",
+    "declined": "blocked",
+}
+
+
 async def record_squad_handoff_event(
     thread_store: Any,
     *,
@@ -241,6 +251,8 @@ async def record_squad_handoff_event(
         parent_message_id=parent_message_id,
     )
     payload = event.to_dict()
+    # Only an open handoff waits on, and is addressed to, its destinations; a status change is not.
+    is_open = payload["status"] in {"requested", "accepted"}
     try:
         message_id = int(
             await thread_store.post_thread_message(
@@ -254,16 +266,18 @@ async def record_squad_handoff_event(
                 metadata={
                     "event_type": "handoff_event",
                     "schema_version": HANDOFF_EVENT_SCHEMA_VERSION,
-                    "delivery_status": "waiting_for_replies",
+                    "delivery_status": _HANDOFF_DELIVERY_STATUS.get(str(payload["status"]), "waiting_for_replies"),
                     "delivery_intent": "execution",
                     "parent_message_id": parent_message_id,
                     "correlation_id": payload.get("correlation_id"),
                     "payload": payload,
                     "handoff_event": payload,
                 },
-                to_agent_ids=payload["destination_agent_ids"],
+                to_agent_ids=payload["destination_agent_ids"] if is_open else None,
                 correlation_id=payload.get("correlation_id"),
                 in_reply_to=parent_message_id,
+                # One event per handoff and status, even when two turns record it at once.
+                idempotency_key=f"handoff_event:{handoff_id}:{payload['status']}",
             )
         )
         handoff_metric(

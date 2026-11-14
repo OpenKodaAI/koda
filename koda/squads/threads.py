@@ -458,12 +458,25 @@ class SquadThreadStore:
             metadata["requires_response_by"] = requires_response_by.isoformat()
         pool = await self._ensure_pool()
         async with pool.acquire() as conn, conn.transaction():
+            # With an idempotency key, lock the thread row so concurrent posts of the
+            # same key serialize, and return the message already posted with it.
             exists = await conn.fetchval(
-                f'SELECT 1 FROM "{self._schema}"."squad_threads" WHERE id = $1',
+                f'SELECT 1 FROM "{self._schema}"."squad_threads" WHERE id = $1'
+                + (" FOR UPDATE" if normalized_idempotency else ""),
                 thread_id,
             )
             if not exists:
                 raise KeyError(f"thread {thread_id!r} not found")
+            if normalized_idempotency:
+                existing_id = await conn.fetchval(
+                    f"""SELECT id FROM "{self._schema}"."squad_messages"
+                         WHERE thread_id = $1 AND idempotency_key = $2
+                      ORDER BY id LIMIT 1""",
+                    thread_id,
+                    str(normalized_idempotency),
+                )
+                if existing_id is not None:
+                    return int(existing_id)
             row_id = await conn.fetchval(
                 f"""INSERT INTO "{self._schema}"."squad_messages"
                         (message_uuid, thread_id, from_agent, to_agent, to_agent_ids, content,

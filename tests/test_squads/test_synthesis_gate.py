@@ -82,3 +82,20 @@ def test_handoff_completes_from_answered_reply_obligations() -> None:
 def test_handoff_marked_returned_supersedes_the_requested_event() -> None:
     result = evaluate_synthesis_readiness(handoff_events=[_handoff("returned"), _handoff("requested")])
     assert result.ready is True
+
+
+def test_handoff_with_a_failed_destination_is_failed_and_disclosed() -> None:
+    result = evaluate_synthesis_readiness(
+        handoff_events=[_handoff()],
+        result_messages=[
+            {"type": "task_result", "id": "msg-1", "from": "FE", "payload": {"status": "ok"}},
+            {"type": "task_result", "id": "msg-2", "from": "QA", "metadata": {"payload": {"status": "failed"}}},
+        ],
+    )
+
+    # The failure is visible, so synthesis may run, but it must be told QA failed.
+    assert result.ready is True
+    assert {"kind": "handoff_event", "id": "handoff-1", "status": "failed"} in result.evidence_refs
+    assert result.timeout_disclosures == [
+        {"kind": "handoff_event", "id": "handoff-1", "status": "failed", "agent_ids": ["QA"]}
+    ]

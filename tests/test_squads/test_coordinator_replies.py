@@ -27,6 +27,7 @@ from koda.squads.capabilities import CapabilitySummary
 from koda.squads.coordinator_engine import (
     CoordinationDecision,
     CoordinationPlannerInput,
+    CoordinationTask,
     SquadCoordinatorEngine,
 )
 from koda.squads.semantic_router import SemanticAgentScore, SemanticRoutingResult
@@ -62,15 +63,17 @@ async def stores(migrated_postgres: str) -> AsyncIterator[tuple[SquadThreadStore
 
 
 class _NoTaskPlanner:
-    def __init__(self, mode: str, selected_agents: list[str]) -> None:
+    def __init__(self, mode: str, selected_agents: list[str], tasks: list[CoordinationTask] | None = None) -> None:
         self._mode = mode
         self._selected_agents = selected_agents
+        self._tasks = tasks or []
 
     async def plan(self, planner_input: CoordinationPlannerInput) -> CoordinationDecision:
         return CoordinationDecision(
             mode=cast(Any, self._mode),
             confidence=0.7,
             reasoning_summary=f"planner chose {self._mode}",
+            tasks=list(self._tasks),
             selected_agents=list(self._selected_agents),
             needs_user_clarification=self._mode == "ask_clarification",
         )
@@ -157,11 +160,11 @@ def routing_stubs(stores: tuple[SquadThreadStore, SquadTaskStore]) -> Iterator[A
         yield SimpleNamespace(enqueue=enqueue, application=SimpleNamespace(bot=None), stack=stack)
 
 
-def _use_planner(stubs: Any, mode: str, selected: list[str]) -> None:
+def _use_planner(stubs: Any, mode: str, selected: list[str], tasks: list[CoordinationTask] | None = None) -> None:
     stubs.stack.enter_context(
         patch(
             "koda.squads.SquadCoordinatorEngine",
-            functools.partial(SquadCoordinatorEngine, planner=_NoTaskPlanner(mode, selected)),
+            functools.partial(SquadCoordinatorEngine, planner=_NoTaskPlanner(mode, selected, tasks)),
         )
     )
 
@@ -233,16 +236,8 @@ class _JsonRequest:
         return dict(self._payload)
 
 
-@pytest.mark.postgres
-@pytest.mark.asyncio
-@pytest.mark.parametrize(("mode", "selected"), MODES)
-async def test_web_room_message_gets_a_reply_when_coordinator_dispatches_no_task(
-    stores: tuple[SquadThreadStore, SquadTaskStore], routing_stubs: Any, mode: str, selected: list[str]
-) -> None:
-    threads, _tasks = stores
-    thread = await _seed_thread(threads)
-    _use_planner(routing_stubs, mode, selected)
-    stack = routing_stubs.stack
+async def _post_web_message(stubs: Any, thread: ThreadDescriptor) -> tuple[Any, AsyncMock]:
+    stack = stubs.stack
     stack.enter_context(patch("koda.control_plane.api._authorize_request", return_value=None))
     stack.enter_context(
         patch(
@@ -264,13 +259,49 @@ async def test_web_room_message_gets_a_reply_when_coordinator_dispatches_no_task
         )
     )
     stack.enter_context(patch("koda.squads.sync_thread_participants_from_squad", AsyncMock(return_value=None)))
-    stack.enter_context(patch("koda.control_plane.api._watch_dashboard_squad_delivery_synthesis", AsyncMock()))
-
+    watcher = stack.enter_context(patch("koda.control_plane.api._watch_dashboard_squad_delivery_synthesis"))
     request = _JsonRequest(thread_id=thread.id, payload={"content": USER_TEXT})
-    request.app["telegram_application"] = routing_stubs.application
+    request.app["telegram_application"] = stubs.application
 
     response = await control_plane_api.post_dashboard_squad_thread_message_route(cast(Any, request))
 
     assert response.status == 200
     assert json.loads(cast(Any, response).text)["messageId"]
+    return response, watcher
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("mode", "selected"), MODES)
+async def test_web_room_message_gets_a_reply_when_coordinator_dispatches_no_task(
+    stores: tuple[SquadThreadStore, SquadTaskStore], routing_stubs: Any, mode: str, selected: list[str]
+) -> None:
+    threads, _tasks = stores
+    thread = await _seed_thread(threads)
+    _use_planner(routing_stubs, mode, selected)
+
+    await _post_web_message(routing_stubs, thread)
+
     await _assert_user_gets_a_reply(threads, thread.id, routing_stubs.enqueue, mode)
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("mode", "watched"), [("handoff", False), ("parallel_delegation", True)])
+async def test_web_handoff_leaves_the_final_synthesis_to_the_post_turn_path(
+    stores: tuple[SquadThreadStore, SquadTaskStore], routing_stubs: Any, mode: str, watched: bool
+) -> None:
+    threads, _tasks = stores
+    thread = await _seed_thread(threads)
+    tasks = [
+        CoordinationTask(key="build", title="Build", agent_id="FE", kind="frontend", objective="Build it"),
+        CoordinationTask(key="review", title="Review", agent_id="QA", kind="review", objective="Review it"),
+    ]
+    _use_planner(routing_stubs, mode, ["FE", "QA"], tasks)
+
+    _response, watcher = await _post_web_message(routing_stubs, thread)
+
+    assert [call.kwargs["executing_agent_id"] for call in routing_stubs.enqueue.await_args_list] == ["FE", "QA"]
+    # The post-turn path synthesises a handoff and records its outcome; a second
+    # synthesiser here would post a second final answer in the room (D-074).
+    assert watcher.called is watched

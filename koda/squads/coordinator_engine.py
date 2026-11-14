@@ -933,9 +933,10 @@ class SquadCoordinatorEngine:
 
 
 def _handoff_destinations(decision: CoordinationDecision, *, coordinator_agent_id: str) -> list[str]:
+    # Only agents with a task are contacted, so only they can reply and complete the handoff (D-074).
     seen: set[str] = set()
     out: list[str] = []
-    for agent_id in [*(task.agent_id for task in decision.tasks), *decision.selected_agents]:
+    for agent_id in (task.agent_id for task in decision.tasks):
         normalized = str(agent_id or "").strip()
         if not normalized or normalized == coordinator_agent_id or normalized in seen:
             continue

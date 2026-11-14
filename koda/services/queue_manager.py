@@ -6885,6 +6885,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             evaluate_synthesis_readiness,
             get_squad_task_store,
             get_squad_thread_store,
+            message_ref_to_id,
             record_squad_handoff_event,
             synthesis_gate_metric,
         )
@@ -6923,6 +6924,8 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         result_messages: list[dict[str, Any]] = []
         handoff_events: list[dict[str, Any]] = []
         declared_timeouts: list[dict[str, Any]] = []
+        answered_obligations: list[dict[str, Any]] = []
+        source_message_id = message_ref_to_id(ctx.parent_message_id)
         with contextlib.suppress(Exception):
             history = await thread_store.thread_history(thread_id=ctx.squad_thread_id, limit=120)
             for message in history:
@@ -6930,6 +6933,14 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                 metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
                 if metadata.get("idempotency_key") == synthesis_idempotency_key:
                     return
+                if source_message_id is not None and message.get("id") == source_message_id:
+                    # A reply obligation on the cycle's source message that a destination answered
+                    # also counts as its reply to a handoff (D-074).
+                    answered_obligations.extend(
+                        item
+                        for item in message.get("reply_obligations") or []
+                        if isinstance(item, dict) and str(item.get("status") or "").lower() == "answered"
+                    )
                 raw_payload = metadata.get("payload")
                 payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
                 if payload.get("schema_version") == "handoff_event.v1" and payload.get("parent_message_id") in {
@@ -6978,6 +6989,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             if first_line:
                 confirmed_results.append(f"- {executing_agent} / {ctx.squad_task_id}: {first_line[:500]}")
         readiness = evaluate_synthesis_readiness(
+            reply_obligations=answered_obligations,
             handoff_events=handoff_events,
             result_messages=result_messages,
             declared_timeouts=declared_timeouts,
@@ -6985,11 +6997,11 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
         if not readiness.ready:
             return
-        # Mark each handoff whose destinations have all replied as returned (D-074).
-        returned_ids = {
-            ref.get("id")
+        # Record the outcome of each handoff whose destinations have all answered (D-074).
+        handoff_outcomes = {
+            ref.get("id"): ref.get("status")
             for ref in readiness.evidence_refs
-            if ref.get("kind") == "handoff_event" and ref.get("status") == "returned"
+            if ref.get("kind") == "handoff_event" and ref.get("status") in {"returned", "failed"}
         }
         closed_ids = {
             event["payload"].get("handoff_id")
@@ -6999,7 +7011,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         for event in handoff_events:
             handoff = event["payload"]
             handoff_id = handoff.get("handoff_id")
-            if handoff_id not in returned_ids or handoff_id in closed_ids:
+            if handoff_id not in handoff_outcomes or handoff_id in closed_ids:
                 continue
             closed_ids.add(handoff_id)
             await record_squad_handoff_event(
@@ -7012,7 +7024,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                 context_policy=handoff.get("context_policy") or {},
                 deadline=handoff.get("deadline"),
                 return_criteria=list(handoff.get("return_criteria") or []),
-                status="returned",
+                status=str(handoff_outcomes[handoff_id]),
                 parent_message_id=handoff.get("parent_message_id"),
                 correlation_id=handoff.get("correlation_id"),
                 handoff_id=str(handoff_id),
@@ -7020,10 +7032,11 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         visible_results_block = "\n\n".join(visible_results)
         confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
         timeout_block = ""
-        if declared_timeouts:
+        # Declared timeouts plus the handoff failures the gate found in the results.
+        if readiness.timeout_disclosures:
             timeout_lines = [
                 "- " + ", ".join(str(agent) for agent in item.get("agent_ids") or []) + f": {item.get('status')}"
-                for item in declared_timeouts
+                for item in readiness.timeout_disclosures
             ]
             timeout_block = "\n\nTimeouts/bloqueios declarados:\n" + "\n".join(timeout_lines)
         synthesis_query = (

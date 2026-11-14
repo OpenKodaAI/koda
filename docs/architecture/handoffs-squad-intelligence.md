@@ -25,10 +25,29 @@ room messages, reply obligations, tasks, or private child runs.
 Parallel handoff is represented either as one event with multiple
 `destination_agent_ids` or as correlated events sharing `correlation_id`.
 Coordinator synthesis must see an explicit return, timeout, decline, or failure
-before treating handoff work as terminal. A `requested` or `accepted` handoff
-counts as returned once every destination has a visible task result or reply,
-or an answered reply obligation. When synthesis then runs, a `returned` event
-with the same `handoff_id` is recorded, and it supersedes the open event.
+before treating handoff work as terminal.
+
+The coordinator engine records a handoff's destinations as the agents it gives
+a task. A task-less handoff gives each selected participant a task first. The
+post-turn task-cycle check (`_maybe_enqueue_squad_coordinator_synthesis`) then
+derives the outcome of a `requested` or `accepted` handoff once every
+destination has answered, through a visible task result for the cycle or a
+reply obligation it answered on the cycle's source message:
+
+- `returned` when every answer succeeded;
+- `failed` when a destination's task result has `payload.status = failed`. The
+  failure is added to the synthesis disclosures, so the synthesis prompt names
+  the agents that failed.
+
+When synthesis then runs, an event with that status and the same `handoff_id`
+is recorded once (its idempotency key is the handoff id and status), and it
+supersedes the open event. A status-change event has a delivery status that
+matches it (`completed`, `failed`, `timed_out`, or `blocked`) and is not
+addressed to the destinations again. On the web, the dashboard delivery
+watcher leaves handoff cycles to this post-turn check, so it does not add a
+second synthesis. The check itself is not atomic yet: two destinations that
+finish at the same moment can each dispatch a synthesis. Nothing times a
+handoff out yet. The reply-cycle path has no handoffs.
 
 ## Route Quality
 
