@@ -17,7 +17,7 @@ Re-check F-PLT-15, F-PLT-17 and F-PLT-19 once they land.
 
 ## 1. Status summary
 
-332 features after merging duplicates. 72 (22%) are `complete_verified`; 19 are `broken` and 6 are `missing_required` (section 6). The last three rows are cross-cutting platform, console-shell and test infrastructure, listed separately from the twelve product domains.
+332 features after merging duplicates. 73 (22%) are `complete_verified`; 19 are `broken` and 6 are `missing_required` (section 6). The last three rows are cross-cutting platform, console-shell and test infrastructure, listed separately from the twelve product domains.
 
 | Domain | `complete_verified` | `implemented_unvalidated` | `partial` | `ui_not_functional` | `inaccessible` | `broken` | `duplicated_obsolete` | `missing_required` | Total |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -32,11 +32,11 @@ Re-check F-PLT-15, F-PLT-17 and F-PLT-19 once they land.
 | [Monitoring, costs, audit and quality](#49-monitoring-costs-audit-and-quality-f-mon) (F-MON) | 7 | 6 | 9 | 0 | 1 | 1 | 3 | 0 | 27 |
 | [Settings and administration](#410-settings-and-administration-f-adm) (F-ADM) | 2 | 2 | 2 | 0 | 2 | 0 | 1 | 1 | 10 |
 | [Channels](#411-channels-f-chn) (F-CHN) | 1 | 3 | 1 | 1 | 1 | 0 | 1 | 0 | 8 |
-| [Setup and authentication](#412-setup-and-authentication-f-set) (F-SET) | 6 | 4 | 4 | 0 | 2 | 0 | 0 | 0 | 16 |
+| [Setup and authentication](#412-setup-and-authentication-f-set) (F-SET) | 7 | 3 | 4 | 0 | 2 | 0 | 0 | 0 | 16 |
 | [Operator console shell (cross-cutting)](#413-cross-cutting-operator-console-shell-f-web) (F-WEB) | 5 | 6 | 9 | 0 | 1 | 0 | 3 | 0 | 24 |
 | [Platform, state and delivery (cross-cutting)](#414-cross-cutting-platform-state-and-delivery-f-plt) (F-PLT) | 4 | 14 | 7 | 0 | 1 | 5 | 3 | 0 | 34 |
 | [Test and quality infrastructure (cross-cutting)](#415-cross-cutting-test-and-quality-infrastructure-f-qa) (F-QA) | 5 | 7 | 7 | 0 | 1 | 0 | 3 | 4 | 27 |
-| **Total** | **72** | **100** | **86** | **6** | **20** | **19** | **23** | **6** | **332** |
+| **Total** | **73** | **99** | **86** | **6** | **20** | **19** | **23** | **6** | **332** |
 
 
 ## Status changes since the audit
@@ -52,6 +52,7 @@ Re-check F-PLT-15, F-PLT-17 and F-PLT-19 once they land.
 | 2026-11-14 | F-SET-12 | `broken` | `partial` | D-004 fixed (DEFECT-BATCH-1): per-client buckets, trusted-proxy XFF, IPv6 /64. The bundled nginx config still bypasses the dashboard: D-220 (M1-E1-T16). |
 | 2026-11-14 | F-PLT-11 | `broken` | `complete_verified` | D-020 fixed (DEFECT-BATCH-1): half-open probe recovery and per-transition audit events, tested through the call paths. |
 | 2026-11-14 | F-SET-16 | `partial` | `implemented_unvalidated` | M1-E1-T3 (wave 2B): minimal pre-login onboarding status, auth/status flags hidden after setup (D-050, D-226), live readiness checks (D-193), one public-path list. J-01 and J-03 live replay pending. |
+| 2026-11-14 | F-SET-04 | `implemented_unvalidated` | `complete_verified` | J-07 replayed live, run and independently re-run (LIVE-REPLAY-1). |
 
 ## 2. How to read this matrix
 
@@ -138,7 +139,7 @@ run. The recipe is recorded with the smoke results; the database it created was 
 | J-04 | Authenticated route sweep (23 routes) | works, with defects | All 200 without an error boundary; redirects behave. React #418 on control-plane, system and memory routes (D-06); `/memory/review` shows a 404 card (D-11). | F-WEB-01, F-WEB-02, F-MEM-18 |
 | J-05 | Login with a wrong, then the correct password | works | 400 "Invalid credentials.", then 200 and redirect to `next`. Fresh browser takes a `/setup` → `/login` double hop (D-14). | F-SET-02 |
 | J-06 | Logout | works | 200; `/control-plane` then redirects to `/login?next=%2Fcontrol-plane`. | F-SET-02 |
-| J-07 | Password recovery through `/forgot-password` | **fails** | Valid issued code rejected with 400 "The information provided is invalid or expired." (D-01). | F-SET-04 |
+| J-07 | Password recovery through `/forgot-password` | works (2026-11-14, LIVE-REPLAY-1) | A recovery code typed lowercase without dashes, and one with dashes, reset the password; the new password logs in and the old one fails. Was failing (D-01), fixed by DEFECT-BATCH-1. | F-SET-04 |
 | J-08 | Password recovery through the API with the uppercase code | works | 200 `{"ok":true}`; other session signed out; old password rejected, new accepted; 1 code consumed, 9 invalidated. | F-SET-04 |
 | J-09 | Create an agent and open the editor | works, with defects | `SMOKE_AGENT` created (paused) and listed; editor step labels render as raw i18n keys (D-07). | F-AGT-02, F-AGT-01, F-AGT-06, F-WEB-08 |
 | J-10 | Connect a model provider | blocked | Fake groq key stored as `configured:true, verified:false`; real verification needs credentials and egress. | F-ADM-03 |
@@ -146,7 +147,7 @@ run. The recipe is recorded with the smoke results; the database it created was 
 | J-12 | Memory map and curation for an agent | blocked | `memory-map` and `memory-curation` return 503 `memory_engine_projection_failed`; UI shows "Memory unavailable". | F-MEM-18, F-MEM-19, F-MEM-20 |
 | J-13 | Runtime task view | blocked | "Could not open the execution: fetch failed"; runtime task API 503. | F-MON-15, F-MON-17 |
 | J-14 | Login over plain HTTP from a non-localhost address | **fails** | Login 200, but cookies are `Secure`, the browser drops them and the next page bounces to `/setup` (D-04). | F-SET-14 |
-| J-15 | Login brute-force and lockout protection | **fails** | Spoofed `X-Forwarded-For` resets the limit; 12 anonymous failures through the web locked the real owner out with 429 (D-02). | F-SET-12 |
+| J-15 | Login brute-force and lockout protection | works (2026-11-14, LIVE-REPLAY-1) | Spoofed `X-Forwarded-For` from an untrusted peer stays in that peer's bucket (429 after 10); the owner logs in from another client after 24 anonymous failures. Remainders: the 429 shows the generic message (M1-E1-T18), loopback is a trusted proxy on native installs (D-237). Was failing (D-02), fixed by DEFECT-BATCH-1. | F-SET-12 |
 | J-16 | Dashboard while the control plane is down | works, with defect | Login 503 "Login service is unavailable"; `/setup` shows the owner-creation form on an instance that has an owner (D-14). | F-SET-01, F-WEB-19 |
 | J-17 | Control-plane graceful shutdown | works, with defect | SIGTERM exits in 3 s with a TCP kernel target; hangs over 35 s with an over-long unix-socket target (D-13). | F-ORC-19 |
 
@@ -486,7 +487,7 @@ and the matching tests in the same change (`CLAUDE.md`).
 | F-SET-01 | Owner bootstrap and first-run setup (bootstrap file code, CLI-issued code, registration, setup wizard with recovery codes) | `partial` | `/setup` (`/control-plane/setup` redirects); `POST /auth/register-owner`, `/auth/bootstrap/exchange`, `/auth/bootstrap/codes` (break-glass only); `GET /onboarding/status` | `cp/operator_auth.py:217-601`; `cp/bootstrap_file.py`; `cp/password_policy.py`; `cp/api.py:543-562`; `web/app/setup/page.tsx`; `setup/*`; `web/app/api/control-plane/auth/register-owner/route.ts` | `test_control_plane_operator_auth.py` (25), `test_control_plane_bootstrap_file.py`, `test_control_plane_password_policy.py` [V pass]; `setup-screen.test.tsx` (8), `web/app/setup/page.test.tsx` (3) [V pass] | [S] Works (J-01 to J-03). [V] An expired bootstrap file is never regenerated (`bootstrap_file.py:95-96`): setup stays locked until the file is deleted by hand or the CLI break-glass path is used. [C] Registration is not transactional; the loopback-trust audit event is never emitted; 4xx shows raw backend text; `MIN_LENGTH=12` hardcoded in the web while the backend reads config. [S] Strength meter shows a raw i18n key (D-07); `/setup` shows the create form when the backend is down (D-14); the code is written lazily on the first status request, not at boot. |
 | F-SET-02 | Login and logout | `complete_verified` | `/login`; `POST /auth/login`, `/auth/logout`; `GET /auth/status` | `cp/operator_auth.py:868-946,969-1048`; `cp/api.py:684-698`; `auth/login-screen.tsx`; `web/app/api/control-plane/auth/*` | `test_control_plane_operator_auth.py`; `login-screen.test.tsx` (6) [V pass]; `login/route.test.ts` [R]; e2e `smoke.spec.ts` (not in CI) | [S] J-05, J-06. [C] A failed login returns 400, not 401; an unknown user skips argon2 (timing difference, 900-903); every request updates `last_used_at`. Fresh browsers take a `/setup` → `/login` double hop (D-14). |
 | F-SET-03 | Password change | `complete_verified` | `/settings/account`; `POST /auth/password/change` | `cp/operator_auth.py:603-707` | `test_control_plane_operator_auth.py`; `security-settings-card.test.tsx` | Revokes other sessions. [C] Personal API tokens survive (F-SET-08). |
-| F-SET-04 | Password recovery with a recovery code (`/forgot-password`) | `implemented_unvalidated` | `/forgot-password` (link from `/login`); `POST /auth/password/recover` | `auth/forgot-password-screen.tsx`; `cp/operator_auth.py:603-707` (comparison at 630) | `forgot-password-screen.test.tsx` (4) [V pass]; backend tests pass | [S] The UI lowercases the code; codes are issued uppercase and compared case-sensitively by sha256, so every UI attempt fails (J-07, D-01). The backend works with the uppercase code (J-08). [C] Every 4xx maps to one generic message, including a password-policy rejection that happens after the code is verified (`operator_auth.py:638`); failed attempts are not audited; personal tokens survive the reset. |
+| F-SET-04 | Password recovery with a recovery code (`/forgot-password`) | `complete_verified` | `/forgot-password` (link from `/login`); `POST /auth/password/recover` | `auth/forgot-password-screen.tsx`; `cp/operator_auth.py:603-707` (comparison at 630) | `forgot-password-screen.test.tsx` (4) [V pass]; backend tests pass | [S] The UI lowercases the code; codes are issued uppercase and compared case-sensitively by sha256, so every UI attempt fails (J-07, D-01). The backend works with the uppercase code (J-08). [C] Every 4xx maps to one generic message, including a password-policy rejection that happens after the code is verified (`operator_auth.py:638`); failed attempts are not audited; personal tokens survive the reset. Live replay J-07 works (LIVE-REPLAY-1). |
 | F-SET-05 | Recovery-code management (summary, regenerate) | `complete_verified` | `/settings/account`; `GET /auth/recovery-codes`, `POST /auth/recovery-codes/regenerate` | `cp/operator_auth.py:796-866` | `test_control_plane_operator_auth.py`; `security-settings-card.test.tsx` | Regeneration invalidates the whole sheet. Recovery input is not upper-cased server-side (see F-SET-04). |
 | F-SET-06 | Operator profile (display name, photo) | `complete_verified` | `/settings/account`; `PATCH /auth/profile`; `POST/GET/DELETE /auth/profile/photo` | `cp/operator_auth.py:709-794`; `cp/operator_profile_photos.py`; `cp/api.py:565-645`; `account/account-identity-panel.tsx`, `account/profile-photo-editor.tsx` | `test_control_plane_operator_auth.py`; `account-identity-panel.test.tsx` [V pass] | [C] The authenticated photo is served with `Cache-Control: public` (`cp/api.py:637`). |
 | F-SET-07 | Account settings page (`/settings/account`) | `complete_verified` | Account menu | `web/app/settings/account/page.tsx`; `account/*` | `account-identity-panel.test.tsx`, `security-settings-card.test.tsx` (11) [V pass] | Server-guarded. The server-rendered header is always English; topbar shows "Workspace"; two `h1`; not in the sidebar or palette (F-WEB-01); no `/settings` index. [S] Renders. |

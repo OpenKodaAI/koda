@@ -174,10 +174,10 @@ per milestone:
 
 | ID | Milestone | Exit criteria | Tasks | ready / pending / blocked / in-progress / in-review / done |
 |---|---|---|---:|---|
-| M0 | Baseline repair and safety net | All gates green on an isolated run. Postgres CI job trusted. Fixture defects fixed. Characterisation tests run the real queue, scheduler, memory, auth and reliability paths, with strict xfails for known defects. Control-plane, worker-runtime and BFF authorization matrices exist. The plan lint runs in CI. CI credentials are requested (M0-E1-T5). | 24 | 20 / 2 / 2 / 0 / 0 / 0 |
-| M1 | Security hardening | Every critical or high security defect (D-002 to D-007, and D-162 as reclassified) is fixed, or has a shipped reversible interim mitigation (M1-E8) with its full fix escalated in approval batch 1. Medium security defects are fixed or risk-accepted. Approved governance (ADR-002) and exposure (ADR-003) decisions are implemented with evidence. The security docs match the new boundary (M1-E9-T1). M1-E2-T5 waits on M2-E2-T2 and closes with M2; it does not hold M1 open. | 61 | 28 / 18 / 11 / 3 / 1 / 0 |
+| M0 | Baseline repair and safety net | All gates green on an isolated run. Postgres CI job trusted. Fixture defects fixed. Characterisation tests run the real queue, scheduler, memory, auth and reliability paths, with strict xfails for known defects. Control-plane, worker-runtime and BFF authorization matrices exist. The plan lint runs in CI. CI credentials are requested (M0-E1-T5). | 25 | 19 / 2 / 2 / 0 / 0 / 2 |
+| M1 | Security hardening | Every critical or high security defect (D-002 to D-007, and D-162 as reclassified) is fixed, or has a shipped reversible interim mitigation (M1-E8) with its full fix escalated in approval batch 1. Medium security defects are fixed or risk-accepted. Approved governance (ADR-002) and exposure (ADR-003) decisions are implemented with evidence. The security docs match the new boundary (M1-E9-T1). M1-E2-T5 waits on M2-E2-T2 and closes with M2; it does not hold M1 open. | 68 | 28 / 18 / 11 / 4 / 2 / 5 |
 | M2 | Data integrity | No cross-agent data loss. Writes are transactional. Migrations are atomic, locked and within the lock budget. A restore drill passes in CI (M2-E6-T1), and every destructive or irreversible task cites it. Destructive changes are made only with approval. | 24 | 12 / 7 / 5 / 0 / 0 / 0 |
-| M3 | Broken critical journeys | Through the M0-E3-T2 harness, on Postgres with a stub provider (M3-E9-T1): a scheduled routine runs; a gated tool call is approved and executes (once M3-E3-T1 is approved); a squad conversation delegates and synthesises; memory is recalled across sessions; password recovery works; cancel stops child runs; emergency stop works; **a dashboard-only agent answers in `/sessions` (J-11)**; an MCP server is connected and its tool called; a skill package is installed through review. The real-provider checkpoint (M3-E9-T2) is recorded, or its blocker is stated. | 42 | 18 / 15 / 3 / 6 / 0 / 0 |
+| M3 | Broken critical journeys | Through the M0-E3-T2 harness, on Postgres with a stub provider (M3-E9-T1): a scheduled routine runs; a gated tool call is approved and executes (once M3-E3-T1 is approved); a squad conversation delegates and synthesises; memory is recalled across sessions; password recovery works; cancel stops child runs; emergency stop works; **a dashboard-only agent answers in `/sessions` (J-11)**; an MCP server is connected and its tool called; a skill package is installed through review. The real-provider checkpoint (M3-E9-T2) is recorded, or its blocker is stated. | 43 | 19 / 15 / 3 / 0 / 3 / 3 |
 | M4 | Dead-weight removal | Zero-consumer code, configuration and files are removed in deletion-only changes. Unreachable web modules are gone. A CI check prevents regrowth. | 22 | 18 / 0 / 4 / 0 / 0 / 0 |
 | M5 | Architecture consolidation | One implementation per concern (ARCHITECTURE_AUDIT §7). Default stack reduced toward 6 containers, with a tested rollback for each fold. No `run_coro_sync` on hot paths. | 68 | 10 / 43 / 15 / 0 / 0 / 0 |
 | M6 | Core functionality completion | Every in-scope feature is `complete_verified`, or removed or deferred with approval. Controls with no backend are labelled. Governance surfaces are reachable. Learning has a definition and measures (ADR-031). | 25 | 16 / 4 / 5 / 0 / 0 / 0 |
@@ -185,9 +185,9 @@ per milestone:
 | M8 | UX and accessibility | WCAG 2.2 AA on key routes, with exceptions documented. No raw i18n keys or hydration errors. One design system per mission §6.2 category. Every key route has its interaction-state row (mission §6.3). | 31 | 17 / 14 / 0 / 0 / 0 / 0 |
 | M9 | Performance and maintainability | Measured baselines and targets exist. Event loops are not blocked. Hot queries have recorded plans. God modules are split along their seams. | 20 | 9 / 10 / 1 / 0 / 0 / 0 |
 | M10 | Polish, documentation and release readiness | Docs match behaviour. Every contract change has its changelog entry. Final acceptance (M10-E1-T5) runs after M1 to M9 exit, with real infrastructure (mission §11, §16). | 5 | 2 / 2 / 1 / 0 / 0 / 0 |
-| | **Total** | | **342** | **160 / 120 / 52 / 9 / 1 / 0** |
+| | **Total** | | **351** | **160 / 120 / 52 / 4 / 5 / 10** |
 
-The counts are as of revision 1. "Ready" means every hard dependency is done and no gate is open. The plan
+The counts were refreshed on 2026-11-14 from `scripts/check_master_plan.py` (M0-E1-T4). "Ready" means every hard dependency is done and no gate is open. The plan
 lint (M0-E1-T4) prints these counts; refresh the table from its output when statuses change (M10-E1-T4).
 
 ## 4. Work before this plan, and moved tasks
@@ -678,7 +678,7 @@ Owner OPS (review SEC, REV) · Risk med · Gate approved (Q-10, 2026-11-14) · *
 - **Tests:** `tests/test_compose_port_exposure.py`; G; G-CI; changelog entry · **Evidence:** VALIDATION_REPORT.md "NET-LOOPBACK": contract test and full `pytest` (4,920 passed, 200 skipped), `ruff`, `ruff format --check`, `mypy`, `actionlint`, reviewer `docker compose config` renders of base, prod, dev, cluster and release. Missing: a GitHub Actions docker-smoke run (`gh run view`).
 
 #### M1-E1-T2 · Trusted-proxy client IP for rate limits
-Owner SEC · Risk med · Gate none · **in-review** · Deps M1-E1-T1, M0-E3-T1
+Owner SEC · Risk med · Gate none · **done** · *started early: real-path regression test required before done* · Deps M1-E1-T1, M0-E3-T1
 - **Addresses:** D-004, SM-02, F-SET-12, J-15, R-35
 - **Files:** `koda/control_plane/rate_limit.py:97`, `koda/config.py`, `.env.example`, `apps/web/src/app/api/control-plane/auth/*/route.ts`, `docs/security/authentication.md`
 - **Do:** honour `X-Forwarded-For` only from `CONTROL_PLANE_TRUSTED_PROXIES` (default: loopback plus the web container network). Have the BFF auth routes forward the browser client IP. Give 429 its own message instead of "Invalid credentials."
@@ -687,15 +687,15 @@ Owner SEC · Risk med · Gate none · **in-review** · Deps M1-E1-T1, M0-E3-T1
   - two browsers get separate buckets;
   - a J-15 replay no longer locks the owner out;
   - the auth doc is updated.
-- **Tests:** unit matrix for `_client_ip`; web route test for the forwarded IP; G; changelog entry (429 message) · **Evidence:** **Missing for done:** J-15 live replay (M0-E3-T7). VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-004): _client_ip unit matrix, dashboard XFF rewrite and route-table tests, IPv6 /64; the 429 message moved to M1-E1-T18 (ADR-038); two review rounds
+- **Tests:** unit matrix for `_client_ip`; web route test for the forwarded IP; G; changelog entry (429 message) · **Evidence:** VALIDATION_REPORT.md "LIVE-REPLAY-1" (J-15 works, run and independently re-run: spoofed XFF from an untrusted peer keeps that peer's bucket (429 after 10, log ip=<real peer>); the owner logs in from a separate client after 24 anonymous failures; the auth doc was already updated). Remainder: the generic 429 message, M1-E1-T18; VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-004): _client_ip unit matrix, dashboard XFF rewrite and route-table tests, IPv6 /64; the 429 message moved to M1-E1-T18 (ADR-038); two review rounds
 
 #### M1-E1-T3 · Minimal pre-login onboarding status
-Owner SEC · Risk med · Gate none · **in-review** · Deps —
+Owner SEC · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-050, D-193, SM-05, F-SET-16, R-36
 - **Files:** `koda/control_plane/manager.py` (`get_onboarding_status` ~5595), `koda/control_plane/api.py` (public paths), `koda/services/onboarding_readiness.py` (~155), `apps/web/src/proxy.ts` and the setup and onboarding consumers, `docs/openapi/control-plane.json`, `docs/security/authentication.md`
 - **Do:** an unauthenticated response returns only `{has_owner, bootstrap_required}`; the full payload requires auth. Align the web and backend public-path lists. Readiness checks return real statuses, and the constant "warning" checks are removed.
 - **Done when:** an unauthenticated GET through :3000 and :8090 returns two fields, and J-01 and J-03 still pass.
-- **Tests:** route test in both states; web unit test; route matrix updated; G; changelog entry · **Evidence:** **Missing for done:** J-01 and J-03 live replay (M0-E3-T7). VALIDATION_REPORT.md "WAVE-2B" (route tests in both states for onboarding/status and auth/status; live readiness checks; one public-path list with exact matching; web tests). J-01 and J-03 not yet replayed live (no Docker)
+- **Tests:** route test in both states; web unit test; route matrix updated; G; changelog entry · **Evidence:** VALIDATION_REPORT.md "LIVE-REPLAY-1" (unauthenticated onboarding/status returns exactly {has_owner, bootstrap_required} through :3000-equivalent and :8090-equivalent ports; J-01 and J-03 work in a real browser, run and independently re-run); VALIDATION_REPORT.md "WAVE-2B" (route tests in both states for onboarding/status and auth/status; live readiness checks; one public-path list with exact matching; web tests). J-01 and J-03 not yet replayed live (no Docker)
 
 #### M1-E1-T4 · Control-plane logging with redaction
 Owner SEC · Risk low · Gate none · **ready** · Deps —
@@ -738,7 +738,7 @@ Owner SEC (OPS) · Risk low · Gate none · **pending** · Deps M0-E3-T1
 - **Tests:** route matrix; unit test; G · **Evidence:** —
 
 #### M1-E1-T6 · Secret-handling correctness fixes
-Owner SEC · Risk low · Gate none · **ready** · Deps —
+Owner SEC · Risk low · Gate none · **in-progress** (`wf_3b822fa2-abc`, wave 4) · Deps —
 - **Addresses:** D-083, SM-10, F-GOV-21, F-SET-10, F-PLT-23; ES items: empty HMAC key accepted, CLI comma-list token, doctor S3 key name
 - **Files:** `koda/services/runtime_access_service.py:50`, `packages/cli/bin/koda.mjs:629`, `scripts/doctor.py:76`
 - **Do:** `RuntimeAccessService` raises on an empty key. CLI recovery sends the first token of the `CONTROL_PLANE_API_TOKEN` list. Doctor builds the DSN from `POSTGRES_*`, reads `S3_*`, probes the published ports and honours `OBJECT_STORAGE_REQUIRED`.
@@ -746,7 +746,7 @@ Owner SEC · Risk low · Gate none · **ready** · Deps —
 - **Tests:** service unit test; CLI test with a fake docker; doctor test; G · **Evidence:** —
 
 #### M1-E1-T7 · Explicit failure for session cookies over plain HTTP
-Owner FE (SEC) · Risk low · Gate none · **ready** · Deps —
+Owner FE (SEC) · Risk low · Gate none · **in-progress** (`wf_3b822fa2-abc`, wave 4) · Deps —
 - **Addresses:** D-085, SM-04, F-SET-14, J-14, TD-173 (the `SECURE_COOKIES` arg)
 - **Files:** `apps/web/src/lib/web-operator-session.ts`, `apps/web/src/proxy.ts`, the login screen, the troubleshooting doc, the web Dockerfile and compose build args
 - **Do:** in production, detect plain HTTP from a non-loopback host. Show a clear error that HTTPS or a reverse proxy is required, instead of bouncing to `/setup`. Fix the troubleshooting entry and remove the build arg nothing reads.
@@ -810,7 +810,7 @@ Owner SEC · Risk low · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-018) m
 - **Tests:** unit tests; route test; G · **Evidence:** —
 
 #### M1-E1-T18 · Account-independent rate-limit message on auth screens
-Owner FE (SEC) · Risk low · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-004) merged
+Owner FE (SEC) · Risk low · Gate none · **in-progress** (`wf_3b822fa2-abc`, wave 4) · Deps DEFECT-BATCH-1 (D-004) merged
 - **Addresses:** D-004 (remainder: a rate-limited login still shows "Invalid credentials."), SM-02
 - **Decision:** the per-client `429` is independent of whether the account exists, so a distinct "Too many attempts, wait N minutes" message reveals nothing about accounts. Per-account lockout and every identity error stay on the single generic key. Amend the "Auth screens" rule in `apps/web/CLAUDE.md` accordingly (DECISIONS.md entry).
 - **Files:** `apps/web/src/app/api/control-plane/auth/*/route.ts`, the auth screen components and i18n resources, `apps/web/CLAUDE.md`, `docs/security/authentication.md`
@@ -1213,7 +1213,7 @@ Owner SEC · Risk low · Gate none · **ready** · Deps —
 - **Tests:** unit tests with a local server; G · **Evidence:** —
 
 #### M1-E7-T10 · Image and parser hardening from the advisory triage
-Owner SEC (BE) · Risk med · Gate none · **ready** · Deps M1-E7-T2 batch P2
+Owner SEC (BE) · Risk med · Gate none · **pending** · Deps M1-E7-T2 batch P2
 - **Addresses:** D-224, SUPPLY_CHAIN_TRIAGE.md §5.1 code-level items (Pillow, pypdf), R-03
 - **Files:** the three `Image.open` call sites, the pypdf extraction path in `koda/services/artifact_ingestion.py`, the `/pip` command guard (`BLOCKED_PIP_PATTERN`)
 - **Do:** pass `formats=["JPEG", "PNG", "WEBP", "GIF"]` to `Image.open`; run Pillow and pypdf extraction off the event loop with a timeout; reject `--index-url`/`--extra-index-url` in `/pip`.
@@ -1221,7 +1221,7 @@ Owner SEC (BE) · Risk med · Gate none · **ready** · Deps M1-E7-T2 batch P2
 - **Tests:** unit tests per item; G · **Evidence:** —
 
 #### M1-E7-T11 · Dashboard WebSocket relay limits
-Owner FE (SEC) · Risk low · Gate none · **ready** · Deps M1-E7-T3 batch N1
+Owner FE (SEC) · Risk low · Gate none · **pending** · Deps M1-E7-T3 batch N1
 - **Addresses:** SUPPLY_CHAIN_TRIAGE.md §5.2 code-level items (ws GHSA-96hv defence in depth)
 - **Files:** `apps/web/server.mjs` (~78, ~125), `apps/web/next.config.ts`
 - **Do:** set `maxPayload` on both WebSocket servers, validate the relay descriptor and token before `handleUpgrade`, and set `images.unoptimized: true` until M1-E7-T3 batch N2 lands.
@@ -1229,7 +1229,7 @@ Owner FE (SEC) · Risk low · Gate none · **ready** · Deps M1-E7-T3 batch N1
 - **Tests:** server tests; G · **Evidence:** —
 
 #### M1-E7-T12 · Postgres transport security in cluster mode
-Owner OPS (SEC) · Risk med · Gate none · **ready** · Deps M1-E7-T4 batch R3
+Owner OPS (SEC) · Risk med · Gate none · **pending** · Deps M1-E7-T4 batch R3
 - **Addresses:** RUSTSEC-2026-0179/0178 residual (NoTls at `rust/koda-postgres/src/lib.rs:155`, `rust/koda-policy-engine/src/store.rs:133`), `docs/operations/cluster-mode.md`
 - **Do:** support `sslmode=require`/`verify-full` in the Rust Postgres clients and the Python pool, or, if that is not taken, document that multi-host cluster mode requires a private network and enforce it in doctor.
 - **Done when:** a cluster-mode stack connects over TLS (CI), or doctor fails a multi-host DSN without TLS and the docs state the requirement.
@@ -1256,12 +1256,12 @@ Owner SEC · Risk med · Gate none · **pending** · Deps M1-E4-T3
 - **Tests:** adversarial package fixtures; G; changelog entry (install flow) · **Evidence:** —
 
 #### M1-E8-T3 · Warn on placeholder Postgres and S3 secrets
-Owner SEC (OPS) · Risk low · Gate none · **in-review** · Deps —
+Owner SEC (OPS) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-007 (remainder, interim; the refusal is M1-E1-T10), F-PLT-07
 - **Files:** `koda/config.py`, `koda/control_plane/supervisor.py` (startup), `scripts/doctor.py`, the dashboard shell banner
 - **Do:** when `POSTGRES_PASSWORD` or an `S3_*` secret still starts with `replace-with-`, log a warning at every start, fail `doctor`, and show a persistent dashboard banner that links to the rotation steps. Nothing refuses to start yet.
 - **Done when:** a stack on placeholders shows the banner and the log line, and doctor fails with the rotation command.
-- **Tests:** config unit test; doctor test; web test; G · **Evidence:** **Missing for done:** a running stack on placeholders showing the banner, the log line and the failing doctor (M0-E3-T7). VALIDATION_REPORT.md "WAVE-2B" (config, supervisor, doctor and generator tests; doctor exits 1 on placeholders and 0 after rotation; AppShell banner render test)
+- **Tests:** config unit test; doctor test; web test; G · **Evidence:** VALIDATION_REPORT.md "LIVE-REPLAY-1" (running stack with POSTGRES_PASSWORD=replace-with-…: the storage_secret_placeholder_in_use log line, a persistent banner with the rotation link on every dashboard route, doctor failing storage_secrets_not_placeholders with the rotation command; the negative control with the real password shows none of them); VALIDATION_REPORT.md "WAVE-2B" (config, supervisor, doctor and generator tests; doctor exits 1 on placeholders and 0 after rotation; AppShell banner render test)
 
 #### M1-E9 — Security documentation
 
@@ -1500,7 +1500,7 @@ Owner OPS · Risk med · Gate none · **pending** · Deps M2-E6-T1
 #### M3-E1 — Scheduling and routines (journey: a routine created on the web runs on schedule)
 
 #### M3-E1-T1 · Scheduled runs carry their policy snapshot
-Owner BE · Risk med · Gate none · **in-review** · Deps M0-E3-T4
+Owner BE · Risk med · Gate none · **in-review** · *started early: real-path regression test required before done* · Deps M0-E3-T4
 - **Addresses:** D-001 (critical), TD-047, F-SCH-01, F-SCH-02, R-16
 - **Files:** `koda/services/scheduled_job_dispatcher.py` (~73-92), `koda/services/scheduled_jobs.py` (~1760, ~1788-1822)
 - **Do:** compute and store the policy snapshot in the dispatcher INSERT. Delete the import-time monkey-patch, the backfill and the private re-exports, and use explicit imports.
@@ -1508,7 +1508,7 @@ Owner BE · Risk med · Gate none · **in-review** · Deps M0-E3-T4
 - **Tests:** G-PG · **Evidence:** **Missing for done:** the M0-E3-T4 end-to-end xfail flip. VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-001): Postgres dispatch tests (automatic runs, snapshot refresh with compare-and-swap, concurrent update) fail on the pre-fix code and pass; the broader M0-E3-T4 end-to-end test is still to land
 
 #### M3-E1-T2 · Web-created routines validate and activate
-Owner BE (FE) · Risk med · Gate none · **in-review** · Deps M3-E1-T1
+Owner BE (FE) · Risk med · Gate none · **in-review** · *started early: real-path regression test required before done* · Deps M3-E1-T1
 - **Addresses:** D-016, F-SCH-05, F-SCH-04, TD-155 (routine flow tests)
 - **Files:** `koda/services/runtime/api.py` (~506), the routine editor and the schedules page, `tests/test_services/runtime/test_schedules_api.py`
 - **Do:** create calls `queue_validation_run(job_id, activate_on_success=True)`, checks the result and returns the real status. Add a Validate action to the UI. Replace the mocked `activate_job` test with an unmocked one.
@@ -1570,7 +1570,7 @@ Owner FE (PROD) · Risk low · Gate none · **ready** · Deps —
 #### M3-E2 — Cancellation and the queue worker
 
 #### M3-E2-T1 · Cancellation stops the running task and keeps the worker
-Owner BE · Risk med · Gate none · **in-review** · Deps M0-E3-T2
+Owner BE · Risk med · Gate none · **in-review** · *started early: real-path regression test required before done* · Deps M0-E3-T2
 - **Addresses:** D-009, D-087, D-088, F-ORC-02, F-CNV-06
 - **Files:** `koda/services/runtime/controller.py` (~2718), `koda/services/queue_manager.py` (~8842), `koda/services/openai_compatible_runner.py` (~328)
 - **Do:** DEFECT-BATCH-1 covers the D-009 part. `cancel_queued_task` returns True only for a tracked queued id; otherwise call `cancel_active_task_execution`. `_process_queue` catches the cancelled task's `CancelledError` and continues. The OpenAI-compatible runner re-raises `CancelledError`.
@@ -1803,12 +1803,12 @@ Owner AIM (ARCH, review REV) · Risk low · Gate none · **pending** · Deps M3-
 #### M3-E7 — Authentication journeys
 
 #### M3-E7-T1 · Password recovery from the web
-Owner SEC (FE) · Risk low · Gate none · **in-review** · Deps —
+Owner SEC (FE) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-018, SM-01, F-SET-04, J-07
 - **Files:** `apps/web/src/components/auth/forgot-password-screen.tsx`, `koda/control_plane/operator_auth.py` (~630), `docs/security/authentication.md`, tests
 - **Do:** stop lowercasing the input, and normalise case on both sides.
 - **Done when:** a J-07 replay succeeds with a pasted code.
-- **Tests:** web test; Postgres auth test; G · **Evidence:** **Missing for done:** J-07 replay with a pasted code (M0-E3-T7). VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-018): canonicalization unit tests, recover route test, forgot-password component tests; J-07 browser replay pending M0-E3-T7
+- **Tests:** web test; Postgres auth test; G · **Evidence:** VALIDATION_REPORT.md "LIVE-REPLAY-1" (J-07 works: a recovery code typed lowercase without dashes, and a second one with dashes, reset the password; the new password logs in and the old one fails; run and independently re-run); VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-018): canonicalization unit tests, recover route test, forgot-password component tests; J-07 browser replay pending M0-E3-T7
 
 #### M3-E7-T2 · Setup page states and error codes
 Owner FE (SEC) · Risk low · Gate none · **ready** · Deps —

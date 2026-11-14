@@ -377,3 +377,51 @@ Other REV findings:
   - AG-16 deletes M1-E4-T7's backend.
 
 Outcome: M1-E2-T1 stays `in-review`. The ADR gets a revision (round 2), and both lenses review it again.
+
+## LIVE-REPLAY-1 — live journeys on the merged tree (dfa596c), run natively and re-run independently
+
+Workflow `wf_ee8fd3fc-121`. A runner started the stack and drove every journey in a real browser. A verifier then repeated everything on its own database, state and ports, and did not reuse the runner's artifacts. The two agree on every result.
+
+Recipe (no Docker here):
+
+- **Services:** PostgreSQL 16 with pgvector on a fresh database, the shared Rust security guard, the production web build (`pnpm build:web`, served by `apps/web/server.mjs`), and `python -m koda.control_plane` with `KODA_ENV=production`, so loopback trust is off and the real setup code is required.
+- **Control-plane settings:** loopback ports, `STATE_ROOT_DIR` and `RUNTIME_EPHEMERAL_ROOT` in a scratch directory, `OBJECT_STORAGE_REQUIRED=false`, and generated `CONTROL_PLANE_API_TOKEN`, `RUNTIME_LOCAL_UI_TOKEN` and `WEB_OPERATOR_SESSION_SECRET`.
+- **Absent:** the runtime-kernel, memory, artifact and retrieval sidecars, S3 and LLM credentials, so no agent turn runs.
+- **Drivers:** Node Playwright with the preinstalled Chromium. `curl --interface 127.0.0.x` stood in for distinct untrusted clients. Every process ran with a scratch HOME and was stopped at the end, and the databases were dropped.
+
+| Journey | Result | Evidence (both runs) |
+|---|---|---|
+| J-01 | works | `/` → `/setup?next=%2F` with email, password, confirm and 12 setup-code cells; no console errors. |
+| J-01, before login | works | `onboarding/status` returns exactly `{has_owner, bootstrap_required}` on the dashboard port and on the API port, also with a bogus bearer token. `auth/status` hides `recovery_available` and shows the two setup-only fields while no owner exists. Extra always-null keys are D-234. `onboarding/readiness` and `placeholder-secrets` answer 401. |
+| J-03 | works | Setup with the real code read from `bootstrap.txt` (mode 0600). 201 and 10 recovery codes; acknowledging them lands on Overview. Session cookie `HttpOnly; SameSite=Strict; Secure`. `bootstrap.txt` is deleted, and anonymous `auth/status` then drops `bootstrap_file_path` and `loopback_trust_enabled`. |
+| J-07 | works | Sign-out, then `/forgot-password` with a code typed lowercase without dashes, and a second code with dashes: each resets the password. The new password logs in and the old one fails. |
+| J-15 | works | Through the dashboard: an untrusted peer with a spoofed, rotating `X-Forwarded-For` gets 400 ×10, then 429. The log names the real peer. Direct to the API: 429 with `Retry-After: 60`. The owner logs in from another client after 24 anonymous failures. The dashboard's 429 shows the generic message (M1-E1-T18), and loopback is a trusted proxy on native installs (D-237). |
+| M1-E8-T3 | works | Restart with `POSTGRES_PASSWORD=replace-with-…` and the real password left in the DSN. `storage_secret_placeholder_in_use` is logged with key names only. A persistent banner with the rotation link appears on every dashboard route, and the API answers 401 to anonymous callers. Doctor fails `storage_secrets_not_placeholders` with the rotation command. The negative control shows none of them. |
+
+Defects found:
+
+- **D-136 (medium), now verified at runtime:** login-failure timing reveals whether an account exists. An unknown identifier fails in 3–5 ms; the owner with a wrong password takes 73–131 ms. M1-E1-T13.
+- **Known and still present:**
+  - D-03 / M1-E1-T4: the setup code is logged in plaintext, because `setup_logging` is never called;
+  - D-12: a reconcile traceback every 5 s;
+  - D-07: a raw i18n key in the setup strength meter;
+  - D-09: the cookie `Max-Age` is 8 h while the session TTL is 7 days;
+  - D-10: doctor's object-storage checks;
+  - M1-E1-T18: the generic 429 message.
+- **New, all low:**
+  - D-231: the browser auto-provision check misses the `chrome-linux64` layout;
+  - D-232: doctor under system Python;
+  - D-233: singular/plural copy in the banner and doctor;
+  - D-234: extra null keys in anonymous `auth/status`;
+  - D-235: a brief double render of `/forgot-password`;
+  - D-236: a Next.js stream error during a control-plane restart;
+  - D-237: loopback is a trusted proxy on native installs.
+
+Outcome: M1-E1-T2, M1-E1-T3, M3-E7-T1 and M1-E8-T3 move to `done`. F-SET-04 becomes `complete_verified`. FEATURE_MATRIX J-07 and J-15 move from fails to works.
+
+## Started-early regression tests — M1-E1-T2
+
+M1-E1-T2 finished before its dependencies M1-E1-T1 and M0-E3-T1, so the M0-E1-T4 plan lint requires a real-path regression test.
+- **regression test** `tests/test_control_plane_rate_limit.py::test_untrusted_peer_cannot_rotate_x_forwarded_for`: the real control-plane rate-limit middleware, with spoofed `X-Forwarded-For` from an untrusted peer.
+- **regression test** `tests/test_control_plane_rate_limit.py::test_real_loopback_proxy_gets_per_client_login_buckets`: the real middleware behind a loopback proxy.
+- LIVE-REPLAY-1 J-15 ran the same path end to end through the production dashboard and API.
