@@ -311,6 +311,9 @@ def _release_run(
 async def run_dispatch_cycle(application: Any) -> dict[str, int]:
     from koda.services.scheduled_job_runtime import _dispatch_run
 
+    # Every cycle, not only at startup: a run whose completion callback was lost
+    # would otherwise stay `running` and block its job until a restart.
+    recover_expired_leases()
     materialized = _materialize_due_runs()
     claimed = _claim_due_runs()
     for run in claimed:

@@ -10,6 +10,9 @@ Pinned guarantees:
     snapshot went stale since validation is refreshed (and the refresh is
     recorded as ``job.policy_snapshot_refreshed``) only through a
     compare-and-swap, so a concurrent edit is never overwritten.
+  * Expired-lease recovery runs in every dispatch cycle: a run whose completion
+    callback was lost leaves ``running`` once its lease expires and is re-run,
+    without restarting the dispatcher.
   * ``POST /api/runtime/schedules`` queues a validation run for the new job
     instead of attempting an activation that the scheduler always rejects, and
     the queued validation activates the job when it passes (or leaves it
@@ -234,6 +237,34 @@ async def test_snapshot_refresh_does_not_overwrite_a_concurrent_job_update(sched
     assert scheduled_job_dispatcher._materialize_due_runs() == 1
     [refresh_event] = _events(job_id, "job.policy_snapshot_refreshed")
     assert refresh_event["details"]["previous_policy_snapshot_hash"] == "concurrent-hash"
+
+
+async def test_run_with_lost_callback_is_recovered_by_a_later_cycle_without_restart(scheduler_db: str) -> None:
+    from koda.services import scheduled_job_runtime, scheduled_jobs
+
+    application = _fake_application()
+    job_id = await _active_reminder_job(application)
+    due_at = scheduled_jobs._utcnow() - timedelta(seconds=5)
+    scheduled_jobs._touch_job(job_id, next_run_at=scheduled_jobs._iso(due_at))
+
+    # The run is claimed, but its success or failure callback never arrives.
+    with patch.object(scheduled_job_runtime, "_dispatch_run", AsyncMock()):
+        cycle = await _run_dispatch_cycle(application)
+    assert cycle["claimed"] == 1
+    [stuck_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert stuck_run["status"] == scheduled_jobs.RUN_STATUS_RUNNING
+
+    # Its lease runs out while the same dispatcher keeps cycling (no restart).
+    expired_at = scheduled_jobs._utcnow() - timedelta(seconds=1)
+    scheduled_jobs._touch_run(int(stuck_run["id"]), lease_expires_at=scheduled_jobs._iso(expired_at))
+    await _run_dispatch_cycle(application)
+
+    [recovered_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert recovered_run["id"] == stuck_run["id"]
+    assert recovered_run["lease_recovery_count"] == 1
+    assert recovered_run["status"] == scheduled_jobs.RUN_STATUS_SUCCEEDED, recovered_run.get("error_message")
+    [recovered_event] = _events(job_id, "run.lease_recovered")
+    assert recovered_event["status_to"] == scheduled_jobs.RUN_STATUS_RETRYING
 
 
 class _AllowRuntimeAccess:
