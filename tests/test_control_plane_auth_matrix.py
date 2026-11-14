@@ -14,6 +14,13 @@ the records that must agree with it:
 
 A new route that answers without credentials therefore fails here until the OpenAPI
 document marks it public.
+
+One request per route cannot see every URL a dynamic route accepts. The middleware lets a
+request through when its decoded path is an allowlist entry or sits under one, while the
+router fills a parameter from the still-encoded path, where ``%2F`` stays one segment. A
+parameter that starts at or before the end of an allowlist entry can therefore spell that
+entry, so such routes are refused on their shape. HEAD routes have no OpenAPI operation of
+their own; each must answer exactly like its GET twin.
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import urllib.parse
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
@@ -229,6 +237,48 @@ def _openapi_drift(probes: dict[tuple[str, str], RouteProbe], openapi: dict[tupl
     return problems
 
 
+def _head_drift(probes: dict[tuple[str, str], RouteProbe]) -> list[str]:
+    """HEAD routes whose anonymous answer differs from the GET route aiohttp runs for them."""
+    problems = []
+    for _key, probe in sorted(probes.items()):
+        if probe.method != "HEAD":
+            continue
+        twin = probes.get(("GET", probe.path))
+        if twin is None:
+            problems.append(f"{probe.identity}: no GET twin to take its security from; extend the matrix")
+        elif probe.public and not twin.public:
+            problems.append(
+                f"{probe.identity}: answers without credentials, but GET {probe.path} requires an operator session"
+            )
+        elif twin.public and not probe.public:
+            problems.append(
+                f"{probe.identity}: requires an operator session, but GET {probe.path} answers without credentials"
+            )
+    return problems
+
+
+def _dynamic_routes_that_can_spell_a_public_path(
+    resources: Iterable[web.AbstractResource], public_paths: Iterable[str]
+) -> list[str]:
+    """Dynamic routes with a parameter that some value turns into an allowlisted path.
+
+    ``literal`` is the route up to its first parameter. When ``P + "/"`` starts with it, a
+    value (with ``%2F`` for each slash) makes the decoded path ``P`` or ``P/...``.
+    """
+    problems = []
+    entries = sorted(public_paths)
+    for resource in resources:
+        if not isinstance(resource, web.DynamicResource):
+            continue
+        literal = resource.canonical.partition("{")[0]
+        problems += [
+            f"{resource.canonical}: a parameter can spell the public path {public}"
+            for public in entries
+            if f"{public}/".startswith(literal)
+        ]
+    return problems
+
+
 def _ts_string_set(path: Path, const_name: str) -> set[str]:
     text = path.read_text(encoding="utf-8")
     match = re.search(rf"const {const_name} = new Set\(\[(.*?)\]\)", text, re.DOTALL)
@@ -272,6 +322,22 @@ def test_every_registered_route_is_probed_through_the_supervisor_stack(route_mat
 def test_routes_answering_without_credentials_match_openapi_security_none(route_matrix: RouteMatrix) -> None:
     problems = _openapi_drift(route_matrix.probes, _openapi_public_operations())
     assert problems == [], "\n".join(problems)
+
+
+def test_head_routes_answer_like_their_get_twin(route_matrix: RouteMatrix) -> None:
+    assert any(probe.method == "HEAD" for probe in route_matrix.probes.values())
+    problems = _head_drift(route_matrix.probes)
+    assert problems == [], "\n".join(problems)
+
+
+def test_no_dynamic_route_can_spell_a_public_path() -> None:
+    resources = list(_build_supervisor_app().router.resources())
+    assert any(isinstance(resource, web.DynamicResource) for resource in resources)
+    problems = _dynamic_routes_that_can_spell_a_public_path(resources, _backend_allowlist())
+    assert problems == [], (
+        "the auth middleware would let some values of these parameters through without credentials; "
+        "give each route a literal part that leaves every allowlist entry first:\n" + "\n".join(problems)
+    )
 
 
 def test_supervisor_internal_routes_are_registered_and_left_out_of_openapi(route_matrix: RouteMatrix) -> None:
@@ -345,6 +411,70 @@ async def test_matrix_flags_new_routes_that_answer_without_credentials() -> None
     ]
     # Left undocumented, all three fail.
     assert len(_openapi_drift(probes, {})) == 3
+
+
+async def test_matrix_flags_dynamic_routes_whose_parameter_can_spell_a_public_path() -> None:
+    """The sample request of such a route gets 401; other values reach the handler anonymously."""
+
+    async def new_handler(_request: web.Request) -> web.Response:
+        raise AssertionError("the probe answers before any handler runs")
+
+    public = sorted(_backend_allowlist())[0]
+    parent, _, last = public.rpartition("/")
+    encoded_tail = urllib.parse.quote(public.removeprefix(CONTROL_PLANE_PREFIX), safe="")
+    # (route, a URL of that route that the middleware treats as public)
+    aligned = [
+        (f"{parent}/{{provider}}/start", f"{parent}/{last}/start"),
+        (f"{CONTROL_PLANE_PREFIX}{{section}}/items", f"{CONTROL_PLANE_PREFIX}{encoded_tail}/items"),
+        (f"{public}{{suffix}}", f"{public}%2Fdetails"),
+    ]
+    clear = f"{PROTECTED_TARGET}/{{item}}/details"
+
+    app = _build_supervisor_app()
+    new_routes = [app.router.add_get(path, new_handler) for path, _ in aligned]
+    new_routes.append(app.router.add_get(clear, new_handler))
+
+    assert _dynamic_routes_that_can_spell_a_public_path(
+        [route.resource for route in new_routes if route.resource is not None], [public]
+    ) == [f"{path}: a parameter can spell the public path {public}" for path, _ in aligned]
+
+    # The one-request-per-route matrix sees nothing wrong with any of them...
+    probes = await _probe_routes(app, new_routes)
+    assert all(not probe.public for probe in probes.values())
+    assert _openapi_drift(probes, {key: False for key in probes}) == []
+    # ...yet each aligned route reaches its handler without credentials.
+    async with TestServer(app) as server:
+        for path, url in aligned:
+            rate_limit.clear_limiters()
+            status, headers = await _raw_get(server, url)
+            assert (status, headers.get(REACHED_HEADER)) == (204, f"GET {path}"), url
+    rate_limit.clear_limiters()
+
+
+async def test_matrix_flags_head_requests_that_skip_the_auth_check() -> None:
+    """aiohttp runs the GET handler for HEAD, so a HEAD request must be refused when GET is."""
+
+    @web.middleware
+    async def auth_skipping_head(request: web.Request, handler: Any) -> web.StreamResponse:
+        if request.method == "HEAD":
+            return await handler(request)
+        return await control_plane_api.control_plane_auth_middleware(request, handler)
+
+    with patch("koda.control_plane.supervisor.control_plane_auth_middleware", auth_skipping_head):
+        app = _build_supervisor_app()
+    routes = [
+        route
+        for route in app.router.routes()
+        if route.resource is not None and route.resource.canonical == PROTECTED_TARGET
+    ]
+    probes = await _probe_routes(app, routes)
+
+    assert {probe.method for probe in probes.values()} >= {"GET", "HEAD"}
+    # The OpenAPI comparison leaves HEAD out, so only the twin check sees the bypass.
+    assert _openapi_drift(probes, {key: False for key in probes}) == []
+    assert _head_drift(probes) == [
+        f"HEAD {PROTECTED_TARGET}: answers without credentials, but GET {PROTECTED_TARGET} requires an operator session"
+    ]
 
 
 def _variant_cases() -> list[tuple[str, int]]:
