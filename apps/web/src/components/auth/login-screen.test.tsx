@@ -36,6 +36,10 @@ beforeEach(() => {
   replaceMock.mockClear();
   refreshMock.mockClear();
   (requestJson as ReturnType<typeof vi.fn>).mockReset();
+  // The i18n provider persists the active language and applies it on the next mount; reset
+  // it so every test, in any order, renders the language it asks for.
+  window.localStorage.clear();
+  document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
 });
 
 describe("LoginScreen", () => {
@@ -151,19 +155,12 @@ describe("LoginScreen", () => {
 });
 
 describe("LoginScreen rate limiting (ADR-038)", () => {
-  beforeEach(() => {
-    // The i18n provider persists the active language; reset it so each test renders the
-    // language it asks for.
-    window.localStorage.clear();
-    document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
-  });
-
   function tr(language: AppLanguage, key: string, options?: Record<string, unknown>) {
     return translateForLanguage(language, key, options);
   }
 
-  function minutes(language: AppLanguage, value: number) {
-    return new Intl.NumberFormat(language, { style: "unit", unit: "minute", unitDisplay: "long" }).format(value);
+  function seconds(language: AppLanguage, value: number) {
+    return new Intl.NumberFormat(language, { style: "unit", unit: "second", unitDisplay: "long" }).format(value);
   }
 
   async function submitLogin(language: AppLanguage) {
@@ -183,13 +180,18 @@ describe("LoginScreen rate limiting (ADR-038)", () => {
   }
 
   it.each(SUPPORTED_LANGUAGES)("tells a rate-limited client how long to wait in %s", async (language) => {
+    // The login bucket (10 per 5 minutes) takes its next request 30 s after a burst.
     (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new ApiError("Too many attempts. Try again later.", 429, { retryAfterSeconds: 60 }),
+      new ApiError("Too many attempts. Try again later.", 429, { retryAfterSeconds: 30 }),
     );
 
     await submitLogin(language);
 
-    const expected = tr(language, "auth.rate_limited.with_wait", { duration: minutes(language, 1) });
+    // The DOM matcher folds the no-break space some locales put before "seconds".
+    const expected = tr(language, "auth.rate_limited.with_wait", { duration: seconds(language, 30) }).replace(
+      /\s+/g,
+      " ",
+    );
     expect(expected).not.toBe("auth.rate_limited.with_wait");
     expect(await screen.findByText(expected)).toBeInTheDocument();
     expect(screen.queryByText(tr(language, "auth.login.generic_error"))).not.toBeInTheDocument();

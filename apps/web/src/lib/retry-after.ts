@@ -1,9 +1,12 @@
 /**
  * `Retry-After` on throttled responses (RFC 9110 §10.2.3).
  *
- * The control plane and the dashboard proxy send delta-seconds (`Retry-After: 60`). An
- * HTTP-date in the IMF-fixdate form every sender must generate is accepted too, so a reverse
- * proxy in front of the dashboard can use either.
+ * Both senders use delta-seconds. The control plane sends the whole seconds, rounded up,
+ * until the bucket that refused the request takes the next one (`Retry-After: 360` after a
+ * burst of recovery attempts). The dashboard proxy sends `Retry-After: 60`, the length of its
+ * sliding window, after which its oldest counted request has expired. An HTTP-date in the
+ * IMF-fixdate form every sender must generate is accepted too, so a reverse proxy in front of
+ * the dashboard can use either.
  */
 
 const DELTA_SECONDS = /^\d+$/;
@@ -28,7 +31,7 @@ export function parseRetryAfterSeconds(
 
 /**
  * A wait as words in `language`: seconds under a minute, otherwise whole minutes rounded up,
- * so the client is never told to retry before the server allows it.
+ * so the wait shown is never shorter than the `seconds` the server asked for.
  */
 export function formatRetryWait(seconds: number, language: string): string {
   const [value, unit] = seconds < 60 ? [seconds, "second"] : [Math.ceil(seconds / 60), "minute"];

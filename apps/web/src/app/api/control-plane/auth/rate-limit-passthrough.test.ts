@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import path from "node:path";
+
 import { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -129,5 +132,39 @@ describe("auth routes pass the per-client rate limit through", () => {
     expect(response.status).toBe(route.rejection.status);
     expect(response.headers.has("Retry-After")).toBe(false);
     expect(body).toEqual({ error: route.rejectedCopy });
+  });
+});
+
+describe("the auth screens rule in apps/web/CLAUDE.md", () => {
+  const authRoutesRoot = path.join(process.cwd(), "src/app/api/control-plane/auth");
+
+  function routesPassingTheRateLimitThrough(dir = authRoutesRoot, found: string[] = []): string[] {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        routesPassingTheRateLimitThrough(fullPath, found);
+      } else if (entry.name === "route.ts" && fs.readFileSync(fullPath, "utf8").includes("rateLimitedAuthResponse(")) {
+        found.push(path.relative(authRoutesRoot, dir).replaceAll(path.sep, "/"));
+      }
+    }
+    return found.sort();
+  }
+
+  it("names exactly the routes and screens that show the wait", () => {
+    const rule = fs
+      .readFileSync(path.join(process.cwd(), "CLAUDE.md"), "utf8")
+      .split("\n")
+      .find((line) => line.includes("rateLimitedAuthResponse"));
+
+    expect(routesPassingTheRateLimitThrough()).toEqual(ROUTES.map((route) => route.path).sort());
+    expect(rule).toBeDefined();
+    for (const route of ROUTES) {
+      expect(rule).toContain(`auth/${route.path}`);
+    }
+    for (const screen of ["/login", "/setup", "/forgot-password"]) {
+      expect(rule).toContain(`\`${screen}\``);
+    }
+    // The session routes behind /settings/account do not pass the 429 through.
+    expect(rule).toContain("`/settings/account` does not show the wait yet");
   });
 });

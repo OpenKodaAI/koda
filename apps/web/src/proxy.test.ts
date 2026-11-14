@@ -154,6 +154,39 @@ describe("web proxy auth gate", () => {
     expect(response.status).toBe(403);
   });
 
+  it("tells a throttled client to retry when its window takes the next request", () => {
+    // The auth screens read this Retry-After to say how long to wait (ADR-038).
+    const start = Date.now();
+    vi.useFakeTimers({ now: start, toFake: ["Date"] });
+    const apiRequest = () =>
+      proxy({
+        nextUrl: new URL("http://localhost/api/control-plane/auth/status"),
+        method: "GET",
+        cookies: { get: () => undefined },
+        headers: {
+          get: (name: string) => (name.toLowerCase() === "x-forwarded-for" ? "198.51.100.77" : null),
+        },
+      } as never);
+
+    try {
+      const burst = Array.from({ length: 120 }, () => apiRequest().status);
+      const refused = apiRequest();
+      vi.setSystemTime(start + 59_999);
+      const early = apiRequest().status;
+      vi.setSystemTime(start + 60_000);
+      const onTime = apiRequest().status;
+
+      expect(new Set(burst)).toEqual(new Set([200]));
+      expect(refused.status).toBe(429);
+      expect(refused.headers.get("Retry-After")).toBe("60");
+      expect(refused.headers.get("Cache-Control")).toBe("no-store");
+      expect(early).toBe(429);
+      expect(onTime).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("rate limits each client address separately instead of one shared bucket", () => {
     const apiRequest = (forwardedFor: string) =>
       proxy({

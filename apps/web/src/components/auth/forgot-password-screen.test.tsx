@@ -34,6 +34,10 @@ import { requestJson } from "@/lib/http-client";
 beforeEach(() => {
   replaceMock.mockClear();
   (requestJson as ReturnType<typeof vi.fn>).mockReset();
+  // The i18n provider persists the active language and applies it on the next mount; reset
+  // it so every test, in any order, renders the language it asks for.
+  window.localStorage.clear();
+  document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
 });
 
 describe("ForgotPasswordScreen", () => {
@@ -179,13 +183,6 @@ describe("ForgotPasswordScreen", () => {
 });
 
 describe("ForgotPasswordScreen rate limiting (ADR-038)", () => {
-  beforeEach(() => {
-    // The i18n provider persists the active language; reset it so each test renders the
-    // language it asks for.
-    window.localStorage.clear();
-    document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
-  });
-
   function tr(language: AppLanguage, key: string, options?: Record<string, unknown>) {
     return translateForLanguage(language, key, options);
   }
@@ -214,13 +211,14 @@ describe("ForgotPasswordScreen rate limiting (ADR-038)", () => {
   }
 
   it.each(SUPPORTED_LANGUAGES)("tells a rate-limited client how long to wait in %s", async (language) => {
+    // The recovery bucket (10 per hour) takes its next request 6 minutes after a burst.
     (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new ApiError("Too many attempts. Try again later.", 429, { retryAfterSeconds: 60 }),
+      new ApiError("Too many attempts. Try again later.", 429, { retryAfterSeconds: 360 }),
     );
 
     await submitRecovery(language);
 
-    const expected = tr(language, "auth.rate_limited.with_wait", { duration: minutes(language, 1) });
+    const expected = tr(language, "auth.rate_limited.with_wait", { duration: minutes(language, 6) });
     expect(expected).not.toBe("auth.rate_limited.with_wait");
     expect(await screen.findByText(expected)).toBeInTheDocument();
     expect(screen.queryByText(tr(language, "auth.forgot.generic_error"))).not.toBeInTheDocument();
