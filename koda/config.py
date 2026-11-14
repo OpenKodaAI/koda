@@ -768,8 +768,9 @@ CLAUDE_CODE_CREDENTIAL_PATHS: tuple[str, ...] = (
 # file tools and browser_upload refuse them like a blocked extension. An entry ending in
 # "/" is a directory, refused with everything below it wherever it appears in a path; any
 # other entry is a file, matched by the last components of the path, together with the
-# copies of it named by FILEOPS_CREDENTIAL_COPY_SUFFIXES. The names of
-# FILEOPS_CREDENTIAL_NAME_PREFIXES are refused with them. Case-insensitive.
+# copies of it named by FILEOPS_CREDENTIAL_COPY_SUFFIXES and the temp copies beside it that
+# FILEOPS_CREDENTIAL_TEMP_COPIES names. The names of FILEOPS_CREDENTIAL_NAME_PREFIXES are
+# refused with them. Case-insensitive.
 FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
     ".ssh/",
     ".gnupg/",
@@ -788,8 +789,8 @@ FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
     ".npmrc",
     ".pypirc",
 )
-# The copies a CLI writes of a credential file, which hold the same secret: the file name
-# followed by one of these and, optionally, a dot and any further suffix. Claude Code keeps
+# The copies Claude Code writes of a credential file, which hold the same secret: the file
+# name followed by one of these and, optionally, a dot and any further suffix. Claude Code keeps
 # <name>.backup beside its global config to recover from, writes <name>.backup.<ts> and
 # <name>.corrupted.<ts> into its config dir's backups/ ($CLAUDE_CONFIG_DIR/backups/ where
 # that is set), and writes each file through <name>.tmp.<hex> (or <name>.tmp.<pid>.<hex>),
@@ -801,7 +802,25 @@ FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
 # the copy's suffix: Claude Code's control.key.tmp.a1b2c3d4 and key.pem.tmp.4242, or
 # prod.env.backup. A name whose final extension is a template suffix is a committed template,
 # not a copy, also with a copy suffix before it (.env.backup.example, prod.env.backup.dist).
+# The other provider CLIs name their temp copies otherwise: FILEOPS_CREDENTIAL_TEMP_COPIES.
 FILEOPS_CREDENTIAL_COPY_SUFFIXES: tuple[str, ...] = (".backup", ".corrupted", ".tmp")
+# The temp copies a provider CLI writes a credential file through under a name of its own,
+# in the same dir, before it renames the copy over the file: file entry of
+# FILEOPS_BLOCKED_CREDENTIAL_PATHS -> the names of those copies, where "*" stands for one or
+# more characters. A copy holds the same secret, and a CLI killed between the write and the
+# rename (a Koda cancel or timeout, a container restart, OOM) leaves it beside the file,
+# where no CLI ever removes it. As the pinned CLIs (packages/provider-clis) name them:
+# Gemini CLI 0.68.0 writes the merged OAuth login, access and refresh token, through
+# .oauth_creds.json.<pid>.<ms>.<n>.tmp on every token refresh (cacheCredentials), and
+# Codex 0.169.0 replaces auth.json through .auth-<random> (its atomic credential
+# replacement). So .gemini/.oauth_creds.json.4242.1763100000000.0.tmp and
+# .codex/.auth-wQZHMQ are refused as .gemini/oauth_creds.json and .codex/auth.json are,
+# but not in another dir, and .gemini/.oauth_creds.json.bak and .codex/auth-x are not.
+# Case-insensitive, like the entries.
+FILEOPS_CREDENTIAL_TEMP_COPIES: dict[str, tuple[str, ...]] = {
+    ".gemini/oauth_creds.json": (".oauth_creds.json.*.tmp",),
+    ".codex/auth.json": (".auth-*",),
+}
 # Credential files that a CLI names with a fixed prefix and a further suffix, refused by
 # that name wherever they sit: a file whose name is one of these, or one of these followed
 # by a dot and any further suffix. Claude Code keeps a remote session's ingress token as

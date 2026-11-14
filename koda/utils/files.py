@@ -14,6 +14,7 @@ from koda.config import (
     FILEOPS_BLOCKED_EXTENSIONS,
     FILEOPS_CREDENTIAL_COPY_SUFFIXES,
     FILEOPS_CREDENTIAL_NAME_PREFIXES,
+    FILEOPS_CREDENTIAL_TEMP_COPIES,
 )
 from koda.logging_config import get_logger
 from koda.utils.workdir import protected_dir_for, protected_dir_within, sensitive_dir_for
@@ -36,6 +37,12 @@ TEMPLATE_FILE_SUFFIXES: frozenset[str] = frozenset({".example", ".sample", ".tem
 
 _COPY_SUFFIX = re.compile("|".join(rf"{re.escape(suffix)}(?=\.|$)" for suffix in FILEOPS_CREDENTIAL_COPY_SUFFIXES))
 """Where a lowered file name carries a copy suffix: ``.tmp`` followed by a dot or the end of the name."""
+
+_TEMP_COPY_NAMES: dict[str, tuple[re.Pattern[str], ...]] = {
+    entry: tuple(re.compile(".+".join(re.escape(part) for part in name.lower().split("*"))) for name in names)
+    for entry, names in FILEOPS_CREDENTIAL_TEMP_COPIES.items()
+}
+"""``FILEOPS_CREDENTIAL_TEMP_COPIES`` as patterns of a whole lowered name, ``*`` being one or more characters."""
 
 
 def _blocked_extension(lowered: str) -> str | None:
@@ -80,20 +87,26 @@ def blocked_file_suffix(name: str) -> str | None:
     return None
 
 
-def _names_credential_file(name: str, file_name: str) -> bool:
-    """Return whether the lowered ``name`` is the credential file ``file_name`` or a copy of it.
+def _names_credential_file(name: str, entry: str) -> bool:
+    """Return whether the lowered ``name`` is the file of the credential file ``entry`` or a copy of it.
 
-    A copy is the file name followed by one of ``FILEOPS_CREDENTIAL_COPY_SUFFIXES`` and,
-    optionally, a dot and any further suffix (``.claude.json.backup``,
-    ``.claude.json.backup.1763100000000``, ``.claude.json.tmp.a1b2c3d4``), as the CLIs write
-    them; ``.claude.json.example`` and ``.claude.json.backupx`` are not.
+    ``entry`` is a file entry of ``FILEOPS_BLOCKED_CREDENTIAL_PATHS``. A copy is the file
+    name followed by one of ``FILEOPS_CREDENTIAL_COPY_SUFFIXES`` and, optionally, a dot and
+    any further suffix (``.claude.json.backup``, ``.claude.json.backup.1763100000000``,
+    ``.claude.json.tmp.a1b2c3d4``), as Claude Code writes them; ``.claude.json.example`` and
+    ``.claude.json.backupx`` are not. It is also a temp copy that the CLI owning ``entry``
+    writes the file through under a name of its own (``FILEOPS_CREDENTIAL_TEMP_COPIES``:
+    ``.oauth_creds.json.4242.1763100000000.0.tmp`` of ``.gemini/oauth_creds.json``,
+    ``.auth-wqzhmq`` of ``.codex/auth.json``), which the caller matches beside that file.
     """
+    file_name = entry.rsplit("/", 1)[-1].lower()
     if name == file_name:
         return True
-    if not name.startswith(file_name):
-        return False
-    rest = name[len(file_name) :]
-    return any(rest == suffix or rest.startswith(suffix + ".") for suffix in FILEOPS_CREDENTIAL_COPY_SUFFIXES)
+    if name.startswith(file_name):
+        rest = name[len(file_name) :]
+        if any(rest == suffix or rest.startswith(suffix + ".") for suffix in FILEOPS_CREDENTIAL_COPY_SUFFIXES):
+            return True
+    return any(pattern.fullmatch(name) for pattern in _TEMP_COPY_NAMES.get(entry, ()))
 
 
 def blocked_credential_path(path: str) -> str | None:
@@ -104,7 +117,8 @@ def blocked_credential_path(path: str) -> str | None:
     (``.codex/auth.json``, ``.netrc``) matches the last components of ``path``, the last
     one being that file's name or the name of a copy a CLI writes of it
     (:func:`_names_credential_file`: ``.claude.json.backup.1763100000000`` in any
-    ``backups/`` is ``.claude.json``). Components are compared case-insensitively, as a
+    ``backups/`` is ``.claude.json``, and ``.gemini/.oauth_creds.json.4242.1763100000000.0.tmp``
+    is ``.gemini/oauth_creds.json``). Components are compared case-insensitively, as a
     case-insensitive filesystem would open them. A file whose name is one of
     ``FILEOPS_CREDENTIAL_NAME_PREFIXES``, or one of them followed by a dot and any further
     suffix (``.session_ingress_token.e3``), matches that prefix wherever it sits. These are
@@ -126,7 +140,7 @@ def blocked_credential_path(path: str) -> str | None:
         elif (
             len(parts) >= size
             and parts[len(parts) - size : -1] == entry_parts[:-1]
-            and _names_credential_file(parts[-1], entry_parts[-1])
+            and _names_credential_file(parts[-1], entry)
         ):
             return entry
     return None
@@ -147,18 +161,19 @@ def secret_file_refusal(path: str) -> str | None:
     return None
 
 
-def _children_named(directory: str, name: str, *, with_copies: bool = False) -> list[str]:
+def _children_named(directory: str, name: str, *, copies_of: str | None = None) -> list[str]:
     """Return the entries of ``directory`` named ``name``, ignoring case as the policy compares names.
 
-    With ``with_copies``, ``name`` is a credential file's name, and the copies a CLI writes
-    of it beside it (:func:`_names_credential_file`) are returned too.
+    With ``copies_of``, ``name`` is the name of that credential file entry's file, and the
+    copies a CLI writes of it beside it (:func:`_names_credential_file`) are returned too.
     """
     try:
-        with os.scandir(directory) as entries:
+        with os.scandir(directory) as children:
             return [
-                entry.path
-                for entry in entries
-                if entry.name.lower() == name or (with_copies and _names_credential_file(entry.name.lower(), name))
+                child.path
+                for child in children
+                if child.name.lower() == name
+                or (copies_of is not None and _names_credential_file(child.name.lower(), copies_of))
             ]
     except OSError:
         return []
@@ -172,8 +187,8 @@ def _entry_completions(location: str, directory: str) -> list[str]:
     ``.config/gcloud/``). For each such entry whose first components ``location`` (absolute
     and normalised) ends with, this returns the paths below ``directory`` named as the rest
     of it, and the copies a CLI writes beside such a file
-    (``.claude/.config.json.tmp.a1b2c3d4``). ``directory`` is ``location`` itself, or the
-    directory a move puts at ``location``.
+    (``.claude/.config.json.tmp.a1b2c3d4``, ``.gemini/.oauth_creds.json.4242.1763100000000.0.tmp``).
+    ``directory`` is ``location`` itself, or the directory a move puts at ``location``.
     """
     location_parts = [part.lower() for part in location.split(os.sep) if part]
     found: list[str] = []
@@ -184,8 +199,8 @@ def _entry_completions(location: str, directory: str) -> list[str]:
                 continue
             below = [directory]
             for index, name in enumerate(entry_parts[split:], start=split):
-                with_copies = index == len(entry_parts) - 1 and not entry.endswith("/")
-                below = [child for parent in below for child in _children_named(parent, name, with_copies=with_copies)]
+                copies_of = entry if index == len(entry_parts) - 1 and not entry.endswith("/") else None
+                below = [child for parent in below for child in _children_named(parent, name, copies_of=copies_of)]
             found.extend(below)
     return found
 

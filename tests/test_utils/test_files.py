@@ -394,6 +394,10 @@ class TestCredentialStoresAreSecretFiles:
             ("/srv/koda-user/.gemini/oauth_creds.json", ".gemini/oauth_creds.json"),
             ("/srv/koda-user/.gemini/mcp-oauth-tokens.json", ".gemini/mcp-oauth-tokens.json"),
             ("/srv/koda-user/.gemini/google_accounts.json", ".gemini/google_accounts.json"),
+            ("/srv/koda-user/.gemini/.oauth_creds.json.4242.1763100000000.0.tmp", ".gemini/oauth_creds.json"),
+            ("/srv/koda-user/.Gemini/.OAUTH_CREDS.JSON.4242.1763100000000.12.TMP", ".gemini/oauth_creds.json"),
+            ("/srv/koda-user/.codex/.auth-wQZHMQ", ".codex/auth.json"),
+            ("/srv/koda-user/.CODEX/.AUTH-wQZHMQ", ".codex/auth.json"),
             ("/srv/koda-user/.claude/.credentials.json", ".claude/.credentials.json"),
             ("/srv/koda-user/.config/gh/hosts.yml", ".config/gh/hosts.yml"),
             ("/srv/koda-user/.docker/config.json", ".docker/config.json"),
@@ -479,6 +483,14 @@ class TestCredentialStoresAreSecretFiles:
             "/srv/koda-user/.session_ingress_tokens",
             "/srv/koda-user/.session_ingress_token_old",
             "/srv/koda-user/session_ingress_token.e3",
+            "/srv/koda-user/.gemini/settings.json",
+            "/srv/koda-user/.gemini/.oauth_creds.json.4242.bak",
+            "/srv/koda-user/.gemini/.google_accounts.json.4242.1763100000000.0.tmp",
+            "/srv/koda-user/project/.oauth_creds.json.4242.1763100000000.0.tmp",
+            "/srv/koda-user/.codex/config.toml.lock",
+            "/srv/koda-user/.codex/auth-wQZHMQ",
+            "/srv/koda-user/.codex/.authx",
+            "/srv/koda-user/project/.auth-wQZHMQ",
         ],
     )
     def test_other_paths_are_not(self, path):
@@ -566,9 +578,33 @@ class TestCredentialStoresAreSecretFiles:
 
         matrix = (Path(__file__).resolve().parents[2] / "docs/security/guardrail-test-matrix.md").read_text()
         row = next(line for line in matrix.splitlines() if line.startswith("| File operations |"))
-        start = row.index("Each file entry also refuses the copies a CLI writes of that file")
+        start = row.index("Each file entry also refuses the copies of that file that the pinned provider CLIs")
         clause = row[row.index(" followed by ", start) : row.index(" and, optionally,", start)]
         assert sorted(re.findall(r"`([^`]+)`", clause)) == sorted(FILEOPS_CREDENTIAL_COPY_SUFFIXES)
+
+    def test_the_guardrail_matrix_names_exactly_the_temp_copies_refused_with_a_credential_file(self):
+        """The File operations row names every ``FILEOPS_CREDENTIAL_TEMP_COPIES`` name, beside its file entry.
+
+        Each key is a file entry of ``FILEOPS_BLOCKED_CREDENTIAL_PATHS``, whose matching applies
+        the names; a key that is not would never refuse anything.
+        """
+        import posixpath
+        import re
+        from pathlib import Path
+
+        from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS, FILEOPS_CREDENTIAL_TEMP_COPIES
+
+        files = {entry for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS if not entry.endswith("/")}
+        assert set(FILEOPS_CREDENTIAL_TEMP_COPIES) <= files
+        matrix = (Path(__file__).resolve().parents[2] / "docs/security/guardrail-test-matrix.md").read_text()
+        row = next(line for line in matrix.splitlines() if line.startswith("| File operations |"))
+        start = row.index("(`koda/config.py::FILEOPS_CREDENTIAL_TEMP_COPIES`:")
+        listing = row[start : row.index(")", start)]
+        assert sorted(re.findall(r"`([^`]+)`", listing)[1:]) == sorted(
+            posixpath.join(posixpath.dirname(entry), name)
+            for entry, names in FILEOPS_CREDENTIAL_TEMP_COPIES.items()
+            for name in names
+        )
 
     def test_the_guardrail_matrix_names_exactly_the_credential_name_prefixes(self):
         """The File operations row names every ``FILEOPS_CREDENTIAL_NAME_PREFIXES`` entry, and nothing else."""
@@ -613,6 +649,7 @@ class TestCredentialStoresAreSecretFiles:
         for name in (
             "test_the_guardrail_matrix_lists_exactly_the_refused_credential_paths",
             "test_the_guardrail_matrix_names_exactly_the_copies_refused_with_a_credential_file",
+            "test_the_guardrail_matrix_names_exactly_the_temp_copies_refused_with_a_credential_file",
             "test_the_guardrail_matrix_names_exactly_the_credential_name_prefixes",
             "test_the_guardrail_matrix_cites_its_credential_tests_by_name",
         ):
@@ -666,6 +703,54 @@ class TestCredentialStoresAreSecretFiles:
         assert f"'{entry}' is a credential store" in (resolution.error or "")
         for visible in (".claude.json.example", "claude-config/backups/notes.txt"):
             assert resolve_work_path(visible, str(home), **options).path == home / visible
+
+    @pytest.mark.parametrize(
+        ("copy", "entry"),
+        [
+            (".gemini/.oauth_creds.json.4242.1763100000000.0.tmp", ".gemini/oauth_creds.json"),
+            (".gemini/.oauth_creds.json.1.1763100000000.137.tmp", ".gemini/oauth_creds.json"),
+            (".codex/.auth-wQZHMQ", ".codex/auth.json"),
+            (".codex/.auth-MdInxh", ".codex/auth.json"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"deny_sensitive_dirs": False}, {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True}],
+        ids=["the file tools", "the file commands", "browser_upload"],
+    )
+    def test_the_temp_copy_a_cli_writes_a_credential_file_through_is_refused_beside_it(
+        self, tmp_path, monkeypatch, options, copy, entry
+    ):
+        """Gemini CLI and Codex write their login through a temp copy with a name of its own, then rename it.
+
+        Gemini CLI 0.68.0 writes the refreshed OAuth login through
+        ``.oauth_creds.json.<pid>.<ms>.<n>.tmp`` and Codex 0.169.0 replaces ``auth.json``
+        through ``.auth-<random>``, beside the file. A CLI killed between the write and the
+        rename leaves that copy, with the refresh token, and none of the copy names Claude Code
+        writes matched it, so file_read, /cat and browser_upload returned it. Each is refused as
+        the login beside it; the same name in another directory and the CLIs' other files are not.
+        """
+        home = tmp_path.resolve() / "home"
+        visible = [
+            ".gemini/settings.json",
+            ".gemini/.oauth_creds.json.4242.bak",
+            "project/.oauth_creds.json.4242.1763100000000.0.tmp",
+            ".codex/config.toml",
+            ".codex/auth-wQZHMQ",
+            "project/.auth-wQZHMQ",
+        ]
+        for path in (copy, *visible):
+            (home / path).parent.mkdir(parents=True, exist_ok=True)
+            (home / path).write_text('{"refresh_token": "1//canary-refresh"}\n')
+        monkeypatch.setenv("HOME", str(home))
+
+        for path in (copy, str(home / copy)):
+            resolution = resolve_work_path(path, str(home), **options)
+            assert resolution.path is None, path
+            assert resolution.reason == "path_blocked_file", path
+            assert f"'{entry}' is a credential store" in (resolution.error or ""), path
+        for path in visible:
+            assert resolve_work_path(path, str(home), **options).path == home / path, path
 
     @pytest.mark.parametrize(
         ("copy", "extension"),

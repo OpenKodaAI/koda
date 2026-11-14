@@ -1656,6 +1656,82 @@ async def test_a_codex_login_moved_out_of_home_by_codex_home_is_refused_where_th
     assert not (codex_home / "auth.json").exists()
 
 
+# The temp copies the pinned Gemini CLI (0.68.0, cacheCredentials) and Codex (0.169.0, its
+# atomic credential replacement) write their login through, beside it, before renaming it
+# over the login: a CLI killed between the write and the rename leaves the copy behind.
+_PROVIDER_LOGIN_TEMP_COPIES = [
+    ".gemini/.oauth_creds.json.4242.1763100000000.0.tmp",
+    ".codex/.auth-wQZHMQ",
+]
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("copy", _PROVIDER_LOGIN_TEMP_COPIES)
+async def test_a_temp_copy_of_a_provider_login_left_by_a_killed_cli_is_refused_on_every_surface(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any, copy: str
+) -> None:
+    """A Gemini or Codex login's temp copy holds the refresh token, and nothing ever removes it.
+
+    Gemini CLI writes every refreshed OAuth login through
+    ``.gemini/.oauth_creds.json.<pid>.<ms>.<n>.tmp`` and Codex replaces ``auth.json``
+    through ``.codex/.auth-<random>``. Killed between the write and the rename (a cancel or
+    timeout, a container restart, OOM), the CLI leaves that copy in the Docker HOME, the
+    work dir, while the login beside it is refused and the logout deletes it. file_read,
+    ``/cat``, browser_upload and ``file_grep refresh_token path=.gemini`` returned the token,
+    and renaming ``.gemini`` or ``.codex`` took the copy out of the name that blocks it.
+    """
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.browser_manager import browser_manager
+    from koda.services.tool_dispatcher import (
+        _handle_browser_upload,
+        _handle_file_grep,
+        _handle_file_move,
+        _handle_file_read,
+    )
+
+    home = _docker_home(tmp_path, monkeypatch)
+    config_dir = copy.split("/", 1)[0]
+    (home / copy).write_text(
+        '{"access_token": "ya29.canary-access", "refresh_token": "1//canary-refresh"}\n', encoding="utf-8"
+    )
+    (home / config_dir / "settings.json").write_text('{"refresh_token_note": "visible"}\n', encoding="utf-8")
+    # A config dir that holds only the copy, so no login beside it blocks the rename.
+    (home / "other" / copy).parent.mkdir(parents=True)
+    (home / "other" / copy).write_text('{"refresh_token": "1//canary-refresh"}\n', encoding="utf-8")
+    mock_context.user_data["work_dir"] = str(home)
+    mock_context.args = [copy]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send:
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+
+    ctx = _file_tool_context(home)
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        read = await _handle_file_read({"path": copy}, ctx)
+        absolute = await _handle_file_read({"path": str(home / copy)}, ctx)
+        grep = await _handle_file_grep({"pattern": "refresh_token", "path": config_dir}, ctx)
+        moved = await _handle_file_move({"source": f"other/{config_dir}", "destination": "other/cli-old"}, ctx)
+    with (
+        patch("koda.services.tool_dispatcher._check_browser_available", new_callable=AsyncMock, return_value=None),
+        patch.object(browser_manager, "upload_file", new_callable=AsyncMock, return_value="Uploaded") as upload,
+    ):
+        uploaded = await _handle_browser_upload({"file_path": copy}, ctx)
+
+    assert not any("canary" in text for text in shown), shown
+    assert "canary" not in read.output + absolute.output + grep.output + uploaded.output
+    assert not read.success and not absolute.success and not uploaded.success, read.output
+    assert "credential store" in read.output, read.output
+    upload.assert_not_awaited()
+    assert grep.success, grep.output
+    assert 'settings.json:1: {"refresh_token_note": "visible"}' in grep.output, grep.output
+    assert not moved.success, moved.output
+    assert "credential store" in moved.output, moved.output
+    assert (home / "other" / copy).is_file()
+    assert not (home / "other" / "cli-old").exists()
+
+
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
