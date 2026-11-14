@@ -86,3 +86,52 @@ export function createSSEStream(
     },
   });
 }
+
+/**
+ * EventSource cannot read HTTP status codes: any failed stream request reaches
+ * the client as a bare `error` event, and the runtime hooks reconnect with it.
+ * When the runtime itself rejects the stream request (for example an invalid
+ * `after_seq` cursor), repeating it unchanged fails the same way. The runtime
+ * stream relays therefore deliver such a rejection in-band, as this named event
+ * on a 200 event stream, and clients then retry only after
+ * `STREAM_REJECTED_RETRY_MS` instead of on their normal reconnect schedule.
+ */
+export const STREAM_ERROR_EVENT = "stream_error";
+
+/**
+ * Delay before a client retries a rejected stream request. Long enough not to
+ * hammer the relay, short enough to recover once the cause has been fixed.
+ */
+export const STREAM_REJECTED_RETRY_MS = 60_000;
+
+export const SSE_RESPONSE_HEADERS = {
+  "Content-Type": "text/event-stream; charset=utf-8",
+  "Cache-Control": "no-cache, no-transform",
+  Connection: "keep-alive",
+  "X-Accel-Buffering": "no",
+} as const;
+
+/**
+ * Statuses that mean the runtime rejected the stream request itself. Apply this
+ * only to a response the runtime returned. Everything else is transient: auth
+ * failures (401/403 usually mean the relay could not obtain a runtime token
+ * from the control plane), 408/425/429, 5xx, and any failure raised before the
+ * runtime answered.
+ */
+const REJECTED_STREAM_STATUSES: ReadonlySet<number> = new Set([400, 404, 422]);
+
+export function isRejectedStreamStatus(status: number): boolean {
+  return REJECTED_STREAM_STATUSES.has(status);
+}
+
+/**
+ * A finished event stream that carries one `stream_error` event with the
+ * runtime's status. The `retry` hint makes a plain EventSource that ignores the
+ * event wait just as long.
+ */
+export function streamErrorResponse(status: number): Response {
+  const body =
+    `retry: ${STREAM_REJECTED_RETRY_MS}\n` +
+    `event: ${STREAM_ERROR_EVENT}\ndata: ${JSON.stringify({ status })}\n\n`;
+  return new Response(body, { status: 200, headers: SSE_RESPONSE_HEADERS });
+}

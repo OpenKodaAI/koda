@@ -34,6 +34,8 @@ from the network until a reverse proxy publishes it. A reverse proxy should:
 - publish `/api/control-plane/*`
 - publish `/api/runtime/*`
 - publish `/openapi/control-plane.json`
+- add the address each request came from to `X-Forwarded-For`, appended or replacing the header
+  (see the rate-limit notes below)
 
 Recommended model:
 
@@ -52,6 +54,51 @@ TLS-terminating proxy running on another host. Such a proxy can reach the dashbo
 sessions) but not the control-plane API, so API-token clients and `/openapi/control-plane.json`
 need a proxy on the Koda host. Plain-HTTP access from other machines does not work: production
 operator session cookies are `Secure`, so browsers only keep them on HTTPS (or `localhost`).
+
+Login and recovery are rate limited per client address. A proxy on the Koda host reaches the
+dashboard from the Docker gateway, whose `X-Forwarded-For` the dashboard believes
+(`WEB_TRUSTED_PROXIES=gateway` in Compose), and the API believes the dashboard
+(`CONTROL_PLANE_TRUSTED_PROXIES=web`). The proxy must therefore add the address it received each
+request from to `X-Forwarded-For`, appended or replacing the header. nginx needs
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (or `$remote_addr`) in every
+`location`, as in the bundled `proxy/nginx.conf`; HAProxy needs `option forwardfor` (without
+`if-none`); Caddy and Traefik do it by default. A proxy that passes the client's header through
+unchanged, which nginx and HAProxy do otherwise, lets each client name its own rate-limit bucket,
+and clients that send no header all share one bucket. If your proxy also forwards
+`/api/control-plane/*` straight to the API, as the bundled `proxy/nginx.conf` does, set
+`CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`, or all of its clients share one budget. A proxy
+on another host needs its address added: `WEB_TRUSTED_PROXIES=gateway,<proxy-ip>`.
+
+A proxy that runs as a container on Koda's Compose network (Traefik or Caddy attached to
+`frontend`) connects from its own container address. `WEB_TRUSTED_PROXIES` takes addresses,
+not service names, and Docker can give a container a new address when it is recreated, so
+pin one in a Compose override and trust that single address
+(`WEB_TRUSTED_PROXIES=gateway,172.30.0.10`). Trusting the whole subnet instead would let every
+container on it name any client. Until the proxy is trusted, all of its clients share one
+budget. A new subnet applies only once the network is recreated (`docker compose down`).
+
+```yaml
+networks:
+  frontend:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+services:
+  proxy: # your reverse proxy
+    networks:
+      frontend:
+        ipv4_address: 172.30.0.10
+```
+
+If that proxy also forwards `/api/control-plane/*` straight to `app:8090`, add its service name
+to `CONTROL_PLANE_TRUSTED_PROXIES` (`web,proxy`), which does accept hostnames.
+
+When `WEB_PUBLISH_ADDRESS` publishes the dashboard beyond loopback, firewall its port so only
+your proxy can reach it. A client that connects directly is charged to its own address, but
+Docker hides that address behind the gateway when its userland proxy carries the connection
+(Docker Desktop, rootless Docker, an IPv6 host address on an IPv4-only network), and the
+gateway is trusted to name any client. See
+[Authentication](../security/authentication.md#which-address-a-request-is-charged-to).
 
 ## Tailscale And External Hosting Layers
 
@@ -117,9 +164,12 @@ For any deploy reachable from the public internet:
 7. **Recovery codes are single-use.** After any password reset, every remaining code is
    invalidated. The owner must regenerate a fresh batch from Settings › Security (requires
    current password).
-8. **Account lockout + rate limits** are already enforced — 5 failed logins per 5 minutes
-   per IP, 5 password resets per hour per IP, 3 regenerations per hour per user. Responses
-   are deliberately slowed to a ~300 ms floor so the caller cannot distinguish between
+8. **Account lockout + rate limits** are already enforced — per client address (IPv6 per /64),
+   for example 10 login attempts per 5 minutes, 10 password resets per hour and 10 recovery-code
+   regenerations per hour, plus a per-account lockout after repeated failed logins. The full
+   budget table and how the client address is determined behind a proxy are in
+   [`../security/authentication.md`](../security/authentication.md#rate-limits-bucket-budgets).
+   Responses are deliberately slowed to a ~300 ms floor so the caller cannot distinguish between
    "account does not exist", "wrong password", and "invalid recovery code".
 9. **Audit.** Every auth event writes a structured `security.*` event through
    `emit_security()`. Ensure your logging backend persists these.

@@ -1,5 +1,7 @@
 import "server-only";
 
+import { headers as incomingRequestHeaders } from "next/headers";
+import { clientIpFromHeaders } from "@/lib/client-ip";
 import { CONTROL_PLANE_CACHE_TAGS, getControlPlaneFetchConfig, type ControlPlaneFetchTier } from "@/lib/control-plane-cache";
 import type { McpCapabilityRisk } from "@/lib/contracts/mcp-risk";
 import { getWebOperatorTokenFromCookie } from "@/lib/web-operator-session";
@@ -1472,6 +1474,16 @@ function combineSignals(
   return typeof factory === "function" ? factory([caller, timeout]) : caller;
 }
 
+/** Address of the browser behind the request being served, if any. */
+async function incomingClientIp(): Promise<string | null> {
+  try {
+    return clientIpFromHeaders(await incomingRequestHeaders());
+  } catch {
+    // Outside a request scope there is no client to attribute the call to.
+    return null;
+  }
+}
+
 export async function controlPlaneFetch(
   pathname: string,
   init: RequestInit = {},
@@ -1482,6 +1494,14 @@ export async function controlPlaneFetch(
   const operatorToken = await getWebOperatorTokenFromCookie();
   if (operatorToken) {
     headers.set("Authorization", `Bearer ${operatorToken}`);
+  }
+  // Let the control plane rate limit per browser instead of lumping every
+  // dashboard user into the web server's own bucket.
+  if (!headers.has("X-Forwarded-For")) {
+    const clientIp = await incomingClientIp();
+    if (clientIp) {
+      headers.set("X-Forwarded-For", clientIp);
+    }
   }
   if (!headers.has("Content-Type") && init.body) {
     headers.set("Content-Type", "application/json");

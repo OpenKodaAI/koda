@@ -21,7 +21,22 @@ Control Plane
 - `CONTROL_PLANE_PUBLIC_PORT` — set by Docker Compose to the published port for host-facing URLs
   (OAuth relay); native runs fall back to `CONTROL_PLANE_PORT`
 - `WEB_PUBLISH_ADDRESS` — address the dashboard is published on (default `127.0.0.1`); change it
-  only for a TLS-terminating proxy on another host, never for plain-HTTP access
+  only for a TLS-terminating proxy on another host, never for plain-HTTP access. Then add that
+  proxy to `WEB_TRUSTED_PROXIES` and firewall the port so only the proxy can reach it: a client
+  that reaches the port directly is rate limited by the address Docker shows, which is the
+  trusted gateway under Docker Desktop, rootless Docker or Docker's userland proxy
+- `CONTROL_PLANE_TRUSTED_PROXIES` — peers whose `X-Forwarded-For` the API rate limiter
+  believes: comma-separated IPs, CIDRs, hostnames, or `gateway` (the container's Docker
+  gateway, where a proxy on the Docker host connects from). Default `127.0.0.1,::1`; Docker
+  Compose sets `web`, the dashboard. Use `web,gateway` only if a proxy on the host forwards
+  straight to the API. Unusable entries are logged at startup and ignored; see
+  [Authentication](../security/authentication.md#which-address-a-request-is-charged-to)
+- `WEB_TRUSTED_PROXIES` — read by the dashboard server (`apps/web/server.mjs`): peers whose
+  `X-Forwarded-For` it believes besides loopback, as IPs, CIDRs or `gateway` (no hostnames: a
+  proxy container on the Compose network needs a fixed `ipv4_address`, see
+  [VPS Install](../install/vps.md#reverse-proxy)). Unset natively;
+  Docker Compose sets `gateway` so a reverse proxy on the host keeps per-client limits. Every
+  other peer is charged to its own address, whatever header it sends
 - `CONTROL_PLANE_API_TOKEN`
 - `WEB_OPERATOR_SESSION_SECRET`
 - `CONTROL_PLANE_MASTER_KEY_FILE`

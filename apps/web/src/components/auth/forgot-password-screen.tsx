@@ -59,6 +59,9 @@ export function ForgotPasswordScreen() {
         method: "POST",
         body: JSON.stringify({
           identifier: identifier.trim(),
+          // Sent as typed (trimmed only). The control plane canonicalizes case and
+          // separators; JS toUpperCase() would fold non-ASCII look-alikes into
+          // ASCII ("ſ" -> "S", "ß" -> "SS") that the server deliberately rejects.
           recovery_code: recoveryCode.trim(),
           new_password: newPassword,
         }),
@@ -131,12 +134,16 @@ export function ForgotPasswordScreen() {
               id="forgot-code"
               type="text"
               value={recoveryCode}
-              onChange={(event) => setRecoveryCode(event.target.value.toLowerCase())}
+              // Kept as typed: rewriting a controlled value moves the caret to the
+              // end. `uppercase` only shows it in the issued format; submit sends
+              // it trimmed and the control plane canonicalizes it.
+              onChange={(event) => setRecoveryCode(event.target.value)}
+              autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
               disabled={busy}
               placeholder={translate("generated.account.xxxx_xxxx_xxxx_d457e3cb")}
-              className="auth-input auth-input--mono"
+              className="auth-input auth-input--mono uppercase"
             />
           </label>
           <label className="auth-field" htmlFor="forgot-new-password">

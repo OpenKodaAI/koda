@@ -36,6 +36,19 @@ Every item below is verifiable. The matching checks live in
 - [ ] Web port `:3000` is reverse-proxied behind TLS (Caddy, Traefik,
       nginx, cloud LB). Self-signed certs are acceptable for VPS
       deploys; managed certs (Let's Encrypt) for public deploys.
+- [ ] `CONTROL_PLANE_TRUSTED_PROXIES` and `WEB_TRUSTED_PROXIES` list only
+      the dashboard and proxies you run (Compose: `web` and `gateway`).
+      A trusted peer can claim any client address for rate limiting.
+- [ ] Every trusted proxy adds the address each request came from to
+      `X-Forwarded-For`, appended or replacing the header: nginx
+      `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`
+      (as in the bundled `proxy/nginx.conf`), HAProxy `option forwardfor`;
+      Caddy and Traefik do it by default. A proxy that passes the client's
+      header through lets each client choose its own rate-limit bucket.
+- [ ] If `WEB_PUBLISH_ADDRESS` publishes the dashboard beyond loopback,
+      its port is firewalled so only your reverse proxy can reach it.
+      Docker can hide a direct client behind the trusted gateway, which
+      lets it choose its own rate-limit bucket.
 - [ ] Sidecar gRPC ports (`50061`–`50067`) are loopback / private
       network only — never publicly exposed.
 - [ ] If running multi-host: `GRPC_TLS_ENABLED=true` for sidecar

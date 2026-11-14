@@ -8,6 +8,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { resolveAgentSelection } from "@/lib/agent-selection";
 import { parseResponseError, readJsonResponse } from "@/lib/http-client";
 import type { RuntimeEvent, RuntimeOverview } from "@/lib/runtime-types";
+import { STREAM_ERROR_EVENT, STREAM_REJECTED_RETRY_MS } from "@/lib/sse";
 
 interface UseRuntimeOverviewResult {
   overviews: Record<string, RuntimeOverview>;
@@ -197,14 +198,24 @@ export function useRuntimeOverview(
         }
       };
 
-      es.onerror = () => {
+      const reconnectAfter = (delayMs: number) => {
         setConnected((current) => ({ ...current, [agentId]: false }));
         es.close();
         if (!disposed) {
           reconnectTimers.push(
-            window.setTimeout(() => connectAgent(agentId), 3000),
+            window.setTimeout(() => connectAgent(agentId), delayMs),
           );
         }
+      };
+
+      // The runtime rejected this request: retry only after a long delay
+      // instead of every few seconds; the overview query keeps polling.
+      es.addEventListener(STREAM_ERROR_EVENT, () => {
+        reconnectAfter(STREAM_REJECTED_RETRY_MS);
+      });
+
+      es.onerror = () => {
+        reconnectAfter(3000);
       };
     };
 

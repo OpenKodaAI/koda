@@ -24,7 +24,7 @@ import aiohttp
 
 from koda.config import AGENT_ID, MODEL_PRICING_USD
 from koda.logging_config import get_logger
-from koda.services.http_client import _check_url_safety
+from koda.services.http_client import _check_url_safety, public_only_connector
 from koda.services.provider_auth import (
     PROVIDER_API_KEY_ENV_KEYS,
     PROVIDER_BASE_URL_ENV_KEYS,
@@ -125,9 +125,8 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
         )
 
     base_url = _resolve_base_url(profile, env)
-    safe_base = _check_url_safety(
-        base_url, allow_private=profile.allow_private_base_url or _looks_like_override(profile, env)
-    )
+    allow_private = _allows_private_base_url(profile, env)
+    safe_base = _check_url_safety(base_url, allow_private=allow_private)
     if safe_base is not None:
         return ProviderCapabilities(
             provider=profile.provider_id,
@@ -146,8 +145,8 @@ async def _probe_capabilities(profile: ProviderHttpProfile, turn_mode: TurnMode)
     headers = _profile_headers(profile, api_key, env)
     try:
         async with (
-            aiohttp.ClientSession(timeout=timeout) as session,
-            session.get(probe_url, headers=headers) as resp,
+            _provider_session(timeout, allow_private=allow_private) as session,
+            session.get(probe_url, headers=headers, allow_redirects=allow_private) as resp,
         ):
             status = resp.status
             body = (await resp.text(encoding="utf-8", errors="replace"))[:512]
@@ -281,9 +280,8 @@ async def run_openai_compatible(
         )
 
     base_url = _resolve_base_url(profile, env)
-    safe_error = _check_url_safety(
-        base_url, allow_private=profile.allow_private_base_url or _looks_like_override(profile, env)
-    )
+    allow_private = _allows_private_base_url(profile, env)
+    safe_error = _check_url_safety(base_url, allow_private=allow_private)
     if safe_error is not None:
         return _error_result(
             profile,
@@ -311,9 +309,14 @@ async def run_openai_compatible(
     timeout = aiohttp.ClientTimeout(total=profile.request_timeout_seconds)
     chat_url = _join_with_base(base_url, profile.chat_path)
     try:
-        async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with _provider_session(timeout, allow_private=allow_private) as session:
             request_task: asyncio.Task[aiohttp.ClientResponse] = asyncio.create_task(
-                session.post(chat_url, headers=_profile_headers(profile, api_key, env), json=payload)
+                session.post(
+                    chat_url,
+                    headers=_profile_headers(profile, api_key, env),
+                    json=payload,
+                    allow_redirects=allow_private,
+                )
             )
             if process_holder is not None:
                 process_holder["task"] = request_task
@@ -326,6 +329,13 @@ async def run_openai_compatible(
                 status = resp.status
                 body_text = await resp.text(encoding="utf-8", errors="replace")
     except asyncio.CancelledError:
+        # When this task is itself being cancelled (/cancel, scheduler control,
+        # shutdown) the cancellation must propagate so the caller stops instead
+        # of handling an error result. Only a cancel of the inner request task
+        # is reported as a provider error.
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
         return _error_result(
             profile,
             turn_mode,
@@ -353,7 +363,7 @@ async def run_openai_compatible(
             retryable=True,
         )
 
-    if status >= 400:
+    if status >= 300:  # an unfollowed redirect is an error, not an empty answer
         kind, retryable = _classify_http_error(status, body_text)
         snippet = _short_error_snippet(body_text)
         return _error_result(
@@ -458,9 +468,8 @@ async def run_openai_compatible_streaming(
         return
 
     base_url = _resolve_base_url(profile, env)
-    safe_error = _check_url_safety(
-        base_url, allow_private=profile.allow_private_base_url or _looks_like_override(profile, env)
-    )
+    allow_private = _allows_private_base_url(profile, env)
+    safe_error = _check_url_safety(base_url, allow_private=allow_private)
     if safe_error is not None:
         if metadata_collector is not None:
             metadata_collector["error"] = True
@@ -495,12 +504,17 @@ async def run_openai_compatible_streaming(
 
     try:
         async with (
-            aiohttp.ClientSession(timeout=request_timeout) as session,
-            session.post(chat_url, headers=_profile_headers(profile, api_key, env), json=payload) as resp,
+            _provider_session(request_timeout, allow_private=allow_private) as session,
+            session.post(
+                chat_url,
+                headers=_profile_headers(profile, api_key, env),
+                json=payload,
+                allow_redirects=allow_private,
+            ) as resp,
         ):
             if process_holder is not None:
                 process_holder["task"] = asyncio.current_task()
-            if resp.status >= 400:
+            if resp.status >= 300:  # an unfollowed redirect is an error, not an empty stream
                 body_text = await resp.text(encoding="utf-8", errors="replace")
                 kind, retryable = _classify_http_error(resp.status, body_text)
                 if metadata_collector is not None:
@@ -640,11 +654,37 @@ def _profile_headers(profile: ProviderHttpProfile, api_key: str, env: dict[str, 
 
 
 def _looks_like_override(profile: ProviderHttpProfile, env: dict[str, str]) -> bool:
+    """True when the operator configured a base URL other than the vendor endpoint.
+
+    Compared with the hard-coded vendor default, not ``profile.base_url``: the
+    profile builders read the same variable from the process env, so a ``.env``
+    override would otherwise compare equal to itself.
+    """
     base_url_env = PROVIDER_BASE_URL_ENV_KEYS.get(cast(Any, profile.provider_id))
     if not base_url_env:
         return False
     override = str(env.get(base_url_env) or os.environ.get(base_url_env) or "").strip()
-    return bool(override) and override != profile.base_url
+    vendor_default = _VENDOR_BASE_URLS.get(profile.provider_id, profile.base_url)
+    return bool(override) and override.rstrip("/") != vendor_default.rstrip("/")
+
+
+def _allows_private_base_url(profile: ProviderHttpProfile, env: dict[str, str]) -> bool:
+    """Operator-set base URLs (and profiles flagged for it) may point at private hosts."""
+    return profile.allow_private_base_url or _looks_like_override(profile, env)
+
+
+def _provider_session(timeout: aiohttp.ClientTimeout, *, allow_private: bool) -> aiohttp.ClientSession:
+    """Open the session for one provider call.
+
+    Unless private base URLs are allowed, DNS answers are re-checked at connect
+    time so the host cannot rebind to a private address after
+    :func:`_check_url_safety` passed.  Those requests also pass
+    ``allow_redirects=False``: aiohttp would follow a redirect (307/308 keep the
+    POST and its auth headers) without that check.
+    """
+    if allow_private:
+        return aiohttp.ClientSession(timeout=timeout)
+    return aiohttp.ClientSession(timeout=timeout, connector=public_only_connector())
 
 
 def _join_with_base(base_url: str, path: str) -> str:
@@ -1045,7 +1085,22 @@ def _record_metrics(provider_id: str, model: str, elapsed: float, *, streaming: 
 #
 # Each builder reads its env-var override (and timeout config) on first lookup
 # rather than at import time. Adding a new OpenAI-compatible provider means
-# adding one builder + one registry entry — no new module file required.
+# adding one builder + one registry entry (and its vendor endpoint in
+# ``_VENDOR_BASE_URLS``) — no new module file required.
+
+# Vendor endpoints used when no base-URL override is configured.  Any other
+# configured value, from the control plane or the process env, is an operator
+# override (see ``_looks_like_override``).
+_VENDOR_BASE_URLS: dict[str, str] = {
+    "deepseek": "https://api.deepseek.com",
+    "groq": "https://api.groq.com/openai",
+    "kimi": "https://api.moonshot.ai",
+    "mistral": "https://api.mistral.ai",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "perplexity": "https://api.perplexity.ai",
+    "qwen": "https://dashscope-intl.aliyuncs.com",
+    "xai": "https://api.x.ai",
+}
 
 
 def _build_deepseek_profile() -> ProviderHttpProfile:
@@ -1053,7 +1108,7 @@ def _build_deepseek_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="deepseek",
-        base_url=os.environ.get("DEEPSEEK_API_BASE_URL") or "https://api.deepseek.com",
+        base_url=os.environ.get("DEEPSEEK_API_BASE_URL") or _VENDOR_BASE_URLS["deepseek"],
         chat_path="/v1/chat/completions",
         models_path="/v1/models",
         first_chunk_timeout_seconds=float(DEEPSEEK_FIRST_CHUNK_TIMEOUT),
@@ -1066,7 +1121,7 @@ def _build_groq_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="groq",
-        base_url=os.environ.get("GROQ_API_BASE_URL") or "https://api.groq.com/openai",
+        base_url=os.environ.get("GROQ_API_BASE_URL") or _VENDOR_BASE_URLS["groq"],
         chat_path="/v1/chat/completions",
         models_path="/v1/models",
         first_chunk_timeout_seconds=float(GROQ_FIRST_CHUNK_TIMEOUT),
@@ -1085,7 +1140,7 @@ def _build_kimi_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="kimi",
-        base_url=os.environ.get("KIMI_API_BASE_URL") or "https://api.moonshot.ai",
+        base_url=os.environ.get("KIMI_API_BASE_URL") or _VENDOR_BASE_URLS["kimi"],
         chat_path="/v1/chat/completions",
         models_path="/v1/models",
         first_chunk_timeout_seconds=float(KIMI_FIRST_CHUNK_TIMEOUT),
@@ -1111,7 +1166,7 @@ def _build_mistral_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="mistral",
-        base_url=os.environ.get("MISTRAL_API_BASE_URL") or "https://api.mistral.ai",
+        base_url=os.environ.get("MISTRAL_API_BASE_URL") or _VENDOR_BASE_URLS["mistral"],
         chat_path="/v1/chat/completions",
         models_path="/v1/models",
         first_chunk_timeout_seconds=float(MISTRAL_FIRST_CHUNK_TIMEOUT),
@@ -1133,7 +1188,7 @@ def _build_perplexity_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="perplexity",
-        base_url=os.environ.get("PERPLEXITY_API_BASE_URL") or "https://api.perplexity.ai",
+        base_url=os.environ.get("PERPLEXITY_API_BASE_URL") or _VENDOR_BASE_URLS["perplexity"],
         chat_path="/chat/completions",
         models_path=None,
         capability_probe="health_only",
@@ -1148,7 +1203,7 @@ def _build_qwen_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="qwen",
-        base_url=os.environ.get("QWEN_API_BASE_URL") or "https://dashscope-intl.aliyuncs.com",
+        base_url=os.environ.get("QWEN_API_BASE_URL") or _VENDOR_BASE_URLS["qwen"],
         chat_path="/compatible-mode/v1/chat/completions",
         models_path="/compatible-mode/v1/models",
         first_chunk_timeout_seconds=float(QWEN_FIRST_CHUNK_TIMEOUT),
@@ -1175,7 +1230,7 @@ def _build_xai_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="xai",
-        base_url=os.environ.get("XAI_API_BASE_URL") or "https://api.x.ai",
+        base_url=os.environ.get("XAI_API_BASE_URL") or _VENDOR_BASE_URLS["xai"],
         chat_path="/v1/chat/completions",
         models_path="/v1/models",
         first_chunk_timeout_seconds=float(XAI_FIRST_CHUNK_TIMEOUT),
@@ -1202,7 +1257,7 @@ def _build_openrouter_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="openrouter",
-        base_url=os.environ.get("OPENROUTER_API_BASE_URL") or "https://openrouter.ai/api/v1",
+        base_url=os.environ.get("OPENROUTER_API_BASE_URL") or _VENDOR_BASE_URLS["openrouter"],
         chat_path="/chat/completions",
         models_path="/models",
         capability_probe="health_only",

@@ -15778,6 +15778,7 @@ mutableResources["en-US"].translation.routines = {
     messages: {
       createdPreview: "Routine drafted (UI preview — backend wiring pending).",
       created: "Routine created.",
+      createdWithoutValidation: "Routine created, but its validation did not start. Use Validate to retry.",
       updated: "Routine updated.",
       deleted: "Routine deleted.",
       createFailed: "Could not create routine.",
@@ -15951,6 +15952,7 @@ mutableResources["pt-BR"].translation.routines = {
     messages: {
       createdPreview: "Rotina rascunhada (prévia de UI — integração com backend pendente).",
       created: "Rotina criada.",
+      createdWithoutValidation: "Rotina criada, mas a validação não foi iniciada. Use Validar para tentar novamente.",
       updated: "Rotina atualizada.",
       deleted: "Rotina excluída.",
       createFailed: "Não foi possível criar a rotina.",
@@ -16124,6 +16126,7 @@ mutableResources["es-ES"].translation.routines = {
     messages: {
       createdPreview: "Rutina creada (vista previa de UI — integración pendiente).",
       created: "Rutina creada.",
+      createdWithoutValidation: "Rutina creada, pero su validación no se inició. Usa Validar para reintentar.",
       updated: "Rutina actualizada.",
       deleted: "Rutina eliminada.",
       createFailed: "No se pudo crear la rutina.",
@@ -16297,6 +16300,7 @@ mutableResources["fr-FR"].translation.routines = {
     messages: {
       createdPreview: "Routine créée (aperçu UI — intégration backend en attente).",
       created: "Routine créée.",
+      createdWithoutValidation: "Routine créée, mais sa validation n'a pas démarré. Utilisez Valider pour réessayer.",
       updated: "Routine mise à jour.",
       deleted: "Routine supprimée.",
       createFailed: "Impossible de créer la routine.",
@@ -16470,6 +16474,7 @@ mutableResources["de-DE"].translation.routines = {
     messages: {
       createdPreview: "Routine entworfen (UI-Vorschau — Backend-Anbindung ausstehend).",
       created: "Routine erstellt.",
+      createdWithoutValidation: "Routine erstellt, aber die Validierung wurde nicht gestartet. Mit Validieren erneut versuchen.",
       updated: "Routine aktualisiert.",
       deleted: "Routine gelöscht.",
       createFailed: "Routine konnte nicht erstellt werden.",
@@ -16936,6 +16941,7 @@ const scheduleTableUiLabels = {
       pause: "Pause",
       resume: "Resume",
       activate: "Activate",
+      validate: "Validate",
       validationPending: "Validation pending",
     },
     statuses: {
@@ -16949,6 +16955,7 @@ const scheduleTableUiLabels = {
       pause: "Pausar",
       resume: "Retomar",
       activate: "Ativar",
+      validate: "Validar",
       validationPending: "Validação pendente",
     },
     statuses: {
@@ -16962,6 +16969,7 @@ const scheduleTableUiLabels = {
       pause: "Pausar",
       resume: "Reanudar",
       activate: "Activar",
+      validate: "Validar",
       validationPending: "Validación pendiente",
     },
     statuses: {
@@ -16975,6 +16983,7 @@ const scheduleTableUiLabels = {
       pause: "Mettre en pause",
       resume: "Reprendre",
       activate: "Activer",
+      validate: "Valider",
       validationPending: "Validation en attente",
     },
     statuses: {
@@ -16988,6 +16997,7 @@ const scheduleTableUiLabels = {
       pause: "Pausieren",
       resume: "Fortsetzen",
       activate: "Aktivieren",
+      validate: "Validieren",
       validationPending: "Validierung ausstehend",
     },
     statuses: {

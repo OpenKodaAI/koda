@@ -12,6 +12,7 @@ This checklist is the minimum operational baseline for running Koda with a secur
 - Keep `.env`, master-key files, and persistent volumes readable only by the service account or root.
 - Do not expose Postgres, object storage, memory, or security service ports publicly unless there is a deliberate network policy around them.
 - Review every curated or custom MCP connection before enabling it for an agent.
+- Give the Koda host real DNS. Outbound fetches only reach public addresses, so fake-IP resolvers (Clash, sing-box or Surge in fake-ip mode answer from `198.18.0.0/15`) make every web fetch, search, artifact download and link preview fail with `private/reserved`. CGNAT or Tailscale destinations (`100.64.0.0/10`) need an explicit private-network grant.
 
 ## Agent And Integration Governance
 

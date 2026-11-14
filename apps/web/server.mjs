@@ -1,12 +1,18 @@
-import http from "node:http";
 import next from "next";
 import { WebSocket, WebSocketServer } from "ws";
+import { createDashboardServer, parseRequestUrl } from "./src/lib/dashboard-server.mjs";
+import { parseTrustedProxies } from "./src/lib/forwarded-for.mjs";
 
 const dev = process.env.NODE_ENV !== "production";
 const host = process.env.HOST ?? "0.0.0.0";
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
 const relayPathPrefix = "/api/runtime/relay/";
 const runtimeRelayStoreKey = Symbol.for("koda.web.runtime-relay-store");
+// Peers whose x-forwarded-for is believed (loopback always). The dashboard
+// server rewrites every request's header to the resolved client before
+// Next.js sees it, so a client that reaches this port directly cannot choose
+// its rate-limit bucket.
+const trustedProxies = parseTrustedProxies(process.env.WEB_TRUSTED_PROXIES);
 
 function getRuntimeRelayStore() {
   if (!globalThis[runtimeRelayStoreKey]) {
@@ -50,9 +56,8 @@ function closeSocket(socket, code, reason) {
 }
 
 async function handleRelayConnection(client, request) {
-  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
-  const relayId = url.pathname.slice(relayPathPrefix.length);
-  const descriptor = readRelayDescriptor(relayId);
+  const url = parseRequestUrl(request);
+  const descriptor = url ? readRelayDescriptor(url.pathname.slice(relayPathPrefix.length)) : null;
 
   if (!descriptor?.upstreamUrl) {
     closeSocket(client, 4404, "relay_not_found");
@@ -127,22 +132,12 @@ relayWss.on("connection", (client, request) => {
   void handleRelayConnection(client, request);
 });
 
-const server = http.createServer((request, response) => {
-  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
-  if (url.pathname === "/api/health") {
-    response.writeHead(200, {
-      "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
-      "Content-Type": "application/json",
-    });
-    response.end(JSON.stringify({ status: "ok", timestamp: new Date().toISOString() }));
+function handleUpgrade(request, socket, head) {
+  const url = parseRequestUrl(request);
+  if (!url) {
+    socket.destroy();
     return;
   }
-
-  void handle(request, response);
-});
-
-server.on("upgrade", (request, socket, head) => {
-  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
   if (url.pathname.startsWith(relayPathPrefix)) {
     relayWss.handleUpgrade(request, socket, head, (client) => {
@@ -157,12 +152,24 @@ server.on("upgrade", (request, socket, head) => {
   }
 
   socket.destroy();
+}
+
+const server = createDashboardServer({
+  handle,
+  upgrade: handleUpgrade,
+  isTrusted: trustedProxies.isTrusted,
 });
 
 server.listen(port, host, () => {
   console.log(
     `> Runtime control plane server ready on http://${host}:${port} (${dev ? "dev" : "prod"})`
   );
+  console.log(`> Trusting x-forwarded-for from ${trustedProxies.trusted.join(", ")}`);
+  if (trustedProxies.ignored.length > 0) {
+    console.warn(
+      `> Ignoring WEB_TRUSTED_PROXIES entries (not an IP, a CIDR or an available gateway): ${trustedProxies.ignored.join(", ")}`
+    );
+  }
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

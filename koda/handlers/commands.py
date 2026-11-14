@@ -718,6 +718,9 @@ async def cmd_cancel(update: Update, context: BotContext) -> None:
         if result is None:
             await update.message.reply_text(f"Task #{target_id} not found.")
             return
+        if result.get("action") == "not_running":
+            await update.message.reply_text(f"Task #{target_id} is not running (status: {result.get('status')}).")
+            return
         await update.message.reply_text(f"Task #{target_id} cancelled. Final phase: {result['final_phase']}.")
         return
 
@@ -742,7 +745,7 @@ async def cmd_cancel(update: Update, context: BotContext) -> None:
             actor="telegram_command",
             reason="Cancelled by /cancel command.",
         )
-        if result is not None:
+        if result is not None and result.get("action") != "not_running":
             cancelled += 1
     await update.message.reply_text(f"Cancelled {cancelled} task(s)." if cancelled else "Nothing running.")
 

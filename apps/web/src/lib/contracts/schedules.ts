@@ -56,3 +56,36 @@ export const patchScheduleBodySchema = z.object({
     })
     .passthrough(),
 }).passthrough();
+
+/*  Response helpers (used by the routines page)                       */
+
+/**
+ * Message for a failed schedule request. Proxy and validation failures answer
+ * `{ error }`, while the scheduler reports refusals as `{ ok: false, message }`
+ * (for example "Validation already pending."), so both are read.
+ */
+export function scheduleErrorMessage(raw: unknown, fallback: string): string {
+  if (raw && typeof raw === "object") {
+    const { error, message } = raw as { error?: unknown; message?: unknown };
+    for (const value of [error, message]) {
+      if (typeof value === "string" && value.trim()) return value.trim();
+    }
+  }
+  return fallback;
+}
+
+/**
+ * The create endpoint answers `validation_run_id: null` when the routine was
+ * created but its validation could not be queued, so it would wait in
+ * "validating" forever. Returns the backend's explanation in that case and
+ * `null` when validation was queued (or the backend does not report it).
+ */
+export function scheduleValidationNotQueuedMessage(raw: unknown, fallback: string): string | null {
+  if (!raw || typeof raw !== "object" || !("validation_run_id" in raw)) return null;
+  const { validation_run_id: validationRunId, message } = raw as {
+    validation_run_id?: unknown;
+    message?: unknown;
+  };
+  if (validationRunId !== null) return null;
+  return typeof message === "string" && message.trim() ? message.trim() : fallback;
+}

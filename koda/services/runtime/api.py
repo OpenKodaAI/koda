@@ -176,10 +176,37 @@ def _parse_positive_int(
     if raw_value is None or raw_value == "":
         value = default
     else:
-        value = int(raw_value)
+        try:
+            value = int(raw_value)
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=f"invalid {name}") from exc
     if value < minimum or value > maximum:
         raise web.HTTPBadRequest(text=f"invalid {name}")
     return value
+
+
+# Runtime ids are Postgres BIGINTs. ``after_seq`` in particular is a resume cursor
+# over ``runtime_events.id``, a BIGSERIAL shared by every task of the agent, not a
+# page size, so any non-negative int64 is valid.
+_MAX_RUNTIME_ID = 2**63 - 1
+
+
+def _parse_after_seq(request: web.Request) -> int:
+    return _parse_positive_int(
+        request.query.get("after_seq"),
+        name="after_seq",
+        default=0,
+        minimum=0,
+        maximum=_MAX_RUNTIME_ID,
+    )
+
+
+def _parse_optional_runtime_id(request: web.Request, name: str) -> int | None:
+    """Optional id filter; must be validated before a stream response is prepared."""
+    raw_value = request.query.get(name)
+    if raw_value is None or raw_value == "":
+        return None
+    return _parse_positive_int(raw_value, name=name, default=0, minimum=0, maximum=_MAX_RUNTIME_ID)
 
 
 def _tail_text(path: Path, *, max_bytes: int = 4096) -> str:
@@ -374,11 +401,13 @@ async def _runtime_schedule_update(request: web.Request) -> web.Response:
     return web.json_response(result, status=status)
 
 
-_IDEMPOTENCY_CACHE: dict[tuple[int, str], tuple[int, float]] = {}
+# (user_id, idempotency key) -> (job_id, expires_at, creation outcome). The outcome holds the
+# create response's "message" and "validation_run_id" so a replay answers like the first call.
+_IDEMPOTENCY_CACHE: dict[tuple[int, str], tuple[int, float, dict[str, object]]] = {}
 _IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 
 
-def _idempotency_lookup(user_id: int, key: str) -> int | None:
+def _idempotency_lookup(user_id: int, key: str) -> tuple[int, dict[str, object]] | None:
     if not key:
         return None
     import time as _time
@@ -387,24 +416,29 @@ def _idempotency_lookup(user_id: int, key: str) -> int | None:
     cached = _IDEMPOTENCY_CACHE.get((user_id, key))
     if cached is None:
         return None
-    job_id, expires_at = cached
+    job_id, expires_at, outcome = cached
     if expires_at < now:
         _IDEMPOTENCY_CACHE.pop((user_id, key), None)
         return None
-    return job_id
+    return job_id, dict(outcome)
 
 
-def _idempotency_remember(user_id: int, key: str, job_id: int) -> None:
+def _idempotency_remember(
+    user_id: int,
+    key: str,
+    job_id: int,
+    outcome: dict[str, object] | None = None,
+) -> None:
     if not key:
         return
     import time as _time
 
     expires_at = _time.monotonic() + _IDEMPOTENCY_TTL_SECONDS
-    _IDEMPOTENCY_CACHE[(user_id, key)] = (job_id, expires_at)
+    _IDEMPOTENCY_CACHE[(user_id, key)] = (job_id, expires_at, dict(outcome or {}))
     if len(_IDEMPOTENCY_CACHE) > 4096:
         # drop expired entries opportunistically
         now = _time.monotonic()
-        for cache_key, (_, exp) in list(_IDEMPOTENCY_CACHE.items()):
+        for cache_key, (_, exp, _) in list(_IDEMPOTENCY_CACHE.items()):
             if exp < now:
                 _IDEMPOTENCY_CACHE.pop(cache_key, None)
 
@@ -438,11 +472,14 @@ async def _runtime_schedule_create(request: web.Request) -> web.Response:
         except (TypeError, ValueError):
             chat_id = -user_id
 
-    cached_job_id = _idempotency_lookup(user_id, idempotency_key)
-    if cached_job_id is not None:
+    cached = _idempotency_lookup(user_id, idempotency_key)
+    if cached is not None:
+        cached_job_id, cached_outcome = cached
         existing = _schedule_detail_payload(cached_job_id)
         if existing is not None:
-            return web.json_response({"ok": True, "idempotent_replay": True, **existing})
+            # Repeat the original message and validation_run_id so a client retrying after a
+            # lost response learns whether validation was queued, exactly as on the first call.
+            return web.json_response({"ok": True, "idempotent_replay": True, **cached_outcome, **existing})
 
     raw_payload = body.get("payload") or {}
     if not isinstance(raw_payload, dict):
@@ -501,15 +538,33 @@ async def _runtime_schedule_create(request: web.Request) -> web.Response:
         log.exception("runtime_schedule_create_failed")
         return web.json_response({"error": str(exc) or "create failed"}, status=500)
 
-    if auto_activate:
-        try:
-            scheduled_jobs.activate_job(job_id, user_id)
-        except Exception:
-            log.exception("runtime_schedule_auto_activate_failed", extra={"job_id": job_id})
+    # A new job can only be activated after a dry-run validation passes, so queue one now.
+    # With auto_activate the passing validation activates the job; otherwise it stays
+    # "validated" until it is activated explicitly.
+    validation_run_id: int | None
+    try:
+        validation_run_id, validation_message = scheduled_jobs.queue_validation_run(
+            job_id,
+            user_id=user_id,
+            activate_on_success=auto_activate,
+        )
+    except Exception:
+        # The job already exists; report the failure instead of a 500 so a retry does not duplicate it.
+        log.exception("runtime_schedule_validation_queue_failed", job_id=job_id)
+        validation_run_id, validation_message = None, "Validation could not be queued."
+    if validation_run_id is None:
+        log.warning("runtime_schedule_validation_not_queued", job_id=job_id, reason=validation_message)
+        message = f"Job created, but validation was not queued: {validation_message}"
+    else:
+        message = f"Job created. {validation_message}"
 
-    _idempotency_remember(user_id, idempotency_key, job_id)
+    creation_outcome: dict[str, object] = {"message": message, "validation_run_id": validation_run_id}
+    _idempotency_remember(user_id, idempotency_key, job_id, creation_outcome)
     detail = _schedule_detail_payload(job_id) or {}
-    return web.json_response({"ok": True, "idempotent_replay": False, **detail}, status=201)
+    return web.json_response(
+        {"ok": True, "idempotent_replay": False, **creation_outcome, **detail},
+        status=201,
+    )
 
 
 async def _runtime_schedule_action(request: web.Request) -> web.Response:
@@ -814,7 +869,7 @@ async def _runtime_task_events(request: web.Request) -> web.Response:
     if auth:
         return auth
     task_id = int(request.match_info["task_id"])
-    after_seq = _parse_positive_int(request.query.get("after_seq"), name="after_seq", default=0, minimum=0)
+    after_seq = _parse_after_seq(request)
     items = get_runtime_controller().store.list_events(task_id=task_id, after_seq=after_seq)
     return web.json_response({"items": items})
 
@@ -1230,14 +1285,16 @@ async def _runtime_stream_sse(request: web.Request) -> web.StreamResponse:
     auth = _authorize_runtime_access(request)
     if auth:
         return auth
-    task_id = request.query.get("task_id")
-    env_id = request.query.get("env_id")
+    # Validate every query parameter before ``prepare``: once the 200 headers are
+    # sent, an error can no longer reach the client as a status code.
+    task_id = _parse_optional_runtime_id(request, "task_id")
+    env_id = _parse_optional_runtime_id(request, "env_id")
     session_id = (request.query.get("session_id") or "").strip() or None
-    after_seq = _parse_positive_int(request.query.get("after_seq"), name="after_seq", default=0, minimum=0)
+    after_seq = _parse_after_seq(request)
     controller = get_runtime_controller()
 
     task_ids_refresh = None
-    if session_id and not task_id:
+    if session_id and task_id is None:
 
         def task_ids_refresh() -> set[int]:
             return set(controller.store.list_task_ids_for_session(session_id))
@@ -1254,9 +1311,9 @@ async def _runtime_stream_sse(request: web.Request) -> web.StreamResponse:
     )
     await response.prepare(request)
     async for event in controller.events.iter_events(
-        task_id=int(task_id) if task_id else None,
+        task_id=task_id,
         task_ids_refresh=task_ids_refresh,
-        env_id=int(env_id) if env_id else None,
+        env_id=env_id,
         after_seq=after_seq,
     ):
         await response.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode())
@@ -1267,16 +1324,17 @@ async def _runtime_stream_ws(request: web.Request) -> web.WebSocketResponse:
     auth = _authorize_runtime_access(request)
     if auth:
         raise web.HTTPForbidden(text=json.dumps({"error": "invalid runtime token"}))
-    task_id = request.query.get("task_id")
-    env_id = request.query.get("env_id")
+    # Validated before the upgrade so a bad value fails the handshake with 400.
+    task_id = _parse_optional_runtime_id(request, "task_id")
+    env_id = _parse_optional_runtime_id(request, "env_id")
     session_id = (request.query.get("session_id") or "").strip() or None
-    after_seq = _parse_positive_int(request.query.get("after_seq"), name="after_seq", default=0, minimum=0)
+    after_seq = _parse_after_seq(request)
     ws = web.WebSocketResponse(heartbeat=30)
     await ws.prepare(request)
     controller = get_runtime_controller()
 
     task_ids_refresh = None
-    if session_id and not task_id:
+    if session_id and task_id is None:
 
         def task_ids_refresh() -> set[int]:
             return set(controller.store.list_task_ids_for_session(session_id))
@@ -1284,9 +1342,9 @@ async def _runtime_stream_ws(request: web.Request) -> web.WebSocketResponse:
     RUNTIME_WS_CLIENTS_ACTIVE.inc()
     try:
         async for event in controller.events.iter_events(
-            task_id=int(task_id) if task_id else None,
+            task_id=task_id,
             task_ids_refresh=task_ids_refresh,
-            env_id=int(env_id) if env_id else None,
+            env_id=env_id,
             after_seq=after_seq,
         ):
             await ws.send_json(event)
@@ -1413,6 +1471,13 @@ async def _runtime_browser_ws(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+def _task_not_running_response(result: dict[str, Any]) -> web.Response:
+    """Answer 409 when a cancel or interrupt found nothing left to stop."""
+    payload = dict(result)
+    payload["error"] = f"task is not running (status: {result.get('status')})"
+    return web.json_response(payload, status=409)
+
+
 async def _runtime_cancel(request: web.Request) -> web.Response:
     auth = _authorize_mutation(request)
     if auth:
@@ -1424,6 +1489,8 @@ async def _runtime_cancel(request: web.Request) -> web.Response:
     result = await get_runtime_controller().cancel_task(task_id=task_id, actor="runtime_api")
     if result is None:
         return web.json_response({"error": "task not found"}, status=404)
+    if result.get("action") == "not_running":
+        return _task_not_running_response(result)
     return web.json_response(result)
 
 
@@ -1442,7 +1509,10 @@ async def _runtime_interrupt(request: web.Request) -> web.Response:
     )
     if result is None:
         return web.json_response({"error": "task not found"}, status=404)
-    result["action"] = "interrupted"
+    if result.get("action") == "not_running":
+        return _task_not_running_response(result)
+    if result.get("action") == "cancelled":
+        result["action"] = "interrupted"
     return web.json_response(result)
 
 

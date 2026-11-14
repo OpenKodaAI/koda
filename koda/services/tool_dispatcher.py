@@ -1560,6 +1560,7 @@ async def _check_browser_available(tool_name: str) -> AgentToolResult | None:
 
     from koda.services.resilience import browser_breaker, check_breaker
 
+    # Check-only: browser outcomes are not recorded, so this breaker never opens.
     err = check_breaker(browser_breaker)
     if err:
         return AgentToolResult(tool=tool_name, success=False, output=err)

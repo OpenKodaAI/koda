@@ -56,7 +56,17 @@ def classify_url(url: str) -> LinkType:
 
 
 def extract_youtube_id(url: str) -> str | None:
-    """Extract YouTube video ID from various URL formats."""
+    """Extract the video ID from a URL whose host is YouTube.
+
+    The ID patterns alone also match a YouTube-looking path, query or fragment
+    on any host (``http://169.254.169.254/?youtu.be/<id>``), which would send
+    that URL down the yt-dlp branch, so the host is checked first.
+    """
+    from urllib.parse import urlparse
+
+    hostname = (urlparse(url).hostname or "").lower()
+    if hostname not in _YOUTUBE_DOMAINS and not hostname.endswith(".youtube.com"):
+        return None
     for pattern in _YOUTUBE_ID_PATTERNS:
         match = pattern.search(url)
         if match:

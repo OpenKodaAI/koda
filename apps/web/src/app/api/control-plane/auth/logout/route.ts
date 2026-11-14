@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { clearWebOperatorSessionCookie, getWebOperatorTokenFromCookie } from "@/lib/web-operator-session";
+import { forwardedClientIpHeaders } from "@/lib/client-ip";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 
 const CONTROL_PLANE_BASE_URL =
@@ -23,7 +24,10 @@ export async function POST(request: NextRequest) {
       `${CONTROL_PLANE_BASE_URL.replace(/\/$/, "")}/api/control-plane/auth/logout`,
       {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...forwardedClientIpHeaders(request.headers),
+        },
         cache: "no-store",
       },
     ).catch(() => null);

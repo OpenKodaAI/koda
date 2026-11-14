@@ -6,6 +6,7 @@ import {
   parseSchemaOrThrow,
   upstreamFetch,
 } from "@/lib/api-utils";
+import { forwardedClientIpHeaders } from "@/lib/client-ip";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
   assertWebOperatorSessionSecretConfigured,
@@ -39,7 +40,10 @@ export async function POST(request: NextRequest) {
       `${CONTROL_PLANE_BASE_URL.replace(/\/$/, "")}/api/control-plane/auth/login`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...forwardedClientIpHeaders(request.headers),
+        },
         body: JSON.stringify(payload),
         cache: "no-store",
       },

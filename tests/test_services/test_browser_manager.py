@@ -501,3 +501,15 @@ async def test_cleanup_does_not_remove_refreshed_context():
         assert time.time() - ctx["last_used"] < _INACTIVITY_TIMEOUT
 
     assert 42 in manager._contexts
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://0.0.0.0:9222/json/version", "http://[::ffff:127.0.0.1]:9222/", "http://100.64.0.1/"],
+)
+def test_browser_url_safety_blocks_unspecified_mapped_and_shared_addresses(url):
+    from koda.services.browser_manager import _check_browser_url_safety
+
+    result = _check_browser_url_safety(url, allow_private=False)
+    assert result is not None
+    assert "private" in result.lower()

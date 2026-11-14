@@ -118,6 +118,18 @@ their stronger password checks.
 
 - Codes are 12 uppercase characters (`XXXX-XXXX-XXXX`) from the `BOOTSTRAP_ALPHABET`
   (no `I`, `O`, `0`, `1`).
+- Codes are stored as a SHA-256 hash of that canonical `XXXX-XXXX-XXXX` form. The control
+  plane is the authority on matching: before hashing a submitted code it keeps only the
+  ASCII letters and digits (whitespace, separators and any non-ASCII character are
+  dropped, not case-folded), upper-cases them, and regroups them in fours
+  (`_normalize_recovery_code` in `koda/control_plane/operator_auth.py`).
+  `abcd efgh jklm`, `ABCDEFGHJKLM` and ` abcd-efgh-jklm ` all match the issued
+  `ABCD-EFGH-JKLM`; a code with a missing, wrong or non-ASCII look-alike character (for
+  example `ſ` in place of `S`) still fails with the generic error, through the
+  `/forgot-password` screen and direct API calls alike. The screen only displays the field
+  in uppercase (CSS) so the input looks like the printed code; it submits the value
+  trimmed but otherwise as typed, with no client-side case mapping, so the control plane
+  is the only canonicalizer.
 - Each code can be used exactly once, enforced by `consumed_at` and `generation` matching
   against `cp_operator_users.recovery_generation`.
 - After a successful `POST /api/control-plane/auth/password/recover`:
@@ -135,26 +147,82 @@ one of them is compromised the whole sheet has to be rotated.
 
 ## Rate limits (bucket budgets)
 
-Per-IP, enforced in `koda/control_plane/rate_limit.py`:
+Per client address, enforced in `koda/control_plane/rate_limit.py`:
 
-| Endpoint                                            | Budget              |
-| --------------------------------------------------- | ------------------- |
-| `POST /auth/login`                                  | 5 requests / 5 min  |
-| `POST /auth/password/recover`                       | 5 requests / hour   |
-| `POST /auth/password/change`                        | 10 requests / hour  |
-| `PATCH /auth/profile`                               | 60 requests / hour  |
-| `POST /auth/register-owner`                         | 3 requests / hour   |
-| `POST /auth/recovery-codes/regenerate`              | 3 requests / hour   |
-| `POST /auth/bootstrap/exchange`                     | 10 requests / hour  |
-| `POST /auth/bootstrap/codes`                        | 3 requests / hour   |
+| Endpoint                                            | Budget               |
+| --------------------------------------------------- | -------------------- |
+| `POST /auth/login`                                  | 10 requests / 5 min  |
+| `POST /auth/password/recover`                       | 10 requests / hour   |
+| `POST /auth/password/change`                        | 20 requests / hour   |
+| `PATCH /auth/profile`                               | 60 requests / hour   |
+| `POST /auth/register-owner`                         | 30 requests / hour   |
+| `POST /auth/recovery-codes/regenerate`              | 10 requests / hour   |
+| `POST /auth/bootstrap/exchange`                     | 30 requests / hour   |
+| `POST /auth/bootstrap/codes`                        | 10 requests / hour   |
 
-Plus the pre-existing per-IP general bucket (`CONTROL_PLANE_RATE_LIMIT`, default 120/min) and
+Plus the per-address general bucket (`CONTROL_PLANE_RATE_LIMIT`, default 120/min) and
 the stricter auth-failure bucket (`CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT`, default 5/min
-triggered on any 401/403).
+triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
+
+### Which address a request is charged to
+
+- By default a request is charged to its TCP peer. `X-Forwarded-For` is read only when the
+  peer is a trusted proxy (`CONTROL_PLANE_TRUSTED_PROXIES`: loopback by default, where a
+  native dashboard runs; Docker Compose sets `web`, the dashboard's service, matched by its
+  resolved address). The header is then read from the right, skipping trusted hops, and the
+  first untrusted address is the client. Entries further left are client-supplied and never
+  select a bucket, so a direct caller cannot rotate the header to get a fresh budget.
+- The dashboard server decides the browser's address before Next.js runs
+  (`apps/web/server.mjs`, `apps/web/src/lib/dashboard-server.mjs`,
+  `apps/web/src/lib/forwarded-for.mjs`). Next.js only fills an
+  *absent* `X-Forwarded-For`, so the server replaces the header on every request with one
+  address: the TCP peer, or, when the peer is a trusted proxy (loopback, plus
+  `WEB_TRUSTED_PROXIES`, which Compose sets to `gateway`), the first untrusted hop from the
+  right. A client that reaches the dashboard port directly is charged to its own address
+  whatever header it sends.
+- The dashboard BFF forwards that address on every control-plane call
+  (`apps/web/src/lib/client-ip.ts`). Each browser therefore has its own budget; one client's
+  failed logins do not lock other clients out. The Next.js proxy (`apps/web/src/proxy.ts`)
+  keys its own per-client window (120/min) the same way; each of its windows tracks at most
+  4096 clients and sweeps idle ones on its own schedule.
+- IPv6 clients are charged per /64, both in the API and in the dashboard, so rotating source
+  addresses inside one subscriber's block does not buy a fresh budget. Each sensitive
+  endpoint keeps its own bucket cache (4096 clients), so cycling through many addresses on
+  one endpoint does not evict buckets on another.
+- Exception: `POST /auth/register-owner` from a browser on loopback is forwarded without
+  `X-Forwarded-For`, because the dev-only loopback trust requires a request with no proxy
+  hop. Requests from any other browser carry its address like every other auth call.
+- `gateway` (in either setting) is the container's IPv4 default gateway, which is where
+  Docker's port proxy connects from: a reverse proxy on the Docker host reaches the
+  dashboard, and the API, from that address. A reverse proxy that forwards
+  `/api/control-plane/*` straight to the API, such as the bundled `proxy/nginx.conf`, needs
+  `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`; until then all of its clients share one
+  bucket. A proxy on another host (`WEB_PUBLISH_ADDRESS`) is trusted by its IP:
+  `WEB_TRUSTED_PROXIES=gateway,203.0.113.5`. `WEB_TRUSTED_PROXIES` takes no hostnames, so a
+  proxy container on the Compose network is trusted by a fixed `ipv4_address`
+  ([VPS Install](../install/vps.md#reverse-proxy)).
+- A trusted proxy must add the address it received the request from to `X-Forwarded-For`,
+  appended or replacing the header: nginx
+  `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (or `$remote_addr`), as in the
+  bundled `proxy/nginx.conf`; HAProxy `option forwardfor` (without `if-none`); Caddy and Traefik
+  do it by default. The last entry is the one a trusted peer vouches for, so a proxy that passes
+  the client's header through unchanged (nginx and HAProxy otherwise) lets each client name its
+  own bucket, and clients that send no header all share one bucket.
+- Trust only peers you control: a trusted peer can claim any client address. Docker hides
+  the real client behind the gateway whenever its userland proxy carries the connection
+  (Docker Desktop, rootless Docker, or an IPv6 host address on an IPv4-only network), so
+  when the dashboard is published beyond loopback (`WEB_PUBLISH_ADDRESS`), firewall its port
+  so only your proxy can reach it.
+- The API trusts `web` by the address Docker DNS returns for it, which must be the address
+  the dashboard connects from. In the source `docker-compose.yml` both containers share two
+  networks; `scripts/docker_smoke.sh` checks that the two addresses match. If they ever
+  differ, every browser falls back to one shared bucket (the safe direction).
 
 Account-level lockout remains on top of the rate limits: after
 `CONTROL_PLANE_OPERATOR_LOGIN_MAX_FAILURES` failed attempts, the row locks for
-`CONTROL_PLANE_OPERATOR_LOGIN_LOCKOUT_SECONDS`.
+`CONTROL_PLANE_OPERATOR_LOGIN_LOCKOUT_SECONDS`. This lockout is per account, not per client,
+so anyone who knows the identifier can still trigger it; the per-client buckets only stop one
+client from spending everyone else's budget.
 
 ## Side-channel mitigations
 

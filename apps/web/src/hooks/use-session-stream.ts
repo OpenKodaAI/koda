@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { isSessionStreamEvent, type SessionStreamEvent } from "@/lib/contracts/sessions";
+import { STREAM_ERROR_EVENT, STREAM_REJECTED_RETRY_MS } from "@/lib/sse";
 
 interface UseSessionStreamOptions {
   agentId: string | null | undefined;
@@ -89,6 +90,19 @@ export function useSessionStream({
         setLastEvent(parsed);
         onEventRef.current?.(parsed);
       };
+
+      // The runtime rejected this request. Repeating it fails the same way, so
+      // retry only after a long delay; the session detail query keeps polling
+      // meanwhile.
+      es.addEventListener(STREAM_ERROR_EVENT, () => {
+        if (disposed) return;
+        es.close();
+        eventSource = null;
+        setIsOpen(false);
+        setError("session stream rejected");
+        if (reconnectTimer) clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connect, STREAM_REJECTED_RETRY_MS);
+      });
 
       es.onerror = () => {
         if (disposed) return;
