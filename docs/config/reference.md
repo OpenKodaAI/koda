@@ -49,6 +49,15 @@ Control Plane
   [Master key rotation](../operations/hardening.md#master-key-rotation)
 - `CONTROL_PLANE_OPERATOR_PASSWORD_MIN_LENGTH`
 - `CONTROL_PLANE_RECOVERY_CODES_PER_USER`
+- `CONTROL_PLANE_BOOTSTRAP_CODE` — a fixed first-boot setup code in place of the generated one the
+  control plane writes to `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (unset by default, which is
+  recommended). Only its ASCII letters and digits count. The `/setup` screen takes at most 12
+  characters from `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` (no `I`, `O`, `0` or `1`), so give it exactly
+  12 of those; any other seed works only through `POST /api/control-plane/auth/register-owner`, and
+  the control plane logs `bootstrap_code_seed_weak` or `bootstrap_code_seed_not_typeable` for it.
+  Read natively and by the repository's Docker Compose; the release bundle's Compose file does not
+  pass it, so an npm install uses the generated code `koda install` prints. See
+  [Authentication](../security/authentication.md#account-creation-first-boot)
 
 Security notes:
 

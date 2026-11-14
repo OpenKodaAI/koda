@@ -34,13 +34,21 @@ alike. Every other character is ignored: whitespace, separators of any kind (an 
 trailing non-breaking space) and any other non-ASCII character, so `ABCD-EFGH-JKLMé` matches
 too. A missing, wrong or extra letter or digit, or a non-ASCII look-alike typed in place of one
 (for example `ſ` in place of `S`), fails with the same generic `Setup code is invalid or expired.`
-The `/setup` screen's code field already submits the dashed, uppercase form.
+The `/setup` screen's code field takes at most 12 characters, from
+`ABCDEFGHJKLMNPQRSTUVWXYZ23456789` only (no `I`, `O`, `0` or `1`), the alphabet of generated codes:
+it drops any other character as it is typed and submits the dashed, uppercase form.
 
 The same rule applies to a `CONTROL_PLANE_BOOTSTRAP_CODE` seed: only its ASCII letters and digits
-count towards its strength. `Tr0ub4dor&3!` is matched as `TR0U-B4DO-R3` (10 letters and digits),
-and `!!!!a!!!!` is matched by a typed `a`. When the control plane writes `bootstrap.txt` from a seed
-with fewer than 12 ASCII letters and digits (a generated code has 12), it logs a
-`bootstrap_code_seed_weak` warning, without the seed; a seed with none never matches.
+count towards its strength. `Hunter2!!` is matched as `HUNT-ER2` (7 letters and digits), and
+`!!!!a!!!!` is matched by a typed `a`. A seed meant to be typed on `/setup` should therefore be
+exactly 12 characters from that alphabet, separators aside (fewer is weaker than a generated code):
+`Wb7k-Qz3m-Np4x` is typed and matched as `WB7K-QZ3M-NP4X`. A seed with more letters and digits, or with `I`, `O`, `0` or `1`, can only be sent
+to the API (`POST /api/control-plane/auth/register-owner`): the `/setup` field would submit fewer
+characters than the seed has, and the code would not match. When the control plane writes
+`bootstrap.txt` from a seed, it logs, without the seed, a `bootstrap_code_seed_weak` warning when the
+seed has fewer than 12 ASCII letters and digits (a generated code has 12) and a
+`bootstrap_code_seed_not_typeable` warning when the `/setup` field cannot take it; a seed with no
+ASCII letter or digit never matches.
 
 Passwords are hashed with **Argon2id** (`argon2-cffi` defaults). The password must:
 

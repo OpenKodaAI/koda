@@ -317,6 +317,7 @@ def test_setup_code_ignores_characters_that_are_not_ascii_letters_or_digits(
 def test_seed_strength_counts_only_what_setup_code_matching_keeps(seed: str) -> None:
     """The weak-seed warning in ``bootstrap_file`` counts exactly the characters the canonicalizer keeps."""
     canonical = operator_auth_mod._normalize_bootstrap_code(seed)
+    assert bootstrap_file_mod._seed_kept_characters(seed) == canonical.replace("-", "")
     assert bootstrap_file_mod._seed_significant_characters(seed) == len(canonical.replace("-", ""))
 
 
@@ -342,6 +343,14 @@ def test_auth_doc_states_which_setup_code_characters_count() -> None:
     # A seed's punctuation no longer counts, and a short seed is flagged.
     assert "seed: only its ASCII letters and digits count towards its strength" in section
     assert "`bootstrap_code_seed_weak` warning" in section
+    # The /setup field takes only part of what the API matches; the doc says which seeds it takes
+    # and gives no example it cannot take (M1-E1-T17 review).
+    assert (
+        "The `/setup` screen's code field takes at most 12 characters, from "
+        "`ABCDEFGHJKLMNPQRSTUVWXYZ23456789` only (no `I`, `O`, `0` or `1`)" in section
+    )
+    assert "`bootstrap_code_seed_not_typeable` warning" in section
+    assert "Tr0ub4dor" not in section
 
 
 @pytest.mark.postgres

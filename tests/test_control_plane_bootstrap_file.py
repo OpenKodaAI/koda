@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -87,6 +88,109 @@ def test_ensure_does_not_warn_about_a_generated_code_or_a_full_seed(
 
     assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
     assert _weak_seed_warnings(log) == []
+
+
+_SETUP_CODE_INPUT = (
+    Path(__file__).resolve().parents[1] / "apps" / "web" / "src" / "components" / "setup" / "bootstrap-code-input.tsx"
+)
+
+
+def _setup_field_rule() -> tuple[str, int]:
+    """The alphabet and length of the /setup screen's code field, read from its component."""
+    source = _SETUP_CODE_INPUT.read_text(encoding="utf-8")
+    alphabet = re.search(r'^const BOOTSTRAP_ALPHABET = "([^"]+)";$', source, re.MULTILINE)
+    groups = re.search(r"^const GROUPS = \[([\d, ]+)\] as const;$", source, re.MULTILINE)
+    assert alphabet and groups, "the /setup code field no longer declares BOOTSTRAP_ALPHABET and GROUPS"
+    # parseIncoming keeps only BOOTSTRAP_ALPHABET characters, up to TOTAL = sum(GROUPS).
+    assert '.map((ch) => (BOOTSTRAP_ALPHABET.includes(ch) ? ch : ""))' in source
+    assert "return filtered.slice(0, TOTAL);" in source
+    return alphabet.group(1), sum(int(size) for size in groups.group(1).split(","))
+
+
+def test_the_seed_check_uses_the_setup_code_field_rule() -> None:
+    """The warning about seeds /setup cannot take follows what the dashboard's field accepts."""
+    alphabet, length = _setup_field_rule()
+
+    assert alphabet == bootstrap_file_mod._BOOTSTRAP_ALPHABET
+    assert length == bootstrap_file_mod._SETUP_FIELD_CHARACTERS
+
+
+def _not_typeable_warnings(log: MagicMock) -> list[Any]:
+    return [call for call in log.warning.call_args_list if call.args == ("bootstrap_code_seed_not_typeable",)]
+
+
+@pytest.mark.parametrize(
+    "seed",
+    [
+        "WB7K-QZ3M-NP4X-HJ5R",  # 16 characters: the field submits only the first 12
+        "Tr0ub4dor&3!",  # 0 and O: the field drops them
+        "CUST-OMSE-EDCD",  # O
+        "CUST-WMSE-EDCI",  # I
+        "cust-wmse-edc1",  # 1
+        "!!!!",  # nothing to type
+    ],
+)
+def test_ensure_warns_about_a_seed_the_setup_screen_cannot_take(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, seed: str
+) -> None:
+    """The /setup field keeps at most 12 characters from the setup alphabet and drops the rest."""
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", seed)
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap_file_mod, "log", log)
+
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False) == seed
+
+    warnings = _not_typeable_warnings(log)
+    assert len(warnings) == 1
+    hint = warnings[0].kwargs["hint"]
+    assert "/setup" in hint
+    assert f"exactly 12 characters from {bootstrap_file_mod._BOOTSTRAP_ALPHABET}" in hint
+    assert seed not in repr(warnings[0])
+
+
+@pytest.mark.parametrize("seed", ["", "WB7K-QZ3M-NP4X", "wb7k qz3m np4x", "Wb7k-Qz3m!Np4x", "ABCD"])
+def test_ensure_does_not_flag_a_seed_the_setup_screen_takes(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, seed: str
+) -> None:
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", seed)
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap_file_mod, "log", log)
+
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
+    assert _not_typeable_warnings(log) == []
+
+
+def test_the_weak_seed_hint_asks_for_a_seed_the_setup_screen_takes(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Following the hint must give a seed the /setup field can take, not just a long one."""
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", "ABCD")
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap_file_mod, "log", log)
+
+    bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
+
+    (warning,) = _weak_seed_warnings(log)
+    assert f"exactly 12 characters from {bootstrap_file_mod._BOOTSTRAP_ALPHABET}" in warning.kwargs["hint"]
+    assert "at least" not in warning.kwargs["hint"]
+
+
+def test_the_seed_setting_is_documented_where_operators_look() -> None:
+    """CONTROL_PLANE_BOOTSTRAP_CODE, and the /setup rule for it, in .env.example and the config reference."""
+    root = Path(__file__).resolve().parents[1]
+    env_example = (root / ".env.example").read_text(encoding="utf-8")
+    reference = " ".join((root / "docs" / "config" / "reference.md").read_text(encoding="utf-8").split())
+    release_compose = (root / "packages" / "cli" / "release" / "bundle" / "docker-compose.release.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "# CONTROL_PLANE_BOOTSTRAP_CODE=" in env_example.splitlines()
+    assert bootstrap_file_mod._BOOTSTRAP_ALPHABET in env_example
+    assert "- `CONTROL_PLANE_BOOTSTRAP_CODE` — " in reference
+    assert f"takes at most 12 characters from `{bootstrap_file_mod._BOOTSTRAP_ALPHABET}`" in reference
+    # The reference says the release bundle does not pass it; passing it means updating that sentence.
+    assert "the release bundle's Compose file does not pass it" in reference
+    assert "CONTROL_PLANE_BOOTSTRAP_CODE" not in release_compose
 
 
 def test_ensure_does_not_overwrite_existing(isolated_bootstrap: Path) -> None:
