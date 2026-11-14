@@ -181,6 +181,58 @@ def test_update_job_queues_validation_for_execution_changes() -> None:
     persist_snapshot.assert_not_called()
 
 
+def test_update_job_keeps_stored_read_only_and_allowed_paths() -> None:
+    # Characterization for the D-006 interim (M1-E8-T1): the dashboard no longer edits these
+    # unenforced settings, so an edit must keep what the routine stores for M3-E1-T4 to enforce.
+    stored_payload = {
+        "query": "Check deploy health",
+        "provider": "claude",
+        "model": "claude-sonnet-4-6",
+        "work_dir": "/tmp",
+        "read_only": True,
+        "allowed_paths": ["/repo/src", "/repo/docs"],
+    }
+    original = _job_fixture(payload=stored_payload, payload_json=json.dumps(stored_payload, ensure_ascii=True))
+
+    with (
+        patch("koda.services.scheduled_jobs._get_job", side_effect=[original, original]),
+        patch("koda.services.scheduled_jobs._get_run", return_value={"trace_id": "schedrun_trace_2"}),
+        patch(
+            "koda.services.scheduled_jobs.validate_work_dir",
+            return_value=SimpleNamespace(ok=True, path="/tmp"),
+        ),
+        patch("koda.services.scheduled_jobs._touch_job") as touch_job,
+        patch("koda.services.scheduled_jobs._suppress_pending_runs"),
+        patch("koda.services.scheduled_jobs._mark_running_runs", return_value=[]),
+        patch("koda.services.scheduled_jobs._request_task_cancellations"),
+        patch("koda.services.scheduled_jobs._persist_job_policy_snapshot"),
+        patch("koda.services.scheduled_jobs.queue_validation_run", return_value=(89, "Validation queued.")),
+        patch("koda.services.scheduled_jobs._record_scheduler_event"),
+    ):
+        # The patch the dashboard routine editor sends: no read_only or allowed_paths keys.
+        result = scheduled_jobs.update_job(
+            7,
+            user_id=111,
+            patch={
+                "trigger_type": "interval",
+                "schedule_expr": "3600",
+                "timezone": "UTC",
+                "work_dir": "/tmp",
+                "notification_policy": {"mode": "summary_complete"},
+                "verification_policy": {"mode": "post_write_if_any"},
+                "query": "Check deploy health and open incidents",
+                "summary": "Deploy health",
+            },
+            expected_config_version=1,
+        )
+
+    assert result["ok"] is True
+    written_payload = json.loads(touch_job.call_args.kwargs["payload_json"])
+    assert written_payload["query"] == "Check deploy health and open incidents"
+    assert written_payload["read_only"] is True
+    assert written_payload["allowed_paths"] == ["/repo/src", "/repo/docs"]
+
+
 def test_run_job_now_rejects_job_that_is_not_validated() -> None:
     with patch(
         "koda.services.scheduled_jobs._get_job",

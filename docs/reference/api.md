@@ -108,6 +108,8 @@ Write/control routes:
 
 Automatic (scheduled and catch-up) runs follow the agent's current policy rather than the snapshot captured at validation: when the job's stored policy snapshot is stale, the dispatcher refreshes it before materializing runs and records a `job.policy_snapshot_refreshed` event with the previous and new `policy_snapshot_hash`.
 
+`payload.read_only` and `payload.allowed_paths` are stored with the job but are not enforced yet: a run is not stopped from writing and is not limited to those paths. `read_only: true` only pins `safety_mode` to `dry_run_required`, which is already the default. The dashboard routine editor labels both settings "Not enforced yet", does not set them on new routines, and leaves the values an existing routine stores unchanged when it is edited.
+
 `POST /api/runtime/tasks/{task_id}/cancel` and `/interrupt` stop a task that is queued, running, or
 retrying and return `action: "cancelled"` (or `"interrupted"`) with its `final_phase`. A task without a
 runtime environment that has already finished (for example completed, failed, cancelled, or

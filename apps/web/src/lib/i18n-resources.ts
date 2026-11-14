@@ -15753,11 +15753,14 @@ mutableResources["en-US"].translation.routines = {
       },
     },
     permissions: {
+      notEnforced: "Not enforced yet",
+      notEnforcedDescription:
+        "Runs ignore these settings for now. They can't be set on new routines, and values a routine already stores are kept.",
       readOnly: "Read-only mode",
-      readOnlyDescription: "Block any writes during the run, even if the agent attempts them.",
+      readOnlyDescription: "Writes are not blocked yet.",
       allowedPaths: "Allowed paths",
       allowedPathsPlaceholder: "/repo/src\n/repo/docs",
-      allowedPathsHint: "One path per line. Empty means no restriction.",
+      allowedPathsHint: "Paths are not restricted yet.",
     },
     actions: {
       cancel: "Cancel",
@@ -15927,11 +15930,14 @@ mutableResources["pt-BR"].translation.routines = {
       },
     },
     permissions: {
+      notEnforced: "Ainda não aplicado",
+      notEnforcedDescription:
+        "As execuções ignoram estas configurações por enquanto. Elas não podem ser definidas em rotinas novas, e os valores que uma rotina já guarda são mantidos.",
       readOnly: "Modo somente leitura",
-      readOnlyDescription: "Bloqueia qualquer escrita durante a execução, mesmo que o agente tente.",
+      readOnlyDescription: "As escritas ainda não são bloqueadas.",
       allowedPaths: "Caminhos permitidos",
       allowedPathsPlaceholder: "/repo/src\n/repo/docs",
-      allowedPathsHint: "Um caminho por linha. Vazio = sem restrição.",
+      allowedPathsHint: "Os caminhos ainda não são restringidos.",
     },
     actions: {
       cancel: "Cancelar",
@@ -16101,11 +16107,14 @@ mutableResources["es-ES"].translation.routines = {
       },
     },
     permissions: {
+      notEnforced: "Aún no se aplica",
+      notEnforcedDescription:
+        "Las ejecuciones ignoran estos ajustes por ahora. No se pueden definir en rutinas nuevas, y se conservan los valores que una rutina ya guarda.",
       readOnly: "Modo solo lectura",
-      readOnlyDescription: "Bloquea cualquier escritura durante la ejecución, aunque el agente lo intente.",
+      readOnlyDescription: "Las escrituras aún no se bloquean.",
       allowedPaths: "Rutas permitidas",
       allowedPathsPlaceholder: "/repo/src\n/repo/docs",
-      allowedPathsHint: "Una ruta por línea. Vacío = sin restricción.",
+      allowedPathsHint: "Las rutas aún no se restringen.",
     },
     actions: {
       cancel: "Cancelar",
@@ -16275,11 +16284,14 @@ mutableResources["fr-FR"].translation.routines = {
       },
     },
     permissions: {
+      notEnforced: "Pas encore appliqué",
+      notEnforcedDescription:
+        "Les exécutions ignorent ces réglages pour l'instant. Ils ne peuvent pas être définis sur les nouvelles routines, et les valeurs qu'une routine enregistre déjà sont conservées.",
       readOnly: "Mode lecture seule",
-      readOnlyDescription: "Bloque toute écriture pendant l'exécution, même si l'agent essaie.",
+      readOnlyDescription: "Les écritures ne sont pas encore bloquées.",
       allowedPaths: "Chemins autorisés",
       allowedPathsPlaceholder: "/repo/src\n/repo/docs",
-      allowedPathsHint: "Un chemin par ligne. Vide = sans restriction.",
+      allowedPathsHint: "Les chemins ne sont pas encore restreints.",
     },
     actions: {
       cancel: "Annuler",
@@ -16449,11 +16461,14 @@ mutableResources["de-DE"].translation.routines = {
       },
     },
     permissions: {
+      notEnforced: "Noch nicht durchgesetzt",
+      notEnforcedDescription:
+        "Ausführungen ignorieren diese Einstellungen vorerst. Für neue Routinen lassen sie sich nicht festlegen, und Werte, die eine Routine bereits speichert, bleiben erhalten.",
       readOnly: "Schreibgeschützter Modus",
-      readOnlyDescription: "Blockiert alle Schreibvorgänge während der Ausführung, auch wenn der Agent sie versucht.",
+      readOnlyDescription: "Schreibvorgänge werden noch nicht blockiert.",
       allowedPaths: "Erlaubte Pfade",
       allowedPathsPlaceholder: "/repo/src\n/repo/docs",
-      allowedPathsHint: "Ein Pfad pro Zeile. Leer = keine Einschränkung.",
+      allowedPathsHint: "Pfade werden noch nicht eingeschränkt.",
     },
     actions: {
       cancel: "Abbrechen",
