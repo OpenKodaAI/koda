@@ -39,21 +39,41 @@ _COPY_SUFFIX = re.compile("|".join(rf"{re.escape(suffix)}(?=\.|$)" for suffix in
 """Where a lowered file name carries a copy suffix: ``.tmp`` followed by a dot or the end of the name."""
 
 
-def _temp_copy_pattern(name: str) -> re.Pattern[str]:
-    """Return a ``FILEOPS_CREDENTIAL_TEMP_COPIES`` name as a pattern of a whole name, ``*`` one or more characters."""
-    return re.compile(".+".join(re.escape(part) for part in name.split("*")))
+def _name_pattern(name: str, *, lowered: bool) -> str:
+    """Return the regular expression of a credential file name as ``koda.config`` writes it.
+
+    ``*`` stands for one or more characters and ``?`` for one ASCII letter or digit (a Rust
+    tempfile's random characters); every other character stands for itself. With
+    ``lowered``, the expression is for a lowered name, as the file layer compares names.
+    """
+    alnum = "[0-9a-z]" if lowered else "[0-9A-Za-z]"
+    wildcards = {"*": ".+", "?": alnum}
+    return "".join(wildcards.get(char) or re.escape(char) for char in (name.lower() if lowered else name))
 
 
 _TEMP_COPY_NAMES: dict[str, tuple[re.Pattern[str], ...]] = {
-    entry: tuple(_temp_copy_pattern(name.lower()) for name in names)
+    entry: tuple(re.compile(_name_pattern(name, lowered=True)) for name in names)
     for entry, names in FILEOPS_CREDENTIAL_TEMP_COPIES.items()
 }
 """``FILEOPS_CREDENTIAL_TEMP_COPIES`` as patterns of a whole lowered name, which the file layer compares."""
 
 _TEMP_COPY_EXACT_NAMES: dict[str, tuple[re.Pattern[str], ...]] = {
-    entry: tuple(_temp_copy_pattern(name) for name in names) for entry, names in FILEOPS_CREDENTIAL_TEMP_COPIES.items()
+    entry: tuple(re.compile(_name_pattern(name, lowered=False)) for name in names)
+    for entry, names in FILEOPS_CREDENTIAL_TEMP_COPIES.items()
 }
 """``FILEOPS_CREDENTIAL_TEMP_COPIES`` as patterns of a whole name as the CLI writes it, which the logout deletes."""
+
+_CREDENTIAL_FILE_NAMES: dict[str, re.Pattern[str]] = {
+    entry: re.compile(
+        _name_pattern(entry.rsplit("/", 1)[-1], lowered=True)
+        + "(?:(?:"
+        + "|".join(re.escape(suffix) for suffix in FILEOPS_CREDENTIAL_COPY_SUFFIXES)
+        + r")(?:\.[\s\S]*)?)?"
+    )
+    for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS
+    if not entry.endswith("/")
+}
+"""Each file entry's name, or that name followed by a copy suffix, as a pattern of a whole lowered name."""
 
 
 def credential_temp_copies(directory: Path, entry: str) -> list[Path]:
@@ -65,8 +85,9 @@ def credential_temp_copies(directory: Path, entry: str) -> list[Path]:
     ``FILEOPS_CREDENTIAL_TEMP_COPIES`` gives for ``entry``, as the CLI writes it, case
     included: ``.auth-wQZHMQ`` beside ``.codex/auth.json``, ``.tmpafU0fU`` beside
     ``.codex/secrets/gateway_oauth.json``. Disconnecting a provider deletes these with the
-    files they copy, and no other file, so a near miss (``.auth-``, ``auth-wQZHMQ``) or
-    another file's temp copy in the same dir is not returned. An unreadable dir has none.
+    files they copy, and no other file, so a near miss (``.auth-``, ``auth-wQZHMQ``,
+    ``.auth-x.example``, ``.tmp-notes.md``) or another file's temp copy in the same dir is
+    not returned. An unreadable dir has none.
     """
     patterns = _TEMP_COPY_EXACT_NAMES.get(entry, ())
     if not patterns:
@@ -128,24 +149,22 @@ def blocked_file_suffix(name: str) -> str | None:
 def _names_credential_file(name: str, entry: str) -> bool:
     """Return whether the lowered ``name`` is the file of the credential file ``entry`` or a copy of it.
 
-    ``entry`` is a file entry of ``FILEOPS_BLOCKED_CREDENTIAL_PATHS``. A copy is the file
-    name followed by one of ``FILEOPS_CREDENTIAL_COPY_SUFFIXES`` and, optionally, a dot and
-    any further suffix (``.claude.json.backup``, ``.claude.json.backup.1763100000000``,
-    ``.claude.json.tmp.a1b2c3d4``), as Claude Code writes them; ``.claude.json.example`` and
-    ``.claude.json.backupx`` are not. It is also a temp copy that the CLI owning ``entry``
-    writes the file through, by the name ``FILEOPS_CREDENTIAL_TEMP_COPIES`` gives it
-    (``.oauth_creds.json.4242.1763100000000.0.tmp`` of ``.gemini/oauth_creds.json``,
-    ``.auth-wqzhmq`` of ``.codex/auth.json``, ``.tmpafu0fu`` of
-    ``.codex/secrets/gateway_oauth.json``), which the caller matches beside that file.
+    ``entry`` is a file entry of ``FILEOPS_BLOCKED_CREDENTIAL_PATHS``, whose name may hold
+    the wildcards :func:`_name_pattern` reads (``*.config.toml`` of ``.codex/*.config.toml``
+    is ``work.config.toml``). A copy is the file name followed by one of
+    ``FILEOPS_CREDENTIAL_COPY_SUFFIXES`` and, optionally, a dot and any further suffix
+    (``.claude.json.backup``, ``.claude.json.backup.1763100000000``,
+    ``.claude.json.tmp.a1b2c3d4``, ``.mcp.json.tmp.4452.b78c150b3d83``), as Claude Code
+    writes them; ``.claude.json.example`` and ``.claude.json.backupx`` are not. It is also a
+    temp copy that the CLI owning ``entry`` writes the file through, by the name
+    ``FILEOPS_CREDENTIAL_TEMP_COPIES`` gives it (``.oauth_creds.json.4242.1763100000000.0.tmp``
+    of ``.gemini/oauth_creds.json``, ``.auth-wqzhmq`` of ``.codex/auth.json``, ``.tmpafu0fu``
+    of ``.codex/secrets/gateway_oauth.json``), which the caller matches beside that file.
     """
-    file_name = entry.rsplit("/", 1)[-1].lower()
-    if name == file_name:
+    own = _CREDENTIAL_FILE_NAMES.get(entry)
+    if own is not None and own.fullmatch(name):
         return True
-    if name.startswith(file_name):
-        rest = name[len(file_name) :]
-        if any(rest == suffix or rest.startswith(suffix + ".") for suffix in FILEOPS_CREDENTIAL_COPY_SUFFIXES):
-            return True
-    return any(pattern.fullmatch(name) for pattern in _TEMP_COPY_NAMES.get(entry, ()))
+    return any(copy.fullmatch(name) for copy in _TEMP_COPY_NAMES.get(entry, ()))
 
 
 def blocked_credential_path(path: str) -> str | None:
@@ -153,8 +172,9 @@ def blocked_credential_path(path: str) -> str | None:
 
     ``path`` is absolute and normalised. A directory entry (``.ssh/``, ``.aws/``) matches
     that directory and every path below it, wherever it appears in ``path``; a file entry
-    (``.codex/auth.json``, ``.netrc``) matches the last components of ``path``, the last
-    one being that file's name or the name of a copy a CLI writes of it
+    (``.codex/auth.json``, ``.netrc``, ``.codex/*.config.toml``) matches the last components
+    of ``path``, the last one being that file's name (a ``*`` in it one or more characters)
+    or the name of a copy a CLI writes of it
     (:func:`_names_credential_file`: ``.claude.json.backup.1763100000000`` in any
     ``backups/`` is ``.claude.json``, and ``.gemini/.oauth_creds.json.4242.1763100000000.0.tmp``
     is ``.gemini/oauth_creds.json``). Components are compared case-insensitively, as a

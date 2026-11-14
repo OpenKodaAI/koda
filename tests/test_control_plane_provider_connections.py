@@ -1996,9 +1996,15 @@ _LOGIN_TEMP_COPIES = {
             ".auth-",
             "auth-wQZHMQ",
             ".AUTH-WQZHMQ",
+            ".auth-wQZHM",
+            ".auth-wQZHMQ7",
+            ".auth-x.example",
             ".tmpafU0fU",
             "secrets/.local.age.tmp-4242-1763100000000",
             "secrets/.tmp",
+            "secrets/.tmpl",
+            "secrets/.tmp-notes.md",
+            "secrets/.tmpafU0fU7",
             "secrets/notes.txt",
         ],
     ),
@@ -2044,13 +2050,13 @@ def test_disconnect_removes_the_temp_copies_of_the_files_it_deletes_and_nothing_
     for name in [*copies, *others]:
         (folder / name).parent.mkdir(parents=True, exist_ok=True)
         (folder / name).write_text('{"refresh_token": "1//canary-refresh"}')
-    (folder / "secrets" / ".tmpdir0").mkdir(parents=True)
+    (folder / "secrets" / ".tmpdIr0a1").mkdir(parents=True)
 
     manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, provider)
 
     assert [name for name in copies if (folder / name).exists()] == []
     assert [name for name in others if not (folder / name).is_file()] == []
-    assert (folder / "secrets" / ".tmpdir0").is_dir()
+    assert (folder / "secrets" / ".tmpdIr0a1").is_dir()
 
 
 def test_disconnect_deletes_claude_codes_login_file_with_the_mcp_client_secrets_as_its_logout_does(
@@ -2182,6 +2188,39 @@ def test_disconnect_removes_the_gemini_sign_ins_from_its_file_keychain_and_keeps
     ]
     assert after == {service: before[service] for service in after}
     assert stat.S_IMODE(keychain.stat().st_mode) == 0o600
+    assert sorted(path.name for path in keychain.parent.iterdir()) == ["gemini-credentials.json"]
+
+
+def test_disconnect_never_rewrites_a_gemini_file_keychain_in_place(monkeypatch, tmp_path):
+    """Review: no test held the disconnect to its atomic rewrite of the keychain.
+
+    The keychain is the only copy of the API key entered in the CLI, the extensions' secrets
+    and the extension integrity key. Written in place, a Koda killed mid-write would leave a
+    truncated file, which the CLI refuses to open ("Corrupted credentials file"), and every
+    one of them would be lost. Written to a complete copy that is then renamed over it, the
+    old file is never touched: a reader that opened the keychain before the disconnect reads
+    all of the old keychain to the end, and the path then names another file, which holds
+    the rest of the keychain.
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager, keychain = _gemini_keychain(
+        monkeypatch, tmp_path, "gemini-0.68.0-gemini-credentials.json", _GEMINI_KEYCHAIN_IDENTITY
+    )
+    with keychain.open("rb") as before:
+        written = before.read()
+        old_file = os.fstat(before.fileno())
+
+        manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, "gemini")
+
+        before.seek(0)
+        assert before.read() == written
+        assert os.fstat(before.fileno()).st_size == old_file.st_size
+    new_file = keychain.stat()
+    assert (new_file.st_dev, new_file.st_ino) != (old_file.st_dev, old_file.st_ino)
+    after = _decrypt_gemini_keychain(keychain.read_text(), *_GEMINI_KEYCHAIN_IDENTITY)
+    assert "gemini-cli-oauth" not in after
+    assert "gemini-cli-api-key" in after
     assert sorted(path.name for path in keychain.parent.iterdir()) == ["gemini-credentials.json"]
 
 

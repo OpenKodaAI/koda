@@ -795,8 +795,13 @@ ANTHROPIC_PROFILE_CONFIG_DIR_ENV_KEY = "ANTHROPIC_CONFIG_DIR"
 ANTHROPIC_FEDERATION_CACHE_DIR_ENV_KEY = "CLAUDE_CODE_FEDERATION_CACHE_DIR"
 # The other files that hold a Claude Code credential in HOME, besides its login
 # (.claude/.credentials.json above, which also holds the MCP servers' OAuth tokens and client
-# secrets), as the pinned CLI names them: the global config (with each MCP server's env and
-# headers that `claude mcp add` writes there), whose copies (<name>.backup beside it, and
+# secrets), as the pinned CLI names them: the project-scope MCP config (.mcp.json, where
+# `claude mcp add -s project` writes each MCP server's env and HTTP headers as literal values,
+# in the dir it runs in, through .mcp.json.tmp.<pid>.<hex>, refused as a copy by
+# FILEOPS_CREDENTIAL_COPY_SUFFIXES below: with the work dir as that dir, ~/.mcp.json, and the
+# CLI's own sandbox lists the name among its credential files wherever it sits); the global
+# config (with each MCP server's env and headers that `claude mcp add` writes there for the
+# local and user scopes), whose copies (<name>.backup beside it, and
 # <name>.backup.<ts> and <name>.corrupted.<ts> in its config dir's backups/) are refused by
 # FILEOPS_CREDENTIAL_COPY_SUFFIXES below wherever they sit, and .claude/backups/ as a
 # whole; the device private keys it keeps where no keychain holds them (.device-keys.json,
@@ -818,6 +823,7 @@ ANTHROPIC_FEDERATION_CACHE_DIR_ENV_KEY = "CLAUDE_CODE_FEDERATION_CACHE_DIR"
 # global config is also the operator's settings and project list. The CLI's other keys
 # (.claude/sessions/*.key) are refused by extension, with their copies.
 CLAUDE_CODE_CREDENTIAL_PATHS: tuple[str, ...] = (
+    ".mcp.json",
     *CLAUDE_CODE_GLOBAL_CONFIG_FILES,
     ".claude/backups/",
     ".device-keys.json",
@@ -842,7 +848,9 @@ CLAUDE_CODE_CREDENTIAL_PATHS: tuple[str, ...] = (
 # (.gemini/cli-browser-profile/: the agent is off by default, and this is its profile in the
 # default persistent session mode). A file entry matches wherever it sits, so a project's own
 # .gemini/settings.json, where `gemini mcp add` writes by default (its project scope), is
-# refused too. Disconnecting the provider does not delete them: the settings and the
+# refused too, as a project's .mcp.json and .codex/config.toml are: a name cannot tell a
+# committed file with no secret from one a CLI wrote a secret into. Disconnecting the provider
+# does not delete them: the settings and the
 # extensions' secrets are the operator's, and without the keychain's integrity key every
 # installed extension fails its integrity check; it removes only the sign-ins from the
 # keychain (GEMINI_CLI_KEYCHAIN_SIGN_IN_SERVICES). Where the keychain fails, the CLI keeps that
@@ -858,22 +866,29 @@ GEMINI_CLI_CREDENTIAL_PATHS: tuple[str, ...] = (
 # it and renamed over it, FILEOPS_CREDENTIAL_TEMP_COPIES below), where `codex mcp add` writes
 # each MCP server's env (--env) and the OAuth client secret of a pre-registered client
 # (--oauth-client-secret), and which holds the HTTP headers an operator gives an MCP server or
-# a model provider; and its secrets dir as a whole: the gateway OAuth file store and its lock
-# (secrets/gateway_oauth.json, gateway_oauth.lock), the encrypted secrets store
-# (secrets/local.age, the secrets the operator stores with Codex, and codex_auth.age,
-# mcp_oauth.age and gateway_oauth.age) and the temp copies each is written through. Everything
-# in the secrets dir is a secret, so it is refused as a whole. A file entry matches wherever it
-# sits, so a project's own .codex/config.toml is refused too. Disconnecting the provider deletes
-# only the sign-ins (PROVIDER_CLI_CREDENTIAL_FILES): the config is the operator's.
-CODEX_CREDENTIAL_PATHS: tuple[str, ...] = (".codex/config.toml", ".codex/secrets/")
+# a model provider; the profile configs beside it (.codex/<name>.config.toml, "*" below
+# standing for the name), which `codex --profile <name>` layers on top of config.toml, with
+# the same MCP servers' env, headers and client secrets, and where Codex itself tells the
+# operator to move a legacy [profiles.<name>] table (Codex takes a name of ASCII letters,
+# digits, "-" and "_"; the entry refuses any name before .config.toml there); and its secrets
+# dir as a whole: the gateway OAuth file store and its lock (secrets/gateway_oauth.json,
+# gateway_oauth.lock), the encrypted secrets store (secrets/local.age, the secrets the operator
+# stores with Codex, and codex_auth.age, mcp_oauth.age and gateway_oauth.age) and the temp
+# copies each is written through. Everything in the secrets dir is a secret, so it is refused
+# as a whole. A file entry matches wherever it sits, so a project's own .codex/config.toml is
+# refused too. Disconnecting the provider deletes only the sign-ins
+# (PROVIDER_CLI_CREDENTIAL_FILES): the config and the profiles are the operator's.
+CODEX_CREDENTIAL_PATHS: tuple[str, ...] = (".codex/config.toml", ".codex/*.config.toml", ".codex/secrets/")
 # Credential stores that the provider and developer CLIs keep in HOME, which is also the
 # default Docker work dir (HOME=/var/lib/koda/runtime/home). The file commands, the agent
 # file tools and browser_upload refuse them like a blocked extension. An entry ending in
 # "/" is a directory, refused with everything below it wherever it appears in a path; any
 # other entry is a file, matched by the last components of the path, together with the
 # copies of it named by FILEOPS_CREDENTIAL_COPY_SUFFIXES and the temp copies beside it that
-# FILEOPS_CREDENTIAL_TEMP_COPIES names. The names of FILEOPS_CREDENTIAL_NAME_PREFIXES are
-# refused with them. Case-insensitive.
+# FILEOPS_CREDENTIAL_TEMP_COPIES names. A file entry's name may hold "*", one or more
+# characters (.codex/*.config.toml), and "?", one ASCII letter or digit; the dirs above it
+# are matched by their names. The names of FILEOPS_CREDENTIAL_NAME_PREFIXES are refused with
+# them. Case-insensitive.
 FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
     ".ssh/",
     ".gnupg/",
@@ -913,36 +928,38 @@ FILEOPS_CREDENTIAL_COPY_SUFFIXES: tuple[str, ...] = (".backup", ".corrupted", ".
 # The temp copies a provider CLI writes a credential file of PROVIDER_CLI_CREDENTIAL_FILES,
 # GEMINI_CLI_CREDENTIAL_PATHS or CODEX_CREDENTIAL_PATHS through, in the same dir, before it
 # renames the copy over the file: file entry of FILEOPS_BLOCKED_CREDENTIAL_PATHS -> the names
-# of those copies, where "*" stands for one or more characters. A copy holds the same secret,
-# and a CLI killed between the write and the rename (a Koda cancel or timeout, a container
-# restart, OOM) leaves it beside the file, where no CLI ever removes it. As the pinned CLIs
-# (packages/provider-clis) name them: Claude Code 2.1.325 writes .credentials.json through
-# .credentials.json.tmp.<hex> (its atomic write; the file layer refuses that name anywhere
-# already, by its .credentials stem); Gemini CLI 0.68.0 writes the merged OAuth login, access
-# and refresh token, through .oauth_creds.json.<pid>.<ms>.<n>.tmp on every token refresh
-# (cacheCredentials), and its settings, with the MCP servers' env and headers, through
-# .settings.json.<pid>.<ms>.<n>.tmp (strace of `gemini mcp add`); Codex 0.169.0 replaces
-# auth.json through .auth-<random> (its atomic credential replacement), config.toml, with the
-# MCP servers' env and client secrets, through .tmp<random> (strace of `codex mcp add`), its
-# gateway OAuth file store through secrets/.tmp<random> (a tempfile it renames over
-# secrets/gateway_oauth.json) and each file of its encrypted secrets store through
+# of those copies, where "*" stands for one or more characters and "?" for one ASCII letter or
+# digit. A copy holds the same secret, and a CLI killed between the write and the rename (a
+# Koda cancel or timeout, a container restart, OOM) leaves it beside the file, where no CLI
+# ever removes it. As the pinned CLIs (packages/provider-clis) name them: Claude Code 2.1.325
+# writes .credentials.json through .credentials.json.tmp.<hex> (its atomic write; the file
+# layer refuses that name anywhere already, by its .credentials stem); Gemini CLI 0.68.0
+# writes the merged OAuth login, access and refresh token, through
+# .oauth_creds.json.<pid>.<ms>.<n>.tmp on every token refresh (cacheCredentials), and its
+# settings, with the MCP servers' env and headers, through .settings.json.<pid>.<ms>.<n>.tmp
+# (strace of `gemini mcp add`); Codex 0.169.0 writes through Rust tempfiles, whose name is a
+# prefix and six random ASCII letters and digits (.tmpTICjQR, .tmpmcry9f, .auth-wQZHMQ): it
+# replaces auth.json through .auth-<six>, its atomic credential replacement, config.toml,
+# with the MCP servers' env and client secrets, through .tmp<six> (strace of `codex mcp add`)
+# and its gateway OAuth file store through secrets/.tmp<six> (a tempfile it renames over
+# secrets/gateway_oauth.json), and each file of its encrypted secrets store through
 # secrets/.<name>.tmp-<a>-<b>. They write the other files of PROVIDER_CLI_CREDENTIAL_FILES and
 # GEMINI_CLI_CREDENTIAL_PATHS in place. So .gemini/.oauth_creds.json.4242.1763100000000.0.tmp,
 # .gemini/.settings.json.4242.1763100000000.0.tmp, .codex/.auth-wQZHMQ, .codex/.tmpafU0fU and
 # .codex/secrets/.tmpafU0fU are refused as .gemini/oauth_creds.json, .gemini/settings.json,
 # .codex/auth.json, .codex/config.toml and .codex/secrets/gateway_oauth.json are, but not in
-# another dir, and .gemini/.oauth_creds.json.bak and .codex/auth-x are not. The file layer
-# compares them case-insensitively, like the entries. Disconnecting a provider deletes the
-# copies of each file it deletes, beside it, by these names exactly as written
-# (koda/utils/files.py::credential_temp_copies), and no other file: the copies of the
-# settings it keeps stay with them.
+# another dir, and .gemini/.oauth_creds.json.bak, .codex/auth-x, .codex/.auth-x.example and
+# .codex/.tmpl are not. The file layer compares them case-insensitively, like the entries.
+# Disconnecting a provider deletes the copies of each file it deletes, beside it, by these
+# names exactly as written (koda/utils/files.py::credential_temp_copies), and no other file:
+# the copies of the settings it keeps stay with them.
 FILEOPS_CREDENTIAL_TEMP_COPIES: dict[str, tuple[str, ...]] = {
     ".claude/.credentials.json": (".credentials.json.tmp.*",),
     ".gemini/oauth_creds.json": (".oauth_creds.json.*.tmp",),
     ".gemini/settings.json": (".settings.json.*.tmp",),
-    ".codex/auth.json": (".auth-*",),
-    ".codex/config.toml": (".tmp*",),
-    ".codex/secrets/gateway_oauth.json": (".tmp*",),
+    ".codex/auth.json": (".auth-??????",),
+    ".codex/config.toml": (".tmp??????",),
+    ".codex/secrets/gateway_oauth.json": (".tmp??????",),
     ".codex/secrets/codex_auth.age": (".codex_auth.age.tmp-*",),
     ".codex/secrets/mcp_oauth.age": (".mcp_oauth.age.tmp-*",),
     ".codex/secrets/gateway_oauth.age": (".gateway_oauth.age.tmp-*",),

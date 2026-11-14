@@ -412,6 +412,16 @@ class TestCredentialStoresAreSecretFiles:
             ("/srv/koda-user/.codex/.tmpM6o6al", ".codex/config.toml"),
             ("/srv/koda-user/.codex/.tmpafU0fU", ".codex/config.toml"),
             ("/srv/koda-user/project/.codex/config.toml", ".codex/config.toml"),
+            ("/srv/koda-user/.codex/work.config.toml", ".codex/*.config.toml"),
+            ("/srv/koda-user/.codex/Work-1_x.config.toml", ".codex/*.config.toml"),
+            ("/srv/koda-user/.CODEX/WORK.CONFIG.TOML", ".codex/*.config.toml"),
+            ("/srv/koda-user/project/.codex/dev.config.toml", ".codex/*.config.toml"),
+            ("/srv/koda-user/.codex/.tmpYDDksZ", ".codex/config.toml"),
+            ("/srv/koda-user/.mcp.json", ".mcp.json"),
+            ("/srv/koda-user/.MCP.JSON", ".mcp.json"),
+            ("/srv/koda-user/.mcp.json.tmp.4452.b78c150b3d83", ".mcp.json"),
+            ("/srv/koda-user/project/.mcp.json", ".mcp.json"),
+            ("/srv/koda-user/project/.mcp.json.tmp.23345.da3f1c390b3b", ".mcp.json"),
             ("/srv/koda-user/.gemini/cli-browser-profile/Default/Cookies", ".gemini/cli-browser-profile/"),
             ("/srv/koda-user/.gemini/cli-browser-profile", ".gemini/cli-browser-profile/"),
             ("/srv/koda-user/.codex/.credentials.json", ".codex/.credentials.json"),
@@ -502,7 +512,24 @@ class TestCredentialStoresAreSecretFiles:
             "/srv/koda-user/.claude/ide-notes.md",
             "/srv/koda-user/project/ide/48123.lock",
             "/srv/koda-user/project/bridge-spawn/config.json",
-            "/srv/koda-user/project/.mcp.json",
+            "/srv/koda-user/project/mcp.json",
+            "/srv/koda-user/.cursor/mcp.json",
+            "/srv/koda-user/.mcp.json.example",
+            "/srv/koda-user/.mcp.jsonl",
+            "/srv/koda-user/.codex/work.config.toml.example",
+            "/srv/koda-user/.codex/.config.toml",
+            "/srv/koda-user/.codex/work.config.tomlx",
+            "/srv/koda-user/project/work.config.toml",
+            "/srv/koda-user/.codex/.tmpl",
+            "/srv/koda-user/.codex/.tmp.md",
+            "/srv/koda-user/.codex/.tmp-notes.md",
+            "/srv/koda-user/.codex/.tmpabc.example",
+            "/srv/koda-user/.codex/.tmpafU0f",
+            "/srv/koda-user/.codex/.tmpafU0fU7",
+            "/srv/koda-user/.codex/.auth-x.example",
+            "/srv/koda-user/.codex/.auth-wQZHM",
+            "/srv/koda-user/.codex/.auth-wQZHMQ7",
+            "/srv/koda-user/.codex/.auth-wQ-HMQ",
             "/srv/koda-user/project/.config.json",
             "/srv/koda-user/project/claude.json",
             "/srv/koda-user/.claude.json.example",
@@ -631,11 +658,12 @@ class TestCredentialStoresAreSecretFiles:
             ".gemini/.settings.json.15792.1794689666313.0.tmp",
             ".codex/config.toml",
             ".codex/.tmpM6o6al",
+            ".codex/work.config.toml",
             ".codex/secrets/local.age",
             ".codex/secrets/.local.age.tmp-4242-1763100000000",
             ".codex/secrets/gateway_oauth.lock",
         ]
-        visible = [".gemini/GEMINI.md", ".codex/AGENTS.md", ".codex/config.toml.lock"]
+        visible = [".gemini/GEMINI.md", ".codex/AGENTS.md", ".codex/config.toml.lock", ".codex/.tmp-notes.md"]
         for store in [*kept, *visible]:
             (home / store).parent.mkdir(parents=True, exist_ok=True)
             (home / store).write_text('{"refresh_token": "1//canary-refresh"}\n')
@@ -717,11 +745,165 @@ class TestCredentialStoresAreSecretFiles:
         from koda.utils.files import credential_temp_copies
 
         secrets = tmp_path / ".codex" / "secrets"
-        (secrets / ".tmpdir0").mkdir(parents=True)
-        (secrets / ".tmpdir0" / "keep.txt").write_text("keep")
+        (secrets / ".tmpdIr0a1").mkdir(parents=True)
+        (secrets / ".tmpdIr0a1" / "keep.txt").write_text("keep")
         (secrets / ".tmpafU0fU").write_text('{"refresh_token": "canary-refresh"}')
 
         assert credential_temp_copies(secrets, ".codex/secrets/gateway_oauth.json") == [secrets / ".tmpafU0fU"]
+
+    def test_codex_temp_copies_are_matched_by_the_name_its_tempfiles_get(self, tmp_path):
+        """Codex 0.169.0 writes through Rust tempfiles: the prefix, then six random ASCII letters and digits.
+
+        strace of ``codex mcp add`` shows ``.codex/.tmpTICjQR``, ``.tmpR17T4v``, ``.tmpTZqGkr``
+        and ``.tmpmcry9f``, and its credential replacement writes ``.auth-wQZHMQ``. A ``.tmp`` or
+        ``.auth-`` name of any other shape is no such copy: it stays readable, and the disconnect,
+        which deletes the copies beside the files it deletes, keeps it.
+        """
+        from koda.utils.files import blocked_credential_path, credential_temp_copies
+
+        codex = tmp_path / ".codex"
+        secrets = codex / "secrets"
+        secrets.mkdir(parents=True)
+        copies = [".auth-wQZHMQ", ".auth-MdInxh", ".auth-123456"]
+        others = [".auth-", ".auth-wQZHM", ".auth-wQZHMQ7", ".auth-wQ-HMQ", ".auth-x.example", ".auth-wQZHMQ.bak"]
+        for name in (*copies, *others):
+            (codex / name).write_text('{"refresh_token": "canary-refresh"}')
+        gateway_copies = [".tmpafU0fU", ".tmpLeft01"]
+        gateway_others = [".tmp", ".tmpl", ".tmp.md", ".tmp-notes.md", ".tmpafU0f", ".tmpafU0fU7", ".tmpabc.example"]
+        for name in (*gateway_copies, *gateway_others):
+            (secrets / name).write_text('{"refresh_token": "canary-refresh"}')
+
+        assert sorted(path.name for path in credential_temp_copies(codex, ".codex/auth.json")) == sorted(copies)
+        assert sorted(
+            path.name for path in credential_temp_copies(secrets, ".codex/secrets/gateway_oauth.json")
+        ) == sorted(gateway_copies)
+        for name in ("/w/.codex/.tmpTICjQR", "/w/.codex/.TMPMCRY9F", "/w/.CODEX/.AUTH-WQZHMQ"):
+            assert blocked_credential_path(name) in {".codex/config.toml", ".codex/auth.json"}, name
+        for name in (
+            "/w/.codex/.tmpl",
+            "/w/.codex/.tmp.md",
+            "/w/.codex/.tmp-notes.md",
+            "/w/.codex/.tmpabc.example",
+            "/w/.codex/.auth-x.example",
+            "/w/examples/.codex/.tmpl",
+        ):
+            assert blocked_credential_path(name) is None, name
+
+    def test_a_wildcard_in_a_credential_entry_is_in_its_file_name_only(self):
+        """``*`` and ``?`` stand for characters of a file name; the dirs above it are matched by name.
+
+        The move checks (:func:`koda.utils.files._entry_completions`) walk an entry's dirs by
+        their names, so a wildcard there would never be matched, and a directory entry is
+        matched by its whole name.
+        """
+        from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS
+
+        for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS:
+            *dirs, name = entry.rstrip("/").split("/")
+            assert not any("*" in part or "?" in part for part in dirs), entry
+            if entry.endswith("/"):
+                assert "*" not in name and "?" not in name, entry
+
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"deny_sensitive_dirs": False}, {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True}],
+        ids=["the file tools", "the file commands", "browser_upload"],
+    )
+    def test_each_clis_mcp_config_is_refused_wherever_it_sits(self, tmp_path, monkeypatch, options):
+        """Review: the project-scope MCP config Claude Code writes stayed readable, while Gemini CLI's was refused.
+
+        Each pinned CLI writes an MCP server's env and HTTP headers, as literal values, into a
+        config file it names, in HOME and in the project it runs in. Claude Code 2.1.325
+        writes ``<cwd>/.mcp.json`` for ``claude mcp add -s project`` (through
+        ``.mcp.json.tmp.<pid>.<hex>``), and ``.claude.json`` for the local and user scopes;
+        ``gemini mcp add`` writes ``<cwd>/.gemini/settings.json`` by default and
+        ``~/.gemini/settings.json`` with ``-s user``; Codex 0.169.0 reads them from
+        ``config.toml`` and, for ``--profile <name>``, from ``<name>.config.toml`` beside it,
+        where its own migration message tells the operator to move a profile. Koda runs these
+        CLIs in the work dir, which is HOME in Docker and ``~`` natively by default. A name
+        cannot tell a committed file with no secret from one a CLI wrote a secret into, so
+        the one rule is that each is refused by its name wherever it sits, as Claude Code's
+        own sandbox treats ``.mcp.json``. A template beside it stays readable, and the
+        disconnect keeps them all: they are the operator's settings.
+        """
+        import koda.control_plane.manager as manager_mod
+
+        home = tmp_path.resolve() / "home"
+        stores = [
+            ".mcp.json",
+            ".mcp.json.tmp.4452.b78c150b3d83",
+            "project/.mcp.json",
+            ".claude.json",
+            ".gemini/settings.json",
+            "project/.gemini/settings.json",
+            ".codex/config.toml",
+            "project/.codex/config.toml",
+            ".codex/work.config.toml",
+            "project/.codex/dev.config.toml",
+        ]
+        templates = [
+            ".mcp.json.example",
+            "project/.mcp.json.example",
+            "project/.gemini/settings.json.example",
+            "project/.codex/config.toml.example",
+            ".codex/work.config.toml.example",
+        ]
+        for path in (*stores, *templates):
+            (home / path).parent.mkdir(parents=True, exist_ok=True)
+            (home / path).write_text('{"mcpServers": {"s": {"headers": {"Authorization": "Bearer canary"}}}}\n')
+        monkeypatch.setenv("HOME", str(home))
+
+        for store in stores:
+            resolution = resolve_work_path(store, str(home), **options)
+            assert resolution.path is None, store
+            assert resolution.reason == "path_blocked_file", store
+            assert "is a credential store" in (resolution.error or ""), store
+        for path in templates:
+            assert resolve_work_path(path, str(home), **options).path == home / path, path
+
+        for provider in ("claude", "gemini", "codex"):
+            manager_mod.ControlPlaneManager._wipe_provider_credential_files(
+                object.__new__(manager_mod.ControlPlaneManager), provider
+            )
+        assert [path for path in (*stores, *templates) if not (home / path).is_file()] == []
+
+    def test_the_guardrail_matrix_states_one_rule_for_every_clis_mcp_config(self):
+        """The row states one rule for each CLI's MCP config, and lists each with the other files of its CLI.
+
+        The sentence that says a file entry matches wherever it sits names the MCP config of
+        each CLI, and the sentences that list the other files holding a CLI's secret in HOME
+        name Claude Code's ``.mcp.json`` and Codex's profile configs.
+        """
+        from pathlib import Path
+
+        matrix = (Path(__file__).resolve().parents[2] / "docs/security/guardrail-test-matrix.md").read_text()
+        row = next(line for line in matrix.splitlines() if line.startswith("| File operations |"))
+        start = row.index("A file entry matches wherever it sits")
+        sentence = row[start : row.index(". ", start)]
+        for name in ("`.mcp.json`", "`.gemini/settings.json`", "`.codex/config.toml`", "`.codex/*.config.toml`"):
+            assert name in sentence, name
+        for owner, name in (
+            ("The other Claude Code entries are", "`.mcp.json`"),
+            ("The Gemini CLI and Codex entries beside them are", "`.codex/*.config.toml`"),
+        ):
+            start = row.index(owner)
+            assert name in row[start : row.index(". ", start)], owner
+
+    def test_the_guardrail_matrix_says_the_disconnect_keeps_the_keychains_other_entries(self):
+        """The disconnect deletes a Gemini file keychain that held only sign-ins, so the row must not say it never does.
+
+        ``koda.utils.gemini_keychain.remove_keychain_services`` deletes a keychain left with no
+        entry, as the CLI does, and keeps the other entries of any other one.
+        """
+        from pathlib import Path
+
+        matrix = (Path(__file__).resolve().parents[2] / "docs/security/guardrail-test-matrix.md").read_text()
+        row = next(line for line in matrix.splitlines() if line.startswith("| File operations |"))
+        assert "deletes none of the keychain" not in row
+        start = row.index("Disconnecting the provider keeps")
+        sentence = row[start : row.index(". ", start)]
+        assert "the keychain's other entries" in sentence
+        assert "It deletes a keychain left with no entry, as the CLI does" in row
 
     def test_the_guardrail_matrix_says_the_disconnect_deletes_claude_codes_mcp_client_secrets(self):
         """Claude Code's login file also holds the MCP OAuth client secrets the operator entered.
@@ -844,6 +1026,8 @@ class TestCredentialStoresAreSecretFiles:
             "test_the_guardrail_matrix_names_exactly_the_temp_copies_refused_with_a_credential_file",
             "test_the_guardrail_matrix_names_exactly_the_credential_name_prefixes",
             "test_the_guardrail_matrix_says_the_disconnect_deletes_claude_codes_mcp_client_secrets",
+            "test_the_guardrail_matrix_states_one_rule_for_every_clis_mcp_config",
+            "test_the_guardrail_matrix_says_the_disconnect_keeps_the_keychains_other_entries",
             "test_the_guardrail_matrix_cites_its_credential_tests_by_name",
         ):
             assert f"{own}::{name}" in cited, name

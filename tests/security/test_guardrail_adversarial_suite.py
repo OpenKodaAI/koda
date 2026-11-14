@@ -1327,6 +1327,9 @@ _DOCKER_HOME_CREDENTIAL_STORES = [
     ".codex/secrets/local.age",
     ".codex/config.toml",
     ".codex/.tmpM6o6al",
+    ".codex/work.config.toml",
+    ".mcp.json",
+    ".mcp.json.tmp.4452.b78c150b3d83",
     ".gemini/oauth_creds.json",
     ".gemini/mcp-oauth-tokens.json",
     ".gemini/a2a-oauth-tokens.json",
@@ -1465,6 +1468,8 @@ _NATIVE_CLAUDE_CODE_CREDENTIAL_FILES = [
     ".claude.json.tmp.a1b2c3d4",
     ".claude.json.tmp.4242.a1b2c3d4e5f6",
     ".claude/.config.json.tmp.a1b2c3d4",
+    ".mcp.json",
+    ".mcp.json.tmp.4452.b78c150b3d83",
     ".claude/.device-keys.json",
     ".claude/daemon/auth/a1b2c3.json",
     ".claude/daemon/auth/a1b2c3.tokens.json",
@@ -1750,12 +1755,29 @@ async def test_a_temp_copy_of_a_provider_login_left_by_a_killed_cli_is_refused_o
     assert not (home / "other" / "cli-old").exists()
 
 
-# The files the pinned Codex (0.169.0) and Gemini CLI (0.68.0) write their MCP servers' secrets
-# into, with what `codex mcp add foo --url ... --oauth-client-id X --oauth-client-secret S`,
-# `codex mcp add bar --env API_KEY=K -- cmd` and `gemini mcp add [-s user] -t http -H
-# 'Authorization: Bearer T' gfoo URL` wrote there (strace, a fresh HOME, dummy values), and
-# the temp copy each was written through. Gemini CLI writes a project's settings by default.
+# The files the pinned Claude Code (2.1.325), Codex (0.169.0) and Gemini CLI (0.68.0) write or
+# read their MCP servers' secrets in, with what `claude mcp add -s project -t http cproj URL -H
+# 'Authorization: Bearer T'`, `claude mcp add -s project cbar -e API_KEY=K -- cmd`, `codex mcp add
+# foo --url ... --oauth-client-id X --oauth-client-secret S`, `codex mcp add bar --env API_KEY=K --
+# cmd` and `gemini mcp add [-s user] -t http -H 'Authorization: Bearer T' gfoo URL` wrote there
+# (strace, a fresh HOME, cwd HOME, dummy values), and the temp copy each was written through.
+# Claude Code writes <cwd>/.mcp.json for its project scope, and Gemini CLI a project's settings
+# by default. Codex reads a profile's MCP servers from <name>.config.toml beside config.toml
+# (`codex --profile work mcp list --json` returned its header and env).
 _MCP_SECRET_STORES = {
+    ".mcp.json": (
+        '{\n  "mcpServers": {\n    "cproj": {\n      "type": "http",\n      "url": "http://127.0.0.1:9/mcp",\n'
+        '      "headers": {\n        "Authorization": "Bearer canary-header"\n      }\n    },\n'
+        '    "cbar": {\n      "type": "stdio",\n      "command": "/bin/true",\n      "args": [],\n'
+        '      "env": {\n        "API_KEY": "canary-env-key"\n      }\n    }\n  }\n}\n'
+    ),
+    ".mcp.json.tmp.4452.b78c150b3d83": '{"mcpServers": {"cproj": {"headers": {"Authorization": "Bearer canary"}}}}\n',
+    "project/.mcp.json": '{"mcpServers": {"cbar": {"env": {"API_KEY": "canary-env-key"}}}}\n',
+    ".codex/work.config.toml": (
+        '[mcp_servers.x]\nurl = "http://127.0.0.1:9/mcp"\nhttp_headers = { Authorization = "Bearer canary-header" }\n'
+        '[mcp_servers.y]\ncommand = "/bin/true"\nenv = { API_KEY = "canary-env-key" }\n'
+    ),
+    "project/.codex/config.toml": '[mcp_servers.bar.env]\nAPI_KEY = "canary-env-key"\n',
     ".codex/config.toml": (
         '[mcp_servers.foo.oauth]\nclient_id = "dummy-cid"\nclient_secret = "canary-client-secret"\n\n'
         '[mcp_servers.bar.env]\nAPI_KEY = "canary-env-key"\n'
@@ -1774,19 +1796,23 @@ _MCP_SECRET_STORES = {
 @pytest.mark.guardrail
 @pytest.mark.asyncio
 @pytest.mark.parametrize("store", list(_MCP_SECRET_STORES))
-async def test_the_mcp_secrets_codex_and_gemini_cli_write_are_refused_on_every_surface(
+async def test_the_mcp_secrets_the_provider_clis_write_are_refused_on_every_surface(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any, store: str
 ) -> None:
-    """Review: the MCP secrets Codex and Gemini CLI write in HOME were readable, while Claude Code's were not.
+    """Review: the MCP secrets the CLIs write in HOME were readable outside the few files Koda knew.
 
     ``codex mcp add`` writes an MCP server's OAuth client secret and env into
     ``~/.codex/config.toml`` through ``.codex/.tmp<random>``, and ``gemini mcp add`` writes its
     HTTP headers and env into ``.gemini/settings.json`` (``~/.gemini`` for the user scope, the
-    project's for the default project scope) through ``.settings.json.<pid>.<ms>.<n>.tmp``. In
-    the Docker HOME, the work dir, file_read, ``/cat``, browser_upload and ``file_grep
-    secret|Bearer path=.codex`` returned them, a CLI killed before the rename left the temp copy
-    with the same secrets, and file_write and file_edit could rewrite them. Koda already refused
-    the same secrets in Claude Code's ``.claude.json`` and ``.claude/.credentials.json``.
+    project's for the default project scope) through ``.settings.json.<pid>.<ms>.<n>.tmp``.
+    ``claude mcp add -s project`` writes them into ``<cwd>/.mcp.json`` through
+    ``.mcp.json.tmp.<pid>.<hex>``: with the work dir as cwd, ``~/.mcp.json``. Codex reads a
+    profile's from ``~/.codex/<name>.config.toml``, where its own message moves a legacy
+    profile. In the Docker HOME, the work dir, file_read, ``/cat``, browser_upload and
+    ``file_grep secret|Bearer`` returned them, a CLI killed before the rename left the temp
+    copy with the same secrets, and file_write and file_edit could rewrite them, also the
+    MCP server's command. Koda already refused the same secrets in Claude Code's
+    ``.claude.json`` and ``.claude/.credentials.json``.
     """
     from koda.handlers.fileops import cmd_cat
     from koda.services.browser_manager import browser_manager
@@ -1875,6 +1901,47 @@ async def test_file_move_cannot_rename_a_credential_store_out_of_its_name(
     assert not moved.success, moved.output
     assert "credential store" in moved.output, moved.output
     assert (home / source).is_dir()
+    assert not (home / destination).exists()
+    assert not read.success
+    assert "canary" not in read.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("store", "source", "destination"),
+    [
+        (".codex/work.config.toml", ".codex", "codex-old"),
+        (".codex/work.config.toml", ".codex/work.config.toml", "work.toml"),
+        (".mcp.json", ".mcp.json", "mcp.json"),
+        (".mcp.json.tmp.4452.b78c150b3d83", ".mcp.json.tmp.4452.b78c150b3d83", "mcp.json"),
+    ],
+)
+async def test_file_move_cannot_take_an_mcp_config_out_of_its_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: str, source: str, destination: str
+) -> None:
+    """A Codex profile and Claude Code's project-scope MCP config hold the MCP servers' secrets.
+
+    ``.codex/<name>.config.toml`` is recognised by its parent's name, so renaming ``.codex``
+    would leave it under a name the policy does not recognise; and the file itself, or the
+    temp copy Claude Code writes ``.mcp.json`` through, must not move to a name of the
+    agent's choosing either. Either way file_read, which needs no approval, would return it.
+    """
+    from koda.services.tool_dispatcher import _handle_file_move, _handle_file_read
+
+    home = _native_claude_home(tmp_path, monkeypatch) / "other-home"
+    (home / store).parent.mkdir(parents=True, exist_ok=True)
+    (home / store).write_text('{"headers": {"Authorization": "Bearer canary-header"}}\n', encoding="utf-8")
+    moved_store = destination + store[len(source) :]
+    ctx = _file_tool_context(home)
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        moved = await _handle_file_move({"source": source, "destination": destination}, ctx)
+        read = await _handle_file_read({"path": moved_store}, ctx)
+
+    assert not moved.success, moved.output
+    assert "credential store" in moved.output, moved.output
+    assert (home / store).is_file()
     assert not (home / destination).exists()
     assert not read.success
     assert "canary" not in read.output
@@ -2007,6 +2074,11 @@ def _move_staging_work_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, stag
             ".config/anthropic/credentials/default.json",
         ),
         ("staging/auth.json", "staging", "backup", "backup/.codex", "backup/.codex/auth.json"),
+        ("evil.toml", "evil.toml", ".codex", ".codex/work.config.toml", ".codex/work.config.toml"),
+        ("work.config.toml", "work.config.toml", ".codex", ".codex", ".codex/work.config.toml"),
+        ("staging/dev.config.toml", "staging", "", ".codex", ".codex/dev.config.toml"),
+        ("mcp.json", "mcp.json", "", ".mcp.json", ".mcp.json"),
+        ("mcp.json", "mcp.json", "project", "project/.mcp.json", "project/.mcp.json"),
     ],
 )
 async def test_file_move_cannot_plant_a_credential_store_where_it_lands(
