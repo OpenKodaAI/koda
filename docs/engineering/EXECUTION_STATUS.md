@@ -18,20 +18,20 @@ iteration.
 - Cloud environment `koda` (personal): limited network (package registries + Google Fonts); `AGENT_TOKEN` / `ALLOWED_USER_IDS` set to CI dummy values in fresh sessions.
 - 4 CPUs / 15 GB RAM: workflow subagent concurrency is effectively 2.
 - PostgreSQL 16 + pgvector can be installed locally (`apt-get install -y postgresql-16-pgvector`); Docker is not available, so testcontainers-based fixtures skip.
-- Parallel worktrees: the pytest conftest builds the Rust security service per checkout (~1.5 GB `rust/target` each). Next waves share one service built from the main checkout (start `rust/target/debug/koda-security-service` once, point every worktree's `SECURITY_GRPC_TARGET` at it) and delete worktree `rust/target` dirs after merge. Disk headroom was 9.6 GB with 7 worktrees.
+- Parallel worktrees: the pytest conftest builds the Rust security service per checkout (~1.5 GB `rust/target` each). Waves share one service built from the main checkout (start `rust/target/debug/koda-security-service` once with `SECURITY_GRPC_TARGET=127.0.0.1:50300`) and delete worktree `rust/target` dirs after merge. Once M0-E2-T1 is on the branch, worktrees opt in with `KODA_TEST_SECURITY_GUARD_TARGET=127.0.0.1:50300` (an ambient `SECURITY_GRPC_TARGET` is ignored; without the opt-in each session starts its own guard on a private Unix socket). A shared guard runs the Rust build it was started from, so runs that change `rust/koda-security-*` must not use it. Disk headroom was 7.9 GB with 7 worktrees.
 - Outbound web access is restricted: reference-product research relies on search results; anything not verifiable is marked as such.
 
 ## Current phase
 
-**Phase Zero — Repository discovery & verified baseline** (in progress)
+**Phase Five — execution loop** (Phase Zero and Phase One complete).
 
 | Step | Status | Evidence |
 |---|---|---|
-| Mission stored durably | done | `docs/engineering/MISSION.md` |
-| Validation baseline run | done | `QUALITY_BASELINE.md`: all gates green except the documented `cargo fmt` command (tooling bug, fixed); 188 Postgres tests skipped |
-| Subsystem discovery (multi-agent) | running | `SYSTEM_INVENTORY.md`, `ARCHITECTURE_AUDIT.md`, `FEATURE_MATRIX.md`, `TECHNICAL_DEBT.md` (pending) |
-| Reference-product research | running | `REFERENCE_RESEARCH.md` (pending) |
-| Granular backlog | pending | `MASTER_PLAN.md` |
+| Mission stored durably | done | `MISSION.md` |
+| Validation baseline | done | `QUALITY_BASELINE.md` |
+| Phase Zero discovery | done | `SYSTEM_INVENTORY.md`, `ARCHITECTURE_AUDIT.md`, `FEATURE_MATRIX.md` (430 features), `TECHNICAL_DEBT.md`, `REFERENCE_RESEARCH.md` (commit 3665c37) |
+| Target architecture, ADRs, risks, backlog | done | `MASTER_PLAN.md` (M0–M10, reviewed and revised; §5.3 operator resolutions), `DECISIONS.md`, `REMAINING_RISKS.md`, `adr/ADR-agent-native-tool-governance.md` (commits d72ac53, 5628c04) |
+| Execution | running | defect batch 1, then the plan's first tasks and the AG foundation wave |
 
 ## Completed tasks
 
@@ -44,13 +44,12 @@ iteration.
 
 - DATA-UNINSTALL-VOLUMES — `koda uninstall` no longer deletes data volumes without `--purge`; `--purge` refuses non-Koda directories and removes volumes before the `.env`. Reviewed (approve). Evidence: `VALIDATION_REPORT.md`.
 
+- M0-E2-T1 — test sessions own their security guard (private Unix socket; explicit `KODA_TEST_SECURITY_GUARD_TARGET` opt-in to share); two concurrent full runs pass with a decoy guard on 50065. Reviewed (approve; 11 minor items fixed). Evidence: `VALIDATION_REPORT.md`.
+
 ## Active tasks
 
 - DEFECT-BATCH-1 (workflow, isolated worktrees, implement → independent review → address): D-001 + D-016 scheduled jobs / web routines never run; D-003 SSRF guard bypass; D-004 login rate-limiter bypass / shared bucket; D-018 password recovery impossible; D-009 `/cancel` does not stop light tasks; D-020 circuit breakers latch open; D-022 event streams cannot resume past id 1000. Branches are merged by the orchestrator after a full-gate run.
 - AGENT-AUTONOMY: ADR done (`docs/engineering/adr/ADR-agent-native-tool-governance.md`, commit d72ac53; operator resolutions O-1..O-8 recorded). Implementation backlog AG-01..AG-32 starts after defect batch 1 merges (foundation wave AG-02..AG-09 first).
-- PHASE-ZERO plan (workflow): MASTER_PLAN / DECISIONS / REMAINING_RISKS being written.
-
-- P0-DISCOVERY — multi-agent subsystem inventory (workflow running; early unverified findings: provider CLIs run tools with permissions bypassed, public break-glass admin token on manual install, retries re-run side-effecting tools, squad post-processing deadlock).
 
 
 ## Pending findings for the plan (verified by the orchestrator)
@@ -75,4 +74,4 @@ _None._ (GitHub push access restored 2026-11-14; branch `claude/dreamy-cerf-mhvb
 
 ## Discovered regressions
 
-_None._ Note: test runs sharing the machine with audit agents must use their own database and `SECURITY_GRPC_TARGET` port; a shared run produced 111 spurious failures when another session's security-guard service on port 50065 went away.
+_None._ Note: test runs sharing the machine with audit agents must use their own database. A shared run produced 111 spurious failures when another session's security-guard service on port 50065 went away; M0-E2-T1 removes that failure mode.

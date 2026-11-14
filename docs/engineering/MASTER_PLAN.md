@@ -100,7 +100,7 @@ this, together with the status rules above, on every change to this file.
 |---|---|
 | `G` | The CLAUDE.md required validation: `ruff check .`, `ruff format --check .`, `mypy koda/ --ignore-missing-imports`, `pytest --cov=koda --cov-report=term-missing`, `pnpm lint:web`, `pnpm test:web`, `pnpm build:web`. Every task runs G. |
 | `G-RS` | `cargo fmt --all --check --manifest-path rust/Cargo.toml`, clippy with `-D warnings`, `cargo test --workspace`. Required whenever `rust/` changes. |
-| `G-PG` | `POSTGRES_TEST_DSN=… pytest -m postgres` on an isolated database with a dedicated `SECURITY_GRPC_TARGET` port. Required whenever persistence changes. |
+| `G-PG` | `POSTGRES_TEST_DSN=… pytest -m postgres` on an isolated database (the session owns its security guard since M0-E2-T1). Required whenever persistence changes. |
 | `G-CI` | Evidence from a GitHub Actions run (Docker builds, docker-smoke, Playwright). |
 
 **Definition of done** (mission §11), applied to every task:
@@ -411,7 +411,7 @@ that fixes them.
 Owner QA · Risk low · Gate none · **ready** · Deps —
 - **Addresses:** F-QA-26, F-QA-01, F-QA-08, F-QA-11
 - **Files:** no source change; `docs/engineering/VALIDATION_REPORT.md`, `docs/engineering/EXECUTION_STATUS.md`
-- **Do:** run G, G-RS and G-PG on HEAD, which includes NET-LOOPBACK. Repeat after each DEFECT-BATCH-1 merge. Use an isolated database and a dedicated `SECURITY_GRPC_TARGET` port. Compare against QUALITY_BASELINE (4,897 passed and 200 skipped; 692 web tests).
+- **Do:** run G, G-RS and G-PG on HEAD, which includes NET-LOOPBACK. Repeat after each DEFECT-BATCH-1 merge. Use an isolated database (each session owns its security guard once M0-E2-T1 lands). Compare against QUALITY_BASELINE (4,897 passed and 200 skipped; 692 web tests).
 - **Done when:** every gate exits 0, or each failure has a root cause and a new task in this plan.
 - **Tests:** G, G-RS, G-PG · **Evidence:** —
 
@@ -464,12 +464,12 @@ Owner OPS (QA, SEC) · Risk low · Gate operator-action; needs-approval (§13: p
 #### M0-E2 — Test-fixture defects
 
 #### M0-E2-T1 · Isolate the security-guard fixture
-Owner QA · Risk low · Gate none · **ready** · Deps —
+Owner QA · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-175, TD-121, EXECUTION_STATUS "Discovered regressions" note (111 spurious failures)
 - **Files:** `tests/conftest.py` (~86-110)
 - **Do:** start the guard on a free port picked per session and export it as `SECURITY_GRPC_TARGET`. Never attach to a listener that is already running. When cargo is missing, skip with a clear message, or error under `CI=1`.
 - **Done when:** two concurrent full runs on one host both pass. A stale guard on 50065 is ignored.
-- **Tests:** two concurrent `pytest` sessions; unit test for port selection · **Evidence:** —
+- **Tests:** two concurrent `pytest` sessions; unit test for port selection · **Evidence:** VALIDATION_REPORT.md "M0-E2-T1" (two concurrent full runs 4928 passed each with a decoy guard on 50065; per-session Unix socket instead of a port, after review)
 
 #### M0-E2-T2 · Integration fixture fails instead of skipping in CI
 Owner QA · Risk low · Gate none · **ready** · Deps —

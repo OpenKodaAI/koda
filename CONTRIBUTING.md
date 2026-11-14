@@ -42,6 +42,16 @@ If your change touches the Rust workspace, also run:
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings`
 - `cargo test --manifest-path rust/Cargo.toml --workspace`
 
+`pytest` starts its own Rust security guard (through `cargo run`) on a private Unix socket for
+each session, so concurrent runs on one host do not interfere and an ambient
+`SECURITY_GRPC_TARGET` is ignored. Without `cargo` every test is skipped with a banner (and the
+run fails under `CI`). To reuse one already-running guard across several checkouts, start
+`rust/target/debug/koda-security-service` with `SECURITY_GRPC_TARGET=127.0.0.1:<port>` and set
+`KODA_TEST_SECURITY_GUARD_TARGET=127.0.0.1:<port>` for each run; the run fails if that guard is
+unreachable. A shared guard runs whatever build it was started from, so do not share one when
+validating changes to `rust/koda-security-*`. `KODA_SECURITY_GUARD_STARTUP_TIMEOUT` (seconds)
+raises the startup wait for cold builds.
+
 To run the same local gate from one command:
 
 ```bash

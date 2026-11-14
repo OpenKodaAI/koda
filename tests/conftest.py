@@ -1,13 +1,13 @@
 """Shared test fixtures."""
 
 import os
-import subprocess
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import grpc
 import pytest
+
+from tests import _security_guard
 
 # Pull in real-Postgres fixtures so any test marked
 # ``@pytest.mark.postgres`` resolves the ``postgres_url`` /
@@ -29,6 +29,9 @@ os.environ.setdefault("DEFAULT_WORK_DIR", tempfile.gettempdir())
 # agent-specific residue into the test suite.
 os.environ["AGENT_ID"] = "AGENT_A"
 os.environ["STATE_BACKEND"] = "postgres"
+# Each session gets its own security guard address (see tests/_security_guard.py);
+# chosen before koda.config reads SECURITY_GRPC_TARGET.
+_GUARD = None if _security_guard.guard_disabled() else _security_guard.select_guard_target()
 
 
 @pytest.fixture(autouse=True)
@@ -72,73 +75,55 @@ def _no_repo_root_database_residue():
     assert not leaked, f"Unexpected repo-root database artifacts created during tests: {leaked_names}"
 
 
+_GUARD_SKIP_REASON: str | None = None
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _security_guard_service():
-    """Make the Rust security guard service available to the test suite."""
-    if os.environ.get("KODA_SKIP_SECURITY_GUARD_SERVICE", "").strip() == "1":
+    """Start this session's Rust security guard, or attach to the explicitly shared one."""
+    global _GUARD_SKIP_REASON
+    if _GUARD is None:
         yield
         return
 
     from koda import config
-    from koda.internal_rpc.common import resolve_grpc_target
 
-    target, _transport = resolve_grpc_target(config.SECURITY_GRPC_TARGET)
-    channel = grpc.insecure_channel(target)
-    startup_timeout = float(
-        os.environ.get("KODA_SECURITY_GUARD_STARTUP_TIMEOUT", "90" if os.environ.get("CI") else "20")
-    )
-    try:
-        grpc.channel_ready_future(channel).result(timeout=0.5)
+    if _GUARD.target != config.SECURITY_GRPC_TARGET:
+        pytest.fail(
+            "koda.config was imported before tests/conftest.py pinned SECURITY_GRPC_TARGET"
+            f" ({config.SECURITY_GRPC_TARGET!r} != {_GUARD.target!r});"
+            " a plugin or sitecustomize imports koda too early."
+        )
+    timeout = _security_guard.startup_timeout()
+    if _GUARD.shared:
+        try:
+            _security_guard.wait_until_ready(_GUARD.target, timeout)
+        except _security_guard.GuardUnavailable as exc:
+            pytest.fail(f"{_security_guard.SHARED_TARGET_ENV}={_GUARD.target} is not reachable: {exc}")
         yield
         return
-    except Exception:
-        pass
 
-    root = Path(__file__).resolve().parents[1]
-    env = dict(os.environ)
-    env["SECURITY_GRPC_TARGET"] = target
-    with tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8") as log_file:
-        proc = subprocess.Popen(
-            [
-                "cargo",
-                "run",
-                "-p",
-                "koda-security-service",
-                "--manifest-path",
-                str(root / "rust" / "Cargo.toml"),
-            ],
-            cwd=root,
-            env=env,
-            stdout=log_file,
-            stderr=log_file,
-            text=True,
-        )
-        try:
-            grpc.channel_ready_future(channel).result(timeout=startup_timeout)
-        except Exception:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-            log_file.flush()
-            log_file.seek(0)
-            log_excerpt = log_file.read().strip()
-            tail = "\n".join(log_excerpt.splitlines()[-40:])
-            pytest.fail(
-                "Timed out while starting the Rust security guard service"
-                f" after {startup_timeout:.0f}s.\n{tail or 'No service logs were captured.'}"
-            )
-        try:
+    try:
+        with _security_guard.run_own_guard(ROOT_DIR, _GUARD.target, timeout):
             yield
-        finally:
-            if proc.poll() is None:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
+    except _security_guard.CargoMissing:
+        message = (
+            "cargo is required to start the Rust security guard for the test suite;"
+            f" install the Rust toolchain or set {_security_guard.SHARED_TARGET_ENV} to a running guard."
+        )
+        if os.environ.get("CI"):
+            pytest.fail(message)
+        _GUARD_SKIP_REASON = message
+        pytest.skip(message)
+    except _security_guard.GuardUnavailable as exc:
+        pytest.fail(f"Could not start the Rust security guard service:\n{exc}")
+
+
+def pytest_terminal_summary(terminalreporter):
+    """Make a guard-less session impossible to mistake for a green run."""
+    if _GUARD_SKIP_REASON:
+        terminalreporter.write_sep("!", "ALL TESTS SKIPPED", red=True, bold=True)
+        terminalreporter.write_line(_GUARD_SKIP_REASON)
 
 
 @pytest.fixture

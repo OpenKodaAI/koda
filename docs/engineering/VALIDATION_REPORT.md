@@ -2,9 +2,11 @@
 
 Evidence log for completed tasks. Each entry lists the exact commands run and
 their observed results. Environment notes: local PostgreSQL 16 + pgvector;
-runs that share the machine with audit agents use a dedicated database and a
-dedicated `SECURITY_GRPC_TARGET` port, because the test session attaches to any
-security-guard service already listening on the default port 50065.
+runs that share the machine with audit agents use a dedicated database. Until
+M0-E2-T1 the test session attached to any security-guard service already
+listening on `SECURITY_GRPC_TARGET` (default port 50065), so earlier entries use
+a dedicated port; since M0-E2-T1 each session starts its own guard on a private
+Unix socket unless `KODA_TEST_SECURITY_GUARD_TARGET` opts into a shared one.
 
 ## P0-FIX-CARGOFMT — documented Rust format gate
 
@@ -145,3 +147,39 @@ reference updated; release CHECKSUMS regenerated.
 Review: independent reviewer, round 1 request changes (2 major docs issues: silent `koda update` behaviour
 change; plain-HTTP LAN advice incompatible with Secure cookies; plus minors) → all addressed; round 2 **approve**: the reviewer re-rendered `docker compose config` for base, +prod, +dev, +cluster and release with `CONTROL_PLANE_PORT=18090` (host 127.0.0.1:18090 → container 8090, web → app:8090, no duplicate bindings) and ran 162 related tests. Round-2 minors fixed in `52ffc26`: `cluster_smoke.sh` probes the fixed internal port; tailnet-IP guidance removed (plain HTTP over a tailnet still drops Secure cookies; use `tailscale serve --bg`); stale compose comments; a remote proxy reaches only the dashboard; `CONTROL_PLANE_PUBLIC_PORT` documented in `.env.example`.
 Follow-up: cluster overlay `replicas: 3` with a fixed host port (pre-existing).
+
+## M0-E2-T1 — isolate the security-guard fixture (D-175, TD-121 part)
+
+Root cause: `tests/conftest.py` attached to any gRPC listener already on
+`SECURITY_GRPC_TARGET` (default `127.0.0.1:50065`), so concurrent sessions used
+each other's guard (111 spurious failures when one went away) and a stale build
+could mask regressions.
+
+Change: `tests/_security_guard.py` + `tests/conftest.py`. Each session pins
+`SECURITY_GRPC_TARGET` (before `koda.config` is imported) to a Unix socket in a
+fresh `0700` temp directory and runs its own guard there; an ambient value is
+ignored. `KODA_TEST_SECURITY_GUARD_TARGET` is the explicit opt-in to a shared
+guard (fails if unreachable). The fixture fails if `koda.config` was imported
+before the pin, stops the guard on every exit path (including
+`KeyboardInterrupt`), reports startup failures with the cargo log tail, and
+without `cargo` skips with an "ALL TESTS SKIPPED" banner (fails under `CI`).
+Docs: `CONTRIBUTING.md`.
+
+Review: independent QA/simplification review → approve with 11 minor/nit
+items. Main item (a narrow port race could still attach to a foreign server;
+the retry loop handled only the harmless case) resolved by switching to a
+per-session Unix socket, which removed the port picking, retry and retarget
+code. Other items fixed: cleanup on `BaseException`, dedicated `CargoMissing`,
+cargo output no longer suppressed, readiness polled on fresh channels through
+`resolve_grpc_target`/`create_grpc_channel`, loud skip banner, config pin check,
+stale-build warning for shared guards, engineering-doc references updated.
+
+| Command | Result |
+|---|---|
+| Two concurrent `pytest -q -p no:cacheprovider` full runs in one checkout, with `SECURITY_GRPC_TARGET=127.0.0.1:50065` exported and a decoy gRPC server listening on 50065 | both **4928 passed, 200 skipped** (48 s each); no `/tmp/koda-guard-*` left |
+| `SECURITY_GRPC_TARGET=127.0.0.1:50065 pytest tests/test_security_guard_fixture.py tests/test_services/test_security_guard.py tests/test_services/test_provider_env.py tests/test_control_plane_supervisor_env.py` | 27 passed |
+| same fixture + guard tests with `KODA_TEST_SECURITY_GUARD_TARGET=127.0.0.1:50300` (shared) | 18 passed |
+| `KODA_TEST_SECURITY_GUARD_TARGET=127.0.0.1:1` | session fails: "…is not reachable: security guard did not listen…" |
+| fixture tests with `cargo` removed from `PATH` | 8 skipped + "ALL TESTS SKIPPED" banner with the reason |
+| `ruff check .` / `ruff format --check .` / `mypy koda/ --ignore-missing-imports` | pass / 710 files formatted / no issues in 358 files |
+| `pytest tests/test_public_docs.py tests/test_open_source_hygiene.py tests/test_installation_assets.py tests/test_top_tier_roadmap_assurance.py` | 51 passed |
