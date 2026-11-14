@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 from dataclasses import dataclass
 
@@ -24,20 +25,39 @@ def normalize_work_dir(path: str | None) -> str:
     return os.path.realpath(os.path.expanduser(raw_path))
 
 
+@functools.lru_cache(maxsize=8)
+def _sensitive_roots(sensitive_dirs: frozenset[str]) -> tuple[tuple[str, str, str], ...]:
+    """Return ``(entry, root, root + "/")`` for each entry, as written and resolved.
+
+    Resolving an entry costs a ``realpath``, and the file tools check every path they
+    touch (``file_grep`` checks every file it walks), so the roots are resolved once per
+    ``SENSITIVE_DIRS`` value instead of on every check.
+    """
+    roots: list[tuple[str, str, str]] = []
+    for sensitive in sorted(sensitive_dirs):
+        for root in dict.fromkeys((sensitive, normalize_work_dir(sensitive))):
+            roots.append((sensitive, root, root.rstrip(os.sep) + os.sep))
+    return tuple(roots)
+
+
 def sensitive_dir_for(path: str) -> str | None:
     """Return the sensitive system directory that contains ``path``, or None.
 
     ``path`` must be absolute and already resolved. Each entry of ``SENSITIVE_DIRS`` is
     compared as written and in its resolved form (``/var/run`` is ``/run`` on most Linux
     hosts, ``/etc`` is ``/private/etc`` on macOS), by whole path component, so ``/etc``
-    matches ``/etc/ssh`` but not ``/etcetera``. Work directories and the paths that the
-    file commands and file tools resolve inside them share this one deny-root check.
+    matches ``/etc/ssh`` but not ``/etcetera``. Work directories (``/setdir``, the setdir
+    buttons, ``agent_set_workdir``, workspace roots) and the paths that the file tools
+    resolve inside them share this one deny-root check.
     """
-    for sensitive in sorted(SENSITIVE_DIRS):
-        for root in {sensitive, normalize_work_dir(sensitive)}:
-            if path == root or path.startswith(root.rstrip(os.sep) + os.sep):
-                return sensitive
+    for sensitive, root, prefix in _sensitive_roots(frozenset(SENSITIVE_DIRS)):
+        if path == root or path.startswith(prefix):
+            return sensitive
     return None
+
+
+# Resolve the configured roots at import, before any caller (or a test) can patch realpath.
+_sensitive_roots(frozenset(SENSITIVE_DIRS))
 
 
 def validate_work_dir(

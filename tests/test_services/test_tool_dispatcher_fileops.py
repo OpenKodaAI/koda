@@ -7,7 +7,7 @@ import pytest
 
 from koda.services.tool_dispatcher import (
     ToolContext,
-    _validate_file_path,
+    _resolve_file_path,
 )
 
 
@@ -30,20 +30,20 @@ def _make_ctx(work_dir: str, **overrides) -> ToolContext:
     return ToolContext(**defaults)
 
 
-class TestValidateFilePath:
+class TestResolveFilePath:
     def test_empty_path(self):
-        assert _validate_file_path("", "/tmp/work") is not None
+        assert _resolve_file_path("", "/tmp/work").error is not None
 
     def test_path_within_workdir(self, tmp_path):
-        assert _validate_file_path(str(tmp_path / "foo.txt"), str(tmp_path)) is None
+        assert _resolve_file_path(str(tmp_path / "foo.txt"), str(tmp_path)).error is None
 
     def test_path_outside_workdir(self, tmp_path):
-        err = _validate_file_path("/etc/passwd", str(tmp_path))
+        err = _resolve_file_path("/etc/passwd", str(tmp_path)).error
         assert err is not None
         assert "outside" in err or "not allowed" in err
 
     def test_blocked_extension(self, tmp_path):
-        err = _validate_file_path(str(tmp_path / "secrets.env"), str(tmp_path))
+        err = _resolve_file_path(str(tmp_path / "secrets.env"), str(tmp_path)).error
         assert err is not None
         assert "blocked" in err.lower()
 
@@ -288,12 +288,12 @@ class TestFileInfoHandler:
 
 class TestSecretFilesAreBlocked:
     def test_dotenv_absolute_path_is_blocked(self, tmp_path):
-        err = _validate_file_path(str(tmp_path / ".env"), str(tmp_path))
+        err = _resolve_file_path(str(tmp_path / ".env"), str(tmp_path)).error
         assert err is not None
         assert "blocked" in err.lower()
 
     def test_dotenv_variant_is_blocked(self, tmp_path):
-        err = _validate_file_path(str(tmp_path / ".env.production"), str(tmp_path))
+        err = _resolve_file_path(str(tmp_path / ".env.production"), str(tmp_path)).error
         assert err is not None
         assert "blocked" in err.lower()
 
@@ -327,6 +327,122 @@ class TestSecretFilesAreBlocked:
         assert result.success
         assert "code.py" in result.output
         assert "canary" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_grep_skips_secret_files_in_subdirectories_and_secret_named_symlinks(self, tmp_path):
+        work = tmp_path / "work"
+        (work / "config").mkdir(parents=True)
+        (work / "config" / "server.pem").write_text("TOKEN=canary-pem\n")
+        (work / "config" / ".env.local").write_text("TOKEN=canary-local\n")
+        (work / "notes.txt").write_text("TOKEN=canary-via-link\n")
+        (work / "alias.key").symlink_to(work / "notes.txt")
+        (work / "safe-link.txt").symlink_to(work / "config" / "server.pem")
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(work))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_grep({"pattern": "TOKEN", "path": "."}, ctx)
+        assert result.success
+        assert "canary-pem" not in result.output
+        assert "canary-local" not in result.output
+        assert "notes.txt:1:" in result.output
+        assert "alias.key" not in result.output
+        assert "safe-link.txt" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_grep_prunes_sensitive_directories_below_the_search_root(self, tmp_path, monkeypatch):
+        work = tmp_path / "work"
+        (work / "etc").mkdir(parents=True)
+        (work / "src").mkdir()
+        (work / "etc" / "shadow.txt").write_text("TOKEN=canary-sensitive\n")
+        (work / "src" / "app.py").write_text("TOKEN = vault()\n")
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(work / "etc")}))
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(work))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_grep({"pattern": "TOKEN", "path": "."}, ctx)
+        assert result.success
+        assert "app.py" in result.output
+        assert "canary-sensitive" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_grep_runs_the_full_resolver_only_for_symlinked_files(self, tmp_path):
+        """A regular file below the checked root needs only the name check; the walk stays cheap."""
+        work = tmp_path / "work"
+        (work / "pkg").mkdir(parents=True)
+        for index in range(40):
+            (work / "pkg" / f"mod{index}.py").write_text(f"VALUE = {index}\n")
+        (work / "linked.py").symlink_to(work / "pkg" / "mod0.py")
+        from koda.services import tool_dispatcher
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(work))
+        with (
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+            patch.object(tool_dispatcher, "resolve_work_path", wraps=tool_dispatcher.resolve_work_path) as resolver,
+        ):
+            result = await _handle_file_grep({"pattern": "VALUE", "path": "."}, ctx)
+        assert result.success
+        assert "pkg/mod39.py:1: VALUE = 39" in result.output
+        assert "linked.py:1: VALUE = 0" in result.output
+        # One call for the search root, one for the symlinked file; none per regular file.
+        assert [call.args[0] for call in resolver.call_args_list] == [".", str(work / "linked.py")]
+
+    @pytest.mark.asyncio
+    async def test_grep_does_not_log_a_warning_per_skipped_secret_file(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        for index in range(20):
+            (work / f"fixture{index}.pem").write_text("-----BEGIN-----\n")
+        (work / "code.py").write_text("x = 1\n")
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(work))
+        with (
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+            patch("koda.utils.files.log") as files_log,
+        ):
+            result = await _handle_file_grep({"pattern": "BEGIN", "path": "."}, ctx)
+        assert result.success
+        assert "No matches" in result.output
+        files_log.warning.assert_not_called()
+
+
+class TestEnvTemplatesStayEditable:
+    """`.env.example` is the committed template, not the secret: agents must keep updating it."""
+
+    @pytest.mark.asyncio
+    async def test_file_read_and_edit_allow_env_example(self, tmp_path):
+        (tmp_path / ".env.example").write_text("TOKEN=\n")
+        from koda.services.tool_dispatcher import _handle_file_edit, _handle_file_read
+
+        ctx = _make_ctx(str(tmp_path))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            read = await _handle_file_read({"path": ".env.example"}, ctx)
+            edit = await _handle_file_edit(
+                {"path": ".env.example", "old_string": "TOKEN=\n", "new_string": "TOKEN=\nNEW_SETTING=\n"}, ctx
+            )
+        assert read.success, read.output
+        assert "TOKEN=" in read.output
+        assert edit.success, edit.output
+        assert (tmp_path / ".env.example").read_text() == "TOKEN=\nNEW_SETTING=\n"
+
+    @pytest.mark.asyncio
+    async def test_grep_searches_env_example_but_not_env(self, tmp_path):
+        (tmp_path / ".env.example").write_text("TOKEN=placeholder\n")
+        (tmp_path / ".env").write_text("TOKEN=canary-secret\n")
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / ".env.sample").write_text("TOKEN=sample\n")
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(tmp_path))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_grep({"pattern": "TOKEN", "path": "."}, ctx)
+        assert result.success
+        assert ".env.example:1: TOKEN=placeholder" in result.output
+        assert "sub/.env.sample:1: TOKEN=sample" in result.output
+        assert "canary-secret" not in result.output
 
 
 class TestDocumentedRelativePathsResolveUnderWorkDir:

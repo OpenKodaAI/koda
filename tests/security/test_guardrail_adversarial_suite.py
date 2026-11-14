@@ -16,7 +16,7 @@ from koda.services.execution_policy import evaluate_execution_policy
 from koda.services.provider_env import build_tool_subprocess_env
 from koda.services.shell_runner import run_shell_command
 from koda.services.shell_tools import BackgroundProcess, BackgroundProcessManager
-from koda.services.tool_dispatcher import _validate_file_path
+from koda.services.tool_dispatcher import _resolve_file_path
 
 
 @dataclass(frozen=True)
@@ -66,8 +66,8 @@ def test_fileops_rejects_symlink_escape_and_sensitive_extensions(tmp_path: Path)
     symlink = workdir / "linked-secret.txt"
     symlink.symlink_to(secret)
 
-    symlink_error = _validate_file_path(str(symlink), str(workdir))
-    extension_error = _validate_file_path(str(workdir / "prod.env"), str(workdir))
+    symlink_error = _resolve_file_path(str(symlink), str(workdir)).error
+    extension_error = _resolve_file_path(str(workdir / "prod.env"), str(workdir)).error
 
     assert symlink_error is not None
     assert "outside" in symlink_error or "not allowed" in symlink_error
@@ -83,6 +83,7 @@ def test_fileops_rejects_symlink_escape_and_sensitive_extensions(tmp_path: Path)
     [
         ("notes.txt", True),
         ("sub/notes.txt", True),
+        (".env.example", True),
         (".env", False),
         (".env.local", False),
         ("prod.env", False),
@@ -104,7 +105,7 @@ async def test_cat_command_and_file_read_reach_the_same_path_decision(
     canary = "canary-secret-value"
     work = tmp_path / "work"
     (work / "sub").mkdir(parents=True)
-    for name in ("notes.txt", "sub/notes.txt"):
+    for name in ("notes.txt", "sub/notes.txt", ".env.example"):
         (work / name).write_text("visible", encoding="utf-8")
     for name in (".env", ".env.local", "prod.env"):
         (work / name).write_text(f"TOKEN={canary}\n", encoding="utf-8")

@@ -21,19 +21,26 @@ class PathResolution:
     error: str | None = None
 
 
+TEMPLATE_FILE_SUFFIXES: frozenset[str] = frozenset({".example", ".sample", ".template", ".dist"})
+"""Final extensions that mark a committed, secret-free template of a secret file."""
+
+
 def blocked_file_suffix(name: str) -> str | None:
     """Return the blocked extension a file name carries, or None.
 
     A name is blocked when its extension is in ``FILEOPS_BLOCKED_EXTENSIONS``
     (``prod.env``, ``server.pem``), or when it is a dotfile whose first segment is one
     (``.env``, ``.env.local``, ``.env.production``), which ``os.path.splitext`` does not
-    report as an extension.
+    report as an extension. A dotfile whose final extension is a template suffix
+    (``.env.example``, ``.env.sample``, ``.env.template``, ``.env.dist``) is the
+    committed template, not the secret, so it stays readable and editable, as
+    ``prod.env.example`` already was.
     """
     lowered = name.lower()
     _, ext = os.path.splitext(lowered)
     if ext in FILEOPS_BLOCKED_EXTENSIONS:
         return ext
-    if lowered.startswith("."):
+    if lowered.startswith(".") and ext not in TEMPLATE_FILE_SUFFIXES:
         stem = "." + lowered[1:].split(".", 1)[0]
         if stem in FILEOPS_BLOCKED_EXTENSIONS:
             return stem
@@ -93,11 +100,6 @@ def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool
 def _refuse(path_str: str, work_dir: str, reason: str, error: str) -> PathResolution:
     log.warning("path_access_blocked", reason=reason, path=path_str, work_dir=work_dir)
     return PathResolution(None, reason, error)
-
-
-def safe_resolve(path_str: str, work_dir: str) -> Path | None:
-    """Resolve a path with :func:`resolve_work_path`; return None when it is refused."""
-    return resolve_work_path(path_str, work_dir).path
 
 
 def list_directory(path_str: str | None, work_dir: str) -> tuple[str, bool]:

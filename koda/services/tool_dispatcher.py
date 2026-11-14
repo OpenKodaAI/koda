@@ -38,8 +38,8 @@ from koda.knowledge.types import EffectiveExecutionPolicy
 from koda.logging_config import get_logger
 from koda.services import blocked_patterns as _blocked_patterns_module
 from koda.services.execution_policy import PolicyEvaluation, evaluate_execution_policy
-from koda.utils.files import PathResolution, resolve_work_path
-from koda.utils.workdir import validate_work_dir
+from koda.utils.files import PathResolution, blocked_file_suffix, resolve_work_path
+from koda.utils.workdir import sensitive_dir_for, validate_work_dir
 
 log = get_logger(__name__)
 
@@ -2393,11 +2393,6 @@ def _resolve_file_path(path: Any, work_dir: str) -> PathResolution:
     return resolve_work_path(path, work_dir)
 
 
-def _validate_file_path(path: str, work_dir: str) -> str | None:
-    """Validate file path is within work_dir and not a sensitive file. Returns error string or None."""
-    return _resolve_file_path(path, work_dir).error
-
-
 async def _handle_file_read(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_fileops_available("file_read")
     if err:
@@ -2592,14 +2587,19 @@ async def _handle_file_grep(params: dict, ctx: ToolContext) -> AgentToolResult:
         glob_filter = params.get("glob", "*")
         results: list[str] = []
         total_matches = 0
+        # Every file read follows the file-tool policy. The search root is resolved and
+        # checked above, and os.walk does not descend into directory symlinks, so below it
+        # a regular file is inside the work dir and its name is all that is left to check;
+        # sensitive directories are pruned, and only a file symlink needs the full resolver.
         for root, dirs, files in os.walk(resolved):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            dirs[:] = [d for d in dirs if not d.startswith(".") and sensitive_dir_for(os.path.join(root, d)) is None]
             for name in files:
                 if not fnmatch.fnmatch(name, glob_filter):
                     continue
                 fpath = os.path.join(root, name)
-                # Every file read goes through the same policy: no secret files, no symlink escapes.
-                if resolve_work_path(fpath, ctx.work_dir).path is None:
+                if blocked_file_suffix(name) is not None:
+                    continue
+                if os.path.islink(fpath) and resolve_work_path(fpath, ctx.work_dir).path is None:
                     continue
                 rel = os.path.relpath(fpath, resolved)
                 try:

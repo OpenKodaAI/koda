@@ -2,36 +2,38 @@
 
 import pytest
 
-from koda.utils.files import list_directory, resolve_work_path, safe_delete, safe_read, safe_resolve, safe_write
+import koda.utils.files as files_module
+import koda.utils.workdir as workdir_module
+from koda.utils.files import list_directory, resolve_work_path, safe_delete, safe_read, safe_write
 from koda.utils.workdir import sensitive_dir_for
 
 
-class TestSafeResolve:
+class TestResolveWorkPathContainment:
     def test_relative_path_inside(self, tmp_path):
         (tmp_path / "file.txt").touch()
-        result = safe_resolve("file.txt", str(tmp_path))
+        result = resolve_work_path("file.txt", str(tmp_path)).path
         assert result is not None
         assert result.name == "file.txt"
 
     def test_absolute_path_inside(self, tmp_path):
         target = tmp_path / "file.txt"
         target.touch()
-        result = safe_resolve(str(target), str(tmp_path))
+        result = resolve_work_path(str(target), str(tmp_path)).path
         assert result is not None
 
     def test_traversal_blocked(self, tmp_path):
-        result = safe_resolve("../../etc/passwd", str(tmp_path))
+        result = resolve_work_path("../../etc/passwd", str(tmp_path)).path
         assert result is None
 
     def test_absolute_path_outside(self, tmp_path):
-        result = safe_resolve("/etc/passwd", str(tmp_path))
+        result = resolve_work_path("/etc/passwd", str(tmp_path)).path
         assert result is None
 
     def test_subdirectory(self, tmp_path):
         sub = tmp_path / "sub"
         sub.mkdir()
         (sub / "file.txt").touch()
-        result = safe_resolve("sub/file.txt", str(tmp_path))
+        result = resolve_work_path("sub/file.txt", str(tmp_path)).path
         assert result is not None
         assert result.name == "file.txt"
 
@@ -104,6 +106,15 @@ class TestResolveWorkPathMatrix:
             ("README.md", "README.md"),
             ("environment.py", "environment.py"),
             ("src/env.ts", "src/env.ts"),
+            # Committed, secret-free templates of secret files stay readable and editable.
+            (".env.example", ".env.example"),
+            (".ENV.EXAMPLE", ".ENV.EXAMPLE"),
+            (".env.sample", ".env.sample"),
+            (".env.template", ".env.template"),
+            (".env.dist", ".env.dist"),
+            (".env.local.example", ".env.local.example"),
+            ("sub/.env.example", "sub/.env.example"),
+            ("prod.env.example", "prod.env.example"),
         ],
     )
     def test_allowed_paths_resolve_under_work_dir(self, work_dir, path, expected):
@@ -135,6 +146,8 @@ class TestResolveWorkPathMatrix:
             (".ENV", "path_blocked_file"),
             (".env.local", "path_blocked_file"),
             (".env.production", "path_blocked_file"),
+            (".env.example.local", "path_blocked_file"),
+            (".env.examples", "path_blocked_file"),
             ("sub/.env", "path_blocked_file"),
             ("prod.env", "path_blocked_file"),
             ("certs/server.PEM", "path_blocked_file"),
@@ -160,6 +173,12 @@ class TestResolveWorkPathMatrix:
         resolution = resolve_work_path("copy.env", str(work_dir))
         assert resolution.reason == "path_blocked_file"
 
+    def test_template_name_does_not_unlock_the_secret_it_links_to(self, work_dir):
+        (work_dir / ".env.example").symlink_to(work_dir / ".env")
+        resolution = resolve_work_path(".env.example", str(work_dir))
+        assert resolution.path is None
+        assert resolution.reason == "path_blocked_file"
+
     def test_sensitive_directory_is_refused_even_inside_work_dir(self):
         resolution = resolve_work_path("/etc/hosts", "/")
         assert resolution.path is None
@@ -169,12 +188,44 @@ class TestResolveWorkPathMatrix:
         assert sensitive_dir_for("/etc") == "/etc"
         assert sensitive_dir_for("/etc/ssh/sshd_config") == "/etc"
         assert sensitive_dir_for("/etcetera/notes.txt") is None
-        assert sensitive_dir_for("/home/user/project") is None
+        assert sensitive_dir_for("/srv/project") is None
 
-    def test_safe_resolve_keeps_its_path_or_none_contract(self, work_dir):
-        assert safe_resolve("a.txt", str(work_dir)) == (work_dir / "a.txt").resolve()
-        assert safe_resolve(".env", str(work_dir)) is None
-        assert safe_resolve("../outside/secret.txt", str(work_dir)) is None
+    def test_sensitive_roots_are_resolved_once_not_on_every_check(self, monkeypatch):
+        """file_grep checks every file it walks, so the deny roots must not be re-resolved each time."""
+        assert sensitive_dir_for("/etc/ssh") == "/etc"
+        resolved: list[str | None] = []
+        real_normalize = workdir_module.normalize_work_dir
+
+        def counting_normalize(path):
+            resolved.append(path)
+            return real_normalize(path)
+
+        monkeypatch.setattr(workdir_module, "normalize_work_dir", counting_normalize)
+        for _ in range(3):
+            assert sensitive_dir_for("/etc/ssh") == "/etc"
+            assert sensitive_dir_for("/srv/project") is None
+        assert resolved == []
+
+    def test_patched_sensitive_dirs_still_take_effect(self, tmp_path, monkeypatch):
+        real = tmp_path / "real-run"
+        real.mkdir()
+        alias = tmp_path / "var-run"
+        alias.symlink_to(real)
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(alias)}))
+        assert sensitive_dir_for(str(real / "app")) == str(alias)
+        assert sensitive_dir_for("/etc/ssh") is None
+
+    def test_refused_path_carries_no_path(self, work_dir):
+        assert resolve_work_path("a.txt", str(work_dir)).path == (work_dir / "a.txt").resolve()
+        assert resolve_work_path(".env", str(work_dir)).path is None
+        assert resolve_work_path("../outside/secret.txt", str(work_dir)).path is None
+
+    def test_resolve_work_path_is_the_only_path_resolver(self):
+        """The old per-surface resolvers are gone, so a new command or tool cannot pick the wrong one."""
+        import koda.services.tool_dispatcher as tool_dispatcher
+
+        assert not hasattr(files_module, "safe_resolve")
+        assert not hasattr(tool_dispatcher, "_validate_file_path")
 
 
 class TestCommandHelpersApplyTheFilePolicy:
@@ -188,6 +239,12 @@ class TestCommandHelpersApplyTheFilePolicy:
         result = safe_write(".env", "TOKEN=x", str(tmp_path))
         assert "blocked" in result.lower()
         assert not (tmp_path / ".env").exists()
+
+    def test_safe_read_and_write_allow_env_template(self, tmp_path):
+        (tmp_path / ".env.example").write_text("TOKEN=\n")
+        assert safe_read(".env.example", str(tmp_path)) == "TOKEN=\n"
+        assert "Written to" in safe_write(".env.example", "TOKEN=\nNEW_SETTING=\n", str(tmp_path))
+        assert (tmp_path / ".env.example").read_text() == "TOKEN=\nNEW_SETTING=\n"
 
     def test_safe_delete_refuses_secret_file(self, tmp_path):
         (tmp_path / "prod.env").write_text("TOKEN=secret\n")

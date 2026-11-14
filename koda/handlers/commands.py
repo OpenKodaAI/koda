@@ -25,7 +25,6 @@ from koda.config import (
     MAX_BUDGET_USD,
     PROJECT_DIRS,
     PROVIDER_MODELS,
-    SENSITIVE_DIRS,
     SHELL_ENABLED,
     TTS_DEFAULT_VOICE,
 )
@@ -107,6 +106,7 @@ from koda.utils.files import list_directory, resolve_work_path
 from koda.utils.formatting import escape_html
 from koda.utils.messaging import send_long_message
 from koda.utils.rate_limiter import acquire_rate_limit
+from koda.utils.workdir import validate_work_dir
 
 log = get_logger(__name__)
 _FUNCTION_DEFINITIONS = {str(item["id"]): dict(item) for item in resolve_model_function_catalog()}
@@ -374,14 +374,14 @@ async def cmd_setdir(update: Update, context: BotContext) -> None:
     args = context.args
 
     if args:
-        path = " ".join(args)
-        path = os.path.expanduser(path)
-        # Block sensitive system directories (use resolved path consistently)
-        resolved = os.path.realpath(path)
-        if any(resolved == s or resolved.startswith(s + "/") for s in SENSITIVE_DIRS):
+        # The shared work-dir check (agent_set_workdir uses it too): the resolved path is
+        # compared with each sensitive directory as written and resolved (/var/run is /run).
+        validation = validate_work_dir(" ".join(args))
+        resolved = validation.path
+        if validation.blocked:
             await update.message.reply_text("Access denied: sensitive system directory.")
             return
-        if os.path.isdir(resolved):
+        if validation.ok:
             context.user_data["work_dir"] = resolved
             await update.message.reply_text(
                 f"Working directory set to: <code>{escape_html(resolved)}</code>", parse_mode=ParseMode.HTML
