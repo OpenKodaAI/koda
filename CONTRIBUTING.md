@@ -57,6 +57,13 @@ test never reads or deletes your files. Provider disconnect tests remove CLI log
 `~/.claude`, `~/.codex` and `~/.gemini`. Write tests against `os.environ["HOME"]`, never against
 your real home directory.
 
+Tests marked `@pytest.mark.postgres` are skipped unless `POSTGRES_TEST_DSN` points at a
+disposable database (they empty the tables they use): run them with
+`POSTGRES_TEST_DSN=postgresql://… pytest -m postgres`. The end-to-end agent-turn tests in
+`tests/test_services/test_agent_turn_e2e.py` run real turns through the queue worker and replace
+only the provider adapter (`tests/fakes/provider.py`) and Telegram (`tests/fakes/telegram.py`).
+Reuse those fakes for new end-to-end tests instead of patching the orchestration path.
+
 To run the same local gate from one command:
 
 ```bash
