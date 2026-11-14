@@ -467,6 +467,9 @@ DASHBOARD_ROUTES: list[tuple[str, dict[str, str]]] = [
     # The /api/runtime/* routes exist only in the dashboard, whatever the caller sends.
     ("/api/runtime/agents", BEARER),
     ("/api/runtime/relay/relay-1", {}),
+    # The photo uploads have a location of their own.
+    ("/api/control-plane/auth/profile/photo", SESSION_COOKIE),
+    ("/api/control-plane/dashboard/squads/threads/thread-1/photo", SESSION_COOKIE),
 ]
 
 API_ROUTES: list[tuple[str, dict[str, str]]] = [
@@ -474,6 +477,8 @@ API_ROUTES: list[tuple[str, dict[str, str]]] = [
     ("/api/control-plane/auth/tokens", {"authorization": "bearer koda-api-token"}),
     ("/api/control-plane/agents/agent-1/publish", {**BEARER, **SESSION_COOKIE}),
     ("/openapi/control-plane.json", {}),
+    ("/api/control-plane/auth/profile/photo", BEARER),
+    ("/api/control-plane/dashboard/squads/threads/thread-1/photo", BEARER),
 ]
 
 
@@ -554,6 +559,13 @@ def test_plain_requests_are_not_turned_into_upgrades(nginx: NginxModel) -> None:
 
 
 ALL_ROUTES = [*DASHBOARD_ROUTES, *API_ROUTES]
+
+
+def test_the_routes_checked_here_reach_every_location(nginx: NginxModel) -> None:
+    """The per-route checks (X-Forwarded-For, Host, body size) cover every location in the config."""
+    reached = {nginx.route(path, headers).location.label for path, headers in ALL_ROUTES}
+
+    assert reached == {location.label for location in nginx.locations()}
 
 
 @pytest.mark.parametrize("route", ALL_ROUTES, ids=[_route_id(route) for route in ALL_ROUTES])
@@ -638,7 +650,7 @@ NEAR_PHOTO_PATHS = [
     "/x/api/control-plane/auth/profile/photo",
 ]
 DEFAULT_LIMIT_ROUTES: list[tuple[str, dict[str, str]]] = [
-    *ALL_ROUTES,
+    *[route for route in ALL_ROUTES if route not in PHOTO_UPLOAD_ROUTES],
     *SMALL_UPLOAD_ROUTES,
     *[(path, headers) for path in NEAR_PHOTO_PATHS for headers in ({}, SESSION_COOKIE, BEARER)],
 ]
