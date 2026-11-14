@@ -15,9 +15,11 @@ supported (in priority order):
    `bootstrap_code_seed_weak` warning when the file is written. The /setup
    screen's code field takes at most 12 characters from `_BOOTSTRAP_ALPHABET`, so
    a seed with more, or with any other letter or digit (0, 1, I, O), can only be
-   sent to the API; it logs a `bootstrap_code_seed_not_typeable` warning.
+   sent to the API; it logs a `bootstrap_code_seed_not_typeable` warning. The
+   seed itself is never logged: the operator chose it.
 3. **Disk file** — `state/control_plane/bootstrap.txt` (mode 0600) written on first
-   boot if no owner exists. The operator SSHs in and reads it.
+   boot if no owner exists. The operator SSHs in and reads it. A generated code is
+   also logged once, in `bootstrap_file_written`.
 
 The file is deleted automatically after the owner registers.
 """
@@ -148,7 +150,22 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
         os.close(fd)
     with contextlib.suppress(OSError):
         os.chmod(str(_BOOTSTRAP_FILE_PATH), 0o600)
-    log.info("bootstrap_file_written", path=str(_BOOTSTRAP_FILE_PATH), code=code, expires_at=expires_at.isoformat())
+    if CONTROL_PLANE_BOOTSTRAP_CODE_SEED:
+        # The operator chose the seed and knows it: say where the code came from, never the code.
+        log.info(
+            "bootstrap_file_written",
+            path=str(_BOOTSTRAP_FILE_PATH),
+            code_source="CONTROL_PLANE_BOOTSTRAP_CODE",
+            expires_at=expires_at.isoformat(),
+        )
+    else:
+        log.info(
+            "bootstrap_file_written",
+            path=str(_BOOTSTRAP_FILE_PATH),
+            code=code,
+            code_source="generated",
+            expires_at=expires_at.isoformat(),
+        )
     if CONTROL_PLANE_BOOTSTRAP_CODE_SEED:
         significant = _seed_significant_characters(CONTROL_PLANE_BOOTSTRAP_CODE_SEED)
         if significant < _SEED_MIN_SIGNIFICANT_CHARACTERS:

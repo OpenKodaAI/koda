@@ -15,8 +15,8 @@ mechanisms, checked in priority order:
 1. **Legacy registration token** — obtained via `koda auth issue-code`, then
    `POST /api/control-plane/auth/bootstrap/exchange`. Still supported for automated installs.
 2. **Bootstrap code (recommended for VPS)** — on first boot the control plane writes
-   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) and prints it to the
-   container log once. The operator SSHs in, reads the file, pastes it into `/setup`, and the
+   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) and prints a generated code to
+   the container log once (never a `CONTROL_PLANE_BOOTSTRAP_CODE` seed). The operator SSHs in, reads the file, pastes it into `/setup`, and the
    file is deleted after registration.
 3. **Loopback trust (dev only)** — when `ALLOW_LOOPBACK_BOOTSTRAP=true` and the request comes
    from `127.0.0.1` / `::1` with no `X-Forwarded-For` hop, no code is required. This mode is
@@ -45,10 +45,12 @@ exactly 12 characters from that alphabet, separators aside (fewer is weaker than
 `Wb7k-Qz3m-Np4x` is typed and matched as `WB7K-QZ3M-NP4X`. A seed with more letters and digits, or with `I`, `O`, `0` or `1`, can only be sent
 to the API (`POST /api/control-plane/auth/register-owner`): the `/setup` field would submit fewer
 characters than the seed has, and the code would not match. When the control plane writes
-`bootstrap.txt` from a seed, it logs, without the seed, a `bootstrap_code_seed_weak` warning when the
-seed has fewer than 12 ASCII letters and digits (a generated code has 12) and a
-`bootstrap_code_seed_not_typeable` warning when the `/setup` field cannot take it; a seed with no
-ASCII letter or digit never matches.
+`bootstrap.txt`, its `bootstrap_file_written` log line carries a generated code, once, but never a
+seed: for a seed it names `code_source=CONTROL_PLANE_BOOTSTRAP_CODE` instead, as the operator
+already knows the code. From a seed it also logs a `bootstrap_code_seed_weak` warning when the seed
+has fewer than 12 ASCII letters and digits (a generated code has 12) and a
+`bootstrap_code_seed_not_typeable` warning when the `/setup` field cannot take it, neither with the
+seed; a seed with no ASCII letter or digit never matches.
 
 Passwords are hashed with **Argon2id** (`argon2-cffi` defaults). The password must:
 
