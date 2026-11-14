@@ -122,6 +122,10 @@ extend-exclude = ["runtime_*", "control_plane_runtime", "logs", "koda/internal_r
 select = ["E", "F", "W", "I", "UP", "B", "SIM"]
 ignore = ["SIM108"]  # ternary operator suggestions reduce readability for complex expressions
 
+[tool.ruff.lint.per-file-ignores]
+# AG-04: harden_process() runs before every other import in the worker entrypoint.
+"koda/__main__.py" = ["E402"]
+
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true

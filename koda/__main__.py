@@ -1,5 +1,13 @@
 """Entry point for koda."""
 
+# First statement on purpose (ADR-002 §2.4 L1, AG-04): the processes this worker
+# starts share its uid, so before anything else runs it becomes non-dumpable
+# (a sibling cannot read /proc/<pid>/environ or mem) and disables core dumps.
+# Raises instead of running unhardened.
+from koda.process_hygiene import harden_process
+
+harden_process()
+
 import argparse
 import asyncio
 import contextlib
