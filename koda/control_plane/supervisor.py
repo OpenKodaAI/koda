@@ -217,16 +217,8 @@ class ControlPlaneSupervisor:
         self._crash_loop_alerted: set[str] = set()
         self._publish_failure_alerted: set[str] = set()
 
-    async def start(self) -> None:
-        from koda.observability import init_tracing
-
-        init_tracing("koda-supervisor")
-        # Fail closed on the master key before anything can read or write a
-        # secret: this is the only place a key is ever created (AG-05).
-        ensure_master_key()
-        self._manager.ensure_seeded()
-        await self._link.start()
-
+    def build_app(self) -> web.Application:
+        """The HTTP app this supervisor serves: the middleware stack and every route."""
         app = web.Application(
             middlewares=[
                 control_plane_rate_limit_middleware,
@@ -239,6 +231,19 @@ class ControlPlaneSupervisor:
         app.router.add_get("/cluster/status", self._cluster_status)
         app.router.add_post("/cluster/drain", self._cluster_drain)
         app.router.add_post("/cluster/undrain", self._cluster_undrain)
+        return app
+
+    async def start(self) -> None:
+        from koda.observability import init_tracing
+
+        init_tracing("koda-supervisor")
+        # Fail closed on the master key before anything can read or write a
+        # secret: this is the only place a key is ever created (AG-05).
+        ensure_master_key()
+        self._manager.ensure_seeded()
+        await self._link.start()
+
+        app = self.build_app()
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         site = web.TCPSite(self._runner, CONTROL_PLANE_BIND, CONTROL_PLANE_PORT)
