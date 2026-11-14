@@ -93,6 +93,7 @@ When a CI failure happens:
 - read `pytest.xml` and `coverage.xml` artifacts for Python regressions
 - read the `vitest.junit.xml` artifact for web test failures
 - read the uploaded SARIF or Security tab findings for dependency, secret, static-analysis, or container issues
+- run `python3 scripts/check_master_plan.py` when `repo-hygiene` reports a status, evidence or dependency problem in `docs/engineering/MASTER_PLAN.md`; it names the line and the rule it breaks
 - read the `docker-smoke` artifact logs when the stack fails to boot in CI
 
 ## Pull Request Expectations
