@@ -17,6 +17,12 @@ VALIDATION_REPORT.md holds its evidence (mission §11).
 minor issues, 23 coverage gaps and 11 cases of over-engineering. This revision addresses all of them. Tasks
 were split, moved or added, and every moved task keeps a pointer from its old ID (section 4.2).
 
+**Reference update (2026-11-14, OpenBot).** REFERENCE_RESEARCH §3.8 adds OpenBot (openbot.run), which
+the operator named as a reference for design, user experience, chat and agents. It also adds principles
+P21 to P28 and the experience and visual direction in §6.10. This plan amends M3-E5-T2, M3-E5-T3,
+M3-E6-T4, M3-E6-T5, M6-E2-T5, M6-E2-T7, M8-E1-T4, M8-E2-T5, M8-E5-T10 and M8-E5-T12, and adds
+M6-E3-T8 and M8-E2-T6 (dispositions in section 5.4). Tasks that WAVE-6 is running were not amended.
+
 ## Contents
 
 1. [How to use this plan](#1-how-to-use-this-plan)
@@ -60,7 +66,7 @@ jump ahead of high-severity items in a later milestone just because of their mil
 | `TD-NNN` | Debt item in TECHNICAL_DEBT.md Part 2 |
 | `SM-NN` | Runtime-smoke defect FEATURE_MATRIX.md §3.4 `D-NN` (renamed here to avoid a clash with `D-NNN`) |
 | `J-NN` | Journey in FEATURE_MATRIX.md §3.2 |
-| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-24 are added in section 5. |
+| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-26 are added in section 5. |
 | `P<n>` | Design principle in REFERENCE_RESEARCH.md §6 |
 | `ADR-NNN` | Entry in DECISIONS.md |
 | `R-NN` | Entry in REMAINING_RISKS.md |
@@ -180,12 +186,12 @@ per milestone:
 | M3 | Broken critical journeys | Through the M0-E3-T2 harness, on Postgres with a stub provider (M3-E9-T1): a scheduled routine runs; a gated tool call is approved and executes (once M3-E3-T1 is approved); a squad conversation delegates and synthesises; memory is recalled across sessions; password recovery works; cancel stops child runs; emergency stop works; **a dashboard-only agent answers in `/sessions` (J-11)**; an MCP server is connected and its tool called; a skill package is installed through review. The real-provider checkpoint (M3-E9-T2) is recorded, or its blocker is stated. | 43 | 19 / 15 / 3 / 0 / 3 / 3 |
 | M4 | Dead-weight removal | Zero-consumer code, configuration and files are removed in deletion-only changes. Unreachable web modules are gone. A CI check prevents regrowth. | 22 | 18 / 0 / 4 / 0 / 0 / 0 |
 | M5 | Architecture consolidation | One implementation per concern (ARCHITECTURE_AUDIT §7). Default stack reduced toward 6 containers, with a tested rollback for each fold. No `run_coro_sync` on hot paths. | 68 | 10 / 43 / 15 / 0 / 0 / 0 |
-| M6 | Core functionality completion | Every in-scope feature is `complete_verified`, or removed or deferred with approval. Controls with no backend are labelled. Governance surfaces are reachable. Learning has a definition and measures (ADR-031). | 25 | 16 / 4 / 5 / 0 / 0 / 0 |
+| M6 | Core functionality completion | Every in-scope feature is `complete_verified`, or removed or deferred with approval. Controls with no backend are labelled. Governance surfaces are reachable. Learning has a definition and measures (ADR-031). | 26 | 17 / 4 / 5 / 0 / 0 / 0 |
 | M7 | Reliability and operations | Health reflects failure. Kernel shutdown is graceful. CI is consolidated and pinned. Resource limits and growth budgets are set. | 20 | 10 / 5 / 5 / 0 / 0 / 0 |
-| M8 | UX and accessibility | WCAG 2.2 AA on key routes, with exceptions documented. No raw i18n keys or hydration errors. One design system per mission §6.2 category. Every key route has its interaction-state row (mission §6.3). | 31 | 17 / 14 / 0 / 0 / 0 / 0 |
+| M8 | UX and accessibility | WCAG 2.2 AA on key routes, with exceptions documented. No raw i18n keys or hydration errors. One design system per mission §6.2 category. Every key route has its interaction-state row (mission §6.3). | 32 | 17 / 15 / 0 / 0 / 0 / 0 |
 | M9 | Performance and maintainability | Measured baselines and targets exist. Event loops are not blocked. Hot queries have recorded plans. God modules are split along their seams. | 20 | 9 / 10 / 1 / 0 / 0 / 0 |
 | M10 | Polish, documentation and release readiness | Docs match behaviour. Every contract change has its changelog entry. Final acceptance (M10-E1-T5) runs after M1 to M9 exit, with real infrastructure (mission §11, §16). | 5 | 2 / 2 / 1 / 0 / 0 / 0 |
-| | **Total** | | **351** | **160 / 120 / 52 / 4 / 5 / 10** |
+| | **Total** | | **353** | **161 / 121 / 52 / 4 / 5 / 10** |
 
 The counts were refreshed on 2026-11-14 from `scripts/check_master_plan.py` (M0-E1-T4). "Ready" means every hard dependency is done and no gate is open. The plan
 lint (M0-E1-T4) prints these counts; refresh the table from its output when statuses change (M10-E1-T4).
@@ -275,6 +281,8 @@ in `koda/knowledge`). Both are cheap to leave; revisit only if the code is touch
 | Q-22 | Remove the opt-in policy-engine and bot-gateway sidecars? (FEATURE_MATRIX §6 decision 3) | Remove both | open | M5-E5-T6, M5-E5-T7 |
 | Q-23 | Enforce per-agent budgets, or remove the budget setting? (D-052, R-26) | Enforce, with a visible "budget reached" state and a changelog entry | open | M2-E4-T5 |
 | Q-24 | Keep the reranker? (TD-103) | Keep only if the M9-E1-T6 eval shows a measurable gain | open | M9-E1-T6, M9-E1-T2 |
+| Q-25 | Should provider failover ask the operator before switching? (P22) | No: keep the automatic switch, and M6-E3-T8 makes it visible | open (§13: changes configured fallback behaviour) | none until decided |
+| Q-26 | Structured operator questions with options? (P21) | No, until a requirement exists | open | none |
 
 ### 5.2 Approvals required
 
@@ -324,7 +332,7 @@ each answer in DECISIONS.md.
 |---|---|---|
 | 1 | Now | Q-2 (J-11 is broken); M3-E3-T1 (with its impact report); M1-E4-T4 and M1-E1-T10 (the full fixes behind the M1-E8 interim mitigations); M1-E6-T1; M1-E1-T9; M1-E4-T7; M1-E1-T12; M0-E1-T5 |
 | 2 | After the first restore drill passes (M2-E6-T1) | M1-E2-T3, M1-E2-T5, M2-E3-T3 with Q-11, M2-E3-T5, M2-E5-T2, M2-E5-T3, M5-E1-T5, M5-E6-T11, M7-E2-T3 |
-| 3 | After M3 exit | Scope and removals: Q-1, Q-3, Q-6, Q-8, Q-9, Q-12, Q-14, Q-17, Q-21, Q-22, Q-23, Q-24 and the removal tasks they gate (M1-E7-T7, M4-E1-T12, M4-E2-T5, M4-E3-T3, M4-E3-T4, M5-E5-T6, M5-E5-T7, M5-E6-T9, M6-E1-T3, M6-E2-T2, M6-E3-T3, M7-E2-T5, M7-E3-T3) |
+| 3 | After M3 exit | Scope and removals: Q-1, Q-3, Q-6, Q-8, Q-9, Q-12, Q-14, Q-17, Q-21, Q-22, Q-23, Q-24, Q-25, Q-26 and the removal tasks they gate (M1-E7-T7, M4-E1-T12, M4-E2-T5, M4-E3-T3, M4-E3-T4, M5-E5-T6, M5-E5-T7, M5-E6-T9, M6-E1-T3, M6-E2-T2, M6-E3-T3, M7-E2-T5, M7-E3-T3) |
 | 4 | After the offline policy replay report (M5-E3-T2) | Q-5, M5-E3-T3, M5-E3-T5, M5-E3-T12 to T17 |
 
 ### 5.4 Reference principles (REFERENCE_RESEARCH §6)
@@ -334,26 +342,38 @@ revisited at the M10-E1-T4 refresh.
 
 | P | Principle | Disposition | Tasks or reason |
 |---|---|---|---|
-| P1 | Three edited layers per agent | Accept, verify first | M8-E2-T5 checks the editor against the three layers; M6-E2-T6 covers the child-run part |
+| P1 | Three edited layers per agent | Accept, verify first | M8-E2-T5 checks the editor against the three layers, and decides on agent settings opened from the chat header and the agent glyph in rows; M6-E2-T6 covers the child-run part |
 | P2 | Effective config and its origin | Defer | Needs the typed settings work (M5-E4-T3) first; the resolved-config view is new UI with no defect behind it |
 | P3 | Draft, publish, diff and roles | Partial: the draft and publish lifecycle is kept; roles are rejected | A single-owner product has no Manager or Collaborator (mission §12). Pre-publish diff deferred |
 | P4 | One handle, explicit bindings, pairing limits | Accept (pairing limits) | M1-E5-T3; bindings follow Q-2 and Q-3 |
-| P5 | Small squads, one owner per stage | Accept | M6-E2-T7 |
+| P5 | Small squads, one owner per stage | Accept | M6-E2-T7 (now also readable handoff lines and the waiting block) |
 | P6 | Coordination mode as an explicit setting | Defer the setting; record the semantics now | ADR-032 and M3-E6-T7 define the current mode (lead synthesizes) and test it; a mode selector waits for a second mode with a user |
 | P7 | Child runs bounded and capability subset | Accept | M6-E2-T6, M3-E2-T4 |
-| P8 | Child runs panel with cascade wording | Accept (wording) | M6-E2-T5 states the cascade, which M3-E2-T4 implements |
+| P8 | Child runs panel with cascade wording | Accept (wording, and the in-chat row) | M6-E2-T5 states the cascade, which M3-E2-T4 implements; M6-E3-T8 adds the collapsed child-run row to the chat |
 | P9 | The supply-chain check is the install UI | Accept (minimal) | M1-E4-T3 and M1-E8-T2 show hash and verdict at the operator review; rescans deferred |
 | P10 | Visibility and authority shown apart | Defer | Depends on one tool catalog (M5-E3-T1); revisit with M8-E2-T5 |
 | P11 | Skill lifecycle, Pin and Lock | Reject for now | No requirement or consumer; skill telemetry exists |
-| P12 | Budgeted core memory above recall | Defer | Recall must work first (M3-E4); ADR-031 defines what is measured |
+| P12 | Budgeted core memory above recall | Defer | Recall must work first (M3-E4); ADR-031 defines what is measured. The composer context meter (REFERENCE_RESEARCH §3.8) is evaluated in M8-E2-T5; context governance already has the totals |
 | P13 | One learning inbox | Defer | ADR-031 keeps two queues (memory review, proposals) until a measured need; M6-E1-T9 keeps proposals honest |
-| P14 | Learned items editable and deletable | Accept | M6-E4-T2, M2-E5-T3 |
-| P15 | Standard approval verbs, narrow Always, fail closed | Accept | M6-E2-T5, M3-E3-T2 |
+| P14 | Learned items editable and deletable | Accept | M6-E4-T2, M2-E5-T3. The per-turn memory receipt is deferred: no per-turn memory-write record exists yet (REFERENCE_RESEARCH §5) |
+| P15 | Standard approval verbs, narrow Always, fail closed | Accept | M6-E2-T5 (scope never widens beyond the card), M3-E3-T2 |
 | P16 | Policy resolves toward strictness | Accept (resolution rule) | M5-E3-T3 and the per-store tasks keep "tighten only" as an acceptance check; the AI-reviewer tier is rejected |
 | P17 | Stopping does not undo work | Accept | M6-E2-T5, M3-E2-T5 |
 | P18 | Agent profile organized around activity | Defer | UX review first (M8-E2-T5) |
-| P19 | Three planes and a Needs-you count | Defer | M8-E2-T5 evaluates it; no task until that review |
+| P19 | Three planes and a Needs-you count | Partial: the Needs-you rail group is accepted; the cross-plane count stays deferred | M8-E2-T6 builds the rail group after the M8-E2-T5 review places it; the global count across approvals, learnings, pairing and skills waits for that review |
 | P20 | Row-first, low density | Accept (already the design rule) | Applied by M8-E5 tasks; no separate task |
+| P21 | Questions and approvals share one waiting state | Accept (one wait state, receipts); the question card is deferred | M6-E2-T5. A structured question card waits for a requirement (Q-26); if built, it uses the broker's `respond` path, not `ui_choice` |
+| P22 | Provider failover is visible and never repeats side effects | Accept (visibility, side-effect safety); ask-first is the operator's call | M6-E3-T8 (the note), M2-E4-T1 (no tool replay). Asking before a switch changes how a configured fallback behaves for users (MISSION §13); no task until the operator decides Q-25 |
+| P23 | Every turn leaves a receipt | Partial | M6-E3-T8 (child runs, provider switch). The memory row waits for P14's write record; the time-axis RunGraph view is evaluated in M8-E2-T5 |
+| P24 | The conversation says who, which model and what state | Accept | M3-E5-T2 (recipient, configured model, paused state). The waiting reason for queued messages waits for M3-E2-T3, which reworks the per-user lock |
+| P25 | System events read as sentences | Accept | M6-E2-T7 (rendering), M3-E6-T4 and M3-E6-T5 (limit and pause events) |
+| P26 | Calm surfaces in Koda's own tokens | Accept (already the design rule) | M8-E5-T3, M8-E5-T10 (weights), M8-E5-T12 (row anatomy) |
+| P27 | Motion and focus designed per component | Accept | M8-E1-T1 (focus token, unchanged while WAVE-6 runs it), M8-E1-T4 (reduced-motion and focus-contrast checks), M8-E5-T12 (row names) |
+| P28 | Copy states the effect, the scope and the next step | Accept (already planned) | M8-E3-T2, M6-E1-T10, M6-E3-T5, M8-E5-T2 |
+
+REFERENCE_RESEARCH §6.10 also lists the OpenBot patterns Koda does not adopt (dark-only theme, its
+accent and avatars, emoji reactions, decorative WebGL, full access by default, and others). They get no
+task.
 
 ---
 
@@ -837,7 +857,8 @@ Owner SEC (ARCH, review REV) · Risk low · Gate approved (Q-4) · **done** · D
 - **Tests:** none (design) · **Evidence:** VALIDATION_REPORT.md "M1-E2-T1 — ADR-002 approved (rounds 1–12)": done-when items 1–4 met since revision 4; round 12 SEC and REV approve with changes and no critical or major finding (fa9016b), the remaining minors recorded as AG Accept criteria with named tests (ADR §7.11); the operator questions OQ-1..OQ-12 await §13 sign-off and gate only the parts the ADR names. Earlier rounds: rounds 1 and 2 (VALIDATION_REPORT "M1-E2-T1 reviews"): SEC and REV requested changes. Round 3: SEC approved with changes; REV requested changes, with one major finding: worker-side chat publishes cannot sign or write once AG-19 and M1-E2-T5 ship. Revision 4 of the ADR answers every round-3 finding (its "Revision 4 log"): chat settings go through a control-plane route (AG-21b, §2.2.3); the Gemini `.env` stop file and system-settings pins (§2.3.2); the Gemini per-key probe (A-K-05); the corrected Codex feature counts (§2.3.3); Codex `none` proven per configured model (A-K-04, §5.3); the Gate lines in §7. Round 4: SEC and REV requested changes, each with one major finding: Gemini loads workspace and ancestor GEMINI.md files and the workspace tree at startup at every level (SEC), and concurrent spawns of one agent share and rewrite one provider home (REV). Revision 5 answers every round-4 finding (its "Revision 5 log"): no workspace directory at Gemini `none`, and `memoryBoundaryMarkers: []` and `includeDirectoryTree: false` at every level (§2.3.2); per-spawn provider homes with a race test (§2.3.5, A-H-01); Codex `none` proven offline by forced calls (A-K-04); validation by source, a row lock and block-less versions read as `read_only` in the publish gate (§2.2.3); the settings-menu buttons; the corrected restart text; the unsupervised start as residual R-9; the squad draft reads moved to AG-22. Round 5: SEC and REV requested changes, each with one major finding: every supervised worker imports `bootstrap.py` and through it the manager and `decrypt_secret`, so the import-graph boundary rested on a false premise (SEC); and AG-19 took the key out without depending on the items that remove the remaining worker decrypt paths, while AG-17's acceptance could not pass before AG-21b, which depends on AG-17 (REV). Revision 6 answers every round-5 finding (its "Revision 6 log"): the supervised entrypoint no longer imports `bootstrap` or the package re-exports (AG-17); "workers never decrypt" becomes a reachability check with an owner for every worker path, run by AG-19, which now depends on AG-11, AG-21b and AG-22 (§2.5.2, §5.1.4); a compare-and-swap publish gate (§2.2.3); orphaned CLIs and spawn homes swept at worker start (A-H-02); no credential write-back from shell levels (§2.4.4, OQ-4 (c)); copies that refuse planted links (§2.3.5); Claude's system prompt file in the spawn home; named read routes for the squad readers and the runtime settings (§2.2.1); and the Gemini per-level context and concurrent spawns rechecked against the pinned CLIs. Round 6: SEC requested changes, with one major finding: processes the model starts through a CLI run in their own session, so they outlive the spawn, the worker's SIGKILL and the sweep, and keep the spawn's grants; REV approved with changes (five minors, two nits). Revision 7 answers every round-6 finding (its "Revision 7 log"): every descendant ends with its spawn, through a PID namespace or a per-spawn cgroup where the host allows one, else a subreaper, with residual R-10 and operator question OQ-8 (ADR §2.3.5); "workers never decrypt" is checked over the whole package, which adds squad runtime-HTTP dispatch to AG-17 (§5.1.4 (c)); native installs never close R-3 to R-5; Koda names Claude's project directory itself; AG-07's transaction helper is interactive; the chat setters move into `app` unchanged in AG-17b, so AG-19 no longer waits on OQ-2; and `worker_reset.py` is dropped. Round 7: SEC requested changes, with one major finding: the provider CLIs and governed shell commands that the runtime kernel starts (`StartTask`, `ExecuteCommand`) are not bound to the worker that asked for them, so they outlive a restart with the old grants, and the next worker's sweep removes a home such a CLI still runs in; REV approved with changes (four minors, six nits). Revision 8 answers every round-7 finding (its "Revision 8 log"): the kernel binds each process it starts to the requesting worker incarnation and ends them before it spawns the next worker (AG-15, ADR §2.3.5); the spawn cgroup nests in the workspace cgroup; the PID-namespace mode mounts its own procfs; §5.1.4 (c) names its one exemption; OQ-8 gates only the lifetime parts of AG-14 to AG-16, and new AG-15b (conditional on AG-08's compose record) has the kernel end what a killed helper leaves; bootstrap stops publishing from a worker in AG-21; the squad reads split into AG-22a, so AG-19 no longer waits for the runner refactor; and consume picks the newest usable grant in SQL. Round 8: SEC and REV approved with changes, with no blocking finding (SEC two minors and three nits; REV four minors and three nits). Revision 9 answers every round-8 finding (its "Revision 9 log"): operator commands (`/shell`, `/git`, `/pip`, `/npm`), scheduled shell jobs and the runtime-environment terminal are class M, with `/git` and the kernel's own git hardened from AG-03 and the commands confined from AG-15, as new operator question OQ-9 asks, and new residual R-11 for the window before AG-15; the kernel's floor names a task's environment workspace exactly; an incarnation ends in a stated order under one lock; the helper is a subreaper in every mode, and AG-15b records every process the kernel starts; R-10 names every case, and Koda's own stop of a stuck helper never orphans its descendants; consume skips a grant whose MAC fails; the unsupervised start's missing tokens become OQ-10; and a declined §9.1 question leaves the release gate. Round 9: SEC and REV approved with changes, with no blocking finding (SEC five minors and one nit; REV six minors and two nits). Revision 10 clears them (its "Revision 10 log"): a shell job the model creates through `job_create` is a governed agent call, refused by S9 from AG-14 and confined from AG-15, not the unconfined operator `scheduled_job` path; the kernel's own git and tar run through the helper (residual R-11a where they cannot); every task-, environment-, terminal- and checkpoint-scoped RPC binds to the token's agent, and workers hold only the per-worker kernel token; an open runtime-environment terminal closes when the agent restarts; the work-dir predicate denies paths under the state roots and login homes; `kill -9 -1` below Landlock ABI 6 is residual R-12; AG-15b's Deps name the operator-command helper with OQ-9 (b)/(c) approved, and OQ-8 and OQ-9 are decided together; git auto-gc finishes inside the command (`-c gc.autoDetach=false`); one spawn function replaces the pending-entry scheme; a worktree floor grants the real git common directory; each kernel's cgroups sit under a per-install subtree; §6 names OQ-10's declined branch; and A-O-01 is split into (a) to (d). Round 10: SEC and REV approved with changes; REV raised one major finding, shared by a SEC minor: revision 10 applied the work-dir predicate's "or under" to every root, which refused the default workspaces in both deployments, every runtime environment and every native work dir under HOME. Revision 11 clears round 10, scoped to its findings (its "Revision 11 log", with implementation obligations in ADR §7.9): "or under" applies only to the Koda-owned roots, and the native `AGENT_WORKSPACE_ROOT` default is `~/koda-workspaces`; AG-15b has one behaviour (off while OQ-9 (b) or (c) is unanswered, dropped if either is declined), and ADR §6 states what each answer does, so the release gate can be met under every combination (and no longer lists AG-32); scheduled shell jobs the model wrote, by `job_create` or `job_update`, become operator question OQ-11, with the author recorded by the caller; every kernel RPC has a stated binding; the per-install cgroup claim is withdrawn and two installs sharing roots on one host is residual R-13; the kernel's own git, tar and copy belong to the kernel, not to the requesting worker, and run through the helper; auto-gc's cost is stated and bounded. Round 11: SEC and REV each raised one major finding on the work-dir predicate: the worker-side workspace grant had no cross-agent rule (SEC), and the predicate passed another agent's workspace and runtime root, Koda's own directories under the runtime root, and home directories such as `~/.ssh` that the model chooses itself (REV). Revision 12 clears round 11, scoped to its findings (its "Revision 12 log", with implementation obligations in ADR §7.10): the predicate takes the caller's agent and the task's environment, and where Koda owns the parent it allows only the agent's own workspace and the task's environment, so the worker side refuses what the kernel refuses; limiting the work dirs the model chooses under the home directory, and refusing the Koda install directory, become operator question OQ-12, with residual R-14 for a decline; `CreateEnvironment` is keyed by agent and task; ADR §6 states what OQ-9 (b) declined with (c) approved, and (a) declined, do; the spawn-end SIGTERM reaches every process of the spawn in each lifetime mode; OQ-11's user impact names the dashboard edit that reclassifies a job. **Missing for done:** approving round-12 SEC and REV reviews recorded in VALIDATION_REPORT.md, and the operator answers to ADR §9.1 for the tasks they gate.
 
 #### M1-E2-T2 · Governed-by-default provider permission modes
-Owner SEC (AIM, review REV) · Risk high · Gate approved (Q-4; impact accepted); ADR §9.1 before the AG items each question names goes live: OQ-2 (AG-21, AG-21b; through AG-21 also AG-11, AG-29 and AG-30), OQ-3 (AG-13a, AG-23, AG-24, AG-25), OQ-4 (AG-13a's per-spawn copy of file OAuth credentials, AG-13b), OQ-5 (AG-16), OQ-6 (AG-24), OQ-8 (the lifetime parts of AG-14, AG-15 and AG-16, and AG-15b, which also needs OQ-9 (b) and (c)), OQ-9 (AG-15's confinement of operator commands, operator-authored scheduled shell jobs and the operator terminal), OQ-10 (before the release: what AG-15 removes from the unsupervised start), OQ-11 (AG-14's and AG-15's governed handling of scheduled shell jobs the model wrote), OQ-12 (AG-12's check of the work dirs the model chooses, and its install-directory rule); and AG-10b's conditional §13 gate · **pending** · Deps M1-E2-T1; per AG item as in ADR §7. Dependencies outside this task: M1-E4-T13 (AG-12); M1-E6-T3 (AG-11); M1-E6-T1 (AG-15); M3-E5-T1 (AG-24); M0-E3-T2 (AG-27 and the release gate); M1-E4-T9's AG-06 and AG-09 (AG-10b; AG-09 also AG-30); M1-E2-T3's AG-17 (AG-13b), AG-17b (AG-11, AG-21b) and AG-22a (AG-22); M1-E2-T4's AG-03 (AG-14, AG-16); AG-31 needs every AG item in the release gate, M1-E2-T3's and T4's included (not AG-32, which ships one release later)
+Owner SEC (AIM, review REV) · Risk high · Gate approved (Q-4; impact accepted); ADR §9.1 before the AG items each question names goes live: OQ-2 (AG-21, AG-21b; through AG-21 also AG-11, AG-29 and AG-30), OQ-3 (AG-13a, AG-23, AG-24, AG-25), OQ-4 (AG-13a's per-spawn copy of file OAuth credentials, AG-13b), OQ-5 (AG-16), OQ-6 (AG-24), OQ-8 (the lifetime parts of AG-14, AG-15 and AG-16, and AG-15b, which also needs OQ-9 (b) and (c)), OQ-9 (AG-15's confinement of operator commands, operator-authored scheduled shell jobs and the operator terminal), OQ-10 (before the release: what AG-15 removes from the unsupervised start), OQ-11 (AG-14's and AG-15's governed handling of scheduled shell jobs the model wrote), OQ-12 (AG-12's check of the work dirs the model chooses, and its install-directory rule); and AG-10b's conditional §13 gate · **pending** · Deps M1-E2-T1; per AG item as in ADR §7. Dependencies outside this task: M1-E4-T13 (AG-12); M1-E6-T3 (AG-11); M1-E6-T1 (AG-15); M3-E5-T1 (AG-24); M0-E3-T2 (AG-27 and the release gate); M1-E4-T9's AG-06 and AG-09 (AG-10b; AG-09 also AG-30)
+- **Item-level dependencies on sibling tasks (not task-level Deps; the plan lint reads task IDs only from Deps):** AG-17 (AG-13b), AG-17b (AG-11, AG-21b) and AG-22a (AG-22) in M1-E2-T3; AG-03 (AG-14, AG-16) in M1-E2-T4; AG-31 needs every AG item in the release gate, the sibling tasks' included (not AG-32, which ships one release later). See ADR §7 for the item graph.
 - **Addresses:** D-002, F-GOV-10, F-ORC-26, F-ORC-27, F-ORC-28, R-01
 - **Carried out by:** AG-02 (done, 6d050b5), AG-07, AG-08, AG-10a, AG-10b, AG-11, AG-12, AG-13a, AG-13b, AG-14, AG-15, AG-15b (only if AG-08 records `subreaper` below Landlock ABI 6 on a deployment, as expected for compose, OQ-8 is answered (a), and OQ-9 (b) and (c) are approved; ADR §6), AG-16, AG-19b, AG-20, AG-21, AG-21b, AG-22 to AG-31
 - **Files:** as listed per AG item in ADR §7 (chiefly `koda/services/claude_runner.py`, `codex_runner.py`, `gemini_runner.py`, `provider_cli_contract.py`, `provider_env.py` (per-spawn homes), new `provider_builtin_tools.py`, `queue_manager.py`, `agent_settings.py`, `chat_settings.py`, `koda/handlers/commands.py`, `koda/handlers/callbacks.py`, `koda/services/runtime/kernel_subprocess.py`, `koda/services/shell_runner.py`, `koda/config.py`, `koda/utils/workdir.py`, `koda/control_plane/manager.py` `publish_agent`, `koda/state/control_plane_store.py` (the one-connection transaction helper), `koda/control_plane/api.py` (the chat-settings and runtime-settings routes), `rust/koda-runtime-kernel`, the web execution-policy editor, docs)
@@ -846,7 +867,8 @@ Owner SEC (AIM, review REV) · Risk high · Gate approved (Q-4; impact accepted)
 - **Tests:** ADR §5.1 to §5.4; G; G-PG; G-RS; G-CI; changelog entry · **Evidence:** AG-02 in VALIDATION_REPORT WAVE-2B
 
 #### M1-E2-T3 · `koda-state` off the runtime-kernel (the master key stays put)
-Owner OPS (SEC, review REV) · Risk high · Gate needs-approval (§13: volume layout around the key material on existing installs; ADR §9.2 O-1 records the approval of AG-19's plan; ADR §9.1 OQ-4 and OQ-7 for AG-32, and OQ-10 before the release, for what AG-17 removes from the unsupervised start) · **blocked** · Deps M1-E2-T1, M1-E1-T1, M2-E6-T1; M1-E2-T2's AG-08 (its self-test, which AG-19's installer preflight runs) and AG-10a (AG-19, which removes the key only after AG-10a, AG-17, AG-17b and AG-22a remove the remaining worker decrypt paths). The dependencies are per AG item, so the two tasks do not wait on each other as wholes, and ADR OQ-2 gates nothing in this task
+Owner OPS (SEC, review REV) · Risk high · Gate needs-approval (§13: volume layout around the key material on existing installs; ADR §9.2 O-1 records the approval of AG-19's plan; ADR §9.1 OQ-4 and OQ-7 for AG-32, and OQ-10 before the release, for what AG-17 removes from the unsupervised start) · **blocked** · Deps M1-E2-T1, M1-E1-T1, M2-E6-T1
+- **Item-level dependencies on M1-E2-T2 (not task-level Deps):** AG-08 (its self-test, which AG-19's installer preflight runs) and AG-10a (AG-19 removes the key only after AG-10a, AG-17, AG-17b and AG-22a remove the remaining worker decrypt paths). The two tasks do not wait on each other as wholes, and ADR OQ-2 gates nothing in this task.
 - **Addresses:** D-047, TD-078 (part), ADR-002, ADR-026 (its relocation step is superseded), R-01, R-07
 - **Carried out by:** AG-05 (done, 6d050b5), AG-17, AG-17b, AG-18, AG-19, AG-22a, AG-32
 - **Files:** `docker-compose.yml`, the release compose file, CHECKSUMS, `koda/control_plane/api.py` (internal worker-broker routes), `koda/control_plane/supervisor.py`, `koda/__main__.py`, `koda/control_plane/__init__.py`, `koda/control_plane/bootstrap.py` (the supervised entrypoint), the worker decrypt paths ADR C10 assigns to AG-17, AG-17b and AG-22a (among them `koda/squads/dispatch.py`, `koda/services/agent_settings.py` and the squad spec readers in `koda/services/tool_dispatcher.py`, `koda/squads/coordinator.py`, `koda/squads/membership.py` and `koda/squads/coordinator_engine.py`, with the published-spec route in `koda/control_plane/api.py`), `koda/config.py` (`WORKER_STATE_ROOT`), `packages/cli/bin/koda.mjs` (install and update), `docs/operations/backup-restore.md`
@@ -1726,22 +1748,24 @@ Owner AIM · Risk med · Gate none (Q-13 default) · **pending** · Deps M0-E3-T
 
 #### M3-E5-T2 · Honest composer
 Owner FE · Risk low · Gate none · **ready** · Deps —
-- **Addresses:** D-206, D-077, D-205, F-CNV-03, F-CNV-04, F-CNV-05, TD-153 (part)
-- **Files:** `apps/web/src/components/features/sessions/sessions-page-client.tsx` (~905, ~1012), `apps/web/src/hooks/use-commands-catalog.ts` (~13)
+- **Addresses:** D-206, D-077, D-205, F-CNV-03, F-CNV-04, F-CNV-05, TD-153 (part); P24 (REFERENCE_RESEARCH §3.8: a composer that names its recipient and shows the configured model)
+- **Files:** `apps/web/src/components/features/sessions/sessions-page-client.tsx` (~905, ~1012, `modelLabel` ~1034), `apps/web/src/hooks/use-commands-catalog.ts` (~13), `apps/web/src/components/sessions/chat/composer/chat-composer.tsx`, `composer-toolbar.tsx`, i18n resources
 - **Do:**
   - for a paused agent, show the paused state with an Activate action and disable send;
   - keep the `@token` text until mentions work end to end, so nothing is silently dropped;
   - the slash menu uses the static catalog;
-  - remove the no-op `/context`.
-- **Done when:** a send to a paused agent never returns 400, no mention disappears, and there are no 404 fetches.
+  - remove the no-op `/context`;
+  - the placeholder names the recipient (`Message <agent>`) instead of the generic "Send a message…";
+  - the toolbar's model label shows the provider, model and effort from the agent's published configuration, not the model of the last reply. It stays read-only; changes stay in the agent editor and its publish step.
+- **Done when:** a send to a paused agent never returns 400, no mention disappears, and there are no 404 fetches. The placeholder names the selected agent in both locales. For a fixture agent whose last reply came from another model, the toolbar shows the configured model and effort.
 - **Tests:** web component tests; G · **Evidence:** —
 
 #### M3-E5-T3 · Telegram optional per agent; dashboard-only agents answer
 Owner BE (AIM) · Risk med · Gate decision Q-2 (approval batch 1) · **blocked** · Deps M0-E3-T3
-- **Addresses:** D-124, F-AGT-07, F-CNV-03, F-CHN-01, J-11, R-24; formerly M6-E1-T1. J-11 (chat with an agent in `/sessions`) is broken for any agent without a Telegram token, so this is a broken critical journey.
-- **Files:** `koda/control_plane/manager.py` (~8477 publish checks), `koda/__main__.py` (PTB lifecycle), `koda/channels/telegram/*`, README, the install docs, the onboarding checklist
-- **Do:** a worker boots without PTB when no token is configured, and serves the runtime HTTP API only. A missing token becomes a publish warning instead of an error.
-- **Done when:** in the M0-E3-T2 harness, an agent published with no Telegram token answers a dashboard message in `/sessions`, and a Telegram agent behaves as before.
+- **Addresses:** D-124, F-AGT-07, F-CNV-03, F-CHN-01, J-11, R-24; formerly M6-E1-T1. J-11 (chat with an agent in `/sessions`) is broken for any agent without a Telegram token, so this is a broken critical journey. REFERENCE_RESEARCH §3.8 (onboarding: provider, agent, a small checkable first task, then its activity).
+- **Files:** `koda/control_plane/manager.py` (~8477 publish checks), `koda/__main__.py` (PTB lifecycle), `koda/channels/telegram/*`, README, the install docs, the onboarding checklist (`apps/web/src/components/dashboard/setup-checklist-card.tsx`)
+- **Do:** a worker boots without PTB when no token is configured, and serves the runtime HTTP API only. A missing token becomes a publish warning instead of an error. The setup checklist marks its Telegram step optional, so the default path runs provider, agent, first task in `/sessions`, then its trace (the onboarding order in REFERENCE_RESEARCH §3.8).
+- **Done when:** in the M0-E3-T2 harness, an agent published with no Telegram token answers a dashboard message in `/sessions`, and a Telegram agent behaves as before. The setup checklist can be completed without a Telegram token; today its completion requires `telegramReady` (`setup-checklist-card.tsx` ~68).
 - **Tests:** M0-E3-T3 extended; G-PG agent-turn test with no token; changelog entry (publish check) · **Evidence:** —
 
 #### M3-E6 — Squads (journey: a squad room conversation with delegation and synthesis)
@@ -1772,18 +1796,18 @@ Owner AIM · Risk med · Gate none · **ready** · Deps —
 
 #### M3-E6-T4 · Bounded delegation and `agent_send`
 Owner AIM (SEC) · Risk med · Gate none · **ready** · Deps —
-- **Addresses:** D-095, D-096, D-185 (unbounded `_delegation_data`), F-SQD-07, F-SQD-06, R-27
+- **Addresses:** D-095, D-096, D-185 (unbounded `_delegation_data`), F-SQD-07, F-SQD-06, R-27; P25 (the limit is visible)
 - **Files:** `koda/agents/postgres_message_bus.py` (~477), `koda/services/tool_dispatcher.py` (~3396), the inbox dispatcher
-- **Do:** carry the full delegation chain and depth in request metadata, and enforce both in the inbox dispatcher before enqueueing. Apply a hop limit to `agent_send` in squad threads. Store a delegation result only when a local waiter exists, or in a TTL map.
-- **Done when:** an A→B→C→A cycle is rejected, depth is capped, and A↔B ping-pong stops at the limit.
+- **Do:** carry the full delegation chain and depth in request metadata, and enforce both in the inbox dispatcher before enqueueing. Apply a hop limit to `agent_send` in squad threads. Store a delegation result only when a local waiter exists, or in a TTL map. When a limit rejects a delegation in a squad thread, post one `system_event` whose metadata names the limit (cycle, depth or hop count), so the room can say why the work stopped (P25; M6-E2-T7 renders it).
+- **Done when:** an A→B→C→A cycle is rejected, depth is capped, and A↔B ping-pong stops at the limit. Each rejection in a squad thread leaves exactly one system event that names its limit.
 - **Tests:** G-PG · **Evidence:** —
 
 #### M3-E6-T5 · Budget pause enforced; expired claims redispatched
 Owner AIM · Risk med · Gate none · **ready** · Deps —
-- **Addresses:** D-075, D-097, F-SQD-19, F-SQD-15, F-SQD-18
-- **Files:** `koda/squads/router.py` (~388), `koda/squads/tasks.py` (~478), `koda/squads/dispatch.py`
-- **Do:** gate `dispatch_squad_turn` and `enqueue_squad_agent_task` on `status == 'open'` and on cost being under the cap. Keep the planned assignee, and redispatch or escalate a claim that expires.
-- **Done when:** a paused thread runs no turns, and an expired claim progresses.
+- **Addresses:** D-075, D-097, F-SQD-19, F-SQD-15, F-SQD-18; P25 (the pause reason is visible)
+- **Files:** `koda/squads/router.py` (~388), `koda/squads/tasks.py` (~478), `koda/squads/dispatch.py`, `koda/control_plane/api.py` (~2414)
+- **Do:** gate `dispatch_squad_turn` and `enqueue_squad_agent_task` on `status == 'open'` and on cost being under the cap. Keep the planned assignee, and redispatch or escalate a claim that expires. The budget auto-pause already posts `budget_exceeded_auto_pause` (`router.py` ~399). Post the same kind of `system_event`, with metadata reason `"operator"`, when the operator pauses a thread through `update_thread_status` (`api.py` ~2414), so the room says why nothing runs (P25; REFERENCE_RESEARCH §3.8, stated waiting reasons).
+- **Done when:** a paused thread runs no turns, and an expired claim progresses. A pause, by the budget or by the operator, leaves exactly one system event that names its reason.
 - **Tests:** G-PG · **Evidence:** —
 
 #### M3-E6-T6 · Live room events stay connected
@@ -2757,10 +2781,10 @@ Owner FE · Risk med · Gate none · **ready** · Deps —
 
 #### M6-E2-T5 · Approval cards and stop dialogs
 Owner UX (FE, SEC) · Risk med · Gate none · **pending** · Deps M3-E3-T2
-- **Addresses:** P15, P17, F-GOV-05, F-GOV-06
-- **Files:** the dashboard approval UI, the Telegram approval keyboard (`koda/utils/approval.py`; keep the PT-BR labels), the cancel and stop dialogs
-- **Do:** use the same verbs in both channels (allow once, allow scope, deny with a reason), and have the card show the exact grant scope and its expiry. Stop and cancel dialogs list the side effects already executed (from the trace) and whether child runs are affected.
-- **Done when:** a dashboard approval of a scoped grant shows the scope, and the stop dialog lists the executed writes.
+- **Addresses:** P15, P17, P21, F-GOV-05, F-GOV-06; REFERENCE_RESEARCH §3.8 (one design for every waiting card; a collapsed receipt after the answer)
+- **Files:** the dashboard approval UI (`apps/web/src/components/sessions/chat/approval-prompt.tsx`, `assistant-message.tsx`), the session detail that lists a turn's approvals (`koda/state/dashboard_store.py`), the Telegram approval keyboard (`koda/utils/approval.py`; keep the PT-BR labels), the cancel and stop dialogs
+- **Do:** use the same verbs in both channels (allow once, allow scope, deny with a reason), and have the card show the exact grant scope and its expiry. Stop and cancel dialogs list the side effects already executed (from the trace) and whether child runs are affected. The approval card shows the action, the agent's reasons, the scope and expiry, then the verbs (approve, edit, respond, reject), with "Waiting for your decision" while open. Once decided, the card collapses to a one-line receipt in the thread (decision, scope, when), read from the recorded decision. "Allow scope" never widens beyond the scope the card shows.
+- **Done when:** a dashboard approval of a scoped grant shows the scope, and the stop dialog lists the executed writes. A decided approval leaves a one-line receipt in its turn that is still there after a page reload, in both locales.
 - **Tests:** web tests; G-PG · **Evidence:** —
 
 #### M6-E2-T6 · Child runs never exceed parent capabilities
@@ -2773,10 +2797,10 @@ Owner AIM (SEC) · Risk med · Gate none · **ready** · Deps —
 
 #### M6-E2-T7 · Squad activity, metrics and task actions in the rooms UI
 Owner FE (AIM) · Risk med · Gate none · **ready** · Deps —
-- **Addresses:** F-SQD-27, P5 (current owner and open obligations visible), ARCHITECTURE_AUDIT §3.3 (backend capabilities with no UI)
-- **Files:** `apps/web/src/components/sessions/*` (room rail, room settings drawer), the existing squad task claim, complete, escalate and metrics routes
-- **Do:** show the squad task list with claim, complete and escalate actions, plus thread metrics and open reply obligations, using the existing backend routes.
-- **Done when:** an operator can see and act on squad tasks from the room.
+- **Addresses:** F-SQD-27, P5 (current owner and open obligations visible), P25 (system events read as sentences), ARCHITECTURE_AUDIT §3.3 (backend capabilities with no UI); REFERENCE_RESEARCH §3.8 (handover as a readable message; "Waiting for replies" block)
+- **Files:** `apps/web/src/components/sessions/*` (room rail, room settings drawer, `chat/room-chat-pane.tsx`), i18n resources, the existing squad task claim, complete, escalate and metrics routes
+- **Do:** show the squad task list with claim, complete and escalate actions, plus thread metrics and open reply obligations, using the existing backend routes. Show the open task's current owner, and a waiting block that lists each agent the thread waits on, with its obligation state (waiting or answered). Render every `system_event` message (routing, handoff, dispatch and mention failures, timeouts, claim, budget and coordinator events, and the limit and pause events from M3-E6-T4 and M3-E6-T5) as one short muted sentence built from the event metadata with i18n keys, for example `<agent> handed the task to <agent>: <reason>`. The stored message content stays as it is.
+- **Done when:** an operator can see and act on squad tasks from the room. No room `system_event` message shows its raw `[event_type] …` content in either locale. Known event types render from metadata, and others use the generic translated line.
 - **Tests:** web tests; G-PG for the routes · **Evidence:** —
 
 #### M6-E3 — Providers and composer
@@ -2836,6 +2860,18 @@ Owner SEC (AIM) · Risk low · Gate none · **pending** · Deps M1-E4-T3
 - **Do:** record what the KodaSkill manifest declares today. Enforce its version and any declared Koda compatibility range at install and at load. If the manifest has no compatibility field, add an optional `requires_koda` range; packages without it are accepted. An upgrade shows the old and new versions on the operator review screen.
 - **Done when:** a package whose declared range excludes the running version is refused with a clear message, and an upgrade shows both versions.
 - **Tests:** unit tests; G · **Evidence:** —
+
+#### M6-E3-T8 · The chat shows child runs and provider switches
+Owner FE (AIM) · Risk low · Gate none · **ready** · Deps —
+- **Addresses:** P8 (in-chat child-run row), P22 (failover is visible), P23 (turn receipts); REFERENCE_RESEARCH §3.8 (turn summary rows, provider-switch note). Journeys: chat in `/sessions` (J-11) and delegation with child runs (the M3 cancel journey). Today the operator must open execution detail to learn that a turn started child runs or moved to another provider.
+- **Files:** `koda/state/dashboard_store.py` (`get_session` ~1393, `_task_row_to_summary` ~664), reached from `koda/control_plane/manager.py` ~3934; `koda/services/child_runs.py` (the `child_runs` table, read only); `apps/web/src/components/sessions/chat/assistant-message.tsx`, `tool-call-card.tsx`; the session contract under `apps/web/src/lib/contracts/`; i18n resources
+- **Do:**
+  - add two fields to the `linked_execution` summary: child-run counts by status, and, when the turn switched provider, the providers before and after. Read the child-run counts with one grouped query over the session's task ids (`child_runs` GROUP BY `parent_task_id`, `status`), not one `list_child_runs_for_parent_sync` call per execution. Derive the switch from the trace's existing `provider fallback: <a> -> <b>` warning, with a unit test that pins that format. `queue_manager.py` does not change;
+  - under the assistant message, show one collapsed row (`<n> child runs · <done> done · <duration>`) that expands to one line per child (goal, status, duration) and links to the existing child-runs panel. The per-child lines load when the row opens, from the execution detail that already returns `child_runs`;
+  - when the provider switched, show one muted line naming both providers;
+  - add no new controls: stopping children stays with M3-E2-T4 and M6-E2-T5.
+- **Done when:** for a seeded parent task with two child runs, the thread shows the collapsed row with the count, and both children after expanding. For a seeded task whose trace records a provider switch, the thread shows one line naming both providers. Both work in both locales, and execution detail is unchanged. The session detail reads the child-run counts in one query, however many executions it holds.
+- **Tests:** G-PG for the summary fields; web component tests; G; changelog entry (session detail response body) · **Evidence:** —
 
 #### M6-E4 — Learning and memory curation (ADR-031)
 
@@ -3059,10 +3095,10 @@ Owner UX · Risk low · Gate none · **ready** · Deps —
 
 #### M8-E1-T4 · Browser accessibility pass
 Owner QA (UX) · Risk low · Gate infra: Docker for the full stack (CI) · **pending** · Deps M0-E3-T7
-- **Addresses:** mission §6.4, F-QA-09
+- **Addresses:** mission §6.4, F-QA-09; P27 (REFERENCE_RESEARCH §3.8: reduced motion designed per component, one focus token with at least 3:1 contrast)
 - **Files:** `apps/web/tests/e2e/a11y.spec.ts` (new)
-- **Do:** run axe through Playwright on the key routes at desktop and mobile viewports. Document the WCAG 2.2 AA exceptions in `docs/engineering/VALIDATION_REPORT.md`.
-- **Done when:** no serious or critical axe violation remains without a documented exception.
+- **Do:** run axe through Playwright on the key routes at desktop and mobile viewports. Document the WCAG 2.2 AA exceptions in `docs/engineering/VALIDATION_REPORT.md`. Add a run with `reducedMotion: 'reduce'` that counts running animations (`document.getAnimations()`) and checks that no content stays hidden behind an unfinished reveal. Measure the focus ring's contrast against each surface it sits on in the sessions rail, the composer and dialogs.
+- **Done when:** no serious or critical axe violation remains without a documented exception. Under reduced motion the key routes run no animation except a documented, non-moving exception, and the measured focus contrast is at least 3:1 on every surface checked.
 - **Tests:** G-CI · **Evidence:** —
 
 #### M8-E2 — Navigation and shell
@@ -3104,11 +3140,27 @@ Owner UX · Risk low · Gate none · **ready** · Deps —
 
 #### M8-E2-T5 · Information-architecture review
 Owner UX (PROD, FE) · Risk low · Gate none · **ready** · Deps —
-- **Addresses:** mission §6.1 (navigation and information architecture, workspace switching, agent, group, skills, memory and governance surfaces), §3.4; P1, P10, P18, P19 (to be evaluated)
+- **Addresses:** mission §6.1 (navigation and information architecture, workspace switching, agent, group, skills, memory and governance surfaces), §3.4; P1, P10, P18, P19 (to be evaluated); P12, P21, P23 and P24 gaps without a task (REFERENCE_RESEARCH §6, §6.10)
 - **Files:** a new review section in `docs/engineering/VALIDATION_REPORT.md` with screenshots from the rendered app; this plan (new tasks)
-- **Do:** walk the rendered app at desktop and mobile widths and record, per area (agents, squads and workspaces, sessions, skills and tools, memory, governance and approvals, monitoring, settings), where each task starts, how many steps it takes, and what is duplicated or unreachable. Evaluate workspace switching end to end. Evaluate P1, P10, P18 and P19 against what exists.
-- **Done when:** the review lists each finding with a screenshot, and every finding is either a new task in this plan or a recorded "no change" with a reason.
+- **Do:** walk the rendered app at desktop and mobile widths and record, per area (agents, squads and workspaces, sessions, skills and tools, memory, governance and approvals, monitoring, settings), where each task starts, how many steps it takes, and what is duplicated or unreachable. Evaluate workspace switching end to end. Evaluate P1, P10, P18 and P19 against what exists. Also decide, with Koda's own design system:
+  - where the Needs-you group sits in the sessions rail (M8-E2-T6 builds it);
+  - whether the agent's settings open from the chat header in the side panel, and how the editor's steps group into identity, knowledge, tools and rules (P1);
+  - whether session rows and the chat header show the agent glyph and mission role once M4-E3-T3 lands (P1);
+  - whether the composer shows a context meter fed by the context-governance totals (P12), a structured question card exists (P21), RunGraph gets a time-axis view opened from the turn row (P23), and messages get a Copy action;
+  - keep or drop for message search in the palette.
+- **Done when:** the review lists each finding with a screenshot, and every finding is either a new task in this plan or a recorded "no change" with a reason. Each decision listed under Do is recorded the same way.
 - **Tests:** none (review) · **Evidence:** —
+
+#### M8-E2-T6 · "Needs you" group in the sessions rail
+Owner FE (UX) · Risk low · Gate none · **pending** · Deps M8-E2-T5
+- **Addresses:** P19 (the Needs-you part only), P21; REFERENCE_RESEARCH §3.8 (a "Needs you" group with a count and the question as the row preview). Journey: a gated tool call is approved and executed (M3-E3). Today a pending approval in a session the operator is not viewing has no mark in the rail, and the command palette lists approvals for the first agent only (REFERENCE_RESEARCH §5).
+- **Files:** `apps/web/src/components/sessions/rail/session-rail.tsx`, `session-row.tsx`, `apps/web/src/hooks/use-command-catalog.ts` (`usePendingApprovalsCatalog`), `apps/web/src/components/command-bar/command-bar-modal.tsx` (~28), i18n resources
+- **Do:**
+  - one hook lists pending approvals for every agent from the existing `/agents/{agent_id}/approvals` route, on the realtime tier with the silent-refresh rules in `apps/web/CLAUDE.md`. An aggregate read is added only if the M8-E2-T5 review finds the per-agent requests too many;
+  - the rail shows a "Needs you" section at the place M8-E2-T5 chose, only while something waits. Its rows are the sessions with a pending approval, matched on `session_id`, each naming the agent and the tool or question, with the count in the section header;
+  - the command palette uses the same hook, so it lists the approvals of every agent.
+- **Done when:** with pending approvals for two agents in two sessions, the rail shows both rows under "Needs you" with a count of 2, in both locales. Deciding one removes its row within one refresh. With nothing pending, the section is absent. The palette lists both approvals.
+- **Tests:** web component tests; G · **Evidence:** —
 
 #### M8-E3 — Internationalisation and rendering
 
@@ -3242,10 +3294,10 @@ Owner UX (FE) · Risk med · Gate none · **pending** · Deps M8-E5-T8
 
 #### M8-E5-T10 · Typography and spacing scales
 Owner UX · Risk med · Gate none · **pending** · Deps M8-E5-T8, M8-E5-T3
-- **Addresses:** mission §6.2 (typography, spacing and sizing)
-- **Files:** `globals.css` tokens, the Tailwind config, the components the inventory lists
-- **Do:** define one type scale and one spacing scale as tokens, and replace arbitrary font sizes and spacings in the listed components.
-- **Done when:** a lint finds no arbitrary `text-[..px]` or spacing value outside the scales in the listed components.
+- **Addresses:** mission §6.2 (typography, spacing and sizing); P26 (REFERENCE_RESEARCH §6.10: three weights, monospace by role)
+- **Files:** `globals.css` tokens, the Tailwind config, the components the inventory lists, `apps/web/CLAUDE.md`
+- **Do:** define one type scale and one spacing scale as tokens, and replace arbitrary font sizes and spacings in the listed components. The type scale includes the weights: 400, 500 and 600, with display text at 500 as the design guide already says. Monospace is for eyebrows, timestamps, code and tabular numbers only. Record both rules in `apps/web/CLAUDE.md`.
+- **Done when:** a lint finds no arbitrary `text-[..px]` or spacing value outside the scales in the listed components, and no font weight outside 400, 500 and 600 in them.
 - **Tests:** lint; web tests · **Evidence:** —
 
 #### M8-E5-T11 · One icon set
@@ -3258,10 +3310,10 @@ Owner UX · Risk low · Gate none · **pending** · Deps M8-E5-T8
 
 #### M8-E5-T12 · Table, list, dialog and panel primitives
 Owner UX (FE) · Risk med · Gate none · **pending** · Deps M8-E5-T8
-- **Addresses:** mission §6.2 (tables, lists, cards, dialogs and panels); P20
-- **Files:** `components/ui/`, the call sites the inventory lists
-- **Do:** one row-list and table primitive, and one dialog and one side-panel primitive, all keyboard-accessible. Migrate the listed call sites.
-- **Done when:** the listed call sites use the primitives, and the keyboard tests (open, close with Escape, focus return) pass for each dialog and panel.
+- **Addresses:** mission §6.2 (tables, lists, cards, dialogs and panels); P20; P26 and P27 (REFERENCE_RESEARCH §6.10: rows grouped by tone, with a summarising accessible name)
+- **Files:** `components/ui/`, the call sites the inventory lists, including `components/sessions/rail/session-row.tsx` and `room-row.tsx`
+- **Do:** one row-list and table primitive, and one dialog and one side-panel primitive, all keyboard-accessible. Migrate the listed call sites. The row primitive has slots for a leading glyph, a title with an optional role tag, a one-line preview, a compact timestamp and a trailing count or status. Its accessible name summarises the row (name, state, last activity).
+- **Done when:** the listed call sites use the primitives, including the session and room rows of the sessions rail, and the keyboard tests (open, close with Escape, focus return) pass for each dialog and panel. A component test reads each rail row's accessible name.
 - **Tests:** web tests · **Evidence:** —
 
 #### M8-E5-T13 · One loading skeleton
@@ -3638,7 +3690,7 @@ flowchart LR
 8. **Policy:** M1-E4-T9 and {M1-E4-T5, M1-E5-T1} → M5-E3-T1 → M5-E3-T2 (offline replay) → M5-E3-T3 (approval batch 4) → M5-E3-T5 → M5-E3-T12 → … → M5-E3-T17 → M5-E3-T19.
 9. **Command guard and sidecars:** {M1-E4-T1, M1-E4-T10} → M5-E3-T6 (kernel guard); {M5-E3-T6, M1-E4-T13, M5-E3-T8} → M5-E5-T1.
 10. **Control plane:** M0-E3-T1 → M5-E6-T2. M1-E1-T5 → M5-E6-T1 → {M5-E6-T12, M5-E6-T10, M5-E8-T1 (error shape), M9-E3-T8 → M9-E3-T9}. {M0-E3-T1, M0-E3-T10} → M5-E6-T8.
-11. **Web:** M4-E3-T1 → M5-E8-T1 → {M5-E8-T2, M5-E8-T3, M5-E8-T6}. M4-E3-T1 → {M5-E8-T4, M8-E5-T1 → M8-E5-T6 → M8-E5-T7, M8-E5-T4}. M8-E5-T8 → M8-E5-T9 … T13. M3-E8-T3 → M8-E6-T1 → {M8-E6-T2, M8-E6-T3}. M0-E3-T7 → M8-E1-T4.
+11. **Web:** M4-E3-T1 → M5-E8-T1 → {M5-E8-T2, M5-E8-T3, M5-E8-T6}. M4-E3-T1 → {M5-E8-T4, M8-E5-T1 → M8-E5-T6 → M8-E5-T7, M8-E5-T4}. M8-E5-T8 → M8-E5-T9 … T13. M8-E2-T5 → M8-E2-T6. M3-E8-T3 → M8-E6-T1 → {M8-E6-T2, M8-E6-T3}. M0-E3-T7 → M8-E1-T4.
 12. **Auth docs:** {M1-E1-T2 … T7, M1-E1-T13, T14, T15} → M1-E1-T8.
 13. **Journeys and acceptance:** M3 tasks → M3-E9-T1 → M3-E9-T2 (needs M0-E1-T5) → M10-E1-T5 (after every milestone exit).
 
@@ -3662,13 +3714,14 @@ scheduling hint only: a hard ordering is always a Deps entry.
 | `apps/web/src/app/globals.css` | M8-E1-T1 → M8-E5-T3 → M8-E5-T10 → M8-E5-T7 → M8-E5-T4 |
 | `apps/web` i18n resources | M1-E8-T1 → M6-E1-T10 → M6-E3-T5 → M8-E3-T2 → M8-E3-T4 |
 | BFF proxy `app/api/control-plane/[...path]/route.ts` | M3-E6-T6 → M3-E8-T3 → M9-E2-T1 |
+| `apps/web/src/components/sessions/` (thread, composer, rail) | M8-E2-T1 → M3-E5-T2 → M6-E2-T7 → M6-E3-T8 → M6-E2-T5 → M8-E2-T6 → M8-E5-T12 |
 
 **Lanes for parallel subagents** (each with a disjoint file set):
 
 - **A:** security outbound and tools (M1-E3, M1-E4 outside the dispatcher, M1-E8-T2).
 - **B:** auth and control plane (M1-E1, M2-E2-T1, M3-E7).
 - **C:** squads and memory (M3-E4, M3-E6, Rust memory).
-- **D:** web (M1-E8-T1, M3-E1 UI tasks, M3-E5-T2, M4-E3, M6-E1-T10, M6-E3-T5, M8).
+- **D:** web (M1-E8-T1, M3-E1 UI tasks, M3-E5-T2, M4-E3, M6-E1-T10, M6-E2-T7, M6-E3-T5, M6-E3-T8, M8).
 - **E:** DevOps and supply chain (M0-E3-T7, M1-E7, M2-E6, M7-E4).
 
 `queue_manager.py` and `tool_dispatcher.py` work stays in a single lane. On this host the effective
