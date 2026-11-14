@@ -31,6 +31,15 @@ log = get_logger(__name__)
 _SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
 # RFC 6052 NAT64 well-known prefix: DNS64 synthesizes these for IPv4-only hosts.
 _NAT64_PREFIX = ipaddress.ip_network("64:ff9b::/96")
+# Cloud metadata services outside link-local, so inside ranges an operator may
+# grant: Alibaba Cloud's (in 100.64.0.0/10, next to Tailscale) and AWS IMDS over
+# IPv6 (a ULA).  Most others live on link-local 169.254.169.254, never granted.
+_METADATA_ADDRESSES = frozenset(
+    {
+        ipaddress.ip_address("100.100.100.200"),
+        ipaddress.ip_address("fd00:ec2::254"),
+    }
+)
 _SSRF_BLOCKED_MESSAGE = "Blocked: URL resolves to a private/reserved IP address."
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -183,9 +192,10 @@ def _is_blocked_ip(ip_str: str, private_networks: Sequence[IPNetwork] = ()) -> b
 
     Public unicast addresses pass.  A non-public address passes only inside one
     of *private_networks*, an operator's private-network grant (for example
-    ``100.64.0.0/10`` for MCP servers on a Tailscale tailnet).  Loopback,
-    link-local (cloud metadata), unspecified and multicast addresses are never
-    granted that way, whatever the networks cover.
+    ``100.64.0.0/10`` and ``fd7a:115c:a1e0::/48`` for MCP servers on a Tailscale
+    tailnet).  Loopback, link-local, unspecified and multicast addresses, and the
+    cloud metadata addresses outside link-local (:data:`_METADATA_ADDRESSES`),
+    are never granted that way, whatever the networks cover.
     """
     if not _is_private_ip(ip_str):
         return False
@@ -196,6 +206,8 @@ def _is_blocked_ip(ip_str: str, private_networks: Sequence[IPNetwork] = ()) -> b
     except ValueError:
         return True
     if addr.is_loopback or addr.is_link_local or addr.is_unspecified or addr.is_multicast:
+        return True
+    if addr in _METADATA_ADDRESSES:
         return True
     return not any(addr in network for network in private_networks)
 
