@@ -445,6 +445,43 @@ def test_group_evidence_counts_the_entry_that_names_the_row() -> None:
     assert problems_for(labelled_dash) == ["40: M1-E1-T1: is done but its Evidence field reads '—'"]
 
 
+# Section 6: a row's evidence is an `<ID>: <evidence>` entry, so only the label before the first ':' counts.
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        pytest.param('M1-E1-T2: VALIDATION_REPORT.md "M1-E1-T2" (M1-E1-T1 still open)', id="remark-in-another-entry"),
+        pytest.param('M1-E1-T2: VALIDATION_REPORT.md "M1-E1-T2", unblocks M1-E1-T1', id="text-of-another-entry"),
+        pytest.param('VALIDATION_REPORT.md "M1-E1-T1"', id="unlabelled-entry"),
+        pytest.param('See M1-E1-T1: VALIDATION_REPORT.md "M1-E1-T1"', id="label-with-other-text"),
+        pytest.param('M1-E1-T1, M1-E1-T2: VALIDATION_REPORT.md "M1-E1-T1"', id="list-label"),
+    ],
+)
+def test_group_evidence_entry_must_be_labelled_with_the_row(evidence: str) -> None:
+    done_row = seed("| M1-E1-T1 | Tool policy | **ready** |", "| M1-E1-T1 | Tool policy | **done** |")
+    plan = seed("**Evidence:** — (one entry per task)", f"**Evidence:** {evidence}", done_row)
+
+    tasks, problems = load_module().lint(plan, REPORT)
+
+    assert problems == ["40: M1-E1-T1: is done but its Evidence field reads '—'"]
+    assert tasks["M1-E1-T1"].evidence == ""
+
+
+def test_group_evidence_label_keeps_the_rest_of_the_entry() -> None:
+    done_row = seed("| M1-E1-T1 | Tool policy | **ready** |", "| M1-E1-T1 | Tool policy | **done** |")
+    plan = seed(
+        "**Evidence:** — (one entry per task)",
+        "**Evidence:** M1-E1-T2: — (needs M1-E1-T1); "
+        'M1-E1-T1 : VALIDATION_REPORT.md "M1-E1-T1" (tests/test_x.py::test_y)',
+        done_row,
+    )
+
+    tasks, problems = load_module().lint(plan, REPORT)
+
+    assert problems == []
+    assert tasks["M1-E1-T1"].evidence == 'VALIDATION_REPORT.md "M1-E1-T1" (tests/test_x.py::test_y)'
+    assert tasks["M1-E1-T2"].evidence == "— (needs M1-E1-T1)"
+
+
 def test_started_early_regression_test_needs_a_test_id_in_a_section_headed_by_the_task() -> None:
     plan = seed(f"**in-progress**{STARTED_EARLY_FLAG}", f"**done**{STARTED_EARLY_FLAG}")
     plan = seed(

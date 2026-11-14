@@ -8,7 +8,8 @@ The task format is MASTER_PLAN.md section 6. Every task is a
 columns). Such a table sits under a group heading that names exactly its rows,
 for example ``#### M5-E3-T5, M5-E3-T12 to M5-E3-T17 · …``. Each row also takes
 the group's Deps, and its evidence is the ``<ID>: …`` entry of the group's
-Evidence field that names it, unless the table has an Evidence column.
+Evidence field whose label (the text before its first ``:``) is the row's ID,
+unless the table has an Evidence column.
 
 Every task ID in a Deps field is a hard dependency, except in a
 ``coordinate with …`` note, which runs to the next ``;`` or the end of the
@@ -131,10 +132,16 @@ def has_evidence(evidence: str) -> bool:
 
 
 def group_row_evidence(group_evidence: str, task_id: str) -> str:
-    """The ``;``-separated entries of a group's Evidence field that name ``task_id``, without their ``<ID>:`` label."""
-    id_re = re.compile(rf"\b{re.escape(task_id)}\b")
-    label_re = re.compile(rf"^{re.escape(task_id)}\s*:\s*")
-    entries = [label_re.sub("", entry.strip()) for entry in group_evidence.split(";") if id_re.search(entry)]
+    """The ``<ID>: <evidence>`` entries (``;``-separated) of a group's Evidence field labelled ``task_id``.
+
+    Only the label, the text before an entry's first ``:``, decides which row an entry belongs to, so another
+    row's entry that mentions ``task_id`` ("M1-E1-T2: …, unblocks M1-E1-T1") is not evidence for it.
+    """
+    entries = []
+    for entry in group_evidence.split(";"):
+        label, colon, evidence = entry.partition(":")
+        if colon and label.strip() == task_id:
+            entries.append(evidence.strip())
     return "; ".join(entries)
 
 
