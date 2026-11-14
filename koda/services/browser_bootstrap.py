@@ -13,18 +13,22 @@ install`` manually. Presence is decided by the executable the pinned
 Playwright itself launches, asked from its own driver (one short Node run):
 that file must exist, and its build must carry the completion marker
 Playwright's installer writes once the build is fully extracted. A build cut
-off mid-extract is therefore reinstalled, not trusted. It emits a clear log
-when it has to install.
+off mid-extract is therefore reinstalled, not trusted. A build marked complete
+whose executable is gone is reinstalled with ``--force``, because the
+installer skips any build it marked complete. It emits a clear log when it has
+to install.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 from koda.logging_config import get_logger
@@ -33,6 +37,13 @@ log = get_logger(__name__)
 
 _DEFAULT_BROWSERS_PATH = "/var/lib/koda/playwright-browsers"
 _LOOKUP_TIMEOUT_SECONDS = 30.0
+_INSTALL_TIMEOUT_SECONDS = 600
+# Installs Chromium, its headless shell and ffmpeg, skipping any build the
+# installer already marked complete.
+_INSTALL_ARGS = ("install", "chromium")
+# Registry names (``chromium-headless-shell``) are passed to the installer as
+# an argument, so only plain names are accepted from the driver.
+_REGISTRY_NAME = re.compile(r"[a-z0-9][a-z0-9-]*")
 
 # Run by the pinned Playwright driver's Node with its package directory as
 # argument. Its own launch code picks the executable for
@@ -40,8 +51,8 @@ _LOOKUP_TIMEOUT_SECONDS = 30.0
 # and its registry maps that to a path for this host, revision and
 # PLAYWRIGHT_BROWSERS_PATH, and to the browser directory whose completion
 # marker its installer checks. Prints {"executablePath": <path or null>,
-# "installationMarker": <path or null>}; a null executablePath means
-# Playwright has no build for this host.
+# "installationMarker": <path or null>, "name": <registry name or null>}; a
+# null executablePath means Playwright has no build for this host.
 _LAUNCH_EXECUTABLE_LOOKUP = """
 const path = require("path");
 const serverDir = path.join(process.argv[1], "lib", "server");
@@ -52,7 +63,8 @@ const executable = server.registry.findExecutable(chromium.getExecutableName({ h
 const executablePath = (executable && executable.executablePath()) || null;
 const installationMarker =
   executablePath && executable.directory ? browserDirectoryToMarkerFilePath(executable.directory) : null;
-process.stdout.write(JSON.stringify({ executablePath, installationMarker }));
+const name = (executablePath && executable.name) || null;
+process.stdout.write(JSON.stringify({ executablePath, installationMarker, name }));
 """
 
 
@@ -62,14 +74,31 @@ class _LookupUnavailableError(Exception):
 
 @dataclass(frozen=True)
 class _LaunchExecutable:
-    """The executable the pinned Playwright launches and its build's completion marker.
+    """The executable the pinned Playwright launches, its build's completion marker and registry name.
 
     Playwright's installer writes ``installation_marker`` only after the
     build is fully extracted, and downloads again any build without it.
+    ``name`` is what ``playwright install`` takes to install that build alone
+    (``chromium-headless-shell``).
     """
 
     path: Path
     installation_marker: Path
+    name: str
+
+
+class _ChromiumState(Enum):
+    """What the bootstrap found for the executable the pinned Playwright launches."""
+
+    PRESENT = "present"
+    # No usable build: not installed, another revision, or an extract cut off
+    # before the installer marked it complete. ``playwright install`` repairs it.
+    MISSING = "missing"
+    # The installer marked the build complete but its executable is gone. The
+    # installer skips a marked build, so only ``--force`` downloads it again.
+    MARKED_WITHOUT_EXECUTABLE = "marked_without_executable"
+    # The driver could not be asked; the installer decides.
+    UNKNOWN = "unknown"
 
 
 def _browsers_path() -> Path:
@@ -113,33 +142,69 @@ def _launch_executable(browsers_path: Path) -> _LaunchExecutable | None:
     if executable is None:
         return None
     marker = payload.get("installationMarker")
-    if not (isinstance(executable, str) and executable and isinstance(marker, str) and marker):
+    name = payload.get("name")
+    if not (
+        isinstance(executable, str)
+        and executable
+        and isinstance(marker, str)
+        and marker
+        and isinstance(name, str)
+        and _REGISTRY_NAME.fullmatch(name)
+    ):
         raise _LookupUnavailableError(f"unexpected driver answer: {result.stdout[:200]!r}")
-    return _LaunchExecutable(path=Path(executable), installation_marker=Path(marker))
+    return _LaunchExecutable(path=Path(executable), installation_marker=Path(marker), name=name)
 
 
-def _chromium_present(browsers_path: Path) -> bool | None:
-    """Return whether the executable the pinned Playwright launches is installed.
+def _chromium_state(browsers_path: Path) -> tuple[_ChromiumState, _LaunchExecutable | None]:
+    """Classify the executable the pinned Playwright launches, with the lookup's answer.
 
     Installed means the executable exists and Playwright's installer marked
     its build complete. An executable without the marker is left by an
     extract cut off mid-way (say, the container stopped during the first-boot
     install); ``playwright install`` downloads that build again, so it counts
-    as missing here too and the installer repairs it.
-
-    ``None`` when its driver cannot be asked: the caller then falls back to
-    ``playwright install``, which skips builds that already finished
-    installing, so a complete install is not downloaded again.
+    as missing. A marker without the executable (the file was deleted after
+    the install) counts as missing too, but the installer skips a marked
+    build, so it needs ``--force``.
     """
     try:
         executable = _launch_executable(browsers_path)
     except _LookupUnavailableError as exc:
         log.warning("browser_bootstrap_lookup_unavailable", path=str(browsers_path), reason=str(exc))
-        return None
+        return _ChromiumState.UNKNOWN, None
     if executable is None:
-        return False
+        return _ChromiumState.MISSING, None
     # The installer tests the marker for existence only; so does this check.
-    return os.path.isfile(executable.path) and os.path.exists(executable.installation_marker)
+    marked = os.path.exists(executable.installation_marker)
+    if not marked:
+        return _ChromiumState.MISSING, executable
+    if not os.path.isfile(executable.path):
+        return _ChromiumState.MARKED_WITHOUT_EXECUTABLE, executable
+    return _ChromiumState.PRESENT, executable
+
+
+def _chromium_present(browsers_path: Path) -> bool | None:
+    """Return whether the executable the pinned Playwright launches is installed.
+
+    ``None`` when its driver cannot be asked: the caller then falls back to
+    ``playwright install``, which skips builds that already finished
+    installing, so a complete install is not downloaded again.
+    """
+    state, _ = _chromium_state(browsers_path)
+    if state is _ChromiumState.UNKNOWN:
+        return None
+    return state is _ChromiumState.PRESENT
+
+
+def _install_command(state: _ChromiumState, executable: _LaunchExecutable | None) -> list[str]:
+    """The ``playwright install`` run that repairs ``state``.
+
+    A build the installer marked complete is skipped unless forced, so only
+    that build is reinstalled with ``--force``. Everything else is the plain
+    install, which downloads only the builds not marked complete.
+    """
+    if state is _ChromiumState.MARKED_WITHOUT_EXECUTABLE and executable is not None:
+        return [sys.executable, "-m", "playwright", "install", "--force", executable.name]
+    return [sys.executable, "-m", "playwright", *_INSTALL_ARGS]
 
 
 def ensure_browser_installed_in_background() -> None:
@@ -163,7 +228,8 @@ def ensure_browser_installed() -> None:
     browsers_path = _browsers_path()
     os.environ.setdefault("PLAYWRIGHT_BROWSERS_PATH", str(browsers_path))
 
-    if _chromium_present(browsers_path):
+    state, executable = _chromium_state(browsers_path)
+    if state is _ChromiumState.PRESENT:
         log.debug("browser_bootstrap_skipped_already_present", path=str(browsers_path))
         return
 
@@ -173,15 +239,16 @@ def ensure_browser_installed() -> None:
         log.warning("browser_bootstrap_mkdir_failed", path=str(browsers_path), exc_info=True)
         return
 
-    log.info("browser_bootstrap_installing", path=str(browsers_path))
+    command = _install_command(state, executable)
+    log.info("browser_bootstrap_installing", path=str(browsers_path), state=state.value, command=command[2:])
     env = os.environ.copy()
     env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_path)
     try:
         subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
+            command,
             env=env,
             check=True,
-            timeout=600,
+            timeout=_INSTALL_TIMEOUT_SECONDS,
         )
     except FileNotFoundError:
         log.warning("browser_bootstrap_playwright_cli_missing")

@@ -10,8 +10,10 @@ properties:
 * A build Playwright would not launch (another revision, or the full browser
   without the headless shell) counts as missing.
 * A build Playwright's installer has not marked complete (an interrupted
-  extract), or one whose executable is gone, counts as missing, so the
-  installer runs and repairs it.
+  extract) counts as missing, so the installer runs and downloads it again.
+* A build marked complete whose executable is gone counts as missing too. The
+  installer skips any build it marked complete, so the bootstrap reinstalls
+  that build with ``--force``.
 * When the binary is missing, it invokes ``playwright install`` with the
   correct ``PLAYWRIGHT_BROWSERS_PATH`` and doesn't crash on subprocess
   failure (browser is optional; LLM / memory / knowledge must still boot).
@@ -72,6 +74,9 @@ _LAYOUTS = {
     ),
 }
 _INSTALL_COMMAND_TAIL = ["-m", "playwright", "install", "chromium"]
+# The pinned registry's name for the build ``chromium.launch(headless=True)`` uses.
+_HEADLESS_SHELL = "chromium-headless-shell"
+_FORCE_INSTALL_COMMAND_TAIL = ["-m", "playwright", "install", "--force", _HEADLESS_SHELL]
 # A revision the pinned Playwright does not use, as left by another version.
 _STALE_REVISION = "1208"
 # Written by Playwright's installer into a browser directory once the build is
@@ -140,13 +145,30 @@ def _fake_node(tmp_path: Path, body: str) -> Path:
     return node
 
 
+def _refusing_download_env(browsers_root: Path, port: int) -> dict[str, str]:
+    """The environment for a real pinned installer that can download nothing.
+
+    The registry prefers a per-browser host (``PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST``)
+    over ``PLAYWRIGHT_DOWNLOAD_HOST``, so both point at the refusing port: a
+    Chromium mirror set on a developer or CI machine must not be used.
+    """
+    refusing = f"http://127.0.0.1:{port}"
+    return {
+        **os.environ,
+        "PLAYWRIGHT_BROWSERS_PATH": str(browsers_root),
+        "PLAYWRIGHT_DOWNLOAD_HOST": refusing,
+        "PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST": refusing,
+    }
+
+
 @dataclass
 class _FakeInstaller:
-    """Stands in for the ``playwright install chromium`` subprocess only."""
+    """Stands in for the bootstrap's ``playwright install`` subprocess only."""
 
     calls: list[tuple[list[str], dict[str, Any]]] = field(default_factory=list)
     effect: Callable[[], None] | None = None
     error: BaseException | None = None
+    real_run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
 
 
 @pytest.fixture
@@ -159,10 +181,10 @@ def installer(monkeypatch: pytest.MonkeyPatch) -> _FakeInstaller:
     from koda.services import browser_bootstrap
 
     real_run = subprocess.run
-    fake = _FakeInstaller()
+    fake = _FakeInstaller(real_run=real_run)
 
     def _run(args, **kwargs):  # type: ignore[no-untyped-def]
-        if list(args[1:]) != _INSTALL_COMMAND_TAIL:
+        if list(args[1:4]) != ["-m", "playwright", "install"]:
             return real_run(args, **kwargs)
         fake.calls.append((list(args), kwargs))
         if fake.error is not None:
@@ -258,19 +280,18 @@ def test_presence_agrees_with_the_pinned_installer(
     from koda.services import browser_bootstrap
 
     _use_layout(monkeypatch, "linux-x64")
+    # A Chromium mirror inherited from the machine running the tests.
+    monkeypatch.setenv("PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST", "http://127.0.0.1:9")
     _install_layout(browsers_root, "linux-x64", chromium=False, complete=complete)
-    shell = browsers_root / f"chromium_headless_shell-{_pinned_revision('chromium-headless-shell')}"
+    shell = browsers_root / f"chromium_headless_shell-{_pinned_revision(_HEADLESS_SHELL)}"
     present = browser_bootstrap._chromium_present(browsers_root)
 
     with socket.socket() as refusing:
         refusing.bind(("127.0.0.1", 0))
+        port = refusing.getsockname()[1]
         install = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium-headless-shell"],
-            env={
-                **os.environ,
-                "PLAYWRIGHT_BROWSERS_PATH": str(browsers_root),
-                "PLAYWRIGHT_DOWNLOAD_HOST": f"http://127.0.0.1:{refusing.getsockname()[1]}",
-            },
+            [sys.executable, "-m", "playwright", "install", _HEADLESS_SHELL],
+            env=_refusing_download_env(browsers_root, port),
             capture_output=True,
             text=True,
             timeout=120,
@@ -281,6 +302,8 @@ def test_presence_agrees_with_the_pinned_installer(
     assert present is complete
     assert (shell / _LAYOUTS["linux-x64"][2]).is_file() is present, output
     assert ("Downloading Chrome Headless Shell" in output) is not present, output
+    if not present:
+        assert f"from http://127.0.0.1:{port}/" in output, output
 
 
 @pytest.mark.parametrize("complete", [False, True], ids=["extract-interrupted", "executable-removed"])
@@ -302,7 +325,55 @@ def test_build_directory_without_its_executable_is_missing(
     assert browser_bootstrap._chromium_present(browsers_root) is False
     browser_bootstrap.ensure_browser_installed()
 
-    assert len(installer.calls) == 1
+    # A build marked complete is skipped by the installer unless forced.
+    tail = _FORCE_INSTALL_COMMAND_TAIL if complete else _INSTALL_COMMAND_TAIL
+    assert [cmd for cmd, _ in installer.calls] == [[sys.executable, *tail]]
+
+
+def test_a_marked_build_whose_executable_is_gone_is_reinstalled_with_force(
+    browsers_root: Path, installer: _FakeInstaller, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The installer skips a build it marked complete, so only ``--force`` brings its executable back.
+
+    The command the bootstrap runs is then given to the real pinned installer,
+    against a port that refuses connections: it must try to download the
+    headless shell again, where plain ``install chromium`` downloads nothing.
+    """
+    from koda.services import browser_bootstrap
+
+    _use_layout(monkeypatch, "linux-x64")
+    _install_layout(browsers_root, "linux-x64")
+    # `install chromium` also installs ffmpeg; lay it out so the plain run has nothing to download.
+    _install_build(
+        browsers_root / f"ffmpeg-{_pinned_revision('ffmpeg')}", "ffmpeg-linux", complete=True, with_executable=True
+    )
+    shell_executable = (
+        browsers_root / f"chromium_headless_shell-{_pinned_revision(_HEADLESS_SHELL)}" / _LAYOUTS["linux-x64"][2]
+    )
+    shell_executable.unlink()
+    monkeypatch.setenv("PLAYWRIGHT_BROWSERS_PATH", str(browsers_root))
+    installer.effect = lambda: _write_executable(shell_executable)
+
+    assert browser_bootstrap._chromium_present(browsers_root) is False
+    browser_bootstrap.ensure_browser_installed()
+
+    assert [cmd for cmd, _ in installer.calls] == [[sys.executable, *_FORCE_INSTALL_COMMAND_TAIL]]
+    assert installer.calls[0][1]["env"]["PLAYWRIGHT_BROWSERS_PATH"] == str(browsers_root)
+    assert browser_bootstrap._chromium_present(browsers_root) is True
+
+    shell_executable.unlink()
+    outputs = {}
+    with socket.socket() as refusing:
+        refusing.bind(("127.0.0.1", 0))
+        env = _refusing_download_env(browsers_root, refusing.getsockname()[1])
+        for name, tail in {"plain": _INSTALL_COMMAND_TAIL, "force": _FORCE_INSTALL_COMMAND_TAIL}.items():
+            run = installer.real_run(
+                [sys.executable, *tail], env=env, capture_output=True, text=True, timeout=300, check=False
+            )
+            outputs[name] = run.stdout + run.stderr
+
+    assert "Downloading" not in outputs["plain"], outputs["plain"]
+    assert "Downloading Chrome Headless Shell" in outputs["force"], outputs["force"]
 
 
 def test_ensure_browser_installed_repairs_an_interrupted_extract(
@@ -322,7 +393,7 @@ def test_ensure_browser_installed_repairs_an_interrupted_extract(
 
     browser_bootstrap.ensure_browser_installed()
 
-    assert len(installer.calls) == 1
+    assert [cmd for cmd, _ in installer.calls] == [[sys.executable, *_INSTALL_COMMAND_TAIL]]
     assert browser_bootstrap._chromium_present(browsers_root) is True
 
 
@@ -377,6 +448,13 @@ _UNUSABLE_DRIVER_NODES = {
     "output-not-an-object": "echo '[]'",
     "output-wrong-shape": "echo '{\"executablePath\": 3}'",
     "output-without-marker": 'echo \'{"executablePath": "/pw/chrome-headless-shell"}\'',
+    "output-without-name": (
+        'echo \'{"executablePath": "/pw/chrome-headless-shell", "installationMarker": "/pw/INSTALLATION_COMPLETE"}\''
+    ),
+    "output-with-an-unsafe-name": (
+        'echo \'{"executablePath": "/pw/chrome-headless-shell", "installationMarker": "/pw/INSTALLATION_COMPLETE",'
+        ' "name": "--with-deps"}\''
+    ),
     "driver-hangs": "exec sleep 30",
 }
 
