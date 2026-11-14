@@ -168,6 +168,34 @@ def test_present_key_loads_and_loose_permissions_are_tightened(key_paths: Simple
     assert _mode(key_paths.key_file) == 0o600
 
 
+@pytest.mark.parametrize("loose_mode", [0o444, 0o440, 0o404, 0o640, 0o604, 0o660])
+def test_key_readable_by_group_or_others_is_tightened(key_paths: SimpleNamespace, loose_mode: int) -> None:
+    # Modes numerically below 0o600 (e.g. 0o444) still expose the key to other users.
+    key = Fernet.generate_key()
+    _write_key(key_paths.key_file, key, mode=loose_mode)
+
+    assert crypto.get_signing_key() == key
+    assert _mode(key_paths.key_file) & 0o077 == 0
+
+
+def test_key_on_unchangeable_mount_is_used_and_exposure_logged(
+    key_paths: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    key = Fernet.generate_key()
+    _write_key(key_paths.key_file, key, mode=0o444)
+    warnings: list[tuple[str, dict]] = []
+    monkeypatch.setattr(crypto.log, "warning", lambda event, **kw: warnings.append((event, kw)))
+
+    def _read_only(self: Path, mode: int) -> None:
+        raise PermissionError(30, "Read-only file system")
+
+    monkeypatch.setattr(Path, "chmod", _read_only)
+
+    assert crypto.get_signing_key() == key
+    assert [event for event, _ in warnings] == ["control_plane_master_key_permissions_too_open"]
+    assert warnings[0][1]["mode"] == "0o444"
+
+
 def test_unreadable_key_file_is_unavailable(key_paths: SimpleNamespace, monkeypatch: pytest.MonkeyPatch) -> None:
     _write_key(key_paths.key_file, Fernet.generate_key())
 

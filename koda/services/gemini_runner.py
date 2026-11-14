@@ -108,17 +108,13 @@ def _build_cmd(
     from koda.services.provider_auth import resolve_provider_command
 
     approval_mode = _effective_approval_mode(permission_mode, dry_run=dry_run)
+    # Attached values: yargs would read a separate value that starts with "-" as an option.
     args = [
-        "--model",
-        model,
-        "--output-format",
-        output_format,
-        "--approval-mode",
-        approval_mode,
-        "--include-directories",
-        work_dir,
-        "--prompt",
-        prompt,
+        f"--model={model}",
+        f"--output-format={output_format}",
+        f"--approval-mode={approval_mode}",
+        f"--include-directories={work_dir}",
+        f"--prompt={prompt}",
     ]
     cmd = [*resolve_provider_command("gemini"), *args]
     # Everything after the executable is checked, including tokens that came with the command.

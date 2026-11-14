@@ -464,7 +464,7 @@ def test_validate_args_rejects_a_choice_outside_the_contract():
     with pytest.raises(pcc.ProviderCliContractError, match="acceptEdits"):
         pcc.validate_args("claude", ["-p", "--permission-mode", "acceptEdits"])
     with pytest.raises(pcc.ProviderCliContractError, match="yolo-plus"):
-        pcc.validate_args("gemini", ["--approval-mode", "yolo-plus"])
+        pcc.validate_args("gemini", ["--approval-mode=yolo-plus"])
 
 
 def test_validate_args_rejects_equals_forms_and_missing_values():
@@ -529,8 +529,30 @@ def test_validate_args_rejects_unknown_subcommands_and_extra_positionals():
 
 
 def test_validate_args_treats_flag_values_as_data():
-    pcc.validate_args("gemini", ["--model", "gemini-2.5-pro", "--prompt", "--yolo please"])
     pcc.validate_args("claude", ["-p", "--append-system-prompt", "--restricted is not a flag here"])
+    pcc.validate_args("gemini", ["--model=gemini-2.5-pro", "--prompt=--yolo please"])
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["--prompt", "-y"],  # yargs: prompt="" and yolo=true
+        ["--prompt", "--approval-mode=yolo"],  # yargs: approval-mode gains "yolo"
+        ["--model", "gemini-2.5-pro"],  # a separate value is refused even when it looks harmless
+        ["--approval-mode", "default"],
+    ],
+)
+def test_gemini_refuses_separate_values_that_yargs_could_read_as_options(argv):
+    with pytest.raises(pcc.ProviderCliContractError, match="attached"):
+        pcc.validate_args("gemini", argv)
+
+
+def test_gemini_attached_values_keep_choices_and_flag_checks():
+    pcc.validate_args("gemini", ["--approval-mode=default", "--prompt=-y", "--extensions=none"])
+    with pytest.raises(pcc.ProviderCliContractError, match="yolo-plus"):
+        pcc.validate_args("gemini", ["--approval-mode=yolo-plus"])
+    with pytest.raises(pcc.ProviderCliContractError, match="--yolo"):
+        pcc.validate_args("gemini", ["--yolo=true"])
 
 
 def test_level_profiles_only_use_current_contract_tokens():

@@ -102,11 +102,26 @@ class MasterKeyMismatch(MasterKeyError):
 
 
 def _tighten_permissions(path: Path) -> None:
+    """Remove group and other access from the key file.
+
+    A file that cannot be changed (for example a read-only secret mount) is
+    still used, but the exposure is logged so the operator can fix the mount.
+    """
     try:
-        if path.stat().st_mode & 0o777 > 0o600:
-            path.chmod(0o600)
+        mode = path.stat().st_mode & 0o777
     except OSError:
-        pass
+        return
+    if not mode & 0o077:
+        return
+    try:
+        path.chmod(0o600)
+    except OSError as exc:
+        log.warning(
+            "control_plane_master_key_permissions_too_open",
+            path=str(path),
+            mode=oct(mode),
+            error=str(exc),
+        )
 
 
 def _read_current_key() -> bytes | None:

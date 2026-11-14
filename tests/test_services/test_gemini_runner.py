@@ -89,3 +89,22 @@ class TestRunGemini:
 
         assert result["error"] is True
         assert result["_error_kind"] == "adapter_contract"
+
+
+def test_build_cmd_attaches_values_so_a_dash_leading_prompt_stays_data():
+    # ``resolve_provider_command`` is already pinned by the autouse fixture; patching it again
+    # with ``monkeypatch`` would restore the fixture's mock after the fixture exits and leak it.
+    from koda.services import gemini_runner
+
+    cmd = gemini_runner._build_cmd(
+        model="gemini-2.5-pro",
+        work_dir="/work",
+        prompt="-y --approval-mode=yolo",
+        permission_mode=None,
+        dry_run=False,
+        output_format="json",
+    )
+
+    assert "--prompt=-y --approval-mode=yolo" in cmd
+    assert "-y" not in cmd and "--yolo" not in cmd
+    assert all(arg == "gemini" or "=" in arg for arg in cmd)

@@ -137,6 +137,9 @@ class ProviderCliContract:
     config_keys: tuple[ConfigKeySpec, ...] = ()
     parser_probe: ParserProbeSpec | None = None
     inner_sandbox_ok: bool = False
+    # The CLI's parser (yargs, for Gemini) reads a separate value element that starts with "-"
+    # as an option of its own, so every value must be attached as one ``--flag=value`` element.
+    attached_values: bool = False
 
     @property
     def contract_id(self) -> str:
@@ -301,13 +304,13 @@ GEMINI_CONTRACT = ProviderCliContract(
         FlagSpec("--prompt", _ROOT, 1, legacy=True),
         FlagSpec("--extensions", _ROOT, 1),
     ),
-    base_args=("--extensions", "none"),
+    base_args=("--extensions=none",),
     # Settings go to GEMINI_CLI_SYSTEM_SETTINGS_PATH; their keys are unverified until AG-25.
     # ``none`` (tools.core=[]) is unproven, so the floor is read_only.
     levels=_levels(
         none=None,
         read_only=LevelContract(
-            args=("--approval-mode", "default"),
+            args=("--approval-mode=default",),
             settings=_settings(
                 {
                     "mcpServers": {},
@@ -318,16 +321,17 @@ GEMINI_CONTRACT = ProviderCliContract(
             ),
         ),
         workspace_write=LevelContract(
-            args=("--approval-mode", "auto_edit"),
+            args=("--approval-mode=auto_edit",),
             settings=_settings(
                 {"mcpServers": {}, "tools": {"exclude": ["run_shell_command", *_GEMINI_ALWAYS_EXCLUDED]}}
             ),
         ),
         workspace_exec=LevelContract(
-            args=("--approval-mode", "yolo"),
+            args=("--approval-mode=yolo",),
             settings=_settings({"mcpServers": {}, "tools": {"exclude": list(_GEMINI_ALWAYS_EXCLUDED)}}),
         ),
     ),
+    attached_values=True,
 )
 
 CONTRACTS: dict[str, ProviderCliContract] = {
@@ -389,8 +393,10 @@ def validate_args(provider: str, args: Sequence[str]) -> None:
     """Refuse a command line (without the executable) that leaves the provider's contract.
 
     Every option must be a contract flag of the subcommand's scope, enumerated values must be
-    contract choices and config overrides contract keys. Flag values are data and are not
-    interpreted, so a prompt that starts with ``--`` is never mistaken for a flag.
+    contract choices and config overrides contract keys. For contracts whose parser treats the
+    next element as the value (commander, clap), that element is data, so a prompt starting with
+    ``--`` is not a flag. For ``attached_values`` contracts (yargs), a separate value element is
+    refused and values must be attached as ``--flag=value``, which the parser binds verbatim.
     """
     contract = get_contract(provider)
     scope_name, scope = _scope_for(contract, args)
@@ -402,10 +408,23 @@ def validate_args(provider: str, args: Sequence[str]) -> None:
         if token == "-" or not token.startswith("-"):
             positionals.append(token)
             continue
+        attached: str | None = None
+        if contract.attached_values and token.startswith("--") and "=" in token:
+            token, _, attached = token.partition("=")
         spec = contract.flag(token)
         if spec is None or scope_name not in spec.scopes:
             raise ProviderCliContractError(f"{contract.contract_id}: {token} is not in the contract for {scope_name}")
         if spec.arity == 0:
+            if attached is not None:
+                raise ProviderCliContractError(f"{contract.contract_id}: {token} takes no value")
+            continue
+        if contract.attached_values:
+            if attached is None or spec.arity == "+":
+                raise ProviderCliContractError(
+                    f"{contract.contract_id}: {token} needs its value attached as {token}=VALUE"
+                )
+            if spec.choices and attached not in spec.choices:
+                raise ProviderCliContractError(f"{contract.contract_id}: {token} {attached} is not in the contract")
             continue
         if spec.arity == "+":
             start = index

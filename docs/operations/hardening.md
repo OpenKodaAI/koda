@@ -167,6 +167,13 @@ stores: `cp_secret_values`, MCP connection env values and OAuth tokens,
 and provider login sessions. Rotate annually or after a suspected
 compromise.
 
+The key file must stay mode `0600`. At startup the control plane
+removes group and other access from a key file that has any, such as
+one written by hand under a `022` umask. When the mount does not allow
+the change (a read-only bind mount, for example), it keeps using the key
+and logs `control_plane_master_key_permissions_too_open` with the
+current mode. Fix the mode on the host when you see that event.
+
 Postgres records a fingerprint of the key in `cp_master_key_fingerprint`
 (an HMAC of a fixed label under the key, never the key). At startup the
 control plane refuses a key that does not match it, unless the previous
