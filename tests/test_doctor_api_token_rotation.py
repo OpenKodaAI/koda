@@ -15,10 +15,14 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
+import threading
+import urllib.request
 from collections.abc import AsyncIterator
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from aiohttp import web
@@ -164,3 +168,58 @@ def test_doctor_splits_the_token_list_as_the_control_plane_does(doctor: ModuleTy
     accepted, _ignored = parse_api_tokens(configured)
 
     assert doctor.api_tokens(configured) == accepted
+
+
+class _RecordingProxy(BaseHTTPRequestHandler):
+    """A forward HTTP proxy that records what it is sent and answers like a healthy control plane."""
+
+    seen: ClassVar[list[tuple[str, str]]]
+
+    def do_GET(self) -> None:
+        self.seen.append((self.path, self.headers.get("Authorization", "")))
+        body = json.dumps(
+            {"status": "healthy", "has_owner": True, "providers": [{"provider_id": "claude", "verified": True}]}
+        ).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *_args: Any) -> None:
+        pass
+
+
+@pytest.mark.parametrize("configured", ["new-break-glass-token,old-break-glass-token"])
+async def test_doctor_never_sends_the_bearer_through_an_http_proxy(
+    doctor: ModuleType, control_plane: _ControlPlane, configured: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An http_proxy without a no_proxy entry for loopback would see the break-glass token in clear text.
+
+    Doctor talks only to this install's control plane and dashboard, so it connects to them directly
+    whatever the proxy settings say.
+    """
+    seen: list[tuple[str, str]] = []
+    proxy = ThreadingHTTPServer(("127.0.0.1", 0), type("Proxy", (_RecordingProxy,), {"seen": seen}))
+    thread = threading.Thread(target=proxy.serve_forever, daemon=True)
+    thread.start()
+    try:
+        proxy_url = f"http://127.0.0.1:{proxy.server_address[1]}"
+        for name in PROXY_VARIABLES:
+            monkeypatch.setenv(name, proxy_url)
+        for name in ("no_proxy", "NO_PROXY"):
+            monkeypatch.delenv(name, raising=False)
+        # urlopen keeps the opener it built from the environment on first use; start from none.
+        monkeypatch.setattr(urllib.request, "_opener", None)
+
+        payload = await _run_doctor(doctor, control_plane, configured)
+    finally:
+        proxy.shutdown()
+        proxy.server_close()
+        thread.join(timeout=5)
+
+    assert seen == []
+    assert [header for header in control_plane.received if header] == ["Bearer new-break-glass-token"]
+    assert _check(payload, "provider_verification")["ok"] is True
+    assert _check(payload, "control_plane_health")["ok"] is True
+    assert _check(payload, "web_dashboard")["ok"] is True

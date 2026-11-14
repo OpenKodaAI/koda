@@ -14,7 +14,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote, unquote, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
 
 # `python3 scripts/doctor.py` puts scripts/ first on sys.path, not the checkout.
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -173,22 +173,52 @@ def check_socket_in_compose(
     return {**result, "ok": False, "error": f"{host} does not resolve on this host and `{via}` failed: {detail}"}
 
 
-def probe_service(host: str, port: int, *, env_file: Path | None, secrets: Iterable[str] = ()) -> dict[str, Any]:
-    """Probe from this host when it resolves ``host``, otherwise from the compose app container."""
-    if env_file is None or host_resolves(host):
+def probe_service(
+    host: str,
+    port: int,
+    *,
+    env_file: Path | None,
+    secrets: Iterable[str] = (),
+    setting: str | None = None,
+) -> dict[str, Any]:
+    """Probe ``host:port`` from where the app connects to it.
+
+    ``env_file`` is a Compose .env: a host this machine cannot resolve is then a compose service
+    name, probed from the compose app container. A native install's app connects from this host,
+    so it passes ``None`` and every host is probed from here. ``setting`` names the .env value the
+    host came from, for the error.
+    """
+    if host_resolves(host):
         return check_socket(host, port)
-    return check_socket_in_compose(host, port, env_file=env_file, secrets=secrets)
+    if env_file is not None:
+        return check_socket_in_compose(host, port, env_file=env_file, secrets=secrets)
+    result = check_socket(host, port)
+    if not result.get("ok"):
+        fix = f" Set {setting} to an address this host can reach." if setting else ""
+        result["error"] = (
+            f"{host} does not resolve on this host, where a native install's app connects from.{fix} "
+            f"({result.get('error', 'unreachable')})"
+        )
+    return result
+
+
+# Doctor talks only to this install's control plane and dashboard, and `--provider` attaches the
+# break-glass bearer. urlopen would honour http_proxy/https_proxy, which also proxy a loopback URL
+# unless no_proxy names it, and the proxy would then see the bearer in clear text. So doctor
+# ignores the proxy settings and always connects directly.
+_DIRECT_OPENER = build_opener(ProxyHandler({}))
 
 
 def fetch_json(url: str, *, timeout: float = 5.0, headers: dict[str, str] | None = None) -> dict[str, Any]:
     request = Request(url, headers=headers or {})
-    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - local/control-plane health URL only
-        return json.loads(response.read().decode("utf-8"))
+    with _DIRECT_OPENER.open(request, timeout=timeout) as response:
+        payload: dict[str, Any] = json.loads(response.read().decode("utf-8"))
+        return payload
 
 
 def fetch_status(url: str, *, timeout: float = 5.0, headers: dict[str, str] | None = None) -> dict[str, Any]:
     request = Request(url, headers=headers or {})
-    with urlopen(request, timeout=timeout) as response:  # noqa: S310 - local/product URL only
+    with _DIRECT_OPENER.open(request, timeout=timeout) as response:
         return {
             "status": getattr(response, "status", 200),
             "content_type": response.headers.get("Content-Type", ""),
@@ -346,8 +376,9 @@ def run_doctor(
 ) -> dict[str, Any]:
     """Run the basic checks.
 
-    ``env_file`` is the .env the values came from: a compose service name that this
-    host does not resolve is probed from that compose project's app container.
+    ``env_file`` is the .env the values came from. For a Compose .env, a service name that this
+    host does not resolve is probed from that compose project's app container. A native .env
+    (one that sets KNOWLEDGE_V2_POSTGRES_DSN) is always probed from this host.
     """
     port = str(env.get("CONTROL_PLANE_PORT", "8090")).strip() or "8090"
     web_port = str(env.get("WEB_PORT", "3000")).strip() or "3000"
@@ -361,6 +392,8 @@ def run_doctor(
     # Compose passes S3_* to the app as KNOWLEDGE_V2_S3_*; a native install sets the latter.
     access_key, access_key_source = _first_configured(env, STORAGE_SECRET_ENV_SOURCES["S3_ACCESS_KEY_ID"])
     secret_key, secret_key_source = _first_configured(env, STORAGE_SECRET_ENV_SOURCES["S3_SECRET_ACCESS_KEY"])
+    # Only a Compose .env has service names that resolve inside the stack; a native app connects from here.
+    compose_env_file = None if is_native_env(env) else env_file
     if dashboard_url is None:
         parsed = urlparse(base_url)
         scheme = parsed.scheme or "http"
@@ -394,7 +427,10 @@ def run_doctor(
     if postgres_dsn:
         checks.append({"name": "postgres_dsn", "ok": True, "source": postgres_sources})
         host, pg_port = parse_postgres_target(postgres_dsn)
-        checks.append({"name": "postgres_socket", **probe_service(host, pg_port, env_file=env_file, secrets=secrets)})
+        postgres_probe = probe_service(
+            host, pg_port, env_file=compose_env_file, secrets=secrets, setting="KNOWLEDGE_V2_POSTGRES_DSN"
+        )
+        checks.append({"name": "postgres_socket", **postgres_probe})
     else:
         error = (
             f"{', '.join(postgres_missing)} {'are' if len(postgres_missing) > 1 else 'is'} not set. Docker Compose "
@@ -409,7 +445,13 @@ def run_doctor(
         checks.append(
             object_storage_check(
                 "object_storage_socket",
-                **probe_service(host, object_storage_port, env_file=env_file, secrets=secrets),
+                **probe_service(
+                    host,
+                    object_storage_port,
+                    env_file=compose_env_file,
+                    secrets=secrets,
+                    setting="KNOWLEDGE_V2_S3_ENDPOINT_URL",
+                ),
             )
         )
     else:

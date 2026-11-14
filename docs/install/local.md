@@ -123,12 +123,21 @@ It reads the storage settings the way Koda receives them. Under Docker Compose t
 `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` and `S3_*`, and Compose builds the app's Postgres DSN
 and object-storage keys from them. A native install sets `KNOWLEDGE_V2_POSTGRES_DSN` and
 `KNOWLEDGE_V2_S3_*` itself; when `.env` sets `KNOWLEDGE_V2_POSTGRES_DSN`, doctor uses it.
-Compose does not publish Postgres or SeaweedFS on the host. When this host cannot resolve their service
-names (`postgres`, `seaweedfs`), doctor opens the connection from the app container with
-`docker compose exec app`, in the Compose project of the `--env-file` directory. For a project started with `-p`, set `COMPOSE_PROJECT_NAME`.
-When Compose cannot parse the `.env` (an unterminated quote, or a `$` that Compose reads as a variable),
-its error repeats the offending value, so doctor reports only that the file could not be parsed. Run
-`docker compose --env-file .env config -q` to see where.
+Compose does not publish Postgres or SeaweedFS on the host. For a Compose `.env`, when this host cannot
+resolve their service names (`postgres`, `seaweedfs`), doctor opens the connection from the app container
+with `docker compose exec app`, in the Compose project of the `--env-file` directory. For a project started
+with `-p`, set `COMPOSE_PROJECT_NAME`. A native install's app connects from this host, so a `.env` that sets
+`KNOWLEDGE_V2_POSTGRES_DSN` is always probed from here: an endpoint left at a Compose service name, such
+as the `.env.example` value `KNOWLEDGE_V2_S3_ENDPOINT_URL=http://seaweedfs:8333`, fails the check even
+while a Compose stack runs from the same checkout.
+When Compose cannot parse the `.env` (an unterminated quote, or a `${` that Compose cannot read as a
+variable), its error repeats the offending value, so doctor reports only that the file could not be
+parsed. Run `docker compose --env-file .env config -q` to see where. A bare `$NAME` in a value is not a
+parse error, and doctor does not report it: Compose replaces it with that variable, or with an empty
+string and only a warning, so `POSTGRES_PASSWORD=P@ss$word` reaches the stack as `P@ss`. Keep `$` out
+of hand-set secrets; `scripts/generate_env_secrets.py` writes hex values, which never contain one.
+Doctor connects to the control plane and the dashboard directly and ignores `http_proxy`, `https_proxy`
+and `no_proxy`, so the break-glass token that `--provider` sends never passes through a proxy.
 With `OBJECT_STORAGE_REQUIRED=false`, the object-storage checks are still reported, marked
 `"required": false`, and do not fail doctor. An unset value means `true`. An empty value means `true`
 under Compose (`${OBJECT_STORAGE_REQUIRED:-true}`) and `false` on a native install, as Koda reads its own

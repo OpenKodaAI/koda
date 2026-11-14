@@ -334,6 +334,54 @@ def test_doctor_without_docker_names_the_unresolvable_host(
     assert "postgres does not resolve on this host" in postgres["error"]
 
 
+def test_a_native_env_probes_an_unresolvable_host_from_this_host_only(
+    doctor: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A native app connects from this host, so a compose app container would answer for the wrong client.
+
+    The .env kept the .env.example endpoint `http://seaweedfs:8333`, which only resolves inside a
+    Compose stack. Even with a compose `app` container running from the same checkout (the fake
+    docker exits 0), the native app cannot reach it, so doctor must fail the direct probe.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "KNOWLEDGE_V2_POSTGRES_DSN=postgresql://koda:4b1f0c2e9d8a7f6e5d4c3b2a19081726@127.0.0.1:5432/koda\n"
+        "KNOWLEDGE_V2_S3_ENDPOINT_URL=http://seaweedfs:8333\n"
+        "KNOWLEDGE_V2_S3_BUCKET=koda-objects\n"
+        "KNOWLEDGE_V2_S3_ACCESS_KEY_ID=a1b2c3d4e5f6a7b8c9d0\n"
+        "KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY=9f8e7d6c5b4a39281706f5e4d3c2b1a0\n",
+        encoding="utf-8",
+    )
+    env = doctor.load_env_file(env_file)
+    assert doctor.is_native_env(env)
+    _stub_http_and_sandbox(doctor, monkeypatch)
+    _only_loopback_resolves(doctor, monkeypatch)
+    log = _fake_docker(tmp_path, monkeypatch)
+    probed: list[tuple[str, int]] = []
+
+    def check_socket(host: str, port: int, **_kwargs: Any) -> dict[str, Any]:
+        probed.append((host, port))
+        if doctor.host_resolves(host):
+            return {"ok": True, "host": host, "port": port}
+        return {"ok": False, "host": host, "port": port, "error": "[Errno -2] Name or service not known"}
+
+    monkeypatch.setattr(doctor, "check_socket", check_socket)
+
+    payload = doctor.run_doctor(env=env, base_url="http://127.0.0.1:8090", env_file=env_file)
+
+    object_storage = _by_name(payload["checks"], "object_storage_socket")
+    assert object_storage["ok"] is False
+    assert object_storage["required"] is True
+    assert "via" not in object_storage
+    assert "docker compose" not in object_storage["error"]
+    assert "seaweedfs does not resolve on this host" in object_storage["error"]
+    assert "KNOWLEDGE_V2_S3_ENDPOINT_URL" in object_storage["error"]
+    assert "via" not in _by_name(payload["checks"], "postgres_socket")
+    assert probed == [("127.0.0.1", 5432), ("seaweedfs", 8333)]
+    assert not log.exists() or _docker_calls(log) == []
+    assert payload["ok"] is False
+
+
 def test_an_explicit_dsn_wins_and_is_probed_from_this_host(doctor: ModuleType, monkeypatch: pytest.MonkeyPatch) -> None:
     """A native install sets KNOWLEDGE_V2_POSTGRES_DSN itself; doctor probes that host directly."""
     _stub_http_and_sandbox(doctor, monkeypatch)
@@ -503,3 +551,16 @@ def test_placeholder_message_agrees_with_the_number_of_keys(
 
     assert check["ok"] is False
     assert check["user_action"].startswith(expected)
+
+
+def test_local_doc_says_which_dollar_signs_doctor_reports() -> None:
+    """Only a `${...}` that Compose cannot read stops it parsing the .env; a bare `$NAME` is expanded silently.
+
+    Compose warns and shortens `P@ss$word` to `P@ss`, and doctor sees no parse error, so the guide
+    must not promise that doctor catches a `$` in a password.
+    """
+    text = " ".join((REPO_ROOT / "docs" / "install" / "local.md").read_text(encoding="utf-8").split())
+
+    assert "a `$` that Compose reads as a variable" not in text
+    assert "a `${` that Compose cannot read as a variable" in text
+    assert "A bare `$NAME` in a value is not a parse error, and doctor does not report it" in text

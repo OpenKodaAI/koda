@@ -89,7 +89,9 @@ During a rotation, `CONTROL_PLANE_API_TOKEN` holds a comma-separated list (`new-
 and each token in it authenticates on its own. `koda auth issue-code` (and `koda install`, which
 calls it) sends the first token of that list that is not a placeholder, never the whole list.
 `scripts/doctor.py --provider` does the same, its `control_plane_api_token` check passes while one
-such token remains, and `--strict` requires every such token to be at least 32 characters.
+such token remains, and `--strict` requires every such token to be at least 32 characters. Doctor
+sends that token straight to the control plane and ignores `http_proxy` and `https_proxy`, so a
+proxy never sees it.
 
 Unedited `.env.example` placeholders (values starting with `replace-with-`) never
 authenticate: they are dropped from `CONTROL_PLANE_API_TOKEN(S)` and treated as an unset
