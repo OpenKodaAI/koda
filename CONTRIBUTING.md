@@ -52,6 +52,13 @@ unreachable. A shared guard runs whatever build it was started from, so do not s
 validating changes to `rust/koda-security-*`. `KODA_SECURITY_GUARD_STARTUP_TIMEOUT` (seconds)
 raises the startup wait for cold builds.
 
+Tests marked `@pytest.mark.postgres` are skipped unless `POSTGRES_TEST_DSN` points at a
+disposable database (they empty the tables they use): run them with
+`POSTGRES_TEST_DSN=postgresql://… pytest -m postgres`. The end-to-end agent-turn tests in
+`tests/test_services/test_agent_turn_e2e.py` run real turns through the queue worker and replace
+only the provider adapter (`tests/fakes/provider.py`) and Telegram (`tests/fakes/telegram.py`).
+Reuse those fakes for new end-to-end tests instead of patching the orchestration path.
+
 To run the same local gate from one command:
 
 ```bash
