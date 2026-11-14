@@ -1915,22 +1915,53 @@ def test_disconnect_runs_the_real_logout_and_removes_the_stored_key(monkeypatch,
     ("provider", "config_dir", "credentials"),
     [
         ("claude", ".claude", [".credentials.json"]),
-        ("codex", ".codex", ["auth.json"]),
-        ("gemini", ".gemini", ["oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json"]),
+        (
+            "codex",
+            ".codex",
+            [
+                "auth.json",
+                ".credentials.json",
+                "secrets/gateway_oauth.json",
+                "secrets/codex_auth.age",
+                "secrets/mcp_oauth.age",
+                "secrets/gateway_oauth.age",
+            ],
+        ),
+        (
+            "gemini",
+            ".gemini",
+            ["oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json", "a2a-oauth-tokens.json"],
+        ),
     ],
 )
 def test_disconnect_removes_only_the_cli_credential_files(monkeypatch, tmp_path, provider, config_dir, credentials):
-    """Review: disconnect emptied the whole CLI folder, which on a native install is the operator's own."""
+    """Review: disconnect emptied the whole CLI folder, which on a native install is the operator's own.
+
+    It deletes the files that hold only a sign-in the CLI gets again by signing in, as the
+    pinned CLIs name them: Codex's MCP OAuth tokens (``.credentials.json``), its gateway OAuth
+    tokens (``secrets/gateway_oauth.json``, which ``codex logout`` keeps) and the same three
+    in its encrypted secrets store, and Gemini CLI's A2A OAuth tokens beside its MCP ones.
+    The secrets the operator stored (Codex ``secrets/local.age``, Gemini's file keychain) stay.
+    """
     import koda.control_plane.manager as manager_mod
 
     manager, _rows, _meta, secrets, _sessions = _make_manager(monkeypatch)
     monkeypatch.setenv("PATH", str(tmp_path / "no-clis"))
     folder = Path(os.environ["HOME"]) / config_dir
     (folder / "projects" / "demo").mkdir(parents=True)
-    kept = [folder / "settings.json", folder / "CLAUDE.md", folder / "projects" / "demo" / "history.jsonl"]
+    kept = [
+        folder / "settings.json",
+        folder / "CLAUDE.md",
+        folder / "projects" / "demo" / "history.jsonl",
+        folder / "secrets" / "local.age",
+        folder / "secrets" / "gateway_oauth.lock",
+        folder / "gemini-credentials.json",
+    ]
     for path in kept:
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("keep")
     for name in credentials:
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
         (folder / name).write_text("token")
     secrets[provider] = "sk-test"
 
@@ -1938,6 +1969,82 @@ def test_disconnect_removes_only_the_cli_credential_files(monkeypatch, tmp_path,
 
     assert [name for name in credentials if (folder / name).exists()] == []
     assert all(path.read_text() == "keep" for path in kept)
+
+
+# The temp copies each pinned CLI writes a credential file of the disconnect list through,
+# beside it, before renaming the copy over it (a CLI killed in between leaves the copy), and
+# names beside them that are no such copy: another file's temp copy, a near miss, a case variant.
+_LOGIN_TEMP_COPIES = {
+    "claude": (
+        [".credentials.json.tmp.a1b2c3d4", ".credentials.json.tmp.4242.a1b2c3d4e5f6"],
+        [".claude.json.tmp.a1b2c3d4", ".credentials.json.backup", ".credentials.json.tmp", ".CREDENTIALS.JSON.TMP.A1"],
+    ),
+    "codex": (
+        [
+            ".auth-wQZHMQ",
+            "secrets/.tmpafU0fU",
+            "secrets/.codex_auth.age.tmp-4242-1763100000000",
+            "secrets/.mcp_oauth.age.tmp-4242-1763100000000",
+            "secrets/.gateway_oauth.age.tmp-4242-1763100000000",
+        ],
+        [
+            ".auth-",
+            "auth-wQZHMQ",
+            ".AUTH-WQZHMQ",
+            ".tmpafU0fU",
+            "secrets/.local.age.tmp-4242-1763100000000",
+            "secrets/.tmp",
+            "secrets/notes.txt",
+        ],
+    ),
+    "gemini": (
+        [".oauth_creds.json.4242.1763100000000.0.tmp", ".oauth_creds.json.1.1763100000000.137.tmp"],
+        [
+            ".oauth_creds.json.4242.bak",
+            ".google_accounts.json.4242.1763100000000.0.tmp",
+            ".projects.json.4242.tmp",
+            "trustedFolders.json.tmp.f0b6be2a",
+            "gemini-credentials.json",
+        ],
+    ),
+}
+
+
+@pytest.mark.parametrize("moved", [False, True], ids=["in HOME", "where the environment moves the dir"])
+@pytest.mark.parametrize("provider", ["claude", "codex", "gemini"])
+def test_disconnect_removes_the_temp_copies_of_the_files_it_deletes_and_nothing_else(
+    monkeypatch, tmp_path, provider, moved
+):
+    """Review: a login's temp copy, which a CLI killed mid-write leaves, outlived the disconnect.
+
+    The copy holds the same tokens as the login it would have replaced, and no CLI removes it.
+    The disconnect deletes each copy beside each file it deletes, by the exact name the pinned
+    CLI gives it (``koda.config.FILEOPS_CREDENTIAL_TEMP_COPIES``), and every other file stays.
+    """
+    import koda.control_plane.manager as manager_mod
+    from koda.config import PROVIDER_CLI_CONFIG_DIR_ENV_KEYS, PROVIDER_CLI_CREDENTIAL_FILES
+
+    env_key = PROVIDER_CLI_CONFIG_DIR_ENV_KEYS.get(provider)
+    if moved and env_key is None:
+        pytest.skip("this CLI has no config dir variable")
+    manager, _rows, _meta, _secrets, _sessions = _make_manager(monkeypatch)
+    monkeypatch.setenv("PATH", str(tmp_path / "no-clis"))
+    folder = Path(os.environ["HOME"]) / PROVIDER_CLI_CREDENTIAL_FILES[provider][0]
+    if moved:
+        assert env_key is not None
+        folder = tmp_path / "moved-config"
+        monkeypatch.setenv(env_key, str(folder))
+    copies, others = _LOGIN_TEMP_COPIES[provider]
+    for name in [*copies, *others]:
+        (folder / name).parent.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text('{"refresh_token": "1//canary-refresh"}')
+    (folder / "secrets" / ".tmpdir0").mkdir(parents=True)
+
+    manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, provider)
+
+    assert [name for name in copies if (folder / name).exists()] == []
+    assert [name for name in others if not (folder / name).is_file()] == []
+    assert (folder / "secrets" / ".tmpdir0").is_dir()
 
 
 def test_tests_never_see_the_real_home():

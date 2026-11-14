@@ -38,11 +38,49 @@ TEMPLATE_FILE_SUFFIXES: frozenset[str] = frozenset({".example", ".sample", ".tem
 _COPY_SUFFIX = re.compile("|".join(rf"{re.escape(suffix)}(?=\.|$)" for suffix in FILEOPS_CREDENTIAL_COPY_SUFFIXES))
 """Where a lowered file name carries a copy suffix: ``.tmp`` followed by a dot or the end of the name."""
 
+
+def _temp_copy_pattern(name: str) -> re.Pattern[str]:
+    """Return a ``FILEOPS_CREDENTIAL_TEMP_COPIES`` name as a pattern of a whole name, ``*`` one or more characters."""
+    return re.compile(".+".join(re.escape(part) for part in name.split("*")))
+
+
 _TEMP_COPY_NAMES: dict[str, tuple[re.Pattern[str], ...]] = {
-    entry: tuple(re.compile(".+".join(re.escape(part) for part in name.lower().split("*"))) for name in names)
+    entry: tuple(_temp_copy_pattern(name.lower()) for name in names)
     for entry, names in FILEOPS_CREDENTIAL_TEMP_COPIES.items()
 }
-"""``FILEOPS_CREDENTIAL_TEMP_COPIES`` as patterns of a whole lowered name, ``*`` being one or more characters."""
+"""``FILEOPS_CREDENTIAL_TEMP_COPIES`` as patterns of a whole lowered name, which the file layer compares."""
+
+_TEMP_COPY_EXACT_NAMES: dict[str, tuple[re.Pattern[str], ...]] = {
+    entry: tuple(_temp_copy_pattern(name) for name in names) for entry, names in FILEOPS_CREDENTIAL_TEMP_COPIES.items()
+}
+"""``FILEOPS_CREDENTIAL_TEMP_COPIES`` as patterns of a whole name as the CLI writes it, which the logout deletes."""
+
+
+def credential_temp_copies(directory: Path, entry: str) -> list[Path]:
+    """Return the temp copies of the credential file ``entry`` that sit in ``directory``.
+
+    ``entry`` is a file entry of ``FILEOPS_BLOCKED_CREDENTIAL_PATHS`` and ``directory`` the
+    dir that holds that file, in HOME or where the environment moves the CLI's config dir. A
+    temp copy is a file (not a directory) whose whole name is one of the names
+    ``FILEOPS_CREDENTIAL_TEMP_COPIES`` gives for ``entry``, as the CLI writes it, case
+    included: ``.auth-wQZHMQ`` beside ``.codex/auth.json``, ``.tmpafU0fU`` beside
+    ``.codex/secrets/gateway_oauth.json``. Disconnecting a provider deletes these with the
+    files they copy, and no other file, so a near miss (``.auth-``, ``auth-wQZHMQ``) or
+    another file's temp copy in the same dir is not returned. An unreadable dir has none.
+    """
+    patterns = _TEMP_COPY_EXACT_NAMES.get(entry, ())
+    if not patterns:
+        return []
+    try:
+        with os.scandir(directory) as children:
+            return [
+                Path(child.path)
+                for child in children
+                if any(pattern.fullmatch(child.name) for pattern in patterns)
+                and not child.is_dir(follow_symlinks=False)
+            ]
+    except OSError:
+        return []
 
 
 def _blocked_extension(lowered: str) -> str | None:
@@ -95,9 +133,10 @@ def _names_credential_file(name: str, entry: str) -> bool:
     any further suffix (``.claude.json.backup``, ``.claude.json.backup.1763100000000``,
     ``.claude.json.tmp.a1b2c3d4``), as Claude Code writes them; ``.claude.json.example`` and
     ``.claude.json.backupx`` are not. It is also a temp copy that the CLI owning ``entry``
-    writes the file through under a name of its own (``FILEOPS_CREDENTIAL_TEMP_COPIES``:
-    ``.oauth_creds.json.4242.1763100000000.0.tmp`` of ``.gemini/oauth_creds.json``,
-    ``.auth-wqzhmq`` of ``.codex/auth.json``), which the caller matches beside that file.
+    writes the file through, by the name ``FILEOPS_CREDENTIAL_TEMP_COPIES`` gives it
+    (``.oauth_creds.json.4242.1763100000000.0.tmp`` of ``.gemini/oauth_creds.json``,
+    ``.auth-wqzhmq`` of ``.codex/auth.json``, ``.tmpafu0fu`` of
+    ``.codex/secrets/gateway_oauth.json``), which the caller matches beside that file.
     """
     file_name = entry.rsplit("/", 1)[-1].lower()
     if name == file_name:

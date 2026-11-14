@@ -145,6 +145,7 @@ from koda.services.whisper_manager import (
     whisper_catalog_payload,
     whisper_model_path,
 )
+from koda.utils.files import credential_temp_copies
 
 from .agent_spec import (
     _normalize_markdown_block,
@@ -1630,10 +1631,13 @@ def _parse_dashboard_appearance() -> dict[str, dict[str, str]]:
     return appearance
 
 
-# Where each provider CLI stores its login, relative to its config folder. Checked against the
-# pinned CLIs (packages/provider-clis): Claude Code ``.credentials.json``, Codex ``auth.json``,
-# Gemini CLI ``oauth_creds.json``, ``google_accounts.json`` and ``mcp-oauth-tokens.json``.
-# The file layer refuses the same files (koda.config.FILEOPS_BLOCKED_CREDENTIAL_PATHS).
+# Where each provider CLI stores its sign-ins, relative to its config folder. Checked against
+# the pinned CLIs (packages/provider-clis): Claude Code ``.credentials.json``; Codex
+# ``auth.json``, ``.credentials.json``, ``secrets/gateway_oauth.json``, ``secrets/codex_auth.age``,
+# ``secrets/mcp_oauth.age`` and ``secrets/gateway_oauth.age``; Gemini CLI ``oauth_creds.json``,
+# ``google_accounts.json``, ``mcp-oauth-tokens.json`` and ``a2a-oauth-tokens.json``
+# (koda.config.PROVIDER_CLI_CREDENTIAL_FILES). The file layer refuses the same files
+# (koda.config.FILEOPS_BLOCKED_CREDENTIAL_PATHS).
 _PROVIDER_CREDENTIAL_FILES: dict[str, tuple[str, ...]] = {
     provider_id: names for provider_id, (_config_dir, names) in PROVIDER_CLI_CREDENTIAL_FILES.items()
 }
@@ -8223,15 +8227,18 @@ class ControlPlaneManager:
             self._persist_global_sections({})  # flush the provider-section drift
 
     def _wipe_provider_credential_files(self, provider_id: str) -> None:
-        """Best-effort removal of the files where a provider CLI keeps its login.
+        """Best-effort removal of the files where a provider CLI keeps its sign-ins.
 
         ``*_auth logout`` is supposed to clear them, but failures or older CLI versions leave
-        the tokens behind. Only the credential files are removed (names checked against the
-        pinned CLIs, see ``_PROVIDER_CREDENTIAL_FILES``), in the CLI's config dir under HOME
-        and in the one its environment variable names (``PROVIDER_CLI_CONFIG_DIR_ENV_KEYS``:
-        ``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``), which the file layer refuses for the same
-        reason. The rest of the folder (settings, history, memory, project files) is never
-        touched: on a native install it is the operator's own CLI configuration.
+        the tokens behind, and ``codex logout`` keeps a gateway's. Only the credential files
+        are removed (names checked against the pinned CLIs, see ``_PROVIDER_CREDENTIAL_FILES``),
+        with the temp copies of each that the CLI writes it through and a CLI killed mid-write
+        leaves beside it (``koda.utils.files.credential_temp_copies``), in the CLI's config dir
+        under HOME and in the one its environment variable names
+        (``PROVIDER_CLI_CONFIG_DIR_ENV_KEYS``: ``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``), which
+        the file layer refuses for the same reason. The rest of the folder (settings, history,
+        memory, project files, the secrets the operator stored) is never touched: on a native
+        install it is the operator's own CLI configuration.
         """
         from pathlib import Path
 
@@ -8247,8 +8254,10 @@ class ControlPlaneManager:
 
         for directory in config_dirs:
             for name in _PROVIDER_CREDENTIAL_FILES.get(provider_id, ()):
-                with contextlib.suppress(OSError):
-                    (directory / name).unlink(missing_ok=True)
+                credential = directory / name
+                for path in (credential, *credential_temp_copies(credential.parent, f"{home_dir}/{name}")):
+                    with contextlib.suppress(OSError):
+                        path.unlink(missing_ok=True)
 
     def get_agent_spec(self, agent_id: str, *, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
         normalized = _normalize_agent_id(agent_id)

@@ -1321,9 +1321,19 @@ async def test_cat_and_file_read_expand_a_home_relative_grant_root(
 
 _DOCKER_HOME_CREDENTIAL_STORES = [
     ".codex/auth.json",
+    ".codex/.credentials.json",
+    ".codex/secrets/gateway_oauth.json",
+    ".codex/secrets/codex_auth.age",
+    ".codex/secrets/local.age",
     ".gemini/oauth_creds.json",
     ".gemini/mcp-oauth-tokens.json",
+    ".gemini/a2a-oauth-tokens.json",
     ".gemini/google_accounts.json",
+    ".gemini/gemini-credentials.json",
+    ".gemini/integrity.key",
+    ".gemini/cli-browser-profile/Default/Cookies",
+    ".cache/.gemini/mcp-oauth-tokens.json",
+    ".cache/.gemini/a2a-oauth-tokens.json",
     ".claude/.credentials.json",
     ".config/gh/hosts.yml",
     ".config/gcloud/application_default_credentials.json",
@@ -1657,11 +1667,14 @@ async def test_a_codex_login_moved_out_of_home_by_codex_home_is_refused_where_th
 
 
 # The temp copies the pinned Gemini CLI (0.68.0, cacheCredentials) and Codex (0.169.0, its
-# atomic credential replacement) write their login through, beside it, before renaming it
-# over the login: a CLI killed between the write and the rename leaves the copy behind.
+# atomic credential replacement, its gateway OAuth file store and its encrypted secrets store)
+# write a login through, beside it, before renaming it over the login: a CLI killed between
+# the write and the rename leaves the copy behind.
 _PROVIDER_LOGIN_TEMP_COPIES = [
     ".gemini/.oauth_creds.json.4242.1763100000000.0.tmp",
     ".codex/.auth-wQZHMQ",
+    ".codex/secrets/.tmpafU0fU",
+    ".codex/secrets/.codex_auth.age.tmp-4242-1763100000000",
 ]
 
 
