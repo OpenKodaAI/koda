@@ -755,3 +755,18 @@ Rules:
   - Gate every documented removal, dead configuration keys included. This floods the operator with requests.
   - Allow behaviour changes inside removals. Removals would then no longer revert cleanly.
 - **Consequences:** there are more and smaller tasks, and M4 commits revert cleanly.
+
+## ADR-038 — Auth screens may show an account-independent rate-limit message
+
+- **Status:** accepted (2026-11-14, Principal Architect, under the operator's delegated decision authority). Implemented by MASTER_PLAN M1-E1-T18.
+- **Context:**
+  - The "Auth screens" rule in `apps/web/CLAUDE.md` routes every authentication error, "rate-limited" included, through one generic message, so a user throttled by the per-client limit (D-004) sees "Invalid credentials." and keeps retrying, which extends the wait.
+  - Two limits exist: a per-client bucket (`429` with `Retry-After`) that behaves identically for existing and unknown accounts, and a per-account lockout that only an existing account can trigger.
+- **Decision:**
+  - The per-client `429` gets its own localized message with the wait time. It reveals only that this client is throttled, never anything about an account.
+  - Per-account lockout, wrong password, unknown user and invalid recovery code stay on the single generic key, and the backend keeps its timing floor.
+  - The rule in `apps/web/CLAUDE.md` and `docs/security/authentication.md` is amended in the same change, with tests.
+- **Alternatives considered:**
+  - Keep the generic message for `429`: no enumeration benefit, worse recovery for real users.
+  - Show a lockout message for the per-account limit as well: reveals that the account exists.
+- **Consequences:** clearer feedback on throttling without weakening enumeration resistance.

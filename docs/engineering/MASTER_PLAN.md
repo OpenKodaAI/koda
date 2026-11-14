@@ -770,10 +770,35 @@ Owner SEC (AIM) · Risk med · Gate needs-approval (§13: new unauthenticated ro
 - **Done when:** browser callback login works live, or the route and the rewrite are gone.
 - **Tests:** route matrix; relay unit tests; changelog entry · **Evidence:** —
 
+#### M1-E1-T16 · Bundled reverse proxy matches the auth model
+Owner OPS (SEC) · Risk med · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-004) merged
+- **Addresses:** D-220, D-004 (remainder), R-35
+- **Files:** `packages/cli/release/bundle/proxy/nginx.conf`, `packages/cli/release/bundle/MIGRATION.md`, `docs/install/vps.md`, `CHECKSUMS.txt` (via `scripts/release_metadata.py --write`)
+- **Do:** route `/`, `/setup`, `/login`, `/forgot-password`, `/control-plane` and the browser-facing `/api/control-plane/*` and `/api/runtime/*` paths to the dashboard; send to :8090 only requests that carry `Authorization` (API-token clients) and `/openapi/control-plane.json`; add WebSocket upgrade headers for the runtime relay; set `X-Forwarded-For` so `CONTROL_PLANE_TRUSTED_PROXIES` sees the real client.
+- **Done when:** a contract test over the rendered config proves each route's upstream, and browser login, the runtime relay WebSocket and an API-token call work through it (docker smoke in CI).
+- **Tests:** config contract test; G; G-CI; changelog entry · **Evidence:** —
+
+#### M1-E1-T17 · Setup codes accept the same input forms as recovery codes
+Owner SEC · Risk low · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-018) merged
+- **Addresses:** D-221
+- **Files:** `koda/control_plane/operator_auth.py` (`_normalize_bootstrap_code` ~107, bootstrap comparison), `koda/control_plane/bootstrap_file.py`, `docs/security/authentication.md`, tests
+- **Do:** canonicalize setup codes with the recovery-code canonicalizer on both the stored and the typed side, so dashes, spaces and case do not matter.
+- **Done when:** a setup code typed without dashes, with spaces or in lower case registers the owner; a wrong code still fails with the generic error.
+- **Tests:** unit tests; route test; G · **Evidence:** —
+
+#### M1-E1-T18 · Account-independent rate-limit message on auth screens
+Owner FE (SEC) · Risk low · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-004) merged
+- **Addresses:** D-004 (remainder: a rate-limited login still shows "Invalid credentials."), SM-02
+- **Decision:** the per-client `429` is independent of whether the account exists, so a distinct "Too many attempts, wait N minutes" message reveals nothing about accounts. Per-account lockout and every identity error stay on the single generic key. Amend the "Auth screens" rule in `apps/web/CLAUDE.md` accordingly (DECISIONS.md entry).
+- **Files:** `apps/web/src/app/api/control-plane/auth/*/route.ts`, the auth screen components and i18n resources, `apps/web/CLAUDE.md`, `docs/security/authentication.md`
+- **Do:** pass `429` and `Retry-After` through the auth routes and show a localized, generic "too many attempts" message with the wait time; keep every other failure on the generic key.
+- **Done when:** a rate-limited login, setup or recovery attempt shows the wait message in every locale, and a locked account still shows the generic error.
+- **Tests:** route tests; component tests; i18n contract; G · **Evidence:** —
+
 #### M1-E2 — Agent-native tool governance (ADR-002, Option C approved)
 
 #### M1-E2-T1 · Finish the native tool governance ADR
-Owner SEC (ARCH, review REV) · Risk low · Gate approved (Q-4) · **in-progress** · Deps the running design workflow (EXECUTION_STATUS) · Active work: AGENT-AUTONOMY-ADR (EXECUTION_STATUS)
+Owner SEC (ARCH, review REV) · Risk low · Gate approved (Q-4) · **done** · Deps —
 - **Addresses:** D-002, F-GOV-10, Q-4, R-01
 - **Files:** `docs/engineering/adr/ADR-agent-native-tool-governance.md`, `docs/engineering/DECISIONS.md` (ADR-002 link)
 - **Do:** produce a per-provider permission-mode matrix: Claude permission modes with allowed and disallowed tools; Codex sandbox and approval policy; Gemini approval modes. Map it from the Koda execution policy. Define the per-agent opt-in field, the operator migration notice and the test plan. Also define how policy-approved `<agent_cmd>` shell, git and supervised writes are authorised (D-011) and how pending approvals cross processes (D-012), since M3-E3-T1 and M3-E3-T2 implement them.
@@ -784,7 +809,7 @@ Owner SEC (ARCH, review REV) · Risk low · Gate approved (Q-4) · **in-progress
   - a test plan that names each argv test M1-E2-T2 must add and each D-011 and D-012 test M3-E3-T1 and M3-E3-T2 must add;
 
   and SEC and REV each record an approving review in VALIDATION_REPORT.md.
-- **Tests:** none (design) · **Evidence:** —
+- **Tests:** none (design) · **Evidence:** `docs/engineering/adr/ADR-agent-native-tool-governance.md` (commit d72ac53): judge-panel design (3 designs, 3 judges), per-provider matrix, invariants, backlog AG-01..AG-32, operator resolutions O-1..O-8 (§9)
 
 #### M1-E2-T2 · Governed-by-default provider permission modes
 Owner SEC (AIM, review REV) · Risk high · Gate approved (Q-4; impact accepted) · **pending** · Deps M1-E2-T1, M0-E3-T2
@@ -878,6 +903,14 @@ Owner SEC · Risk low · Gate none · **pending** · Deps M1-E3-T1
 - **Do:** one predicate, behind an explicit development flag that is off by default, decides whether localhost and private MCP URLs are allowed. Registration and transport both call it.
 - **Done when:** with the flag off, registering `http://localhost:9000` fails with the same message the transport gives; with it on, both accept.
 - **Tests:** unit tests; G · **Evidence:** —
+
+#### M1-E3-T8 · Remaining outbound fetches go through the guarded client
+Owner SEC · Risk med · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-003) merged; coordinate with M1-E3-T3, M1-E3-T4 and M1-E3-T7 (same files)
+- **Addresses:** D-223, TD-040 (classifier part)
+- **Files:** `koda/services/mcp_client.py` (`_validate_url`, `_urlopen_safely`), `koda/services/artifact_ingestion.py` (yt-dlp), `koda/services/generation_stubs.py` (`_download_image_url`), `koda/services/provider_auth.py` (verifier), the Ollama and control-plane runtime fetches
+- **Do:** use the M1-E3-T1 classifier and validated-IP connect for every listed fetch, ignore `*_proxy` env for guarded requests, normalize yt-dlp input to a canonical watch URL as `link_analyzer` does, and give operator-configured local endpoints (Ollama, Tailscale MCP servers) an explicit private-network grant instead of a blanket bypass.
+- **Done when:** the SSRF probe matrix (0.0.0.0, IPv4-mapped IPv6, 100.64.0.0/10, NAT64, DNS rebinding, cross-origin redirect) is rejected on every listed path, and configured local endpoints still work.
+- **Tests:** shared probe matrix applied per path; G · **Evidence:** —
 
 #### M1-E4 — Tool execution and prompt-injection safety
 
@@ -1528,6 +1561,14 @@ Owner BE (SEC, FE) · Risk med · Gate none · **pending** · Deps M3-E2-T4
 - **Do:** one operator action, "Stop all agents", reuses `pause_agent` for every agent and the M3-E2-T4 cascade for every active task. It needs a confirmation that lists what is running, per P17, and writes one audit row. Agents stay paused until the operator reactivates them. No new mechanism is added.
 - **Done when:** in the harness, with three agents running tasks, child runs and a squad thread, the action leaves no running task, child run or claimable squad task within 10 s, every agent shows paused, and the audit row exists.
 - **Tests:** G-PG scenario; web component test for the confirmation; route matrix · **Evidence:** —
+
+#### M3-E2-T6 · Env-backed cancellation cannot fall through to a fallback
+Owner BE · Risk low · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-009) merged
+- **Addresses:** D-222
+- **Files:** `koda/services/queue_manager.py` (cancel path for env-backed tasks), `koda/services/runtime/controller.py`
+- **Do:** mark the task cancelled before signalling the kernel, and check the flag before any retry or streaming fallback.
+- **Done when:** a fake-kernel test that exits the provider during termination shows no fallback and a cancelled final phase.
+- **Tests:** unit test with a fake kernel; G · **Evidence:** —
 
 #### M3-E3 — Governed tools (journey: a gated tool call is approved and executed)
 
