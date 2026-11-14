@@ -663,7 +663,7 @@ Owner OPS (review SEC, REV) · Risk med · Gate approved (Q-10, 2026-11-14) · *
 - **Tests:** `tests/test_compose_port_exposure.py`; G; G-CI; changelog entry · **Evidence:** VALIDATION_REPORT.md "NET-LOOPBACK": contract test and full `pytest` (4,920 passed, 200 skipped), `ruff`, `ruff format --check`, `mypy`, `actionlint`, reviewer `docker compose config` renders of base, prod, dev, cluster and release. Missing: a GitHub Actions docker-smoke run (`gh run view`).
 
 #### M1-E1-T2 · Trusted-proxy client IP for rate limits
-Owner SEC · Risk med · Gate none · **in-review** · Deps M1-E1-T1, M0-E3-T1
+Owner SEC · Risk med · Gate none · **done** · Deps M1-E1-T1, M0-E3-T1
 - **Addresses:** D-004, SM-02, F-SET-12, J-15, R-35
 - **Files:** `koda/control_plane/rate_limit.py:97`, `koda/config.py`, `.env.example`, `apps/web/src/app/api/control-plane/auth/*/route.ts`, `docs/security/authentication.md`
 - **Do:** honour `X-Forwarded-For` only from `CONTROL_PLANE_TRUSTED_PROXIES` (default: loopback plus the web container network). Have the BFF auth routes forward the browser client IP. Give 429 its own message instead of "Invalid credentials."
@@ -672,15 +672,15 @@ Owner SEC · Risk med · Gate none · **in-review** · Deps M1-E1-T1, M0-E3-T1
   - two browsers get separate buckets;
   - a J-15 replay no longer locks the owner out;
   - the auth doc is updated.
-- **Tests:** unit matrix for `_client_ip`; web route test for the forwarded IP; G; changelog entry (429 message) · **Evidence:** **Missing for done:** J-15 live replay (M0-E3-T7). VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-004): _client_ip unit matrix, dashboard XFF rewrite and route-table tests, IPv6 /64; the 429 message moved to M1-E1-T18 (ADR-038); two review rounds
+- **Tests:** unit matrix for `_client_ip`; web route test for the forwarded IP; G; changelog entry (429 message) · **Evidence:** VALIDATION_REPORT.md "LIVE-REPLAY-1" (J-15 works, run and independently re-run: spoofed XFF from an untrusted peer keeps that peer's bucket (429 after 10, log ip=<real peer>); the owner logs in from a separate client after 24 anonymous failures; the auth doc was already updated). Remainder: the generic 429 message, M1-E1-T18; VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-004): _client_ip unit matrix, dashboard XFF rewrite and route-table tests, IPv6 /64; the 429 message moved to M1-E1-T18 (ADR-038); two review rounds
 
 #### M1-E1-T3 · Minimal pre-login onboarding status
-Owner SEC · Risk med · Gate none · **in-review** · Deps —
+Owner SEC · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-050, D-193, SM-05, F-SET-16, R-36
 - **Files:** `koda/control_plane/manager.py` (`get_onboarding_status` ~5595), `koda/control_plane/api.py` (public paths), `koda/services/onboarding_readiness.py` (~155), `apps/web/src/proxy.ts` and the setup and onboarding consumers, `docs/openapi/control-plane.json`, `docs/security/authentication.md`
 - **Do:** an unauthenticated response returns only `{has_owner, bootstrap_required}`; the full payload requires auth. Align the web and backend public-path lists. Readiness checks return real statuses, and the constant "warning" checks are removed.
 - **Done when:** an unauthenticated GET through :3000 and :8090 returns two fields, and J-01 and J-03 still pass.
-- **Tests:** route test in both states; web unit test; route matrix updated; G; changelog entry · **Evidence:** **Missing for done:** J-01 and J-03 live replay (M0-E3-T7). VALIDATION_REPORT.md "WAVE-2B" (route tests in both states for onboarding/status and auth/status; live readiness checks; one public-path list with exact matching; web tests). J-01 and J-03 not yet replayed live (no Docker)
+- **Tests:** route test in both states; web unit test; route matrix updated; G; changelog entry · **Evidence:** VALIDATION_REPORT.md "LIVE-REPLAY-1" (unauthenticated onboarding/status returns exactly {has_owner, bootstrap_required} through :3000-equivalent and :8090-equivalent ports; J-01 and J-03 work in a real browser, run and independently re-run); VALIDATION_REPORT.md "WAVE-2B" (route tests in both states for onboarding/status and auth/status; live readiness checks; one public-path list with exact matching; web tests). J-01 and J-03 not yet replayed live (no Docker)
 
 #### M1-E1-T4 · Control-plane logging with redaction
 Owner SEC · Risk low · Gate none · **ready** · Deps —
@@ -1241,12 +1241,12 @@ Owner SEC · Risk med · Gate none · **pending** · Deps M1-E4-T3
 - **Tests:** adversarial package fixtures; G; changelog entry (install flow) · **Evidence:** —
 
 #### M1-E8-T3 · Warn on placeholder Postgres and S3 secrets
-Owner SEC (OPS) · Risk low · Gate none · **in-review** · Deps —
+Owner SEC (OPS) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-007 (remainder, interim; the refusal is M1-E1-T10), F-PLT-07
 - **Files:** `koda/config.py`, `koda/control_plane/supervisor.py` (startup), `scripts/doctor.py`, the dashboard shell banner
 - **Do:** when `POSTGRES_PASSWORD` or an `S3_*` secret still starts with `replace-with-`, log a warning at every start, fail `doctor`, and show a persistent dashboard banner that links to the rotation steps. Nothing refuses to start yet.
 - **Done when:** a stack on placeholders shows the banner and the log line, and doctor fails with the rotation command.
-- **Tests:** config unit test; doctor test; web test; G · **Evidence:** **Missing for done:** a running stack on placeholders showing the banner, the log line and the failing doctor (M0-E3-T7). VALIDATION_REPORT.md "WAVE-2B" (config, supervisor, doctor and generator tests; doctor exits 1 on placeholders and 0 after rotation; AppShell banner render test)
+- **Tests:** config unit test; doctor test; web test; G · **Evidence:** VALIDATION_REPORT.md "LIVE-REPLAY-1" (running stack with POSTGRES_PASSWORD=replace-with-…: the storage_secret_placeholder_in_use log line, a persistent banner with the rotation link on every dashboard route, doctor failing storage_secrets_not_placeholders with the rotation command; the negative control with the real password shows none of them); VALIDATION_REPORT.md "WAVE-2B" (config, supervisor, doctor and generator tests; doctor exits 1 on placeholders and 0 after rotation; AppShell banner render test)
 
 #### M1-E9 — Security documentation
 
@@ -1788,12 +1788,12 @@ Owner AIM (ARCH, review REV) · Risk low · Gate none · **pending** · Deps M3-
 #### M3-E7 — Authentication journeys
 
 #### M3-E7-T1 · Password recovery from the web
-Owner SEC (FE) · Risk low · Gate none · **in-review** · Deps —
+Owner SEC (FE) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-018, SM-01, F-SET-04, J-07
 - **Files:** `apps/web/src/components/auth/forgot-password-screen.tsx`, `koda/control_plane/operator_auth.py` (~630), `docs/security/authentication.md`, tests
 - **Do:** stop lowercasing the input, and normalise case on both sides.
 - **Done when:** a J-07 replay succeeds with a pasted code.
-- **Tests:** web test; Postgres auth test; G · **Evidence:** **Missing for done:** J-07 replay with a pasted code (M0-E3-T7). VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-018): canonicalization unit tests, recover route test, forgot-password component tests; J-07 browser replay pending M0-E3-T7
+- **Tests:** web test; Postgres auth test; G · **Evidence:** VALIDATION_REPORT.md "LIVE-REPLAY-1" (J-07 works: a recovery code typed lowercase without dashes, and a second one with dashes, reset the password; the new password logs in and the old one fails; run and independently re-run); VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-018): canonicalization unit tests, recover route test, forgot-password component tests; J-07 browser replay pending M0-E3-T7
 
 #### M3-E7-T2 · Setup page states and error codes
 Owner FE (SEC) · Risk low · Gate none · **ready** · Deps —
