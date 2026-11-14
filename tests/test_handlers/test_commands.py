@@ -228,3 +228,29 @@ class TestCmdCancel:
         controller.cancel_task.assert_awaited_once()
         call_text = mock_update.message.reply_text.call_args[0][0]
         assert "cancelled_retained" in call_text
+
+    @pytest.mark.asyncio
+    async def test_cancel_specific_task_reports_a_finished_task_as_not_running(self, mock_update, mock_context):
+        task_id = 78
+        mock_context.args = [str(task_id)]
+        controller = MagicMock()
+        controller.cancel_task = AsyncMock(
+            return_value={
+                "ok": False,
+                "action": "not_running",
+                "task_id": task_id,
+                "env_id": None,
+                "status": "completed",
+                "final_phase": "completed",
+            }
+        )
+
+        with (
+            patch("koda.handlers.commands.get_task_info", return_value=None),
+            patch("koda.handlers.commands.get_task", return_value=(task_id, 111)),
+            patch("koda.services.runtime.get_runtime_controller", return_value=controller),
+        ):
+            await cmd_cancel(mock_update, mock_context)
+
+        call_text = mock_update.message.reply_text.call_args[0][0]
+        assert call_text == f"Task #{task_id} is not running (status: completed)."

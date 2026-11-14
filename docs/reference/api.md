@@ -104,6 +104,11 @@ Write/control routes:
 - `POST /api/runtime/tasks/{task_id}/workspace/rename`
 - `POST /api/runtime/processes/{process_id}/terminate`
 
+Cancel and interrupt stop a task that is queued or running and return `action: "cancelled"` (or
+`"interrupted"`) with its `final_phase`. A task without a runtime environment that has already completed,
+failed, or been cancelled is left as it is: the response carries `action: "not_running"`, `ok: false`, its
+`status`, and its unchanged `final_phase`.
+
 WebSocket routes:
 
 - `GET /ws/runtime`

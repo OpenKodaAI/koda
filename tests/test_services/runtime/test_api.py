@@ -1159,3 +1159,33 @@ async def test_runtime_task_detail_keeps_episode_context_when_primary_knowledge_
     assert payload["knowledge"]["answer_trace"]["answer_text"] == "episode answer"
     assert payload["knowledge"]["retrieval_trace"] is None
     assert payload["knowledge"]["artifact_evidence"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cancel_action", "expected_action"),
+    [("cancelled", "interrupted"), ("not_running", "not_running")],
+)
+async def test_runtime_interrupt_reports_the_cancel_outcome(tmp_path, cancel_action, expected_action):
+    from koda.services.runtime.api import _runtime_interrupt
+
+    controller = _ControllerStub(runtime_root=tmp_path / "runtime")
+    controller.cancel_task = AsyncMock(  # type: ignore[attr-defined]
+        return_value={"ok": cancel_action == "cancelled", "action": cancel_action, "task_id": 27, "env_id": None}
+    )
+    request = _request(task_id=27, headers={"X-Runtime-Token": "secret"})
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+    ):
+        response = await _runtime_interrupt(request)
+
+    payload = json.loads(response.text)
+    assert response.status == 200
+    assert payload["action"] == expected_action
+    controller.cancel_task.assert_awaited_once_with(  # type: ignore[attr-defined]
+        task_id=27,
+        actor="runtime_api",
+        reason="Interrupted by operator.",
+    )

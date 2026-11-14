@@ -326,6 +326,13 @@ async def run_openai_compatible(
                 status = resp.status
                 body_text = await resp.text(encoding="utf-8", errors="replace")
     except asyncio.CancelledError:
+        # When this task is itself being cancelled (/cancel, scheduler control,
+        # shutdown) the cancellation must propagate so the caller stops instead
+        # of handling an error result. Only a cancel of the inner request task
+        # is reported as a provider error.
+        current = asyncio.current_task()
+        if current is not None and current.cancelling():
+            raise
         return _error_result(
             profile,
             turn_mode,

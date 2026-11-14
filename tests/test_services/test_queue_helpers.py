@@ -1789,8 +1789,11 @@ class TestCancelQueuedTask:
     @pytest.mark.asyncio
     async def test_cancel_queued_task_no_item_loss(self):
         """Cancelling a task does not lose other queued items."""
+        import koda.services.metrics  # noqa: F401  (the patch target below must be imported)
         from koda.services.queue_manager import (
             _cancelled_task_ids,
+            _track_queued_task_id,
+            _user_queue_task_ids,
             _user_queues,
             cancel_queued_task,
         )
@@ -1800,23 +1803,164 @@ class TestCancelQueuedTask:
         user_id = 99999
         _user_queues[user_id] = queue
 
-        # Enqueue three items with task_ids 1, 2, 3
+        # Enqueue three items with task_ids 1, 2, 3, tracked as the enqueue
+        # helpers do.
         for tid in (1, 2, 3):
             await queue.put(("update", "query", "work_dir", tid))
+            _track_queued_task_id(user_id, tid)
 
-        with patch("koda.services.metrics") as mock_metrics:
-            mock_metrics.QUEUE_DEPTH.labels.return_value.set = MagicMock()
-            result = await cancel_queued_task(2)
+        try:
+            with patch("koda.services.metrics") as mock_metrics:
+                mock_metrics.QUEUE_DEPTH.labels.return_value.set = MagicMock()
+                result = await cancel_queued_task(2)
 
-        assert result is True
-        assert 2 in _cancelled_task_ids
+            assert result is True
+            assert 2 in _cancelled_task_ids
+            # The cancelled task no longer counts as pending for the user.
+            assert _user_queue_task_ids[user_id] == [1, 3]
 
-        # All three items are still in the queue (sentinel approach)
-        assert queue.qsize() == 3
+            # All three items are still in the queue (sentinel approach)
+            assert queue.qsize() == 3
+        finally:
+            _cancelled_task_ids.clear()
+            _user_queue_task_ids.pop(user_id, None)
+            _user_queues.pop(user_id, None)
 
-        # Clean up
-        _cancelled_task_ids.clear()
-        _user_queues.pop(user_id, None)
+    @pytest.mark.asyncio
+    async def test_cancel_queued_task_returns_false_for_task_not_in_queue(self):
+        """A task a worker already dequeued (running) is not reported as queued (D-009).
+
+        Returning True here made the runtime controller skip
+        ``cancel_active_task_execution`` and leaked the id in ``_cancelled_task_ids``.
+        """
+        from koda.services.queue_manager import (
+            _cancelled_task_ids,
+            _track_queued_task_id,
+            _user_queue_task_ids,
+            cancel_queued_task,
+        )
+
+        user_id = 99998
+        _track_queued_task_id(user_id, 11)
+        try:
+            assert await cancel_queued_task(12) is False
+            assert 12 not in _cancelled_task_ids
+            assert _user_queue_task_ids[user_id] == [11]
+        finally:
+            _cancelled_task_ids.discard(11)
+            _cancelled_task_ids.discard(12)
+            _user_queue_task_ids.pop(user_id, None)
+
+
+class TestCancelActiveTaskExecution:
+    @pytest.mark.asyncio
+    async def test_cancel_stops_the_streaming_run_and_removes_its_progress_message(self):
+        """A cancelled streaming run kills its provider, propagates, and leaves no partial output (D-009)."""
+        import signal
+        import sys
+
+        from koda.services.queue_manager import (
+            _register_task,
+            _unregister_task,
+            active_processes,
+            cancel_active_task_execution,
+        )
+
+        task_id = 7301
+        ctx = QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+        )
+        item = QueueItem(chat_id=111, query_text="hello")
+        progress_message = MagicMock()
+        progress_message.edit_text = AsyncMock()
+        progress_message.delete = AsyncMock()
+        context = MagicMock()
+        context.bot.send_message = AsyncMock(return_value=progress_message)
+        streaming = asyncio.Event()
+        procs: list[asyncio.subprocess.Process] = []
+
+        async def _fake_stream(**kwargs):
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable,
+                "-c",
+                "import time; time.sleep(60)",
+                start_new_session=True,
+            )
+            procs.append(proc)
+            kwargs["process_holder"]["proc"] = proc
+            kwargs["process_holder"]["event"].set()
+            yield "partial output"
+            streaming.set()
+            await proc.wait()
+            yield "output after the provider exited"
+
+        task_info = TaskInfo(task_id=task_id, user_id=7300, chat_id=111, query_text="hello")
+        _register_task(task_info)
+        try:
+            with (
+                patch("koda.services.queue_manager.run_llm_streaming", new=_fake_stream),
+                patch("koda.services.queue_manager._send_typing", new_callable=AsyncMock),
+            ):
+                run = asyncio.create_task(_run_streaming(ctx, item, 7300, 111, context, task_id=task_id))
+                task_info.asyncio_task = run
+                await asyncio.wait_for(streaming.wait(), timeout=10)
+                for _ in range(100):
+                    if task_id in active_processes:
+                        break
+                    await asyncio.sleep(0.01)
+                assert active_processes[task_id] is procs[0]
+
+                assert await cancel_active_task_execution(task_id, reason="Cancelled by /cancel command.") is True
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(run, timeout=10)
+
+            await asyncio.wait_for(procs[0].wait(), timeout=10)
+            assert procs[0].returncode == -signal.SIGTERM
+            assert task_info.error_message == "Cancelled by /cancel command."
+            progress_message.delete.assert_awaited_once()
+            assert task_id not in active_processes
+        finally:
+            for proc in procs:
+                if proc.returncode is None:
+                    proc.kill()
+                    await proc.wait()
+            active_processes.pop(task_id, None)
+            _unregister_task(task_info)
+
+
+class TestIsTaskActiveInProcess:
+    def test_reports_queued_running_and_provider_tasks(self):
+        from koda.services.queue_manager import (
+            _register_task,
+            _track_queued_task_id,
+            _unregister_task,
+            _untrack_queued_task_id,
+            active_processes,
+            is_task_active_in_process,
+        )
+
+        user_id = 7310
+        task_info = TaskInfo(task_id=7312, user_id=user_id, chat_id=1, query_text="q")
+        _track_queued_task_id(user_id, 7311)
+        _register_task(task_info)
+        active_processes[7313] = MagicMock()
+        try:
+            assert is_task_active_in_process(7311) is True
+            assert is_task_active_in_process(7312) is True
+            assert is_task_active_in_process(7313) is True
+            assert is_task_active_in_process(7314) is False
+        finally:
+            _untrack_queued_task_id(user_id, 7311)
+            _unregister_task(task_info)
+            active_processes.pop(7313, None)
 
 
 class TestQueueOrdering:
@@ -1898,6 +2042,98 @@ class TestQueueOrdering:
             assert started == [1, 2]
             assert max_active == 1
             assert queue.qsize() == 0
+        finally:
+            _queue_workers.pop(user_id, None)
+            _user_tasks.pop(user_id, None)
+            _user_queues.pop(user_id, None)
+
+    @pytest.mark.asyncio
+    async def test_process_queue_keeps_running_after_a_task_is_cancelled(self):
+        """Cancelling one running task must not kill the user's queue worker."""
+        from koda.services.queue_manager import (
+            _queue_workers,
+            _unregister_task,
+            _user_queues,
+            _user_tasks,
+            cancel_active_task_execution,
+            get_task_info,
+        )
+
+        user_id = 655
+        context = MagicMock()
+        context.user_data = {}
+        queue = asyncio.Queue()
+        _user_queues[user_id] = queue
+        await queue.put({"_task_id": 1, "chat_id": 655, "query_text": "longa"})
+        await queue.put({"_task_id": 2, "chat_id": 655, "query_text": "seguinte"})
+
+        first_started = asyncio.Event()
+        finished: list[int] = []
+
+        async def _fake_execute(raw_item, _user_id, _context, task_id, task_info):
+            try:
+                if task_id == 1:
+                    first_started.set()
+                    await asyncio.sleep(60)
+                finished.append(task_id)
+            finally:
+                _unregister_task(task_info)
+
+        try:
+            with (
+                patch("koda.services.queue_manager._execute_single_task", side_effect=_fake_execute),
+                patch("koda.services.queue_manager._sync_user_queue_observability"),
+            ):
+                worker = asyncio.create_task(_process_queue(user_id, context))
+                await asyncio.wait_for(first_started.wait(), timeout=5)
+                assert await cancel_active_task_execution(1, reason="Cancelled by /cancel command.") is True
+                await asyncio.wait_for(worker, timeout=5)
+
+            assert finished == [2]
+            assert queue.qsize() == 0
+            assert get_task_info(1) is None
+        finally:
+            _queue_workers.pop(user_id, None)
+            _user_tasks.pop(user_id, None)
+            _user_queues.pop(user_id, None)
+
+    @pytest.mark.asyncio
+    async def test_process_queue_propagates_cancellation_of_the_worker_itself(self):
+        """Shutdown cancels the worker; that cancellation must still propagate."""
+        from koda.services.queue_manager import _queue_workers, _unregister_task, _user_queues, _user_tasks
+
+        user_id = 656
+        context = MagicMock()
+        context.user_data = {}
+        queue = asyncio.Queue()
+        _user_queues[user_id] = queue
+        await queue.put({"_task_id": 1, "chat_id": 656, "query_text": "longa"})
+        await queue.put({"_task_id": 2, "chat_id": 656, "query_text": "seguinte"})
+
+        first_started = asyncio.Event()
+        started: list[int] = []
+
+        async def _fake_execute(raw_item, _user_id, _context, task_id, task_info):
+            started.append(task_id)
+            try:
+                first_started.set()
+                await asyncio.sleep(60)
+            finally:
+                _unregister_task(task_info)
+
+        try:
+            with (
+                patch("koda.services.queue_manager._execute_single_task", side_effect=_fake_execute),
+                patch("koda.services.queue_manager._sync_user_queue_observability"),
+            ):
+                worker = asyncio.create_task(_process_queue(user_id, context))
+                await asyncio.wait_for(first_started.wait(), timeout=5)
+                worker.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(worker, timeout=5)
+
+            assert started == [1]
+            assert queue.qsize() == 1
         finally:
             _queue_workers.pop(user_id, None)
             _user_tasks.pop(user_id, None)

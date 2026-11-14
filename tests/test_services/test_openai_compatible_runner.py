@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+from collections.abc import AsyncIterator
 from unittest.mock import patch
 
 import pytest
+from aiohttp import web
 
 from koda.services.openai_compatible_runner import (
     _append_citations_footer,
@@ -484,6 +488,102 @@ class TestRunOpenAICompatible:
         )
         assert result["error"] is True
         assert "unavailable" in result["result"].lower()
+
+
+class TestRunOpenAICompatibleCancellation:
+    """A /cancel reaches the non-streaming runner as a cancel of its calling task (D-009)."""
+
+    @staticmethod
+    @contextlib.asynccontextmanager
+    async def _hanging_server() -> AsyncIterator[tuple[str, asyncio.Event]]:
+        """Serve a chat endpoint that accepts the request and never answers."""
+        request_received = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _chat(_request: web.Request) -> web.Response:
+            request_received.set()
+            await release.wait()
+            return web.json_response({})
+
+        app = web.Application()
+        app.router.add_post("/v1/chat/completions", _chat)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, "127.0.0.1", 0)
+        await site.start()
+        port = runner.addresses[0][1]
+        try:
+            yield f"http://127.0.0.1:{port}", request_received
+        finally:
+            release.set()
+            await runner.cleanup()
+
+    @staticmethod
+    def _local_profile(base_url: str) -> ProviderHttpProfile:
+        return ProviderHttpProfile(
+            provider_id="mistral",
+            base_url=base_url,
+            chat_path="/v1/chat/completions",
+            models_path="/v1/models",
+            allow_private_base_url=True,
+        )
+
+    @pytest.mark.asyncio
+    async def test_cancelling_the_calling_task_propagates(self, ready_capability):
+        """The cancel must stop the caller, not turn into an error result it then reports."""
+        from koda.services.openai_compatible_runner import run_openai_compatible
+
+        async with self._hanging_server() as (base_url, request_received):
+            with patch(
+                "koda.services.openai_compatible_runner.build_llm_subprocess_env",
+                return_value={"MISTRAL_API_KEY": "sk-test"},
+            ):
+                run = asyncio.create_task(
+                    run_openai_compatible(
+                        profile=self._local_profile(base_url),
+                        query="hi",
+                        work_dir="/tmp",
+                        model="mistral-large-latest",
+                        turn_mode="new_turn",
+                        capabilities=ready_capability,
+                        process_holder={},
+                    )
+                )
+                await asyncio.wait_for(request_received.wait(), timeout=10)
+                run.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(run, timeout=10)
+
+        assert run.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_cancelling_only_the_request_task_returns_an_error_result(self, ready_capability):
+        from koda.services.openai_compatible_runner import run_openai_compatible
+
+        process_holder: dict = {}
+        async with self._hanging_server() as (base_url, request_received):
+            with patch(
+                "koda.services.openai_compatible_runner.build_llm_subprocess_env",
+                return_value={"MISTRAL_API_KEY": "sk-test"},
+            ):
+                run = asyncio.create_task(
+                    run_openai_compatible(
+                        profile=self._local_profile(base_url),
+                        query="hi",
+                        work_dir="/tmp",
+                        model="mistral-large-latest",
+                        turn_mode="new_turn",
+                        capabilities=ready_capability,
+                        process_holder=process_holder,
+                    )
+                )
+                await asyncio.wait_for(request_received.wait(), timeout=10)
+                process_holder["task"].cancel()
+                result = await asyncio.wait_for(run, timeout=10)
+
+        assert result["error"] is True
+        assert result["result"] == "mistral request cancelled."
+        assert "task" not in process_holder
 
 
 class TestUserContentBuilder:
