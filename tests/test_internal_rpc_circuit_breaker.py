@@ -120,6 +120,53 @@ async def test_failures_outside_window_do_not_count() -> None:
     assert breaker.state is State.CLOSED
 
 
+async def _own_timeout() -> Any:
+    raise TimeoutError("the command ran out its own budget")
+
+
+def _is_own_timeout(exc: Exception) -> bool:
+    return isinstance(exc, TimeoutError)
+
+
+@pytest.mark.asyncio
+async def test_expected_errors_neither_open_nor_close_the_breaker() -> None:
+    breaker = CircuitBreaker("svc", failure_threshold=2, window_seconds=10)
+    for _ in range(5):
+        with pytest.raises(TimeoutError):
+            await breaker.run_allowing(_is_own_timeout, _own_timeout)
+    assert breaker.state is State.CLOSED
+
+    # One upstream failure, then expected errors: they do not clear that failure either.
+    with pytest.raises(RuntimeError):
+        await breaker.run_allowing(_is_own_timeout, _boom)
+    with pytest.raises(TimeoutError):
+        await breaker.run_allowing(_is_own_timeout, _own_timeout)
+    assert breaker.state is State.CLOSED
+    with pytest.raises(RuntimeError):
+        await breaker.run_allowing(_is_own_timeout, _boom)
+    assert breaker.state is State.OPEN
+
+    # While open, run_allowing short-circuits like run.
+    with pytest.raises(CircuitOpenError):
+        await breaker.run_allowing(_is_own_timeout, _own_timeout)
+
+
+@pytest.mark.asyncio
+async def test_run_allowing_passes_arguments_and_records_success() -> None:
+    breaker = CircuitBreaker("svc", failure_threshold=2, window_seconds=10)
+    with pytest.raises(RuntimeError):
+        await breaker.run(_boom)
+
+    async def _echo(value: str, *, suffix: str) -> str:
+        return value + suffix
+
+    assert await breaker.run_allowing(_is_own_timeout, _echo, "o", suffix="k") == "ok"
+    # The success cleared the earlier failure, so one more failure does not open the breaker.
+    with pytest.raises(RuntimeError):
+        await breaker.run(_boom)
+    assert breaker.state is State.CLOSED
+
+
 def test_get_breaker_returns_same_instance_per_name() -> None:
     a = get_breaker("svc")
     b = get_breaker("svc")

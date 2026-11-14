@@ -1,16 +1,23 @@
-"""Background shell process manager for agent tools."""
+"""Background shell process manager for agent tools.
+
+Background commands take the same path as ``shell_execute``: the approval gate
+and command guard in :mod:`koda.services.shell_runner`, then the runtime
+kernel's ExecuteCommand. Killing a handle cancels that call, and the kernel
+then kills every process still in the command's process group. A process that
+leaves the group (``setsid``, a daemonizing fork) is not covered: the command
+guard is a guard, not a sandbox.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import time
 from dataclasses import dataclass, field
+from typing import Any, cast
 
 from koda.config import SHELL_BG_MAX_PROCESSES, SHELL_BG_OUTPUT_MAX, SHELL_TIMEOUT
 from koda.logging_config import get_logger
-from koda.services.provider_env import build_tool_subprocess_env, validate_runtime_path, validate_shell_command
-from koda.services.shell_safety import enforce_shell_guardrails
+from koda.services.shell_runner import ShellCommandRejected, execute_in_runtime_kernel, guard_shell_command
 
 log = get_logger(__name__)
 
@@ -22,11 +29,11 @@ class BackgroundProcess:
     command: str
     work_dir: str
     started_at: float
-    process: asyncio.subprocess.Process | None = None
     stdout_buf: str = ""
     stderr_buf: str = ""
     exit_code: int | None = None
     finished: bool = False
+    finished_at: float | None = None
     killed: bool = False
     timed_out: bool = False
     _collection_task: asyncio.Task[None] | None = field(default=None, repr=False)
@@ -55,57 +62,56 @@ class BackgroundProcessManager:
         timeout: int = SHELL_TIMEOUT,
     ) -> tuple[str, str | None]:
         """Start a background process. Returns (handle_id, error_or_none)."""
+        self.cleanup_finished()
+        try:
+            command, validated_dir = guard_shell_command(command, work_dir)
+        except ShellCommandRejected as e:
+            return "", str(e)
+
         if self.active_count(user_id) >= SHELL_BG_MAX_PROCESSES:
             return "", f"Too many background processes (max {SHELL_BG_MAX_PROCESSES}). Kill some first."
 
-        try:
-            command = enforce_shell_guardrails(command)
-            command = validate_shell_command(command)
-            validated_dir = validate_runtime_path(work_dir, allow_empty=True)
-        except ValueError as e:
-            return "", f"Blocked: {e}"
-
         handle_id = self._make_handle(user_id)
-        proc_env = build_tool_subprocess_env()
-
-        try:
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=validated_dir,
-                env=proc_env,
-                start_new_session=True,
-            )
-        except Exception as e:
-            return "", f"Failed to start: {e}"
-
         bg = BackgroundProcess(
             handle_id=handle_id,
             user_id=user_id,
             command=command,
             work_dir=validated_dir,
             started_at=time.monotonic(),
-            process=process,
         )
         self._processes[handle_id] = bg
-
-        async def _collect() -> None:
-            try:
-                stdout_bytes, stderr_bytes = await asyncio.wait_for(process.communicate(), timeout=max(1, timeout))
-                bg.stdout_buf = (stdout_bytes or b"").decode(errors="replace")[:SHELL_BG_OUTPUT_MAX]
-                bg.stderr_buf = (stderr_bytes or b"").decode(errors="replace")[:SHELL_BG_OUTPUT_MAX]
-                bg.exit_code = process.returncode
-            except TimeoutError:
-                bg.timed_out = True
-                with contextlib.suppress(ProcessLookupError):
-                    process.kill()
-                bg.exit_code = -1
-            finally:
-                bg.finished = True
-
-        bg._collection_task = asyncio.create_task(_collect())
+        bg._collection_task = asyncio.create_task(self._collect(bg, timeout))
         return handle_id, None
+
+    async def _collect(self, bg: BackgroundProcess, timeout: int) -> None:
+        try:
+            execution = await execute_in_runtime_kernel(
+                bg.command, bg.work_dir, timeout=timeout, command_kind="shell_bg"
+            )
+            if not bool(execution.get("forwarded", False)):
+                reason = str(execution.get("reason") or "runtime kernel unavailable")
+                log.warning("shell_bg_runtime_kernel_unavailable", handle_id=bg.handle_id, reason=reason)
+                bg.stderr_buf = f"Error: {reason}"
+                bg.exit_code = -1
+                return
+            bg.stdout_buf = str(execution.get("stdout") or "")[:SHELL_BG_OUTPUT_MAX]
+            bg.stderr_buf = str(execution.get("stderr") or "")[:SHELL_BG_OUTPUT_MAX]
+            bg.timed_out = bool(execution.get("timed_out", False))
+            bg.exit_code = -1 if bg.timed_out else int(cast(Any, execution.get("exit_code", 0)) or 0)
+        except ShellCommandRejected as e:
+            # The kernel's own command check or network policy refused it: shell_execute's answer.
+            bg.stderr_buf = str(e)
+            bg.exit_code = -1
+        except asyncio.CancelledError:
+            bg.exit_code = -1
+            raise
+        except Exception as e:
+            log.exception("shell_bg_error", handle_id=bg.handle_id, command=bg.command[:100])
+            bg.stderr_buf = f"Error: {e}"
+            bg.exit_code = -1
+        finally:
+            bg.finished = True
+            bg.finished_at = time.monotonic()
 
     def get(self, handle_id: str, *, user_id: int | None = None) -> BackgroundProcess | None:
         bg = self._processes.get(handle_id)
@@ -121,18 +127,22 @@ class BackgroundProcessManager:
             return f"No process with handle '{handle_id}'."
         if bg.finished:
             return "Process already finished."
-        if bg.process:
-            try:
-                bg.process.kill()
-                bg.killed = True
-            except ProcessLookupError:
-                pass
+        task = bg._collection_task
+        if task is not None and not task.done():
+            bg.killed = True
+            # Cancelling the ExecuteCommand call makes the runtime kernel kill the command's process group.
+            task.cancel()
+            await asyncio.wait({task})
         return None
 
     def cleanup_finished(self, max_age: float = 600) -> int:
-        """Remove finished processes older than max_age seconds."""
+        """Forget processes that finished more than max_age seconds ago."""
         now = time.monotonic()
-        to_remove = [h for h, p in self._processes.items() if p.finished and (now - p.started_at) > max_age]
+        to_remove = [
+            h
+            for h, p in self._processes.items()
+            if p.finished and (now - (p.finished_at if p.finished_at is not None else p.started_at)) > max_age
+        ]
         for h in to_remove:
             del self._processes[h]
         return len(to_remove)

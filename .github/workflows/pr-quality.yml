@@ -311,6 +311,40 @@ jobs:
       - name: Rust tests
         run: cargo +stable test --workspace
 
+  runtime-kernel-live:
+    # The shell tools against a freshly built koda-runtime-kernel over gRPC. Only this job
+    # shows that the real server stops a command, and its process group, when the call is
+    # cancelled (shell_kill) or the command runs out its time; the unit tests stand in for
+    # the kernel.
+    name: runtime-kernel-live
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Build the runtime kernel and the security guard
+        run: cargo +stable build --manifest-path rust/Cargo.toml -p koda-runtime-kernel -p koda-security-service
+      - name: Run the shell tools against the runtime kernel
+        run: uv run pytest -q tests/integration/test_runtime_kernel_shell_live.py
+        env:
+          KODA_TEST_RUNTIME_KERNEL_BIN: ${{ github.workspace }}/rust/target/debug/koda-runtime-kernel
+          AGENT_TOKEN: "test-token"
+          ALLOWED_USER_IDS: "123456789"
+          KODA_SECURITY_GUARD_STARTUP_TIMEOUT: "120"
+
   docker-smoke:
     name: docker-smoke
     runs-on: ubuntu-latest
