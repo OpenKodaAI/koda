@@ -33,7 +33,7 @@ from koda.agent_contract import (
     resolve_feature_filtered_tools,
     serialize_connection_profile,
 )
-from koda.config import AGENT_ID, DOTENV_PATH, SHARED_PLATFORM_PROMPT, STATE_BACKEND
+from koda.config import AGENT_ID, DOTENV_PATH, PROVIDER_CLI_CREDENTIAL_FILES, SHARED_PLATFORM_PROMPT, STATE_BACKEND
 from koda.internal_rpc.retrieval_engine import build_retrieval_engine_client
 from koda.knowledge.config import (
     KNOWLEDGE_V2_EMBEDDING_DIMENSION,
@@ -1625,10 +1625,9 @@ def _parse_dashboard_appearance() -> dict[str, dict[str, str]]:
 # Where each provider CLI stores its login, relative to its config folder. Checked against the
 # pinned CLIs (packages/provider-clis): Claude Code ``.credentials.json``, Codex ``auth.json``,
 # Gemini CLI ``oauth_creds.json``, ``google_accounts.json`` and ``mcp-oauth-tokens.json``.
+# The file layer refuses the same files (koda.config.FILEOPS_BLOCKED_CREDENTIAL_PATHS).
 _PROVIDER_CREDENTIAL_FILES: dict[str, tuple[str, ...]] = {
-    "claude": (".credentials.json",),
-    "codex": ("auth.json",),
-    "gemini": ("oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json"),
+    provider_id: names for provider_id, (_config_dir, names) in PROVIDER_CLI_CREDENTIAL_FILES.items()
 }
 
 

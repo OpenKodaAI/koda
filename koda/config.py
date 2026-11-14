@@ -686,6 +686,15 @@ FILEOPS_MAX_READ_SIZE: int = int(_env("FILEOPS_MAX_READ_SIZE", "1048576"))  # 1M
 FILEOPS_BLOCKED_EXTENSIONS: frozenset[str] = frozenset(
     {".env", ".key", ".pem", ".p12", ".pfx", ".jks", ".keystore", ".secret", ".credentials"}
 )
+# The credential files each provider CLI that Koda logs in keeps in its config dir under
+# HOME: provider id -> (that dir's name in HOME, the files). Disconnecting a provider
+# deletes exactly these (koda/control_plane/manager.py), and the file layer refuses them
+# (FILEOPS_BLOCKED_CREDENTIAL_PATHS below), so the two lists cannot drift apart.
+PROVIDER_CLI_CREDENTIAL_FILES: dict[str, tuple[str, tuple[str, ...]]] = {
+    "claude": (".claude", (".credentials.json",)),
+    "codex": (".codex", ("auth.json",)),
+    "gemini": (".gemini", ("oauth_creds.json", "google_accounts.json", "mcp-oauth-tokens.json")),
+}
 # Credential stores that the provider and developer CLIs keep in HOME, which is also the
 # default Docker work dir (HOME=/var/lib/koda/runtime/home). The file commands, the agent
 # file tools and browser_upload refuse them like a blocked extension. An entry ending in
@@ -697,9 +706,7 @@ FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
     ".aws/",
     ".azure/",
     ".config/gcloud/",
-    ".claude/.credentials.json",
-    ".codex/auth.json",
-    ".gemini/oauth_creds.json",
+    *(f"{config_dir}/{name}" for config_dir, names in PROVIDER_CLI_CREDENTIAL_FILES.values() for name in names),
     ".config/gh/hosts.yml",
     ".docker/config.json",
     ".kube/config",

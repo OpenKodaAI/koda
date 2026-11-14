@@ -1322,6 +1322,8 @@ async def test_cat_and_file_read_expand_a_home_relative_grant_root(
 _DOCKER_HOME_CREDENTIAL_STORES = [
     ".codex/auth.json",
     ".gemini/oauth_creds.json",
+    ".gemini/mcp-oauth-tokens.json",
+    ".gemini/google_accounts.json",
     ".claude/.credentials.json",
     ".config/gh/hosts.yml",
     ".config/gcloud/application_default_credentials.json",

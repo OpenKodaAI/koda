@@ -391,6 +391,8 @@ class TestCredentialStoresAreSecretFiles:
             ("/srv/koda-user/.config/gcloud/credentials.db", ".config/gcloud/"),
             ("/srv/koda-user/.codex/auth.json", ".codex/auth.json"),
             ("/srv/koda-user/.gemini/oauth_creds.json", ".gemini/oauth_creds.json"),
+            ("/srv/koda-user/.gemini/mcp-oauth-tokens.json", ".gemini/mcp-oauth-tokens.json"),
+            ("/srv/koda-user/.gemini/google_accounts.json", ".gemini/google_accounts.json"),
             ("/srv/koda-user/.claude/.credentials.json", ".claude/.credentials.json"),
             ("/srv/koda-user/.config/gh/hosts.yml", ".config/gh/hosts.yml"),
             ("/srv/koda-user/.docker/config.json", ".docker/config.json"),
@@ -426,6 +428,20 @@ class TestCredentialStoresAreSecretFiles:
         from koda.utils.files import blocked_credential_path
 
         assert blocked_credential_path(path) is None
+
+    @pytest.mark.parametrize(
+        ("provider", "config_dir"), [("claude", ".claude"), ("codex", ".codex"), ("gemini", ".gemini")]
+    )
+    def test_every_file_the_provider_logout_deletes_is_a_credential_store(self, provider, config_dir):
+        """Koda's own logout (``disconnect_provider_connection``) names the CLI credential files; all are refused."""
+        from koda.control_plane.manager import _PROVIDER_CREDENTIAL_FILES
+        from koda.utils.files import blocked_credential_path
+
+        names = _PROVIDER_CREDENTIAL_FILES[provider]
+        assert names
+        for name in names:
+            assert blocked_credential_path(f"/srv/koda-user/{config_dir}/{name}") == f"{config_dir}/{name}"
+        assert set(_PROVIDER_CREDENTIAL_FILES) == {"claude", "codex", "gemini"}
 
     @pytest.mark.parametrize("deny_sensitive_dirs", [True, False])
     def test_both_surfaces_refuse_them(self, tmp_path, deny_sensitive_dirs):
