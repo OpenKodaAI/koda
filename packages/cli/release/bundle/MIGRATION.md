@@ -48,6 +48,20 @@
   replace that copy with the new template, keeping your `server_name` and TLS settings, then run
   `nginx -t` and reload nginx.
 
+## MCP Servers On Private Networks
+
+- Remote (HTTP) MCP servers are now reached on public addresses only, and the address check is
+  stricter: `100.64.0.0/10` (Tailscale and other carrier-grade NAT ranges) counts as private, and
+  an IPv4-mapped or NAT64 IPv6 address is judged by the IPv4 address it carries. Earlier releases
+  accepted an MCP server at a `100.64.0.0/10` address.
+- After `koda update`, an MCP server on such an address, or on any other private network, is
+  refused (`Private/internal IP not allowed`) both when it is registered and when an agent
+  connects to it. To keep using it, list its networks in `MCP_ALLOWED_PRIVATE_NETWORKS` in the
+  install's `.env`, as comma-separated CIDRs: for a tailnet both
+  `100.64.0.0/10,fd7a:115c:a1e0::/48`, or better each server's own `/32` and `/128`. Then run
+  `koda up`. The control plane passes the grant on to every agent worker. Loopback, link-local and
+  cloud metadata addresses are never granted.
+
 ## Update Behavior
 
 - `koda update` swaps the release manifest, reapplies the stack, runs health checks, and rolls back

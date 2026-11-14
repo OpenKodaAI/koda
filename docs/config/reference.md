@@ -102,8 +102,10 @@ Claude, Codex, Gemini, ElevenLabs and Ollama Cloud.
   Loopback, link-local, unspecified and multicast addresses and the cloud metadata addresses
   `100.100.100.200` and `fd00:ec2::254` are never granted, whatever the list covers; any
   other address in the list is, so keep it narrow. Entries that are not CIDRs are logged and
-  ignored. Set it in the host's `.env`: the control plane checks registrations against it
-  and passes it on to every agent worker
+  ignored. Set it in the `.env` Docker Compose reads: the install's `.env` for the npm/release
+  install (the release Compose file passes it to the control plane; run `koda up` after a
+  change), or the checkout's `.env` for a source install. The control plane checks
+  registrations against it and passes it on to every agent worker
 
 ### Postgres
 

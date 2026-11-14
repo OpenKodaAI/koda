@@ -59,6 +59,10 @@ services:
       KNOWLEDGE_V2_S3_REGION: "${KNOWLEDGE_V2_S3_REGION:-us-east-1}"
       KNOWLEDGE_V2_S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in .env}"
       KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in .env}"
+      # Private networks MCP HTTP servers may be reached on, as comma-separated
+      # CIDRs (a tailnet needs 100.64.0.0/10,fd7a:115c:a1e0::/48); empty means
+      # public addresses only. The control plane passes it on to agent workers.
+      MCP_ALLOWED_PRIVATE_NETWORKS: "${MCP_ALLOWED_PRIVATE_NETWORKS:-}"
     ports:
       # Control-plane API: loopback only. The dashboard reaches it over the
       # internal network; a host reverse proxy reaches it over loopback.
