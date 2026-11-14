@@ -878,9 +878,13 @@ def _resource_policy_for_operational_resolution(
     grant: dict[str, Any] = {"allow_actions": [resolution.action_id]}
     # Scope the grant to the command's own path. A path that cannot be placed (a relative
     # path without a work dir) is left to the execution-policy path rules, which fail
-    # closed on it; the handler then refuses to run without a work dir.
-    if resolution.path and canonical_grant_path(resolution.path) is not None:
-        grant["allowed_paths"] = [resolution.path]
+    # closed on it; the handler then refuses to run without a work dir. Grant entries are
+    # trimmed (normalize_integration_grants), so an entry for a path whose name ends in
+    # whitespace would name its trimmed twin and refuse the command's own path; such a
+    # path is scoped by the operator's grant check (_evaluate_operational_grant) alone.
+    path = resolution.path
+    if path and path == path.strip() and canonical_grant_path(path) is not None:
+        grant["allowed_paths"] = [path]
     return {"integration_grants": {resolution.integration_id: grant}}
 
 

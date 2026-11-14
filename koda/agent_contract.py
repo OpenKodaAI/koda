@@ -1709,16 +1709,29 @@ def path_in_allowed_paths(path: str | None, allowed_paths: list[str]) -> bool:
     return False
 
 
+def given_path(value: object) -> str | None:
+    """Return a path param exactly as given, or None when it is missing or blank.
+
+    The integration grant and the execution policy decide the path the handler acts on,
+    and the handlers do not trim it, so neither is it trimmed here: ``<work>/src `` (its
+    name ends in a space) is a sibling of ``<work>/src``, not that directory. Whitespace
+    only decides whether a path was given at all.
+    """
+    text = str(value or "")
+    return text if text.strip() else None
+
+
 def _grant_scoped_paths(resolution: IntegrationActionResolution, params: dict[str, Any]) -> list[str]:
     """Return every path an action touches that a grant's ``allowed_paths`` must cover.
 
     That is the envelope path, except for ``file_move``, which writes its destination as
-    well as reading its source, so both ends are checked.
+    well as reading its source, so both ends are checked. Each is the param as given
+    (:func:`given_path`).
     """
     if resolution.tool_id == "file_move":
-        ends = [str(params.get(key) or "").strip() for key in ("source", "destination")]
-        if any(ends):
-            return [end for end in ends if end]
+        ends = [given_path(params.get(key)) for key in ("source", "destination")]
+        if any(end is not None for end in ends):
+            return [end for end in ends if end is not None]
     return [resolution.path] if resolution.path else []
 
 
@@ -2290,7 +2303,7 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             default_approval_mode=integration.default_approval_mode,
             tool_id=tool,
             auth_modes=integration.auth_modes,
-            path=str(payload.get("path") or "").strip() or None,
+            path=given_path(payload.get("path")),
             resource_method=action_id,
         )
 
@@ -2309,7 +2322,7 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             "move": "write",
             "delete": "destructive",
         }.get(action_suffix, "write")
-        path = str(payload.get("path") or payload.get("source") or payload.get("destination") or "").strip() or None
+        path = given_path(payload.get("path") or payload.get("source") or payload.get("destination"))
         return IntegrationActionResolution(
             integration_id=integration.id,
             action_id=action_id,
@@ -2350,7 +2363,7 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             default_approval_mode=integration.default_approval_mode,
             tool_id=tool,
             auth_modes=integration.auth_modes,
-            path=str(payload.get("path") or "").strip() or None,
+            path=given_path(payload.get("path")),
             resource_method=action_id,
         )
 

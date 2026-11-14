@@ -822,6 +822,117 @@ class TestGrantChecksTheCanonicalCallPath:
         assert "canary-other" not in worker.output
 
 
+class TestGrantChecksThePathWithItsWhitespace:
+    """``allowed_paths`` decides the path the handler acts on, whitespace included.
+
+    ``<work>/src `` (its name ends in a space) is a sibling of the grant root ``<work>/src``,
+    and ``notes.txt `` a sibling of the granted ``notes.txt``. The dispatcher hands the grant
+    each file-tool path resolved but not trimmed, so trimming it there would grant the
+    sibling as its whitespace-less twin.
+    """
+
+    @pytest.fixture
+    def work(self, tmp_path, monkeypatch):
+        work = (tmp_path / "work").resolve()
+        (work / "src").mkdir(parents=True)
+        (work / "src" / "a.txt").write_text("TOKEN = 'granted'\n")
+        (work / "src ").mkdir()
+        (work / "src " / "secret.txt").write_text("TOKEN = 'canary-outside-grant'\n")
+        (work / "notes.txt").write_text("granted-notes\n")
+        (work / "notes.txt ").write_text("canary-outside-grant\n")
+        monkeypatch.chdir(tmp_path)
+        return work
+
+    @staticmethod
+    def _grant(*allowed_paths) -> dict:
+        return {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(p) for p in allowed_paths]}}}
+
+    async def _execute(self, tool: str, params: dict, work_dir: str, *allowed_paths):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", self._grant(*allowed_paths)),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(work_dir))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [
+            ("file_grep", {"pattern": "TOKEN", "path": "src "}),
+            ("file_list", {"path": "src "}),
+            ("file_search", {"pattern": "*", "path": "src "}),
+            ("file_read", {"path": "notes.txt "}),
+            ("file_read", {"path": "src /secret.txt"}),
+            ("file_write", {"path": "src\t", "content": "x"}),
+            ("file_move", {"source": "src/a.txt", "destination": "src\n"}),
+        ],
+    )
+    async def test_a_whitespace_suffixed_sibling_of_a_grant_root_is_outside_it(self, work, tool, params):
+        result = await self._execute(tool, params, str(work), work / "src", work / "notes.txt")
+
+        assert not result.success, result.output
+        assert "outside the granted scope" in result.output
+        assert "canary-outside-grant" not in result.output
+        assert "secret.txt" not in result.output
+        assert (work / "src" / "a.txt").exists()
+        assert not (work / "src\t").exists()
+        assert not (work / "src\n").exists()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [("file_grep", {"pattern": "TOKEN"}), ("file_list", {}), ("file_search", {"pattern": "*"})],
+    )
+    async def test_a_work_dir_whose_name_ends_in_a_space_is_the_one_the_grant_checks(self, work, tool, params):
+        from koda.utils.workdir import validate_work_dir
+
+        validation = validate_work_dir(str(work / "src "))
+        assert validation.ok
+        assert validation.path == f"{work}/src "
+
+        refused = await self._execute(tool, params, validation.path, work / "src")
+        assert not refused.success, refused.output
+        assert "outside the granted scope" in refused.output
+        assert "secret.txt" not in refused.output
+
+        # A grant entry is trimmed like the rest of the policy, so a grant on the parent covers it.
+        granted = await self._execute(tool, params, validation.path, work)
+        assert granted.success, granted.output
+        assert "secret.txt" in granted.output
+
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [
+            ("file_read", {"path": "{work}/notes.txt "}),
+            ("file_move", {"source": "{work}/src/a.txt", "destination": "{work}/src "}),
+            ("file_move", {"source": "{work}/src ", "destination": "{work}/src/b"}),
+            ("cat", {"path": "{work}/src "}),
+            ("ls", {"path": "{work}/src "}),
+        ],
+    )
+    def test_the_contract_grant_check_keeps_the_whitespace(self, work, tool, params):
+        from koda.agent_contract import evaluate_integration_grant, resolve_integration_action
+
+        call = {key: value.format(work=work) for key, value in params.items()}
+        decision = evaluate_integration_grant(tool, call, self._grant(work / "src", work / "notes.txt"))
+
+        assert not decision.allowed
+        assert decision.reason == "path_not_granted"
+        first = call.get("path") or call["source"]
+        assert resolve_integration_action(tool, call).path == first
+
+    @pytest.mark.parametrize("tool", ["file_read", "cat", "agent_set_workdir"])
+    @pytest.mark.parametrize("path", ["", "   ", "\n"])
+    def test_a_blank_path_is_still_no_path(self, tool, path):
+        from koda.agent_contract import resolve_integration_action
+
+        assert resolve_integration_action(tool, {"path": path}).path is None
+
+
 class TestPathRulesCoverWhatASubtreeToolReads:
     """A restrictive path rule on a directory decides a grep, search, listing or move of an ancestor of it."""
 

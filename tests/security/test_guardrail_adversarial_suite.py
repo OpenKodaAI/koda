@@ -1053,6 +1053,38 @@ async def test_a_work_dir_whose_name_ends_in_a_space_is_the_one_the_grant_checks
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
+async def test_ls_alone_in_a_work_dir_whose_name_ends_in_a_space_is_checked_on_that_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any
+) -> None:
+    """/ls alone lists the work dir itself, so the grant must see ``<work>/src `` as it is, not trimmed."""
+    from koda.handlers.commands import cmd_ls
+    from koda.utils.workdir import validate_work_dir
+
+    work = _work_dir_with_a_trailing_space(tmp_path)
+    (work / "src " / "only-outside.txt").write_text("x", encoding="utf-8")
+    validation = validate_work_dir(str(work / "src "))
+    assert validation.ok
+    monkeypatch.chdir(tmp_path)
+    mock_context.user_data["work_dir"] = validation.path
+    mock_context.args = []
+    for allowed, expect_listing in ((work / "src", False), (work, True)):
+        mock_update.message.reply_text.reset_mock()
+        with (
+            patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", _grant(allowed)),
+            patch("koda.handlers.commands.send_long_message", new_callable=AsyncMock) as send,
+        ):
+            await cmd_ls(mock_update, mock_context)
+
+        listed = [call.args[1] for call in send.call_args_list]
+        replies = [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+        assert any("only-outside.txt" in text for text in listed) is expect_listing, (listed, replies)
+        if not expect_listing:
+            assert any("outside the granted scope" in text for text in replies), replies
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
 @pytest.mark.parametrize("work_dir", ["", "   "])
 async def test_a_file_command_without_a_work_dir_never_reads_the_process_cwd(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any, work_dir: str
