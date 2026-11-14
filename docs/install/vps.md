@@ -164,9 +164,12 @@ For any deploy reachable from the public internet:
 7. **Recovery codes are single-use.** After any password reset, every remaining code is
    invalidated. The owner must regenerate a fresh batch from Settings › Security (requires
    current password).
-8. **Account lockout + rate limits** are already enforced — 5 failed logins per 5 minutes
-   per IP, 5 password resets per hour per IP, 3 regenerations per hour per user. Responses
-   are deliberately slowed to a ~300 ms floor so the caller cannot distinguish between
+8. **Account lockout + rate limits** are already enforced — per client address (IPv6 per /64),
+   for example 10 login attempts per 5 minutes, 10 password resets per hour and 10 recovery-code
+   regenerations per hour, plus a per-account lockout after repeated failed logins. The full
+   budget table and how the client address is determined behind a proxy are in
+   [`../security/authentication.md`](../security/authentication.md#rate-limits-bucket-budgets).
+   Responses are deliberately slowed to a ~300 ms floor so the caller cannot distinguish between
    "account does not exist", "wrong password", and "invalid recovery code".
 9. **Audit.** Every auth event writes a structured `security.*` event through
    `emit_security()`. Ensure your logging backend persists these.
