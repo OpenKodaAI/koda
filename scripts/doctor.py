@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import ipaddress
 import json
 import os
 import socket
@@ -233,7 +234,8 @@ class _NoRedirectWithCredentials(HTTPRedirectHandler):
 # Doctor talks only to this install's control plane and dashboard, and `--provider` attaches the
 # break-glass bearer. urlopen would honour http_proxy/https_proxy, which also proxy a loopback URL
 # unless no_proxy names it, and the proxy would then see the bearer in clear text. So doctor
-# ignores the proxy settings and always connects directly, and never sends the bearer to a redirect.
+# ignores the proxy settings and always connects directly, never sends the bearer to a redirect, and
+# sends it over plain HTTP only to this host (_request).
 _DIRECT_OPENER = build_opener(ProxyHandler({}), _NoRedirectWithCredentials())
 
 
@@ -241,9 +243,34 @@ class _CredentialedRequest(Request):
     """A request that carries credentials; ``_NoRedirectWithCredentials`` never redirects it."""
 
 
+def _stays_on_this_host(hostname: str) -> bool:
+    """True for a loopback address or ``localhost``: plain HTTP to it never leaves this machine.
+
+    ``*.localhost`` is not on the list: Python resolves it through the system resolver, which does
+    not promise a loopback answer the way a browser does.
+    """
+    host = hostname.strip().lower().rstrip(".")
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def _request(url: str, credentials: dict[str, str] | None) -> Request:
     if not credentials:
         return Request(url)
+    parsed = urlparse(url)
+    if parsed.scheme.lower() != "https" and not _stays_on_this_host(parsed.hostname or ""):
+        # The CLI only ever sends the break-glass token to loopback. Over plain HTTP to another
+        # host anyone on the path could read it, so doctor refuses before it opens a connection.
+        raise ValueError(
+            f"doctor does not send the control-plane token over plain HTTP to {parsed.hostname or url}, "
+            "which is not a loopback address, so anyone on the path could read it. Run doctor on the "
+            "control plane's host with --base-url http://127.0.0.1:8090, reach it through an SSH "
+            "tunnel (ssh -L 8090:127.0.0.1:8090), or give an https:// --base-url."
+        )
     request = _CredentialedRequest(url)
     for name, value in credentials.items():
         request.add_unredirected_header(name, value)

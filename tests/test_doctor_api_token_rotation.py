@@ -368,3 +368,163 @@ async def test_doctor_never_sends_the_bearer_to_a_redirect(
     # A request without the bearer still follows a redirect: the dashboard answers `/` with one.
     assert _check(payload, "web_dashboard")["ok"] is True
     assert _check(payload, "onboarding_status")["ok"] is True
+
+
+@pytest.fixture
+async def redirect_to_other_host() -> AsyncIterator[tuple[str, list[str], list[str]]]:
+    """`/start` on 127.0.0.1 answers a 302 to `/landing` on 127.0.0.2, and both record Authorization."""
+    first_hop: list[str] = []
+    second_hop: list[str] = []
+
+    async def landing(req: web.Request) -> web.Response:
+        second_hop.append(req.headers.get("Authorization", ""))
+        return web.json_response({"landed": True})
+
+    other_host = web.Application()
+    other_host.router.add_get("/landing", landing)
+    other_server = TestServer(other_host, host="127.0.0.2")
+    await other_server.start_server()
+
+    async def start(req: web.Request) -> web.Response:
+        first_hop.append(req.headers.get("Authorization", ""))
+        raise web.HTTPFound(f"http://127.0.0.2:{other_server.port}/landing")
+
+    app = web.Application()
+    app.router.add_get("/start", start)
+    server = TestServer(app, host="127.0.0.1")
+    await server.start_server()
+    try:
+        yield f"http://127.0.0.1:{server.port}/start", first_hop, second_hop
+    finally:
+        await server.close()
+        await other_server.close()
+
+
+async def test_doctor_attaches_credentials_as_unredirected_headers(
+    doctor: ModuleType, redirect_to_other_host: tuple[str, list[str], list[str]]
+) -> None:
+    """The first of doctor's two protections: urllib never copies an unredirected header onto a redirect.
+
+    test_doctor_never_sends_the_bearer_to_a_redirect covers the second (doctor refuses to redirect a
+    request that carries credentials). This one opens doctor's request with urllib's default redirect
+    handler, which follows the 302, so it still holds if a later change lets credentialed requests
+    follow some redirects (a reverse proxy's trailing-slash 301, say).
+    """
+    from urllib.request import ProxyHandler, build_opener
+
+    url, first_hop, second_hop = redirect_to_other_host
+    request = doctor._request(url, {"Authorization": "Bearer probe-break-glass-token"})
+    following_opener = build_opener(ProxyHandler({}))
+
+    def follow() -> dict[str, Any]:
+        with following_opener.open(request, timeout=10) as response:
+            payload: dict[str, Any] = json.loads(response.read())
+            return payload
+
+    assert await asyncio.to_thread(follow) == {"landed": True}
+    assert first_hop == ["Bearer probe-break-glass-token"]
+    assert second_hop == [""]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1:8090/api/control-plane/onboarding/status",
+        "http://127.10.20.30:8090/api/control-plane/onboarding/status",
+        "http://localhost:8090/api/control-plane/onboarding/status",
+        "http://LOCALHOST.:8090/api/control-plane/onboarding/status",
+        "http://[::1]:8090/api/control-plane/onboarding/status",
+        "https://koda.example.com/api/control-plane/onboarding/status",
+        "https://192.0.2.10:8090/api/control-plane/onboarding/status",
+    ],
+)
+def test_doctor_attaches_credentials_over_https_or_to_this_host(doctor: ModuleType, url: str) -> None:
+    request = doctor._request(url, {"Authorization": "Bearer probe-break-glass-token"})
+
+    assert request.unredirected_hdrs == {"Authorization": "Bearer probe-break-glass-token"}
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://192.0.2.10:8090/api/control-plane/onboarding/status",
+        "http://koda.example.com:8090/api/control-plane/onboarding/status",
+        # Python resolves *.localhost through the system resolver, which does not promise loopback.
+        "http://koda.localhost:8090/api/control-plane/onboarding/status",
+        "http://0.0.0.0:8090/api/control-plane/onboarding/status",
+        "http://[2001:db8::10]:8090/api/control-plane/onboarding/status",
+        "HTTP://192.0.2.10:8090/api/control-plane/onboarding/status",
+    ],
+)
+def test_doctor_refuses_to_attach_credentials_to_plain_http_off_this_host(doctor: ModuleType, url: str) -> None:
+    with pytest.raises(ValueError, match="plain HTTP"):
+        doctor._request(url, {"Authorization": "Bearer probe-break-glass-token"})
+    # A request without credentials is not affected.
+    assert doctor._request(url, None).full_url == url
+
+
+class _RecordingOpener:
+    """Stands in for doctor's opener: records each request, credentials included, and answers 200 JSON."""
+
+    def __init__(self) -> None:
+        self.seen: list[tuple[str, str]] = []
+
+    def open(self, request: Any, timeout: float = 0.0) -> Any:
+        headers = {**request.headers, **request.unredirected_hdrs}
+        self.seen.append((request.full_url, headers.get("Authorization", "")))
+        body = json.dumps(
+            {"status": "healthy", "has_owner": True, "providers": [{"provider_id": "claude", "verified": True}]}
+        ).encode()
+
+        class _Response:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def read(self) -> bytes:
+                return body
+
+            def __enter__(self) -> _Response:
+                return self
+
+            def __exit__(self, *_exc: object) -> None:
+                return None
+
+        return _Response()
+
+
+def test_doctor_provider_check_never_sends_the_bearer_in_clear_text_off_this_host(
+    doctor: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--base-url http://<vps>:8090` from another machine would put the break-glass bearer on the network.
+
+    The CLI only ever talks to loopback. Doctor sends the bearer to a plain-HTTP URL only on this
+    host; for any other host the provider check fails, says why and how to run it instead, and the
+    authenticated request is never made. The anonymous checks still run.
+    """
+    opener = _RecordingOpener()
+    monkeypatch.setattr(doctor, "_DIRECT_OPENER", opener)
+    env = {
+        "CONTROL_PLANE_API_TOKEN": "probe-break-glass-token-0123456789abcdef",
+        "RUNTIME_LOCAL_UI_TOKEN": "r" * 64,
+        "KNOWLEDGE_V2_POSTGRES_DSN": "postgresql://koda:4b1f0c2e9d8a7f6e5d4c3b2a19081726@127.0.0.1:5432/koda",
+        "OBJECT_STORAGE_REQUIRED": "false",
+    }
+
+    payload = doctor.run_doctor(
+        env=env,
+        base_url="http://192.0.2.10:8090",
+        dashboard_url="http://192.0.2.10:3000",
+        provider_id="claude",
+    )
+
+    assert opener.seen, "the anonymous checks still reach the control plane"
+    assert [authorization for _url, authorization in opener.seen if authorization] == []
+    provider = _check(payload, "provider_verification")
+    assert provider["ok"] is False
+    assert "plain HTTP" in provider["error"]
+    assert "192.0.2.10" in provider["error"]
+    assert "--base-url http://127.0.0.1:8090" in provider["error"]
+    assert "probe-break-glass-token" not in json.dumps(payload)
+    assert _check(payload, "control_plane_health")["ok"] is True
+    assert _check(payload, "onboarding_status")["ok"] is True
+    assert payload["ok"] is False

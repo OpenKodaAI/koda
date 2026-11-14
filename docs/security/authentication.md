@@ -92,7 +92,10 @@ calls it) sends the first token of that list that is not a placeholder, never th
 such token remains, and `--strict` requires every such token to be at least 32 characters. Doctor
 sends that token straight to the control plane and ignores `http_proxy` and `https_proxy`, so a
 proxy never sees it, and it never follows a redirect with it: a `3xx` from `--base-url` fails the
-provider check instead of carrying the token to the host the redirect names.
+provider check instead of carrying the token to the host the redirect names. It sends the token over
+plain HTTP only to loopback (`127.0.0.0/8`, `[::1]`, `localhost`), where the CLI sends it; a plain-HTTP
+`--base-url` on another host fails the provider check before any connection carries the token. Use
+an SSH tunnel or an `https://` URL from another machine.
 
 Unedited `.env.example` placeholders (values starting with `replace-with-`) never
 authenticate: they are dropped from `CONTROL_PLANE_API_TOKEN(S)` and treated as an unset
