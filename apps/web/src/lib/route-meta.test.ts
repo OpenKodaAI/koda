@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AppTranslator } from "@/lib/i18n";
-import { getRouteMeta } from "@/lib/route-meta";
+import { getRouteMeta, getRouteShell } from "@/lib/route-meta";
 
 const t: AppTranslator = (key) => key;
 
@@ -11,7 +11,7 @@ describe("getRouteMeta", () => {
       title: "routeMeta.system.title",
       summary: "routeMeta.system.summary",
     });
-    expect(getRouteMeta("/control-plane/agents/abc123", t)).toEqual({
+    expect(getRouteMeta("/control-plane", t)).toEqual({
       eyebrow: "routeMeta.agents.eyebrow",
       title: "routeMeta.agents.title",
       summary: "routeMeta.agents.summary",
@@ -39,5 +39,25 @@ describe("getRouteMeta", () => {
       title: "routeMeta.fallback.title",
       summary: "routeMeta.fallback.summary",
     });
+  });
+
+  it("keeps the shell layout flags in the same registry", () => {
+    expect(getRouteShell("/sessions")).toEqual({ layout: "fullBleed" });
+    expect(getRouteShell("/sessions/abc123")).toEqual({ layout: "fullBleed" });
+    expect(getRouteShell("/control-plane")).toEqual({ layout: "pane" });
+    expect(getRouteShell("/control-plane/agents/abc123")).toEqual({
+      layout: "pane",
+      fullWidth: true,
+    });
+    expect(getRouteShell("/control-plane/system")).toEqual({ layout: "pane", clipStage: true });
+    expect(getRouteShell("/control-plane/system/models")).toEqual({
+      layout: "pane",
+      clipStage: true,
+    });
+    expect(getRouteShell("/")).toEqual({ layout: "page" });
+    expect(getRouteShell("/memory")).toEqual({ layout: "page" });
+    // /control-plane/setup only redirects to /setup, so it has no shell branch.
+    expect(getRouteShell("/control-plane/setup")).toEqual({ layout: "page" });
+    expect(getRouteShell("/somewhere-else")).toEqual({ layout: "page" });
   });
 });

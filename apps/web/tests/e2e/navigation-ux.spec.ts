@@ -43,4 +43,25 @@ test.describe("navigation and UX guards", () => {
     await attachCheckpoint(page, testInfo, "mobile-navigation");
     expectNoConsoleIssues(consoleIssues);
   });
+
+  test("a mobile user can leave /sessions through the menu", async ({ page }) => {
+    const consoleIssues = installConsoleGuard(page);
+    await page.setViewportSize({ width: 390, height: 844 });
+    await gotoHealthy(page, "/sessions");
+
+    const menu = page.getByRole("button", { name: /open menu|abrir menu|abrir menú/i });
+    await expect(menu).toBeVisible();
+    await menu.click();
+    const navigation = page.getByRole("complementary", {
+      name: /main navigation|navegação principal|navegación principal/i,
+    });
+    await navigation.locator('a[href="/runtime"]').first().click();
+    await expect(page).toHaveURL(/\/runtime(?:$|[/?#])/);
+
+    // From lg up the sidebar is always on screen, so /sessions drops the topbar.
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await gotoHealthy(page, "/sessions");
+    await expect(page.locator("header.workspace-topbar")).toBeHidden();
+    expectNoConsoleIssues(consoleIssues);
+  });
 });

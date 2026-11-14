@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -27,9 +27,28 @@ vi.mock("next/navigation", () => ({
 }));
 
 // The shell's chrome is covered by its own tests; stub it so this test only
-// exercises the frame, the real AuthProvider and the real banner.
-vi.mock("@/components/layout/sidebar", () => ({ Sidebar: () => null }));
-vi.mock("@/components/layout/workspace-topbar", () => ({ WorkspaceTopbar: () => null }));
+// exercises the frame, the real AuthProvider and the real banner. The stubs
+// expose the props the shell wires: the mobile-nav state and the menu trigger.
+vi.mock("@/components/layout/sidebar", () => ({
+  Sidebar: ({ mobileOpen }: { mobileOpen: boolean }) => (
+    <nav data-testid="sidebar" data-mobile-open={mobileOpen ? "true" : "false"} />
+  ),
+}));
+vi.mock("@/components/layout/workspace-topbar", () => ({
+  WorkspaceTopbar: ({
+    className,
+    onOpenMobileNav,
+  }: {
+    className?: string;
+    onOpenMobileNav?: () => void;
+  }) => (
+    <header data-testid="topbar" className={className}>
+      <button type="button" onClick={onOpenMobileNav}>
+        menu
+      </button>
+    </header>
+  ),
+}));
 vi.mock("@/components/command-bar/command-bar-modal", () => ({ CommandBarModal: () => null }));
 vi.mock("@/components/layout/active-downloads-rebinder", () => ({
   ActiveDownloadsRebinder: () => null,
@@ -136,4 +155,35 @@ describe("AppShell placeholder-secrets banner", () => {
     expect(fetchMock).not.toHaveBeenCalledWith(PLACEHOLDER_SECRETS_PATH, expect.anything());
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
+});
+
+describe("AppShell navigation", () => {
+  it("keeps a menu trigger on /sessions below lg that opens the navigation", async () => {
+    installFetch([]);
+
+    renderShell("/sessions");
+
+    const topbar = screen.getByTestId("topbar");
+    // Hidden from lg up only, where the sidebar is always on screen.
+    expect(topbar).toHaveClass("lg:hidden");
+    expect(screen.getByTestId("sidebar")).toHaveAttribute("data-mobile-open", "false");
+
+    fireEvent.click(within(topbar).getByRole("button", { name: "menu" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("sidebar")).toHaveAttribute("data-mobile-open", "true"),
+    );
+  });
+
+  it.each(["/", "/control-plane", "/control-plane/agents/agent-1", "/control-plane/system"])(
+    "keeps the topbar on every breakpoint on %s",
+    (pathname) => {
+      installFetch([]);
+
+      renderShell(pathname);
+
+      expect(screen.getByTestId("topbar")).not.toHaveClass("lg:hidden");
+      expect(screen.getByTestId("sidebar")).toBeInTheDocument();
+    },
+  );
 });

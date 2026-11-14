@@ -9,14 +9,17 @@ import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { tourAnchor, tourRoute } from "@/components/tour/tour-attrs";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { getRouteMeta } from "@/lib/route-meta";
+import { cn } from "@/lib/utils";
 
 interface WorkspaceTopbarProps {
+  className?: string;
   onOpenMobileNav?: () => void;
   isSidebarCollapsed?: boolean;
   onToggleSidebarCollapse?: () => void;
 }
 
 export function WorkspaceTopbar({
+  className,
   onOpenMobileNav,
   isSidebarCollapsed = false,
   onToggleSidebarCollapse,
@@ -26,7 +29,7 @@ export function WorkspaceTopbar({
   const routeMeta = useMemo(() => getRouteMeta(pathname, t), [pathname, t]);
 
   return (
-    <header className="workspace-topbar" {...tourRoute("shell.topbar")}>
+    <header className={cn("workspace-topbar", className)} {...tourRoute("shell.topbar")}>
       <div className="workspace-topbar__inner">
         <div className="flex min-w-0 items-center gap-3 sm:gap-4">
           <button
