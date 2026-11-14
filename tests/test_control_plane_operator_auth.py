@@ -1,9 +1,17 @@
-"""Focused tests for operator auth bootstrap, sessions, and token management."""
+"""Operator auth bootstrap, sessions, recovery and token management.
+
+The service tests run against the real control-plane tables on Postgres
+(``@pytest.mark.postgres``), through the same ``koda.control_plane.database``
+adapter the control plane uses in production. Tests of pure helpers stay
+DB-free and run without Postgres.
+"""
 
 from __future__ import annotations
 
 import io
 import uuid
+from collections.abc import Iterator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -13,514 +21,53 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from koda.control_plane import api as control_plane_api
+from koda.control_plane import bootstrap_file as bootstrap_file_mod
+from koda.control_plane import database as control_plane_db
 from koda.control_plane import operator_auth as operator_auth_mod
 from koda.control_plane import operator_profile_photos
 
 STRONG_PASSWORD = "CorrectHorseBattery!9"
 ANOTHER_STRONG_PASSWORD = "R3volution@Nebula!42"
 
-
-class FakeOperatorAuthDb:
-    def __init__(self) -> None:
-        self.users: dict[str, dict[str, Any]] = {}
-        self.sessions: dict[str, dict[str, Any]] = {}
-        self.tokens: dict[str, dict[str, Any]] = {}
-        self.bootstrap_codes: dict[str, dict[str, Any]] = {}
-        self.recovery_codes: dict[str, dict[str, Any]] = {}
-
-    # ---------------------------- fetch_one ---------------------------------
-
-    def fetch_one(self, query: str, params: tuple[Any, ...] = ()) -> dict[str, Any] | None:
-        normalized = " ".join(query.split())
-
-        if "FROM cp_operator_users ORDER BY created_at ASC LIMIT 1" in normalized:
-            if not self.users:
-                return None
-            return sorted(self.users.values(), key=lambda row: str(row["created_at"]))[0]
-
-        if "SELECT * FROM cp_operator_users WHERE id = ?" in normalized:
-            return self.users.get(str(params[0]))
-
-        if "SELECT recovery_generation FROM cp_operator_users WHERE id = ?" in normalized:
-            row = self.users.get(str(params[0]))
-            if row is None:
-                return None
-            return {"recovery_generation": str(row.get("recovery_generation") or "")}
-
-        if "SELECT id FROM cp_operator_users WHERE lower(username) = lower(?) OR lower(email) = lower(?)" in normalized:
-            username = str(params[0]).lower()
-            email = str(params[1]).lower()
-            for row in self.users.values():
-                if str(row["username"]).lower() == username or str(row["email"]).lower() == email:
-                    return {"id": row["id"]}
-            return None
-
-        if "SELECT * FROM cp_operator_users WHERE lower(username) = lower(?) OR lower(email) = lower(?)" in normalized:
-            username = str(params[0]).lower()
-            email = str(params[1]).lower()
-            matches = [
-                row
-                for row in self.users.values()
-                if str(row["username"]).lower() == username or str(row["email"]).lower() == email
-            ]
-            if not matches:
-                return None
-            return sorted(matches, key=lambda row: str(row["created_at"]))[0]
-
-        if "SELECT * FROM cp_bootstrap_codes WHERE code_hash = ?" in normalized:
-            code_hash = str(params[0])
-            for row in self.bootstrap_codes.values():
-                if str(row.get("code_hash")) == code_hash:
-                    return row
-            return None
-
-        if "SELECT * FROM cp_bootstrap_codes WHERE exchange_token_hash = ?" in normalized:
-            token_hash = str(params[0])
-            for row in self.bootstrap_codes.values():
-                if str(row.get("exchange_token_hash") or "") == token_hash:
-                    return row
-            return None
-
-        if "SELECT * FROM cp_bootstrap_codes WHERE id = ?" in normalized:
-            return self.bootstrap_codes.get(str(params[0]))
-
-        if "SELECT * FROM cp_operator_sessions WHERE token_hash = ?" in normalized:
-            token_hash = str(params[0])
-            matches = [row for row in self.sessions.values() if str(row.get("token_hash")) == token_hash]
-            if not matches:
-                return None
-            return sorted(matches, key=lambda row: str(row["created_at"]), reverse=True)[0]
-
-        if "SELECT * FROM cp_operator_tokens WHERE token_hash = ?" in normalized:
-            token_hash = str(params[0])
-            matches = [row for row in self.tokens.values() if str(row.get("token_hash")) == token_hash]
-            if not matches:
-                return None
-            return sorted(matches, key=lambda row: str(row["created_at"]), reverse=True)[0]
-
-        if (
-            "SELECT COUNT(*) AS count FROM cp_operator_recovery_codes WHERE user_id = ? AND generation = ?"
-            in normalized
-        ):
-            user_id = str(params[0])
-            generation = str(params[1])
-            count = sum(
-                1
-                for row in self.recovery_codes.values()
-                if str(row.get("user_id")) == user_id and str(row.get("generation")) == generation
-            )
-            return {"count": count}
-
-        if (
-            "SELECT COUNT(*) AS count FROM cp_operator_recovery_codes "
-            "WHERE user_id = ? AND consumed_at = '' AND generation = ?"
-        ) in normalized:
-            user_id = str(params[0])
-            generation = str(params[1])
-            count = sum(
-                1
-                for row in self.recovery_codes.values()
-                if str(row.get("user_id")) == user_id
-                and str(row.get("consumed_at") or "") == ""
-                and str(row.get("generation")) == generation
-            )
-            return {"count": count}
-
-        if (
-            "SELECT created_at FROM cp_operator_recovery_codes WHERE user_id = ? AND generation = ? "
-            "ORDER BY created_at ASC LIMIT 1"
-        ) in normalized:
-            user_id = str(params[0])
-            generation = str(params[1])
-            matches = [
-                row
-                for row in self.recovery_codes.values()
-                if str(row.get("user_id")) == user_id and str(row.get("generation")) == generation
-            ]
-            if not matches:
-                return None
-            earliest = sorted(matches, key=lambda row: str(row["created_at"]))[0]
-            return {"created_at": earliest["created_at"]}
-
-        raise AssertionError(f"Unexpected fetch_one query: {query}")
-
-    # ---------------------------- fetch_all ---------------------------------
-
-    def fetch_all(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
-        normalized = " ".join(query.split())
-
-        if "SELECT * FROM cp_operator_tokens WHERE user_id = ?" in normalized:
-            user_id = str(params[0])
-            return sorted(
-                [row for row in self.tokens.values() if str(row.get("user_id")) == user_id],
-                key=lambda row: str(row["created_at"]),
-                reverse=True,
-            )
-
-        if "SELECT * FROM cp_operator_sessions WHERE user_id = ?" in normalized:
-            user_id = str(params[0])
-            return sorted(
-                [row for row in self.sessions.values() if str(row.get("user_id")) == user_id],
-                key=lambda row: str(row["created_at"]),
-                reverse=True,
-            )
-
-        if (
-            "SELECT id, code_hash FROM cp_operator_recovery_codes "
-            "WHERE user_id = ? AND consumed_at = '' AND generation = ?"
-        ) in normalized:
-            user_id = str(params[0])
-            generation = str(params[1])
-            matches = [
-                {"id": row["id"], "code_hash": row["code_hash"]}
-                for row in self.recovery_codes.values()
-                if str(row.get("user_id")) == user_id
-                and str(row.get("consumed_at") or "") == ""
-                and str(row.get("generation")) == generation
-            ]
-            return sorted(matches, key=lambda row: str(row["id"]))
-
-        raise AssertionError(f"Unexpected fetch_all query: {query}")
-
-    # ---------------------------- execute -----------------------------------
-
-    def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
-        normalized = " ".join(query.split())
-
-        if "INSERT INTO cp_bootstrap_codes" in normalized:
-            (
-                row_id,
-                code_hash,
-                code_hint,
-                purpose,
-                created_at,
-                expires_at,
-                issued_by,
-                metadata_json,
-            ) = params
-            self.bootstrap_codes[str(row_id)] = {
-                "id": str(row_id),
-                "code_hash": str(code_hash),
-                "code_hint": str(code_hint),
-                "purpose": str(purpose),
-                "created_at": str(created_at),
-                "expires_at": str(expires_at),
-                "issued_by": str(issued_by),
-                "metadata_json": str(metadata_json),
-                "consumed_at": "",
-                "exchange_token_hash": "",
-                "exchange_issued_at": "",
-                "exchange_expires_at": "",
-                "exchange_consumed_at": "",
-            }
-            return
-
-        if "UPDATE cp_bootstrap_codes SET consumed_at = ?" in normalized:
-            consumed_at, exchange_token_hash, exchange_issued_at, exchange_expires_at, row_id = params
-            row = self.bootstrap_codes[str(row_id)]
-            row["consumed_at"] = str(consumed_at)
-            row["exchange_token_hash"] = str(exchange_token_hash)
-            row["exchange_issued_at"] = str(exchange_issued_at)
-            row["exchange_expires_at"] = str(exchange_expires_at)
-            return
-
-        if "UPDATE cp_bootstrap_codes SET exchange_consumed_at = ?" in normalized:
-            exchange_consumed_at, row_id = params
-            self.bootstrap_codes[str(row_id)]["exchange_consumed_at"] = str(exchange_consumed_at)
-            return
-
-        if "INSERT INTO cp_operator_users" in normalized:
-            (
-                user_id,
-                username,
-                email,
-                display_name,
-                password_hash,
-                role,
-                created_at,
-                updated_at,
-                last_login_at,
-                failed_login_attempts,
-                locked_until,
-                disabled,
-                totp_secret,
-                recovery_generation,
-            ) = params
-            self.users[str(user_id)] = {
-                "id": str(user_id),
-                "username": str(username),
-                "email": str(email),
-                "display_name": str(display_name),
-                "password_hash": str(password_hash),
-                "role": str(role),
-                "created_at": str(created_at),
-                "updated_at": str(updated_at),
-                "last_login_at": str(last_login_at),
-                "failed_login_attempts": int(failed_login_attempts),
-                "locked_until": str(locked_until),
-                "disabled": int(disabled),
-                "totp_secret": str(totp_secret),
-                "recovery_generation": str(recovery_generation),
-                "profile_photo_hash": "",
-                "profile_photo_updated_at": "",
-            }
-            return
-
-        if "INSERT INTO cp_operator_sessions" in normalized:
-            (
-                session_id,
-                user_id,
-                token_hash,
-                subject_type,
-                label,
-                created_at,
-                last_used_at,
-                expires_at,
-                revoked_at,
-                metadata_json,
-            ) = params
-            self.sessions[str(session_id)] = {
-                "session_id": str(session_id),
-                "user_id": str(user_id) if user_id else "",
-                "token_hash": str(token_hash),
-                "subject_type": str(subject_type),
-                "label": str(label),
-                "created_at": str(created_at),
-                "last_used_at": str(last_used_at),
-                "expires_at": str(expires_at),
-                "revoked_at": str(revoked_at),
-                "metadata_json": str(metadata_json),
-            }
-            return
-
-        if "INSERT INTO cp_operator_recovery_codes" in normalized:
-            # Supports both the batched multi-row INSERT used in production and
-            # the legacy single-row form (8 params).
-            assert len(params) % 8 == 0, f"unexpected recovery insert: {params}"
-            for offset in range(0, len(params), 8):
-                row_id, user_id, code_hash, code_hint, created_at, consumed_at, consumed_reason, generation = (
-                    params[offset + 0],
-                    params[offset + 1],
-                    params[offset + 2],
-                    params[offset + 3],
-                    params[offset + 4],
-                    params[offset + 5],
-                    params[offset + 6],
-                    params[offset + 7],
-                )
-                self.recovery_codes[str(row_id)] = {
-                    "id": str(row_id),
-                    "user_id": str(user_id),
-                    "code_hash": str(code_hash),
-                    "code_hint": str(code_hint),
-                    "created_at": str(created_at),
-                    "consumed_at": str(consumed_at),
-                    "consumed_reason": str(consumed_reason),
-                    "generation": str(generation),
-                }
-            return
-
-        if "UPDATE cp_operator_recovery_codes SET consumed_at = ?, consumed_reason = ? WHERE id = ?" in normalized:
-            consumed_at, reason, row_id = params
-            row = self.recovery_codes.get(str(row_id))
-            if row:
-                row["consumed_at"] = str(consumed_at)
-                row["consumed_reason"] = str(reason)
-            return
-
-        if (
-            "UPDATE cp_operator_recovery_codes SET consumed_at = ?, consumed_reason = ? "
-            "WHERE user_id = ? AND consumed_at = '' AND generation = ?"
-        ) in normalized:
-            consumed_at, reason, user_id, generation = params
-            for row in self.recovery_codes.values():
-                if (
-                    str(row.get("user_id")) == str(user_id)
-                    and str(row.get("consumed_at") or "") == ""
-                    and str(row.get("generation")) == str(generation)
-                ):
-                    row["consumed_at"] = str(consumed_at)
-                    row["consumed_reason"] = str(reason)
-            return
-
-        if (
-            "UPDATE cp_operator_recovery_codes SET consumed_at = ?, consumed_reason = ? "
-            "WHERE user_id = ? AND consumed_at = ''"
-            in normalized
-            and "generation" not in normalized
-        ):
-            consumed_at, reason, user_id = params
-            for row in self.recovery_codes.values():
-                if str(row.get("user_id")) == str(user_id) and str(row.get("consumed_at") or "") == "":
-                    row["consumed_at"] = str(consumed_at)
-                    row["consumed_reason"] = str(reason)
-            return
-
-        if "UPDATE cp_operator_users SET failed_login_attempts = ?, locked_until = ?, updated_at = ?" in normalized:
-            attempts, locked_until, updated_at, user_id = params
-            row = self.users[str(user_id)]
-            row["failed_login_attempts"] = int(attempts)
-            row["locked_until"] = str(locked_until)
-            row["updated_at"] = str(updated_at)
-            return
-
-        if (
-            "UPDATE cp_operator_users SET failed_login_attempts = 0, locked_until = '', "
-            "last_login_at = ?, updated_at = ?" in normalized
-        ):
-            last_login_at, updated_at, user_id = params
-            row = self.users[str(user_id)]
-            row["failed_login_attempts"] = 0
-            row["locked_until"] = ""
-            row["last_login_at"] = str(last_login_at)
-            row["updated_at"] = str(updated_at)
-            return
-
-        if "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?" in normalized:
-            password_hash, updated_at, user_id = params
-            row = self.users[str(user_id)]
-            row["password_hash"] = str(password_hash)
-            row["updated_at"] = str(updated_at)
-            return
-
-        if "UPDATE cp_operator_users SET display_name = ?, updated_at = ? WHERE id = ?" in normalized:
-            display_name, updated_at, user_id = params
-            row = self.users[str(user_id)]
-            row["display_name"] = str(display_name)
-            row["updated_at"] = str(updated_at)
-            return
-
-        if (
-            "UPDATE cp_operator_users SET profile_photo_hash = ?, profile_photo_updated_at = ?, "
-            "updated_at = ? WHERE id = ?"
-        ) in normalized:
-            photo_hash, photo_updated_at, updated_at, user_id = params
-            row = self.users[str(user_id)]
-            row["profile_photo_hash"] = str(photo_hash)
-            row["profile_photo_updated_at"] = str(photo_updated_at)
-            row["updated_at"] = str(updated_at)
-            return
-
-        if (
-            "UPDATE cp_operator_users SET profile_photo_hash = '', profile_photo_updated_at = '', "
-            "updated_at = ? WHERE id = ?"
-        ) in normalized:
-            updated_at, user_id = params
-            row = self.users[str(user_id)]
-            row["profile_photo_hash"] = ""
-            row["profile_photo_updated_at"] = ""
-            row["updated_at"] = str(updated_at)
-            return
-
-        if "UPDATE cp_operator_users SET recovery_generation = ?, updated_at = ? WHERE id = ?" in normalized:
-            generation, updated_at, user_id = params
-            row = self.users[str(user_id)]
-            row["recovery_generation"] = str(generation)
-            row["updated_at"] = str(updated_at)
-            return
-
-        if "UPDATE cp_operator_sessions SET revoked_at = ?, last_used_at = ? WHERE token_hash = ?" in normalized:
-            revoked_at, last_used_at, token_hash = params
-            for row in self.sessions.values():
-                if str(row.get("token_hash")) == str(token_hash):
-                    row["revoked_at"] = str(revoked_at)
-                    row["last_used_at"] = str(last_used_at)
-            return
-
-        if "UPDATE cp_operator_sessions SET last_used_at = ? WHERE session_id = ?" in normalized:
-            last_used_at, session_id = params
-            self.sessions[str(session_id)]["last_used_at"] = str(last_used_at)
-            return
-
-        if (
-            "UPDATE cp_operator_sessions SET revoked_at = ? WHERE user_id = ? "
-            "AND session_id != ? AND revoked_at = ''" in normalized
-        ):
-            revoked_at, user_id, current_session_id = params
-            for row in self.sessions.values():
-                if (
-                    str(row.get("user_id")) == str(user_id)
-                    and str(row.get("session_id")) != str(current_session_id)
-                    and str(row.get("revoked_at") or "") == ""
-                ):
-                    row["revoked_at"] = str(revoked_at)
-            return
-
-        if "UPDATE cp_operator_sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at = ''" in normalized:
-            revoked_at, user_id = params
-            for row in self.sessions.values():
-                if str(row.get("user_id")) == str(user_id) and str(row.get("revoked_at") or "") == "":
-                    row["revoked_at"] = str(revoked_at)
-            return
-
-        if "INSERT INTO cp_operator_tokens" in normalized:
-            (
-                token_id,
-                user_id,
-                token_name,
-                token_hash,
-                token_prefix,
-                scopes_json,
-                created_at,
-                last_used_at,
-                expires_at,
-                revoked_at,
-                metadata_json,
-            ) = params
-            self.tokens[str(token_id)] = {
-                "id": str(token_id),
-                "user_id": str(user_id),
-                "token_name": str(token_name),
-                "token_hash": str(token_hash),
-                "token_prefix": str(token_prefix),
-                "scopes_json": str(scopes_json),
-                "created_at": str(created_at),
-                "last_used_at": str(last_used_at),
-                "expires_at": str(expires_at),
-                "revoked_at": str(revoked_at),
-                "metadata_json": str(metadata_json),
-            }
-            return
-
-        if "UPDATE cp_operator_tokens SET last_used_at = ? WHERE id = ?" in normalized:
-            last_used_at, token_id = params
-            self.tokens[str(token_id)]["last_used_at"] = str(last_used_at)
-            return
-
-        if "UPDATE cp_operator_tokens SET revoked_at = ? WHERE id = ? AND user_id = ?" in normalized:
-            revoked_at, token_id, user_id = params
-            row = self.tokens.get(str(token_id))
-            if row and str(row.get("user_id")) == str(user_id):
-                row["revoked_at"] = str(revoked_at)
-            return
-
-        if "UPDATE cp_operator_sessions SET revoked_at = ? WHERE session_id = ? AND user_id = ?" in normalized:
-            revoked_at, session_id, user_id = params
-            row = self.sessions.get(str(session_id))
-            if row and str(row.get("user_id")) == str(user_id):
-                row["revoked_at"] = str(revoked_at)
-            return
-
-        raise AssertionError(f"Unexpected execute query: {query}")
+# Every table OperatorAuthService reads or writes.
+_OPERATOR_AUTH_TABLES = (
+    "cp_operator_users",
+    "cp_operator_sessions",
+    "cp_operator_tokens",
+    "cp_operator_recovery_codes",
+    "cp_bootstrap_codes",
+)
 
 
 @pytest.fixture()
-def fake_operator_db(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> FakeOperatorAuthDb:
-    db = FakeOperatorAuthDb()
-    monkeypatch.setattr(operator_auth_mod, "fetch_one", db.fetch_one)
-    monkeypatch.setattr(operator_auth_mod, "fetch_all", db.fetch_all)
-    monkeypatch.setattr(operator_auth_mod, "execute", db.execute)
+def operator_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[Path]:
+    """Empty operator-auth tables on the migrated test database.
+
+    Only side channels are stubbed: audit events, the break-glass token list
+    and the failure timing floor. The bootstrap file helpers are the real ones,
+    pointed at a per-test path, which the fixture yields.
+    """
+    control_plane_db.execute(f"TRUNCATE TABLE {', '.join(_OPERATOR_AUTH_TABLES)}")
     monkeypatch.setattr(operator_auth_mod, "emit_security", lambda *args, **kwargs: None)
     monkeypatch.setattr(operator_auth_mod, "CONTROL_PLANE_API_TOKENS", ["legacy-break-glass"])
     monkeypatch.setattr(operator_auth_mod, "_FAILURE_TIMING_FLOOR_SECONDS", 0.0)
-    # Ensure bootstrap file helpers don't touch the real filesystem during tests.
-    monkeypatch.setattr(operator_auth_mod, "ensure_bootstrap_file", lambda **_: None)
-    monkeypatch.setattr(operator_auth_mod, "consume_bootstrap_file", lambda: None)
-    monkeypatch.setattr(operator_auth_mod, "read_bootstrap_file", lambda: None)
-    monkeypatch.setattr(operator_auth_mod, "bootstrap_file_path", lambda: tmp_path / "bootstrap.txt")
+    bootstrap_path = tmp_path / "control_plane" / "bootstrap.txt"
+    monkeypatch.setattr(bootstrap_file_mod, "_BOOTSTRAP_FILE_PATH", bootstrap_path)
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", "")
     operator_auth_mod._password_hasher.cache_clear()
-    yield db
+    yield bootstrap_path
     operator_auth_mod._password_hasher.cache_clear()
+
+
+def _user_row(user_id: str) -> dict[str, Any]:
+    row = control_plane_db.fetch_one("SELECT * FROM cp_operator_users WHERE id = ?", (user_id,))
+    assert row is not None, f"operator {user_id} not persisted"
+    return dict(row)
+
+
+def _count(table: str) -> int:
+    row = control_plane_db.fetch_one(f"SELECT COUNT(*) AS count FROM {table}")
+    return int(row["count"]) if row else 0
 
 
 def _create_owner(
@@ -539,7 +86,8 @@ def _create_owner(
     )
 
 
-def test_loopback_owner_registration_issues_recovery_codes(fake_operator_db: FakeOperatorAuthDb) -> None:
+@pytest.mark.postgres
+def test_loopback_owner_registration_issues_recovery_codes(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
 
     assert service.auth_status()["authenticated"] is False
@@ -562,7 +110,8 @@ def test_loopback_owner_registration_issues_recovery_codes(fake_operator_db: Fak
     assert context.user_id == payload["operator"]["id"]
 
 
-def test_bootstrap_via_registration_token_still_works(fake_operator_db: FakeOperatorAuthDb) -> None:
+@pytest.mark.postgres
+def test_bootstrap_via_registration_token_still_works(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     bootstrap = service.issue_bootstrap_code(label="cli")
     exchanged = service.exchange_bootstrap_code(bootstrap["code"])
@@ -575,8 +124,229 @@ def test_bootstrap_via_registration_token_still_works(fake_operator_db: FakeOper
     assert payload["operator"]["email"] == "cli@example.com"
 
 
+def _bootstrap_file_code(service: operator_auth_mod.OperatorAuthService) -> str:
+    """Let the service write ``bootstrap.txt`` as it does on first boot, then read the code back."""
+    service.onboarding_payload()
+    code = bootstrap_file_mod.read_bootstrap_file()
+    assert code, "the first status request writes the bootstrap file"
+    return code
+
+
+@pytest.mark.postgres
+def test_owner_registration_with_bootstrap_file_code(operator_db: Path) -> None:
+    """The VPS path: the code from ``bootstrap.txt`` registers the owner from a remote address."""
+    service = operator_auth_mod.OperatorAuthService()
+    code = _bootstrap_file_code(service)
+    assert operator_db.exists()
+
+    payload = service.register_owner(
+        bootstrap_code=code,
+        email="vps@example.com",
+        password=STRONG_PASSWORD,
+        remote_ip="203.0.113.7",
+    )
+
+    assert payload["operator"]["email"] == "vps@example.com"
+    assert service.has_owner() is True
+    assert not operator_db.exists(), "the bootstrap file is deleted after registration"
+    stored = control_plane_db.fetch_all("SELECT code_hint, consumed_at, exchange_consumed_at FROM cp_bootstrap_codes")
+    assert len(stored) == 1
+    assert stored[0]["code_hint"] == code[-4:]
+    assert stored[0]["consumed_at"] and stored[0]["exchange_consumed_at"]
+
+
+@pytest.mark.postgres
+def test_wrong_setup_code_fails_without_creating_owner(operator_db: Path) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    code = _bootstrap_file_code(service)
+    wrong = code[:-1] + ("A" if code[-1] != "A" else "B")
+
+    with pytest.raises(ValueError, match=r"^Setup code is invalid or expired\.$"):
+        service.register_owner(
+            bootstrap_code=wrong,
+            email="vps@example.com",
+            password=STRONG_PASSWORD,
+            remote_ip="203.0.113.7",
+        )
+
+    assert service.has_owner() is False
+    assert _count("cp_operator_users") == 0
+    assert _count("cp_bootstrap_codes") == 0
+    assert operator_db.exists(), "a failed attempt leaves the real code usable"
+
+
+@pytest.mark.postgres
+def test_setup_code_is_single_use_and_expires(operator_db: Path) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    used = service.issue_bootstrap_code(label="cli")["code"]
+    service.exchange_bootstrap_code(used)
+    with pytest.raises(ValueError, match=r"^Setup code is invalid or expired\.$"):
+        service.exchange_bootstrap_code(used)
+
+    expired = service.issue_bootstrap_code(label="cli")["code"]
+    control_plane_db.execute(
+        "UPDATE cp_bootstrap_codes SET expires_at = ? WHERE code_hash = ?",
+        ("2000-01-01T00:00:00+00:00", operator_auth_mod._hash_secret(expired)),
+    )
+    with pytest.raises(ValueError, match=r"^Setup code is invalid or expired\.$"):
+        service.exchange_bootstrap_code(expired)
+    assert service.has_owner() is False
+
+
+# Setup codes are issued as ``XXXX-XXXX-XXXX``, like recovery codes, and the
+# server canonicalizes what the operator types the same way (D-221).
+_TYPED_CODE_VARIANTS = [
+    pytest.param(str.lower, id="lowercase"),
+    pytest.param(lambda code: code.replace("-", ""), id="no-dashes"),
+    pytest.param(lambda code: f"  {code.lower().replace('-', ' ')}\n", id="spaces-and-padding"),
+    pytest.param(lambda code: code.replace("-", "_").lower(), id="underscores"),
+]
+
+
+def _setup_code(service: operator_auth_mod.OperatorAuthService, source: str) -> str:
+    if source == "cli":
+        return str(service.issue_bootstrap_code(label="cli")["code"])
+    return _bootstrap_file_code(service)
+
+
+def _register_with_setup_code(service: operator_auth_mod.OperatorAuthService, code: str) -> dict[str, Any]:
+    return service.register_owner(
+        bootstrap_code=code,
+        email="owner@example.com",
+        password=STRONG_PASSWORD,
+        remote_ip="203.0.113.7",
+    )
+
+
+def test_setup_code_canonicalizer_is_the_recovery_code_canonicalizer() -> None:
+    normalize = operator_auth_mod._normalize_bootstrap_code
+    assert normalize("abcd-efgh-jklm") == "ABCD-EFGH-JKLM"
+    assert normalize(" abcd efgh\tjklm ") == "ABCD-EFGH-JKLM"
+    assert normalize("ABCDEFGHJKLM") == "ABCD-EFGH-JKLM"
+    for typed in ("ab-cd--efgh_jk.lm", "abſd-efgh-jklm", "ＡＢＣＤ-efgh-jklm", "----", "", None):
+        assert normalize(typed) == operator_auth_mod._normalize_recovery_code(typed)
+    # Issued codes are already canonical, so stored hashes keep matching.
+    issued = operator_auth_mod._random_code()
+    assert normalize(issued) == issued
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("source", ["cli", "bootstrap_file"])
+@pytest.mark.parametrize("transform", _TYPED_CODE_VARIANTS)
+def test_setup_code_accepts_case_and_separator_variants(operator_db: Path, source: str, transform: Any) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    code = _setup_code(service, source)
+    assert code == operator_auth_mod._normalize_bootstrap_code(code)
+
+    payload = _register_with_setup_code(service, transform(code))
+
+    assert payload["operator"]["email"] == "owner@example.com"
+    assert service.has_owner() is True
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("source", ["cli", "bootstrap_file"])
+def test_setup_code_canonicalization_does_not_accept_other_codes(operator_db: Path, source: str) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    code = _setup_code(service, source)
+    compact = code.replace("-", "").lower()
+    other = "a" if compact[-1] != "a" else "b"
+    # A missing, wrong, extra or non-ASCII (look-alike) character still fails
+    # with the generic error, never a server error.
+    for candidate in (compact[:-1], compact[:-1] + other, compact + "a", code[:-1] + "ſ", code[:-1] + "é", "----"):
+        with pytest.raises(ValueError, match=r"^Setup code is invalid or expired\.$"):
+            _register_with_setup_code(service, candidate)
+    assert service.has_owner() is False
+
+
+@pytest.mark.postgres
+def test_seeded_setup_code_is_canonicalized_on_the_stored_side(
+    operator_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """``CONTROL_PLANE_BOOTSTRAP_CODE`` reaches ``bootstrap.txt`` as configured; matching ignores its spelling."""
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", "cust omse edcd")
+    service = operator_auth_mod.OperatorAuthService()
+    assert _bootstrap_file_code(service) == "cust omse edcd"
+
+    _register_with_setup_code(service, "CUST-OMSE-EDCD")
+
+    assert service.has_owner() is True
+
+
+@pytest.mark.postgres
+def test_setup_code_without_ascii_letters_or_digits_never_matches(
+    operator_db: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A seed that canonicalizes to nothing must not match input that also canonicalizes to nothing."""
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", "ÄÖÜ-ÄÖÜ")
+    service = operator_auth_mod.OperatorAuthService()
+    _bootstrap_file_code(service)
+
+    for candidate in ("----", "ÄÖÜ-ÄÖÜ", "äöü äöü"):
+        with pytest.raises(ValueError, match=r"^Setup code is invalid or expired\.$"):
+            _register_with_setup_code(service, candidate)
+    assert service.has_owner() is False
+    assert _count("cp_bootstrap_codes") == 0
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("source", ["cli", "bootstrap_file"])
+@pytest.mark.parametrize(
+    "transform",
+    [
+        pytest.param(lambda code: code + "é", id="added-non-ascii"),
+        pytest.param(lambda code: code.replace("-", "\u2013"), id="en-dashes"),
+        pytest.param(lambda code: code + "\u00a0", id="trailing-nbsp"),
+    ],
+)
+def test_setup_code_ignores_characters_that_are_not_ascii_letters_or_digits(
+    operator_db: Path, source: str, transform: Any
+) -> None:
+    """Only ASCII letters and digits count, so an added non-ASCII character or separator is ignored."""
+    service = operator_auth_mod.OperatorAuthService()
+    code = _setup_code(service, source)
+
+    _register_with_setup_code(service, transform(code))
+
+    assert service.has_owner() is True
+
+
+@pytest.mark.parametrize(
+    "seed", ["!@#$%^&*()_+1", "!!!!a!!!!", "Tr0ub4dor&3!", "ÄÖÜ-ÄÖÜ", "CUST-OMSE-EDCD", "abſd ＡＢＣＤ efgh"]
+)
+def test_seed_strength_counts_only_what_setup_code_matching_keeps(seed: str) -> None:
+    """The weak-seed warning in ``bootstrap_file`` counts exactly the characters the canonicalizer keeps."""
+    canonical = operator_auth_mod._normalize_bootstrap_code(seed)
+    assert bootstrap_file_mod._seed_significant_characters(seed) == len(canonical.replace("-", ""))
+
+
+def test_seed_punctuation_and_non_ascii_add_nothing_to_the_setup_code() -> None:
+    normalize = operator_auth_mod._normalize_bootstrap_code
+    assert normalize("Tr0ub4dor&3!") == "TR0U-B4DO-R3"
+    assert normalize("!!!!a!!!!") == normalize("a") == "A"
+    assert normalize("!@#$%^&*()_+1") == "1"
+
+
+_AUTH_DOC = Path(__file__).resolve().parents[1] / "docs" / "security" / "authentication.md"
+
+
+def test_auth_doc_states_which_setup_code_characters_count() -> None:
+    """The security contract must not overstate what a setup code rejects (D-221 review)."""
+    text = _AUTH_DOC.read_text(encoding="utf-8")
+    start = text.index("## Account creation")
+    section = " ".join(text[start : text.index("\n## ", start)].split())
+    # An added non-ASCII character is dropped, not rejected; only a look-alike in place of a character fails.
+    assert "non-ASCII character fails" not in section
+    assert "any other non-ASCII character, so `ABCD-EFGH-JKLMé` matches too" in section
+    assert "or a non-ASCII look-alike typed in place of one (for example `ſ` in place of `S`), fails" in section
+    # A seed's punctuation no longer counts, and a short seed is flagged.
+    assert "seed: only its ASCII letters and digits count towards its strength" in section
+    assert "`bootstrap_code_seed_weak` warning" in section
+
+
+@pytest.mark.postgres
 def test_loopback_rejected_when_flag_disabled(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
@@ -585,8 +355,9 @@ def test_loopback_rejected_when_flag_disabled(
         _create_owner(service)
 
 
+@pytest.mark.postgres
 def test_loopback_rejected_when_owner_exists(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
     _create_owner(service)
@@ -594,26 +365,25 @@ def test_loopback_rejected_when_owner_exists(
         _create_owner(service, email="second@example.com")
 
 
+@pytest.mark.postgres
 def test_issue_bootstrap_code_tolerates_insert_replay(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
     bootstrap_id = "boot_" + "1" * 32
     bootstrap_uuid = uuid.UUID(hex="1" * 32)
     recorded_insert = {"done": False}
-    original_execute = fake_operator_db.execute
+    original_execute = operator_auth_mod.execute
 
     def execute_with_replay(query: str, params: tuple[Any, ...] = ()) -> int:
-        normalized = " ".join(query.split())
-        if "INSERT INTO cp_bootstrap_codes" not in normalized:
-            original_execute(query, params)
-            return 1
-        original_execute(query, params)
-        if not recorded_insert["done"]:
+        # The row is really written, but the driver reports 0 affected rows,
+        # as a replayed INSERT ... ON CONFLICT DO NOTHING would.
+        affected = original_execute(query, params)
+        if "INSERT INTO cp_bootstrap_codes" in " ".join(query.split()) and not recorded_insert["done"]:
             recorded_insert["done"] = True
             return 0
-        return 1
+        return affected
 
     monkeypatch.setattr(operator_auth_mod, "execute", execute_with_replay)
     monkeypatch.setattr(operator_auth_mod, "uuid4", lambda: bootstrap_uuid)
@@ -622,14 +392,16 @@ def test_issue_bootstrap_code_tolerates_insert_replay(
 
     assert payload["ok"] is True
     assert payload["code"]
-    assert bootstrap_id in fake_operator_db.bootstrap_codes
-    assert fake_operator_db.bootstrap_codes[bootstrap_id]["code_hash"] == operator_auth_mod._hash_secret(
-        payload["code"]
-    )
+    assert recorded_insert["done"] is True
+    stored = control_plane_db.fetch_all("SELECT id, code_hash FROM cp_bootstrap_codes")
+    assert [dict(row) for row in stored] == [
+        {"id": bootstrap_id, "code_hash": operator_auth_mod._hash_secret(payload["code"])}
+    ]
 
 
+@pytest.mark.postgres
 def test_login_lockout_applies_after_repeated_failures(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
@@ -649,37 +421,42 @@ def test_login_lockout_applies_after_repeated_failures(
         service.login(identifier="owner", password=STRONG_PASSWORD)
 
 
-def test_login_never_reveals_account_disabled(fake_operator_db: FakeOperatorAuthDb) -> None:
+@pytest.mark.postgres
+def test_login_never_reveals_account_disabled(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
-    fake_operator_db.users[payload["operator"]["id"]]["disabled"] = 1
+    control_plane_db.execute("UPDATE cp_operator_users SET disabled = 1 WHERE id = ?", (payload["operator"]["id"],))
     with pytest.raises(ValueError, match="Invalid credentials"):
         service.login(identifier="owner", password=STRONG_PASSWORD)
 
 
-def test_register_owner_rejects_weak_password(fake_operator_db: FakeOperatorAuthDb) -> None:
+@pytest.mark.postgres
+def test_register_owner_rejects_weak_password(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     with pytest.raises(ValueError, match="at least"):
         _create_owner(service, password="short")
 
 
-def test_register_owner_rejects_common_password(fake_operator_db: FakeOperatorAuthDb) -> None:
+@pytest.mark.postgres
+def test_register_owner_rejects_common_password(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     # Long enough and has 3 classes, but exists in the common-password list.
     with pytest.raises(ValueError, match="too common"):
         _create_owner(service, password="Welcome2025!")
 
 
+@pytest.mark.postgres
 def test_register_owner_rejects_password_containing_email_local_part(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
     with pytest.raises(ValueError, match="must not contain"):
         _create_owner(service, password="Owner!OwnerOwner1", email="owner@example.com")
 
 
+@pytest.mark.postgres
 def test_recovery_code_resets_password_and_invalidates_all(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
@@ -707,6 +484,7 @@ def test_recovery_code_resets_password_and_invalidates_all(
     assert logged_in["operator"]["username"] == "owner"
 
 
+@pytest.mark.postgres
 @pytest.mark.parametrize(
     "transform",
     [
@@ -717,7 +495,7 @@ def test_recovery_code_resets_password_and_invalidates_all(
     ],
 )
 def test_recovery_code_accepts_case_and_separator_variants(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
     transform: Any,
 ) -> None:
     """Codes are issued as ``XXXX-XXXX-XXXX``; the server canonicalizes what the user types."""
@@ -735,8 +513,9 @@ def test_recovery_code_accepts_case_and_separator_variants(
     assert logged_in["operator"]["username"] == "owner"
 
 
+@pytest.mark.postgres
 def test_recovery_code_normalization_does_not_accept_other_codes(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
@@ -772,8 +551,9 @@ def test_normalize_recovery_code_is_canonical_issued_format() -> None:
     assert normalize(issued) == issued
 
 
+@pytest.mark.postgres
 async def test_password_recover_route_accepts_lowercase_compact_code(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End to end through the aiohttp handler and the control-plane middlewares."""
@@ -815,175 +595,49 @@ async def test_password_recover_route_accepts_lowercase_compact_code(
         assert (await fresh.json())["operator"]["username"] == "owner"
 
 
-_OPERATOR_ONBOARDING_STATUS: dict[str, Any] = {
-    "control_plane": {"ready": True},
-    "storage": {"database": {"ready": True}, "object_storage": {"ready": True}},
-    "providers": [{"provider_id": "claude", "verified": True, "connection_status": {"account_label": "team"}}],
-    "agents": [{"id": "ATLAS", "display_name": "Atlas", "status": "active"}],
-    "system": {"owner_email": "owner@example.com", "allowed_user_ids": [123456789]},
-    "steps": {"onboarding_complete": True},
-}
-
-
-def _serve_onboarding_status(monkeypatch: pytest.MonkeyPatch, service: Any) -> tuple[TestServer, MagicMock]:
-    """The onboarding status route behind the real control-plane middlewares."""
-    manager = MagicMock()
-    manager.get_onboarding_status.return_value = dict(_OPERATOR_ONBOARDING_STATUS)
+@pytest.mark.postgres
+async def test_register_owner_route_accepts_lowercase_compact_setup_code(
+    operator_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End to end through the aiohttp handler and the control-plane middlewares."""
+    service = operator_auth_mod.OperatorAuthService()
+    code = _bootstrap_file_code(service)
     monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
-    monkeypatch.setattr(control_plane_api, "_manager", lambda: manager)
+
     app = web.Application(
         middlewares=[
             control_plane_api.control_plane_error_middleware,
             control_plane_api.control_plane_auth_middleware,
         ]
     )
-    app.router.add_get("/api/control-plane/onboarding/status", control_plane_api.onboarding_status)
-    return TestServer(app), manager
+    app.router.add_post("/api/control-plane/auth/register-owner", control_plane_api.auth_register_owner)
+    account = {"email": "owner@example.com", "password": STRONG_PASSWORD}
+    compact = code.lower().replace("-", "")
 
-
-@pytest.mark.parametrize("owner_exists", [False, True], ids=["before-setup", "after-setup"])
-async def test_onboarding_status_without_a_session_returns_only_the_setup_flags(
-    fake_operator_db: FakeOperatorAuthDb,
-    monkeypatch: pytest.MonkeyPatch,
-    owner_exists: bool,
-) -> None:
-    """Before login the route says whether setup is needed and nothing else (D-050)."""
-    service = operator_auth_mod.OperatorAuthService()
-    if owner_exists:
-        _create_owner(service)
-    ensured: list[dict[str, Any]] = []
-    monkeypatch.setattr(operator_auth_mod, "ensure_bootstrap_file", lambda **kwargs: ensured.append(kwargs))
-    server, manager = _serve_onboarding_status(monkeypatch, service)
-
-    async with TestClient(server) as client:
-        anonymous = await client.get("/api/control-plane/onboarding/status")
-        unknown_token = await client.get(
-            "/api/control-plane/onboarding/status",
-            headers={"Authorization": "Bearer kodas_not-a-live-session"},
+    async with TestClient(TestServer(app)) as client:
+        wrong = await client.post(
+            "/api/control-plane/auth/register-owner",
+            json={**account, "bootstrap_code": compact[:-1] + ("a" if compact[-1] != "a" else "b")},
         )
+        assert wrong.status == 400
+        assert await wrong.json() == {"error": "Setup code is invalid or expired."}
 
-        for response in (anonymous, unknown_token):
-            assert response.status == 200, await response.text()
-            assert await response.json() == {"has_owner": owner_exists, "bootstrap_required": not owner_exists}
-
-    manager.get_onboarding_status.assert_not_called()
-    # `koda auth issue-code` polls this route so the control plane writes the setup-code file.
-    assert ensured == [{"has_owner": owner_exists}, {"has_owner": owner_exists}]
-
-
-async def test_onboarding_status_with_an_operator_credential_returns_the_full_payload(
-    fake_operator_db: FakeOperatorAuthDb,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    service = operator_auth_mod.OperatorAuthService()
-    session_token = _create_owner(service)["session_token"]
-    server, manager = _serve_onboarding_status(monkeypatch, service)
-
-    async with TestClient(server) as client:
-        for token in (session_token, "legacy-break-glass"):
-            response = await client.get(
-                "/api/control-plane/onboarding/status",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            assert response.status == 200, await response.text()
-            payload = await response.json()
-            assert payload["agents"] == _OPERATOR_ONBOARDING_STATUS["agents"]
-            assert payload["providers"] == _OPERATOR_ONBOARDING_STATUS["providers"]
-            assert payload["system"] == _OPERATOR_ONBOARDING_STATUS["system"]
-            assert payload["has_owner"] is True
-            assert payload["bootstrap_required"] is False
-            assert payload["session_required"] is True
-
-    assert manager.get_onboarding_status.call_count == 2
-
-
-def _serve_auth_status(monkeypatch: pytest.MonkeyPatch, service: Any) -> TestServer:
-    """The auth status route behind the real control-plane middlewares."""
-    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
-    app = web.Application(
-        middlewares=[
-            control_plane_api.control_plane_error_middleware,
-            control_plane_api.control_plane_auth_middleware,
-        ]
-    )
-    app.router.add_get("/api/control-plane/auth/status", control_plane_api.auth_status)
-    return TestServer(app)
-
-
-_ANONYMOUS_AUTH_STATUS_KEYS = {
-    "has_owner",
-    "bootstrap_required",
-    "auth_mode",
-    "session_required",
-    "onboarding_complete",
-    "authenticated",
-    "session_subject",
-    "operator",
-}
-
-
-@pytest.mark.parametrize("owner_exists", [False, True], ids=["before-setup", "after-setup"])
-async def test_auth_status_without_a_session_names_the_bootstrap_file_only_before_setup(
-    fake_operator_db: FakeOperatorAuthDb,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
-    owner_exists: bool,
-) -> None:
-    """The setup screen gets the bootstrap file path; once an owner exists nobody anonymous does (D-050, R-36)."""
-    monkeypatch.setattr(operator_auth_mod, "ALLOW_LOOPBACK_BOOTSTRAP", True)
-    service = operator_auth_mod.OperatorAuthService()
-    if owner_exists:
-        _create_owner(service)
-    server = _serve_auth_status(monkeypatch, service)
-
-    async with TestClient(server) as client:
-        anonymous = await client.get("/api/control-plane/auth/status")
-        unknown_token = await client.get(
-            "/api/control-plane/auth/status",
-            headers={"Authorization": "Bearer kodas_not-a-live-session"},
+        created = await client.post(
+            "/api/control-plane/auth/register-owner",
+            json={**account, "bootstrap_code": compact},
         )
+        assert created.status == 201, await created.text()
+        body = await created.json()
+        assert body["operator"]["email"] == "owner@example.com"
+        assert len(body["recovery_codes"]) >= 10
 
-        for response in (anonymous, unknown_token):
-            assert response.status == 200, await response.text()
-            payload = await response.json()
-            assert payload["authenticated"] is False
-            assert payload["operator"] is None
-            assert payload["has_owner"] is owner_exists
-            assert payload["bootstrap_required"] is not owner_exists
-            if owner_exists:
-                assert set(payload) == _ANONYMOUS_AUTH_STATUS_KEYS
-            else:
-                assert set(payload) == _ANONYMOUS_AUTH_STATUS_KEYS | {"bootstrap_file_path", "loopback_trust_enabled"}
-                assert payload["bootstrap_file_path"] == str(tmp_path / "bootstrap.txt")
-                assert payload["loopback_trust_enabled"] is True
+    assert service.has_owner() is True
+    assert not operator_db.exists()
 
 
-async def test_auth_status_with_an_operator_credential_keeps_the_server_flags(
-    fake_operator_db: FakeOperatorAuthDb,
-    monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Any,
-) -> None:
-    monkeypatch.setattr(operator_auth_mod, "ALLOW_LOOPBACK_BOOTSTRAP", True)
-    service = operator_auth_mod.OperatorAuthService()
-    session_token = _create_owner(service)["session_token"]
-    server = _serve_auth_status(monkeypatch, service)
-
-    async with TestClient(server) as client:
-        for token in (session_token, "legacy-break-glass"):
-            response = await client.get(
-                "/api/control-plane/auth/status",
-                headers={"Authorization": f"Bearer {token}"},
-            )
-            assert response.status == 200, await response.text()
-            payload = await response.json()
-            assert payload["authenticated"] is True
-            assert payload["has_owner"] is True
-            assert payload["recovery_available"] is True
-            assert payload["loopback_trust_enabled"] is True
-            assert payload["bootstrap_file_path"] == str(tmp_path / "bootstrap.txt")
-
-
-def test_password_reset_revokes_all_existing_sessions(fake_operator_db: FakeOperatorAuthDb) -> None:
+@pytest.mark.postgres
+def test_password_reset_revokes_all_existing_sessions(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
     # Initial session should resolve.
@@ -998,8 +652,9 @@ def test_password_reset_revokes_all_existing_sessions(fake_operator_db: FakeOper
     assert service.resolve_bearer_token(payload["session_token"]) is None
 
 
+@pytest.mark.postgres
 def test_change_password_revokes_other_sessions_but_keeps_current(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
@@ -1020,8 +675,9 @@ def test_change_password_revokes_other_sessions_but_keeps_current(
     assert service.resolve_bearer_token(other_login["session_token"]) is None
 
 
+@pytest.mark.postgres
 def test_change_password_rejects_wrong_current_password(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
@@ -1035,7 +691,8 @@ def test_change_password_rejects_wrong_current_password(
         )
 
 
-def test_update_profile_normalizes_and_persists_display_name(fake_operator_db: FakeOperatorAuthDb) -> None:
+@pytest.mark.postgres
+def test_update_profile_normalizes_and_persists_display_name(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
     context = service.resolve_bearer_token(payload["session_token"])
@@ -1044,13 +701,14 @@ def test_update_profile_normalizes_and_persists_display_name(fake_operator_db: F
     updated = service.update_profile(context, display_name="  Avery   Stone  ")
 
     assert updated["operator"]["display_name"] == "Avery Stone"
-    assert fake_operator_db.users[payload["operator"]["id"]]["display_name"] == "Avery Stone"
+    assert _user_row(payload["operator"]["id"])["display_name"] == "Avery Stone"
     refreshed = service.resolve_bearer_token(payload["session_token"])
     assert refreshed is not None
     assert service.auth_status(refreshed)["operator"]["display_name"] == "Avery Stone"
 
 
-def test_update_profile_rejects_invalid_display_name(fake_operator_db: FakeOperatorAuthDb) -> None:
+@pytest.mark.postgres
+def test_update_profile_rejects_invalid_display_name(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
     context = service.resolve_bearer_token(payload["session_token"])
@@ -1064,8 +722,9 @@ def test_update_profile_rejects_invalid_display_name(fake_operator_db: FakeOpera
         service.update_profile(context, display_name="A" * 81)
 
 
+@pytest.mark.postgres
 def test_profile_photo_upload_read_and_delete(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
@@ -1146,8 +805,9 @@ def test_operator_profile_photo_storage_rejects_unsafe_or_large_payload(
         )
 
 
+@pytest.mark.postgres
 def test_regenerate_recovery_codes_invalidates_old(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
@@ -1173,8 +833,9 @@ def test_regenerate_recovery_codes_invalidates_old(
     )
 
 
+@pytest.mark.postgres
 def test_recovery_codes_summary_counts_remaining(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
@@ -1202,8 +863,9 @@ def test_recovery_codes_summary_counts_remaining(
     assert summary_after["remaining"] == 0
 
 
+@pytest.mark.postgres
 def test_personal_tokens_and_sessions_can_be_listed_and_revoked(
-    fake_operator_db: FakeOperatorAuthDb,
+    operator_db: Path,
 ) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
@@ -1230,13 +892,28 @@ def test_personal_tokens_and_sessions_can_be_listed_and_revoked(
     assert service.resolve_bearer_token(payload["session_token"]) is None
 
 
+@pytest.mark.postgres
+def test_login_then_logout_revokes_only_that_session(operator_db: Path) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    registration = _create_owner(service)
+    login = service.login(identifier="owner@example.com", password=STRONG_PASSWORD)
+    assert service.resolve_bearer_token(login["session_token"]) is not None
+    assert _user_row(login["operator"]["id"])["last_login_at"]
+
+    assert service.logout(login["session_token"]) == {"ok": True}
+
+    assert service.resolve_bearer_token(login["session_token"]) is None
+    assert service.resolve_bearer_token(registration["session_token"]) is not None
+
+
 def test_legacy_exchange_method_is_removed() -> None:
     service = operator_auth_mod.OperatorAuthService()
 
     assert not hasattr(service, "exchange_legacy_token")
 
 
-def test_break_glass_accepts_configured_token(fake_operator_db: FakeOperatorAuthDb) -> None:
+@pytest.mark.postgres
+def test_break_glass_accepts_configured_token(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
 
     context = service.resolve_bearer_token("legacy-break-glass")
@@ -1245,9 +922,8 @@ def test_break_glass_accepts_configured_token(fake_operator_db: FakeOperatorAuth
     assert context.auth_kind == "break_glass"
 
 
-def test_break_glass_never_accepts_env_example_placeholder(
-    fake_operator_db: FakeOperatorAuthDb, monkeypatch: pytest.MonkeyPatch
-) -> None:
+@pytest.mark.postgres
+def test_break_glass_never_accepts_env_example_placeholder(operator_db: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from koda.control_plane.settings import parse_api_tokens
 
     # A deployment that copied .env.example without editing it.
@@ -1257,3 +933,175 @@ def test_break_glass_never_accepts_env_example_placeholder(
 
     assert ignored == 1
     assert service.resolve_bearer_token("replace-with-a-random-token") is None
+
+
+_OPERATOR_ONBOARDING_STATUS: dict[str, Any] = {
+    "control_plane": {"ready": True},
+    "storage": {"database": {"ready": True}, "object_storage": {"ready": True}},
+    "providers": [{"provider_id": "claude", "verified": True, "connection_status": {"account_label": "team"}}],
+    "agents": [{"id": "ATLAS", "display_name": "Atlas", "status": "active"}],
+    "system": {"owner_email": "owner@example.com", "allowed_user_ids": [123456789]},
+    "steps": {"onboarding_complete": True},
+}
+
+
+def _serve_onboarding_status(monkeypatch: pytest.MonkeyPatch, service: Any) -> tuple[TestServer, MagicMock]:
+    """The onboarding status route behind the real control-plane middlewares."""
+    manager = MagicMock()
+    manager.get_onboarding_status.return_value = dict(_OPERATOR_ONBOARDING_STATUS)
+    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
+    monkeypatch.setattr(control_plane_api, "_manager", lambda: manager)
+    app = web.Application(
+        middlewares=[
+            control_plane_api.control_plane_error_middleware,
+            control_plane_api.control_plane_auth_middleware,
+        ]
+    )
+    app.router.add_get("/api/control-plane/onboarding/status", control_plane_api.onboarding_status)
+    return TestServer(app), manager
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("owner_exists", [False, True], ids=["before-setup", "after-setup"])
+async def test_onboarding_status_without_a_session_returns_only_the_setup_flags(
+    operator_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    owner_exists: bool,
+) -> None:
+    """Before login the route says whether setup is needed and nothing else (D-050)."""
+    service = operator_auth_mod.OperatorAuthService()
+    if owner_exists:
+        _create_owner(service)
+    ensured: list[dict[str, Any]] = []
+    monkeypatch.setattr(operator_auth_mod, "ensure_bootstrap_file", lambda **kwargs: ensured.append(kwargs))
+    server, manager = _serve_onboarding_status(monkeypatch, service)
+
+    async with TestClient(server) as client:
+        anonymous = await client.get("/api/control-plane/onboarding/status")
+        unknown_token = await client.get(
+            "/api/control-plane/onboarding/status",
+            headers={"Authorization": "Bearer kodas_not-a-live-session"},
+        )
+
+        for response in (anonymous, unknown_token):
+            assert response.status == 200, await response.text()
+            assert await response.json() == {"has_owner": owner_exists, "bootstrap_required": not owner_exists}
+
+    manager.get_onboarding_status.assert_not_called()
+    # `koda auth issue-code` polls this route so the control plane writes the setup-code file.
+    assert ensured == [{"has_owner": owner_exists}, {"has_owner": owner_exists}]
+
+
+@pytest.mark.postgres
+async def test_onboarding_status_with_an_operator_credential_returns_the_full_payload(
+    operator_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    session_token = _create_owner(service)["session_token"]
+    server, manager = _serve_onboarding_status(monkeypatch, service)
+
+    async with TestClient(server) as client:
+        for token in (session_token, "legacy-break-glass"):
+            response = await client.get(
+                "/api/control-plane/onboarding/status",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status == 200, await response.text()
+            payload = await response.json()
+            assert payload["agents"] == _OPERATOR_ONBOARDING_STATUS["agents"]
+            assert payload["providers"] == _OPERATOR_ONBOARDING_STATUS["providers"]
+            assert payload["system"] == _OPERATOR_ONBOARDING_STATUS["system"]
+            assert payload["has_owner"] is True
+            assert payload["bootstrap_required"] is False
+            assert payload["session_required"] is True
+
+    assert manager.get_onboarding_status.call_count == 2
+
+
+def _serve_auth_status(monkeypatch: pytest.MonkeyPatch, service: Any) -> TestServer:
+    """The auth status route behind the real control-plane middlewares."""
+    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
+    app = web.Application(
+        middlewares=[
+            control_plane_api.control_plane_error_middleware,
+            control_plane_api.control_plane_auth_middleware,
+        ]
+    )
+    app.router.add_get("/api/control-plane/auth/status", control_plane_api.auth_status)
+    return TestServer(app)
+
+
+_ANONYMOUS_AUTH_STATUS_KEYS = {
+    "has_owner",
+    "bootstrap_required",
+    "auth_mode",
+    "session_required",
+    "onboarding_complete",
+    "authenticated",
+    "session_subject",
+    "operator",
+}
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("owner_exists", [False, True], ids=["before-setup", "after-setup"])
+async def test_auth_status_without_a_session_names_the_bootstrap_file_only_before_setup(
+    operator_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    owner_exists: bool,
+) -> None:
+    """The setup screen gets the bootstrap file path; once an owner exists nobody anonymous does (D-050, R-36)."""
+    monkeypatch.setattr(operator_auth_mod, "ALLOW_LOOPBACK_BOOTSTRAP", True)
+    service = operator_auth_mod.OperatorAuthService()
+    if owner_exists:
+        _create_owner(service)
+    server = _serve_auth_status(monkeypatch, service)
+
+    async with TestClient(server) as client:
+        anonymous = await client.get("/api/control-plane/auth/status")
+        unknown_token = await client.get(
+            "/api/control-plane/auth/status",
+            headers={"Authorization": "Bearer kodas_not-a-live-session"},
+        )
+
+        for response in (anonymous, unknown_token):
+            assert response.status == 200, await response.text()
+            payload = await response.json()
+            assert payload["authenticated"] is False
+            assert payload["operator"] is None
+            assert payload["has_owner"] is owner_exists
+            assert payload["bootstrap_required"] is not owner_exists
+            if owner_exists:
+                assert set(payload) == _ANONYMOUS_AUTH_STATUS_KEYS
+            else:
+                assert set(payload) == _ANONYMOUS_AUTH_STATUS_KEYS | {"bootstrap_file_path", "loopback_trust_enabled"}
+                assert payload["bootstrap_file_path"] == str(operator_db)
+                assert payload["loopback_trust_enabled"] is True
+
+
+@pytest.mark.postgres
+async def test_auth_status_with_an_operator_credential_keeps_the_server_flags(
+    operator_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    monkeypatch.setattr(operator_auth_mod, "ALLOW_LOOPBACK_BOOTSTRAP", True)
+    service = operator_auth_mod.OperatorAuthService()
+    session_token = _create_owner(service)["session_token"]
+    server = _serve_auth_status(monkeypatch, service)
+
+    async with TestClient(server) as client:
+        for token in (session_token, "legacy-break-glass"):
+            response = await client.get(
+                "/api/control-plane/auth/status",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status == 200, await response.text()
+            payload = await response.json()
+            assert payload["authenticated"] is True
+            assert payload["has_owner"] is True
+            assert payload["recovery_available"] is True
+            assert payload["loopback_trust_enabled"] is True
+            assert payload["bootstrap_file_path"] == str(operator_db)

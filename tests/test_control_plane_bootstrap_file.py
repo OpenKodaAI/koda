@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -44,6 +46,47 @@ def test_ensure_respects_env_seed(isolated_bootstrap: Path, monkeypatch: pytest.
     code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
     assert code == "CUST-OMSE-EDCD"
     assert isolated_bootstrap.read_text(encoding="utf-8").splitlines()[0] == "CUST-OMSE-EDCD"
+
+
+def _weak_seed_warnings(log: MagicMock) -> list[Any]:
+    return [call for call in log.warning.call_args_list if call.args == ("bootstrap_code_seed_weak",)]
+
+
+@pytest.mark.parametrize(
+    ("seed", "significant"),
+    [("!@#$%^&*()_+1", 1), ("!!!!a!!!!", 1), ("Tr0ub4dor&3!", 10), ("ÄÖÜ-ÄÖÜ", 0)],
+)
+def test_ensure_warns_about_a_seed_with_few_ascii_letters_or_digits(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, seed: str, significant: int
+) -> None:
+    """Setup codes match on ASCII letters and digits only, so a symbol-heavy seed is a short secret."""
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", seed)
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap_file_mod, "log", log)
+
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False) == seed
+    assert isolated_bootstrap.read_text(encoding="utf-8").splitlines()[0] == seed
+    # The file already exists now, so a later call writes nothing and warns no more.
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False) is None
+
+    warnings = _weak_seed_warnings(log)
+    assert len(warnings) == 1
+    kwargs = warnings[0].kwargs
+    assert kwargs["significant_characters"] == significant
+    assert kwargs["minimum"] == 12
+    assert seed not in repr(warnings[0])
+
+
+@pytest.mark.parametrize("seed", ["", "CUST-OMSE-EDCD", "cust omse edcd", "Tr0ub4dor&3!xy"])
+def test_ensure_does_not_warn_about_a_generated_code_or_a_full_seed(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, seed: str
+) -> None:
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", seed)
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap_file_mod, "log", log)
+
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
+    assert _weak_seed_warnings(log) == []
 
 
 def test_ensure_does_not_overwrite_existing(isolated_bootstrap: Path) -> None:

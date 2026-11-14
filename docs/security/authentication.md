@@ -22,6 +22,26 @@ mechanisms, checked in priority order:
    from `127.0.0.1` / `::1` with no `X-Forwarded-For` hop, no code is required. This mode is
    refused at boot when `KODA_ENV=production`.
 
+Setup codes are matched in the same canonical form as recovery codes (see
+[Recovery code lifecycle](#recovery-code-lifecycle)), on both sides: the stored code (the hash
+of a `koda auth issue-code` code, the code in `bootstrap.txt`, or a `CONTROL_PLANE_BOOTSTRAP_CODE`
+seed) and the code the operator types are reduced to their ASCII letters and digits,
+upper-cased and regrouped in fours (`_normalize_bootstrap_code` in
+`koda/control_plane/operator_auth.py`). `abcd efgh jklm`, `ABCDEFGHJKLM` and
+` abcd-efgh-jklm ` all register the owner with the issued `ABCD-EFGH-JKLM`, through
+`POST /api/control-plane/auth/register-owner` and `POST /api/control-plane/auth/bootstrap/exchange`
+alike. Every other character is ignored: whitespace, separators of any kind (an en dash, a
+trailing non-breaking space) and any other non-ASCII character, so `ABCD-EFGH-JKLMé` matches
+too. A missing, wrong or extra letter or digit, or a non-ASCII look-alike typed in place of one
+(for example `ſ` in place of `S`), fails with the same generic `Setup code is invalid or expired.`
+The `/setup` screen's code field already submits the dashed, uppercase form.
+
+The same rule applies to a `CONTROL_PLANE_BOOTSTRAP_CODE` seed: only its ASCII letters and digits
+count towards its strength. `Tr0ub4dor&3!` is matched as `TR0U-B4DO-R3` (10 letters and digits),
+and `!!!!a!!!!` is matched by a typed `a`. When the control plane writes `bootstrap.txt` from a seed
+with fewer than 12 ASCII letters and digits (a generated code has 12), it logs a
+`bootstrap_code_seed_weak` warning, without the seed; a seed with none never matches.
+
 Passwords are hashed with **Argon2id** (`argon2-cffi` defaults). The password must:
 
 - be 12+ characters (`CONTROL_PLANE_OPERATOR_PASSWORD_MIN_LENGTH`)
