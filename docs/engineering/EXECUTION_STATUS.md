@@ -13,6 +13,19 @@ iteration.
 5. Commit with a message referencing the task ID and push to the branch.
 6. Never mark a task `done` without recorded evidence (command + result).
 
+## Workflow rules (no rework, no over-engineering) — 2026-11-14
+
+Learned from waves 2A–5 and the ADR-002 rounds. Every workflow script follows them.
+
+1. **Bounded review loops that end on a review.** Each task has at most 3 rounds of implement, then two-lens review. Never stop on a fix that no reviewer has seen.
+2. **Only substantive findings reopen a round.** A critical, major or minor finding reopens a round; a nit alone does not. Nits are fixed when a round is running anyway, or recorded. After the last round, remaining minors become tracked items: a TECHNICAL_DEBT entry, or an acceptance criterion with a named test on the owning plan task.
+3. **Round 2 onward is a confirm review.** It covers only that round's commits and the earlier findings. New findings count only when those commits introduced them, or when they are critical or major anywhere. Unchanged code is not re-audited for minors.
+4. **Design documents converge the same way.** Once an ADR has no critical or major finding, each remaining minor is fixed locally, made an implementation obligation (an acceptance criterion and test on the AG item), made an operator question (§13), or rejected with a reason. There is no open-ended re-review of the whole document; ADR-002 needed 10 revisions before this rule.
+5. **Scope discipline.** Implementers do exactly the task's done-when and the review items: no new scope, no refactors beyond them. Reviewers flag scope creep as an issue (MISSION §12).
+6. **Disk discipline.** Agents never copy the repository, build a second Rust target, or create extra venvs in the scratchpad. They run tests in the task worktree and compare with the base through `git show`/`git diff`. Budget about 2 GB per worktree that runs the full pytest (debug guard plus release bot-gateway). The orchestrator removes merged worktrees and finished agents' scratch.
+7. **Never stop and resume a running workflow to change its prompts.** Resume reuses only the unchanged prefix of agent calls, so completed agents after the first changed call run again. Prompt changes apply to the next workflow.
+8. **Lane balance.** Capacity allowing, from WAVE-6 on each wave includes, besides the security lane, at least one agent-journey task (M3: squads, memory, governed tools) and one design or UX task (M8: design system, accessibility).
+
 ## Environment facts
 
 - Cloud environment `koda` (personal): limited network (package registries + Google Fonts); `AGENT_TOKEN` / `ALLOWED_USER_IDS` set to CI dummy values in fresh sessions.
