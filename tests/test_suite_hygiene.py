@@ -1,13 +1,18 @@
 """Guards that keep the test suite independent of where and how it runs.
 
-- Tests read repository files through paths anchored on ``__file__``, never
-  through paths that resolve against the current directory and break when
-  pytest starts outside the repo root. Two shapes are rejected: a
-  ``Path("koda/...")``-style literal naming a repository entry that is read
-  (``Path(...).read_text()``, ``open(...)``, ``.glob()``, ``.exists()``...),
-  and a helper that reads ``Path(<its own parameter>)`` instead of joining
-  the parameter onto an anchored root (``_read_source("koda/x.py")`` callers
-  cannot see that the helper is cwd-relative).
+- Tests read repository files through paths anchored on ``__file__``, so
+  they pass when pytest starts outside the repo root. Two shapes in test
+  code are rejected: a ``Path("koda/...")``-style literal naming a
+  repository entry that is read (``Path(...).read_text()``, ``open(...)``,
+  ``.glob()``, ``.exists()``...), and a helper that reads
+  ``Path(<its own parameter>)`` instead of joining the parameter onto an
+  anchored root (``_read_source("koda/x.py")`` callers cannot see that the
+  helper is cwd-relative). The check is static and stops at the test file:
+  a relative path handed to code under test that resolves it against the
+  cwd is invisible to it (``scripts/review_dependency_changes.py`` resolves
+  a Cargo manifest's directory this way). Such tests pass an anchored path
+  and, where the behaviour depends on it, run under
+  ``monkeypatch.chdir(tmp_path)``.
 - Postgres tests empty squad tables only through
   ``tests.postgres_fixtures.reset_squad_runtime_tables``, so a new squad table
   or foreign key needs one change instead of one per test file.
