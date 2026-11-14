@@ -18,6 +18,7 @@ iteration.
 - Cloud environment `koda` (personal): limited network (package registries + Google Fonts); `AGENT_TOKEN` / `ALLOWED_USER_IDS` set to CI dummy values in fresh sessions.
 - 4 CPUs / 15 GB RAM: workflow subagent concurrency is effectively 2.
 - PostgreSQL 16 + pgvector can be installed locally (`apt-get install -y postgresql-16-pgvector`); Docker is not available, so testcontainers-based fixtures skip.
+- Parallel worktrees: the pytest conftest builds the Rust security service per checkout (~1.5 GB `rust/target` each). Next waves share one service built from the main checkout (start `rust/target/debug/koda-security-service` once, point every worktree's `SECURITY_GRPC_TARGET` at it) and delete worktree `rust/target` dirs after merge. Disk headroom was 9.6 GB with 7 worktrees.
 - Outbound web access is restricted: reference-product research relies on search results; anything not verifiable is marked as such.
 
 ## Current phase
@@ -46,7 +47,7 @@ iteration.
 ## Active tasks
 
 - DEFECT-BATCH-1 (workflow, isolated worktrees, implement → independent review → address): D-001 + D-016 scheduled jobs / web routines never run; D-003 SSRF guard bypass; D-004 login rate-limiter bypass / shared bucket; D-018 password recovery impossible; D-009 `/cancel` does not stop light tasks; D-020 circuit breakers latch open; D-022 event streams cannot resume past id 1000. Branches are merged by the orchestrator after a full-gate run.
-- AGENT-AUTONOMY-ADR (workflow): design for D-002 (Option C); D-011/D-012 (approvals, supervised shell) fold into it.
+- AGENT-AUTONOMY: ADR done (`docs/engineering/adr/ADR-agent-native-tool-governance.md`, commit d72ac53; operator resolutions O-1..O-8 recorded). Implementation backlog AG-01..AG-32 starts after defect batch 1 merges (foundation wave AG-02..AG-09 first).
 - PHASE-ZERO plan (workflow): MASTER_PLAN / DECISIONS / REMAINING_RISKS being written.
 
 - P0-DISCOVERY — multi-agent subsystem inventory (workflow running; early unverified findings: provider CLIs run tools with permissions bypassed, public break-glass admin token on manual install, retries re-run side-effecting tools, squad post-processing deadlock).
