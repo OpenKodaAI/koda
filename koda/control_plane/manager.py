@@ -87,7 +87,7 @@ from koda.services.kokoro_manager import (
     kokoro_voice_file_path,
     kokoro_voice_metadata,
 )
-from koda.services.mcp_connection_broker import decrypt_env_values, resolve_mcp_runtime_connection
+from koda.services.mcp_connection_broker import resolve_mcp_runtime_connection
 from koda.services.prompt_budget import PromptSegment, preview_compiled_prompt, preview_modeled_runtime_prompt
 from koda.services.provider_auth import (
     LOGOUT_NOT_SUPPORTED,
@@ -14018,9 +14018,6 @@ class ControlPlaneManager:
             "created_at": str(row.get("created_at") or ""),
             "updated_at": str(row.get("updated_at") or ""),
         }
-
-    def _decrypt_mcp_env_values(self, env_values_json: str) -> dict[str, str]:
-        return decrypt_env_values(env_values_json)
 
     def get_mcp_runtime_config(self, agent_id: str) -> list[dict[str, Any]]:
         """Get full MCP config with decrypted credentials for runtime bootstrap."""

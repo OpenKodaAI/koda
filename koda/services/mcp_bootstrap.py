@@ -55,7 +55,7 @@ async def bootstrap_mcp_for_agent(agent_id: str) -> dict[str, Any]:
             command_list = conn.get("command_override") or conn.get("command") or catalog.get("command") or []
             command = command_list if isinstance(command_list, list) else None
             url = conn.get("url_override") or conn.get("url") or catalog.get("remote_url") or catalog.get("url")
-            env_values = _decrypt_connection_env(conn)
+            env_values = _connection_env_values(conn)
             headers = conn.get("headers") if isinstance(conn.get("headers"), dict) else None
 
             # Token freshness check for OAuth connections
@@ -71,7 +71,7 @@ async def bootstrap_mcp_for_agent(agent_id: str) -> dict[str, Any]:
                     # Re-load env values since they may have been refreshed
                     refreshed_conn = _load_single_connection(agent_id, server_key)
                     if refreshed_conn:
-                        env_values = _decrypt_connection_env(refreshed_conn)
+                        env_values = _connection_env_values(refreshed_conn)
                         headers = (
                             refreshed_conn.get("headers")
                             if isinstance(refreshed_conn.get("headers"), dict)
@@ -246,12 +246,12 @@ def _load_single_connection(agent_id: str, server_key: str) -> dict[str, Any] | 
         return None
 
 
-def _decrypt_connection_env(conn: dict[str, Any]) -> dict[str, str]:
+def _connection_env_values(conn: dict[str, Any]) -> dict[str, str]:
     """Extract environment values from a connection.
 
     Runtime snapshots may inline already-decrypted values under ``env_values``.
-    Manager-backed rows still store encrypted ``env_values_json`` that must be
-    decrypted on demand.
+    Manager-backed rows still store encrypted ``env_values_json``, which
+    ``decrypt_env_values`` (the one MCP env decrypt helper) decrypts on demand.
     """
     # Already-decrypted values from the runtime snapshot payload.
     plain = conn.get("env_values")
@@ -261,10 +261,6 @@ def _decrypt_connection_env(conn: dict[str, Any]) -> dict[str, str]:
     raw_json = conn.get("env_values_json", "{}")
     if not raw_json or raw_json == "{}":
         return {}
-    try:
-        from koda.control_plane.manager import get_control_plane_manager
+    from koda.services.mcp_connection_broker import decrypt_env_values
 
-        manager = get_control_plane_manager()
-        return manager._decrypt_mcp_env_values(raw_json)
-    except Exception:
-        return {}
+    return decrypt_env_values(str(raw_json))

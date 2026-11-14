@@ -62,7 +62,7 @@ class TestMcpBootstrap:
                 return_value=fake_catalog,
             ),
             patch(
-                "koda.services.mcp_bootstrap._decrypt_connection_env",
+                "koda.services.mcp_bootstrap._connection_env_values",
                 return_value={},
             ),
             patch("koda.services.mcp_manager.mcp_server_manager") as mock_mgr,
@@ -106,7 +106,7 @@ class TestMcpBootstrap:
                 return_value=fake_catalog,
             ),
             patch(
-                "koda.services.mcp_bootstrap._decrypt_connection_env",
+                "koda.services.mcp_bootstrap._connection_env_values",
                 return_value={},
             ),
             patch("koda.services.mcp_manager.mcp_server_manager") as mock_mgr,
@@ -166,7 +166,7 @@ class TestMcpBootstrap:
                 side_effect=lambda key: fake_catalog_github if key == "github" else fake_catalog_slack,
             ),
             patch(
-                "koda.services.mcp_bootstrap._decrypt_connection_env",
+                "koda.services.mcp_bootstrap._connection_env_values",
                 return_value={},
             ),
             patch("koda.services.mcp_manager.mcp_server_manager") as mock_mgr,
