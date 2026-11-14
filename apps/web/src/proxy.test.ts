@@ -166,6 +166,31 @@ describe("web proxy auth gate", () => {
     expect(apiRequest("2001:db8:5:7::1").status).toBe(200);
   });
 
+  it.each([
+    ["login-session", "/api/control-plane/providers/x/connection/login/abc", 20, 401],
+    ["general", "/api/control-plane/auth/status", 120, 200],
+  ])("bounds the clients the %s window tracks", (_name, path, limit, allowedStatus) => {
+    const apiRequest = (forwardedFor: string) =>
+      proxy({
+        nextUrl: new URL(`http://localhost${path}`),
+        method: "GET",
+        cookies: { get: () => undefined },
+        headers: {
+          get: (name: string) => (name.toLowerCase() === "x-forwarded-for" ? forwardedFor : null),
+        },
+      } as never);
+
+    const exhausted = Array.from({ length: limit + 1 }, () => apiRequest("198.51.100.200").status);
+    expect(exhausted.at(-1)).toBe(429);
+    // Unauthenticated requests from 4096 distinct /64s, as from one routed /48.
+    for (let n = 0; n < 4096; n += 1) {
+      const address = `2001:db8:${(0x1000 + (n >> 8)).toString(16)}:${(n & 0xff).toString(16)}::1`;
+      expect(apiRequest(address).status).toBe(allowedStatus);
+    }
+    // The window keeps the 4096 most recent clients, so the oldest is gone.
+    expect(apiRequest("198.51.100.200").status).toBe(allowedStatus);
+  });
+
   it("keeps the proxy matcher locked to the protected API surfaces", () => {
     expect(config.matcher).toEqual([
       "/((?!_next/static|_next/image|_next/webpack-hmr|favicon.ico|apple-icon.png|robots.txt|sitemap.xml).*)",

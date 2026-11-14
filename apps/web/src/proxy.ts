@@ -8,6 +8,7 @@ import {
   WEB_OPERATOR_SESSION_COOKIE,
 } from "@/lib/web-operator-session-constants";
 import { isSafeRedirectTarget } from "@/lib/safe-redirect";
+import { createSlidingWindowLimiter } from "@/lib/sliding-window-limiter";
 
 /* ---------- page-level auth gate ---------- */
 
@@ -130,8 +131,8 @@ function pageAuthGate(request: NextRequest): NextResponse {
 
 /* ---------- sliding-window rate limiter ---------- */
 
-const RATE_LIMIT_WINDOW_MS = 60_000;
 const RATE_LIMIT_MAX_REQUESTS = 120;
+const LOGIN_RATE_LIMIT_MAX = 20;
 const PUBLIC_CONTROL_PLANE_PATHS = new Set([
   "/api/control-plane/onboarding/status",
   "/api/control-plane/auth/status",
@@ -141,49 +142,9 @@ const PUBLIC_CONTROL_PLANE_PATHS = new Set([
   "/api/control-plane/auth/password/recover",
 ]);
 
-interface SlidingWindow {
-  timestamps: number[];
-  updatedAt: number;
-}
-
-const ipWindows = new Map<string, SlidingWindow>();
-
-/** Evict stale entries every 5 minutes to prevent unbounded growth. */
-const EVICTION_INTERVAL_MS = 5 * 60_000;
-let lastEviction = Date.now();
-
-function evictStaleEntries(now: number) {
-  if (now - lastEviction < EVICTION_INTERVAL_MS) return;
-  lastEviction = now;
-  for (const [ip, window] of ipWindows) {
-    if (now - window.updatedAt > RATE_LIMIT_WINDOW_MS * 2) {
-      ipWindows.delete(ip);
-    }
-  }
-}
-
-function isRateLimited(ip: string): boolean {
-  const now = Date.now();
-  evictStaleEntries(now);
-
-  let window = ipWindows.get(ip);
-  if (!window) {
-    window = { timestamps: [], updatedAt: now };
-    ipWindows.set(ip, window);
-  }
-
-  // Remove timestamps outside the sliding window.
-  const cutoff = now - RATE_LIMIT_WINDOW_MS;
-  window.timestamps = window.timestamps.filter((t) => t > cutoff);
-  window.updatedAt = now;
-
-  if (window.timestamps.length >= RATE_LIMIT_MAX_REQUESTS) {
-    return true;
-  }
-
-  window.timestamps.push(now);
-  return false;
-}
+// Separate per-client windows, each with its own eviction schedule and size cap.
+const apiWindow = createSlidingWindowLimiter({ maxRequests: RATE_LIMIT_MAX_REQUESTS });
+const loginSessionWindow = createSlidingWindowLimiter({ maxRequests: LOGIN_RATE_LIMIT_MAX });
 
 /** Rate-limit key of the client behind the request (an IPv6 client's /64). */
 function clientKey(request: NextRequest): string {
@@ -232,36 +193,6 @@ function forbiddenMutationResponse() {
 
 /* ---------- proxy ---------- */
 
-const LOGIN_RATE_LIMIT_MAX = 20;
-const loginIpWindows = new Map<string, SlidingWindow>();
-
-function evictStaleLoginEntries(now: number) {
-  if (now - lastEviction < EVICTION_INTERVAL_MS) return;
-  for (const [ip, window] of loginIpWindows) {
-    if (now - window.updatedAt > RATE_LIMIT_WINDOW_MS * 2) {
-      loginIpWindows.delete(ip);
-    }
-  }
-}
-
-function isLoginRateLimited(ip: string): boolean {
-  const now = Date.now();
-  evictStaleLoginEntries(now);
-  let window = loginIpWindows.get(ip);
-  if (!window) {
-    window = { timestamps: [], updatedAt: now };
-    loginIpWindows.set(ip, window);
-  }
-  const cutoff = now - RATE_LIMIT_WINDOW_MS;
-  window.timestamps = window.timestamps.filter((t) => t > cutoff);
-  window.updatedAt = now;
-  if (window.timestamps.length >= LOGIN_RATE_LIMIT_MAX) {
-    return true;
-  }
-  window.timestamps.push(now);
-  return false;
-}
-
 function isLoginSessionPath(pathname: string): boolean {
   return /\/api\/control-plane\/providers\/[^/]+\/connection\/login\//.test(pathname);
 }
@@ -271,12 +202,8 @@ function isPublicControlPlanePath(pathname: string): boolean {
 }
 
 function apiProxyGate(request: NextRequest): NextResponse {
-  const ip = clientKey(request);
-  if (isLoginSessionPath(request.nextUrl.pathname)) {
-    if (isLoginRateLimited(ip)) {
-      return rateLimitedResponse();
-    }
-  } else if (isRateLimited(ip)) {
+  const limiter = isLoginSessionPath(request.nextUrl.pathname) ? loginSessionWindow : apiWindow;
+  if (limiter.isLimited(clientKey(request))) {
     return rateLimitedResponse();
   }
 

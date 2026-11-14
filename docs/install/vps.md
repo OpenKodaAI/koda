@@ -61,6 +61,30 @@ API believes the dashboard (`CONTROL_PLANE_TRUSTED_PROXIES=web`). If your proxy 
 `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`, or all of its clients share one budget. A proxy
 on another host needs its address added: `WEB_TRUSTED_PROXIES=gateway,<proxy-ip>`.
 
+A proxy that runs as a container on Koda's Compose network (Traefik or Caddy attached to
+`frontend`) connects from its own container address. `WEB_TRUSTED_PROXIES` takes addresses,
+not service names, and Docker can give a container a new address when it is recreated, so
+pin one in a Compose override and trust that single address
+(`WEB_TRUSTED_PROXIES=gateway,172.30.0.10`). Trusting the whole subnet instead would let every
+container on it name any client. Until the proxy is trusted, all of its clients share one
+budget. A new subnet applies only once the network is recreated (`docker compose down`).
+
+```yaml
+networks:
+  frontend:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+services:
+  proxy: # your reverse proxy
+    networks:
+      frontend:
+        ipv4_address: 172.30.0.10
+```
+
+If that proxy also forwards `/api/control-plane/*` straight to `app:8090`, add its service name
+to `CONTROL_PLANE_TRUSTED_PROXIES` (`web,proxy`), which does accept hostnames.
+
 When `WEB_PUBLISH_ADDRESS` publishes the dashboard beyond loopback, firewall its port so only
 your proxy can reach it. A client that connects directly is charged to its own address, but
 Docker hides that address behind the gateway when its userland proxy carries the connection

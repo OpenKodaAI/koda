@@ -161,7 +161,8 @@ triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
   first untrusted address is the client. Entries further left are client-supplied and never
   select a bucket, so a direct caller cannot rotate the header to get a fresh budget.
 - The dashboard server decides the browser's address before Next.js runs
-  (`apps/web/server.mjs`, `apps/web/src/lib/forwarded-for.mjs`). Next.js only fills an
+  (`apps/web/server.mjs`, `apps/web/src/lib/dashboard-server.mjs`,
+  `apps/web/src/lib/forwarded-for.mjs`). Next.js only fills an
   *absent* `X-Forwarded-For`, so the server replaces the header on every request with one
   address: the TCP peer, or, when the peer is a trusted proxy (loopback, plus
   `WEB_TRUSTED_PROXIES`, which Compose sets to `gateway`), the first untrusted hop from the
@@ -170,7 +171,8 @@ triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
 - The dashboard BFF forwards that address on every control-plane call
   (`apps/web/src/lib/client-ip.ts`). Each browser therefore has its own budget; one client's
   failed logins do not lock other clients out. The Next.js proxy (`apps/web/src/proxy.ts`)
-  keys its own per-client window (120/min) the same way.
+  keys its own per-client window (120/min) the same way; each of its windows tracks at most
+  4096 clients and sweeps idle ones on its own schedule.
 - IPv6 clients are charged per /64, both in the API and in the dashboard, so rotating source
   addresses inside one subscriber's block does not buy a fresh budget. Each sensitive
   endpoint keeps its own bucket cache (4096 clients), so cycling through many addresses on
@@ -184,7 +186,9 @@ triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
   `/api/control-plane/*` straight to the API, such as the bundled `proxy/nginx.conf`, needs
   `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`; until then all of its clients share one
   bucket. A proxy on another host (`WEB_PUBLISH_ADDRESS`) is trusted by its IP:
-  `WEB_TRUSTED_PROXIES=gateway,203.0.113.5`.
+  `WEB_TRUSTED_PROXIES=gateway,203.0.113.5`. `WEB_TRUSTED_PROXIES` takes no hostnames, so a
+  proxy container on the Compose network is trusted by a fixed `ipv4_address`
+  ([VPS Install](../install/vps.md#reverse-proxy)).
 - Trust only peers you control: a trusted peer can claim any client address. Docker hides
   the real client behind the gateway whenever its userland proxy carries the connection
   (Docker Desktop, rootless Docker, or an IPv6 host address on an IPv4-only network), so

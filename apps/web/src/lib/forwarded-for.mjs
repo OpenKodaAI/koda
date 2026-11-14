@@ -1,6 +1,7 @@
 /**
- * Decides which client a dashboard request belongs to. server.mjs runs this on
- * every request because it is the only code that sees the TCP socket.
+ * Decides which client a dashboard request belongs to. The dashboard server
+ * (`dashboard-server.mjs`, started by server.mjs) runs this on every request
+ * because it is the only code that sees the TCP socket.
  *
  * Next.js writes the socket address into `x-forwarded-for` only when the header
  * is missing. A client that reaches this server directly could therefore send
@@ -11,7 +12,8 @@
  *
  * Loopback is always trusted. `WEB_TRUSTED_PROXIES` adds IPs, CIDRs and the
  * keyword `gateway`: this host's IPv4 default gateway, which inside a Docker
- * container is the address Docker's port proxy connects from.
+ * container is the address Docker's port proxy connects from. Hostnames are
+ * not accepted; a proxy container is trusted by a fixed address.
  */
 
 import { readFileSync } from "node:fs";

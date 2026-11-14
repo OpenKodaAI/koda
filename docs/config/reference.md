@@ -32,7 +32,9 @@ Control Plane
   straight to the API. Unusable entries are logged at startup and ignored; see
   [Authentication](../security/authentication.md#which-address-a-request-is-charged-to)
 - `WEB_TRUSTED_PROXIES` — read by the dashboard server (`apps/web/server.mjs`): peers whose
-  `X-Forwarded-For` it believes besides loopback, as IPs, CIDRs or `gateway`. Unset natively;
+  `X-Forwarded-For` it believes besides loopback, as IPs, CIDRs or `gateway` (no hostnames: a
+  proxy container on the Compose network needs a fixed `ipv4_address`, see
+  [VPS Install](../install/vps.md#reverse-proxy)). Unset natively;
   Docker Compose sets `gateway` so a reverse proxy on the host keeps per-client limits. Every
   other peer is charged to its own address, whatever header it sends
 - `CONTROL_PLANE_API_TOKEN`
