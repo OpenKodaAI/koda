@@ -181,11 +181,13 @@ def _logged(log: MagicMock) -> list[Any]:
 
 
 @pytest.mark.parametrize("seed", ["Tr0ub4dor&3!", "WB7K-QZ3M-NP4X", "wb7k qz3m np4x", "Qz3m"])
-def test_a_seed_is_never_logged(isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, seed: str) -> None:
+def test_a_seed_is_never_logged(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], seed: str
+) -> None:
     """The operator chose the seed and knows it; the first-boot log says where the code came from.
 
     Setup codes match on their ASCII letters and digits, so neither the seed as configured nor
-    those characters, upper-cased or regrouped in fours, may reach the log.
+    those characters, upper-cased or regrouped in fours, may reach the log or the console.
     """
     monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", seed)
     log = MagicMock()
@@ -196,29 +198,38 @@ def test_a_seed_is_never_logged(isolated_bootstrap: Path, monkeypatch: pytest.Mo
     kept = bootstrap_file_mod._seed_kept_characters(seed)
     grouped = "-".join(kept[index : index + 4] for index in range(0, len(kept), 4))
     logged = repr(_logged(log))
+    console = capsys.readouterr()
     for form in {seed, seed.upper(), kept, grouped}:
         assert form not in logged, form
+        assert form not in console.out + console.err, form
     (written,) = [call for call in log.info.call_args_list if call.args == ("bootstrap_file_written",)]
     assert written.kwargs["code_source"] == "CONTROL_PLANE_BOOTSTRAP_CODE"
     assert "code" not in written.kwargs
 
 
-def test_a_generated_code_is_logged_once(isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Without a seed the operator learns the code from bootstrap.txt or from this one log line."""
+def test_a_generated_code_is_shown_once_in_a_banner_and_never_logged(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Without a seed the operator learns the code from bootstrap.txt or from one banner on stderr."""
     log = MagicMock()
     monkeypatch.setattr(bootstrap_file_mod, "log", log)
 
     code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
+    assert code is not None
     assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False) is None
 
     (written,) = [call for call in log.info.call_args_list if call.args == ("bootstrap_file_written",)]
-    assert written.kwargs["code"] == code
+    assert "code" not in written.kwargs
     assert written.kwargs["code_source"] == "generated"
-    assert repr(_logged(log)).count(str(code)) == 1
+    assert code not in repr(_logged(log))
+    console = capsys.readouterr()
+    assert console.err.count(code) == 1
+    assert f"Koda setup code: {code}" in console.err
+    assert code not in console.out
 
 
-def test_the_docs_say_which_setup_code_is_logged() -> None:
-    """authentication.md and .env.example: a generated code is logged once, a seed never."""
+def test_the_docs_say_where_the_setup_code_is_shown() -> None:
+    """authentication.md and .env.example: a generated code is shown once on stderr, a seed never."""
     root = Path(__file__).resolve().parents[1]
     guide = " ".join((root / "docs" / "security" / "authentication.md").read_text(encoding="utf-8").split())
     env_example = " ".join(
@@ -226,11 +237,15 @@ def test_the_docs_say_which_setup_code_is_logged() -> None:
     )
 
     assert "logs, without the seed," not in guide
+    assert "log line carries a generated code" not in guide
     assert (
-        "`bootstrap_file_written` log line carries a generated code, once, but never a seed: for a seed it"
-        " names `code_source=CONTROL_PLANE_BOOTSTRAP_CODE` instead" in guide
+        "prints a generated code once, in a banner on stderr, never a seed. The structured log never carries"
+        " the code: its `bootstrap_file_written` event names `code_source=generated` or"
+        " `code_source=CONTROL_PLANE_BOOTSTRAP_CODE` instead" in guide
     )
-    assert "A seed set here replaces that code and is never logged." in env_example
+    assert "logs it once" not in env_example
+    assert "prints it once, on stderr" in env_example
+    assert "A seed set here replaces that code and is never logged or printed." in env_example
 
 
 def test_the_seed_setting_is_documented_where_operators_look() -> None:

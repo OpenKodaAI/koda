@@ -19,7 +19,8 @@ supported (in priority order):
    seed itself is never logged: the operator chose it.
 3. **Disk file** — `state/control_plane/bootstrap.txt` (mode 0600) written on first
    boot if no owner exists. The operator SSHs in and reads it. A generated code is
-   also logged once, in `bootstrap_file_written`.
+   also shown once, in a banner on stderr; the structured log (`bootstrap_file_written`)
+   never carries it.
 
 The file is deleted automatically after the owner registers.
 """
@@ -29,6 +30,7 @@ from __future__ import annotations
 import contextlib
 import os
 import secrets
+import sys
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -111,11 +113,30 @@ def _render_bootstrap_file(code: str, expires_at: datetime) -> str:
     )
 
 
+def _show_setup_code_banner(code: str, expires_at: datetime) -> None:
+    """Show a generated setup code once, on stderr, outside the structured log on stdout."""
+    rule = "=" * 72
+    sys.stderr.write(
+        "\n".join(
+            (
+                rule,
+                f"Koda setup code: {code}",
+                f"Paste it into /setup before {expires_at.isoformat()}. It is also in {_BOOTSTRAP_FILE_PATH}.",
+                "This code is shown once and is not written to the structured log.",
+                rule,
+                "",
+            )
+        )
+    )
+    sys.stderr.flush()
+
+
 def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
     """Write a bootstrap code to disk if one is needed and none exists.
 
-    Returns the plaintext code if a *new* one was written (so callers can echo
-    it to the log once), or None if nothing was written.
+    Returns the plaintext code if a *new* one was written, or None if nothing was
+    written. A new generated code is shown once, in a banner on stderr; the
+    structured log never carries it.
 
     Does nothing when:
     - The owner account already exists.
@@ -162,10 +183,10 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
         log.info(
             "bootstrap_file_written",
             path=str(_BOOTSTRAP_FILE_PATH),
-            code=code,
             code_source="generated",
             expires_at=expires_at.isoformat(),
         )
+        _show_setup_code_banner(code, expires_at)
     if CONTROL_PLANE_BOOTSTRAP_CODE_SEED:
         significant = _seed_significant_characters(CONTROL_PLANE_BOOTSTRAP_CODE_SEED)
         if significant < _SEED_MIN_SIGNIFICANT_CHARACTERS:

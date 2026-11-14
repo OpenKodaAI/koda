@@ -15,9 +15,11 @@ mechanisms, checked in priority order:
 1. **Legacy registration token** — obtained via `koda auth issue-code`, then
    `POST /api/control-plane/auth/bootstrap/exchange`. Still supported for automated installs.
 2. **Bootstrap code (recommended for VPS)** — on first boot the control plane writes
-   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) and prints a generated code to
-   the container log once (never a `CONTROL_PLANE_BOOTSTRAP_CODE` seed). The operator SSHs in, reads the file, pastes it into `/setup`, and the
-   file is deleted after registration.
+   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) and prints a generated code
+   once, in a banner on stderr, which is part of the container log (never a
+   `CONTROL_PLANE_BOOTSTRAP_CODE` seed, and never in the structured log). The operator SSHs in,
+   reads the file or the banner, pastes the code into `/setup`, and the file is deleted after
+   registration.
 3. **Loopback trust (dev only)** — when `ALLOW_LOOPBACK_BOOTSTRAP=true` and the request comes
    from `127.0.0.1` / `::1` with no `X-Forwarded-For` hop, no code is required. This mode is
    refused at boot when `KODA_ENV=production`.
@@ -45,9 +47,10 @@ exactly 12 characters from that alphabet, separators aside (fewer is weaker than
 `Wb7k-Qz3m-Np4x` is typed and matched as `WB7K-QZ3M-NP4X`. A seed with more letters and digits, or with `I`, `O`, `0` or `1`, can only be sent
 to the API (`POST /api/control-plane/auth/register-owner`): the `/setup` field would submit fewer
 characters than the seed has, and the code would not match. When the control plane writes
-`bootstrap.txt`, its `bootstrap_file_written` log line carries a generated code, once, but never a
-seed: for a seed it names `code_source=CONTROL_PLANE_BOOTSTRAP_CODE` instead, as the operator
-already knows the code. From a seed it also logs a `bootstrap_code_seed_weak` warning when the seed
+`bootstrap.txt`, it prints a generated code once, in a banner on stderr, never a seed. The
+structured log never carries the code: its `bootstrap_file_written` event names
+`code_source=generated` or `code_source=CONTROL_PLANE_BOOTSTRAP_CODE` instead, as the operator
+chose a seed. From a seed it also logs a `bootstrap_code_seed_weak` warning when the seed
 has fewer than 12 ASCII letters and digits (a generated code has 12) and a
 `bootstrap_code_seed_not_typeable` warning when the `/setup` field cannot take it, neither with the
 seed; a seed with no ASCII letter or digit never matches.
@@ -436,9 +439,18 @@ message would reveal that the account exists.
   [Rate limits](#rate-limits-bucket-budgets)), and the plain-HTTP refusal
   (`error.code: "INSECURE_TRANSPORT"`), which the dashboard decides from the transport before
   it reads any credential (see [Plain HTTP](#plain-http)).
-- The structured logging pipeline redacts `password`, `new_password`, `current_password`,
-  `recovery_code`, `session_token`, `registration_token`, `bootstrap_code`, `code`,
-  `totp_secret`, `api_key`, `secret`, `token`, `authorization`, and `cookie` keys.
+- The control plane (`python -m koda.control_plane`) configures the structured logging pipeline
+  (`setup_logging` in `koda/logging_config.py`) before anything logs; the agent workers configure
+  it at startup. `LOG_FORMAT=json` writes one JSON object per line on stdout; any other value
+  writes console lines. The pipeline replaces with `***` the value of these top-level event keys,
+  in any case: `password`, `new_password`, `current_password`, `recovery_code`, `session_token`,
+  `registration_token`, `bootstrap_code`, `code`, `totp_secret`, `api_key`, `apikey`, `secret`,
+  `private_key`, `token`, `authorization` and `cookie`. It does not look inside nested values, and
+  records from the standard `logging` module, such as third-party libraries', are formatted but
+  not redacted. Console lines print tracebacks without local variables; a JSON line marks an
+  exception with `"exc_info": true` and carries no traceback. In the control plane, aiohttp's
+  access log stays off, because its request lines carry query strings such as the authorization
+  code of an MCP OAuth callback.
 
 ## Security headers
 
