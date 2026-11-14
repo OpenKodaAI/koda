@@ -2859,11 +2859,41 @@ async def _check_git_available(tool: str) -> AgentToolResult | None:
     return None
 
 
+# Options that write files (``diff``/``log --output``) or run a command (``push --receive-pack``/``--exec``,
+# ``pull``/``fetch --upload-pack``). git also accepts unambiguous abbreviations such as ``--outp`` or ``--receive``.
+_GIT_DENIED_OPTIONS = ("output", "receive-pack", "upload-pack", "exec")
+_GIT_END_OF_OPTIONS = "--end-of-options"
+
+
+def _is_denied_git_option(arg: str) -> bool:
+    if not arg.startswith("--"):
+        return False
+    name = arg[2:].split("=", 1)[0]
+    return bool(name) and any(denied.startswith(name) or name.startswith(denied) for denied in _GIT_DENIED_OPTIONS)
+
+
 def _validate_git_args(args: list[str]) -> str | None:
-    """Validate git arguments for injection. Returns error or None."""
+    """Validate git arguments for injection. Returns error or None.
+
+    The handlers reject model-supplied refs, branches, remotes, targets and start points that start
+    with ``-`` and pass them after ``--end-of-options`` where git honours it. As a backstop, the denied
+    options are refused wherever they appear: ``git pull`` hands its operands to ``git fetch`` without
+    the marker, so a position after it is no guarantee.
+    """
     for arg in args:
         if GIT_META_CHARS.search(arg):
             return "Blocked: argument contains disallowed characters."
+        if _is_denied_git_option(arg):
+            return f"Blocked: git option '{arg.split('=', 1)[0]}' is not allowed."
+    return None
+
+
+def _git_leading_dash_error(tool: str, params: dict, *names: str) -> AgentToolResult | None:
+    """Reject model-supplied values that git would parse as options."""
+    for name in names:
+        value = params.get(name)
+        if value and str(value).startswith("-"):
+            return AgentToolResult(tool=tool, success=False, output=f"Blocked: '{name}' must not start with '-'.")
     return None
 
 
@@ -2911,18 +2941,18 @@ async def _handle_git_status(params: dict, ctx: ToolContext) -> AgentToolResult:
 
 
 async def _handle_git_diff(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_git_available("git_diff")
+    err = await _check_git_available("git_diff") or _git_leading_dash_error("git_diff", params, "ref")
     if err:
         return err
     args: list[str] = []
     if params.get("staged"):
         args.append("--cached")
-    if params.get("ref"):
-        args.append(str(params["ref"]))
-    if params.get("path"):
-        args.extend(["--", str(params["path"])])
     if params.get("stat"):
         args.append("--stat")
+    if params.get("ref"):
+        args.extend([_GIT_END_OF_OPTIONS, str(params["ref"])])
+    if params.get("path"):
+        args.extend(["--", str(params["path"])])
     return await _run_git("diff", args, ctx)
 
 
@@ -2949,20 +2979,23 @@ async def _handle_git_commit(params: dict, ctx: ToolContext) -> AgentToolResult:
     message = params.get("message", "")
     if not message:
         return AgentToolResult(tool="git_commit", success=False, output="Missing required param: 'message'.")
-    args = ["-m", message]
+    # Attached to the option, so the text is never read as an option or matched against the denied ones.
+    args = [f"--message={message}"]
     if params.get("all"):
         args.insert(0, "-a")
     return await _run_git("commit", args, ctx)
 
 
 async def _handle_git_branch(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_git_available("git_branch")
+    err = await _check_git_available("git_branch") or _git_leading_dash_error(
+        "git_branch", params, "name", "start_point"
+    )
     if err:
         return err
     name = params.get("name")
     if name:
         # Create branch
-        args = [str(name)]
+        args = [_GIT_END_OF_OPTIONS, str(name)]
         if params.get("start_point"):
             args.append(str(params["start_point"]))
         return await _run_git("branch", args, ctx)
@@ -2974,7 +3007,10 @@ async def _handle_git_branch(params: dict, ctx: ToolContext) -> AgentToolResult:
 
 
 async def _handle_git_checkout(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_git_available("git_checkout")
+    # git checkout reads --end-of-options as a pathspec, so the leading-dash check is its guard.
+    err = await _check_git_available("git_checkout") or _git_leading_dash_error(
+        "git_checkout", params, "target", "start_point"
+    )
     if err:
         return err
     target = params.get("target", "")
@@ -2993,10 +3029,10 @@ async def _handle_git_checkout(params: dict, ctx: ToolContext) -> AgentToolResul
 
 
 async def _handle_git_push(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_git_available("git_push")
+    err = await _check_git_available("git_push") or _git_leading_dash_error("git_push", params, "remote", "branch")
     if err:
         return err
-    args: list[str] = []
+    args: list[str] = [_GIT_END_OF_OPTIONS]
     remote = params.get("remote", "origin")
     branch = params.get("branch")
     args.append(str(remote))
@@ -3008,14 +3044,15 @@ async def _handle_git_push(params: dict, ctx: ToolContext) -> AgentToolResult:
 
 
 async def _handle_git_pull(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_git_available("git_pull")
+    # git pull hands its operands to git fetch without --end-of-options, so the leading-dash check is its guard.
+    err = await _check_git_available("git_pull") or _git_leading_dash_error("git_pull", params, "remote", "branch")
     if err:
         return err
     args: list[str] = []
     remote = params.get("remote")
     branch = params.get("branch")
     if remote:
-        args.append(str(remote))
+        args.extend([_GIT_END_OF_OPTIONS, str(remote)])
         if branch:
             args.append(str(branch))
     if params.get("rebase"):
