@@ -27,7 +27,7 @@ groups:
           severity: high
         annotations:
           summary: "Circuit breaker open: {{ $labels.dependency }} (agent {{ $labels.agent_id }})"
-          description: "An internal_rpc dependency is failing fast. Check the matching sidecar's container logs and restart if needed. The breaker auto-recovers via a half-open probe after the cooldown."
+          description: "A dependency guarded by koda/services/resilience.py (provider CLI, web search/fetch, ElevenLabs, scheduler dispatcher, ...) is failing fast. Check that dependency and the agent logs. The breaker recovers through a half-open probe on the first call after reset_timeout. An idle dependency stays open until a call arrives, so this alert can outlive the outage; see docs/operations/scaling-resilience-runbook.md."
 
       - alert: KodaQueueDepthHigh
         expr: koda_queue_depth > 50

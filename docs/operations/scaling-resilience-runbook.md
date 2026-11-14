@@ -51,6 +51,35 @@ Preserve these current defaults unless a later phase changes them deliberately:
 - Resources are bounded and released.
 - Observability is part of the product contract.
 
+## Dependency Circuit Breakers
+
+The breakers in `koda/services/resilience.py` (Claude and Codex CLIs, web
+search/fetch, ElevenLabs, the scheduler dispatcher, and the rest of
+`ALL_BREAKERS`) recover on their own after a transient outage:
+
+- A breaker opens after `fail_max` consecutive recorded failures; calls are
+  rejected with `<dependency> temporarily unavailable (circuit breaker open).`
+- After `reset_timeout` seconds the next call is admitted as the recovery
+  probe and the breaker reports `half-open`
+  (`koda_circuit_breaker_state == 1`, audit event `system.circuit_half_open`).
+  The probe holds the slot for `reset_timeout` seconds and other calls are
+  rejected during that time.
+- A successful probe closes the breaker (`koda_circuit_breaker_state == 0`,
+  `system.circuit_closed`). A failed probe re-opens it for another
+  `reset_timeout` (`system.circuit_opened`).
+- A probe that has not reported within `reset_timeout` frees the slot, whether
+  it was lost or is still running, and the next call becomes another probe.
+  The Claude and Codex CLI breakers use a 60 s `reset_timeout`, while a CLI
+  run can last up to `CLAUDE_TIMEOUT`/`CODEX_TIMEOUT` (3600 s by default). A
+  long-running probe therefore lets one more call through every 60 s until a
+  probe reports.
+- The state flips to `half-open` only when a call arrives. A breaker with no
+  traffic keeps reporting `open` past `reset_timeout` until the next call, so
+  `/health` stays `degraded` and `KodaCircuitBreakerOpen` keeps firing for an
+  idle dependency.
+- The `browser` breaker is check-only. The browser tools never record an
+  outcome against it, so it never opens.
+
 ## Validation Gates
 
 | Gate | Required scenarios | Expected evidence |
