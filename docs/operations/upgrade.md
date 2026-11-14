@@ -138,10 +138,13 @@ npx are not in the image, and Gemini no longer falls back to
 
 Before a provider's first turn, Koda checks the installed binary
 against its contract in `koda/services/provider_cli_contract.py`: the
-version must equal the pin, `--help` must list every option Koda
-passes, and options that `--help` hides must be accepted by the
-parser. If any check fails, the provider is unavailable for turns
-and its health entry shows the reason:
+version must equal the pin, every option Koda passes must have its own
+entry in `--help` with each value Koda passes listed in that entry,
+and options that `--help` hides must be accepted by the parser. Each
+runner repeats the check once its cached result is 30 seconds old, so
+a binary replaced in place is probed again. If any check fails, the
+provider is unavailable for turns and its health entry shows the
+reason:
 
 | Reason | Meaning |
 |---|---|
@@ -152,11 +155,18 @@ and its health entry shows the reason:
 Koda never runs a turn on an unverified CLI. Rebuild or pull the
 images to get the pinned versions. Native (non-Docker) runs must
 install exactly the versions in `packages/provider-clis/package.json`.
+The `gemini_bin` system setting (`GEMINI_BIN`) is the path of one
+executable, the pinned `gemini` binary. A command line such as
+`npx -y @google/gemini-cli` is not a valid value: Koda reads the
+whole value as one path, finds no such executable, and treats the
+CLI as not installed.
 
 `python -m koda.services.provider_cli_contract` prints the check for
 every provider as JSON and exits non-zero on any mismatch. It runs
 only `--version`, `--help` and a parser check, with no model call and
-no credentials.
+no credentials. It starts each CLI the way the runners do: with the
+same command and the same allowlisted environment, so database,
+object-storage and other container secrets never reach the CLIs.
 
 ### Changing a pinned version
 

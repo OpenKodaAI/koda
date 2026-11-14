@@ -120,8 +120,10 @@ def _build_cmd(
         "--prompt",
         prompt,
     ]
-    provider_cli_contract.validate_args("gemini", args)
-    return [*resolve_provider_command("gemini"), *args]
+    cmd = [*resolve_provider_command("gemini"), *args]
+    # Everything after the executable is checked, including tokens that came with the command.
+    provider_cli_contract.validate_args("gemini", cmd[1:])
+    return cmd
 
 
 def _extract_text(value: Any) -> str:

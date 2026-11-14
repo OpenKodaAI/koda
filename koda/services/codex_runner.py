@@ -51,7 +51,11 @@ _RESULT_ERROR_PREFIX_PATTERN = re.compile(
     r"^(failed to |error:|api error:|usage:|\{.*\"type\"\s*:\s*\"error\")",
     re.IGNORECASE | re.DOTALL,
 )
-_CAPABILITY_CACHE: dict[TurnMode, ProviderCapabilities] = {}
+# Same TTL as Claude and Gemini: the CLI contract is re-checked (a stat while the binary is
+# unchanged), so an in-place upgrade or a transient probe failure does not stick for the
+# worker's life.
+_CAPABILITY_CACHE_TTL_SECONDS = 30.0
+_CAPABILITY_CACHE: dict[TurnMode, tuple[float, ProviderCapabilities]] = {}
 _CAPABILITY_LOCK = asyncio.Lock()
 _AUTH_CAPABILITY_CACHE: tuple[float, bool, str] | None = None
 # Contract scope (``codex exec`` vs ``codex exec resume``) that each turn mode's argv uses.
@@ -327,20 +331,21 @@ def _capability_from_contract(
 async def get_codex_capabilities(turn_mode: TurnMode) -> ProviderCapabilities:
     """Return cached Codex compatibility information for one turn mode.
 
-    The installed binary must match the pinned CLI contract before anything else runs.
+    The installed binary must match the pinned CLI contract before anything else runs. The
+    result is reused for ``_CAPABILITY_CACHE_TTL_SECONDS``, then checked again.
     """
-    cached = _CAPABILITY_CACHE.get(turn_mode)
-    if cached is None:
+    entry = _CAPABILITY_CACHE.get(turn_mode)
+    if entry is None or time.monotonic() - entry[0] >= _CAPABILITY_CACHE_TTL_SECONDS:
         async with _CAPABILITY_LOCK:
-            cached = _CAPABILITY_CACHE.get(turn_mode)
-            if cached is None:
+            entry = _CAPABILITY_CACHE.get(turn_mode)
+            if entry is None or time.monotonic() - entry[0] >= _CAPABILITY_CACHE_TTL_SECONDS:
                 check = await provider_cli_contract.verify_provider_cli(
                     "codex", (CODEX_BIN,), env=build_llm_subprocess_env(provider="codex")
                 )
-                cached = _capability_from_contract(turn_mode, check)
-                _CAPABILITY_CACHE[turn_mode] = cached
+                entry = (time.monotonic(), _capability_from_contract(turn_mode, check))
+                _CAPABILITY_CACHE[turn_mode] = entry
 
-    cached = cached.clone()
+    cached = entry[1].clone()
     if not cached.can_execute and cached.errors:
         # The binary is not the verified contract version; do not run anything else on it.
         return cached

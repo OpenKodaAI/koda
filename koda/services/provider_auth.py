@@ -445,13 +445,14 @@ def resolve_provider_command(provider_id: str, base_env: dict[str, str] | None =
             return parts or ("codex",)
         raise FileNotFoundError(executable)
 
+    # GEMINI_BIN is one executable path, never a command line: extra tokens would be argv
+    # outside the CLI contract, and a runner such as ``npx -y @google/gemini-cli`` would run
+    # whatever package version it resolves (ADR-002 AG-02).
     configured = str(env.get("GEMINI_BIN") or "").strip()
     if configured:
-        parts = tuple(shlex.split(configured))
-        executable = parts[0] if parts else ""
-        if executable and shutil.which(executable, path=env.get("PATH")):
-            return parts
-        raise FileNotFoundError(executable or "gemini")
+        if shutil.which(configured, path=env.get("PATH")):
+            return (configured,)
+        raise FileNotFoundError(configured)
     if shutil.which("gemini", path=env.get("PATH")):
         return ("gemini",)
     # Never fall back to an unpinned ``npx -y @google/gemini-cli`` (ADR-002 AG-02): a missing

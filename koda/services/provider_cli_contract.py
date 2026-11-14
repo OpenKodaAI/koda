@@ -6,9 +6,11 @@ ADR-002 §2.3 / AG-02. This module is the one table the CLI runners build argv f
   ``packages/provider-clis/package-lock.json``.
 * ``flags`` and ``config_keys`` are every token a runner may emit. ``validate_args`` refuses
   anything else, so a builder cannot emit a token that is not in the contract.
-* ``verify_provider_cli`` probes the installed binary for exactly those tokens. A different
-  version, a token missing from ``--help`` or a hidden option the parser rejects makes the
-  provider unavailable (``unavailable:unverified_cli_version``). It never widens.
+* ``verify_provider_cli`` probes the installed binary (one executable path, never a command
+  line such as ``npx -y <package>``) for exactly those tokens: each flag must have its own
+  option entry in ``--help`` and each choice must appear inside that entry. A different
+  version, a missing token or a hidden option the parser rejects makes the provider
+  unavailable (``unavailable:unverified_cli_version``). It never widens.
 * ``levels`` records, per provider built-in tool level, the argv tokens, whether the level
   is self-confined, and the native-resume override. The compilers of AG-23..25 consume it.
 
@@ -23,8 +25,9 @@ Evidence (2026-11-14):
   mismatch fails closed. (Reading the published packages found each token in the Codex
   binary's strings and the Gemini bundle's option table; that is not proof.) The ``-c`` flag
   is probed, but Codex config keys and Gemini settings keys cannot be seen in ``--help`` at
-  all: ``validate_args`` allows only the keys listed here, and they stay unverified until the
-  live provider checks (AG-24, AG-25).
+  all: ``validate_args`` allows only the keys listed here (the ones that keep MCP servers, web
+  search and the secret env passthrough off only at the value §2.3 fixes), and they stay
+  unverified until the live provider checks (AG-24, AG-25).
 
 Nothing here is proven self-confined or resume-safe yet: those values stay conservative
 until the live checks of AG-23..25 record the evidence.
@@ -86,6 +89,9 @@ class ConfigKeySpec:
     key: str
     scopes: tuple[str, ...]
     choices: tuple[str, ...] = ()
+    # The only value the key may take (ADR-002 §2.3 fixes it), written as in ``base_args``.
+    # Compared as a parsed literal, so ``{ }`` equals ``{}`` but ``"false"`` is not ``false``.
+    value: str | None = None
     legacy: bool = False
 
 
@@ -162,6 +168,7 @@ _CLAUDE_WRITE = f"{_CLAUDE_READ},Edit,Write"
 _CLAUDE_EXEC = f"{_CLAUDE_WRITE},Bash"
 _CODEX_SCOPES = ("exec", "exec_resume")
 _CODEX_EFFORTS = ("none", "minimal", "low", "medium", "high", "xhigh")
+_CODEX_ENV_EXCLUDE = '["*_API_KEY","*TOKEN*","*SECRET*","POSTGRES*","KNOWLEDGE_V2_S3*"]'
 _GEMINI_ALWAYS_EXCLUDED = ("web_fetch", "google_web_search", "save_memory")
 
 CLAUDE_CONTRACT = ProviderCliContract(
@@ -244,9 +251,11 @@ CODEX_CONTRACT = ProviderCliContract(
         ConfigKeySpec("developer_instructions", _CODEX_SCOPES, legacy=True),
         ConfigKeySpec("model_reasoning_effort", _CODEX_SCOPES, choices=_CODEX_EFFORTS),
         ConfigKeySpec("shell_environment_policy.inherit", _CODEX_SCOPES, choices=("core",)),
-        ConfigKeySpec("shell_environment_policy.exclude", _CODEX_SCOPES),
-        ConfigKeySpec("mcp_servers", _CODEX_SCOPES),
-        ConfigKeySpec("tools.web_search", _CODEX_SCOPES),
+        # These keep MCP servers, web search and the secret env passthrough off; no builder
+        # may emit another value for them.
+        ConfigKeySpec("shell_environment_policy.exclude", _CODEX_SCOPES, value=_CODEX_ENV_EXCLUDE),
+        ConfigKeySpec("mcp_servers", _CODEX_SCOPES, value="{}"),
+        ConfigKeySpec("tools.web_search", _CODEX_SCOPES, value="false"),
     ),
     base_args=(
         "-c",
@@ -254,7 +263,7 @@ CODEX_CONTRACT = ProviderCliContract(
         "-c",
         'shell_environment_policy.inherit="core"',
         "-c",
-        'shell_environment_policy.exclude=["*_API_KEY","*TOKEN*","*SECRET*","POSTGRES*","KNOWLEDGE_V2_S3*"]',
+        f"shell_environment_policy.exclude={_CODEX_ENV_EXCLUDE}",
         "-c",
         "mcp_servers={}",
         "-c",
@@ -349,6 +358,15 @@ def _scope_for(contract: ProviderCliContract, args: Sequence[str]) -> tuple[str,
     raise ProviderCliContractError(f"{contract.contract_id}: argv does not start with a contract subcommand")
 
 
+def _config_literal(raw_value: str) -> str:
+    """Canonical form of a ``-c`` value: the parsed JSON/TOML literal, else the raw string."""
+    try:
+        value = json.loads(raw_value)
+    except json.JSONDecodeError:
+        value = raw_value
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
 def _check_config_override(contract: ProviderCliContract, scope: str, override: str) -> None:
     key, sep, raw_value = override.partition("=")
     if not sep or not key:
@@ -356,6 +374,8 @@ def _check_config_override(contract: ProviderCliContract, scope: str, override: 
     spec = next((item for item in contract.config_keys if item.key == key and scope in item.scopes), None)
     if spec is None:
         raise ProviderCliContractError(f"{contract.contract_id}: config key {key!r} is not in the contract")
+    if spec.value is not None and _config_literal(raw_value) != _config_literal(spec.value):
+        raise ProviderCliContractError(f"{contract.contract_id}: {key} must be {spec.value}, not {raw_value}")
     if spec.choices:
         try:
             value = json.loads(raw_value)
@@ -470,6 +490,40 @@ def help_lists_token(help_text: str, token: str) -> bool:
     return re.search(rf"(?<![\w-]){re.escape(token)}(?![\w-])", help_text) is not None
 
 
+# An option line of ``--help``: indented a little, starting with ``-``; its names end at the
+# first run of two spaces (commander, yargs and clap all lay options out this way). Description
+# lines are indented further, so ``--plugin-dir A`` inside a description never starts an entry.
+_HELP_OPTION_LINE = re.compile(r"^(?P<indent> {0,8})(?P<names>-\S.*?)(?= {2,}|$)")
+
+
+def help_option_entries(help_text: str, token: str) -> list[str]:
+    """The ``--help`` entries that document option ``token``: from the option line that names
+    it up to the next option line or the next line that is not indented under it.
+
+    A choice counts only when it appears inside its own flag's entry, and a flag only when an
+    option line names it: a word elsewhere in the help (``~/.claude.json``, another option's
+    description) proves nothing.
+    """
+    lines = help_text.expandtabs().splitlines()
+    entries: list[str] = []
+    index = 0
+    while index < len(lines):
+        match = _HELP_OPTION_LINE.match(lines[index])
+        index += 1
+        if match is None or not help_lists_token(match.group("names"), token):
+            continue
+        indent = len(match.group("indent"))
+        entry = [lines[index - 1]]
+        while index < len(lines):
+            line = lines[index]
+            if line.strip() and (_HELP_OPTION_LINE.match(line) or len(line) - len(line.lstrip()) <= indent):
+                break
+            entry.append(line)
+            index += 1
+        entries.append("\n".join(entry))
+    return entries
+
+
 def parser_probe_args(contract: ProviderCliContract) -> tuple[str, ...]:
     """Arguments of the parser probe: the hidden flags, then an option that cannot exist."""
     if contract.parser_probe is None:
@@ -516,13 +570,9 @@ def clear_cli_contract_cache() -> None:
 
 def _fingerprint(contract: ProviderCliContract, command: Sequence[str], executable: str) -> tuple[Any, ...]:
     """Identify the installed binary so a replaced or upgraded CLI is probed again."""
-    parts: list[Any] = [contract.contract_id, tuple(command)]
-    for path in (executable, *command[1:]):
-        if os.path.isfile(path):
-            real = os.path.realpath(path)
-            stat = os.stat(real)
-            parts.append((real, stat.st_mtime_ns, stat.st_size))
-    return tuple(parts)
+    real = os.path.realpath(executable)
+    stat = os.stat(real)
+    return (contract.contract_id, tuple(command), real, stat.st_mtime_ns, stat.st_size)
 
 
 def _fail(contract: ProviderCliContract, reason: str, detail: str, **extra: Any) -> CliContractCheck:
@@ -541,10 +591,21 @@ async def verify_provider_cli(
 
     Runs ``--version``, each scope's ``--help`` and, for hidden options, a parser probe that
     stops before any model call. Only a fully verified result is cached, keyed by the binary.
+
+    ``command`` must be one executable path. A command line such as ``npx -y <package>`` is
+    refused: its extra tokens are argv outside the contract, and the binary fingerprint would
+    keep vouching for whatever package version the runner resolves later.
     """
     contract = get_contract(provider)
     if not command:
         return not_installed_check(contract.provider, contract.provider)
+    if len(command) != 1:
+        return _fail(
+            contract,
+            REASON_UNVERIFIED_CLI_VERSION,
+            f"Koda runs {contract.package} as one executable path, not the command line "
+            f"{' '.join(command)!r}. Point it at the pinned binary (packages/provider-clis).",
+        )
     search_path = (env if env is not None else os.environ).get("PATH")
     executable = shutil.which(command[0], path=search_path)
     if executable is None:
@@ -589,13 +650,14 @@ async def _probe(
         for spec in contract.flags:
             if scope_name not in spec.scopes or spec.hidden:
                 continue
-            if not help_lists_token(help_text, spec.token):
+            entries = help_option_entries(help_text, spec.token)
+            if not entries:
                 missing.append(MissingToken(scope_name, spec.token))
                 continue
             missing.extend(
                 MissingToken(scope_name, f"{spec.token}={choice}")
                 for choice in spec.choices
-                if not help_lists_token(help_text, choice)
+                if not any(help_lists_token(entry, choice) for entry in entries)
             )
 
     hidden = [spec for spec in contract.flags if spec.hidden]
@@ -644,16 +706,41 @@ async def _probe_hidden_flags(
 # --- Command-line check (CI contract job and the images) ------------------------------------
 
 
+def _runner_command(provider: str) -> tuple[str, ...]:
+    """The command each runner invokes its CLI with (``claude_runner``, ``codex_runner``,
+    ``gemini_runner``), so this check probes the same binary the runners would run."""
+    if provider == "codex":
+        from koda.config import CODEX_BIN
+
+        return (CODEX_BIN,)
+    if provider == "gemini":
+        from koda.services.provider_auth import resolve_provider_command
+
+        return resolve_provider_command("gemini")
+    return (provider,)
+
+
+async def _check_as_runner(provider: str) -> CliContractCheck:
+    """Probe one CLI with the runner's command and its allowlisted child env, never os.environ."""
+    from koda.services.provider_env import build_llm_subprocess_env
+
+    try:
+        command = _runner_command(provider)
+    except FileNotFoundError as exc:
+        return not_installed_check(provider, str(exc) or provider)
+    return await verify_provider_cli(provider, command, env=build_llm_subprocess_env(provider=provider))
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Probe the CLIs on PATH against the contract; print a JSON report; exit 1 unless all pass.
 
     No model is called and no credential is needed: only ``--version``, ``--help`` and the
-    parser probe run.
+    parser probe run, each with the same command and allowlisted env as the runner's probe.
     """
     del argv
 
     async def _run() -> list[CliContractCheck]:
-        return [await verify_provider_cli(provider, (provider,), env=os.environ) for provider in CONTRACTS]
+        return [await _check_as_runner(provider) for provider in CONTRACTS]
 
     checks = asyncio.run(_run())
     print(json.dumps([check.as_dict() for check in checks], indent=2))
