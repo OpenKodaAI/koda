@@ -194,9 +194,10 @@ triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
   hop. Requests from any other browser carry its address like every other auth call.
 - `gateway` (in either setting) is the container's IPv4 default gateway, which is where
   Docker's port proxy connects from: a reverse proxy on the Docker host reaches the
-  dashboard, and the API, from that address. A reverse proxy that forwards
-  `/api/control-plane/*` straight to the API, such as the bundled `proxy/nginx.conf`, needs
-  `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`; until then all of its clients share one
+  dashboard, and the API, from that address. Browser requests reach the API through the
+  dashboard. A reverse proxy that forwards requests straight to the API, as the bundled
+  `proxy/nginx.conf` does for API-token requests (`Authorization: Bearer`), needs
+  `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`; until then all of those clients share one
   bucket. A proxy on another host (`WEB_PUBLISH_ADDRESS`) is trusted by its IP:
   `WEB_TRUSTED_PROXIES=gateway,203.0.113.5`. `WEB_TRUSTED_PROXIES` takes no hostnames, so a
   proxy container on the Compose network is trusted by a fixed `ipv4_address`
