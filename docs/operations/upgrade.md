@@ -77,6 +77,20 @@ existing rules are validated and simulated:
   case. When two rules with the winning decision match different
   spellings, the higher priority (then the lower name) decides, as for
   any other tie.
+- **A path rule also covers a listing, search, grep or move of an
+  ancestor.** `file_list`, `file_search`, `file_grep` and `file_move`
+  act on everything below their path (a moved directory takes its
+  contents along, and a move can create a directory's contents at its
+  destination). For these tools a `deny`, `require_approval` or
+  `allow_with_preview` path rule now also matches when its path lies
+  below the call's path. So `file_grep` with its `path` set to the
+  working directory, or `file_search` from `/`, is denied by a deny rule
+  on a directory inside it, as `file_grep` without a `path` already was,
+  and moving a directory that holds a gated path, or onto one, needs
+  that rule's approval or preview. A rule path with a wildcard segment
+  counts when the call's path is at, above or below the segments before
+  the wildcard, and one that starts with `*` always counts. An `allow`
+  path rule still has to cover the call's path itself.
 - **A path that is not absolute fails closed.** The worker's tools
   expand `~` and resolve a relative path against the agent's working
   directory, which the rule engine does not know. So a path that starts

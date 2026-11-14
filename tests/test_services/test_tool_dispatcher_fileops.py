@@ -822,6 +822,68 @@ class TestGrantChecksTheCanonicalCallPath:
         assert "canary-other" not in worker.output
 
 
+class TestPathRulesCoverWhatASubtreeToolReads:
+    """A restrictive path rule on a directory decides a grep, search, listing or move of an ancestor of it."""
+
+    @pytest.fixture
+    def work(self, tmp_path, monkeypatch):
+        work = tmp_path.resolve() / "work"
+        (work / "secrets").mkdir(parents=True)
+        (work / "secrets" / "notes.txt").write_text("PRIVATE canary-secret\n")
+        (work / "src").mkdir()
+        (work / "src" / "main.py").write_text("PRIVATE visible\n")
+        monkeypatch.chdir(tmp_path)
+        policy = {
+            "version": 1,
+            "rules": [
+                {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+                {"name": "deny-secrets", "match": {"path": str(work / "secrets")}, "decision": "deny"},
+            ],
+        }
+        monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+        return work
+
+    _GRANT = {"integration_grants": {"fileops": {"allow_actions": ["fileops.*"]}}}
+
+    async def _execute(self, tool: str, params: dict, work):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", self._GRANT),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(str(work)))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [
+            ("file_grep", {"pattern": "PRIVATE", "path": "{work}"}),
+            ("file_grep", {"pattern": "PRIVATE", "path": "."}),
+            ("file_grep", {"pattern": "PRIVATE"}),
+            ("file_search", {"pattern": "*.txt", "path": "{work}"}),
+            ("file_list", {"path": "{work}"}),
+            ("file_move", {"source": "{work}", "destination": "{work}/../moved"}),
+        ],
+    )
+    async def test_naming_an_ancestor_does_not_step_around_the_deny(self, work, tool, params):
+        result = await self._execute(tool, {k: v.format(work=work) for k, v in params.items()}, work)
+
+        assert not result.success, result.output
+        assert result.output == "Matched execution-policy rule."
+        assert "canary-secret" not in result.output
+        assert (work / "secrets" / "notes.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_a_grep_beside_the_denied_directory_still_runs(self, work):
+        result = await self._execute("file_grep", {"pattern": "PRIVATE", "path": str(work / "src")}, work)
+
+        assert result.success, result.output
+        assert "visible" in result.output
+
+
 class TestWorkDirUnderASensitiveRoot:
     """The Docker default work dir (HOME=/var/lib/koda/runtime/home) is under /var/lib, a SENSITIVE_DIRS root.
 

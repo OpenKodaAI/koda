@@ -28,6 +28,14 @@ Rule semantics:
   of ``git_diff`` and ``git_log`` and ``job_create``'s ``work_dir`` are not
   evaluated, nor is anything a shell command touches, so a path rule does not
   keep those tools out of a directory (owner: AG-12).
+* ``file_list``, ``file_search``, ``file_grep`` and both ends of ``file_move`` act
+  on everything below their path (:data:`koda.agent_contract.SUBTREE_PATH_TOOLS`).
+  For them a deny, require_approval or allow_with_preview path rule also matches
+  when its path lies below a spelling of the call's path, so a listing, search,
+  grep or move of an ancestor of the rule's directory does not step around it. A
+  rule path with a wildcard segment counts when the call's path is at, above or
+  below the segments before the wildcard, and one that starts with ``*`` always
+  counts. An allow path rule must still cover the call's path itself.
 * An absolute path is evaluated once for each of its spellings: lexically
   normalized (``.``, ``..`` and repeated ``/`` resolved) and as written, each
   compared with case and ignoring case. The as-written spelling is the one
@@ -68,6 +76,7 @@ from typing import Any
 
 from koda.agent_contract import (
     CORE_TOOL_CATALOG,
+    SUBTREE_PATH_TOOLS,
     ActionEnvelope,
     IntegrationGrantDecision,
     is_tool_allowed_by_secure_default,
@@ -708,12 +717,53 @@ def _path_pattern_matches(path: str, pattern: str) -> bool:
     return fnmatchcase(path, base) or fnmatchcase(path, base.rstrip("/") + "/*")
 
 
-def _path_matches(spelling: _PathSpelling | None, patterns: tuple[str, ...], *, decision: str) -> bool:
+def _within(path: str, root: str) -> bool:
+    """Return whether ``path`` is ``root`` or below it, by whole path segment."""
+    return path == root or root == "/" or path.startswith(root + "/")
+
+
+def _path_pattern_reaches_below(path: str, pattern: str) -> bool:
+    """Return whether ``pattern`` can match a path strictly below ``path``.
+
+    ``pattern`` is normalized (:func:`_normalize_path_pattern`). Its fixed part is the
+    segments before its first segment with a wildcard; every path it matches starts with
+    that part. Without a wildcard, the pattern itself must lie strictly below ``path``.
+    With one, a match can lie below ``path`` when the fixed part is ``path``, below it or
+    above it: ``*`` also matches ``/``, so the wildcard can stand for several segments,
+    and the check fails closed instead of reasoning about what it can match. A pattern
+    that starts with ``*`` matches at any depth, so it can lie below any path.
+    """
+    if not pattern.startswith("/"):
+        return True
+    root = path.rstrip("/") or "/"
+    fixed: list[str] = []
+    for segment in pattern.strip("/").split("/"):
+        if _GLOB_CHARACTERS & set(segment):
+            prefix = "/" + "/".join(fixed)
+            return _within(prefix, root) or _within(root, prefix)
+        if segment:
+            fixed.append(segment)
+    prefix = "/" + "/".join(fixed)
+    return prefix != root and _within(prefix, root)
+
+
+def _path_matches(
+    spelling: _PathSpelling | None,
+    patterns: tuple[str, ...],
+    *,
+    decision: str,
+    subtree: bool = False,
+) -> bool:
     """Return whether one spelling of a call's path matches a ``path`` selector of a rule with ``decision``.
 
     A call without a path matches no path selector. A path the engine cannot place
     matches the path selector of every deny, require_approval and allow_with_preview
     rule, and of no allow rule, so it fails closed whatever the worker resolves it to.
+    For a tool that acts on everything below its path (``subtree``, see
+    :data:`koda.agent_contract.SUBTREE_PATH_TOOLS`), a deny, require_approval or
+    allow_with_preview rule also matches when its path can lie below the call's path
+    (:func:`_path_pattern_reaches_below`), so naming an ancestor of a restrictive rule's
+    directory does not step around it; an allow rule must still cover the path itself.
     """
     if spelling is None:
         return False
@@ -722,7 +772,9 @@ def _path_matches(spelling: _PathSpelling | None, patterns: tuple[str, ...], *, 
     path = spelling.path
     if spelling.ignore_case:
         path, patterns = path.lower(), tuple(pattern.lower() for pattern in patterns)
-    return any(_path_pattern_matches(path, pattern) for pattern in patterns)
+    if any(_path_pattern_matches(path, pattern) for pattern in patterns):
+        return True
+    return subtree and decision != "allow" and any(_path_pattern_reaches_below(path, pattern) for pattern in patterns)
 
 
 def _effect_tags_match(effect_tags: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
@@ -740,7 +792,12 @@ def _selector_matches(
     path_spelling: _PathSpelling | None,
 ) -> bool:
     if key == "path":
-        return _path_matches(path_spelling, _normalize_match_values(value, fold_case=False), decision=decision)
+        return _path_matches(
+            path_spelling,
+            _normalize_match_values(value, fold_case=False),
+            decision=decision,
+            subtree=envelope.tool_id in SUBTREE_PATH_TOOLS,
+        )
     patterns = _normalize_match_values(value)
     if key == "effect_tags":
         return _effect_tags_match(envelope.effect_tags, patterns)

@@ -972,6 +972,151 @@
       },
       "action": {"tool_id": "browser_upload", "params": {"selector": "#file", "file_path": "/srv/work/secrets/key.pem"}},
       "expected": {"decision": "require_approval", "reason_code": "human_factor_required", "rule_id": null}
+    },
+    {
+      "id": "path-deny-covers-a-grep-of-an-ancestor",
+      "description": "file_grep reads every file below its path, so a deny path rule on a directory below the call's path decides it, as it decides file_grep without a path.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-secrets", "match": {"path": "/srv/work/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_grep", "params": {"pattern": "PRIVATE KEY", "path": "/srv/work"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-secrets"}
+    },
+    {
+      "id": "path-deny-covers-a-search-from-the-root",
+      "description": "file_search walks every directory below its path; a search from / reaches every restrictive path rule.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-secrets", "match": {"path": "/srv/work/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_search", "params": {"pattern": "*.pem", "path": "/"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-secrets"}
+    },
+    {
+      "id": "path-deny-covers-a-listing-of-an-ancestor",
+      "description": "file_list lists the entries below its path, so a deny path rule below the call's path decides it.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-secrets", "match": {"path": "/srv/work/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_list", "params": {"path": "/srv/work/"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-secrets"}
+    },
+    {
+      "id": "path-deny-covers-a-move-of-an-ancestor",
+      "description": "file_move moves a directory with everything below it, so a deny path rule below the source decides the move.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-data-secrets", "match": {"path": "/srv/work/data/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_move", "params": {"source": "/srv/work/data", "destination": "/srv/work/public/data"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-data-secrets"}
+    },
+    {
+      "id": "path-approval-covers-a-move-onto-an-ancestor",
+      "description": "A file_move whose destination is an ancestor of an approval-gated path can create that path, so the require_approval rule decides it.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "approve-release-keys", "match": {"path": "/srv/work/release/keys"}, "decision": "require_approval"}
+        ]
+      },
+      "action": {"tool_id": "file_move", "params": {"source": "/srv/stage/release", "destination": "/srv/work/release"}},
+      "expected": {"decision": "require_approval", "reason_code": "rule_match", "rule_id": "approve-release-keys"}
+    },
+    {
+      "id": "path-deny-with-a-wildcard-covers-a-grep-it-could-reach",
+      "description": "A rule path with a wildcard segment counts as below a subtree call whose path is above, at or below its fixed part (/srv), since the wildcard can stand for several segments.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-any-secrets", "match": {"path": "/srv/*/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_grep", "params": {"pattern": "PRIVATE KEY", "path": "/srv/work/app"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-any-secrets"}
+    },
+    {
+      "id": "path-deny-starting-with-a-wildcard-covers-every-subtree-call",
+      "description": "A rule path that starts with * matches at any depth, so it can lie below any subtree call.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-pem-dirs", "match": {"path": "*/certs"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_search", "params": {"pattern": "*.pem", "path": "/opt/app"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-pem-dirs"}
+    },
+    {
+      "id": "path-deny-below-a-grep-matches-in-another-case",
+      "description": "The below check uses every spelling of the call's path, ignoring case too.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-secrets", "match": {"path": "/srv/Work/Secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_grep", "params": {"pattern": "PRIVATE KEY", "path": "/srv/work"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-secrets"}
+    },
+    {
+      "id": "path-deny-below-the-path-does-not-decide-a-single-file-tool",
+      "description": "file_read acts on its path only; a deny path rule below it does not decide the call.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-secrets", "match": {"path": "/srv/work/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_read", "params": {"path": "/srv/work"}},
+      "expected": {"decision": "allow", "reason_code": "rule_match", "rule_id": "allow-file-tools"}
+    },
+    {
+      "id": "path-deny-on-a-sibling-does-not-cover-a-grep",
+      "description": "A deny path rule that is neither at, below nor above the call's path does not decide a subtree call.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-other-secrets", "match": {"path": "/srv/other/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_grep", "params": {"pattern": "PRIVATE KEY", "path": "/srv/work"}},
+      "expected": {"decision": "allow", "reason_code": "rule_match", "rule_id": "allow-file-tools"}
+    },
+    {
+      "id": "path-allow-below-a-grep-does-not-cover-it",
+      "description": "Only restrictive path rules match below a subtree call; an allow path rule must cover the call's path itself.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-public-greps", "match": {"tool_id": "file_grep", "path": "/srv/work/public"}, "decision": "allow"},
+          {"name": "preview-greps", "match": {"tool_id": "file_grep"}, "decision": "allow_with_preview"}
+        ]
+      },
+      "action": {"tool_id": "file_grep", "params": {"pattern": "TODO", "path": "/srv/work"}},
+      "expected": {"decision": "allow_with_preview", "reason_code": "rule_match", "rule_id": "preview-greps"}
     }
   ]
 }
