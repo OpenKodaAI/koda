@@ -8,19 +8,21 @@ stack answers in place of the handler, so no handler runs and nothing is read or
 Which routes are public is observed, never listed here. The observation is compared with
 the records that must agree with it:
 
-- the backend allowlist, ``_PUBLIC_CONTROL_PLANE_API_PATHS``;
-- the operations marked ``security: []`` in ``docs/openapi/control-plane.json``;
-- the dashboard lists in ``apps/web/src/proxy.ts`` and the BFF catch-all route.
+- the backend table of public routes and their methods, ``_PUBLIC_CONTROL_PLANE_API_ROUTES``;
+- the operations ``docs/openapi/control-plane.json`` lets through without a token;
+- the dashboard list in ``apps/web/src/lib/public-control-plane-paths.ts``, which the
+  Next.js proxy and the BFF catch-all both read.
 
 A new route that answers without credentials therefore fails here until the OpenAPI
-document marks it public.
+document marks it public. HEAD routes have no OpenAPI operation of their own; each must
+answer exactly like its GET twin.
 
-One request per route cannot see every URL a dynamic route accepts. The middleware lets a
-request through when its decoded path is an allowlist entry or sits under one, while the
-router fills a parameter from the still-encoded path, where ``%2F`` stays one segment. A
-parameter that starts at or before the end of an allowlist entry can therefore spell that
-entry, so such routes are refused on their shape. HEAD routes have no OpenAPI operation of
-their own; each must answer exactly like its GET twin.
+The auth middleware skips the bearer check only when the router resolved the request to a
+public route, with a method the table names for it. One request per route cannot show that
+for every URL, so other spellings of each public path, and routes added under or beside
+one, are sent byte for byte and must not reach a handler without a session.
+``tests/test_control_plane_public_paths.py`` checks the same rule on a minimal app and
+compares the backend and dashboard lists with each other.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ import urllib.parse
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 from unittest.mock import patch
 
@@ -46,9 +49,9 @@ from koda.control_plane.supervisor import ControlPlaneSupervisor
 
 ROOT = Path(__file__).resolve().parents[1]
 OPENAPI_PATH = ROOT / "docs" / "openapi" / "control-plane.json"
+WEB_PUBLIC_PATHS_PATH = ROOT / "apps" / "web" / "src" / "lib" / "public-control-plane-paths.ts"
 WEB_PROXY_PATH = ROOT / "apps" / "web" / "src" / "proxy.ts"
-WEB_APP_DIR = ROOT / "apps" / "web" / "src" / "app"
-WEB_CATCH_ALL_PATH = WEB_APP_DIR / "api" / "control-plane" / "[...path]" / "route.ts"
+WEB_CATCH_ALL_PATH = ROOT / "apps" / "web" / "src" / "app" / "api" / "control-plane" / "[...path]" / "route.ts"
 
 CONTROL_PLANE_PREFIX = "/api/control-plane/"
 OPERATOR_TOKEN = "route-matrix-operator-token"
@@ -56,6 +59,8 @@ UNKNOWN_TOKEN = "route-matrix-unknown-token"
 REACHED_HEADER = "X-Route-Matrix-Reached"
 UNAUTHORIZED_BODY = {"error": "operator session is required"}
 OPENAPI_METHODS = frozenset({"get", "put", "post", "delete", "patch"})
+# Methods sent to each public path besides the ones it is public for.
+VARIANT_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 # A protected route that the traversal variants below aim at.
 PROTECTED_TARGET = "/api/control-plane/agents"
 
@@ -66,15 +71,6 @@ SUPERVISOR_INTERNAL_ROUTES = frozenset(
         ("GET", "/cluster/status"),
         ("POST", "/cluster/drain"),
         ("POST", "/cluster/undrain"),
-    }
-)
-
-# Paths the BFF catch-all forwards without an operator session although the backend
-# requires one. New drift fails the test; resolved drift does not.
-KNOWN_BFF_ONLY_PUBLIC_PATHS = frozenset(
-    {
-        # The catch-all forwards it without a session and the backend answers 401 (F-SET-16).
-        "/api/control-plane/onboarding/readiness",
     }
 )
 
@@ -189,6 +185,31 @@ async def _probe_routes(app: web.Application, routes: Iterable[web.AbstractRoute
     return probes
 
 
+async def _raw_request(
+    server: TestServer, method: str, target: str, token: str | None = None
+) -> tuple[int, str | None]:
+    """Send ``target`` byte for byte; the aiohttp client would normalise dot segments.
+
+    Returns the status and the route the probe middleware answered for, if any.
+    """
+    rate_limit.clear_limiters()
+    authorization = f"Authorization: Bearer {token}\r\n" if token else ""
+    request = f"{method} {target} HTTP/1.1\r\nHost: matrix\r\n{authorization}Connection: close\r\n\r\n"
+    reader, writer = await asyncio.open_connection(server.host, server.port)
+    try:
+        writer.write(request.encode("ascii"))
+        await writer.drain()
+        raw = await reader.read()
+    finally:
+        writer.close()
+        await writer.wait_closed()
+    rate_limit.clear_limiters()
+    head = raw.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
+    status = int(head[0].split(" ", 2)[1])
+    headers = dict(line.split(": ", 1) for line in head[1:] if ": " in line)
+    return status, headers.get(REACHED_HEADER)
+
+
 @dataclass(frozen=True)
 class RouteMatrix:
     registered_routes: int
@@ -196,6 +217,11 @@ class RouteMatrix:
 
     def without_head(self) -> dict[tuple[str, str], RouteProbe]:
         return {key: probe for key, probe in self.probes.items() if probe.method != "HEAD"}
+
+    def public_under_control_plane(self) -> set[tuple[str, str]]:
+        return {
+            key for key, probe in self.probes.items() if probe.public and probe.path.startswith(CONTROL_PLANE_PREFIX)
+        }
 
 
 @pytest.fixture(scope="module")
@@ -257,35 +283,21 @@ def _head_drift(probes: dict[tuple[str, str], RouteProbe]) -> list[str]:
     return problems
 
 
-def _dynamic_routes_that_can_spell_a_public_path(
-    resources: Iterable[web.AbstractResource], public_paths: Iterable[str]
-) -> list[str]:
-    """Dynamic routes with a parameter that some value turns into an allowlisted path.
-
-    ``literal`` is the route up to its first parameter. When ``P + "/"`` starts with it, a
-    value (with ``%2F`` for each slash) makes the decoded path ``P`` or ``P/...``.
-    """
-    problems = []
-    entries = sorted(public_paths)
-    for resource in resources:
-        if not isinstance(resource, web.DynamicResource):
-            continue
-        literal = resource.canonical.partition("{")[0]
-        problems += [
-            f"{resource.canonical}: a parameter can spell the public path {public}"
-            for public in entries
-            if f"{public}/".startswith(literal)
-        ]
-    return problems
-
-
 def _ts_string_set(path: Path, const_name: str) -> set[str]:
     text = path.read_text(encoding="utf-8")
-    match = re.search(rf"const {const_name} = new Set\(\[(.*?)\]\)", text, re.DOTALL)
+    match = re.search(rf"const {const_name}\b[^=]*= new Set\(\[(.*?)\]\)", text, re.DOTALL)
     assert match, f"{const_name} not found in {path.relative_to(ROOT)}"
     entries = set(re.findall(r'"([^"]+)"', match.group(1)))
     assert entries, f"{const_name} in {path.relative_to(ROOT)} is empty"
     return entries
+
+
+def _backend_public_routes() -> dict[str, frozenset[str]]:
+    return dict(control_plane_api._PUBLIC_CONTROL_PLANE_API_ROUTES)
+
+
+def _backend_public_operations() -> set[tuple[str, str]]:
+    return {(method, path) for path, methods in _backend_public_routes().items() for method in methods}
 
 
 def _backend_allowlist() -> set[str]:
@@ -330,16 +342,6 @@ def test_head_routes_answer_like_their_get_twin(route_matrix: RouteMatrix) -> No
     assert problems == [], "\n".join(problems)
 
 
-def test_no_dynamic_route_can_spell_a_public_path() -> None:
-    resources = list(_build_supervisor_app().router.resources())
-    assert any(isinstance(resource, web.DynamicResource) for resource in resources)
-    problems = _dynamic_routes_that_can_spell_a_public_path(resources, _backend_allowlist())
-    assert problems == [], (
-        "the auth middleware would let some values of these parameters through without credentials; "
-        "give each route a literal part that leaves every allowlist entry first:\n" + "\n".join(problems)
-    )
-
-
 def test_supervisor_internal_routes_are_registered_and_left_out_of_openapi(route_matrix: RouteMatrix) -> None:
     openapi = _openapi_public_operations()
     for key in SUPERVISOR_INTERNAL_ROUTES:
@@ -348,36 +350,35 @@ def test_supervisor_internal_routes_are_registered_and_left_out_of_openapi(route
 
 
 def test_backend_allowlist_equals_openapi_security_none_set() -> None:
+    """The OpenAPI lets exactly the table's methods through without a token, path by path."""
     documented_public = {
-        path
-        for (_method, path), public in _openapi_public_operations().items()
-        if public and path.startswith(CONTROL_PLANE_PREFIX)
+        key
+        for key, public in _openapi_public_operations().items()
+        if public and key[1].startswith(CONTROL_PLANE_PREFIX)
     }
-    assert _backend_allowlist() == documented_public
+    assert {key for key in _backend_public_operations() if key[0] != "HEAD"} == documented_public
 
 
-def test_backend_allowlist_entries_are_registered_public_routes(route_matrix: RouteMatrix) -> None:
-    public_paths = {probe.path for probe in route_matrix.without_head().values() if probe.public}
-    assert _backend_allowlist() - public_paths == set(), "allowlist entries that match no registered route"
+def test_backend_public_routes_are_exactly_the_routes_answering_without_credentials(
+    route_matrix: RouteMatrix,
+) -> None:
+    observed = route_matrix.public_under_control_plane()
+    backend = _backend_public_operations()
+    assert backend - observed == set(), "public table entries that no registered route answers anonymously"
+    assert observed - backend == set(), "control-plane routes that answer anonymously but are not in the public table"
 
 
-def test_web_proxy_public_list_equals_backend_allowlist() -> None:
-    assert _ts_string_set(WEB_PROXY_PATH, "PUBLIC_CONTROL_PLANE_PATHS") == _backend_allowlist()
-
-
-def test_bff_catch_all_public_list_differs_from_backend_only_as_recorded() -> None:
-    catch_all = {
-        f"{CONTROL_PLANE_PREFIX}{entry}" for entry in _ts_string_set(WEB_CATCH_ALL_PATH, "PUBLIC_CONTROL_PLANE_PATHS")
-    }
-    backend = _backend_allowlist()
-
-    assert catch_all - backend <= KNOWN_BFF_ONLY_PUBLIC_PATHS, "new BFF-only public path"
-    # A public backend path the catch-all would reject must have its own BFF route,
-    # which Next.js serves before the catch-all.
-    missing_routes = [
-        path for path in sorted(backend - catch_all) if not (WEB_APP_DIR / path.lstrip("/") / "route.ts").is_file()
-    ]
-    assert missing_routes == [], "public backend paths that the dashboard rejects before login"
+def test_dashboard_public_list_equals_the_paths_answering_without_credentials(route_matrix: RouteMatrix) -> None:
+    observed = {path for _method, path in route_matrix.public_under_control_plane()}
+    assert _ts_string_set(WEB_PUBLIC_PATHS_PATH, "PUBLIC_CONTROL_PLANE_API_PATHS") == observed
+    # The proxy and the BFF catch-all gate on that list, not on a copy of their own.
+    shared_import = re.compile(
+        r'import \{[^}]*\bisPublicControlPlaneApiPath\b[^}]*\} from "@/lib/public-control-plane-paths";'
+    )
+    for gate in (WEB_PROXY_PATH, WEB_CATCH_ALL_PATH):
+        text = gate.read_text(encoding="utf-8")
+        assert shared_import.search(text), f"{gate.relative_to(ROOT)} does not import the shared list"
+        assert "isPublicControlPlaneApiPath(" in text, f"{gate.relative_to(ROOT)} does not gate on the shared list"
 
 
 @pytest.mark.xfail(
@@ -389,66 +390,91 @@ def test_cluster_drain_endpoints_require_an_operator_session(route_matrix: Route
     assert not route_matrix.probes[("POST", "/cluster/undrain")].public
 
 
+async def _unreachable_handler(_request: web.Request) -> web.Response:
+    raise AssertionError("the probe answers before any handler runs")
+
+
 async def test_matrix_flags_new_routes_that_answer_without_credentials() -> None:
     """Adding an unauthenticated route must fail the matrix, even when it is documented."""
-
-    async def new_handler(_request: web.Request) -> web.Response:
-        raise AssertionError("the probe answers before any handler runs")
-
     app = _build_supervisor_app()
-    under_public_prefix = f"{sorted(_backend_allowlist())[0]}/details"
+    made_public = f"{CONTROL_PLANE_PREFIX}matrix-public"
     new_routes = [
-        app.router.add_get(under_public_prefix, new_handler),
-        app.router.add_get("/debug/state", new_handler),
-        app.router.add_get("/api/control-plane/matrix-new", new_handler),
+        app.router.add_get("/debug/state", _unreachable_handler),
+        app.router.add_get(made_public, _unreachable_handler),
+        app.router.add_get(f"{CONTROL_PLANE_PREFIX}matrix-new", _unreachable_handler),
     ]
-    probes = await _probe_routes(app, new_routes)
+    public_routes = MappingProxyType({**_backend_public_routes(), made_public: frozenset({"GET"})})
+    with patch.object(control_plane_api, "_PUBLIC_CONTROL_PLANE_API_ROUTES", public_routes):
+        probes = await _probe_routes(app, new_routes)
 
     # The author documents all three in the OpenAPI as ordinary, bearer-protected routes.
     assert _openapi_drift(probes, {key: False for key in probes}) == [
-        f"GET {under_public_prefix}: answers without credentials but the OpenAPI requires bearerAuth",
+        f"GET {made_public}: answers without credentials but the OpenAPI requires bearerAuth",
         "GET /debug/state: answers without credentials but the OpenAPI requires bearerAuth",
     ]
     # Left undocumented, all three fail.
     assert len(_openapi_drift(probes, {})) == 3
 
 
-async def test_matrix_flags_dynamic_routes_whose_parameter_can_spell_a_public_path() -> None:
-    """The sample request of such a route gets 401; other values reach the handler anonymously."""
+async def test_routes_added_under_or_beside_a_public_path_need_a_session() -> None:
+    """A route cannot take over a public path, whatever URL the router resolves to it.
 
-    async def new_handler(_request: web.Request) -> web.Response:
-        raise AssertionError("the probe answers before any handler runs")
-
+    Each URL below is, or decodes to, a public path or a path under one, and the router
+    resolves it to a new route that the public table does not name. Matching the decoded path by prefix would let
+    every one of them through without credentials while the route's one sample request got 401.
+    """
     public = sorted(_backend_allowlist())[0]
     parent, _, last = public.rpartition("/")
     encoded_tail = urllib.parse.quote(public.removeprefix(CONTROL_PLANE_PREFIX), safe="")
-    # (route, a URL of that route that the middleware treats as public)
-    aligned = [
-        (f"{parent}/{{provider}}/start", f"{parent}/{last}/start"),
-        (f"{CONTROL_PLANE_PREFIX}{{section}}/items", f"{CONTROL_PLANE_PREFIX}{encoded_tail}/items"),
-        (f"{public}{{suffix}}", f"{public}%2Fdetails"),
-    ]
-    clear = f"{PROTECTED_TARGET}/{{item}}/details"
+    other_method = next(method for method in VARIANT_METHODS if method not in _backend_public_routes()[public])
 
     app = _build_supervisor_app()
-    new_routes = [app.router.add_get(path, new_handler) for path, _ in aligned]
-    new_routes.append(app.router.add_get(clear, new_handler))
+    router = app.router
+    # (new route, a URL the router resolves to it)
+    added = [
+        (router.add_get(f"{public}/details", _unreachable_handler), f"{public}/details"),
+        (router.add_route(other_method, public, _unreachable_handler), public),
+        (router.add_get(f"{parent}/{{provider}}/start", _unreachable_handler), f"{parent}/{last}/start"),
+        # %2F stays inside one segment when the router matches, and decodes to "/" in the path.
+        (
+            router.add_get(f"{CONTROL_PLANE_PREFIX}{{section}}", _unreachable_handler),
+            f"{CONTROL_PLANE_PREFIX}{encoded_tail}",
+        ),
+        (
+            router.add_get(f"{CONTROL_PLANE_PREFIX}{{section}}/items", _unreachable_handler),
+            f"{CONTROL_PLANE_PREFIX}{encoded_tail}/items",
+        ),
+        (router.add_get(f"{public}{{suffix}}", _unreachable_handler), f"{public}%2Fdetails"),
+    ]
+    # A sub-application's routes go through the same middleware stack, and the matrix lists them.
+    sub_app = web.Application()
+    added.append((sub_app.router.add_get("/{provider}/settings", _unreachable_handler), f"{parent}/{last}/settings"))
+    app.add_subapp(parent, sub_app)
+    new_routes = [route for route, _url in added]
+    assert set(new_routes) <= set(app.router.routes())
+    identities = [f"{route.method} {route.resource.canonical}" for route in new_routes if route.resource is not None]
+    assert len(identities) == len(added)
 
-    assert _dynamic_routes_that_can_spell_a_public_path(
-        [route.resource for route in new_routes if route.resource is not None], [public]
-    ) == [f"{path}: a parameter can spell the public path {public}" for path, _ in aligned]
-
-    # The one-request-per-route matrix sees nothing wrong with any of them...
-    probes = await _probe_routes(app, new_routes)
-    assert all(not probe.public for probe in probes.values())
-    assert _openapi_drift(probes, {key: False for key in probes}) == []
-    # ...yet each aligned route reaches its handler without credentials.
-    async with TestServer(app) as server:
-        for path, url in aligned:
-            rate_limit.clear_limiters()
-            status, headers = await _raw_get(server, url)
-            assert (status, headers.get(REACHED_HEADER)) == (204, f"GET {path}"), url
-    rate_limit.clear_limiters()
+    probes = {probe.identity: probe for probe in (await _probe_routes(app, new_routes)).values()}
+    observed = []
+    with patch.object(control_plane_api, "_auth_service", _StubAuthService):
+        async with TestServer(app) as server:
+            for (route, url), identity in zip(added, identities, strict=True):
+                observed.append(
+                    (
+                        identity,
+                        (probes[identity].anonymous_status, probes[identity].operator_reached),
+                        url,
+                        await _raw_request(server, route.method, url, OPERATOR_TOKEN),
+                        await _raw_request(server, route.method, url),
+                    )
+                )
+    # The sample request needs a session. So does the URL: an operator session shows that it
+    # resolves to the new route, and without one it gets 401.
+    assert observed == [
+        (identity, (401, identity), url, (204, identity), (401, None))
+        for (_route, url), identity in zip(added, identities, strict=True)
+    ]
 
 
 async def test_matrix_flags_head_requests_that_skip_the_auth_check() -> None:
@@ -477,57 +503,45 @@ async def test_matrix_flags_head_requests_that_skip_the_auth_check() -> None:
     ]
 
 
-def _variant_cases() -> list[tuple[str, int]]:
-    """``(request target, expected status)``; none of them may reach a handler anonymously."""
+def _variant_cases() -> list[tuple[str, str, int]]:
+    """``(method, request target, expected status)``; none of them may reach a handler anonymously."""
     target_tail = PROTECTED_TARGET.removeprefix(CONTROL_PLANE_PREFIX)
-    cases: list[tuple[str, int]] = []
-    for public in sorted(_backend_allowlist()):
+    cases: list[tuple[str, str, int]] = []
+    for public, methods in sorted(_backend_public_routes().items()):
         parent, _, last = public.rpartition("/")
         ups = "/".join([".."] * len(public.removeprefix(CONTROL_PLANE_PREFIX).split("/")))
         cases += [
-            # A sub-path of an allowlist entry is public by prefix, and nothing is registered there.
-            (f"{public}/x", 404),
-            (f"{public}/", 404),
+            # Public paths match exactly: a sub-path or a trailing slash resolves to no public route.
+            ("GET", f"{public}/x", 401),
+            ("GET", f"{public}/", 401),
             # A longer or differently cased name is not the entry.
-            (f"{public}x", 401),
-            (f"{public};x", 401),
-            (f"{parent}/{last.upper()}", 401),
-            (public.upper(), 404),
+            ("GET", f"{public}x", 401),
+            ("GET", f"{public};x", 401),
+            ("GET", f"{parent}/{last.upper()}", 401),
+            # Outside the case-sensitive /api/control-plane/ prefix, where nothing is registered.
+            ("GET", public.upper(), 404),
             # Dot segments from the public entry to a protected route, plain and encoded.
-            (f"{public}/{ups}/{target_tail}", 404),
-            (f"{public}/{ups.replace('..', '%2e%2e')}/{target_tail}", 404),
-            (f"{public}%2F{ups.replace('/', '%2F')}%2F{target_tail}", 404),
+            # The server does not resolve them, so they match no route.
+            ("GET", f"{public}/{ups}/{target_tail}", 401),
+            ("GET", f"{public}/{ups.replace('..', '%2e%2e')}/{target_tail}", 401),
+            ("GET", f"{public}%2F{ups.replace('/', '%2F')}%2F{target_tail}", 401),
         ]
+        # The public path with a method it is not public for.
+        cases += [(method, public, 401) for method in VARIANT_METHODS if method not in methods]
     cases += [
         # Other spellings of the protected route itself.
-        (f"/{PROTECTED_TARGET}", 404),
-        (PROTECTED_TARGET.replace("/api/", "/api//", 1), 404),
-        (PROTECTED_TARGET.replace("/control-plane/", "/control-plane//", 1), 401),
-        (f"{PROTECTED_TARGET}/", 401),
-        (PROTECTED_TARGET.replace("control-plane", "control%2Dplane", 1), 401),
-        (PROTECTED_TARGET.replace("/api/", "/api%2F", 1), 401),
-        (f"/x/..{PROTECTED_TARGET}", 404),
-        (f"/health/..{PROTECTED_TARGET}", 404),
-        (f"{PROTECTED_TARGET}?next={sorted(_backend_allowlist())[0]}", 401),
-        (CONTROL_PLANE_PREFIX.rstrip("/"), 404),
+        ("GET", f"/{PROTECTED_TARGET}", 404),
+        ("GET", PROTECTED_TARGET.replace("/api/", "/api//", 1), 404),
+        ("GET", PROTECTED_TARGET.replace("/control-plane/", "/control-plane//", 1), 401),
+        ("GET", f"{PROTECTED_TARGET}/", 401),
+        ("GET", PROTECTED_TARGET.replace("control-plane", "control%2Dplane", 1), 401),
+        ("GET", PROTECTED_TARGET.replace("/api/", "/api%2F", 1), 401),
+        ("GET", f"/x/..{PROTECTED_TARGET}", 404),
+        ("GET", f"/health/..{PROTECTED_TARGET}", 404),
+        ("GET", f"{PROTECTED_TARGET}?next={sorted(_backend_allowlist())[0]}", 401),
+        ("GET", CONTROL_PLANE_PREFIX.rstrip("/"), 404),
     ]
     return cases
-
-
-async def _raw_get(server: TestServer, target: str) -> tuple[int, dict[str, str]]:
-    """Send ``target`` byte for byte; the aiohttp client would normalise dot segments."""
-    reader, writer = await asyncio.open_connection(server.host, server.port)
-    try:
-        writer.write(f"GET {target} HTTP/1.1\r\nHost: matrix\r\nConnection: close\r\n\r\n".encode("ascii"))
-        await writer.drain()
-        raw = await reader.read()
-    finally:
-        writer.close()
-        await writer.wait_closed()
-    head = raw.split(b"\r\n\r\n", 1)[0].decode("latin-1").split("\r\n")
-    status = int(head[0].split(" ", 2)[1])
-    headers = dict(line.split(": ", 1) for line in head[1:] if ": " in line)
-    return status, headers
 
 
 async def test_path_variants_never_reach_a_handler_without_credentials() -> None:
@@ -535,11 +549,8 @@ async def test_path_variants_never_reach_a_handler_without_credentials() -> None
     app = _build_supervisor_app()
     observed = []
     async with TestServer(app) as server:
-        for target in [PROTECTED_TARGET, *(target for target, _ in cases)]:
-            rate_limit.clear_limiters()
-            status, headers = await _raw_get(server, target)
-            observed.append((target, status, headers.get(REACHED_HEADER)))
-    rate_limit.clear_limiters()
+        for method, target in [("GET", PROTECTED_TARGET), *((method, target) for method, target, _ in cases)]:
+            observed.append((method, target, *await _raw_request(server, method, target)))
 
-    assert observed[0] == (PROTECTED_TARGET, 401, None), "PROTECTED_TARGET must be a protected route"
-    assert observed[1:] == [(target, expected, None) for target, expected in cases]
+    assert observed[0] == ("GET", PROTECTED_TARGET, 401, None), "PROTECTED_TARGET must be a protected route"
+    assert observed[1:] == [(method, target, expected, None) for method, target, expected in cases]

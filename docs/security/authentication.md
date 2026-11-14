@@ -106,6 +106,17 @@ proxy at `5174` is defence in depth, not the only line of defence: `apps/web/src
 unseals the operator-session cookie and forwards the bearer token to the backend, so the
 normal dashboard flow is unaffected.
 
+The middleware checks only `/api/control-plane/*`. The supervisor's other routes (`/`, `/setup`,
+`/health`, `/openapi/control-plane.json` and the `/cluster/*` deploy hooks) answer without a
+session. `tests/test_control_plane_auth_matrix.py` sends a request to every route the supervisor
+registers, through its own middleware stack, without a session and with one. It fails when a
+route answers without a session and the OpenAPI document does not let that operation through
+without a token. It also fails when the routes that answer without a session differ, by path or
+method, from the public routes listed above or from the dashboard list. It sends other spellings
+of each public path (a sub-path, a trailing slash, another case or method, dot segments, encoded
+slashes) and routes added under or next to one, and fails if any of them reaches a handler
+without a session.
+
 ### Onboarding status before login
 
 `GET /api/control-plane/onboarding/status` is polled before anyone can log in: by the CLI
