@@ -17578,36 +17578,54 @@ for (const [language, labels] of Object.entries(sidebarEvaluationLabels)) {
   };
 }
 
+// `titleOne` and `descriptionOne` read for a single key; `title` and
+// `description` for several. The banner picks the form from the key count.
 const placeholderSecretsBannerLabels: Record<
   string,
-  { title: string; description: string; action: string }
+  { titleOne: string; title: string; descriptionOne: string; description: string; action: string }
 > = {
   "en-US": {
+    titleOne: "A database or object-storage secret is still a placeholder",
     title: "Database and object-storage secrets are still placeholders",
+    descriptionOne:
+      "{{keys}} still uses the public example value from .env.example, so anyone who can reach Postgres or object storage can use it. Koda keeps running; rotate it to secure this install.",
     description:
       "{{keys}} still use the public example values from .env.example, so anyone who can reach Postgres or object storage can use them. Koda keeps running; rotate them to secure this install.",
     action: "Rotation steps",
   },
   "pt-BR": {
+    titleOne: "Um segredo do banco de dados ou do armazenamento de objetos ainda é um placeholder",
     title: "Os segredos do banco de dados e do armazenamento de objetos ainda são placeholders",
+    descriptionOne:
+      "{{keys}} ainda usa o valor público de exemplo do .env.example, então qualquer pessoa que alcance o Postgres ou o armazenamento de objetos pode usá-lo. O Koda continua funcionando; troque-o para proteger esta instalação.",
     description:
       "{{keys}} ainda usam os valores públicos de exemplo do .env.example, então qualquer pessoa que alcance o Postgres ou o armazenamento de objetos pode usá-los. O Koda continua funcionando; troque-os para proteger esta instalação.",
     action: "Passos de rotação",
   },
   "es-ES": {
+    titleOne:
+      "Un secreto de la base de datos o del almacenamiento de objetos sigue siendo un marcador de posición",
     title: "Los secretos de la base de datos y del almacenamiento de objetos siguen siendo marcadores de posición",
+    descriptionOne:
+      "{{keys}} sigue usando el valor público de ejemplo de .env.example, así que cualquiera que llegue a Postgres o al almacenamiento de objetos puede usarlo. Koda sigue funcionando; rótalo para proteger esta instalación.",
     description:
       "{{keys}} siguen usando los valores públicos de ejemplo de .env.example, así que cualquiera que llegue a Postgres o al almacenamiento de objetos puede usarlos. Koda sigue funcionando; rótalos para proteger esta instalación.",
     action: "Pasos de rotación",
   },
   "fr-FR": {
+    titleOne: "Un secret de la base de données ou du stockage objet est encore une valeur d'exemple",
     title: "Les secrets de la base de données et du stockage objet sont encore des valeurs d'exemple",
+    descriptionOne:
+      "{{keys}} utilise encore la valeur d'exemple publique de .env.example : toute personne qui peut joindre Postgres ou le stockage objet peut s'en servir. Koda continue de fonctionner ; changez-la pour sécuriser cette installation.",
     description:
       "{{keys}} utilisent encore les valeurs d'exemple publiques de .env.example : toute personne qui peut joindre Postgres ou le stockage objet peut s'en servir. Koda continue de fonctionner ; changez-les pour sécuriser cette installation.",
     action: "Étapes de rotation",
   },
   "de-DE": {
+    titleOne: "Ein Datenbank- oder Objektspeicher-Geheimnis ist noch ein Platzhalter",
     title: "Datenbank- und Objektspeicher-Geheimnisse sind noch Platzhalter",
+    descriptionOne:
+      "{{keys}} verwendet noch den öffentlichen Beispielwert aus .env.example, daher kann jeder, der Postgres oder den Objektspeicher erreicht, ihn nutzen. Koda läuft weiter; rotiere ihn, um diese Installation abzusichern.",
     description:
       "{{keys}} verwenden noch die öffentlichen Beispielwerte aus .env.example, daher kann jeder, der Postgres oder den Objektspeicher erreicht, sie nutzen. Koda läuft weiter; rotiere sie, um diese Installation abzusichern.",
     action: "Schritte zur Rotation",

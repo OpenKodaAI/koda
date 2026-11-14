@@ -43,6 +43,8 @@ export function PlaceholderSecretsBanner({ className }: { className?: string }) 
   if (!data || data.placeholder_keys.length === 0) {
     return null;
   }
+  // One key reads in the singular ("POSTGRES_PASSWORD still uses ..."), several in the plural.
+  const single = data.placeholder_keys.length === 1;
 
   return (
     <InlineAlert
@@ -60,11 +62,16 @@ export function PlaceholderSecretsBanner({ className }: { className?: string }) 
         </a>
       }
     >
-      <p className="font-medium">{t("securityBanner.placeholderSecrets.title")}</p>
+      <p className="font-medium">
+        {t(single ? "securityBanner.placeholderSecrets.titleOne" : "securityBanner.placeholderSecrets.title")}
+      </p>
       <p className="mt-0.5 text-[var(--text-secondary)]">
-        {t("securityBanner.placeholderSecrets.description", {
-          keys: data.placeholder_keys.join(", "),
-        })}
+        {t(
+          single
+            ? "securityBanner.placeholderSecrets.descriptionOne"
+            : "securityBanner.placeholderSecrets.description",
+          { keys: data.placeholder_keys.join(", ") },
+        )}
       </p>
     </InlineAlert>
   );
