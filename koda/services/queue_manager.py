@@ -1867,6 +1867,17 @@ async def cancel_active_task_execution(task_id: int, *, reason: str = "Cancelled
     return cancelled
 
 
+def is_task_active_in_process(task_id: int) -> bool:
+    """Return whether this process still holds the task.
+
+    True while the task waits in an in-memory queue, runs in a worker, or has a
+    registered provider process.
+    """
+    if task_id in active_processes or get_task_info(task_id) is not None:
+        return True
+    return any(task_id in task_ids for task_ids in _user_queue_task_ids.values())
+
+
 def _get_worker_lock(user_id: int) -> asyncio.Lock:
     """Get or create a lock for worker spawn coordination."""
     if user_id not in _worker_locks:
@@ -2038,10 +2049,19 @@ async def _ensure_queue_worker(user_id: int, context: BotContext) -> None:
 
 
 async def cancel_queued_task(task_id: int) -> bool:
-    """Mark a queued task as cancelled so the worker discards it on dequeue."""
-    _cancelled_task_ids.add(task_id)
-    _set_queue_depth_metric()
-    return True
+    """Mark a queued task as cancelled so the worker discards it on dequeue.
+
+    Returns False when the task is not waiting in an in-memory queue, for
+    example because a worker already dequeued it and it is running. Callers
+    must then cancel the active execution with ``cancel_active_task_execution``.
+    """
+    for user_id, task_ids in list(_user_queue_task_ids.items()):
+        if task_id in task_ids:
+            _untrack_queued_task_id(user_id, task_id)
+            _cancelled_task_ids.add(task_id)
+            _set_queue_depth_metric()
+            return True
+    return False
 
 
 async def enqueue_runtime_retry_task(
@@ -3925,6 +3945,14 @@ async def _run_streaming(
             runtime_terminal_id=runtime_terminal_id,
             runtime_terminal_path=runtime_terminal_path,
         )
+
+    except asyncio.CancelledError:
+        # A cancelled run (/cancel, scheduler control) delivers no response, so
+        # remove the progress message that shows its partial output.
+        if streaming_msg is not None:
+            with contextlib.suppress(Exception):
+                await streaming_msg.delete()
+        raise
 
     except Exception:
         log.exception("streaming_error")
@@ -8839,7 +8867,17 @@ async def _process_queue(user_id: int, context: BotContext) -> None:
 
                 t = asyncio.create_task(_execute_single_task(raw_item, user_id, context, cast(int, task_id), task_info))
                 task_info.asyncio_task = t
-                await t
+                try:
+                    await t
+                except asyncio.CancelledError:
+                    # Cancelling one task (/cancel, scheduler control) must not
+                    # stop the worker; only a cancellation of the worker itself
+                    # propagates.
+                    current = asyncio.current_task()
+                    if not t.cancelled() or (current is not None and current.cancelling()):
+                        raise
+                    _unregister_task(task_info)
+                    log.info("task_cancelled", task_id=task_id, user_id=user_id)
             except Exception as exc:
                 if task_info is not None:
                     _unregister_task(task_info)

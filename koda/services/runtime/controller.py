@@ -80,6 +80,8 @@ from koda.state.history_store import create_task
 
 log = get_logger(__name__)
 
+_TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled"})
+
 _WORKSPACE_SEARCH_IGNORED_DIRS = {
     ".git",
     ".hg",
@@ -2700,6 +2702,26 @@ class RuntimeController:
             return None
         env = self.store.get_environment_by_task(task_id)
         env_id = int(env["id"]) if env else None
+
+        from koda.services.queue_manager import (
+            cancel_active_task_execution,
+            cancel_queued_task,
+            is_task_active_in_process,
+        )
+
+        task_status = str(task.get("status") or "")
+        if env is None and task_status in _TERMINAL_TASK_STATUSES and not is_task_active_in_process(task_id):
+            # A light task that already finished has nothing left to stop: keep
+            # its recorded outcome instead of rewriting it as cancelled.
+            return {
+                "ok": False,
+                "action": "not_running",
+                "task_id": task_id,
+                "env_id": None,
+                "status": task_status,
+                "final_phase": str(task.get("current_phase") or task_status),
+            }
+
         await self.events.publish(
             task_id=task_id,
             env_id=env_id,
@@ -2713,10 +2735,13 @@ class RuntimeController:
         if env_id is not None:
             self.store.update_environment(env_id, current_phase="cancel_requested", status="cancel_requested")
 
-        from koda.services.queue_manager import cancel_active_task_execution, cancel_queued_task
-
         queued_cancelled = await cancel_queued_task(task_id)
-        if queued_cancelled and env is None:
+        if env is None:
+            if not queued_cancelled:
+                # Light tasks run without a runtime environment. Once a worker
+                # has dequeued one it is no longer queued, so stop the running
+                # execution and its provider process here.
+                await cancel_active_task_execution(task_id, reason=reason)
             final_phase = "cancelled_retained"
             self.store.update_runtime_queue_item(task_id, status="cancelled")
             self.store.update_task_runtime(task_id, status="cancelled", phase=final_phase, error_message=reason)

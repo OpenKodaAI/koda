@@ -1500,7 +1500,8 @@ async def _runtime_interrupt(request: web.Request) -> web.Response:
     )
     if result is None:
         return web.json_response({"error": "task not found"}, status=404)
-    result["action"] = "interrupted"
+    if result.get("action") == "cancelled":
+        result["action"] = "interrupted"
     return web.json_response(result)
 
 
