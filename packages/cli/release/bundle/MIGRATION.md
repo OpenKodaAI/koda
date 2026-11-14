@@ -41,8 +41,10 @@
   `/api/runtime/relay/`, and sends only `/api/control-plane/*` requests carrying
   `Authorization: Bearer` (API tokens) and `/openapi/control-plane.json` to the API. It also passes
   the browser's `Host` with its port (`$http_host`), so sign-in works behind a non-default port,
-  sends the `server_name` for a request without a `Host` (an HTTP/1.0 health check), and keeps idle
-  runtime event streams open. `koda update` does not change a copy installed in nginx:
+  sends the `server_name` for a request without a `Host` (an HTTP/1.0 health check), keeps idle
+  runtime event streams open, and accepts request bodies of up to 13 MiB
+  (`client_max_body_size 13m;`, where nginx's default of 1 MiB refused photo uploads over 1 MiB).
+  `koda update` does not change a copy installed in nginx:
   replace that copy with the new template, keeping your `server_name` and TLS settings, then run
   `nginx -t` and reload nginx.
 

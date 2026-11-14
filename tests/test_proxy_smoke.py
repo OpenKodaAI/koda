@@ -15,6 +15,8 @@ against the real stack.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import http.client
 import json
 import os
 import secrets
@@ -486,3 +488,86 @@ async def test_the_smoke_rejects_the_previous_template(nginx_binary: str, tmp_pa
         "relay: WebSocket upgrade reaches the dashboard relay",
         "api-token: POST with a body",
     }
+
+
+# ---------------------------------------------------------------------------
+# Upload size
+# ---------------------------------------------------------------------------
+
+
+def _multipart_photo(size: int) -> tuple[bytes, str]:
+    """A multipart/form-data body carrying one ``photo`` file of *size* bytes, as the dashboard sends it."""
+    boundary = secrets.token_hex(16)
+    head = (
+        f"--{boundary}\r\n"
+        'Content-Disposition: form-data; name="photo"; filename="photo.jpg"\r\n'
+        "Content-Type: image/jpeg\r\n\r\n"
+    ).encode("ascii")
+    tail = f"\r\n--{boundary}--\r\n".encode("ascii")
+    return head + b"\xff" * size + tail, f"multipart/form-data; boundary={boundary}"
+
+
+def _upload_app(upstream: str, received: list[tuple[str, str, int]]) -> web.Application:
+    """Reads the whole body, as the photo routes in koda/control_plane/api.py do, and records its size."""
+
+    async def receive(request: web.Request) -> web.Response:
+        size = 0
+        async for chunk in request.content.iter_chunked(64 * 1024):
+            size += len(chunk)
+        received.append((upstream, request.path, size))
+        return _json({"received": size})
+
+    app = web.Application()
+    app.router.add_post("/api/control-plane/{path:.*}", receive)
+    return app
+
+
+def _post(proxy_url: str, path: str, body: bytes, headers: dict[str, str]) -> int:
+    proxy = proxy_smoke.Proxy(proxy_url, timeout=60)
+    connection = http.client.HTTPConnection(proxy.host, proxy.port, timeout=60)
+    try:
+        # nginx may answer 413 before the whole body is sent; its answer is still read below.
+        with contextlib.suppress(BrokenPipeError, ConnectionResetError):
+            connection.request("POST", path, body=body, headers={"Host": proxy.netloc, **headers})
+        response = connection.getresponse()
+        response.read()
+        return response.status
+    finally:
+        connection.close()
+
+
+async def test_the_bundled_proxy_passes_the_largest_upload_in_a_real_nginx(nginx_binary: str, tmp_path: Path) -> None:
+    """nginx's default client_max_body_size (1m) would answer 413 to a photo upload of up to 12 MiB."""
+    from koda.control_plane import operator_profile_photos
+    from koda.squads import room_photos
+
+    largest = max(operator_profile_photos.MAX_INPUT_BYTES, room_photos.MAX_INPUT_BYTES)
+    body, content_type = _multipart_photo(largest)
+    # tests/test_release_proxy_routing.py keeps the limit within 1 MiB above the largest photo.
+    oversized, _ = _multipart_photo(largest + 1024 * 1024)
+    received: list[tuple[str, str, int]] = []
+    template = TEMPLATE.read_text(encoding="utf-8")
+    browser = {"Content-Type": content_type, "Cookie": f"{proxy_smoke.SESSION_COOKIE}=sealed"}
+    api_token = {"Content-Type": content_type, "Authorization": "Bearer koda-api-token"}
+
+    async with serve(_upload_app("dashboard", received)) as dashboard, serve(_upload_app("api", received)) as api:
+        moved = template.replace(proxy_smoke.TEMPLATE_DASHBOARD, f"http://{dashboard}").replace(
+            proxy_smoke.TEMPLATE_API, f"http://{api}"
+        )
+        with running_nginx(nginx_binary, tmp_path, moved) as proxy_url:
+            statuses = [
+                await asyncio.to_thread(_post, proxy_url, "/api/control-plane/auth/profile/photo", body, browser),
+                await asyncio.to_thread(_post, proxy_url, "/api/control-plane/auth/profile/photo", body, api_token),
+                await asyncio.to_thread(
+                    _post, proxy_url, "/api/control-plane/dashboard/squads/threads/t-1/photo", body, browser
+                ),
+                await asyncio.to_thread(_post, proxy_url, "/api/control-plane/auth/profile/photo", oversized, browser),
+            ]
+
+    assert statuses == [200, 200, 200, 413]
+    # The full body reached the upstream that serves each caller; the oversized one reached none.
+    assert received == [
+        ("dashboard", "/api/control-plane/auth/profile/photo", len(body)),
+        ("api", "/api/control-plane/auth/profile/photo", len(body)),
+        ("dashboard", "/api/control-plane/dashboard/squads/threads/t-1/photo", len(body)),
+    ]

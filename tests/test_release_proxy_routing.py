@@ -12,7 +12,9 @@ The routing follows the auth model in docs/install/vps.md ("Reverse Proxy"):
 - every request adds the address it came from to ``X-Forwarded-For``, so the trusted-proxy
   settings charge rate limits to the real client;
 - every request reaches the upstream with a ``Host``: the browser's, port included, or the server
-  name when the client sent none.
+  name when the client sent none;
+- every request may carry a body as large as the largest upload the app accepts (a 12 MiB photo
+  in a multipart form), where nginx's default ``client_max_body_size`` of 1m would refuse it.
 
 The config is parsed and routed by a small model of nginx: exact and longest-prefix ``location``
 matching, ``if`` with ``return``, ``error_page ... = @named``, ``map`` without regexes, and the
@@ -143,7 +145,9 @@ def _parse(tokens: list[tuple[str, str]]) -> tuple[Directive, ...]:
 
 # Directives the model understands in the `server` block and inside a `location`; anything else
 # fails the test.
-_SERVER_DIRECTIVES = {"error_page", "listen", "location", "proxy_set_header", "server_name"}
+# client_max_body_size is understood in the server block only, so one limit covers every location
+# (the named API location included).
+_SERVER_DIRECTIVES = {"client_max_body_size", "error_page", "listen", "location", "proxy_set_header", "server_name"}
 _LOCATION_DIRECTIVES = {
     "error_page",
     "if",
@@ -153,6 +157,8 @@ _LOCATION_DIRECTIVES = {
     "proxy_send_timeout",
     "proxy_set_header",
 }
+# nginx's client_max_body_size when the config sets none.
+_NGINX_DEFAULT_BODY_LIMIT = "1m"
 # Header fields nginx redefines for every proxied request unless proxy_set_header says otherwise
 # (an empty value is not sent). Hop-by-hop fields such as Upgrade never pass through on their own.
 _NGINX_DEFAULT_HEADERS = {
@@ -196,6 +202,7 @@ class Route:
     target: str  # the request URI sent upstream
     http_version: str
     headers: dict[str, str]  # lower-case names, as sent upstream
+    body_limit: int  # the largest request body nginx accepts, in bytes (client_max_body_size)
 
 
 class NginxModel:
@@ -336,6 +343,11 @@ class NginxModel:
                 return self.named[target]
         raise AssertionError(f"{location.label} returns a bare {status}")
 
+    def body_limit(self) -> int:
+        limits = [d for d in self.server if d.name == "client_max_body_size"]
+        assert len(limits) <= 1, "client_max_body_size is set more than once"
+        return _size(limits[0].args[0] if limits else _NGINX_DEFAULT_BODY_LIMIT)
+
     def upstream(self, location: Location) -> tuple[str, str | None]:
         url = location.one("proxy_pass").args[0]
         match = re.fullmatch(r"(http://[^/$]+)(/[^$]*)?", url)
@@ -372,6 +384,7 @@ class NginxModel:
             target=target,
             http_version=versions[-1].args[0] if versions else "1.0",
             headers={field: value for field, value in expanded.items() if value},
+            body_limit=self.body_limit(),
         )
 
 
@@ -380,6 +393,13 @@ def _seconds(value: str) -> int:
     assert match, value
     factor = {"ms": 0.001, "s": 1, "m": 60, "h": 3600, "d": 86400}[match.group(2) or "s"]
     return int(int(match.group(1)) * factor)
+
+
+def _size(value: str) -> int:
+    match = re.fullmatch(r"(\d+)([kKmMgG])?", value)
+    assert match, f"size {value} is outside the model"
+    factor = {"": 1, "k": 1024, "m": 1024**2, "g": 1024**3}[(match.group(2) or "").lower()]
+    return int(match.group(1)) * factor
 
 
 @pytest.fixture(scope="module")
@@ -554,6 +574,60 @@ def test_every_route_sends_a_host_when_the_client_sent_none(
     assert routed.http_version == "1.1"
     assert routed.headers.get("host") == nginx.server_name
     assert routed.headers["x-forwarded-for"] == CLIENT
+
+
+# The uploads the app accepts, from the dashboard (session cookie) and from API-token clients.
+UPLOAD_ROUTES: list[tuple[str, dict[str, str]]] = [
+    ("/api/control-plane/auth/profile/photo", SESSION_COOKIE),
+    ("/api/control-plane/auth/profile/photo", BEARER),
+    ("/api/control-plane/dashboard/squads/threads/thread-1/photo", SESSION_COOKIE),
+    ("/api/control-plane/dashboard/squads/threads/thread-1/photo", BEARER),
+    ("/api/control-plane/providers/supertonic/voices/import", SESSION_COOKIE),
+    ("/api/control-plane/providers/supertonic/voices/import", BEARER),
+]
+# Room for what a multipart form adds around the file: boundaries, part headers, other fields.
+MULTIPART_FRAMING_BYTES = 64 * 1024
+
+
+def largest_upload_bytes() -> int:
+    """The largest file any upload route accepts (the handlers read multipart bodies unbounded)."""
+    from koda.control_plane import operator_profile_photos
+    from koda.services import supertonic_manager
+    from koda.squads import room_photos
+
+    return max(
+        operator_profile_photos.MAX_INPUT_BYTES,
+        room_photos.MAX_INPUT_BYTES,
+        supertonic_manager._MAX_CUSTOM_VOICE_BYTES,
+    )
+
+
+@pytest.mark.parametrize(
+    "route", [*ALL_ROUTES, *UPLOAD_ROUTES], ids=[_route_id(r) for r in [*ALL_ROUTES, *UPLOAD_ROUTES]]
+)
+def test_every_route_accepts_the_largest_upload_the_app_accepts(
+    nginx: NginxModel, route: tuple[str, dict[str, str]]
+) -> None:
+    """nginx answers 413 to a body over client_max_body_size before any upstream sees it.
+
+    Its default is 1m, but a profile or room photo may be 12 MiB (``MAX_INPUT_BYTES`` in
+    koda/control_plane/operator_profile_photos.py and koda/squads/room_photos.py), sent as
+    multipart/form-data. The limit leaves room for the multipart framing around such a file and
+    stays within 1 MiB above it, so it follows the app's own limit.
+    """
+    path, headers = route
+    largest = largest_upload_bytes()
+
+    routed = nginx.route(path, headers)
+
+    assert routed.body_limit >= largest + MULTIPART_FRAMING_BYTES
+    assert routed.body_limit <= largest + 1024 * 1024
+
+
+def test_upload_routes_reach_the_upstream_that_serves_them(nginx: NginxModel) -> None:
+    for path, headers in UPLOAD_ROUTES:
+        expected = API if "authorization" in {name.lower() for name in headers} else DASHBOARD
+        assert nginx.route(path, headers).upstream == expected, (path, headers)
 
 
 @pytest.mark.parametrize(

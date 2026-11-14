@@ -41,6 +41,9 @@ from the network until a reverse proxy publishes it. A reverse proxy should:
   dashboard refuses an HTTP/1.1 request without one
 - send to the control-plane API only the `/api/control-plane/*` requests that carry
   `Authorization: Bearer` (API-token clients), and `/openapi/control-plane.json`
+- accept request bodies of up to 13 MiB: a profile or room photo may be 12 MiB, sent as a
+  multipart form. nginx refuses anything over 1 MiB unless `client_max_body_size` says otherwise;
+  the bundled `proxy/nginx.conf` sets `client_max_body_size 13m;`
 - optionally keep `/control-plane/setup` as a compatibility redirect to `/setup`
 - add the address each request came from to `X-Forwarded-For`, appended or replacing the header
   (see the rate-limit notes below)
