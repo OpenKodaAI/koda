@@ -35,6 +35,10 @@ import { useStableQueryData } from "@/hooks/use-stable-query-data";
 import { formatAgentSelectionLabel, resolveAgentSelection } from "@/lib/agent-selection";
 import { fetchControlPlaneDashboardJsonAllowError } from "@/lib/control-plane-dashboard";
 import {
+  scheduleErrorMessage,
+  scheduleValidationNotQueuedMessage,
+} from "@/lib/contracts/schedules";
+import {
   DASHBOARD_CACHE_GC_MS,
   DASHBOARD_CACHE_STALE_MS,
   DASHBOARD_PAGE_SIZE,
@@ -485,11 +489,7 @@ export default function SchedulesPage() {
         | ({ message?: string } & Partial<ScheduleDetail>)
         | { error?: string };
       if (!response.ok) {
-        throw new Error(
-          "error" in payload
-            ? payload.error || "Unable to operate on schedule"
-            : "Unable to operate on schedule",
-        );
+        throw new Error(scheduleErrorMessage(payload, "Unable to operate on schedule"));
       }
       setStatusMessage((payload as { message?: string }).message || "Schedule updated.");
       setTableActionState(job.id, actionKey, "success");
@@ -534,7 +534,12 @@ export default function SchedulesPage() {
           body: JSON.stringify(body),
         });
         const responseBody = (await response.json()) as
-          | ({ ok?: boolean; idempotent_replay?: boolean } & Partial<ScheduleDetail>)
+          | ({
+              ok?: boolean;
+              idempotent_replay?: boolean;
+              message?: string;
+              validation_run_id?: number | null;
+            } & Partial<ScheduleDetail>)
           | { error?: string; field?: string };
         if (!response.ok) {
           const fallback = t("routines.editor.messages.createFailed");
@@ -543,8 +548,20 @@ export default function SchedulesPage() {
           showToast(errMessage, "error");
           throw new Error(errMessage);
         }
-        showToast(t("routines.editor.messages.created"), "success");
-        setStatusMessage(t("routines.editor.messages.created"));
+        const createdWithoutValidation = t("routines.editor.messages.createdWithoutValidation");
+        const validationNotQueued = scheduleValidationNotQueuedMessage(
+          responseBody,
+          createdWithoutValidation,
+        );
+        if (validationNotQueued) {
+          // The routine exists but would sit in "validating" forever; say so and keep the
+          // backend's reason visible so the operator knows to use Validate.
+          showToast(createdWithoutValidation, "warning");
+          setStatusMessage(validationNotQueued);
+        } else {
+          showToast(t("routines.editor.messages.created"), "success");
+          setStatusMessage(t("routines.editor.messages.created"));
+        }
         setCreatingRoutine(false);
         void schedulesQuery.refetch();
       } catch (error) {

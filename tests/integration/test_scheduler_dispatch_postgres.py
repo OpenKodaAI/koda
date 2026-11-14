@@ -6,9 +6,14 @@ Pinned guarantees:
     dispatcher (materialize -> claim -> dispatch). Automatic runs carry the
     policy snapshot the dispatch gate requires, so they are not blocked as
     "policy snapshot is missing".
+  * Automatic runs follow the agent's current policy: a job whose stored
+    snapshot went stale since validation is refreshed (and the refresh is
+    recorded as ``job.policy_snapshot_refreshed``) only through a
+    compare-and-swap, so a concurrent edit is never overwritten.
   * ``POST /api/runtime/schedules`` queues a validation run for the new job
     instead of attempting an activation that the scheduler always rejects, and
-    the queued validation activates the job when it passes.
+    the queued validation activates the job when it passes (or leaves it
+    ``validated`` when ``auto_activate`` is false).
 """
 
 from __future__ import annotations
@@ -94,6 +99,29 @@ def _fake_application() -> SimpleNamespace:
     return SimpleNamespace(bot=SimpleNamespace(send_message=AsyncMock()))
 
 
+def _events(job_id: int, event_type: str) -> list[dict[str, Any]]:
+    from koda.services import scheduled_jobs
+
+    return [event for event in scheduled_jobs.list_job_events(job_id, limit=200) if event["event_type"] == event_type]
+
+
+async def _active_reminder_job(application: Any) -> int:
+    """Create a reminder job and let its dry-run validation activate it."""
+    from koda.services import scheduled_jobs
+
+    job_id = scheduled_jobs.create_reminder_job(
+        user_id=111,
+        chat_id=222,
+        trigger_type="interval",
+        schedule_expr="3600",
+        text="Stretch break",
+    )
+    await _run_dispatch_cycle(application)
+    job = scheduled_jobs._get_job(job_id)
+    assert job is not None and job["status"] == scheduled_jobs.JOB_STATUS_ACTIVE
+    return job_id
+
+
 async def test_reminder_validates_activates_and_fires_automatically(scheduler_db: str) -> None:
     from koda.services import scheduled_jobs
 
@@ -135,6 +163,84 @@ async def test_reminder_validates_activates_and_fires_automatically(scheduler_db
     assert job_after["policy_snapshot_hash"] == expected_hash
     next_run_at = scheduled_jobs._parse_dt(job_after["next_run_at"])
     assert next_run_at is not None and next_run_at > scheduled_jobs._utcnow()
+
+
+async def test_automatic_run_follows_current_agent_policy_and_records_snapshot_refresh(scheduler_db: str) -> None:
+    from koda.services import scheduled_jobs
+
+    application = _fake_application()
+    job_id = await _active_reminder_job(application)
+    validated_job = scheduled_jobs._get_job(job_id)
+    assert validated_job is not None
+    validated_hash = validated_job["policy_snapshot_hash"]
+
+    # The agent's execution policy changes after the job was validated.
+    due_at = scheduled_jobs._utcnow() - timedelta(seconds=5)
+    scheduled_jobs._touch_job(job_id, next_run_at=scheduled_jobs._iso(due_at))
+    with patch.object(scheduled_jobs, "AGENT_EXECUTION_POLICY", {"approval_mode": "changed-after-validation"}):
+        _, _, current_hash = scheduled_jobs._policy_snapshot_payload(validated_job)
+        assert current_hash != validated_hash
+        cycle = await _run_dispatch_cycle(application)
+
+    assert cycle["materialized"] == 1
+    [automatic_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert automatic_run["status"] == scheduled_jobs.RUN_STATUS_SUCCEEDED, automatic_run.get("error_message")
+    assert automatic_run["metadata"]["policy_snapshot_hash"] == current_hash
+
+    job_after = scheduled_jobs._get_job(job_id)
+    assert job_after is not None
+    assert job_after["policy_snapshot_hash"] == current_hash
+    [refresh_event] = _events(job_id, "job.policy_snapshot_refreshed")
+    assert refresh_event["source"] == "scheduler_dispatcher"
+    assert refresh_event["details"] == {
+        "previous_policy_snapshot_hash": validated_hash,
+        "policy_snapshot_hash": current_hash,
+    }
+
+
+async def test_snapshot_refresh_does_not_overwrite_a_concurrent_job_update(scheduler_db: str) -> None:
+    from koda.services import scheduled_job_dispatcher, scheduled_jobs
+
+    job_id = await _active_reminder_job(_fake_application())
+    due_at = scheduled_jobs._iso(scheduled_jobs._utcnow() - timedelta(seconds=5))
+    scheduled_jobs._touch_job(
+        job_id,
+        next_run_at=due_at,
+        policy_snapshot_json='{"stale":true}',
+        policy_snapshot_hash="stale-hash",
+    )
+    real_store = scheduled_job_dispatcher._store()
+
+    class _ConcurrentEditStore:
+        """Lands a job edit right after the dispatcher reads the due jobs."""
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(real_store, name)
+
+        def fetch_all(self, query: str, params: tuple[Any, ...] = ()) -> list[dict[str, Any]]:
+            rows = real_store.fetch_all(query, params)
+            if "FROM scheduled_jobs" in query and "next_run_at <= ?" in query:
+                real_store.execute(
+                    "UPDATE scheduled_jobs SET config_version = config_version + 1, "
+                    "policy_snapshot_hash = ? WHERE id = ?",
+                    ("concurrent-hash", job_id),
+                )
+            return rows
+
+    with patch.object(scheduled_job_dispatcher, "_store", return_value=_ConcurrentEditStore()):
+        assert scheduled_job_dispatcher._materialize_due_runs() == 0
+
+    job = scheduled_jobs._get_job(job_id)
+    assert job is not None
+    assert job["policy_snapshot_hash"] == "concurrent-hash"
+    assert job["next_run_at"] == due_at
+    assert _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL) == []
+    assert _events(job_id, "job.policy_snapshot_refreshed") == []
+
+    # The next cycle reads the fresh row and materializes the run.
+    assert scheduled_job_dispatcher._materialize_due_runs() == 1
+    [refresh_event] = _events(job_id, "job.policy_snapshot_refreshed")
+    assert refresh_event["details"]["previous_policy_snapshot_hash"] == "concurrent-hash"
 
 
 class _AllowRuntimeAccess:
@@ -200,11 +306,11 @@ async def test_runtime_api_create_without_auto_activate_stops_at_validated(sched
 
     status, payload = await _post_schedule(
         {
-            "job_type": "agent_query",
-            "trigger_type": "cron",
-            "schedule_expr": "0 9 * * *",
+            "job_type": "reminder",
+            "trigger_type": "interval",
+            "schedule_expr": "3600",
             "timezone": "UTC",
-            "payload": {"query": "Summarize open incidents", "name": "Incident digest"},
+            "payload": {"text": "Incident digest", "name": "Incident digest"},
             "auto_activate": False,
         }
     )
@@ -215,3 +321,12 @@ async def test_runtime_api_create_without_auto_activate_stops_at_validated(sched
     [validation_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_MANUAL_TEST)
     assert payload["validation_run_id"] == validation_run["id"]
     assert validation_run["metadata"]["activate_on_success"] is False
+
+    await _run_dispatch_cycle(_fake_application())
+
+    [validation_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_MANUAL_TEST)
+    assert validation_run["status"] == scheduled_jobs.RUN_STATUS_SUCCEEDED, validation_run.get("error_message")
+    job = scheduled_jobs._get_job(job_id)
+    assert job is not None
+    assert job["status"] == scheduled_jobs.JOB_STATUS_VALIDATED
+    assert job["next_run_at"] is None

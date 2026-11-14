@@ -56,14 +56,47 @@ def _materialize_due_runs(now: datetime | None = None) -> int:
         created_this_cycle = 0
         skipped_outside_window = 0
         # Every automatic run carries the policy snapshot it was materialized under;
-        # _dispatch_run blocks runs without one. Execution enforces the job's stored
-        # snapshot, so keep it aligned with the snapshot embedded in these runs.
+        # _dispatch_run blocks runs without one. Automatic runs follow the agent's
+        # *current* policy, not the snapshot captured when the job was validated:
+        # execution enforces the job's stored snapshot, so a stale one is refreshed
+        # to match the runs created here and the change is recorded as an event.
         snapshot, snapshot_json, snapshot_hash = jobs._policy_snapshot_payload(job)
-        if (
-            str(job.get("policy_snapshot_hash") or "") != snapshot_hash
-            or str(job.get("policy_snapshot_json") or "") != snapshot_json
-        ):
-            jobs._touch_job(int(job["id"]), policy_snapshot_json=snapshot_json, policy_snapshot_hash=snapshot_hash)
+        stored_snapshot_hash = str(job.get("policy_snapshot_hash") or "")
+        if stored_snapshot_hash != snapshot_hash or str(job.get("policy_snapshot_json") or "") != snapshot_json:
+            # Compare-and-swap against the row read above so a concurrent update_job or
+            # queue_validation_run is never overwritten with a snapshot built from stale
+            # provider/model/work_dir. If the job changed underneath, skip it this cycle;
+            # the next cycle materializes it from the fresh row.
+            refreshed = _store().execute(
+                """
+                UPDATE scheduled_jobs
+                SET policy_snapshot_json = ?, policy_snapshot_hash = ?, updated_at = ?
+                WHERE id = ? AND status = ? AND COALESCE(config_version, 1) = ?
+                  AND COALESCE(policy_snapshot_hash, '') = ?
+                """,
+                (
+                    snapshot_json,
+                    snapshot_hash,
+                    jobs._iso(now),
+                    int(job["id"]),
+                    jobs.JOB_STATUS_ACTIVE,
+                    int(job.get("config_version") or 1),
+                    stored_snapshot_hash,
+                ),
+            )
+            if not refreshed:
+                log.info("scheduler_policy_snapshot_refresh_skipped", job_id=int(job["id"]))
+                continue
+            jobs._record_scheduler_event(
+                scheduled_job_id=int(job["id"]),
+                event_type="job.policy_snapshot_refreshed",
+                source="scheduler_dispatcher",
+                reason="Automatic runs follow the agent's current policy; the job's stored snapshot was stale.",
+                details={
+                    "previous_policy_snapshot_hash": stored_snapshot_hash or None,
+                    "policy_snapshot_hash": snapshot_hash,
+                },
+            )
         run_metadata_json = jobs._stable_dumps_json(
             {
                 "policy_snapshot": snapshot,

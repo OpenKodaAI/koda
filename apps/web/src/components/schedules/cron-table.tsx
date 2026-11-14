@@ -67,8 +67,9 @@ function getLifecycleAction(job: CronJob): {
     case "failed_open":
       return { action: "resume", labelKey: "schedules.table.lifecycle.resume", disabled: false, icon: RotateCcw };
     case "validation_pending":
-      // Jobs blocked back into validation have no other way out; the backend answers
-      // "Validation already pending." while a validation run is still in flight.
+      // Jobs blocked back into validation, or whose validation never got queued, have no
+      // other way out. While a validation run is still in flight the backend refuses with
+      // "Validation already pending.", which the routines page shows to the operator.
       return { action: "validate", labelKey: "schedules.table.lifecycle.validate", disabled: false, icon: ShieldCheck };
     default:
       return {

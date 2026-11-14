@@ -104,7 +104,9 @@ Write/control routes:
 - `POST /api/runtime/tasks/{task_id}/workspace/rename`
 - `POST /api/runtime/processes/{process_id}/terminate`
 
-`POST /api/runtime/schedules` creates the job in `validation_pending` and queues a dry-run validation run, returned as `validation_run_id` with a `message`. When `auto_activate` is true (the default) a passing validation activates the job; otherwise the job stays `validated` until the `activate` or `resume` action is called. A failed validation leaves the job `failed_open`. `run` is rejected until the job has been validated.
+`POST /api/runtime/schedules` creates the job in `validation_pending` and queues a dry-run validation run, returned as `validation_run_id` with a `message`. When `auto_activate` is true (the default) a passing validation activates the job; otherwise the job stays `validated` until the `activate` or `resume` action is called. A failed validation leaves the job `failed_open`. `run` is rejected until the job has been validated. If the validation could not be queued the job is still created (`201`), but `validation_run_id` is `null` and `message` says why; call the `validate` action to retry it. A replay with the same `X-Idempotency-Key` returns the original `message` and `validation_run_id`. The `validate` action itself answers `400` with `{"ok": false, "message": ...}` when it is refused, for example while a validation run is still pending.
+
+Automatic (scheduled and catch-up) runs follow the agent's current policy rather than the snapshot captured at validation: when the job's stored policy snapshot is stale, the dispatcher refreshes it before materializing runs and records a `job.policy_snapshot_refreshed` event with the previous and new `policy_snapshot_hash`.
 
 WebSocket routes:
 

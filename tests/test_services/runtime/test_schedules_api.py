@@ -196,9 +196,9 @@ class RuntimeScheduleCreateTests(AioHTTPTestCase):
             patch(
                 "koda.services.scheduled_jobs.queue_validation_run",
                 return_value=(501, "Validation queued."),
-            ),
+            ) as validation_mock,
         ):
-            status1, _ = await self._post(
+            status1, payload1 = await self._post(
                 {
                     "trigger_type": "cron",
                     "schedule_expr": "0 9 * * *",
@@ -223,6 +223,34 @@ class RuntimeScheduleCreateTests(AioHTTPTestCase):
         assert status2 == 200
         assert payload2["idempotent_replay"] is True
         assert create_mock.call_count == 1
+        assert validation_mock.call_count == 1
+        # The replay answers like the first call: same validation run and message.
+        assert payload2["validation_run_id"] == payload1["validation_run_id"] == 501
+        assert payload2["message"] == payload1["message"] == "Job created. Validation queued."
+
+    async def test_create_idempotent_replay_keeps_validation_not_queued_warning(self) -> None:
+        body = {
+            "trigger_type": "cron",
+            "schedule_expr": "0 9 * * *",
+            "timezone": "UTC",
+            "payload": {"query": "x"},
+        }
+        with (
+            patch("koda.services.scheduled_jobs.create_job", return_value=78),
+            patch(
+                "koda.services.scheduled_jobs.queue_validation_run",
+                side_effect=RuntimeError("scheduler store unavailable"),
+            ),
+        ):
+            status1, payload1 = await self._post(body, idem="warn-key")
+            status2, payload2 = await self._post(body, idem="warn-key")
+
+        assert (status1, status2) == (201, 200)
+        assert payload2["idempotent_replay"] is True
+        assert payload1["validation_run_id"] is None
+        assert payload2["validation_run_id"] is None
+        assert payload2["message"] == payload1["message"]
+        assert payload2["message"] == "Job created, but validation was not queued: Validation could not be queued."
 
     async def test_create_value_error_maps_to_field(self) -> None:
         with patch(

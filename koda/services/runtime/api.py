@@ -374,11 +374,13 @@ async def _runtime_schedule_update(request: web.Request) -> web.Response:
     return web.json_response(result, status=status)
 
 
-_IDEMPOTENCY_CACHE: dict[tuple[int, str], tuple[int, float]] = {}
+# (user_id, idempotency key) -> (job_id, expires_at, creation outcome). The outcome holds the
+# create response's "message" and "validation_run_id" so a replay answers like the first call.
+_IDEMPOTENCY_CACHE: dict[tuple[int, str], tuple[int, float, dict[str, object]]] = {}
 _IDEMPOTENCY_TTL_SECONDS = 24 * 60 * 60
 
 
-def _idempotency_lookup(user_id: int, key: str) -> int | None:
+def _idempotency_lookup(user_id: int, key: str) -> tuple[int, dict[str, object]] | None:
     if not key:
         return None
     import time as _time
@@ -387,24 +389,29 @@ def _idempotency_lookup(user_id: int, key: str) -> int | None:
     cached = _IDEMPOTENCY_CACHE.get((user_id, key))
     if cached is None:
         return None
-    job_id, expires_at = cached
+    job_id, expires_at, outcome = cached
     if expires_at < now:
         _IDEMPOTENCY_CACHE.pop((user_id, key), None)
         return None
-    return job_id
+    return job_id, dict(outcome)
 
 
-def _idempotency_remember(user_id: int, key: str, job_id: int) -> None:
+def _idempotency_remember(
+    user_id: int,
+    key: str,
+    job_id: int,
+    outcome: dict[str, object] | None = None,
+) -> None:
     if not key:
         return
     import time as _time
 
     expires_at = _time.monotonic() + _IDEMPOTENCY_TTL_SECONDS
-    _IDEMPOTENCY_CACHE[(user_id, key)] = (job_id, expires_at)
+    _IDEMPOTENCY_CACHE[(user_id, key)] = (job_id, expires_at, dict(outcome or {}))
     if len(_IDEMPOTENCY_CACHE) > 4096:
         # drop expired entries opportunistically
         now = _time.monotonic()
-        for cache_key, (_, exp) in list(_IDEMPOTENCY_CACHE.items()):
+        for cache_key, (_, exp, _) in list(_IDEMPOTENCY_CACHE.items()):
             if exp < now:
                 _IDEMPOTENCY_CACHE.pop(cache_key, None)
 
@@ -438,11 +445,14 @@ async def _runtime_schedule_create(request: web.Request) -> web.Response:
         except (TypeError, ValueError):
             chat_id = -user_id
 
-    cached_job_id = _idempotency_lookup(user_id, idempotency_key)
-    if cached_job_id is not None:
+    cached = _idempotency_lookup(user_id, idempotency_key)
+    if cached is not None:
+        cached_job_id, cached_outcome = cached
         existing = _schedule_detail_payload(cached_job_id)
         if existing is not None:
-            return web.json_response({"ok": True, "idempotent_replay": True, **existing})
+            # Repeat the original message and validation_run_id so a client retrying after a
+            # lost response learns whether validation was queued, exactly as on the first call.
+            return web.json_response({"ok": True, "idempotent_replay": True, **cached_outcome, **existing})
 
     raw_payload = body.get("payload") or {}
     if not isinstance(raw_payload, dict):
@@ -521,16 +531,11 @@ async def _runtime_schedule_create(request: web.Request) -> web.Response:
     else:
         message = f"Job created. {validation_message}"
 
-    _idempotency_remember(user_id, idempotency_key, job_id)
+    creation_outcome: dict[str, object] = {"message": message, "validation_run_id": validation_run_id}
+    _idempotency_remember(user_id, idempotency_key, job_id, creation_outcome)
     detail = _schedule_detail_payload(job_id) or {}
     return web.json_response(
-        {
-            "ok": True,
-            "idempotent_replay": False,
-            "message": message,
-            "validation_run_id": validation_run_id,
-            **detail,
-        },
+        {"ok": True, "idempotent_replay": False, **creation_outcome, **detail},
         status=201,
     )
 
