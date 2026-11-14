@@ -1426,6 +1426,124 @@ async def test_file_grep_never_prints_a_cli_credential_store(
         assert "visible-setting" in result.output
 
 
+# The files that hold a credential which the pinned Claude Code CLI keeps in HOME when
+# CLAUDE_CONFIG_DIR is unset, under the names it writes them: its global config (with
+# primaryApiKey) for each OAuth environment, the legacy one, their recovery copies and the
+# timestamped backups, the device private keys, the background sessions' auth snapshot and
+# socket tokens, a remote session's tokens, and the login and keys refused before.
+_NATIVE_CLAUDE_CODE_CREDENTIAL_FILES = [
+    ".claude.json",
+    ".claude-staging-oauth.json",
+    ".claude-local-oauth.json",
+    ".claude-custom-oauth.json",
+    ".claude.json.backup",
+    ".claude-custom-oauth.json.backup",
+    ".claude/.config.json",
+    ".claude/.config.json.backup",
+    ".claude/backups/.claude.json.backup.1763100000000",
+    ".claude/.device-keys.json",
+    ".claude/daemon/auth/a1b2c3.json",
+    ".claude/daemon/auth/a1b2c3.tokens.json",
+    ".claude/remote/.oauth_token",
+    ".claude/remote/.api_key",
+    ".claude/remote/.session_ingress_token",
+    ".claude/.credentials.json",
+    ".claude/daemon/control.key",
+    ".claude/sessions/4242.0f1e2d3c.key",
+]
+
+
+def _native_claude_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The native layout, ``CLAUDE_CONFIG_DIR`` unset: the default work dir is HOME, which holds Claude Code's files."""
+    import koda.utils.workdir as workdir
+
+    root = tmp_path.resolve()
+    home = root / "home"
+    (home / "src").mkdir(parents=True)
+    (home / "src" / "main.py").write_text("print('visible')\n", encoding="utf-8")
+    (home / ".claude").mkdir()
+    (home / ".claude" / "settings.json").write_text('{"theme": "visible"}\n', encoding="utf-8")
+    for store in _NATIVE_CLAUDE_CODE_CREDENTIAL_FILES:
+        (home / store).parent.mkdir(parents=True, exist_ok=True)
+        (home / store).write_text('{"primaryApiKey": "sk-ant-canary"}\n', encoding="utf-8")
+    monkeypatch.setitem(vars(workdir), "SENSITIVE_DIRS", frozenset({str(root / "etc")}))
+    monkeypatch.setitem(vars(workdir), "DEFAULT_WORK_DIR", str(home))
+    monkeypatch.setitem(vars(workdir), "STATE_ROOT_DIR", home / ".koda-state")
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.chdir(root)
+    return home
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store", [*_NATIVE_CLAUDE_CODE_CREDENTIAL_FILES, "src/main.py", ".claude/settings.json"])
+async def test_claude_code_credentials_in_a_native_home_are_refused_on_every_surface(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any, store: str
+) -> None:
+    """``~/.claude.json`` holds the /login managed API key and sits in the default work dir ``~``.
+
+    Only ``.claude/.credentials.json`` was refused, so file_read (no approval once the
+    fileops grant exists), ``/cat`` and browser_upload returned ``primaryApiKey`` and the
+    other credential files the pinned CLI keeps beside it.
+    """
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.browser_manager import browser_manager
+    from koda.services.tool_dispatcher import _handle_browser_upload, _handle_file_read
+
+    home = _native_claude_home(tmp_path, monkeypatch)
+    allowed = store in ("src/main.py", ".claude/settings.json")
+    mock_context.user_data["work_dir"] = str(home)
+    mock_context.args = [store]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send:
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+
+    ctx = _file_tool_context(home)
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        read = await _handle_file_read({"path": store}, ctx)
+        absolute = await _handle_file_read({"path": str(home / store)}, ctx)
+    with (
+        patch("koda.services.tool_dispatcher._check_browser_available", new_callable=AsyncMock, return_value=None),
+        patch.object(browser_manager, "upload_file", new_callable=AsyncMock, return_value="Uploaded") as upload,
+    ):
+        uploaded = await _handle_browser_upload({"file_path": store}, ctx)
+
+    assert not any("canary" in text for text in shown), shown
+    assert "canary" not in read.output + absolute.output + uploaded.output
+    assert any("visible" in text for text in shown) == allowed, shown
+    assert read.success == absolute.success == uploaded.success == allowed, read.output
+    assert upload.await_count == int(allowed)
+    if not allowed:
+        assert "blocked for safety" in read.output, read.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search_path", [None, ".claude", ".claude/daemon"])
+async def test_file_grep_never_prints_claude_code_credentials_in_a_native_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, search_path: str | None
+) -> None:
+    from koda.services.tool_dispatcher import _handle_file_grep
+
+    home = _native_claude_home(tmp_path, monkeypatch)
+    ctx = _file_tool_context(home)
+    params = {"pattern": "primaryApiKey|visible"}
+    if search_path is not None:
+        params["path"] = search_path
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        result = await _handle_file_grep(params, ctx)
+
+    assert result.success, result.output
+    assert "canary" not in result.output, result.output
+    if search_path is None:
+        assert "src/main.py:1: print('visible')" in result.output
+    if search_path == ".claude":
+        assert 'settings.json:1: {"theme": "visible"}' in result.output
+
+
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio

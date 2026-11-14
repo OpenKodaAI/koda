@@ -701,6 +701,36 @@ PROVIDER_CLI_CREDENTIAL_FILES: dict[str, tuple[str, tuple[str, ...]]] = {
 # provider deletes the credential files there too (koda/control_plane/manager.py), and the
 # file layer refuses the whole dir in every work dir (koda/utils/workdir.py::protected_dirs).
 PROVIDER_CLI_CONFIG_DIR_ENV_KEYS: dict[str, str] = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
+# Claude Code's global config, as the pinned CLI (packages/provider-clis, 2.1.325) names it
+# in HOME (in CLAUDE_CONFIG_DIR where that is set, a protected dir as a whole): .claude.json,
+# or .claude-<env>-oauth.json for another OAuth environment (CLAUDE_CODE_CUSTOM_OAUTH_URL
+# selects -custom-oauth), and the legacy .claude/.config.json it still reads when present.
+# Each holds the /login managed API key (primaryApiKey) and the MCP servers' env and headers.
+CLAUDE_CODE_GLOBAL_CONFIG_FILES: tuple[str, ...] = (
+    *(f".claude{suffix}.json" for suffix in ("", "-staging-oauth", "-local-oauth", "-custom-oauth")),
+    ".claude/.config.json",
+)
+# The other files that hold a Claude Code credential in HOME, besides its login
+# (.claude/.credentials.json above, which also holds the MCP servers' OAuth tokens): the
+# global config, the copy of it the CLI recovers from (<name>.backup) and its timestamped
+# copies in .claude/backups/; the device private keys it keeps where no keychain holds
+# them (.device-keys.json, in its config dir); the background sessions' auth snapshots and
+# socket tokens (.claude/daemon/auth/); and a remote session's OAuth token, API key and
+# session ingress token (.claude/remote/, which the CLI keeps at a fixed path in a remote
+# session's home, only with CLAUDE_CODE_REMOTE set). Disconnecting the provider does not
+# delete them: the global config is also the operator's settings and project list. The
+# CLI's other keys (.claude/daemon/control.key, pipe.key, sessions/*.key) are refused by
+# extension.
+CLAUDE_CODE_CREDENTIAL_PATHS: tuple[str, ...] = (
+    *CLAUDE_CODE_GLOBAL_CONFIG_FILES,
+    *(f"{name}.backup" for name in CLAUDE_CODE_GLOBAL_CONFIG_FILES),
+    ".claude/backups/",
+    ".device-keys.json",
+    ".claude/daemon/auth/",
+    ".claude/remote/.oauth_token",
+    ".claude/remote/.api_key",
+    ".claude/remote/.session_ingress_token",
+)
 # Credential stores that the provider and developer CLIs keep in HOME, which is also the
 # default Docker work dir (HOME=/var/lib/koda/runtime/home). The file commands, the agent
 # file tools and browser_upload refuse them like a blocked extension. An entry ending in
@@ -713,6 +743,7 @@ FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
     ".azure/",
     ".config/gcloud/",
     *(f"{config_dir}/{name}" for config_dir, names in PROVIDER_CLI_CREDENTIAL_FILES.values() for name in names),
+    *CLAUDE_CODE_CREDENTIAL_PATHS,
     ".config/gh/hosts.yml",
     ".docker/config.json",
     ".kube/config",

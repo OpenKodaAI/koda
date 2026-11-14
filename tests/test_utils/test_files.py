@@ -403,6 +403,24 @@ class TestCredentialStoresAreSecretFiles:
             ("/srv/koda-user/.pgpass", ".pgpass"),
             ("/srv/koda-user/project/.npmrc", ".npmrc"),
             ("/srv/koda-user/.pypirc", ".pypirc"),
+            ("/srv/koda-user/.claude.json", ".claude.json"),
+            ("/srv/koda-user/.Claude.json", ".claude.json"),
+            ("/srv/koda-user/.claude-custom-oauth.json", ".claude-custom-oauth.json"),
+            ("/srv/koda-user/.claude-staging-oauth.json", ".claude-staging-oauth.json"),
+            ("/srv/koda-user/.claude-local-oauth.json", ".claude-local-oauth.json"),
+            ("/srv/koda-user/.claude/.config.json", ".claude/.config.json"),
+            ("/srv/koda-user/.claude.json.backup", ".claude.json.backup"),
+            ("/srv/koda-user/.claude-custom-oauth.json.backup", ".claude-custom-oauth.json.backup"),
+            ("/srv/koda-user/.claude/.config.json.backup", ".claude/.config.json.backup"),
+            ("/srv/koda-user/.claude/backups/.claude.json.backup.1763100000000", ".claude/backups/"),
+            ("/srv/koda-user/.claude/backups", ".claude/backups/"),
+            ("/srv/koda-user/.claude/.device-keys.json", ".device-keys.json"),
+            ("/srv/secure-storage/.device-keys.json", ".device-keys.json"),
+            ("/srv/koda-user/.claude/daemon/auth/a1b2c3.tokens.json", ".claude/daemon/auth/"),
+            ("/srv/koda-user/.claude/daemon/auth/a1b2c3.json", ".claude/daemon/auth/"),
+            ("/srv/koda-user/.claude/remote/.oauth_token", ".claude/remote/.oauth_token"),
+            ("/srv/koda-user/.claude/remote/.api_key", ".claude/remote/.api_key"),
+            ("/srv/koda-user/.claude/remote/.session_ingress_token", ".claude/remote/.session_ingress_token"),
         ],
     )
     def test_credential_stores_are_matched(self, path, entry):
@@ -422,6 +440,14 @@ class TestCredentialStoresAreSecretFiles:
             "/srv/koda-user/.npmrc.example",
             "/srv/koda-user/netrc",
             "/srv/koda-user/src/kube/config",
+            "/srv/koda-user/.claude/settings.json",
+            "/srv/koda-user/.claude/CLAUDE.md",
+            "/srv/koda-user/.claude/projects/p/session.jsonl",
+            "/srv/koda-user/.claude/daemon/roster.json",
+            "/srv/koda-user/project/.mcp.json",
+            "/srv/koda-user/project/.config.json",
+            "/srv/koda-user/project/claude.json",
+            "/srv/koda-user/.claude.json.example",
         ],
     )
     def test_other_paths_are_not(self, path):
@@ -442,6 +468,63 @@ class TestCredentialStoresAreSecretFiles:
         for name in names:
             assert blocked_credential_path(f"/srv/koda-user/{config_dir}/{name}") == f"{config_dir}/{name}"
         assert set(_PROVIDER_CREDENTIAL_FILES) == {"claude", "codex", "gemini"}
+
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"deny_sensitive_dirs": False}, {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True}],
+        ids=["the file tools", "the file commands", "browser_upload"],
+    )
+    def test_claude_codes_other_credential_files_in_home_are_refused_and_kept_on_logout(
+        self, tmp_path, monkeypatch, options
+    ):
+        """With ``CLAUDE_CONFIG_DIR`` unset, Claude Code keeps more than its login in the default work dir ``~``.
+
+        ``~/.claude.json`` holds the /login managed API key (``primaryApiKey``), and the
+        pinned CLI keeps copies of it, device private keys and background-session tokens
+        beside it. The file layer refuses each of them; Koda's logout deletes only the
+        login, since the global config is also the operator's own settings.
+        """
+        import koda.control_plane.manager as manager_mod
+        from koda.config import CLAUDE_CODE_CREDENTIAL_PATHS
+
+        home = tmp_path.resolve() / "home"
+        stores = [entry + "x.json" if entry.endswith("/") else entry for entry in CLAUDE_CODE_CREDENTIAL_PATHS]
+        for store in [*stores, ".claude/.credentials.json", ".claude/settings.json", "project/main.py"]:
+            (home / store).parent.mkdir(parents=True, exist_ok=True)
+            (home / store).write_text('{"primaryApiKey": "sk-ant-canary"}\n')
+        monkeypatch.setenv("HOME", str(home))
+
+        for store in stores:
+            resolution = resolve_work_path(store, str(home), **options)
+            assert resolution.path is None, store
+            assert resolution.reason == "path_blocked_file", store
+        for visible in (".claude/settings.json", "project/main.py"):
+            assert resolve_work_path(visible, str(home), **options).path == home / visible
+
+        manager_mod.ControlPlaneManager._wipe_provider_credential_files(
+            object.__new__(manager_mod.ControlPlaneManager), "claude"
+        )
+        assert not (home / ".claude" / ".credentials.json").exists()
+        assert [store for store in stores if not (home / store).exists()] == []
+
+    def test_the_guardrail_matrix_lists_exactly_the_refused_credential_paths(self):
+        """The File operations row lists every ``FILEOPS_BLOCKED_CREDENTIAL_PATHS`` entry, and nothing else."""
+        import re
+        from pathlib import Path
+
+        from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS
+
+        matrix = (Path(__file__).resolve().parents[2] / "docs/security/guardrail-test-matrix.md").read_text()
+        row = next(line for line in matrix.splitlines() if line.startswith("| File operations |"))
+        start = row.index("(`FILEOPS_BLOCKED_CREDENTIAL_PATHS`")
+        listing = row[start : row.index(")", start)]
+        named = re.findall(r"`([^`]+)`", listing)[1:]
+        assert sorted(named) == sorted(FILEOPS_BLOCKED_CREDENTIAL_PATHS)
+        directories, files = listing.split(" directories with everything below them", 1)
+        assert sorted(re.findall(r"`([^`]+/)`", directories)) == sorted(
+            entry for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS if entry.endswith("/")
+        )
+        assert not re.findall(r"`([^`]+/)`", files)
 
     @pytest.mark.parametrize(("provider", "env_key"), [("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")])
     @pytest.mark.parametrize(
