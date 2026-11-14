@@ -41,6 +41,8 @@ iteration.
 
 - SEC-PLACEHOLDER-SECRETS — unedited `.env.example` placeholders (`replace-with-*`) authenticated as break-glass owner / runtime UI token on the documented manual install (port 8090 published on all interfaces). Fixed: placeholders treated as unset in Python, web and the runtime-token broker; web checks the secret before contacting the control plane (no lost recovery codes); `scripts/generate_env_secrets.py` (0600, mkstemp, auth-only on existing installs) used by docs and CI smoke; doctor checks hardened. Two security review rounds (round 1: 2 major + 6 minor; round 2: approve, 4 minor → fixed). Evidence: `VALIDATION_REPORT.md`.
 
+- DATA-UNINSTALL-VOLUMES — `koda uninstall` no longer deletes data volumes without `--purge`; `--purge` refuses non-Koda directories and removes volumes before the `.env`. Reviewed (approve). Evidence: `VALIDATION_REPORT.md`.
+
 ## Active tasks
 
 - P0-DISCOVERY — multi-agent subsystem inventory (workflow running; early unverified findings: provider CLIs run tools with permissions bypassed, public break-glass admin token on manual install, retries re-run side-effecting tools, squad post-processing deadlock).
@@ -48,12 +50,13 @@ iteration.
 
 ## Pending findings for the plan (verified by the orchestrator)
 
-- `docker-compose.yml` publishes 8090/3000 on all host interfaces while `docker-compose.prod.yml` and `docs/security/authentication.md` assume loopback. Changing the binding is an externally visible network-policy change → **needs operator approval**.
+- **DECISION NEEDED (network exposure)** — `docs/install/vps.md` promises the dashboard (3000) and control-plane API (8090) are bound to localhost behind a reverse proxy, and `docs/security/authentication.md` says the backend is bound to `127.0.0.1:8090`. Reality: (a) the packaged installer's `packages/cli/release/bundle/docker-compose.release.yml` publishes both on all interfaces; (b) base `docker-compose.yml` does too; (c) `docker-compose.prod.yml` *adds* loopback bindings but Compose merges `ports` lists rather than replacing them (skeptic-confirmed), so it does not remove the public ones. Proposed: bind both to `127.0.0.1` by default (`!override` in the prod overlay, loopback in the release bundle and base compose) with an explicit opt-in variable for direct LAN access. Impact: anyone currently opening `http://<server>:3000` directly would need the reverse proxy or the opt-in. Not done without operator approval (MISSION §13).
 - `scripts/doctor.py` checks `KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY` but `.env.example` defines `S3_SECRET_ACCESS_KEY` → false "object_storage_secret_key: false" on manual installs.
 - `POSTGRES_PASSWORD` / `S3_*` placeholders are still accepted (compose `:?` rejects only empty); reachable from the `backend` network, which includes `runtime-kernel` where agent tool code runs.
 - `RuntimeAccessService` (`koda/services/runtime_access_service.py:50`) accepts an empty HMAC key; only call sites guard it.
 - CLI recovery (`packages/cli/bin/koda.mjs:629`) sends the raw comma-separated `CONTROL_PLANE_API_TOKEN` as bearer → breaks during `new,old` rotation.
 - Internal gRPC sidecars are unauthenticated on the `backend` network.
+- Packaged install dir `~/.koda` and a source checkout named `koda` share the compose project name `koda` (same volume names); needs a pinned, distinct project name plus an install migration.
 - `CHANGELOG.md` is the changelog of an unrelated project (`@googleworkspace/cli`); needs replacing with Koda's own.
 - Web build had one transient Turbopack `next/font/google` resolution failure (passed on retry); watch for recurrence.
 

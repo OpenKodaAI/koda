@@ -72,6 +72,9 @@ Usage:
   koda uninstall [--dir <path>] [--purge]
 
 Options:
+  --purge          With uninstall: also delete the data volumes (Postgres,
+                   object storage, state) and the install directory. Without
+                   it, uninstall only stops and removes the containers.
   --reset-volumes  Destroy any pre-existing Docker volumes managed by the
                    target install before bringing the stack up. Use this when
                    reinstalling and the previous Postgres password no longer
@@ -713,8 +716,8 @@ async function installCommand(args) {
 
   // The .env we are about to mint will only match a fresh Postgres data
   // directory. If the user already has volumes from a prior install but no
-  // .env (typical after `koda uninstall` without --purge, or a manual rm of
-  // ~/.koda), abort with an actionable message instead of waiting for the app
+  // .env (typical after a manual rm of ~/.koda; `koda uninstall` keeps
+  // both and `koda uninstall --purge` removes both), abort with an actionable message instead of waiting for the app
   // healthcheck to time out on auth failures.
   const envExistedBefore = existsSync(join(installDir, ".env"));
   if (resetVolumes) {
@@ -864,12 +867,30 @@ async function updateCommand(args) {
 async function uninstallCommand(args) {
   const purge = consumeFlag(args, "--purge");
   const installDir = resolveInstallDir(args);
-  if (existsSync(join(installDir, "bundle", "docker-compose.release.yml"))) {
-    runDockerCompose(installDir, ["down", "-v"]);
+  const composeFile = join(installDir, "bundle", "docker-compose.release.yml");
+  // Never touch (let alone delete) a directory that is not a Koda install.
+  if (!existsSync(composeFile) && !existsSync(join(installDir, "manifest.json"))) {
+    console.log(`No Koda install found at ${installDir}; nothing to remove.`);
+    return;
   }
   if (purge) {
+    // Remove the data volumes before the .env that matches them. Docker must be
+    // reachable (resetManagedVolumes is a no-op otherwise), and the label-based
+    // fallback also catches volumes from older releases or a broken .env.
+    ensureDockerReady();
+    resetManagedVolumes(installDir);
     await rm(installDir, { recursive: true, force: true });
+    return;
   }
+  // Data volumes (Postgres, object storage, state) are only deleted with
+  // --purge; a plain uninstall must be reversible with `koda up`.
+  if (existsSync(composeFile)) {
+    runDockerCompose(installDir, ["down", "--remove-orphans"]);
+  }
+  console.log(
+    `Koda stopped. Data volumes and ${join(installDir, ".env")} were kept; ` +
+      "run `koda up` to start again or `koda uninstall --purge` to delete everything.",
+  );
 }
 
 await main();

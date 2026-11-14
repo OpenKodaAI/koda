@@ -89,6 +89,8 @@ koda auth issue-code      # issue a setup/login code from the local install
 koda logs app web         # tail release services
 koda update               # move the install to the latest published bundle
 koda down                 # stop the local stack
+koda uninstall            # remove containers, keep data volumes and .env
+koda uninstall --purge    # also delete data volumes and the install directory
 ```
 
 Typical first workflow:

@@ -94,3 +94,27 @@ snippet rotated the Postgres password; web threw after owner registration, losin
 6 minor) → fixed. Round 2 approve with 4 minor (default mode rotated storage keys on existing installs;
 fixed temp name followed symlinks; narrower placeholder detection; login echoed the internal error) → fixed
 with tests. Deferred items are listed under "Pending findings" in `EXECUTION_STATUS.md`.
+
+## DATA-UNINSTALL-VOLUMES — `koda uninstall` deleted all data without `--purge`
+
+Defect (skeptic-confirmed, reproduced): `uninstallCommand` always ran `docker compose down -v`, deleting
+the Postgres, object-storage and state volumes even without `--purge`, contrary to the help text, the
+reinstall guard comment and `docs/install/local.md`.
+
+Fix (`packages/cli/bin/koda.mjs`): plain uninstall runs `down --remove-orphans`, keeps volumes and `.env`,
+and points to `koda up`; `--purge` checks Docker is reachable, removes volumes via `resetManagedVolumes`
+(compose `down -v` with a project-label fallback that also catches volumes from older releases), then
+deletes the install directory; any directory without `bundle/docker-compose.release.yml` or
+`manifest.json` is refused (previously `koda uninstall --dir ~ --purge` would `rm -rf` the home dir).
+Help text and both READMEs document the semantics.
+
+| Command | Result |
+|---|---|
+| `tests/test_cli_uninstall.py` (real CLI + fake `docker` recording argv) | 3 passed; the no-purge test fails against the old CLI |
+| hygiene/docs/install-asset tests | 46 passed |
+| full `pytest` | 4897 passed, 200 skipped (before the guard test) |
+| `node --check packages/cli/bin/koda.mjs`, `scripts/sync_npm_readme.py` | ok, no drift |
+
+Review: independent reviewer approved (simulated install → uninstall → install keeps the identical `.env`
+and skips the volume guard; release smokes still use `--purge`). Its minor items 1–3, 5–7 are fixed here;
+item 4 (default project name `koda` collides with a source checkout named `koda`) is recorded as a follow-up.
