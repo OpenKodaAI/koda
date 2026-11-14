@@ -401,7 +401,17 @@ class TestCredentialStoresAreSecretFiles:
             ("/srv/koda-user/.gemini/a2a-oauth-tokens.json", ".gemini/a2a-oauth-tokens.json"),
             ("/srv/koda-user/.cache/.gemini/a2a-oauth-tokens.json", ".gemini/a2a-oauth-tokens.json"),
             ("/srv/koda-user/.cache/.gemini/mcp-oauth-tokens.json", ".gemini/mcp-oauth-tokens.json"),
+            ("/srv/koda-user/.cache/.gemini/google_accounts.json", ".gemini/google_accounts.json"),
             ("/srv/koda-user/.gemini/gemini-credentials.json", ".gemini/gemini-credentials.json"),
+            ("/srv/koda-user/.gemini/gemini-credentials.json.tmp.a1b2c3d4", ".gemini/gemini-credentials.json"),
+            ("/srv/koda-user/.gemini/settings.json", ".gemini/settings.json"),
+            ("/srv/koda-user/.gemini/.settings.json.15792.1794689666313.0.tmp", ".gemini/settings.json"),
+            ("/srv/koda-user/project/.gemini/settings.json", ".gemini/settings.json"),
+            ("/srv/koda-user/project/.gemini/.settings.json.19480.1794691605174.0.tmp", ".gemini/settings.json"),
+            ("/srv/koda-user/.codex/config.toml", ".codex/config.toml"),
+            ("/srv/koda-user/.codex/.tmpM6o6al", ".codex/config.toml"),
+            ("/srv/koda-user/.codex/.tmpafU0fU", ".codex/config.toml"),
+            ("/srv/koda-user/project/.codex/config.toml", ".codex/config.toml"),
             ("/srv/koda-user/.gemini/cli-browser-profile/Default/Cookies", ".gemini/cli-browser-profile/"),
             ("/srv/koda-user/.gemini/cli-browser-profile", ".gemini/cli-browser-profile/"),
             ("/srv/koda-user/.codex/.credentials.json", ".codex/.credentials.json"),
@@ -473,7 +483,11 @@ class TestCredentialStoresAreSecretFiles:
         "path",
         [
             "/srv/koda-user/.docker/Dockerfile",
-            "/srv/koda-user/.codex/config.toml",
+            "/srv/koda-user/.codex/config.toml.lock",
+            "/srv/koda-user/.codex/tmpM6o6al",
+            "/srv/koda-user/.codex/agents/reviewer.toml",
+            "/srv/koda-user/project/config.toml",
+            "/srv/koda-user/project/.tmpM6o6al",
             "/srv/koda-user/.config/gh/config.yml",
             "/srv/koda-user/.config/gcloud-tools/notes.md",
             "/srv/koda-user/project/docs/ssh.md",
@@ -501,7 +515,12 @@ class TestCredentialStoresAreSecretFiles:
             "/srv/koda-user/.session_ingress_tokens",
             "/srv/koda-user/.session_ingress_token_old",
             "/srv/koda-user/session_ingress_token.e3",
-            "/srv/koda-user/.gemini/settings.json",
+            "/srv/koda-user/.gemini/settings.json.example",
+            "/srv/koda-user/.gemini/.settings.json.4242.bak",
+            "/srv/koda-user/.gemini/GEMINI.md",
+            "/srv/koda-user/project/settings.json",
+            "/srv/koda-user/project/.settings.json.15792.1794689666313.0.tmp",
+            "/srv/koda-user/.gemini/projects.json.4bc57a29-9a96-4a54-8c4c-d4c8941aea58.tmp",
             "/srv/koda-user/.gemini/.oauth_creds.json.4242.bak",
             "/srv/koda-user/.gemini/.google_accounts.json.4242.1763100000000.0.tmp",
             "/srv/koda-user/project/.oauth_creds.json.4242.1763100000000.0.tmp",
@@ -514,7 +533,7 @@ class TestCredentialStoresAreSecretFiles:
             "/srv/koda-user/.gemini/projects.json",
             "/srv/koda-user/project/cli-browser-profile/Default/Cookies",
             "/srv/koda-user/project/gemini-credentials.json",
-            "/srv/koda-user/.codex/.tmpafU0fU",
+            "/srv/koda-user/.gemini/gemini-credentials.json.example",
             "/srv/koda-user/.codex/mcp-oauth-locks/file-store.lock",
             "/srv/koda-user/.codex/secrets.toml",
             "/srv/koda-user/project/secrets/gateway_oauth.json",
@@ -592,11 +611,14 @@ class TestCredentialStoresAreSecretFiles:
         in the CLI, the login and MCP tokens under ``GEMINI_FORCE_ENCRYPTED_FILE_STORAGE``, the
         extensions' secret settings and the key that signs the extension integrity store
         (``.gemini/integrity.key`` where the keychain fails). Its browser agent keeps a Chrome
-        profile with the sites' cookies in ``.gemini/cli-browser-profile/``, and in the macOS
-        sandbox it keeps its MCP and A2A tokens in ``.cache/.gemini/``. Codex 0.169.0 keeps the
-        secrets the operator stores with it in ``.codex/secrets/local.age``. Each is refused on
-        every surface; disconnecting the provider keeps them, since the keychain and the store
-        hold the operator's own secrets and deleting the integrity key breaks every extension.
+        profile with the sites' cookies in ``.gemini/cli-browser-profile/``. ``gemini mcp add``
+        writes each MCP server's env and HTTP headers into ``.gemini/settings.json`` through
+        ``.settings.json.<pid>.<ms>.<n>.tmp``, and ``codex mcp add`` writes an MCP server's env
+        and OAuth client secret into ``.codex/config.toml`` through ``.tmp<random>``. Codex
+        0.169.0 keeps the secrets the operator stores with it in ``.codex/secrets/local.age``.
+        Each is refused on every surface; disconnecting the provider keeps them, since they
+        hold the operator's own settings and secrets and deleting the integrity key breaks
+        every extension.
         """
         import koda.control_plane.manager as manager_mod
 
@@ -605,13 +627,16 @@ class TestCredentialStoresAreSecretFiles:
             ".gemini/gemini-credentials.json",
             ".gemini/integrity.key",
             ".gemini/cli-browser-profile/Default/Cookies",
-            ".cache/.gemini/mcp-oauth-tokens.json",
-            ".cache/.gemini/a2a-oauth-tokens.json",
+            ".gemini/settings.json",
+            ".gemini/.settings.json.15792.1794689666313.0.tmp",
+            ".codex/config.toml",
+            ".codex/.tmpM6o6al",
             ".codex/secrets/local.age",
             ".codex/secrets/.local.age.tmp-4242-1763100000000",
             ".codex/secrets/gateway_oauth.lock",
         ]
-        for store in [*kept, ".gemini/settings.json", ".codex/config.toml"]:
+        visible = [".gemini/GEMINI.md", ".codex/AGENTS.md", ".codex/config.toml.lock"]
+        for store in [*kept, *visible]:
             (home / store).parent.mkdir(parents=True, exist_ok=True)
             (home / store).write_text('{"refresh_token": "1//canary-refresh"}\n')
         monkeypatch.setenv("HOME", str(home))
@@ -620,14 +645,102 @@ class TestCredentialStoresAreSecretFiles:
             resolution = resolve_work_path(store, str(home), **options)
             assert resolution.path is None, store
             assert resolution.reason == "path_blocked_file", store
-        for visible in (".gemini/settings.json", ".codex/config.toml"):
-            assert resolve_work_path(visible, str(home), **options).path == home / visible
+        for path in visible:
+            assert resolve_work_path(path, str(home), **options).path == home / path
 
         for provider in ("gemini", "codex"):
             manager_mod.ControlPlaneManager._wipe_provider_credential_files(
                 object.__new__(manager_mod.ControlPlaneManager), provider
             )
         assert [store for store in kept if not (home / store).exists()] == []
+
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"deny_sensitive_dirs": False}, {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True}],
+        ids=["the file tools", "the file commands", "browser_upload"],
+    )
+    def test_the_sign_ins_gemini_keeps_in_its_sandbox_runtime_dir_are_refused_and_deleted_on_logout(
+        self, tmp_path, monkeypatch, options
+    ):
+        """Inside the macOS seatbelt sandbox Gemini CLI keeps three of its sign-ins in ``~/.cache/.gemini/``.
+
+        Gemini CLI 0.68.0 keeps its account list and the MCP servers' and A2A agents' OAuth
+        tokens in its runtime dir (``Storage.getGlobalRuntimeDir``), which is
+        ``~/.cache/.gemini`` under ``SANDBOX=sandbox-exec`` and ``~/.gemini`` otherwise, while
+        its OAuth login stays in ``~/.gemini``. The file layer refuses those files there by
+        their ``.gemini/`` entries, and the disconnect deletes them there as it does in
+        ``~/.gemini``, so the next sandboxed run is no longer signed in to those servers and
+        agents. The rest of the runtime dir stays.
+        """
+        import koda.control_plane.manager as manager_mod
+        from koda.config import PROVIDER_CLI_CREDENTIAL_FILES, PROVIDER_CLI_RUNTIME_CREDENTIAL_FILES
+
+        assert set(PROVIDER_CLI_RUNTIME_CREDENTIAL_FILES) == {"gemini"}
+        runtime_dir, names = PROVIDER_CLI_RUNTIME_CREDENTIAL_FILES["gemini"]
+        assert runtime_dir == ".cache/.gemini"
+        assert sorted(names) == ["a2a-oauth-tokens.json", "google_accounts.json", "mcp-oauth-tokens.json"]
+        assert set(names) <= set(PROVIDER_CLI_CREDENTIAL_FILES["gemini"][1])
+        home = tmp_path.resolve() / "home"
+        stores = [f"{runtime_dir}/{name}" for name in names]
+        kept = [
+            ".cache/.gemini/installation_id",
+            ".cache/.gemini/trustedFolders.json",
+            ".cache/.gemini/policy_integrity.json",
+            ".cache/.gemini/tmp/proj/logs.json",
+            ".gemini/settings.json",
+        ]
+        for path in [*stores, *kept]:
+            (home / path).parent.mkdir(parents=True, exist_ok=True)
+            (home / path).write_text('[{"token": {"refreshToken": "canary-refresh"}}]\n')
+        monkeypatch.setenv("HOME", str(home))
+
+        for store, name in zip(stores, names, strict=True):
+            resolution = resolve_work_path(store, str(home), **options)
+            assert resolution.path is None, store
+            assert f"'.gemini/{name}' is a credential store" in (resolution.error or ""), store
+        for path in kept[:-1]:
+            assert resolve_work_path(path, str(home), **options).path == home / path, path
+
+        manager_mod.ControlPlaneManager._wipe_provider_credential_files(
+            object.__new__(manager_mod.ControlPlaneManager), "gemini"
+        )
+        assert [store for store in stores if (home / store).exists()] == []
+        assert [path for path in kept if not (home / path).is_file()] == []
+
+    def test_a_directory_named_like_a_temp_copy_is_not_one(self, tmp_path):
+        """``credential_temp_copies`` returns files only, so the disconnect never takes a directory for a temp copy.
+
+        Codex writes its gateway OAuth tokens through ``secrets/.tmp<random>``, a file. A
+        directory of a matching name (another tool's temp dir) is no such copy, and whatever
+        deletes what the helper returns must not delete it or what it holds.
+        """
+        from koda.utils.files import credential_temp_copies
+
+        secrets = tmp_path / ".codex" / "secrets"
+        (secrets / ".tmpdir0").mkdir(parents=True)
+        (secrets / ".tmpdir0" / "keep.txt").write_text("keep")
+        (secrets / ".tmpafU0fU").write_text('{"refresh_token": "canary-refresh"}')
+
+        assert credential_temp_copies(secrets, ".codex/secrets/gateway_oauth.json") == [secrets / ".tmpafU0fU"]
+
+    def test_the_guardrail_matrix_says_the_disconnect_deletes_claude_codes_mcp_client_secrets(self):
+        """Claude Code's login file also holds the MCP OAuth client secrets the operator entered.
+
+        ``claude mcp add --client-secret`` (2.1.325) stores the secret in
+        ``.claude/.credentials.json`` under ``mcpOAuthClientConfig``, which signing in again
+        does not give back, and ``claude auth logout`` deletes the whole file, as the
+        disconnect does. The row must say that, not that every file the disconnect deletes
+        holds only a sign-in the CLI gets back by signing in again.
+        """
+        from pathlib import Path
+
+        matrix = (Path(__file__).resolve().parents[2] / "docs/security/guardrail-test-matrix.md").read_text()
+        row = next(line for line in matrix.splitlines() if line.startswith("| File operations |"))
+        start = row.index("The provider CLI sign-ins in that list are the files disconnecting a provider deletes")
+        sentence = row[start : row.index("The disconnect also deletes the temp copies", start)]
+        assert "each holds only a sign-in the CLI gets back by signing in again" not in sentence
+        assert "`mcpOAuthClientConfig`" in sentence
+        assert "`claude auth logout`" in sentence
 
     def test_the_guardrail_matrix_lists_exactly_the_refused_credential_paths(self):
         """The File operations row lists every ``FILEOPS_BLOCKED_CREDENTIAL_PATHS`` entry, and nothing else."""
@@ -730,6 +843,7 @@ class TestCredentialStoresAreSecretFiles:
             "test_the_guardrail_matrix_names_exactly_the_copies_refused_with_a_credential_file",
             "test_the_guardrail_matrix_names_exactly_the_temp_copies_refused_with_a_credential_file",
             "test_the_guardrail_matrix_names_exactly_the_credential_name_prefixes",
+            "test_the_guardrail_matrix_says_the_disconnect_deletes_claude_codes_mcp_client_secrets",
             "test_the_guardrail_matrix_cites_its_credential_tests_by_name",
         ):
             assert f"{own}::{name}" in cited, name
@@ -794,6 +908,8 @@ class TestCredentialStoresAreSecretFiles:
             (".codex/secrets/.codex_auth.age.tmp-4242-1763100000000", ".codex/secrets/codex_auth.age"),
             (".codex/secrets/.mcp_oauth.age.tmp-4242-1763100000000", ".codex/secrets/mcp_oauth.age"),
             (".codex/secrets/.gateway_oauth.age.tmp-4242-1763100000000", ".codex/secrets/gateway_oauth.age"),
+            (".gemini/.settings.json.15792.1794689666313.0.tmp", ".gemini/settings.json"),
+            (".codex/.tmpM6o6al", ".codex/config.toml"),
         ],
     )
     @pytest.mark.parametrize(
@@ -810,20 +926,24 @@ class TestCredentialStoresAreSecretFiles:
         ``.oauth_creds.json.<pid>.<ms>.<n>.tmp``; Codex 0.169.0 replaces ``auth.json``
         through ``.auth-<random>``, its gateway OAuth tokens (``secrets/gateway_oauth.json``)
         through ``secrets/.tmp<random>`` and each file of its encrypted secrets store through
-        ``secrets/.<name>.tmp-<a>-<b>``. A CLI killed between the write and the rename leaves
-        that copy, with the refresh token, and none of the copy names Claude Code writes
-        matched it, so file_read, /cat and browser_upload returned it. Each is refused as the
-        file beside it; the same name in another directory and the CLIs' other files are not.
+        ``secrets/.<name>.tmp-<a>-<b>``. They write their MCP servers' secrets the same way:
+        Gemini CLI its settings through ``.settings.json.<pid>.<ms>.<n>.tmp`` and Codex its
+        ``config.toml`` through ``.tmp<random>``. A CLI killed between the write and the
+        rename leaves that copy, with the refresh token or the MCP secrets, and none of the
+        copy names Claude Code writes matched it, so file_read, /cat and browser_upload
+        returned it. Each is refused as the file beside it; the same name in another
+        directory and the CLIs' other files are not.
         """
         home = tmp_path.resolve() / "home"
         visible = [
-            ".gemini/settings.json",
+            ".gemini/GEMINI.md",
             ".gemini/.oauth_creds.json.4242.bak",
             "project/.oauth_creds.json.4242.1763100000000.0.tmp",
-            ".codex/config.toml",
+            "project/.settings.json.15792.1794689666313.0.tmp",
+            ".codex/AGENTS.md",
             ".codex/auth-wQZHMQ",
             "project/.auth-wQZHMQ",
-            ".codex/.tmpafU0fU",
+            ".claude/.tmpafU0fU",
             "project/secrets/.tmpafU0fU",
         ]
         for path in (copy, *visible):

@@ -1325,6 +1325,8 @@ _DOCKER_HOME_CREDENTIAL_STORES = [
     ".codex/secrets/gateway_oauth.json",
     ".codex/secrets/codex_auth.age",
     ".codex/secrets/local.age",
+    ".codex/config.toml",
+    ".codex/.tmpM6o6al",
     ".gemini/oauth_creds.json",
     ".gemini/mcp-oauth-tokens.json",
     ".gemini/a2a-oauth-tokens.json",
@@ -1332,8 +1334,11 @@ _DOCKER_HOME_CREDENTIAL_STORES = [
     ".gemini/gemini-credentials.json",
     ".gemini/integrity.key",
     ".gemini/cli-browser-profile/Default/Cookies",
+    ".gemini/settings.json",
+    ".gemini/.settings.json.15792.1794689666313.0.tmp",
     ".cache/.gemini/mcp-oauth-tokens.json",
     ".cache/.gemini/a2a-oauth-tokens.json",
+    ".cache/.gemini/google_accounts.json",
     ".claude/.credentials.json",
     ".config/gh/hosts.yml",
     ".config/gcloud/application_default_credentials.json",
@@ -1709,7 +1714,7 @@ async def test_a_temp_copy_of_a_provider_login_left_by_a_killed_cli_is_refused_o
     (home / copy).write_text(
         '{"access_token": "ya29.canary-access", "refresh_token": "1//canary-refresh"}\n', encoding="utf-8"
     )
-    (home / config_dir / "settings.json").write_text('{"refresh_token_note": "visible"}\n', encoding="utf-8")
+    (home / config_dir / "notes.md").write_text('{"refresh_token_note": "visible"}\n', encoding="utf-8")
     # A config dir that holds only the copy, so no login beside it blocks the rename.
     (home / "other" / copy).parent.mkdir(parents=True)
     (home / "other" / copy).write_text('{"refresh_token": "1//canary-refresh"}\n', encoding="utf-8")
@@ -1738,11 +1743,95 @@ async def test_a_temp_copy_of_a_provider_login_left_by_a_killed_cli_is_refused_o
     assert "credential store" in read.output, read.output
     upload.assert_not_awaited()
     assert grep.success, grep.output
-    assert 'settings.json:1: {"refresh_token_note": "visible"}' in grep.output, grep.output
+    assert 'notes.md:1: {"refresh_token_note": "visible"}' in grep.output, grep.output
     assert not moved.success, moved.output
     assert "credential store" in moved.output, moved.output
     assert (home / "other" / copy).is_file()
     assert not (home / "other" / "cli-old").exists()
+
+
+# The files the pinned Codex (0.169.0) and Gemini CLI (0.68.0) write their MCP servers' secrets
+# into, with what `codex mcp add foo --url ... --oauth-client-id X --oauth-client-secret S`,
+# `codex mcp add bar --env API_KEY=K -- cmd` and `gemini mcp add [-s user] -t http -H
+# 'Authorization: Bearer T' gfoo URL` wrote there (strace, a fresh HOME, dummy values), and
+# the temp copy each was written through. Gemini CLI writes a project's settings by default.
+_MCP_SECRET_STORES = {
+    ".codex/config.toml": (
+        '[mcp_servers.foo.oauth]\nclient_id = "dummy-cid"\nclient_secret = "canary-client-secret"\n\n'
+        '[mcp_servers.bar.env]\nAPI_KEY = "canary-env-key"\n'
+    ),
+    ".codex/.tmpM6o6al": '[mcp_servers.foo.oauth]\nclient_secret = "canary-client-secret"\n',
+    ".gemini/settings.json": (
+        '{\n  "mcpServers": {\n    "gfoo": {\n      "url": "http://127.0.0.1:9/mcp",\n'
+        '      "headers": {\n        "Authorization": "Bearer canary-header"\n      }\n    }\n  }\n}\n'
+    ),
+    ".gemini/.settings.json.15792.1794689666313.0.tmp": '{"mcpServers": {"g": {"headers": {"X": "Bearer canary"}}}}\n',
+    "project/.gemini/settings.json": '{"mcpServers": {"gbar": {"env": {"API_KEY": "canary-env-key"}}}}\n',
+}
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store", list(_MCP_SECRET_STORES))
+async def test_the_mcp_secrets_codex_and_gemini_cli_write_are_refused_on_every_surface(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any, store: str
+) -> None:
+    """Review: the MCP secrets Codex and Gemini CLI write in HOME were readable, while Claude Code's were not.
+
+    ``codex mcp add`` writes an MCP server's OAuth client secret and env into
+    ``~/.codex/config.toml`` through ``.codex/.tmp<random>``, and ``gemini mcp add`` writes its
+    HTTP headers and env into ``.gemini/settings.json`` (``~/.gemini`` for the user scope, the
+    project's for the default project scope) through ``.settings.json.<pid>.<ms>.<n>.tmp``. In
+    the Docker HOME, the work dir, file_read, ``/cat``, browser_upload and ``file_grep
+    secret|Bearer path=.codex`` returned them, a CLI killed before the rename left the temp copy
+    with the same secrets, and file_write and file_edit could rewrite them. Koda already refused
+    the same secrets in Claude Code's ``.claude.json`` and ``.claude/.credentials.json``.
+    """
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.browser_manager import browser_manager
+    from koda.services.tool_dispatcher import (
+        _handle_browser_upload,
+        _handle_file_edit,
+        _handle_file_grep,
+        _handle_file_read,
+        _handle_file_write,
+    )
+
+    home = _docker_home(tmp_path, monkeypatch)
+    content = _MCP_SECRET_STORES[store]
+    (home / store).parent.mkdir(parents=True, exist_ok=True)
+    (home / store).write_text(content, encoding="utf-8")
+    config_dir = str(Path(store).parent)
+    (home / config_dir / "notes.md").write_text("secret Bearer visible\n", encoding="utf-8")
+    mock_context.user_data["work_dir"] = str(home)
+    mock_context.args = [store]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send:
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+
+    ctx = _file_tool_context(home)
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        read = await _handle_file_read({"path": store}, ctx)
+        grep = await _handle_file_grep({"pattern": "secret|Bearer|API_KEY", "path": config_dir}, ctx)
+        written = await _handle_file_write({"path": store, "content": "attacker-config"}, ctx)
+        edited = await _handle_file_edit({"path": store, "old_string": "canary", "new_string": "attacker"}, ctx)
+    with (
+        patch("koda.services.tool_dispatcher._check_browser_available", new_callable=AsyncMock, return_value=None),
+        patch.object(browser_manager, "upload_file", new_callable=AsyncMock, return_value="Uploaded") as upload,
+    ):
+        uploaded = await _handle_browser_upload({"file_path": store}, ctx)
+
+    assert not any("canary" in text for text in shown), shown
+    assert "canary" not in read.output + grep.output + uploaded.output
+    for result in (read, written, edited, uploaded):
+        assert not result.success, result.output
+        assert "credential store" in result.output, result.output
+    upload.assert_not_awaited()
+    assert grep.success, grep.output
+    assert "notes.md:1: secret Bearer visible" in grep.output, grep.output
+    assert (home / store).read_text(encoding="utf-8") == content
 
 
 @pytest.mark.security

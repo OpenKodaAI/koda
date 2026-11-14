@@ -36,8 +36,11 @@ from koda.agent_contract import (
 from koda.config import (
     AGENT_ID,
     DOTENV_PATH,
+    GEMINI_CLI_FILE_KEYCHAIN,
+    GEMINI_CLI_KEYCHAIN_SIGN_IN_SERVICES,
     PROVIDER_CLI_CONFIG_DIR_ENV_KEYS,
     PROVIDER_CLI_CREDENTIAL_FILES,
+    PROVIDER_CLI_RUNTIME_CREDENTIAL_FILES,
     SHARED_PLATFORM_PROMPT,
     STATE_BACKEND,
 )
@@ -146,6 +149,7 @@ from koda.services.whisper_manager import (
     whisper_model_path,
 )
 from koda.utils.files import credential_temp_copies
+from koda.utils.gemini_keychain import remove_keychain_services
 
 from .agent_spec import (
     _normalize_markdown_block,
@@ -1636,8 +1640,9 @@ def _parse_dashboard_appearance() -> dict[str, dict[str, str]]:
 # ``auth.json``, ``.credentials.json``, ``secrets/gateway_oauth.json``, ``secrets/codex_auth.age``,
 # ``secrets/mcp_oauth.age`` and ``secrets/gateway_oauth.age``; Gemini CLI ``oauth_creds.json``,
 # ``google_accounts.json``, ``mcp-oauth-tokens.json`` and ``a2a-oauth-tokens.json``
-# (koda.config.PROVIDER_CLI_CREDENTIAL_FILES). The file layer refuses the same files
-# (koda.config.FILEOPS_BLOCKED_CREDENTIAL_PATHS).
+# (koda.config.PROVIDER_CLI_CREDENTIAL_FILES; Gemini CLI's last three also in its sandbox
+# runtime dir, koda.config.PROVIDER_CLI_RUNTIME_CREDENTIAL_FILES). The file layer refuses the
+# same files (koda.config.FILEOPS_BLOCKED_CREDENTIAL_PATHS).
 _PROVIDER_CREDENTIAL_FILES: dict[str, tuple[str, ...]] = {
     provider_id: names for provider_id, (_config_dir, names) in PROVIDER_CLI_CREDENTIAL_FILES.items()
 }
@@ -8230,15 +8235,22 @@ class ControlPlaneManager:
         """Best-effort removal of the files where a provider CLI keeps its sign-ins.
 
         ``*_auth logout`` is supposed to clear them, but failures or older CLI versions leave
-        the tokens behind, and ``codex logout`` keeps a gateway's. Only the credential files
-        are removed (names checked against the pinned CLIs, see ``_PROVIDER_CREDENTIAL_FILES``),
-        with the temp copies of each that the CLI writes it through and a CLI killed mid-write
-        leaves beside it (``koda.utils.files.credential_temp_copies``), in the CLI's config dir
-        under HOME and in the one its environment variable names
-        (``PROVIDER_CLI_CONFIG_DIR_ENV_KEYS``: ``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``), which
-        the file layer refuses for the same reason. The rest of the folder (settings, history,
-        memory, project files, the secrets the operator stored) is never touched: on a native
-        install it is the operator's own CLI configuration.
+        the tokens behind, ``codex logout`` keeps a gateway's, and Gemini CLI has no logout.
+        Only the sign-in files are removed (names checked against the pinned CLIs, see
+        ``_PROVIDER_CREDENTIAL_FILES``), with the temp copies of each that the CLI writes it
+        through and a CLI killed mid-write leaves beside it
+        (``koda.utils.files.credential_temp_copies``), in the CLI's config dir under HOME, in
+        the one its environment variable names (``PROVIDER_CLI_CONFIG_DIR_ENV_KEYS``:
+        ``CLAUDE_CONFIG_DIR``, ``CODEX_HOME``), which the file layer refuses for the same
+        reason, and in the second dir some of them move to (``PROVIDER_CLI_RUNTIME_CREDENTIAL_FILES``:
+        Gemini CLI's runtime dir inside the macOS sandbox, ``~/.cache/.gemini``). Claude Code's
+        login file also holds the MCP servers' OAuth client secrets the operator entered
+        (``mcpOAuthClientConfig``), which signing in again does not give back; ``claude auth
+        logout`` deletes the whole file too, so the disconnect does the same. For Gemini CLI,
+        the sign-ins it keeps in its encrypted file keychain are removed from it
+        (``GEMINI_CLI_KEYCHAIN_SIGN_IN_SERVICES``), and the rest of the keychain stays. The
+        rest of the folder (settings, history, memory, project files, the secrets the operator
+        stored) is never touched: on a native install it is the operator's own CLI configuration.
         """
         from pathlib import Path
 
@@ -8251,13 +8263,24 @@ class ControlPlaneManager:
         home_dir = PROVIDER_CLI_CREDENTIAL_FILES.get(provider_id, ("", ()))[0]
         if home and home_dir:
             config_dirs.append(Path(home) / home_dir)
+        credentials = [
+            (directory / name, f"{home_dir}/{name}")
+            for directory in config_dirs
+            for name in _PROVIDER_CREDENTIAL_FILES.get(provider_id, ())
+        ]
+        runtime_dir, runtime_names = PROVIDER_CLI_RUNTIME_CREDENTIAL_FILES.get(provider_id, ("", ()))
+        if home and runtime_dir:
+            credentials += [(Path(home) / runtime_dir / name, f"{home_dir}/{name}") for name in runtime_names]
 
-        for directory in config_dirs:
-            for name in _PROVIDER_CREDENTIAL_FILES.get(provider_id, ()):
-                credential = directory / name
-                for path in (credential, *credential_temp_copies(credential.parent, f"{home_dir}/{name}")):
-                    with contextlib.suppress(OSError):
-                        path.unlink(missing_ok=True)
+        for credential, entry in credentials:
+            for path in (credential, *credential_temp_copies(credential.parent, entry)):
+                with contextlib.suppress(OSError):
+                    path.unlink(missing_ok=True)
+        if provider_id == "gemini" and home:
+            try:
+                remove_keychain_services(Path(home) / GEMINI_CLI_FILE_KEYCHAIN, GEMINI_CLI_KEYCHAIN_SIGN_IN_SERVICES)
+            except Exception:  # noqa: BLE001 - a disconnect never fails on its best-effort wipe
+                log.warning("provider_disconnect_keychain_wipe_failed", provider=provider_id, exc_info=True)
 
     def get_agent_spec(self, agent_id: str, *, snapshot: dict[str, Any] | None = None) -> dict[str, Any]:
         normalized = _normalize_agent_id(agent_id)
