@@ -9,11 +9,11 @@ alongside koda.
 
 | Signal | Source | How to consume |
 |---|---|---|
-| Prometheus metrics | `koda/services/metrics.py` — runtime, queue, cost, tools, memory, RunGraph, proposals, skills, channels, quality cockpit, ops benchmark | Scrape `:8090/metrics` |
+| Prometheus metrics | `koda/services/metrics.py` — runtime, queue, cost, tools, memory, RunGraph, proposals, skills, channels, quality cockpit, ops benchmark | Scrape `app:8090/metrics` inside the stack (the observability overlay does this); from the host use `127.0.0.1:${CONTROL_PLANE_PORT}` — the API is not published beyond loopback |
 | Structured logs | `structlog` → stdout / `~/.koda-local/var/log/` | Tail with `docker compose logs -f` or ship to Loki |
 | Audit events | `audit_events` table | Query via `koda` UI or directly in Postgres |
 | OpenTelemetry traces | Workers/supervisor when `OTEL_EXPORTER_OTLP_ENDPOINT` is set | Send to Tempo, Jaeger, Honeycomb, Datadog |
-| Health probes | `:8090/health` (granular: per-worker + per-sidecar) | Liveness/readiness for any monitoring tool |
+| Health probes | `:8090/health` (granular: per-worker + per-sidecar) | Liveness/readiness from the host (`127.0.0.1`) or inside the stack (`app:8090`) |
 
 Prometheus labels must stay low-cardinality. Do not add raw prompt text, user
 ids, chat ids, task ids, run ids, proposal ids, file paths, or message content

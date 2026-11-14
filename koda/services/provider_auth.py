@@ -1642,8 +1642,9 @@ def _rewrite_auth_callback_for_relay(auth_url: str, session_id: str) -> tuple[st
 
             # Found a localhost callback — rewrite it
             internal_callback = callback_url
-            cp_port = os.environ.get("CONTROL_PLANE_PORT", "8090")
-            relay_url = f"http://localhost:{cp_port}/api/control-plane/oauth-relay/{session_id}"
+            from koda.config import CONTROL_PLANE_PUBLIC_PORT
+
+            relay_url = f"http://localhost:{CONTROL_PLANE_PUBLIC_PORT}/api/control-plane/oauth-relay/{session_id}"
 
             # Replace the callback parameter in the auth URL
             qs[param_name] = [relay_url]

@@ -15,8 +15,13 @@ Control Plane
 ### Control Plane And Auth
 
 - `CONTROL_PLANE_ENABLED`
-- `CONTROL_PLANE_BIND`
-- `CONTROL_PLANE_PORT`
+- `CONTROL_PLANE_BIND` — native runs only; Docker Compose binds `0.0.0.0` inside the container
+- `CONTROL_PLANE_PORT` — host port the control plane is published on (loopback only); the
+  container always listens on 8090
+- `CONTROL_PLANE_PUBLIC_PORT` — set by Docker Compose to the published port for host-facing URLs
+  (OAuth relay); native runs fall back to `CONTROL_PLANE_PORT`
+- `WEB_PUBLISH_ADDRESS` — address the dashboard is published on (default `127.0.0.1`); use it for
+  a tailnet IP or a TLS-terminating proxy on another host, never plain HTTP
 - `CONTROL_PLANE_API_TOKEN`
 - `WEB_OPERATOR_SESSION_SECRET`
 - `CONTROL_PLANE_MASTER_KEY_FILE`

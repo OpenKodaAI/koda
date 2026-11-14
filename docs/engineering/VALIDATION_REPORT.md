@@ -118,3 +118,30 @@ Help text and both READMEs document the semantics.
 Review: independent reviewer approved (simulated install → uninstall → install keeps the identical `.env`
 and skips the volume guard; release smokes still use `--purge`). Its minor items 1–3, 5–7 are fixed here;
 item 4 (default project name `koda` collides with a source checkout named `koda`) is recorded as a follow-up.
+
+## NET-LOOPBACK — publish the dashboard and control-plane API on loopback by default (operator-approved)
+
+Problem: `docs/install/vps.md` promised loopback-only publishing, but `docker-compose.yml` and the
+packaged `docker-compose.release.yml` published 8090/3000 on all interfaces, and the prod overlay only
+added loopback mappings (Compose concatenates `ports`). Non-default `CONTROL_PLANE_PORT` also broke the
+stack (container listened on the custom port while the mapping and `http://app:8090` assumed 8090).
+
+Fix: API `127.0.0.1:${CONTROL_PLANE_PORT:-8090}:8090` (no opt-out); dashboard
+`${WEB_PUBLISH_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000`; container always listens on 8090 and
+`CONTROL_PLANE_PUBLIC_PORT` carries the host port for the OAuth relay URL; prod overlay no longer repeats
+ports; `.env.example` `CONTROL_PLANE_BIND=127.0.0.1` for native runs; nginx sample proxies to
+`127.0.0.1`; migration note, VPS/local/Tailscale/observability/hardening/cluster docs and config
+reference updated; release CHECKSUMS regenerated.
+
+| Command | Result |
+|---|---|
+| `tests/test_compose_port_exposure.py` (new contract: loopback defaults, `:-` only, no overlay re-publishing, no host networking, fixed internal port, relay URL) | pass; fails against the old compose files / provider_auth |
+| `tests/test_installation_assets.py` (tarball guard now structure-aware) | pass |
+| full `pytest` | 4920 passed, 200 skipped |
+| `ruff` / `ruff format --check` / `mypy koda/` / actionlint | clean |
+| `scripts/release_metadata.py` | no drift |
+| reviewer `docker compose config` (base, +prod, +dev, +cluster, release) | app → 127.0.0.1:8090, web → 127.0.0.1:3000, no duplicates |
+
+Review: independent reviewer, round 1 request changes (2 major docs issues: silent `koda update` behaviour
+change; plain-HTTP LAN advice incompatible with Secure cookies; plus minors) → all addressed; round 2 pending.
+Follow-up: cluster overlay `replicas: 3` with a fixed host port (pre-existing).

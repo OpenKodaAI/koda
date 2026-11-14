@@ -85,6 +85,11 @@ The quickstart path does not require per-agent env configuration. Product config
 
 `CONTROL_PLANE_API_TOKEN` is a break-glass and CLI credential. Browser auth uses owner login and HTTP-only sessions.
 
+The dashboard (`http://localhost:3000`) and the control-plane API (`http://localhost:8090`) are
+published on loopback only. To reach the dashboard from another machine, serve it over HTTPS with a
+reverse proxy or `tailscale serve` (see `docs/install/vps.md`); plain-HTTP access from another
+machine does not work because operator session cookies are `Secure`.
+
 ## Demo Data For Screenshots
 
 ```bash

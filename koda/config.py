@@ -1371,6 +1371,12 @@ RUNTIME_RECOVERY_SWEEP_INTERVAL_SECONDS: int = int(_env("RUNTIME_RECOVERY_SWEEP_
 RUNTIME_CLEANUP_SWEEP_INTERVAL_SECONDS: int = int(_env("RUNTIME_CLEANUP_SWEEP_INTERVAL_SECONDS", "300"))
 RUNTIME_LOCAL_UI_BIND: str = _env("RUNTIME_LOCAL_UI_BIND", _env("HEALTH_BIND", "127.0.0.1"))
 RUNTIME_LOCAL_UI_TOKEN: str = _env_secret("RUNTIME_LOCAL_UI_TOKEN")
+# Host port the browser uses to reach the control plane. Docker Compose sets it
+# to the published port while the container itself always listens on 8090;
+# native runs fall back to CONTROL_PLANE_PORT.
+CONTROL_PLANE_PUBLIC_PORT: str = (
+    _env("CONTROL_PLANE_PUBLIC_PORT", "") or _env("CONTROL_PLANE_PORT", "8090") or "8090"
+).strip()
 RUNTIME_SUPERVISED_ATTACH_ENABLED: bool = _env("RUNTIME_SUPERVISED_ATTACH_ENABLED", "true").lower() == "true"
 
 RUNTIME_OPERATOR_SESSION_TTL_SECONDS: int = int(_env("RUNTIME_OPERATOR_SESSION_TTL_SECONDS", "1800"))

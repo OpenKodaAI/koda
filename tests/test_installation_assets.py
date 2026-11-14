@@ -825,21 +825,46 @@ def test_npm_tarball_network_strings_are_expected_and_localized(tmp_path) -> Non
     tarball_path = output_dir / payload["npm_tarball"]
     host_re = re.compile(r"(?:git\\+)?https?://([A-Za-z0-9.-]+)")
 
+    names = (
+        "package/package.json",
+        "package/README.md",
+        "package/bin/koda.mjs",
+        "package/release/manifest.json",
+        "package/release/bundle/docker-compose.release.yml",
+        "package/release/bundle/proxy/nginx.conf",
+        "package/release/bundle/sbom.spdx.json",
+    )
     with tarfile.open(tarball_path, "r:gz") as tarball:
-        texts = [
-            tarball.extractfile(name).read().decode("utf-8")
-            for name in (
-                "package/package.json",
-                "package/README.md",
-                "package/bin/koda.mjs",
-                "package/release/manifest.json",
-                "package/release/bundle/docker-compose.release.yml",
-                "package/release/bundle/proxy/nginx.conf",
-                "package/release/bundle/sbom.spdx.json",
-            )
-        ]
+        files = {name: tarball.extractfile(name).read().decode("utf-8") for name in names}
 
-    combined = "\n".join(texts)
+    compose_name = "package/release/bundle/docker-compose.release.yml"
+    nginx_name = "package/release/bundle/proxy/nginx.conf"
+
+    # Network endpoints in CLI code and package metadata use `localhost`, never
+    # IP literals. Loopback literals are allowed only where the deployment
+    # needs an address: Compose port bindings (Docker requires an IP) and the
+    # sample reverse proxy's upstreams (Koda publishes on IPv4 loopback only).
+    for name, text in files.items():
+        if name not in (compose_name, nginx_name):
+            assert "127.0.0.1" not in text, name
+
+    def _strings(node: object, path: tuple[str, ...] = ()) -> list[tuple[tuple[str, ...], str]]:
+        if isinstance(node, dict):
+            return [item for key, value in node.items() for item in _strings(value, (*path, str(key)))]
+        if isinstance(node, list):
+            return [item for value in node for item in _strings(value, path)]
+        return [(path, str(node))] if isinstance(node, str) else []
+
+    compose = yaml.safe_load(files[compose_name])
+    for path, value in _strings(compose):
+        if "127.0.0.1" in value:
+            assert len(path) == 3 and path[0] == "services" and path[2] == "ports", (path, value)
+    for line in files[nginx_name].splitlines():
+        stripped = line.strip()
+        if "127.0.0.1" in stripped and not stripped.startswith("#"):
+            assert re.fullmatch(r"proxy_pass http://127\.0\.0\.1:\d+(?:/[^;]*)?;", stripped), line
+
+    combined = "\n".join(text for name, text in files.items() if name != nginx_name)
     hosts = sorted(set(host_re.findall(combined)))
     allowed_hosts = {
         "app",
@@ -850,7 +875,6 @@ def test_npm_tarball_network_strings_are_expected_and_localized(tmp_path) -> Non
         "seaweedfs",
     }
 
-    assert "127.0.0.1" not in combined
     assert "https://openkoda.ai/spdx/" not in combined
     assert "urn:openkodaai:spdx:koda-release-bundle:" in combined
     assert "git+https://github.com/OpenKodaAI/koda.git" in combined
@@ -860,6 +884,7 @@ def test_npm_tarball_network_strings_are_expected_and_localized(tmp_path) -> Non
     assert "http://seaweedfs:8333" in combined
     assert hosts
     assert set(hosts) <= allowed_hosts, hosts
+    assert set(host_re.findall(files[nginx_name])) == {"127.0.0.1"}
 
 
 def test_repo_hygiene_workflows_cover_public_docs_and_installation_assets() -> None:

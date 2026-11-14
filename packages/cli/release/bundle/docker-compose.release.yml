@@ -29,7 +29,10 @@ services:
       CLAUDE_CONFIG_DIR: "/var/lib/koda/runtime/claude-config"
       CONTROL_PLANE_ENABLED: "true"
       CONTROL_PLANE_BIND: "0.0.0.0"
-      CONTROL_PLANE_PORT: "${CONTROL_PLANE_PORT:-8090}"
+      # The container always listens on 8090 (web, Prometheus and healthchecks
+      # rely on it); CONTROL_PLANE_PORT only selects the published host port.
+      CONTROL_PLANE_PORT: "8090"
+      CONTROL_PLANE_PUBLIC_PORT: "${CONTROL_PLANE_PORT:-8090}"
       CONTROL_PLANE_API_TOKEN: "${CONTROL_PLANE_API_TOKEN:?Set CONTROL_PLANE_API_TOKEN in .env}"
       RUNTIME_LOCAL_UI_TOKEN: "${RUNTIME_LOCAL_UI_TOKEN:?Set RUNTIME_LOCAL_UI_TOKEN in .env}"
       SECURITY_GRPC_TARGET: "security:50065"
@@ -38,7 +41,7 @@ services:
       RETRIEVAL_GRPC_TARGET: "retrieval:50062"
       RUNTIME_KERNEL_GRPC_TARGET: "runtime-kernel:50061"
       RUNTIME_KERNEL_SOCKET: "runtime-kernel:50061"
-      HEALTHCHECK_URL: "http://localhost:${CONTROL_PLANE_PORT:-8090}/health"
+      HEALTHCHECK_URL: "http://localhost:8090/health"
       STATE_BACKEND: "${STATE_BACKEND:-postgres}"
       OBJECT_STORAGE_REQUIRED: "${OBJECT_STORAGE_REQUIRED:-true}"
       STATE_ROOT_DIR: "${STATE_ROOT_DIR:-/var/lib/koda/state}"
@@ -55,7 +58,9 @@ services:
       KNOWLEDGE_V2_S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID:?Set S3_ACCESS_KEY_ID in .env}"
       KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY:?Set S3_SECRET_ACCESS_KEY in .env}"
     ports:
-      - "${CONTROL_PLANE_PORT:-8090}:8090"
+      # Control-plane API: loopback only. The dashboard reaches it over the
+      # internal network; a host reverse proxy reaches it over loopback.
+      - "127.0.0.1:${CONTROL_PLANE_PORT:-8090}:8090"
     volumes:
       - koda-state:/var/lib/koda/state
       - koda-runtime:/var/lib/koda/runtime
@@ -91,7 +96,9 @@ services:
       CONTROL_PLANE_BASE_URL: "http://app:8090"
       WEB_OPERATOR_SESSION_SECRET: "${WEB_OPERATOR_SESSION_SECRET:?Set WEB_OPERATOR_SESSION_SECRET in .env}"
     ports:
-      - "${WEB_PORT:-3000}:3000"
+      # Dashboard: loopback by default. Set WEB_PUBLISH_ADDRESS=0.0.0.0 only
+      # to open it on other interfaces without a reverse proxy.
+      - "${WEB_PUBLISH_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000"
     healthcheck:
       test:
         [

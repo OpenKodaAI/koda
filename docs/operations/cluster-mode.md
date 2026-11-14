@@ -58,8 +58,11 @@ Each supervisor exposes:
 | `POST /cluster/undrain` | Reverts the drain flag. |
 
 These are unauthenticated by design: the control-plane port (8090)
-is internal-only — put it behind a private network or VPN. They are
-NOT exposed publicly under any circumstance.
+is published on the host's loopback only, so they are reachable from
+the host and from containers on the stack network. Multi-host clusters
+must reach them over a private network or VPN (a dedicated Compose
+override using `ports: !override`); they are NOT exposed publicly under
+any circumstance.
 
 ## Rolling deploy (blue/green)
 

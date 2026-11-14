@@ -31,8 +31,8 @@ Every item below is verifiable. The matching checks live in
 
 ## Network
 
-- [ ] Control-plane port `:8090` is NOT exposed publicly. Bind to
-      `127.0.0.1` or a private network only.
+- [ ] Control-plane port `:8090` is NOT exposed publicly. Compose publishes
+      it on `127.0.0.1` only; keep it that way (no overlay may re-publish it).
 - [ ] Web port `:3000` is reverse-proxied behind TLS (Caddy, Traefik,
       nginx, cloud LB). Self-signed certs are acceptable for VPS
       deploys; managed certs (Let's Encrypt) for public deploys.
