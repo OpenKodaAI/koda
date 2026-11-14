@@ -198,3 +198,31 @@ Raw data collected by the orchestrator on 2026-11-14 (scratchpad, not committed)
 Triage workflow `wf_d4d7a684-2ed` (20 agents): one analyst per slice (Python, Node prod, Node dev, Rust), a skeptic per critical/high non-upgrade claim, a registry feasibility check per slice, and a report writer. 34 verdicts; 3 overturned (urllib3 and postgres-protocol reachable after all; cryptography's full fix needs 50.x). Output: `docs/engineering/SUPPLY_CHAIN_TRIAGE.md`. Orchestrator spot-check: the `--no-dev` claim (D-224) reproduced by diffing `uv export` with and without `--no-dev`.
 
 Limitation: Dependabot's alert list could not be exported (no API access from this session), so its 352 alerts are compared by count only.
+
+## DEFECT-BATCH-1 — seven verified high/critical defects (merged a4a441e)
+
+Process: workflow `wf_1ddc4a95-938` (21 agents) implemented each fix in its own worktree with tests written first and shown to fail on the pre-fix code, then an independent review and an address round. Workflow `wf_4962a220-f9b` (22 agents) then re-reviewed each final branch from scratch (two lenses — security/correctness plus test adequacy — for D-003, D-004 and D-022), ran bounded address/re-review rounds, and reviewed the merged `integrate/batch-1` for cross-branch interactions. All seven branches were approved; the integration review's findings (stale merge, `vps.md` rate-limit figures, `not_running` contract) were resolved before the merge.
+
+| Defect | Plan task | Fix | Review |
+|---|---|---|---|
+| D-001 / D-016 | M3-E1-T1, M3-E1-T2 | Automatic and web-created scheduled jobs run; stale policy snapshots are refreshed with a compare-and-swap update and a `job.policy_snapshot_refreshed` event; create replay keeps `message`/`validation_run_id` | round 1 approve (5 minor → fixed), round 2 approve |
+| D-003 | M1-E3-T1 | SSRF guard: unmapped IPv4-mapped IPv6, `0.0.0.0/8`, `100.64.0.0/10`, connect to the validated IP; the pre-check now uses the host aiohttp connects to (IDNA mismatch found in round 2); yt-dlp only sees canonical watch URLs; `.env` provider base URLs count as operator overrides | round 1 request_changes → fixed; round 2 request_changes (major: IDNA host mismatch) → fixed; round 3 approve |
+| D-004 | M1-E1-T2 | Per-real-client login buckets; `X-Forwarded-For` trusted only from configured proxies; the dashboard server rewrites XFF; IPv6 per /64; bounded dashboard windows | round 1 request_changes → fixed; round 2 request_changes (major) → fixed; round 3 approve |
+| D-009 | M3-E2-T1 | `/cancel` and the runtime cancel/interrupt stop queued and running light tasks; a finished task answers `409` with `action: "not_running"` | approve (minor items fixed twice) |
+| D-018 | M3-E7-T1 | Recovery codes canonicalized on both sides (non-ASCII dropped before upper-casing; no browser upper-casing) | approve (minor items fixed twice) |
+| D-020 | M3-E8-T2 | Open breakers recover through a half-open probe with a fresh timeout; each transition audited | approve twice |
+| D-022 | M3-E8-T1 | SSE and WS resume past event id 1000 with validated cursors; relay reconnects on transient failures | round 1 request_changes → fixed; round 2 approve (minor → fixed) |
+
+Gates on `integrate/batch-1` e65bb32 (the merge adds only docs/engineering commits on top):
+
+| Command | Result |
+|---|---|
+| `ruff check .` / `ruff format --check .` / `mypy koda/ --ignore-missing-imports` | pass / 712 files formatted / no issues in 358 files |
+| `KODA_TEST_SECURITY_GUARD_TARGET=127.0.0.1:50300 pytest --cov=koda` | 5164 passed, 205 skipped; 62 % line coverage (baseline 61 %) |
+| `POSTGRES_TEST_DSN=… pytest -m postgres` | first run 189 passed / 2 failed (`test_squads/test_projections.py`, load average ~10); 4 reruns (two consecutive on a fresh database, two on the original) 191 passed / 2 skipped — filed as D-225 / M0-E2-T8 |
+| `pnpm lint:web` / `pnpm test:web` / `pnpm build:web` | 0 errors (40 pre-existing warnings) / 169 files, 783 tests passed / ok |
+| Branch-level full suites (each worktree) | every branch passed its own full suite; fail-before evidence recorded per branch in the workflow results |
+
+Follow-ups filed from the agents' notes: D-220 (bundled nginx config, M1-E1-T16), D-221 (setup codes, M1-E1-T17), D-004 remainder (429 message, M1-E1-T18, ADR-038), D-222 (env-backed cancel, M3-E2-T6), D-223 (remaining outbound fetch paths, M1-E3-T8), D-225 (projection test flake, M0-E2-T8).
+
+Not verified here (no Docker): live browser journeys J-07 (password recovery) and the routine wizard, and the docker smoke. These stay open in the task evidence above.

@@ -519,6 +519,14 @@ Owner FE (QA) · Risk low · Gate none · **ready** · Deps —
 - **Done when:** `pnpm lint:web` type-checks the tests and passes.
 - **Tests:** G · **Evidence:** —
 
+#### M0-E2-T8 · Squads projection tests are independent of machine speed
+Owner QA · Risk low · Gate none · **ready** · Deps —
+- **Addresses:** D-225
+- **Files:** `tests/test_squads/test_projections.py`, `koda/squads/projections.py`, `koda/squads/coordinator_engine.py` (TTL inputs only if the cause is there)
+- **Do:** reproduce the two observed failures under CPU pressure; find the time-dependent input; make the tests set or freeze time instead of relying on wall-clock speed. If the root cause is in production code (a lease that can lapse mid-request), fix it there and test that path.
+- **Done when:** the two tests pass 50 consecutive runs under induced load, and the root cause is recorded in TECHNICAL_DEBT.md.
+- **Tests:** the reproduction loop; G-PG · **Evidence:** —
+
 #### M0-E3 — Characterisation safety net
 
 #### M0-E3-T1 · Control-plane auth middleware route-matrix test
@@ -655,7 +663,7 @@ Owner OPS (review SEC, REV) · Risk med · Gate approved (Q-10, 2026-11-14) · *
 - **Tests:** `tests/test_compose_port_exposure.py`; G; G-CI; changelog entry · **Evidence:** VALIDATION_REPORT.md "NET-LOOPBACK": contract test and full `pytest` (4,920 passed, 200 skipped), `ruff`, `ruff format --check`, `mypy`, `actionlint`, reviewer `docker compose config` renders of base, prod, dev, cluster and release. Missing: a GitHub Actions docker-smoke run (`gh run view`).
 
 #### M1-E1-T2 · Trusted-proxy client IP for rate limits
-Owner SEC · Risk med · Gate none · **in-progress** (started early: real-path regression test required before done) · Deps M1-E1-T1, M0-E3-T1 · Active work: DEFECT-BATCH-1 (EXECUTION_STATUS)
+Owner SEC · Risk med · Gate none · **done** · Deps M1-E1-T1, M0-E3-T1
 - **Addresses:** D-004, SM-02, F-SET-12, J-15, R-35
 - **Files:** `koda/control_plane/rate_limit.py:97`, `koda/config.py`, `.env.example`, `apps/web/src/app/api/control-plane/auth/*/route.ts`, `docs/security/authentication.md`
 - **Do:** honour `X-Forwarded-For` only from `CONTROL_PLANE_TRUSTED_PROXIES` (default: loopback plus the web container network). Have the BFF auth routes forward the browser client IP. Give 429 its own message instead of "Invalid credentials."
@@ -664,7 +672,7 @@ Owner SEC · Risk med · Gate none · **in-progress** (started early: real-path 
   - two browsers get separate buckets;
   - a J-15 replay no longer locks the owner out;
   - the auth doc is updated.
-- **Tests:** unit matrix for `_client_ip`; web route test for the forwarded IP; G; changelog entry (429 message) · **Evidence:** —
+- **Tests:** unit matrix for `_client_ip`; web route test for the forwarded IP; G; changelog entry (429 message) · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-004): _client_ip unit matrix, dashboard XFF rewrite and route-table tests, IPv6 /64; the 429 message moved to M1-E1-T18 (ADR-038); two review rounds
 
 #### M1-E1-T3 · Minimal pre-login onboarding status
 Owner SEC · Risk med · Gate none · **ready** · Deps —
@@ -849,12 +857,12 @@ Owner OPS (SEC) · Risk high · Gate needs-approval (§13: new production creden
 #### M1-E3 — Outbound request safety
 
 #### M1-E3-T1 · Harden the SSRF guard
-Owner SEC · Risk med · Gate none · **in-progress** · Deps — · Active work: DEFECT-BATCH-1 (EXECUTION_STATUS)
+Owner SEC · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-003, F-SKL-08, TD-065 (SSRF tests), R-05
 - **Files:** `koda/services/http_client.py` (~86), `tests/test_services/test_http_client.py`
 - **Do:** unmap IPv4-mapped IPv6. Block with the `ipaddress` predicates (private, loopback, link-local, reserved, unspecified, multicast), plus `0.0.0.0/8` and `100.64.0.0/10`. Connect to the validated IP through a custom resolver, with no second lookup.
 - **Done when:** `0.0.0.0`, `[::ffff:127.0.0.1]`, `100.64.0.1` and a rebinding resolver are all rejected, and public fetches still work against a local test server.
-- **Tests:** unit matrix; G · **Evidence:** —
+- **Tests:** unit matrix; G · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-003): probe matrix (0.0.0.0, IPv4-mapped IPv6, 100.64.0.0/10, rebinding, IDNA host mismatch) rejected end to end against a local aiohttp server; public fetches pass; two review rounds
 
 #### M1-E3-T2 · Browser SSRF guard for the whole context lifetime
 Owner SEC · Risk med · Gate none · **pending** · Deps M1-E3-T1
@@ -1476,20 +1484,20 @@ Owner OPS · Risk med · Gate none · **pending** · Deps M2-E6-T1
 #### M3-E1 — Scheduling and routines (journey: a routine created on the web runs on schedule)
 
 #### M3-E1-T1 · Scheduled runs carry their policy snapshot
-Owner BE · Risk med · Gate none · **in-progress** (started early: real-path regression test required before done) · Deps M0-E3-T4 · Active work: DEFECT-BATCH-1 (EXECUTION_STATUS)
+Owner BE · Risk med · Gate none · **done** · Deps M0-E3-T4
 - **Addresses:** D-001 (critical), TD-047, F-SCH-01, F-SCH-02, R-16
 - **Files:** `koda/services/scheduled_job_dispatcher.py` (~73-92), `koda/services/scheduled_jobs.py` (~1760, ~1788-1822)
 - **Do:** compute and store the policy snapshot in the dispatcher INSERT. Delete the import-time monkey-patch, the backfill and the private re-exports, and use explicit imports.
 - **Done when:** the M0-E3-T4 xfail flips to pass, and recurring, one-shot and cron jobs fire.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-001): Postgres dispatch tests (automatic runs, snapshot refresh with compare-and-swap, concurrent update) fail on the pre-fix code and pass; the broader M0-E3-T4 end-to-end test is still to land
 
 #### M3-E1-T2 · Web-created routines validate and activate
-Owner BE (FE) · Risk med · Gate none · **in-progress** (started early: real-path regression test required before done) · Deps M3-E1-T1 · Active work: DEFECT-BATCH-1 (EXECUTION_STATUS)
+Owner BE (FE) · Risk med · Gate none · **done** · Deps M3-E1-T1
 - **Addresses:** D-016, F-SCH-05, F-SCH-04, TD-155 (routine flow tests)
 - **Files:** `koda/services/runtime/api.py` (~506), the routine editor and the schedules page, `tests/test_services/runtime/test_schedules_api.py`
 - **Do:** create calls `queue_validation_run(job_id, activate_on_success=True)`, checks the result and returns the real status. Add a Validate action to the UI. Replace the mocked `activate_job` test with an unmocked one.
 - **Done when:** a routine created on the web reaches `active` after validation and runs.
-- **Tests:** G-PG; web tests · **Evidence:** —
+- **Tests:** G-PG; web tests · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-016): runtime-API create validates and activates (Postgres), idempotent replay, web contract and toast tests; browser journey not yet run
 
 #### M3-E1-T3 · Archived routines hidden; routine names persisted
 Owner BE (FE) · Risk low · Gate none · **ready** · Deps —
@@ -1546,12 +1554,12 @@ Owner FE (PROD) · Risk low · Gate none · **ready** · Deps —
 #### M3-E2 — Cancellation and the queue worker
 
 #### M3-E2-T1 · Cancellation stops the running task and keeps the worker
-Owner BE · Risk med · Gate none · **in-progress** (started early: real-path regression test required before done) · Deps M0-E3-T2 · Active work: DEFECT-BATCH-1 (EXECUTION_STATUS)
+Owner BE · Risk med · Gate none · **done** · Deps M0-E3-T2
 - **Addresses:** D-009, D-087, D-088, F-ORC-02, F-CNV-06
 - **Files:** `koda/services/runtime/controller.py` (~2718), `koda/services/queue_manager.py` (~8842), `koda/services/openai_compatible_runner.py` (~328)
 - **Do:** DEFECT-BATCH-1 covers the D-009 part. `cancel_queued_task` returns True only for a tracked queued id; otherwise call `cancel_active_task_execution`. `_process_queue` catches the cancelled task's `CancelledError` and continues. The OpenAI-compatible runner re-raises `CancelledError`.
 - **Done when:** the cancellation xfail in M0-E3-T2 passes, there is no late response, and the next queued item runs.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-009): queued and running light tasks cancel on the real execution path, finished tasks answer 409; the M0-E3-T2 characterisation (wave 2) re-checks it
 
 #### M3-E2-T2 · Per-item delivery context
 Owner BE · Risk med · Gate none · **pending** · Deps M0-E3-T2
@@ -1779,12 +1787,12 @@ Owner AIM (ARCH, review REV) · Risk low · Gate none · **pending** · Deps M3-
 #### M3-E7 — Authentication journeys
 
 #### M3-E7-T1 · Password recovery from the web
-Owner SEC (FE) · Risk low · Gate none · **in-progress** · Deps — · Active work: DEFECT-BATCH-1 (EXECUTION_STATUS)
+Owner SEC (FE) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-018, SM-01, F-SET-04, J-07
 - **Files:** `apps/web/src/components/auth/forgot-password-screen.tsx`, `koda/control_plane/operator_auth.py` (~630), `docs/security/authentication.md`, tests
 - **Do:** stop lowercasing the input, and normalise case on both sides.
 - **Done when:** a J-07 replay succeeds with a pasted code.
-- **Tests:** web test; Postgres auth test; G · **Evidence:** —
+- **Tests:** web test; Postgres auth test; G · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-018): canonicalization unit tests, recover route test, forgot-password component tests; J-07 browser replay pending M0-E3-T7
 
 #### M3-E7-T2 · Setup page states and error codes
 Owner FE (SEC) · Risk low · Gate none · **ready** · Deps —
@@ -1805,20 +1813,20 @@ Owner FE · Risk low · Gate none · **ready** · Deps —
 #### M3-E8 — Runtime streams and resilience
 
 #### M3-E8-T1 · Runtime event stream resume
-Owner BE · Risk low · Gate none · **in-progress** · Deps — · Active work: DEFECT-BATCH-1 (EXECUTION_STATUS)
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-022, D-091, F-MON-19
 - **Files:** `koda/services/runtime/api.py` (~168), `koda/services/runtime/events.py` (~95)
 - **Do:** DEFECT-BATCH-1 covers the D-022 part. Remove the 1,000 cap on `after_seq`, and return 400 instead of 500 on a ValueError. Subscribe before replaying, dedupe by seq, and bound the subscriber queues.
 - **Done when:** a resume after id 5,000 works, and no event is lost during replay.
-- **Tests:** unit tests; G-PG; changelog entry · **Evidence:** —
+- **Tests:** unit tests; G-PG; changelog entry · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-022): 32 SSE/WS cursor tests including ids past 1000 and invalid cursors; web relay reconnect tests
 
 #### M3-E8-T2 · Circuit breakers recover
-Owner BE · Risk med · Gate none · **in-progress** · Deps — · Active work: DEFECT-BATCH-1 (EXECUTION_STATUS)
+Owner BE · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-020, F-PLT-11, TD-065 (breaker test), R-20
 - **Files:** `koda/services/resilience.py` (~186) and its call sites
 - **Do:** let one half-open probe through after `reset_timeout`, or wrap the real call with `breaker.call_async`. Test through the real call path.
 - **Done when:** after a transient outage, the scheduler, the runners, web search and ElevenLabs recover on their own.
-- **Tests:** unit tests through the call path; G · **Evidence:** —
+- **Tests:** unit tests through the call path; G · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-020): half-open recovery and fresh timeouts tested through the call paths; per-transition audit events
 
 #### M3-E8-T3 · Outages are visible
 Owner FE · Risk med · Gate none (Q-15 default, ADR-020) · **ready** · Deps —
