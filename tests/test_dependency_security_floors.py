@@ -56,6 +56,11 @@ SECURITY_FLOORS: dict[str, tuple[str, str]] = {
     "urllib3": ("2.8.0", "GHSA-vxq7-64xx-v4gw, GHSA-8988-9cw3-xx77, GHSA-gh4c-6fx4-qh6g"),
 }
 
+# The uv (and uvx, which spawns catalog MCP servers) each Python image installs
+# outside uv.lock, so no export audit sees it. 0.13.4 drops the compromised emSign
+# root from uv's vendored webpki roots, as certifi's floor does for the Python side.
+IMAGE_UV_FLOOR = ("0.13.4", "GHSA-hq85-5cpj-mr62, GHSA-pjjw-68hj-v9mw, GHSA-4gg8-gxpx-9rph")
+
 
 def _locked_versions() -> dict[str, list[Version]]:
     lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
@@ -124,3 +129,15 @@ def test_python_image_pip_pin_meets_security_floor(dockerfile: str) -> None:
     assert pins, f"{dockerfile} must pin the pip it installs"
     below = [pin for pin in pins if Version(pin) < Version(floor)]
     assert not below, f"{dockerfile} pins pip {below}, below the security floor {floor} ({advisories})"
+
+
+@pytest.mark.parametrize("dockerfile", PYTHON_IMAGE_DOCKERFILES)
+def test_python_image_uv_pin_meets_security_floor(dockerfile: str) -> None:
+    floor, advisories = IMAGE_UV_FLOOR
+    text = (ROOT / dockerfile).read_text(encoding="utf-8")
+    pins = re.findall(r"^ENV UV_VERSION=(\S+)$", text, re.MULTILINE)
+
+    assert pins, f"{dockerfile} must pin the uv it installs"
+    assert re.search(r"\buv==\$\{UV_VERSION\}", text), f"{dockerfile} must install uv at UV_VERSION"
+    below = [pin for pin in pins if Version(pin) < Version(floor)]
+    assert not below, f"{dockerfile} pins uv {below}, below the security floor {floor} ({advisories})"

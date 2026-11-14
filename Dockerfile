@@ -19,7 +19,7 @@ FROM python:3.12-slim
 ENV HEALTHCHECK_URL=http://127.0.0.1:8090/health
 ENV DEBIAN_FRONTEND=noninteractive
 ENV RUNNING_IN_DOCKER=true
-ENV UV_VERSION=0.10.7
+ENV UV_VERSION=0.13.8
 ENV PLAYWRIGHT_BROWSERS_PATH=/var/lib/koda/playwright-browsers
 
 RUN python -m pip install --no-cache-dir --upgrade pip==26.3 uv==${UV_VERSION}
@@ -58,7 +58,8 @@ WORKDIR /app
 
 # Install locked Python dependencies first (cache layer). Runtime dependencies
 # only: --no-dev leaves out the dev group (pytest, ruff, mypy, pip-audit and its
-# pip, msgpack and cachecontrol), which security.yml's audit assumes images lack.
+# pip, msgpack and cachecontrol, watchfiles), which security.yml's audit assumes
+# images lack.
 COPY pyproject.toml uv.lock ./
 RUN uv export \
         --format requirements.txt \
@@ -72,6 +73,25 @@ RUN uv export \
         --output-file /tmp/runtime-requirements.txt \
     && pip install --no-cache-dir -r /tmp/runtime-requirements.txt \
     && rm -f /tmp/runtime-requirements.txt
+
+# The dev stack (docker-compose.dev.yml) builds with INSTALL_DEV_DEPENDENCIES=true
+# and adds the locked dev group: its hot-reload runner,
+# scripts/dev/run_control_plane_dev.py, imports watchfiles.
+ARG INSTALL_DEV_DEPENDENCIES=false
+RUN if [ "$INSTALL_DEV_DEPENDENCIES" = "true" ]; then \
+      uv export \
+        --format requirements.txt \
+        --locked \
+        --only-dev \
+        --no-editable \
+        --no-emit-project \
+        --no-emit-workspace \
+        --no-header \
+        --no-annotate \
+        --output-file /tmp/dev-requirements.txt \
+      && pip install --no-cache-dir -r /tmp/dev-requirements.txt \
+      && rm -f /tmp/dev-requirements.txt; \
+    fi
 
 # Copy application code
 COPY koda/ koda/

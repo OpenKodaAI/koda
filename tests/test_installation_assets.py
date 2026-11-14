@@ -1000,7 +1000,7 @@ def test_runtime_dockerfile_exports_locked_python_dependencies(dockerfile: str) 
     text = (ROOT / dockerfile).read_text(encoding="utf-8")
     export = _runtime_requirements_export(text)
 
-    assert "ENV UV_VERSION=0.10.7" in text
+    assert re.search(r"^ENV UV_VERSION=\S+$", text, re.MULTILINE)
     assert re.search(r"pip==\S+ uv==\$\{UV_VERSION\}", text)
     assert "COPY pyproject.toml uv.lock ./" in text
     assert "--locked" in export
@@ -1016,14 +1016,45 @@ def test_runtime_dockerfile_exports_locked_python_dependencies(dockerfile: str) 
     assert "pip install --no-cache-dir -r requirements.txt" not in text
 
 
-def test_python_images_pin_the_same_pip() -> None:
+@pytest.mark.parametrize("pin_pattern", [r"\bpip==(\S+)", r"^ENV UV_VERSION=(\S+)$"], ids=["pip", "uv"])
+def test_python_images_pin_the_same_pip_and_uv(pin_pattern: str) -> None:
     pins = {
-        dockerfile: re.findall(r"\bpip==(\S+)", (ROOT / dockerfile).read_text(encoding="utf-8"))
+        dockerfile: re.findall(pin_pattern, (ROOT / dockerfile).read_text(encoding="utf-8"), re.MULTILINE)
         for dockerfile in _PYTHON_IMAGE_DOCKERFILES
     }
 
     assert all(len(found) == 1 for found in pins.values()), pins
     assert len({found[0] for found in pins.values()}) == 1, pins
+
+
+def test_dev_stack_image_adds_the_locked_dev_group_for_its_runner() -> None:
+    """docker-compose.dev.yml runs scripts/dev/run_control_plane_dev.py in the app image; it imports watchfiles.
+
+    watchfiles is in the dev group, which the image's runtime export leaves out
+    (--no-dev). So the dev overlay builds the app image with
+    INSTALL_DEV_DEPENDENCIES=true, which adds the dev group from uv.lock, hash
+    checked, in a layer after the runtime one. The default build leaves it out.
+    """
+    base_app = yaml.safe_load((ROOT / "docker-compose.yml").read_text(encoding="utf-8"))["services"]["app"]
+    dev_app = yaml.safe_load((ROOT / "docker-compose.dev.yml").read_text(encoding="utf-8"))["services"]["app"]
+    dev_group = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["dependency-groups"]["dev"]
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert dev_app["command"] == ["python", "scripts/dev/run_control_plane_dev.py"]
+    assert any(isinstance(spec, str) and spec.startswith("watchfiles") for spec in dev_group)
+    assert dev_app["build"]["args"]["INSTALL_DEV_DEPENDENCIES"] == "true"
+    assert "INSTALL_DEV_DEPENDENCIES" not in json.dumps(base_app.get("build"))
+
+    runtime_export_end = dockerfile.index("--output-file /tmp/runtime-requirements.txt")
+    arg = dockerfile.index("ARG INSTALL_DEV_DEPENDENCIES=false\n")
+    assert arg > runtime_export_end, "the runtime layer must not depend on the dev-stack build arg"
+    dev_layer = dockerfile[dockerfile.index('RUN if [ "$INSTALL_DEV_DEPENDENCIES" = "true" ]; then', arg) :]
+    dev_layer = dev_layer[: dev_layer.index("\n    fi\n")]
+    assert "uv export" in dev_layer
+    assert "--locked" in dev_layer
+    assert "--only-dev" in dev_layer
+    assert "--no-emit-project" in dev_layer
+    assert "pip install --no-cache-dir -r /tmp/dev-requirements.txt" in dev_layer
 
 
 def _locked_runtime_closure() -> set[str]:

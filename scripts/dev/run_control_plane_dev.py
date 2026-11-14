@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import site
 import subprocess
 import sys
 from pathlib import Path
@@ -16,18 +15,14 @@ WATCH_PATHS = (
 
 
 def ensure_watchfiles() -> None:
+    # watchfiles comes from uv.lock's dev group, never from an unpinned install here.
     try:
         import watchfiles  # noqa: F401
-
-        return
     except ImportError:
-        env = os.environ.copy()
-        env.setdefault("PIP_DISABLE_PIP_VERSION_CHECK", "1")
-        subprocess.check_call(
-            [sys.executable, "-m", "pip", "install", "--user", "--no-cache-dir", "watchfiles>=1.1"],
-            env=env,
-        )
-    site.addsitedir(site.getusersitepackages())
+        raise SystemExit(
+            "[koda-dev] watchfiles is not installed. It is in uv.lock's dev group: run `uv sync` "
+            "on the host, or rebuild the dev stack image with `pnpm dev:stack:build`."
+        ) from None
 
 
 def run_control_plane() -> None:
