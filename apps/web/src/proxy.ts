@@ -244,6 +244,6 @@ export function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|_next/webpack-hmr|favicon.ico|apple-icon.png|robots.txt|sitemap.xml).*)",
+    "/((?!_next/static|_next/image|_next/hmr|favicon.ico|apple-icon.png|robots.txt|sitemap.xml).*)",
   ],
 };

@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { config, proxy } from "./proxy";
 
@@ -215,7 +217,17 @@ describe("web proxy auth gate", () => {
 
   it("keeps the proxy matcher locked to the protected API surfaces", () => {
     expect(config.matcher).toEqual([
-      "/((?!_next/static|_next/image|_next/webpack-hmr|favicon.ico|apple-icon.png|robots.txt|sitemap.xml).*)",
+      "/((?!_next/static|_next/image|_next/hmr|favicon.ico|apple-icon.png|robots.txt|sitemap.xml).*)",
     ]);
+  });
+
+  it("excludes the dev HMR path the installed Next.js serves", async () => {
+    // router-server.js matches HMR upgrades on `${hmrPrefix}/_next/<path>`
+    // (`_next/webpack-hmr` up to 16.2, `_next/hmr` from 16.4).
+    const routerServer = await readFile(createRequire(import.meta.url).resolve("next/dist/server/lib/router-server.js"), "utf8");
+    const hmrPath = routerServer.match(/`\$\{hmrPrefix\}\/(_next\/[\w-]+)`/)?.[1];
+
+    expect(hmrPath).toBeDefined();
+    expect(config.matcher[0]).toContain(`|${hmrPath}|`);
   });
 });
