@@ -38,8 +38,14 @@ from koda.knowledge.types import EffectiveExecutionPolicy
 from koda.logging_config import get_logger
 from koda.services import blocked_patterns as _blocked_patterns_module
 from koda.services.execution_policy import PolicyEvaluation, evaluate_execution_policy
-from koda.utils.files import PathResolution, blocked_file_suffix, resolve_work_path, work_path_location
-from koda.utils.workdir import sensitive_dir_for, validate_work_dir
+from koda.utils.files import (
+    PathResolution,
+    blocked_credential_path,
+    resolve_work_path,
+    secret_file_refusal,
+    work_path_location,
+)
+from koda.utils.workdir import SensitiveDirs, validate_work_dir
 
 log = get_logger(__name__)
 
@@ -2625,24 +2631,30 @@ async def _handle_file_grep(params: dict, ctx: ToolContext) -> AgentToolResult:
         # Every file read follows the file-tool policy and stays inside the search root,
         # which is resolved and checked above (by a path-scoped grant too). os.walk does not
         # descend into directory symlinks, so below it a regular file is inside the root and
-        # its name is all that is left to check; sensitive directories that do not contain
-        # the work dir are pruned, and a file symlink is resolved with the search root as
-        # its bound, so a link to a file elsewhere in the work dir is skipped as well.
-        work_root = os.path.realpath(ctx.work_dir)
+        # only the secret-file policy is left to check; sensitive directories (other than
+        # the ones waived for the work dir) and credential-store directories are pruned. A
+        # file symlink goes through the full resolver in the work dir and must also land
+        # inside the search root, so a link to a file elsewhere in the work dir is skipped.
+        sensitive_dirs = SensitiveDirs.for_work_dir(ctx.work_dir)
+        search_root = resolved.rstrip(os.sep) + os.sep
         for root, dirs, files in os.walk(resolved):
             dirs[:] = [
                 d
                 for d in dirs
-                if not d.startswith(".") and sensitive_dir_for(os.path.join(root, d), work_dir=work_root) is None
+                if not d.startswith(".")
+                and sensitive_dirs.containing(os.path.join(root, d)) is None
+                and blocked_credential_path(os.path.join(root, d)) is None
             ]
             for name in files:
                 if not fnmatch.fnmatch(name, glob_filter):
                     continue
                 fpath = os.path.join(root, name)
-                if blocked_file_suffix(name) is not None:
+                if secret_file_refusal(fpath) is not None:
                     continue
-                if os.path.islink(fpath) and resolve_work_path(fpath, resolved).path is None:
-                    continue
+                if os.path.islink(fpath):
+                    target = resolve_work_path(fpath, ctx.work_dir).path
+                    if target is None or not str(target).startswith(search_root):
+                        continue
                 rel = os.path.relpath(fpath, resolved)
                 try:
                     with open(fpath, errors="replace") as f:

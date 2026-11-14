@@ -822,6 +822,49 @@ def _evaluate_operational_grant(
     return True, None
 
 
+@dataclass(frozen=True, slots=True)
+class _ApprovedFileTarget:
+    """The path a file command's confirmation was shown for, as the gate resolved it.
+
+    ``with_approval`` stores it with the pending operation, and
+    :func:`dispatch_approved_operation` runs the gate again before the handler, so an
+    approval runs the command only on this path.
+    """
+
+    command: str
+    raw_args: str
+    path_arg: str
+    path: str | None
+
+
+def _approved_file_target_refusal(target: _ApprovedFileTarget, user_data: dict[str, Any]) -> str | None:
+    """Return why an approved file command cannot run as it was confirmed, or None.
+
+    The handler resolves its path again against the work dir current at approval time,
+    which ``/setdir``, ``agent_set_workdir`` or a queued task may have changed since the
+    request, and a link on the path may point elsewhere by now. So the gate runs again on
+    the same parsed path: it must still pass the path policy, resolve to the path the
+    confirmation was shown for, and be allowed by the integration grant.
+    """
+    work_dir = str(user_data.get("work_dir") or "").strip() or None
+    resolution = _resolve_operational_command(
+        target.command, target.raw_args, work_dir=work_dir, file_path=target.path_arg
+    )
+    if resolution is not None and resolution.deny_reason:
+        return resolution.deny_message or "Blocked by integration policy."
+    if (resolution.path if resolution is not None else None) != target.path:
+        return (
+            f"Not run: <code>{escape_html(target.path_arg)}</code> no longer resolves to "
+            f"<code>{escape_html(target.path or '')}</code>, the path this confirmation was for "
+            "(the working directory or a link on the path changed). Send the command again."
+        )
+    if resolution is not None:
+        allowed, deny_message = _evaluate_operational_grant(resolution, work_dir=work_dir)
+        if not allowed:
+            return deny_message or "Blocked by integration policy."
+    return None
+
+
 def _resource_policy_for_operational_resolution(
     resolution: _OperationalActionResolution | None,
 ) -> dict[str, Any]:
@@ -1036,8 +1079,13 @@ async def _show_approval_keyboard(
     *,
     preview_text: str | None = None,
     requests: list[dict[str, Any]] | None = None,
+    approved_target: _ApprovedFileTarget | None = None,
 ) -> None:
-    """Show an InlineKeyboard asking the user to approve/deny the operation."""
+    """Show an InlineKeyboard asking the user to approve/deny the operation.
+
+    ``approved_target`` pins a file command to the path its gate resolved, so the approval
+    runs it only on that path (:func:`dispatch_approved_operation`).
+    """
     await _ensure_persistence_loaded()
     _cleanup_stale_ops()
     message = require_message(update)
@@ -1067,6 +1115,7 @@ async def _show_approval_keyboard(
         "agent_id": agent_id,
         "requests": list(requests or []),
         "grants": [],
+        "approved_target": approved_target,
     }
     user_data["_pending_op_id"] = op_id
 
@@ -1122,6 +1171,22 @@ async def dispatch_approved_operation(op_id: str) -> None:
     chat_id = pending.get("chat_id")
 
     original_user_data = require_user_data(original_context)
+    approved_target = pending.get("approved_target")
+    if isinstance(approved_target, _ApprovedFileTarget):
+        refusal = _approved_file_target_refusal(approved_target, original_user_data)
+        if refusal is not None:
+            _audit_operational_block(
+                str(pending.get("cmd_name") or approved_target.command), "approved_path_changed", user_id or None
+            )
+            log.warning(
+                "approved_operation_not_run",
+                op_id=op_id,
+                cmd=pending.get("cmd_name"),
+                path=approved_target.path,
+            )
+            await require_message(original_update).reply_text(refusal, parse_mode=ParseMode.HTML)
+            return
+
     original_user_data["_approved"] = True
     _execution_approved.set(True)
     success = False
@@ -1175,6 +1240,7 @@ def with_approval(
             policy_command_name, policy_raw_args = _canonical_operational_request(command_name, raw_args)
             resolution: _OperationalActionResolution | None = None
             policy_params: dict[str, Any] | None = None
+            approved_target: _ApprovedFileTarget | None = None
             # A file command is checked on the very path its handler acts on (/ls alone: ".").
             file_path = (
                 file_command_path(policy_command_name, context_args) if policy_command_name in FILE_COMMANDS else None
@@ -1216,6 +1282,13 @@ def with_approval(
                         parse_mode=ParseMode.HTML,
                     )
                     return None
+                if resolution and file_path is not None:
+                    approved_target = _ApprovedFileTarget(
+                        command=policy_command_name,
+                        raw_args=policy_raw_args,
+                        path_arg=file_path,
+                        path=resolution.path,
+                    )
                 if resolution:
                     allowed, deny_message = _evaluate_operational_grant(
                         resolution,
@@ -1297,6 +1370,7 @@ def with_approval(
                         func,
                         preview_text=policy_evaluation.preview_text,
                         requests=approval_requests,
+                        approved_target=approved_target,
                     )
                     return None
 
@@ -1357,7 +1431,9 @@ def with_approval(
                 return result
 
             # Needs approval → show keyboard, store, return
-            await _show_approval_keyboard(update, context, command_name, raw_args, func)
+            await _show_approval_keyboard(
+                update, context, command_name, raw_args, func, approved_target=approved_target
+            )
             return None
 
         return cast(

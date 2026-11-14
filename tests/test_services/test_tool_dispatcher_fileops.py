@@ -5,10 +5,19 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from koda.services import tool_dispatcher
 from koda.services.tool_dispatcher import (
     ToolContext,
     _resolve_file_path,
 )
+
+
+@pytest.fixture(autouse=True)
+def _fresh_tool_rate_window():
+    """execute_tool counts calls per user and minute; each test starts with an empty window."""
+    tool_dispatcher._tool_rate_windows.clear()
+    yield
+    tool_dispatcher._tool_rate_windows.clear()
 
 
 def _make_ctx(work_dir: str, **overrides) -> ToolContext:
@@ -720,6 +729,18 @@ class TestGrantRootsWrittenThroughASymlink:
         assert not refused.allowed
         assert refused.reason == "path_not_granted"
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("path", "granted"), [("src/main.py", True), ("top.txt", False)])
+    async def test_a_home_relative_entry_is_expanded_then_canonicalised(
+        self, linked_work, monkeypatch, tmp_path, path, granted
+    ):
+        """``~/link/src`` is ``<HOME>/link/src``, a grant root written through a symlink."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        result = await self._read(path, linked_work, "~/link/src")
+        assert result.success == granted, result.output
+        if not granted:
+            assert "outside the granted scope" in result.output
+
     def test_a_relative_entry_is_not_resolved_against_the_process_cwd(self, linked_work):
         """The CWD is the parent of ``link``: resolving ``link/src`` there would widen the grant."""
         from koda.agent_contract import evaluate_integration_grant
@@ -751,6 +772,7 @@ class TestWorkDirUnderASensitiveRoot:
         (root / "etc").mkdir()
         (root / "etc" / "passwd").write_text("TOKEN=canary-passwd\n")
         monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(root / "etc")}))
+        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(work))
         monkeypatch.chdir(root)
         return work
 

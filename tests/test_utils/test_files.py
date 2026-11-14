@@ -6,7 +6,7 @@ import pytest
 
 import koda.utils.files as files_module
 from koda.utils.files import list_directory, resolve_work_path, safe_delete, safe_read, safe_write
-from koda.utils.workdir import sensitive_dir_for
+from koda.utils.workdir import sensitive_dir_for, validate_work_dir
 
 
 class TestResolveWorkPathContainment:
@@ -258,8 +258,9 @@ class TestCommandHelpersApplyTheFilePolicy:
 class TestWorkDirInsideSensitiveDirectory:
     """The default Docker work dir (HOME=/var/lib/koda/runtime/home) sits under /var/lib, a SENSITIVE_DIRS root.
 
-    The work dir and the paths inside it are allowed on both surfaces; a sensitive root that
-    does not contain the work dir stays denied, and the secret-file policy applies everywhere.
+    It is the operator's DEFAULT_WORK_DIR, the one work dir that may sit under a sensitive
+    root. It and the paths inside it are allowed on both surfaces; a sensitive root that does
+    not contain it as configured stays denied, and the secret-file policy applies everywhere.
     """
 
     @pytest.fixture
@@ -275,6 +276,7 @@ class TestWorkDirInsideSensitiveDirectory:
         (work / ".env").write_text("TOKEN=canary-secret\n")
         (other / "passwd").write_text("canary-passwd")
         monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(other)}))
+        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(work))
         return work, other
 
     def test_file_tools_allow_the_work_dir_and_paths_inside_it(self, docker_layout):
@@ -306,6 +308,7 @@ class TestWorkDirInsideSensitiveDirectory:
         inner.mkdir(parents=True)
         (inner / "hosts").write_text("canary-hosts")
         monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(inner)}))
+        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(work))
         resolution = resolve_work_path("etc/hosts", str(work))
         assert resolution.path is None
         assert resolution.reason == "path_sensitive_dir"
@@ -322,10 +325,123 @@ class TestWorkDirInsideSensitiveDirectory:
         alias = tmp_path.resolve() / "var-run"
         alias.symlink_to(real)
         monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(alias)}))
+        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(work))
         assert sensitive_dir_for(str(work / "x.txt")) == str(alias)
         assert sensitive_dir_for(str(work / "x.txt"), work_dir=str(work)) is None
         assert resolve_work_path("x.txt", str(work)).path == work / "x.txt"
         assert resolve_work_path("x.txt", str(alias / "koda")).path == work / "x.txt"
+
+    def test_only_the_configured_default_work_dir_is_waived(self, docker_layout, monkeypatch):
+        """Every other work dir is validated, so one under a sensitive root gets no waiver."""
+        work, _ = docker_layout
+        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(work.parent))
+        resolution = resolve_work_path("notes.txt", str(work))
+        assert resolution.path is None
+        assert resolution.reason == "path_sensitive_dir"
+        assert sensitive_dir_for(str(work / "notes.txt"), work_dir=str(work)) is not None
+
+    def test_a_validated_work_dir_swapped_for_a_symlink_into_a_sensitive_root_is_not_waived(
+        self, tmp_path, monkeypatch
+    ):
+        root = tmp_path.resolve()
+        etc = root / "etc"
+        etc.mkdir()
+        (etc / "shadow").write_text("canary-shadow")
+        (root / "home").mkdir()
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(etc)}))
+        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(root / "home"))
+        (root / "proj").mkdir()
+        validation = validate_work_dir(str(root / "proj"))
+        assert validation.ok
+        (root / "proj").rmdir()
+        (root / "proj").symlink_to(etc)
+        for path in ("shadow", str(etc / "shadow"), "."):
+            resolution = resolve_work_path(path, validation.path)
+            assert resolution.reason == "path_sensitive_dir", path
+        assert sensitive_dir_for(str(etc / "shadow"), work_dir=validation.path) == str(etc)
+
+    def test_the_waiver_stays_with_the_configured_location_of_the_default_work_dir(self, docker_layout):
+        """DEFAULT_WORK_DIR replaced with a symlink into another sensitive root: that root stays denied."""
+        work, other = docker_layout
+        (work / "notes.txt").unlink()
+        (work / ".env").unlink()
+        (work / "src" / "main.py").unlink()
+        (work / "src").rmdir()
+        work.rmdir()
+        work.symlink_to(other)
+        for path in ("passwd", str(other / "passwd")):
+            resolution = resolve_work_path(path, str(work))
+            assert resolution.path is None, path
+            assert resolution.reason == "path_sensitive_dir", path
+
+
+class TestCredentialStoresAreSecretFiles:
+    """The CLI credential stores in a HOME (the Docker work dir) are secret files, whatever their extension."""
+
+    @pytest.mark.parametrize(
+        ("path", "entry"),
+        [
+            ("/srv/koda-user/.ssh/id_ed25519", ".ssh/"),
+            ("/srv/koda-user/.ssh", ".ssh/"),
+            ("/srv/koda-user/.SSH/id_rsa", ".ssh/"),
+            ("/srv/koda-user/.gnupg/private-keys-v1.d/a.key", ".gnupg/"),
+            ("/srv/app/.aws/credentials", ".aws/"),
+            ("/srv/koda-user/.azure/msal_token_cache.json", ".azure/"),
+            ("/srv/koda-user/.config/gcloud/credentials.db", ".config/gcloud/"),
+            ("/srv/koda-user/.codex/auth.json", ".codex/auth.json"),
+            ("/srv/koda-user/.gemini/oauth_creds.json", ".gemini/oauth_creds.json"),
+            ("/srv/koda-user/.claude/.credentials.json", ".claude/.credentials.json"),
+            ("/srv/koda-user/.config/gh/hosts.yml", ".config/gh/hosts.yml"),
+            ("/srv/koda-user/.docker/config.json", ".docker/config.json"),
+            ("/srv/koda-user/.kube/config", ".kube/config"),
+            ("/srv/koda-user/.git-credentials", ".git-credentials"),
+            ("/srv/koda-user/.netrc", ".netrc"),
+            ("/srv/koda-user/_netrc", "_netrc"),
+            ("/srv/koda-user/.pgpass", ".pgpass"),
+            ("/srv/koda-user/project/.npmrc", ".npmrc"),
+            ("/srv/koda-user/.pypirc", ".pypirc"),
+        ],
+    )
+    def test_credential_stores_are_matched(self, path, entry):
+        from koda.utils.files import blocked_credential_path
+
+        assert blocked_credential_path(path) == entry
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "/srv/koda-user/.docker/Dockerfile",
+            "/srv/koda-user/.codex/config.toml",
+            "/srv/koda-user/.config/gh/config.yml",
+            "/srv/koda-user/.config/gcloud-tools/notes.md",
+            "/srv/koda-user/project/docs/ssh.md",
+            "/srv/koda-user/.sshconfig",
+            "/srv/koda-user/.npmrc.example",
+            "/srv/koda-user/netrc",
+            "/srv/koda-user/src/kube/config",
+        ],
+    )
+    def test_other_paths_are_not(self, path):
+        from koda.utils.files import blocked_credential_path
+
+        assert blocked_credential_path(path) is None
+
+    @pytest.mark.parametrize("deny_sensitive_dirs", [True, False])
+    def test_both_surfaces_refuse_them(self, tmp_path, deny_sensitive_dirs):
+        work = tmp_path.resolve()
+        (work / ".ssh").mkdir()
+        (work / ".ssh" / "id_ed25519").write_text("canary-key")
+        (work / ".netrc").write_text("canary-netrc")
+        (work / "key.txt").symlink_to(work / ".ssh" / "id_ed25519")
+        (work / "notes.txt").write_text("visible")
+        for path in (".ssh/id_ed25519", ".ssh", str(work / ".netrc"), "key.txt", "src/../.netrc"):
+            resolution = resolve_work_path(path, str(work), deny_sensitive_dirs=deny_sensitive_dirs)
+            assert resolution.path is None, path
+            assert resolution.reason == "path_blocked_file", path
+            assert "credential" in (resolution.error or ""), path
+        assert resolve_work_path("notes.txt", str(work), deny_sensitive_dirs=deny_sensitive_dirs).path is not None
+        assert "canary" not in safe_read(".ssh/id_ed25519", str(work))
+        assert "canary" not in safe_read(".netrc", str(work))
 
 
 class TestFileCommandPath:

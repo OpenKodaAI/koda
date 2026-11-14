@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from koda.config import FILEOPS_BLOCKED_EXTENSIONS
+from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS, FILEOPS_BLOCKED_EXTENSIONS
 from koda.logging_config import get_logger
 from koda.utils.workdir import sensitive_dir_for
 
@@ -45,6 +45,43 @@ def blocked_file_suffix(name: str) -> str | None:
         stem = "." + lowered[1:].split(".", 1)[0]
         if stem in FILEOPS_BLOCKED_EXTENSIONS:
             return stem
+    return None
+
+
+def blocked_credential_path(path: str) -> str | None:
+    """Return the ``FILEOPS_BLOCKED_CREDENTIAL_PATHS`` entry that ``path`` is, or is inside.
+
+    ``path`` is absolute and normalised. A directory entry (``.ssh/``, ``.aws/``) matches
+    that directory and every path below it, wherever it appears in ``path``; a file entry
+    (``.codex/auth.json``, ``.netrc``) matches the last components of ``path``. Components
+    are compared case-insensitively, as a case-insensitive filesystem would open them.
+    These are the credential stores that the CLIs sharing the runtime HOME keep there, and
+    in the Docker layout HOME is the work dir. Returns None for any other path.
+    """
+    parts = [part.lower() for part in path.split(os.sep) if part]
+    for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS:
+        entry_parts = [part.lower() for part in entry.split("/") if part]
+        size = len(entry_parts)
+        if entry.endswith("/"):
+            if any(parts[start : start + size] == entry_parts for start in range(len(parts) - size + 1)):
+                return entry
+        elif parts[-size:] == entry_parts:
+            return entry
+    return None
+
+
+def secret_file_refusal(path: str) -> str | None:
+    """Return why ``path`` (absolute, normalised) is a secret file the file layer refuses, or None.
+
+    It is the one secret-file policy: a blocked extension or ``.env`` dotfile
+    (:func:`blocked_file_suffix`), or a CLI credential store (:func:`blocked_credential_path`).
+    """
+    suffix = blocked_file_suffix(os.path.basename(path))
+    if suffix is not None:
+        return f"files with extension '{suffix}' are blocked for safety"
+    credential = blocked_credential_path(path)
+    if credential is not None:
+        return f"'{credential}' is a credential store, blocked for safety"
     return None
 
 
@@ -95,12 +132,13 @@ def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool
     - ``~`` is expanded, a relative path is joined with ``work_dir`` (never the process
       CWD), and symlinks are resolved (:func:`work_path_location`);
     - the result must be ``work_dir`` or inside it (``path_outside_workdir``);
-    - it must not be inside a sensitive system directory that does not contain
-      ``work_dir`` (``path_sensitive_dir``, see :func:`koda.utils.workdir.sensitive_dir_for`):
-      ``work_dir`` and the paths inside it stay usable when the work dir itself is under
-      one, such as the Docker default ``HOME`` under ``/var/lib``;
-    - neither the requested name nor the name it resolves to may be a blocked secret
-      file (``path_blocked_file``, see :func:`blocked_file_suffix`).
+    - it must not be inside a sensitive system directory (``path_sensitive_dir``, see
+      :func:`koda.utils.workdir.sensitive_dir_for`), except the ones the operator's
+      ``DEFAULT_WORK_DIR`` is configured under when ``work_dir`` is ``DEFAULT_WORK_DIR``:
+      the Docker default ``HOME`` under ``/var/lib`` and the paths inside it stay usable;
+    - neither the requested path nor the path it resolves to may be a secret file
+      (``path_blocked_file``, see :func:`secret_file_refusal`): a blocked extension, a
+      ``.env`` dotfile, or a CLI credential store such as ``.ssh/`` or ``.netrc``.
 
     ``work_dir`` is the work dir the runtime chose for the caller: every entry point
     validates it (:func:`koda.utils.workdir.validate_work_dir`), or it is the operator's
@@ -108,8 +146,10 @@ def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool
 
     ``deny_sensitive_dirs=False`` skips only the sensitive-directory check. The file
     commands and ``browser_upload`` pass it: they have never applied that check, and
-    anything inside the work dir stays uploadable. It changes a decision only when the
-    work dir contains a sensitive directory (a work dir of ``/`` contains ``/etc``).
+    anything inside the work dir stays uploadable. It changes a decision only for a path
+    inside a sensitive directory that is not waived: one inside the work dir (a work dir
+    of ``/`` contains ``/etc``), or one a validated work dir resolves into later, through
+    a symlink.
     """
     if not path_str or not path_str.strip():
         return PathResolution(None, "path_missing", "Missing path.")
@@ -129,16 +169,9 @@ def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool
             path_str, work_dir, "path_sensitive_dir", f"Access denied: '{sensitive}' is a sensitive system directory."
         )
     if resolved != root:
-        suffix = blocked_file_suffix(os.path.basename(requested.rstrip(os.sep))) or blocked_file_suffix(
-            os.path.basename(resolved)
-        )
-        if suffix is not None:
-            return _refuse(
-                path_str,
-                work_dir,
-                "path_blocked_file",
-                f"Access denied: files with extension '{suffix}' are blocked for safety.",
-            )
+        refusal = secret_file_refusal(os.path.normpath(os.path.join(root, requested))) or secret_file_refusal(resolved)
+        if refusal is not None:
+            return _refuse(path_str, work_dir, "path_blocked_file", f"Access denied: {refusal}.")
     return PathResolution(Path(resolved))
 
 
