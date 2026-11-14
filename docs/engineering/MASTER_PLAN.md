@@ -663,7 +663,7 @@ Owner OPS (review SEC, REV) · Risk med · Gate approved (Q-10, 2026-11-14) · *
 - **Tests:** `tests/test_compose_port_exposure.py`; G; G-CI; changelog entry · **Evidence:** VALIDATION_REPORT.md "NET-LOOPBACK": contract test and full `pytest` (4,920 passed, 200 skipped), `ruff`, `ruff format --check`, `mypy`, `actionlint`, reviewer `docker compose config` renders of base, prod, dev, cluster and release. Missing: a GitHub Actions docker-smoke run (`gh run view`).
 
 #### M1-E1-T2 · Trusted-proxy client IP for rate limits
-Owner SEC · Risk med · Gate none · **done** · Deps M1-E1-T1, M0-E3-T1
+Owner SEC · Risk med · Gate none · **in-review** · Deps M1-E1-T1, M0-E3-T1
 - **Addresses:** D-004, SM-02, F-SET-12, J-15, R-35
 - **Files:** `koda/control_plane/rate_limit.py:97`, `koda/config.py`, `.env.example`, `apps/web/src/app/api/control-plane/auth/*/route.ts`, `docs/security/authentication.md`
 - **Do:** honour `X-Forwarded-For` only from `CONTROL_PLANE_TRUSTED_PROXIES` (default: loopback plus the web container network). Have the BFF auth routes forward the browser client IP. Give 429 its own message instead of "Invalid credentials."
@@ -672,15 +672,15 @@ Owner SEC · Risk med · Gate none · **done** · Deps M1-E1-T1, M0-E3-T1
   - two browsers get separate buckets;
   - a J-15 replay no longer locks the owner out;
   - the auth doc is updated.
-- **Tests:** unit matrix for `_client_ip`; web route test for the forwarded IP; G; changelog entry (429 message) · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-004): _client_ip unit matrix, dashboard XFF rewrite and route-table tests, IPv6 /64; the 429 message moved to M1-E1-T18 (ADR-038); two review rounds
+- **Tests:** unit matrix for `_client_ip`; web route test for the forwarded IP; G; changelog entry (429 message) · **Evidence:** **Missing for done:** J-15 live replay (M0-E3-T7). VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-004): _client_ip unit matrix, dashboard XFF rewrite and route-table tests, IPv6 /64; the 429 message moved to M1-E1-T18 (ADR-038); two review rounds
 
 #### M1-E1-T3 · Minimal pre-login onboarding status
-Owner SEC · Risk med · Gate none · **ready** · Deps —
+Owner SEC · Risk med · Gate none · **in-review** · Deps —
 - **Addresses:** D-050, D-193, SM-05, F-SET-16, R-36
 - **Files:** `koda/control_plane/manager.py` (`get_onboarding_status` ~5595), `koda/control_plane/api.py` (public paths), `koda/services/onboarding_readiness.py` (~155), `apps/web/src/proxy.ts` and the setup and onboarding consumers, `docs/openapi/control-plane.json`, `docs/security/authentication.md`
 - **Do:** an unauthenticated response returns only `{has_owner, bootstrap_required}`; the full payload requires auth. Align the web and backend public-path lists. Readiness checks return real statuses, and the constant "warning" checks are removed.
 - **Done when:** an unauthenticated GET through :3000 and :8090 returns two fields, and J-01 and J-03 still pass.
-- **Tests:** route test in both states; web unit test; route matrix updated; G; changelog entry · **Evidence:** —
+- **Tests:** route test in both states; web unit test; route matrix updated; G; changelog entry · **Evidence:** **Missing for done:** J-01 and J-03 live replay (M0-E3-T7). VALIDATION_REPORT.md "WAVE-2B" (route tests in both states for onboarding/status and auth/status; live readiness checks; one public-path list with exact matching; web tests). J-01 and J-03 not yet replayed live (no Docker)
 
 #### M1-E1-T4 · Control-plane logging with redaction
 Owner SEC · Risk low · Gate none · **ready** · Deps —
@@ -806,7 +806,7 @@ Owner FE (SEC) · Risk low · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-0
 #### M1-E2 — Agent-native tool governance (ADR-002, Option C approved)
 
 #### M1-E2-T1 · Finish the native tool governance ADR
-Owner SEC (ARCH, review REV) · Risk low · Gate approved (Q-4) · **done** · Deps —
+Owner SEC (ARCH, review REV) · Risk low · Gate approved (Q-4) · **in-review** · Deps —
 - **Addresses:** D-002, F-GOV-10, Q-4, R-01
 - **Files:** `docs/engineering/adr/ADR-agent-native-tool-governance.md`, `docs/engineering/DECISIONS.md` (ADR-002 link)
 - **Do:** produce a per-provider permission-mode matrix: Claude permission modes with allowed and disallowed tools; Codex sandbox and approval policy; Gemini approval modes. Map it from the Koda execution policy. Define the per-agent opt-in field, the operator migration notice and the test plan. Also define how policy-approved `<agent_cmd>` shell, git and supervised writes are authorised (D-011) and how pending approvals cross processes (D-012), since M3-E3-T1 and M3-E3-T2 implement them.
@@ -817,7 +817,7 @@ Owner SEC (ARCH, review REV) · Risk low · Gate approved (Q-4) · **done** · D
   - a test plan that names each argv test M1-E2-T2 must add and each D-011 and D-012 test M3-E3-T1 and M3-E3-T2 must add;
 
   and SEC and REV each record an approving review in VALIDATION_REPORT.md.
-- **Tests:** none (design) · **Evidence:** `docs/engineering/adr/ADR-agent-native-tool-governance.md` (commit d72ac53): judge-panel design (3 designs, 3 judges), per-provider matrix, invariants, backlog AG-01..AG-32, operator resolutions O-1..O-8 (§9)
+- **Tests:** none (design) · **Evidence:** **Missing for done:** the round-1 SEC and REV reviews (VALIDATION_REPORT "M1-E2-T1 reviews") requested changes: every done-when item is unmet, and D-011 and D-012 are not designed. Needed: an ADR revision, then approving reviews. `docs/engineering/adr/ADR-agent-native-tool-governance.md` (commit d72ac53): judge-panel design (3 designs, 3 judges), per-provider matrix, invariants, backlog AG-01..AG-32, operator resolutions O-1..O-8 (§9)
 
 #### M1-E2-T2 · Governed-by-default provider permission modes
 Owner SEC (AIM, review REV) · Risk high · Gate approved (Q-4; impact accepted) · **pending** · Deps M1-E2-T1, M0-E3-T2
@@ -1003,10 +1003,11 @@ Owner SEC (BE) · Risk med · Gate none (Q-20 default) · **pending** · Deps M0
 - **Tests:** unit tests plus an agent-turn scenario; G · **Evidence:** —
 
 #### M1-E4-T9 · Interim policy-evaluator parity
-Owner SEC · Risk med · Gate none · **ready** · Deps —
+Owner SEC · Risk med · Gate none · **in-progress** (`wf_b38ba6c2-6ca`, as ADR-002 AG-06) · Deps AG-09 (for the replay)
 - **Addresses:** D-024, F-GOV-03, F-GOV-01, TD-031 (prerequisite)
 - **Files:** `koda/services/execution_policy.py` (~236), `koda/control_plane/execution_policy.py`, the control-plane evaluate and simulate route
-- **Do:** fail-safe changes only, so that no decision becomes more permissive:
+- **Amended by ADR-039:** AG-06 implements this task as one engine with fnmatch for every rule, and AG-09 runs the replay before AG-10 delivers rules. The list below is the original ADR-008 step 1 design, kept for traceability. The done-when items still apply.
+- **Do (original):** fail-safe changes only, so that no decision becomes more permissive:
   - a deny rule applies when either today's runtime matcher or fnmatch (the validation semantics) matches the call, so a deny can only match more calls than before;
   - allow rules keep today's runtime semantics, and validation rejects new allow patterns whose meaning differs between the two matchers;
   - the simulate endpoint calls the runtime evaluator;
@@ -1224,12 +1225,12 @@ Owner OPS (SEC) · Risk med · Gate none · **ready** · Deps M1-E7-T4 batch R3
 Each task here is reversible and is undone by the full fix named in it.
 
 #### M1-E8-T1 · Label the routine read-only and allowed-paths controls "Not enforced yet"
-Owner FE (SEC) · Risk low · Gate none · **ready** · Deps —
+Owner FE (SEC) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-006 (interim; the fix is M3-E1-T4), F-SCH-09, R-53
 - **Files:** `apps/web/src/components/routines/routine-editor.tsx` (~700), i18n resources
 - **Do:** show both controls as "Not enforced yet" with a short explanation, and disable them for new routines. Existing values stay stored, so M3-E1-T4 can enforce them. M3-E1-T4 removes the label when it lands.
 - **Done when:** no routine screen implies that writes are blocked or paths restricted, in either locale.
-- **Tests:** web component test; G · **Evidence:** —
+- **Tests:** web component test; G · **Evidence:** VALIDATION_REPORT.md "WAVE-2B" (routine-editor tests for create and edit, including empty and malformed stored payloads, all failing before the change; five locales; backend characterization test that saving keeps stored values)
 
 #### M1-E8-T2 · Code-bearing packages always need the operator review
 Owner SEC · Risk med · Gate none · **pending** · Deps M1-E4-T3
@@ -1240,12 +1241,12 @@ Owner SEC · Risk med · Gate none · **pending** · Deps M1-E4-T3
 - **Tests:** adversarial package fixtures; G; changelog entry (install flow) · **Evidence:** —
 
 #### M1-E8-T3 · Warn on placeholder Postgres and S3 secrets
-Owner SEC (OPS) · Risk low · Gate none · **ready** · Deps —
+Owner SEC (OPS) · Risk low · Gate none · **in-review** · Deps —
 - **Addresses:** D-007 (remainder, interim; the refusal is M1-E1-T10), F-PLT-07
 - **Files:** `koda/config.py`, `koda/control_plane/supervisor.py` (startup), `scripts/doctor.py`, the dashboard shell banner
 - **Do:** when `POSTGRES_PASSWORD` or an `S3_*` secret still starts with `replace-with-`, log a warning at every start, fail `doctor`, and show a persistent dashboard banner that links to the rotation steps. Nothing refuses to start yet.
 - **Done when:** a stack on placeholders shows the banner and the log line, and doctor fails with the rotation command.
-- **Tests:** config unit test; doctor test; web test; G · **Evidence:** —
+- **Tests:** config unit test; doctor test; web test; G · **Evidence:** **Missing for done:** a running stack on placeholders showing the banner, the log line and the failing doctor (M0-E3-T7). VALIDATION_REPORT.md "WAVE-2B" (config, supervisor, doctor and generator tests; doctor exits 1 on placeholders and 0 after rotation; AppShell banner render test)
 
 #### M1-E9 — Security documentation
 
@@ -1484,20 +1485,20 @@ Owner OPS · Risk med · Gate none · **pending** · Deps M2-E6-T1
 #### M3-E1 — Scheduling and routines (journey: a routine created on the web runs on schedule)
 
 #### M3-E1-T1 · Scheduled runs carry their policy snapshot
-Owner BE · Risk med · Gate none · **done** · Deps M0-E3-T4
+Owner BE · Risk med · Gate none · **in-review** · Deps M0-E3-T4
 - **Addresses:** D-001 (critical), TD-047, F-SCH-01, F-SCH-02, R-16
 - **Files:** `koda/services/scheduled_job_dispatcher.py` (~73-92), `koda/services/scheduled_jobs.py` (~1760, ~1788-1822)
 - **Do:** compute and store the policy snapshot in the dispatcher INSERT. Delete the import-time monkey-patch, the backfill and the private re-exports, and use explicit imports.
 - **Done when:** the M0-E3-T4 xfail flips to pass, and recurring, one-shot and cron jobs fire.
-- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-001): Postgres dispatch tests (automatic runs, snapshot refresh with compare-and-swap, concurrent update) fail on the pre-fix code and pass; the broader M0-E3-T4 end-to-end test is still to land
+- **Tests:** G-PG · **Evidence:** **Missing for done:** the M0-E3-T4 end-to-end xfail flip. VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-001): Postgres dispatch tests (automatic runs, snapshot refresh with compare-and-swap, concurrent update) fail on the pre-fix code and pass; the broader M0-E3-T4 end-to-end test is still to land
 
 #### M3-E1-T2 · Web-created routines validate and activate
-Owner BE (FE) · Risk med · Gate none · **done** · Deps M3-E1-T1
+Owner BE (FE) · Risk med · Gate none · **in-review** · Deps M3-E1-T1
 - **Addresses:** D-016, F-SCH-05, F-SCH-04, TD-155 (routine flow tests)
 - **Files:** `koda/services/runtime/api.py` (~506), the routine editor and the schedules page, `tests/test_services/runtime/test_schedules_api.py`
 - **Do:** create calls `queue_validation_run(job_id, activate_on_success=True)`, checks the result and returns the real status. Add a Validate action to the UI. Replace the mocked `activate_job` test with an unmocked one.
 - **Done when:** a routine created on the web reaches `active` after validation and runs.
-- **Tests:** G-PG; web tests · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-016): runtime-API create validates and activates (Postgres), idempotent replay, web contract and toast tests; browser journey not yet run
+- **Tests:** G-PG; web tests · **Evidence:** **Missing for done:** the web journey on a running stack (M0-E3-T7). VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-016): runtime-API create validates and activates (Postgres), idempotent replay, web contract and toast tests; browser journey not yet run
 
 #### M3-E1-T3 · Archived routines hidden; routine names persisted
 Owner BE (FE) · Risk low · Gate none · **ready** · Deps —
@@ -1554,12 +1555,12 @@ Owner FE (PROD) · Risk low · Gate none · **ready** · Deps —
 #### M3-E2 — Cancellation and the queue worker
 
 #### M3-E2-T1 · Cancellation stops the running task and keeps the worker
-Owner BE · Risk med · Gate none · **done** · Deps M0-E3-T2
+Owner BE · Risk med · Gate none · **in-review** · Deps M0-E3-T2
 - **Addresses:** D-009, D-087, D-088, F-ORC-02, F-CNV-06
 - **Files:** `koda/services/runtime/controller.py` (~2718), `koda/services/queue_manager.py` (~8842), `koda/services/openai_compatible_runner.py` (~328)
 - **Do:** DEFECT-BATCH-1 covers the D-009 part. `cancel_queued_task` returns True only for a tracked queued id; otherwise call `cancel_active_task_execution`. `_process_queue` catches the cancelled task's `CancelledError` and continues. The OpenAI-compatible runner re-raises `CancelledError`.
 - **Done when:** the cancellation xfail in M0-E3-T2 passes, there is no late response, and the next queued item runs.
-- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-009): queued and running light tasks cancel on the real execution path, finished tasks answer 409; the M0-E3-T2 characterisation (wave 2) re-checks it
+- **Tests:** G-PG · **Evidence:** **Missing for done:** the M0-E3-T2 cancellation characterisation (wave 2A). VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-009): queued and running light tasks cancel on the real execution path, finished tasks answer 409; the M0-E3-T2 characterisation (wave 2) re-checks it
 
 #### M3-E2-T2 · Per-item delivery context
 Owner BE · Risk med · Gate none · **pending** · Deps M0-E3-T2
@@ -1787,12 +1788,12 @@ Owner AIM (ARCH, review REV) · Risk low · Gate none · **pending** · Deps M3-
 #### M3-E7 — Authentication journeys
 
 #### M3-E7-T1 · Password recovery from the web
-Owner SEC (FE) · Risk low · Gate none · **done** · Deps —
+Owner SEC (FE) · Risk low · Gate none · **in-review** · Deps —
 - **Addresses:** D-018, SM-01, F-SET-04, J-07
 - **Files:** `apps/web/src/components/auth/forgot-password-screen.tsx`, `koda/control_plane/operator_auth.py` (~630), `docs/security/authentication.md`, tests
 - **Do:** stop lowercasing the input, and normalise case on both sides.
 - **Done when:** a J-07 replay succeeds with a pasted code.
-- **Tests:** web test; Postgres auth test; G · **Evidence:** VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-018): canonicalization unit tests, recover route test, forgot-password component tests; J-07 browser replay pending M0-E3-T7
+- **Tests:** web test; Postgres auth test; G · **Evidence:** **Missing for done:** J-07 replay with a pasted code (M0-E3-T7). VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-018): canonicalization unit tests, recover route test, forgot-password component tests; J-07 browser replay pending M0-E3-T7
 
 #### M3-E7-T2 · Setup page states and error codes
 Owner FE (SEC) · Risk low · Gate none · **ready** · Deps —
