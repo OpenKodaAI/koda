@@ -22,6 +22,7 @@ run pnpm test:web
 run pnpm build:web
 
 run uv run python3 scripts/sync_npm_readme.py
+run uv run python3 scripts/check_master_plan.py
 run uv run pytest -q tests/test_open_source_hygiene.py tests/test_public_docs.py tests/test_installation_assets.py
 
 run cargo fmt --manifest-path rust/Cargo.toml --all --check
