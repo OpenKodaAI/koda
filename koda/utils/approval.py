@@ -517,10 +517,14 @@ def _resolve_file_command(
     raw_args: str,
     work_dir: str | None,
 ) -> _OperationalActionResolution | None:
-    """Resolve a file command on the path its handler acts on (``path_arg``)."""
+    """Resolve a file command on the path its handler acts on (``path_arg``).
+
+    Without a work dir the path stays as written, so the execution policy still sees it: a
+    relative or ``~`` path then fails closed under every restrictive path rule (ADR-039, AG-06).
+    """
     if not path_arg:
         return None
-    resolved_path = None
+    resolved_path: str | None = path_arg
     if work_dir:
         resolution = resolve_work_path(path_arg, work_dir, deny_sensitive_dirs=False)
         if resolution.path is None:

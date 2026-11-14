@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from koda.agent_contract import ActionEnvelope
-from koda.services.execution_policy import ApprovalScope
+from koda.services.execution_policy import ApprovalScope, PolicyEvaluation, evaluate_execution_policy
 from koda.utils.approval import (
     _APPROVAL_GRANTS,
     _PENDING_AGENT_CMD_OPS,
@@ -21,6 +21,7 @@ from koda.utils.approval import (
     get_agent_cmd_decision,
     is_write_operation,
     match_agent_approval_grant,
+    peek_agent_approval_grant,
     request_agent_cmd_approval,
     reset_approval_state,
     resolve_agent_cmd_approval,
@@ -298,6 +299,35 @@ class TestWithApprovalDecorator:
         update.message.reply_text.assert_called_once()
         assert "Confirmacao necessaria" in update.message.reply_text.call_args.args[0]
         _PENDING_OPS.clear()
+
+    @pytest.mark.asyncio
+    async def test_without_a_work_dir_a_file_command_path_is_evaluated_as_written(self, monkeypatch):
+        """With no work dir to resolve it under, the path the command acts on reaches the gate unresolved.
+
+        A relative path then fails closed: every deny path rule counts as matching it.
+        """
+        policy = {
+            "version": 1,
+            "rules": [
+                {"name": "allow-rm", "match": {"tool_id": "rm"}, "decision": "allow"},
+                {"name": "deny-secrets", "match": {"path": "/srv/work/secrets"}, "decision": "deny"},
+            ],
+        }
+        monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+        call_log = []
+
+        async def handler(update, context):
+            call_log.append(True)
+
+        decorated = with_approval("rm")(handler)
+        update, context = self._make_update_context(["x", "/../secrets/key"])
+
+        result = await decorated(update, context)
+
+        assert result is None
+        assert call_log == []
+        assert update.message.reply_text.call_args.args[0] == "Matched execution-policy rule."
+        assert _PENDING_OPS == {}
 
     @pytest.mark.asyncio
     async def test_write_with_approved_flag_passes_through(self):
@@ -924,6 +954,61 @@ class TestAgentCmdApproval:
         assert first is not None
         assert second is not None
         assert third is None
+
+    def test_a_scope_grant_for_a_move_does_not_cover_a_move_to_another_destination(self):
+        """Path rules gate both ends of a move, so a scope grant is bound to both ends."""
+        policy = {
+            "version": 1,
+            "rules": [
+                {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+                {
+                    "name": "approve-secrets",
+                    "match": {"path": "/w/secrets"},
+                    "decision": "require_approval",
+                    "approval_scope_kind": "scope",
+                },
+                {
+                    "name": "approve-prod-once",
+                    "match": {"path": "/w/prod"},
+                    "decision": "require_approval",
+                    "approval_scope_kind": "once",
+                },
+            ],
+        }
+
+        def move(destination: str) -> PolicyEvaluation:
+            return evaluate_execution_policy(
+                "file_move",
+                {"source": "/w/a", "destination": destination},
+                resource_access_policy={"integration_grants": {"fileops": {"allow_actions": ["fileops.*"]}}},
+                execution_policy=policy,
+                known_tool=True,
+            )
+
+        def peek(evaluation: PolicyEvaluation) -> dict | None:
+            return peek_agent_approval_grant(
+                user_id=222,
+                agent_id="agent-a",
+                envelope=evaluation.envelope,
+                approval_scope=evaluation.approval_scope,
+            )
+
+        to_secrets = move("/w/secrets/x")
+        assert (to_secrets.decision, to_secrets.rule_id) == ("require_approval", "approve-secrets")
+        assert to_secrets.approval_scope is not None and to_secrets.approval_scope.kind == "scope"
+        _issue_agent_approval_grants(
+            user_id=222,
+            agent_id="agent-a",
+            requests=[{"envelope": to_secrets.envelope, "approval_scope": to_secrets.approval_scope}],
+            decision="approved_scope",
+        )
+        assert peek(move("/w/secrets/x")) is not None
+
+        to_prod = move("/w/prod/config.yml")
+
+        assert (to_prod.decision, to_prod.rule_id) == ("require_approval", "approve-prod-once")
+        assert to_prod.approval_scope is not None and to_prod.approval_scope.kind == "once"
+        assert peek(to_prod) is None
 
 
 # TestPeriodicCleanup — background approval cleanup

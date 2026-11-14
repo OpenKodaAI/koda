@@ -15,6 +15,120 @@ multi-supervisor deployments; cluster mode adds a drain step.
    docker compose pull
    ```
 
+### Execution-policy rules
+
+Agent execution-policy rules (`execution_policy.rules`) now follow the
+worker's rule engine everywhere: in publish validation, in the
+control-plane simulator (`POST /api/control-plane/agents/{agent_id}/execution-policy/evaluate`)
+and in the worker. Workers do not receive these rules yet, so this
+release does not change what agents can run. It does change how
+existing rules are validated and simulated:
+
+- **Publish rejects rules the engine cannot evaluate.** A `^regex`
+  pattern, an unknown selector key (for example a misspelt `tool_ids`),
+  an empty selector value, a mapping value, a value other than true or
+  false on a boolean selector (for example `private_network: "ture"`),
+  a `path` pattern that is neither absolute nor starts with `*` (for
+  example `~/prod` or `srv/prod`) or has `..` after a wildcard segment
+  (for example `/srv/*/../prod`), a rule with no selectors or an unknown
+  `decision` or legacy `action` (for example `dney`), and two rules with
+  the same name are now validation errors. A rule with no selectors or an
+  unknown decision used to disappear silently; publish now validates the
+  policy as stored and reports it. An agent with any of these cannot be
+  published, for any change, until the rule is fixed. Saving a changed
+  policy through the agent spec or the execution-policy route is refused
+  with the same errors; saving other changes beside an unchanged policy
+  still works.
+  Each error names the rule and the selector, for example
+  `execution_policy.rules[0].match.tool_ids is not a supported selector`.
+  Rewrite a regex as an fnmatch pattern: `^mcp_.*__delete_.*$` becomes
+  `mcp_*__delete_*`.
+- **The most restrictive matching rule wins.** The simulator used to
+  take the first match by priority. Now a matching `deny` beats every
+  `require_approval`, `allow_with_preview` and `allow` rule, whatever
+  their priority.
+- **An `effect_tags` list needs every listed tag.** The simulator used to
+  match a rule when any listed tag was present. Now, as in the worker,
+  every listed tag must be present, so a deny rule that lists several
+  tags matches fewer calls. To deny a call that has any of the tags,
+  write one rule per tag.
+- **A `path` selector covers the path and everything below it.** The
+  simulator used to match only that exact path. Path rules are now
+  evaluated against these paths, as the tool receives them: a file
+  tool's `path`, `source` and `destination` (both ends of a
+  `file_move`), the working directory for `file_list`, `file_search`
+  and `file_grep` called without a `path`, the `path` of
+  `agent_set_workdir`, and the file an operator file command acts on
+  (see below). No other param is evaluated, even one that names a
+  path: an MCP tool's params, `browser_upload`'s `file_path`,
+  `plugin_install`'s `path`, the `path` of `git_diff` and `git_log`,
+  and `job_create`'s `work_dir`, nor anything a shell or git command
+  touches. A path rule therefore does not keep those tools out of a
+  directory (owner: AG-12).
+  An absolute path is evaluated once for each of its spellings
+  (normalized, with `.`, `..` and repeated `/` resolved, and as written;
+  each with and without case), and the most restrictive outcome wins. A
+  `deny`, `require_approval` or `allow_with_preview` path rule therefore
+  also covers `..`, `//` and other-case spellings of its path, and a
+  call such as `/srv/work/link/../other/key` that passes through its
+  directory `/srv/work/link` (when that directory is a symlink, the tool
+  follows the link before the `..`). An `allow` path rule covers a call
+  only when each spelling of each of the call's paths is inside it, with
+  case. When two rules with the winning decision match different
+  spellings, the higher priority (then the lower name) decides, as for
+  any other tie.
+- **A path that is not absolute fails closed.** The worker's tools
+  expand `~` and resolve a relative path against the agent's working
+  directory, which the rule engine does not know. So a path that starts
+  with `~`, a relative path such as `notes.txt` or `../secrets/key.pem`,
+  and a file listing or search of the working directory without a
+  `path` now count as matching every `deny`, `require_approval` and
+  `allow_with_preview` path rule, and no `allow` path rule. A call that
+  such a rule's other selectors match and that gives a relative or `~`
+  path is therefore denied, or needs approval or a preview, even when it
+  would land outside that rule's directory. The agent's own tool prompt
+  teaches relative paths (`{"path": "src/main.py"}`,
+  `{"path": "output.txt"}`, and `file_list` with `{}`), so once rules
+  reach workers, one restrictive path rule beside an allow for the file
+  tools gates nearly every file call an agent makes, until relative
+  paths are resolved under the work dir (M1-E4-T13). Check such a rule
+  with the simulator before you rely on it.
+- **Rule path patterns are normalized.** `/srv//prod`, `/srv/./prod`,
+  `/srv/x/../prod` and `/srv/prod/` now all mean `/srv/prod`, so such a
+  rule matches the calls it names instead of none.
+- **The simulator uses the agent's feature flags.** For an agent with no
+  rules, the simulator filters its tool policy with the feature flags of
+  the agent's worker, not with the control-plane process's own. It
+  computes them as the worker does: from the environment the supervisor
+  gives it, that is the agent's environment (for example the
+  `shell_enabled` and `browser_enabled` settings), where an agent-scoped
+  `<AGENT_ID>_<KEY>` entry comes first, and the supervisor's own
+  `INTER_AGENT_ENABLED` only when the agent's environment does not set
+  it; then from the install's `.env` file, which fills only the settings
+  that environment lacks. So a flag set in `.env` after the first
+  bootstrap applies in the simulator as it does in the worker.
+
+After the upgrade, send the calls you care about to the simulator to see
+what each agent's rules now decide.
+
+### Operator file commands and approval grants
+
+These changes apply with or without rules:
+
+- **A file command is checked against the file it acts on.** `/rm`,
+  `/mkdir` and `/cat` act on their whole argument, spaces included, and
+  `/write` and `/edit` on their first argument. The execution policy and
+  the `fileops` grant's `allowed_paths` now see that path, resolved
+  under the work dir as the command resolves it. They used to see the
+  first shell word, so `/rm x /../secrets/key` was checked as `x` while
+  it deleted `secrets/key`. A path with a quote in it, such as
+  `/cat it's.txt`, no longer fails before the check.
+- **An `approve scope` grant covers only calls on the same paths.** A
+  grant now records every path that path rules evaluate, both ends of a
+  `file_move` included, so it no longer covers a move from the same
+  source to another destination. Scope grants issued before the upgrade
+  no longer match, and their calls ask for approval again.
+
 ## Step 1 — schema migration gate
 
 ```bash

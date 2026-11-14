@@ -12,7 +12,9 @@ from urllib.parse import unquote, urlsplit
 from dotenv import load_dotenv
 
 SCRIPT_DIR = Path(__file__).resolve().parent.parent
-load_dotenv(SCRIPT_DIR / ".env")
+# The install's .env. It is loaded without override, so it only fills settings the environment lacks.
+DOTENV_PATH = SCRIPT_DIR / ".env"
+load_dotenv(DOTENV_PATH)
 
 # --- Multi-agent support ---
 AGENT_ID: str | None = os.environ.get("AGENT_ID")

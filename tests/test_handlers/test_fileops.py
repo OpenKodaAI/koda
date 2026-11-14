@@ -1,10 +1,12 @@
 """Tests for file operation command handlers."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
 from koda.handlers.fileops import cmd_cat, cmd_edit, cmd_mkdir, cmd_rm, cmd_write
+from koda.utils.files import resolve_work_path
 
 
 @pytest.mark.asyncio
@@ -196,3 +198,52 @@ async def test_write_gate_checks_the_path_the_handler_writes(mock_update, mock_c
         await cmd_write(mock_update, mock_context)
     assert "outside the granted scope" in mock_update.message.reply_text.call_args.args[0]
     assert not (work / '"src').exists()
+
+
+def _tree(root: Path) -> dict[str, str | None]:
+    return {
+        str(path.relative_to(root)): path.read_text() if path.is_file() else None for path in sorted(root.rglob("*"))
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "handler", "args", "acted_on"),
+    [
+        # /rm, /mkdir and /cat act on the whole argument string, spaces included.
+        ("rm", cmd_rm, ["x", "/../secrets/key"], "secrets/key"),
+        ("mkdir", cmd_mkdir, ["x", "/../secrets/new"], "secrets/new"),
+        ("cat", cmd_cat, ["x", "/../secrets/key"], "secrets/key"),
+        # /write and /edit act on their first argument, whatever a shell would make of the quote in it.
+        ("write", cmd_write, ['x/../secrets/key"', '/../../elsewhere"', "content"], 'secrets/key"'),
+        ("edit", cmd_edit, ['x/../secrets/key"', '/../../elsewhere"', "line"], 'secrets/key"'),
+    ],
+)
+async def test_path_rules_decide_the_path_the_file_command_acts_on(
+    command, handler, args, acted_on, mock_update, mock_context, tmp_path, monkeypatch
+):
+    work_dir = tmp_path.resolve()
+    (work_dir / "secrets").mkdir()
+    (work_dir / "secrets" / "key").write_text("SECRET")
+    (work_dir / "secrets" / 'key"').write_text("SECRET\n")
+    handler_path = args[0] if command in {"write", "edit"} else " ".join(args)
+    assert resolve_work_path(handler_path, str(work_dir)).path == work_dir / acted_on
+    policy = {
+        "version": 1,
+        "rules": [
+            {"name": f"allow-{command}", "match": {"tool_id": command}, "decision": "allow"},
+            {"name": "deny-secrets", "match": {"path": str(work_dir / "secrets")}, "decision": "deny"},
+        ],
+    }
+    monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+    before = _tree(work_dir)
+    mock_context.user_data["work_dir"] = str(work_dir)
+    mock_context.args = args
+
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await handler(mock_update, mock_context)
+
+    mock_send.assert_not_called()
+    assert mock_update.message.reply_text.call_args.args[0] == "Matched execution-policy rule."
+    assert "reply_markup" not in mock_update.message.reply_text.call_args.kwargs
+    assert _tree(work_dir) == before

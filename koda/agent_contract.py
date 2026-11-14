@@ -617,6 +617,53 @@ _CORE_TOOL_DEFINITIONS: tuple[CoreToolDefinition, ...] = (
 CORE_TOOL_CATALOG: dict[str, CoreToolDefinition] = {definition.id: definition for definition in _CORE_TOOL_DEFINITIONS}
 CORE_TOOL_IDS: tuple[str, ...] = tuple(CORE_TOOL_CATALOG)
 
+# Tools the worker's dispatcher handles that the core catalog does not list.
+_DISPATCHER_ONLY_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "image_generate",
+        "job_update",
+        "request_skill",
+        "squad_artifact_list",
+        "squad_capabilities",
+        "squad_context",
+        "squad_coordinator_demote",
+        "squad_coordinator_elect",
+        "squad_coordinator_get",
+        "squad_dashboard_overview",
+        "squad_inbox_drain",
+        "squad_post",
+        "squad_router_tick",
+        "squad_task_claim",
+        "squad_task_complete",
+        "squad_task_create",
+        "squad_task_escalate",
+        "squad_task_list",
+        "squad_task_update",
+        "squad_telegram_bind",
+        "squad_telegram_binding_get",
+        "squad_telegram_post",
+        "squad_telegram_unbind",
+        "squad_thread_create",
+        "squad_thread_history",
+        "squad_thread_overview",
+    }
+)
+# Every tool id with a handler in ``koda.services.tool_dispatcher._TOOL_HANDLERS``;
+# tests/test_execution_policy_vectors.py keeps the two equal.
+DISPATCHER_TOOL_IDS: frozenset[str] = frozenset(CORE_TOOL_CATALOG) | _DISPATCHER_ONLY_TOOL_IDS
+
+
+def is_known_dispatcher_tool(tool_id: str) -> bool:
+    """Return whether ``tool_id`` is a known tool without consulting a plugin registry.
+
+    A tool is known when the worker's dispatcher has a handler for it or it is an
+    MCP tool (``mcp_<server>__<tool>``). The worker's ``is_known_tool`` also accepts
+    the tools in its plugin registry. The control-plane simulator cannot see that
+    registry, so it uses this predicate alone and reports plugin tools as unknown.
+    """
+    return tool_id in DISPATCHER_TOOL_IDS or tool_id.startswith("mcp_")
+
+
 _CORE_PROVIDER_DEFINITIONS: tuple[CoreProviderDefinition, ...] = (
     CoreProviderDefinition(
         id="claude",
@@ -1799,12 +1846,20 @@ def _resolve_resource_scope(
     *,
     server_key: str | None,
 ) -> dict[str, Any]:
+    """Return what one call acts on; an approval grant of kind ``scope`` covers calls with the same scope.
+
+    ``paths`` holds every path execution-policy path rules evaluate
+    (:func:`resolve_action_paths`), so a scope grant issued for one ``file_move``
+    does not cover a move from the same source to another destination, which a
+    different path rule can gate.
+    """
     scope: dict[str, Any] = {
         "integration_id": resolution.integration_id,
         "action_id": resolution.action_id,
         "resource_method": resolution.resource_method,
         "domain": resolution.domain,
         "path": resolution.path,
+        "paths": list(resolve_action_paths(resolution.tool_id, params)),
         "db_env": resolution.db_env,
         "server_key": server_key,
     }
@@ -1935,6 +1990,43 @@ def _infer_mcp_access_level(tool_name: str) -> str:
     if not action_token:
         return "write"
     return _action_level_from_tokens(action_token, read_actions=_MCP_READ_ACTION_TOKENS)
+
+
+# The tools that act on the working directory when the call gives no ``path``
+# (``params.get("path", ctx.work_dir)`` in koda.services.tool_dispatcher).
+_WORK_DIR_DEFAULT_PATH_TOOLS = frozenset({"file_list", "file_search", "file_grep"})
+
+
+def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """Return the paths execution-policy ``path`` rules evaluate for one call, exactly as the tool receives them.
+
+    They are not trimmed or normalized: the tools expand ``~`` and resolve a
+    relative path against the worker's working directory, and the engine must see
+    what the tool sees. They are a ``file_*`` tool's ``path``, ``source`` and
+    ``destination`` (so a ``file_move`` yields its source and its destination); the
+    working directory, returned as the relative path ``.``, for ``file_list``,
+    ``file_search`` and ``file_grep`` without a ``path``; the ``path`` of an
+    ``agent_*`` tool (``agent_set_workdir``); and the ``path`` of the operator file
+    commands ``write``, ``edit``, ``rm``, ``mkdir`` and ``cat``, which the approval
+    gate sets to the file the command acts on. No other param is returned, though
+    some name paths: an MCP tool's params, ``browser_upload``'s ``file_path``,
+    ``plugin_install``'s ``path``, the ``path`` of ``git_diff`` and ``git_log`` and
+    ``job_create``'s ``work_dir`` (owner: AG-12). An approval grant's resource
+    scope holds these paths too (:func:`_resolve_resource_scope`).
+    """
+    tool = str(tool_id or "").strip()
+    payload = params or {}
+    keys: tuple[str, ...]
+    if tool in {"write", "edit", "rm", "mkdir", "cat"} or tool.startswith("agent_"):
+        keys = ("path",)
+    elif tool.startswith("file_"):
+        keys = ("path", "source", "destination")
+    else:
+        return ()
+    paths = tuple(str(payload[key]) for key in keys if payload.get(key) not in (None, ""))
+    if tool in _WORK_DIR_DEFAULT_PATH_TOOLS and "path" not in payload:
+        return (".", *paths)
+    return paths
 
 
 def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = None) -> IntegrationActionResolution:

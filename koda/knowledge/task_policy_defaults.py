@@ -81,8 +81,9 @@ def _apply_runtime_autonomy_policy(
     base_policy: EffectiveExecutionPolicy,
     *,
     task_kind: str,
+    autonomy_policy: dict[str, Any] | None = None,
 ) -> EffectiveExecutionPolicy:
-    payload = _load_runtime_autonomy_policy()
+    payload = _load_runtime_autonomy_policy() if autonomy_policy is None else autonomy_policy
     if not payload:
         return base_policy
 
@@ -121,8 +122,18 @@ def _apply_runtime_autonomy_policy(
     return replace(base_policy, **patch) if patch else base_policy
 
 
-def default_execution_policy(task_kind: str, *, environment: str = "") -> EffectiveExecutionPolicy:
-    """Return policy defaults for the classified task kind."""
+def default_execution_policy(
+    task_kind: str,
+    *,
+    environment: str = "",
+    autonomy_policy: dict[str, Any] | None = None,
+) -> EffectiveExecutionPolicy:
+    """Return policy defaults for the classified task kind.
+
+    ``autonomy_policy`` is the agent's autonomy policy; when omitted, the worker's
+    ``AGENT_AUTONOMY_POLICY_JSON`` is used. The control plane passes it to simulate
+    an agent's decisions.
+    """
     normalized_env = environment.lower()
     is_production = normalized_env in {"prod", "production"}
     defaults: dict[str, EffectiveExecutionPolicy] = {
@@ -176,7 +187,7 @@ def default_execution_policy(task_kind: str, *, environment: str = "") -> Effect
             approval_mode="supervised",
         ),
     )
-    return _apply_runtime_autonomy_policy(base_policy, task_kind=task_kind)
+    return _apply_runtime_autonomy_policy(base_policy, task_kind=task_kind, autonomy_policy=autonomy_policy)
 
 
 ExecutionPolicy = EffectiveExecutionPolicy

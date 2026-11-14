@@ -13,6 +13,7 @@ from typing import Any, cast
 
 from koda.agent_contract import (
     evaluate_integration_grant,
+    is_known_dispatcher_tool,
     resolve_integration_action,
 )
 from koda.config import (
@@ -245,9 +246,13 @@ def _configured_resource_access_policy() -> dict[str, object]:
 
 
 def is_known_tool(tool_id: str) -> bool:
-    if tool_id in _TOOL_HANDLERS:
-        return True
-    if tool_id.startswith("mcp_"):
+    """Return whether the policy gate treats ``tool_id`` as a known tool.
+
+    Handler and MCP tools are decided by ``is_known_dispatcher_tool``, the same
+    predicate the control-plane simulator uses. This worker also accepts the
+    tools in its plugin registry.
+    """
+    if is_known_dispatcher_tool(tool_id):
         return True
     if PLUGIN_SYSTEM_ENABLED:
         try:
