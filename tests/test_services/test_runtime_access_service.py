@@ -8,6 +8,8 @@ import hmac
 import json
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from koda.services.runtime_access_service import RuntimeAccessService
 
 
@@ -63,3 +65,46 @@ def test_runtime_access_service_rejects_missing_capability():
     )
 
     assert service.authorize(token, agent_scope="AGENT_A", capability="mutate") is None
+
+
+@pytest.mark.parametrize("secret", ["", "   ", "\t\n"], ids=["empty", "spaces", "whitespace"])
+def test_runtime_access_service_refuses_an_empty_key(secret: str) -> None:
+    """An empty HMAC key lets anyone mint a valid scope, so the service refuses it outright."""
+    with pytest.raises(ValueError, match="secret"):
+        RuntimeAccessService(secret)
+
+
+def test_sensitive_runtime_access_without_a_configured_token_is_refused() -> None:
+    """With no RUNTIME_LOCAL_UI_TOKEN, a scope signed with the empty key must not open sensitive reads."""
+    from types import SimpleNamespace
+    from unittest.mock import patch
+
+    from koda.services.runtime import api as runtime_api
+
+    payload = json.dumps(
+        {
+            "agent_scope": "AGENT_A",
+            "capabilities": ["read"],
+            "workspace_scope": [],
+            "source_scope": [],
+            "sensitive_allowed": True,
+            "issued_at": datetime.now(tz=UTC).isoformat(),
+            "expires_at": (datetime.now(tz=UTC) + timedelta(minutes=5)).isoformat(),
+        },
+        separators=(",", ":"),
+    ).encode("utf-8")
+    forged = (
+        base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+        + "."
+        + base64.urlsafe_b64encode(hmac.new(b"", payload, hashlib.sha256).digest()).decode("ascii").rstrip("=")
+    )
+    request = SimpleNamespace(
+        headers={"X-Runtime-Access-Scope": forged},
+        query={"include_sensitive": "true"},
+    )
+
+    with patch.object(runtime_api, "RUNTIME_LOCAL_UI_TOKEN", ""):
+        response = runtime_api._authorize_sensitive_runtime_access(request, agent_scope="AGENT_A")
+
+    assert response is not None
+    assert response.status == 403

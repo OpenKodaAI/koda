@@ -641,11 +641,27 @@ async function readBootstrapCodeFromContainer(installDir, env) {
   };
 }
 
+// CONTROL_PLANE_API_TOKEN is a comma-separated list during a rotation
+// (`new-token,old-token`). The control plane accepts each token on its own and
+// never an unedited `replace-with-...` placeholder (koda/control_plane/settings.py,
+// parse_api_tokens), so the CLI sends the first token the server would accept.
+const PLACEHOLDER_SECRET_PREFIX = "replace-with-";
+
+function recoveryTokenFrom(rawValue) {
+  return (
+    String(rawValue || "")
+      .split(",")
+      .map((token) => token.trim())
+      .find((token) => token && !token.toLowerCase().startsWith(PLACEHOLDER_SECRET_PREFIX)) || ""
+  );
+}
+
 async function issueBootstrapCode(installDir) {
   const env = await readInstallEnv(installDir);
   const controlPlanePort = env.CONTROL_PLANE_PORT || "8090";
   const webPort = env.WEB_PORT || "3000";
-  const recoveryToken = String(env.CONTROL_PLANE_API_TOKEN || "").trim();
+  const configuredTokens = String(env.CONTROL_PLANE_API_TOKEN || "").trim();
+  const recoveryToken = recoveryTokenFrom(configuredTokens);
   const failures = [];
   if (recoveryToken) {
     try {
@@ -671,6 +687,8 @@ async function issueBootstrapCode(installDir) {
     } catch (error) {
       failures.push(error instanceof Error ? error.message : String(error));
     }
+  } else if (configuredTokens) {
+    failures.push("CONTROL_PLANE_API_TOKEN has no usable token.");
   } else {
     failures.push("CONTROL_PLANE_API_TOKEN is missing.");
   }
