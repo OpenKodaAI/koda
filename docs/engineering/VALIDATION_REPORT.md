@@ -425,3 +425,38 @@ M1-E1-T2 finished before its dependencies M1-E1-T1 and M0-E3-T1, so the M0-E1-T4
 - **regression test** `tests/test_control_plane_rate_limit.py::test_untrusted_peer_cannot_rotate_x_forwarded_for`: the real control-plane rate-limit middleware, with spoofed `X-Forwarded-For` from an untrusted peer.
 - **regression test** `tests/test_control_plane_rate_limit.py::test_real_loopback_proxy_gets_per_client_login_buckets`: the real middleware behind a loopback proxy.
 - LIVE-REPLAY-1 J-15 ran the same path end to end through the production dashboard and API.
+
+## WAVE-3 — nine plan tasks (merged 9296448)
+
+Process:
+- **Implementation.** Workflow `wf_413821e3-b62` implemented each task in its own worktree from 666fe36, with tests written first and shown failing on the earlier code, then two review lenses and a bounded address loop. All nine were approved; M0-E3-T1 and M0-E2-T3 were approved with minors left.
+- **Integration.** Workflow `wf_2b8a7475-523`, on `integrate/wave-3` from 1ae546e.
+  - The orchestrator resolved the conflicts: CONTRIBUTING; `scripts/docker_smoke.sh`, keeping both the provider-CLI check and the proxy check; and `tests/test_control_plane_operator_auth.py`, where wave 2B's onboarding and auth-status tests were ported to the Postgres `operator_db` fixture after M0-E3-T6 removed the SQL fake.
+  - An integrator verified the clean merges semantically. Nothing was lost between M1-E3-T8 and wave 2B in `provider_auth.py` and `manager.py`, and M0-E3-T1's matrix agrees with the route-based public check.
+  - It fixed one semantic merge defect: wave 2B's AG-05 fixture leaked pools, the D-225 pattern, and connections left open at session end went from 18 to 0 (b08c329).
+  - It also fixed the leftovers, each with a fail-first test: anonymous root routes pinned (0028d87); nginx `client_max_body_size 13m` for the 12 MiB photo uploads (5fdf758); `_run_fallback` no longer raises `CancelledError` out of its `finally` (133c201); setup-code seeds are never logged (f1e6a89).
+  - The security and correctness reviewers both approve in round 3. Every remaining item is out of scope and recorded as D-238..D-251.
+- **Stash check.** M1-E3-T8's agent proved fail-before with `git stash`, because its prompt predated the rule. A scope check of every wave-3 branch found no files from another task.
+
+| Task | Addresses | Evidence |
+|---|---|---|
+| M1-E3-T8 | D-223, TD-040 | `tests/security/test_outbound_fetch_guard.py`: the probe matrix (0.0.0.0, IPv4-mapped, 100.64.0.0/10, NAT64, DNS rebinding, cross-origin redirect) is rejected on every listed path; configured local endpoints still work. 71 of 85 new cases failed before. |
+| M0-E3-T1 | D-048, F-QA-22, F-SET-11 | `tests/test_control_plane_auth_matrix.py`: every registered route, the route-based public table, OpenAPI parity and pinned anonymous root routes. |
+| M0-E3-T9 | R-57 (part), F-MON-15 | `tests/test_services/runtime/test_runtime_api_auth_matrix.py`: 572 cases passed, and 169 strict xfails pin D-241. |
+| M3-E2-T6 | D-222 | Fake-kernel tests: a provider exit during termination gives no fallback and a cancelled final phase. |
+| M1-E1-T16 | D-220, R-35 | `tests/test_release_proxy_routing.py` contract test, plus the real nginx 1.24 proxy tests (9 of 9, `KODA_TEST_NGINX`) with stub upstreams. The docker smoke in CI is still to run, so the task stays `in-review`. |
+| M0-E2-T2 | D-174, F-QA-04 | `tests/integration/test_rust_build_fixture.py`: a simulated build failure fails under CI and skips with a message locally. |
+| M0-E2-T3, M0-E2-T8 | D-173, D-146, D-155 (part), D-225 | The 7 files pass from `/tmp`; there is one squad reset helper. The two projection tests passed 50 of 50 consecutive runs under 3 CPU burners. Root cause: fixtures leaked bridge-loop asyncpg pools (D-225). |
+| M0-E3-T6, M1-E1-T17 | TD-187, D-221, F-SET-01..05 | Operator auth runs on real Postgres with the fake removed. Setup codes are accepted lowercase, compact or with spaces, and a wrong code gets the generic error. |
+
+Gates on `integrate/wave-3` (orchestrator run, own guard per session):
+
+| Command | Result |
+|---|---|
+| `ruff check .` / `ruff format --check .` / `mypy koda/ --ignore-missing-imports` | pass / 728 files formatted / no issues in 360 files |
+| `pytest --cov=koda` | 6360 passed, 288 skipped, 170 xfailed; 63 % line coverage (was 62 %) |
+| `POSTGRES_TEST_DSN=… pytest -m postgres` (fresh database) | 270 passed, 2 skipped |
+| `tests/test_open_source_hygiene.py` | 5 passed |
+| Web and Rust | not affected: wave 3 changes nothing under `apps/web` or `rust/` |
+
+The 170 xfails are strict and pin recorded defects, among them the 169 D-241 cases in the runtime matrix and D-033 in the control-plane matrix.
