@@ -20,7 +20,7 @@ Most control-plane routes require one of:
 - a bearer token created by `/api/control-plane/auth/tokens`
 - the break-glass `CONTROL_PLANE_API_TOKEN`, when configured
 
-Public or bootstrap routes are explicitly marked with `security: []` in the OpenAPI. Auth-adjacent routes are rate-limited more strictly than normal operator routes.
+Public or bootstrap routes are explicitly marked with `security: []` in the OpenAPI. `GET /api/control-plane/onboarding/status` is public with an optional bearer (`security: [{}, {"bearerAuth": []}]`): without a credential it returns only `has_owner` and `bootstrap_required`; see [`../security/authentication.md`](../security/authentication.md). Auth-adjacent routes are rate-limited more strictly than normal operator routes.
 
 ## Control Plane
 
@@ -37,8 +37,8 @@ The control plane owns product configuration and operator-facing management. The
 | Memory, knowledge, and evals | knowledge candidates, runbooks, retrieval/answer traces, knowledge graph, legacy knowledge evals, `eval_case.v1`, eval runs, trajectory exports, latest release quality |
 | Self-improvement | `improvement_proposal.v1` list/create/detail plus approve, reject, validate, apply, and rollback |
 | Quality cockpit | quality overview, per-agent quality, and failure-to-proposal |
-| Providers | provider connection state, API-key/local/subscription-login flows, verification, disconnect, Ollama, ElevenLabs, Kokoro, Supertonic, Whisper, embedding model downloads/select/delete, active download jobs, and cancellation |
-| System settings | global defaults, system settings, general settings, global secrets, and persistence diagnostics |
+| Providers | provider connection state, API-key/local/subscription-login flows, verification, disconnect (runs `claude auth logout` or `codex logout` where the CLI is installed, removes the stored key and only the CLI's credential files — Claude `.credentials.json`, Codex `auth.json`, Gemini `oauth_creds.json`, `google_accounts.json`, `mcp-oauth-tokens.json` — and resets the connection to its fresh-install mode), Ollama, ElevenLabs, Kokoro, Supertonic, Whisper, embedding model downloads/select/delete, active download jobs, and cancellation |
+| System settings | global defaults, system settings, general settings, global secrets, placeholder-secret status (names only, for the dashboard warning banner), and persistence diagnostics |
 | Channel gateway | `channel_gateway.v1` state, pairing codes, unknown senders, approve, block, revoke |
 | Connections and MCP | system defaults, per-agent connections, tool discovery/policies, OAuth start/status/refresh/revoke, resources, prompts, capability policies, MCP catalog, custom MCP servers, and Claude Desktop MCP import |
 
@@ -107,6 +107,8 @@ Write/control routes:
 `POST /api/runtime/schedules` creates the job in `validation_pending` and queues a dry-run validation run, returned as `validation_run_id` with a `message`. When `auto_activate` is true (the default) a passing validation activates the job; otherwise the job stays `validated` until the `activate` or `resume` action is called. A failed validation leaves the job `failed_open`. `run` is rejected until the job has been validated. If the validation could not be queued the job is still created (`201`), but `validation_run_id` is `null` and `message` says why; call the `validate` action to retry it. A replay with the same `X-Idempotency-Key` returns the original `message` and `validation_run_id`. The `validate` action itself answers `400` with `{"ok": false, "message": ...}` when it is refused, for example while a validation run is still pending.
 
 Automatic (scheduled and catch-up) runs follow the agent's current policy rather than the snapshot captured at validation: when the job's stored policy snapshot is stale, the dispatcher refreshes it before materializing runs and records a `job.policy_snapshot_refreshed` event with the previous and new `policy_snapshot_hash`.
+
+`payload.read_only` and `payload.allowed_paths` are stored with the job but are not enforced yet: a run is not stopped from writing and is not limited to those paths. `read_only: true` only pins `safety_mode` to `dry_run_required`, which is already the default. The dashboard routine editor labels both settings "Not enforced yet", does not set them on new routines, and leaves the values an existing routine stores unchanged when it is edited.
 
 `POST /api/runtime/tasks/{task_id}/cancel` and `/interrupt` stop a task that is queued, running, or
 retrying and return `action: "cancelled"` (or `"interrupted"`) with its `final_phase`. A task without a

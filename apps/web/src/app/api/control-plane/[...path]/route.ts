@@ -19,6 +19,7 @@ import "@/lib/contracts/handoffs";
 import "@/lib/contracts/quality-cockpit";
 import { controlPlaneFetch, sanitizeControlPlanePayload } from "@/lib/control-plane";
 import { getControlPlaneMutationInvalidation } from "@/lib/control-plane-cache";
+import { isPublicControlPlaneApiPath } from "@/lib/public-control-plane-paths";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
   getWebOperatorTokenFromCookie,
@@ -32,21 +33,8 @@ type RouteContext = {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const PUBLIC_CONTROL_PLANE_PATHS = new Set([
-  "onboarding/status",
-  "onboarding/readiness",
-  "auth/status",
-  "auth/bootstrap/exchange",
-  "auth/login",
-  "auth/register-owner",
-]);
-
 const UPSTREAM_UNAVAILABLE_HEADER = "X-Koda-Upstream-Unavailable";
 const UPSTREAM_UNAVAILABLE_MESSAGE = "Control plane upstream is unavailable";
-
-function isPublicControlPlanePath(path: string[]) {
-  return PUBLIC_CONTROL_PLANE_PATHS.has(path.join("/"));
-}
 
 function readPositiveInt(searchParams: URLSearchParams, name: string, fallback: number) {
   const value = Number(searchParams.get(name));
@@ -284,7 +272,16 @@ function unavailableReadPayload(path: string[], request: NextRequest): unknown |
   return null;
 }
 
-function unavailableReadResponse(path: string[], request: NextRequest) {
+function unavailableReadResponse(
+  path: string[],
+  request: NextRequest,
+  hasOperatorSession: boolean,
+) {
+  // The soft fallbacks mirror operator payload shapes. A caller without a
+  // session gets the plain upstream error instead.
+  if (!hasOperatorSession) {
+    return null;
+  }
   const payload = unavailableReadPayload(path, request);
   if (payload === null) {
     return null;
@@ -339,9 +336,9 @@ async function handleControlPlaneProxy(request: NextRequest, { params }: RouteCo
     return jsonErrorResponse(error, "Invalid control plane path.");
   }
 
+  const pathname = `/api/control-plane/${path.join("/")}`;
   const operatorToken = await getWebOperatorTokenFromCookie();
-  const publicPath = isPublicControlPlanePath(path);
-  if (!operatorToken && !publicPath) {
+  if (!operatorToken && !isPublicControlPlaneApiPath(pathname)) {
     return unauthorizedResponse();
   }
   if (!isTrustedDashboardRequest(request)) {
@@ -362,7 +359,6 @@ async function handleControlPlaneProxy(request: NextRequest, { params }: RouteCo
       },
     );
   }
-  const pathname = `/api/control-plane/${path.join("/")}`;
   const upstreamUrl = new URL(pathname, "http://local.invalid");
   upstreamUrl.search = request.nextUrl.search;
 
@@ -432,7 +428,7 @@ async function handleControlPlaneProxy(request: NextRequest, { params }: RouteCo
       },
     );
   } catch (error) {
-    const fallback = unavailableReadResponse(path, request);
+    const fallback = unavailableReadResponse(path, request, Boolean(operatorToken));
     if (fallback) {
       return fallback;
     }
@@ -440,7 +436,7 @@ async function handleControlPlaneProxy(request: NextRequest, { params }: RouteCo
   }
 
   if (response.status === 503) {
-    const fallback = unavailableReadResponse(path, request);
+    const fallback = unavailableReadResponse(path, request, Boolean(operatorToken));
     if (fallback) {
       return fallback;
     }

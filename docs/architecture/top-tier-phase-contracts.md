@@ -261,8 +261,8 @@ KG-12 and KG-13 close only when:
   with fallback JSON locks for rollback-safe local use.
 - Dashboard channel UI consumes backend gateway payloads and does not duplicate
   policy/risk decisions.
-- `onboarding_readiness.v1` reports provider, runtime, storage, sandbox, MCP,
-  memory, channel, first task, first trace, docs, and release quality checks.
+- `onboarding_readiness.v1` reports provider, runtime, storage, channel, first
+  task, first trace, and release quality checks.
 - First-task onboarding uses the normal dashboard/runtime path and does not
   bypass queue, policy, audit, metrics, or RunGraph-compatible events.
 - Slack and Discord adapter contracts route through `ChannelManager` and

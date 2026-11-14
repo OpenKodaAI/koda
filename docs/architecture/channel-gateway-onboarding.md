@@ -14,8 +14,7 @@ credentialed E2E remains required before they are called production-ready.
 - Let operators create short-lived pairing codes and approve, block, or revoke
   identities from the dashboard.
 - Surface onboarding readiness as backend-owned status: provider, runtime,
-  storage, sandbox, MCP, memory, channel, first task, first trace, docs, and
-  release quality.
+  storage, channel, first task, first trace, and release quality.
 - Emit audit, metrics, and RunGraph-compatible event names for every public
   state transition.
 
@@ -206,16 +205,15 @@ Required check keys:
 - `provider`
 - `runtime`
 - `storage`
-- `sandbox`
-- `mcp`
-- `memory`
 - `channel`
 - `first_task`
 - `first_trace`
-- `docs`
 - `release_quality`
 
-API:
+Each check is derived from live state; there are no fixed-status checks, so the
+rollup can reach `passed`.
+
+API (operator session or token required):
 
 - `GET /api/control-plane/onboarding/readiness`
 - `POST /api/control-plane/onboarding/first-task`

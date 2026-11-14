@@ -9,16 +9,19 @@ readiness checks, and Phase 6 closeout.
 renders the payload and may call provided actions, but it must not reclassify
 policy, security, release quality, or channel identity state.
 
-Canonical route:
+Canonical route (both routes need an operator session or token; the dashboard
+sends the session for you):
 
 ```bash
-curl http://127.0.0.1:8090/api/control-plane/onboarding/readiness
+curl http://127.0.0.1:8090/api/control-plane/onboarding/readiness \
+  -H 'Authorization: Bearer <operator-token>'
 ```
 
 First task action:
 
 ```bash
 curl -X POST http://127.0.0.1:8090/api/control-plane/onboarding/first-task \
+  -H 'Authorization: Bearer <operator-token>' \
   -H 'content-type: application/json' \
   -d '{"agent_id":"ATLAS"}'
 ```
@@ -30,14 +33,16 @@ curl -X POST http://127.0.0.1:8090/api/control-plane/onboarding/first-task \
 | `provider` | At least one provider is verified. | Open model/provider settings. |
 | `runtime` | Control-plane runtime probe is healthy. | Run doctor and inspect runtime. |
 | `storage` | Primary state/storage is available. | Configure Postgres/object storage. |
-| `sandbox` | Sandbox doctor has no strict failure. | Fix mounts, secrets, egress, or isolation. |
-| `mcp` | MCP grants/risk setup has no blocking issue. | Review MCP catalog and grants. |
-| `memory` | Memory setup is configured or explicitly optional. | Configure embeddings/memory if needed. |
 | `channel` | Telegram has an approved gateway identity or clear warning. | Pair or approve a sender. |
 | `first_task` | At least one safe first task exists or was queued. | Run the first-task action. |
 | `first_trace` | A trace/execution detail is available. | Open executions after first task completes. |
-| `docs` | Objective docs and runbooks are present. | Open docs index and install guide. |
 | `release_quality` | Latest deterministic release-quality payload passes or warns explicitly. | Run eval smoke/release gate. |
+
+Every check is derived from live state, so the rollup reaches `passed` once each
+one has evidence. Sandbox, MCP, memory and docs are not readiness checks: they
+used to be fixed values (`warning`, or `passed` for docs) that kept the rollup
+at `warning` forever. Sandbox health is reported by `scripts/doctor.py` and the
+per-task sandbox doctor.
 
 ## Dashboard Behavior
 

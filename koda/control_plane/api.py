@@ -10,9 +10,10 @@ import json
 import mimetypes
 import urllib.parse
 import urllib.request
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, cast
 
 from aiohttp import ClientConnectionResetError, ContentTypeError, web
@@ -128,18 +129,41 @@ def _clip_preview_text(value: Any, *, limit: int) -> str | None:
     return text[: max(0, limit - 1)].rstrip() + "…"
 
 
-_PUBLIC_CONTROL_PLANE_API_PATHS: tuple[str, ...] = (
-    "/api/control-plane/onboarding/status",
-    "/api/control-plane/auth/status",
-    "/api/control-plane/auth/bootstrap/exchange",
-    "/api/control-plane/auth/login",
-    "/api/control-plane/auth/register-owner",
-    "/api/control-plane/auth/password/recover",
+# The routes a caller reaches without an operator session, as path -> methods. Keep the paths in
+# sync with apps/web/src/lib/public-control-plane-paths.ts; tests/test_control_plane_public_paths.py
+# compares both lists and the methods setup_control_plane_routes registers.
+_PUBLIC_CONTROL_PLANE_API_ROUTES: Mapping[str, frozenset[str]] = MappingProxyType(
+    {
+        "/api/control-plane/onboarding/status": frozenset({"GET", "HEAD"}),
+        "/api/control-plane/auth/status": frozenset({"GET", "HEAD"}),
+        "/api/control-plane/auth/bootstrap/exchange": frozenset({"POST"}),
+        "/api/control-plane/auth/login": frozenset({"POST"}),
+        "/api/control-plane/auth/register-owner": frozenset({"POST"}),
+        "/api/control-plane/auth/password/recover": frozenset({"POST"}),
+    }
 )
+_PUBLIC_CONTROL_PLANE_API_PATHS: tuple[str, ...] = tuple(_PUBLIC_CONTROL_PLANE_API_ROUTES)
 
 
 def _is_public_control_plane_api_path(path: str) -> bool:
-    return any(path == candidate or path.startswith(f"{candidate}/") for candidate in _PUBLIC_CONTROL_PLANE_API_PATHS)
+    # Exact match, like the dashboard: a route added under a public path still needs a session.
+    return path in _PUBLIC_CONTROL_PLANE_API_ROUTES
+
+
+def _is_public_control_plane_request(request: web.Request) -> bool:
+    """Whether the router resolved ``request`` to one of the public routes itself.
+
+    The check uses the resolved resource and method, not the path string, so a route added
+    later cannot take over a public path: a dynamic ``/auth/{name}``, a GET next to a public
+    POST, or a pattern an encoded slash (``auth%2Fstatus``) resolves to all need a session.
+    Unmatched requests (404, 405) have no resource and need one too.
+    """
+    route = request.match_info.route
+    resource = route.resource
+    if resource is None:
+        return False
+    methods = _PUBLIC_CONTROL_PLANE_API_ROUTES.get(resource.canonical)
+    return methods is not None and route.method in methods
 
 
 def _optional_auth_context(request: web.Request) -> OperatorAuthContext | None:
@@ -332,7 +356,7 @@ async def control_plane_auth_middleware(
     handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
 ) -> web.StreamResponse:
     if request.path.startswith("/api/control-plane/"):
-        if _is_public_control_plane_api_path(request.path):
+        if _is_public_control_plane_request(request):
             context = _optional_auth_context(request)
             if context is not None:
                 request["operator_auth"] = context
@@ -440,15 +464,29 @@ async def setup_page(request: web.Request) -> web.Response:
     return web.Response(text=render_setup_page(request), content_type="text/html")
 
 
+# What onboarding/status tells a caller without an operator credential.
+_PRE_LOGIN_ONBOARDING_STATUS_FIELDS: tuple[str, ...] = ("has_owner", "bootstrap_required")
+
+
 async def onboarding_status(request: web.Request) -> web.Response:
     # This endpoint is a *health snapshot* polled by the CLI, setup wizard
     # and release smoke. A transient failure (seed race, lazy provider row,
     # storage not yet reachable) should degrade the payload but keep a 2xx
     # — fail-closed with 4xx/5xx here makes ``koda install --headless``
     # abort mid-bootstrap instead of letting the caller re-poll.
+    #
+    # The route is public, so a caller without an operator credential only
+    # learns whether setup is still needed. Agents, owner contact details,
+    # the Telegram allowlist, provider state and server paths need a session.
+    authenticated = False
     try:
+        authenticated = _request_auth_context(request) is not None
+        # Always computed: it also writes the first-run setup-code file.
+        auth_payload = _auth_service().onboarding_payload()
+        if not authenticated:
+            return web.json_response({field: auth_payload[field] for field in _PRE_LOGIN_ONBOARDING_STATUS_FIELDS})
         payload = dict(_manager().get_onboarding_status())
-        payload.update(_auth_service().onboarding_payload())
+        payload.update(auth_payload)
         return web.json_response(payload)
     except Exception as exc:
         log.warning(
@@ -457,6 +495,8 @@ async def onboarding_status(request: web.Request) -> web.Response:
             error=str(exc),
             exc_info=True,
         )
+        if not authenticated:
+            return web.json_response({"status": "degraded", "error": "onboarding_status_failed"})
         return web.json_response(
             {
                 "status": "degraded",
@@ -3137,6 +3177,15 @@ async def get_persistence_diagnostics(request: web.Request) -> web.Response:
     return web.json_response(_manager().get_persistence_diagnostics())
 
 
+async def get_placeholder_secrets(request: web.Request) -> web.Response:
+    """Names (never values) of Postgres/object-storage secrets still on ``.env.example`` placeholders."""
+    from koda.config import PLACEHOLDER_SECRET_ROTATION_URL, placeholder_storage_secrets
+
+    return web.json_response(
+        {"placeholder_keys": placeholder_storage_secrets(), "rotation_url": PLACEHOLDER_SECRET_ROTATION_URL}
+    )
+
+
 async def put_general_system_settings(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
     try:
@@ -5469,6 +5518,7 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_put("/api/control-plane/system-settings", put_system_settings)
     app.router.add_get("/api/control-plane/system-settings/general", get_general_system_settings)
     app.router.add_put("/api/control-plane/system-settings/general", put_general_system_settings)
+    app.router.add_get("/api/control-plane/system-settings/placeholder-secrets", get_placeholder_secrets)
     app.router.add_get("/api/control-plane/_diag/persistence", get_persistence_diagnostics)
     app.router.add_get("/api/control-plane/providers/{provider_id}/connection", get_provider_connection)
     app.router.add_put(

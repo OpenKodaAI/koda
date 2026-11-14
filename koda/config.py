@@ -7,6 +7,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import overload
+from urllib.parse import unquote, urlsplit
 
 from dotenv import load_dotenv
 
@@ -50,6 +51,47 @@ def _env_secret(key: str) -> str:
     """Read a credential, treating ``.env.example`` placeholders as unset."""
     value = (_env(key, "") or "").strip()
     return "" if is_placeholder_secret(value) else value
+
+
+# Postgres and object-storage secrets, keyed by the .env name the operator
+# edits, with the runtime settings compose derives from each one (the release
+# compose passes only the derived ones to the app). Unlike the auth secrets, a
+# placeholder here still authenticates, because the bundled Postgres and
+# SeaweedFS were set up with it. Koda warns about it (startup log, doctor,
+# dashboard banner) but still starts.
+STORAGE_SECRET_ENV_SOURCES: dict[str, tuple[str, ...]] = {
+    "POSTGRES_PASSWORD": ("POSTGRES_PASSWORD", "KNOWLEDGE_V2_POSTGRES_DSN"),
+    "S3_ACCESS_KEY_ID": ("S3_ACCESS_KEY_ID", "KNOWLEDGE_V2_S3_ACCESS_KEY_ID"),
+    "S3_SECRET_ACCESS_KEY": ("S3_SECRET_ACCESS_KEY", "KNOWLEDGE_V2_S3_SECRET_ACCESS_KEY"),
+}
+PLACEHOLDER_SECRET_ROTATION_URL = (
+    "https://github.com/OpenKodaAI/koda/blob/main/docs/install/local.md"
+    "#rotating-placeholder-postgres-and-object-storage-secrets"
+)
+
+
+def _dsn_password(dsn: str | None) -> str:
+    try:
+        return unquote(urlsplit(str(dsn or "").strip()).password or "")
+    except ValueError:
+        return ""
+
+
+def placeholder_storage_secrets() -> list[str]:
+    """Return the ``.env`` names of Postgres/object-storage secrets that are still placeholders.
+
+    Reads the process environment at call time. Only names are returned, never values.
+    """
+    found: list[str] = []
+    for name, sources in STORAGE_SECRET_ENV_SOURCES.items():
+        for source in sources:
+            value = os.environ.get(source)
+            if source.endswith("_DSN"):
+                value = _dsn_password(value)
+            if is_placeholder_secret(value):
+                found.append(name)
+                break
+    return found
 
 
 def _env_required(key: str) -> str:
@@ -220,7 +262,8 @@ CLAUDE_DEFAULT_MODEL: str = _env(
 
 # --- Codex CLI ---
 CODEX_ENABLED: bool = _env("CODEX_ENABLED", "true").lower() == "true"
-CODEX_BIN: str = _env("CODEX_BIN", "codex")
+# One executable path, never a command line (ADR-002 AG-02); provider_auth.provider_executable() reads it.
+CODEX_BIN: str = _env("CODEX_BIN", "").strip() or "codex"
 CODEX_TIMEOUT: int = int(_env("CODEX_TIMEOUT", str(CLAUDE_TIMEOUT)))
 CODEX_FIRST_CHUNK_TIMEOUT: int = int(_env("CODEX_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
 CODEX_SANDBOX: str = _env("CODEX_SANDBOX", "danger-full-access")
@@ -245,7 +288,8 @@ CODEX_DEFAULT_MODEL: str = _env("CODEX_DEFAULT_MODEL", CODEX_TIER_MODELS["large"
 
 # --- Gemini CLI ---
 GEMINI_ENABLED: bool = _env("GEMINI_ENABLED", "false").lower() == "true"
-GEMINI_BIN: str = _env("GEMINI_BIN", "") or ""
+# One executable path, never a command line (ADR-002 AG-02); provider_auth.provider_executable() reads it.
+GEMINI_BIN: str = _env("GEMINI_BIN", "").strip() or "gemini"
 GEMINI_TIMEOUT: int = int(_env("GEMINI_TIMEOUT", str(CLAUDE_TIMEOUT)))
 GEMINI_FIRST_CHUNK_TIMEOUT: int = int(_env("GEMINI_FIRST_CHUNK_TIMEOUT", str(FIRST_CHUNK_TIMEOUT)))
 # Gemini lineup verified against https://ai.google.dev/gemini-api/docs/models

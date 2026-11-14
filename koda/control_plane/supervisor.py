@@ -29,6 +29,7 @@ from .api import (
     setup_control_plane_routes,
 )
 from .cluster import ClusterClient, ClusterConfig
+from .crypto import ensure_master_key
 from .lifecycle_events import consume_lifecycle_signal, get_lifecycle_event
 from .manager import RuntimeSnapshot, get_control_plane_manager
 from .rate_limit import check_trusted_proxies, control_plane_rate_limit_middleware
@@ -217,6 +218,9 @@ class ControlPlaneSupervisor:
         from koda.observability import init_tracing
 
         init_tracing("koda-supervisor")
+        # Fail closed on the master key before anything can read or write a
+        # secret: this is the only place a key is ever created (AG-05).
+        ensure_master_key()
         self._manager.ensure_seeded()
         await self._link.start()
 
@@ -648,8 +652,13 @@ def _split_health_url(url: str) -> tuple[int, str]:
 
 
 def _warn_about_placeholder_secrets() -> None:
-    """Explain at startup why placeholder credentials do not authenticate."""
-    from koda.config import AGENT_ID, is_placeholder_secret
+    """Report at every start which credentials are still ``.env.example`` placeholders."""
+    from koda.config import (
+        AGENT_ID,
+        PLACEHOLDER_SECRET_ROTATION_URL,
+        is_placeholder_secret,
+        placeholder_storage_secrets,
+    )
     from koda.control_plane.settings import CONTROL_PLANE_API_TOKEN_PLACEHOLDERS_IGNORED
 
     if CONTROL_PLANE_API_TOKEN_PLACEHOLDERS_IGNORED:
@@ -670,6 +679,18 @@ def _warn_about_placeholder_secrets() -> None:
             detail=(
                 "The runtime UI token still contains the .env.example placeholder and is ignored; runtime UI "
                 "access is denied unless a token is stored in the control plane."
+            ),
+        )
+    storage_keys = placeholder_storage_secrets()
+    if storage_keys:
+        log.warning(
+            "storage_secret_placeholder_in_use",
+            keys=storage_keys,
+            rotation_url=PLACEHOLDER_SECRET_ROTATION_URL,
+            detail=(
+                "These Postgres/object-storage credentials still use the public .env.example placeholder and "
+                "still authenticate, so anyone who can reach those services can read and change Koda's data. "
+                "Rotate them with the steps at rotation_url."
             ),
         )
 
