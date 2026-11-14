@@ -65,6 +65,13 @@ plane, so a misconfigured dashboard never consumes a setup code or recovery code
 installer generates random values; manual installs use `scripts/generate_env_secrets.py`
 (see `docs/install/local.md`, including the upgrade path for existing installs).
 
+Postgres and object-storage placeholders (`POSTGRES_PASSWORD`, `S3_ACCESS_KEY_ID`,
+`S3_SECRET_ACCESS_KEY`) are different: the bundled services were set up with them, so they still
+authenticate and Koda still starts. The supervisor logs `storage_secret_placeholder_in_use` (key
+names only) at every start, `scripts/doctor.py` fails, and the dashboard shell shows a persistent
+banner. The banner reads `GET /api/control-plane/system-settings/placeholder-secrets`, an
+operator-only route that returns key names and the rotation link, never values.
+
 A small public whitelist bypasses the bearer check (these endpoints carry their own
 credential or are required to bootstrap auth itself):
 
