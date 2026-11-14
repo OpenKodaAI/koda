@@ -122,7 +122,13 @@ def file_command_path(command: str, args: Sequence[str] | None) -> str:
     return joined
 
 
-def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool = True) -> PathResolution:
+def resolve_work_path(
+    path_str: str,
+    work_dir: str,
+    *,
+    deny_sensitive_dirs: bool = True,
+    deny_sensitive_work_dir: bool = False,
+) -> PathResolution:
     """Resolve a path for the file commands and the agent file tools.
 
     This is the single path policy behind ``/cat``, ``/write``, ``/edit``, ``/rm``,
@@ -150,7 +156,11 @@ def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool
     anything inside the work dir stays uploadable. It changes a decision only for a path
     inside a sensitive directory that is not waived: one inside the work dir (a work dir
     of ``/`` contains ``/etc``), or one a validated work dir resolves into later, through
-    a symlink.
+    a symlink. ``deny_sensitive_work_dir=True``, which ``browser_upload`` passes with it,
+    keeps the check for the work dir itself: a work dir that resolves into a sensitive
+    directory it is not waived for, such as a validated work dir later replaced with a
+    symlink into ``/etc``, refuses every path, while a sensitive directory inside the work
+    dir stays reachable.
     """
     if not path_str or not path_str.strip():
         return PathResolution(None, "path_missing", "Missing path.")
@@ -164,7 +174,12 @@ def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool
         return _refuse(
             path_str, work_dir, "path_outside_workdir", f"Access denied: '{path_str}' is outside the working directory."
         )
-    sensitive = sensitive_dir_for(resolved, work_dir=root) if deny_sensitive_dirs else None
+    if deny_sensitive_dirs:
+        sensitive = sensitive_dir_for(resolved, work_dir=root)
+    elif deny_sensitive_work_dir:
+        sensitive = sensitive_dir_for(root, work_dir=root)
+    else:
+        sensitive = None
     if sensitive is not None:
         return _refuse(
             path_str, work_dir, "path_sensitive_dir", f"Access denied: '{sensitive}' is a sensitive system directory."

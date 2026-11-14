@@ -1988,8 +1988,10 @@ async def _handle_browser_upload(params: dict, ctx: ToolContext) -> AgentToolRes
         selector = 'input[type="file"]'
     # The file the page receives follows the shared path policy: relative to the work dir,
     # inside it, and never a secret file such as .env. Like the file commands, uploads skip
-    # the sensitive-directory check and keep their reach, anything inside the work dir.
-    resolution = _resolve_file_path(file_path, ctx.work_dir, deny_sensitive_dirs=False)
+    # the sensitive-directory check for the paths inside the work dir and keep their reach,
+    # anything inside it; unlike them, a work dir that itself resolves into a sensitive
+    # directory it is not waived for (one swapped for a symlink into /etc) is refused.
+    resolution = _resolve_file_path(file_path, ctx.work_dir, deny_sensitive_dirs=False, deny_sensitive_work_dir=True)
     if resolution.path is None:
         return AgentToolResult(tool="browser_upload", success=False, output=resolution.error or "Access denied.")
     from koda.services.browser_manager import browser_manager
@@ -2432,11 +2434,22 @@ async def _check_fileops_available(tool: str) -> AgentToolResult | None:
     return None
 
 
-def _resolve_file_path(path: Any, work_dir: str, *, deny_sensitive_dirs: bool = True) -> PathResolution:
+def _resolve_file_path(
+    path: Any,
+    work_dir: str,
+    *,
+    deny_sensitive_dirs: bool = True,
+    deny_sensitive_work_dir: bool = False,
+) -> PathResolution:
     """Resolve a file-tool path with the policy the file commands use (relative to ``work_dir``)."""
     if not isinstance(path, str) or not path.strip():
         return PathResolution(None, "path_missing", "Missing required param: 'path'.")
-    return resolve_work_path(path, work_dir, deny_sensitive_dirs=deny_sensitive_dirs)
+    return resolve_work_path(
+        path,
+        work_dir,
+        deny_sensitive_dirs=deny_sensitive_dirs,
+        deny_sensitive_work_dir=deny_sensitive_work_dir,
+    )
 
 
 async def _handle_file_read(params: dict, ctx: ToolContext) -> AgentToolResult:

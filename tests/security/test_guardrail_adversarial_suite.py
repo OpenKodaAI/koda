@@ -1581,6 +1581,7 @@ async def test_browser_upload_keeps_its_reach_when_the_work_dir_is_under_a_sensi
     (work / ".ssh").mkdir()
     (work / ".ssh" / "id_ed25519").write_text("canary-private-key\n", encoding="utf-8")
     monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(work / "etc")}))
+    monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(work))
     monkeypatch.chdir(root)
     requested = path.format(work=work)
     ctx = ToolContext(
@@ -1608,6 +1609,61 @@ async def test_browser_upload_keeps_its_reach_when_the_work_dir_is_under_a_sensi
     assert "blocked" in secret.output
     assert not ssh_key.success
     assert "blocked for safety" in ssh_key.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["shadow", "{etc}/shadow"])
+async def test_browser_upload_does_not_follow_a_work_dir_swapped_for_a_symlink_into_a_sensitive_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """A validated work dir later replaced with a symlink into ``etc`` does not hand ``etc`` to the page.
+
+    The upload keeps its reach inside the work dir, a sensitive directory inside it included,
+    but a work dir that itself resolves into a sensitive directory it is not waived for is
+    refused, as file_read refuses it.
+    """
+    from koda.services.browser_manager import browser_manager
+    from koda.services.tool_dispatcher import ToolContext, _handle_browser_upload, _handle_file_read
+    from koda.utils.workdir import validate_work_dir
+
+    root = tmp_path.resolve()
+    etc = root / "etc"
+    etc.mkdir()
+    (etc / "shadow").write_text("canary-shadow\n", encoding="utf-8")
+    (root / "home").mkdir()
+    (root / "proj").mkdir()
+    monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(etc)}))
+    monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(root / "home"))
+    validation = validate_work_dir(str(root / "proj"))
+    assert validation.ok, validation.reason
+    (root / "proj").rmdir()
+    (root / "proj").symlink_to(etc)
+    monkeypatch.chdir(root)
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=validation.path,
+        user_data={"work_dir": validation.path},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    requested = path.format(etc=etc)
+
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        read = await _handle_file_read({"path": requested}, ctx)
+    with (
+        patch("koda.services.tool_dispatcher._check_browser_available", new_callable=AsyncMock, return_value=None),
+        patch.object(browser_manager, "upload_file", new_callable=AsyncMock, return_value="Uploaded") as upload,
+    ):
+        result = await _handle_browser_upload({"file_path": requested}, ctx)
+
+    assert not read.success
+    assert not result.success, result.output
+    assert "sensitive system directory" in result.output
+    assert result.output == read.output
+    upload.assert_not_awaited()
 
 
 class _RedirectResponse:
