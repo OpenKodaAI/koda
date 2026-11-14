@@ -190,7 +190,7 @@ describe("useSessionStream", () => {
     expect(instances).toHaveLength(3);
   });
 
-  it("keeps the reason and retries only after the slow retry delay on stream_error", async () => {
+  it("reports the rejection and retries only after the slow retry delay on stream_error", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: false });
     const { result } = renderHook(() =>
       useSessionStream({
@@ -202,7 +202,7 @@ describe("useSessionStream", () => {
     const first = instances[0];
     act(() => {
       first.triggerOpen();
-      first.dispatch("stream_error", { status: 400, error: "invalid after_seq" });
+      first.dispatch("stream_error", { status: 400 });
       // The relay then ends the response; a closed EventSource reports nothing.
       if (first.readyState !== 2) first.triggerError();
     });
@@ -214,7 +214,7 @@ describe("useSessionStream", () => {
     expect(first.close).toHaveBeenCalled();
     expect(instances).toHaveLength(1);
     expect(result.current.connected).toBe(false);
-    expect(result.current.error).toBe("invalid after_seq");
+    expect(result.current.error).toBe("session stream rejected");
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1);
@@ -233,14 +233,19 @@ describe("useSessionStream", () => {
 
     act(() => {
       instances[0].triggerOpen();
-      instances[0].dispatch("stream_error", { status: 404, error: "task not found" });
+      instances[0].dispatch("stream_error", { status: 404 });
     });
+    // The stream_error listener closed the stream and scheduled the slow retry.
+    expect(instances[0].close).toHaveBeenCalled();
+    expect(vi.getTimerCount()).toBe(1);
+
     act(() => {
       result.current.reconnect();
     });
     expect(instances).toHaveLength(2);
-
     // The manual reconnect replaces the pending slow retry.
+    expect(vi.getTimerCount()).toBe(0);
+
     await act(async () => {
       await vi.advanceTimersByTimeAsync(STREAM_REJECTED_RETRY_MS);
     });

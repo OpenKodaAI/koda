@@ -46,12 +46,12 @@ describe("runtime agent stream relay", () => {
   });
 
   it.each([
-    [400, "invalid after_seq", "invalid after_seq"],
-    [404, '{"error":"task not found"}', "task not found"],
-    [422, "unprocessable", "unprocessable"],
+    [400, "invalid after_seq"],
+    [404, '{"error":"task not found"}'],
+    [422, "unprocessable"],
   ])(
     "turns a %i the runtime returned into a stream_error event",
-    async (status, upstreamBody, message) => {
+    async (status, upstreamBody) => {
       const { runtimeFetch } = await import("@/lib/runtime-api");
       vi.mocked(runtimeFetch).mockResolvedValue(new Response(upstreamBody, { status }));
 
@@ -63,7 +63,8 @@ describe("runtime agent stream relay", () => {
       const body = await response.text();
       expect(body).toContain("retry: 60000\n");
       expect(body).toContain("event: stream_error\n");
-      expect(body).toContain(`data: ${JSON.stringify({ status, error: message })}`);
+      // Only the status: no client reads the upstream message.
+      expect(body).toContain(`data: ${JSON.stringify({ status })}\n\n`);
     },
   );
 

@@ -58,7 +58,7 @@ describe("runtime session stream relay", () => {
     expect(response.headers.get("Content-Type")).toContain("text/event-stream");
     const body = await response.text();
     expect(body).toContain("event: stream_error\n");
-    expect(body).toContain('data: {"status":400,"error":"invalid after_seq"}');
+    expect(body).toContain('data: {"status":400}\n\n');
   });
 
   // An empty 200 stream here used to fire EventSource `open`, which reset the
