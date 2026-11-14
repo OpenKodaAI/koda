@@ -30,10 +30,21 @@
 - Login, recovery and setup are now rate limited per client address. `X-Forwarded-For` is believed
   only from trusted peers: the API trusts the dashboard (`CONTROL_PLANE_TRUSTED_PROXIES=web`) and
   the dashboard trusts the Docker gateway a proxy on this host connects from
-  (`WEB_TRUSTED_PROXIES=gateway`). If your proxy forwards `/api/control-plane/*` straight to the
-  API, as `proxy/nginx.conf` does, set `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`. With
-  `WEB_PUBLISH_ADDRESS`, add your proxy's IP to `WEB_TRUSTED_PROXIES` and firewall the dashboard
-  port so only the proxy reaches it.
+  (`WEB_TRUSTED_PROXIES=gateway`). If your proxy forwards requests straight to the API, as
+  `proxy/nginx.conf` does for API-token requests, set `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`.
+  With `WEB_PUBLISH_ADDRESS`, add your proxy's IP to `WEB_TRUSTED_PROXIES` and firewall the
+  dashboard port so only the proxy reaches it.
+- `proxy/nginx.conf` now follows the auth model. Earlier templates sent `/setup`,
+  `/api/control-plane/*` and `/api/runtime/*` straight to the API, so browser sign-in, the runtime
+  terminal and browser panels, and per-client login limits failed through them. The template now
+  sends pages and every browser API call to the dashboard, passes WebSocket upgrades on
+  `/api/runtime/relay/`, and sends only `/api/control-plane/*` requests carrying
+  `Authorization: Bearer` (API tokens) and `/openapi/control-plane.json` to the API. It also passes
+  the browser's `Host` with its port (`$http_host`), so sign-in works behind a non-default port,
+  sends the `server_name` for a request without a `Host` (an HTTP/1.0 health check), and keeps idle
+  runtime event streams open. `koda update` does not change a copy installed in nginx:
+  replace that copy with the new template, keeping your `server_name` and TLS settings, then run
+  `nginx -t` and reload nginx.
 
 ## Update Behavior
 
