@@ -901,7 +901,12 @@ def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
     app_dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     web_dockerfile = (ROOT / "apps" / "web" / "Dockerfile").read_text(encoding="utf-8")
 
-    assert "rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack" in app_dockerfile
+    # The provider CLIs come from /opt/provider-clis (ADR-002 AG-02), so the node image's
+    # global node_modules, and with it npm and corepack, never reach the runtime image.
+    assert "COPY --from=node-base /usr/local/lib/node_modules" not in app_dockerfile
+    assert "/usr/local/bin/npm" not in app_dockerfile
+    assert "/usr/local/bin/npx" not in app_dockerfile
+    assert "/usr/local/bin/corepack" not in app_dockerfile
     assert "@googleworkspace/cli" not in app_dockerfile
     assert "/usr/local/bin/gws" not in app_dockerfile
     assert "apt-get install -y --no-install-recommends gh" not in app_dockerfile
@@ -969,3 +974,117 @@ def test_steady_state_assets_do_not_reference_legacy_object_storage_branding() -
         text = path.read_text(encoding="utf-8").lower()
         assert legacy_backend_name not in text, path.as_posix()
     assert legacy_backend_name in migration_doc.read_text(encoding="utf-8").lower()
+
+
+_PROVIDER_CLI_PACKAGES = ("@anthropic-ai/claude-code", "@openai/codex", "@google/gemini-cli")
+_PROVIDER_CLI_DOCKERFILES = ("Dockerfile", "Dockerfile.runtime-kernel")
+_PROVIDER_CLI_INSTALL = "npm ci --omit=dev --ignore-scripts --no-audit --no-fund"
+_PROVIDER_CLI_LINKS = (
+    "ln -sf /opt/provider-clis/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude",
+    "ln -sf /opt/provider-clis/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex",
+    "ln -sf /opt/provider-clis/node_modules/@google/gemini-cli/bundle/gemini.js /usr/local/bin/gemini",
+)
+
+
+def _node_base_stage(dockerfile_text: str) -> str:
+    match = re.search(r"^FROM node:\S+ AS node-base\n.*?(?=^FROM )", dockerfile_text, re.MULTILINE | re.DOTALL)
+    assert match, "missing node-base stage"
+    lines = match.group(0).splitlines()
+    # Comments right before the next FROM describe the next stage, not this one.
+    while lines and (not lines[-1].strip() or lines[-1].lstrip().startswith("#")):
+        lines.pop()
+    return "\n".join(lines)
+
+
+def test_provider_clis_install_identical_exact_versions_in_both_images() -> None:
+    """ADR-002 AG-02: one lockfile, installed the same way by both images, never unpinned."""
+    stages = {}
+    for name in _PROVIDER_CLI_DOCKERFILES:
+        text = (ROOT / name).read_text(encoding="utf-8")
+        stage = _node_base_stage(text)
+        stages[name] = stage
+        assert "COPY packages/provider-clis/package.json packages/provider-clis/package-lock.json ./" in stage
+        assert _PROVIDER_CLI_INSTALL in stage
+        # Install scripts stay off; only Claude Code's own postinstall runs, explicitly.
+        assert "node node_modules/@anthropic-ai/claude-code/install.cjs" in stage
+        instructions = "\n".join(line for line in text.splitlines() if not line.lstrip().startswith("#"))
+        assert not re.search(r"\bnpm\s+(?:install|i|add)\b", instructions), name
+        assert not re.search(r"\bnpx\b", instructions), name
+        for package in _PROVIDER_CLI_PACKAGES:
+            assert f" {package}" not in instructions, (name, package)
+        assert "COPY --from=node-base /opt/provider-clis /opt/provider-clis" in text
+        assert "/usr/local/lib/node_modules" not in text, name
+        assert "/usr/local/bin/npm" not in text, name
+        for link in _PROVIDER_CLI_LINKS:
+            assert link in text, (name, link)
+    assert stages["Dockerfile"] == stages["Dockerfile.runtime-kernel"]
+
+
+def test_provider_cli_lockfile_pins_exact_registry_versions() -> None:
+    from koda.services.provider_cli_contract import get_contract
+
+    manifest = json.loads((ROOT / "packages" / "provider-clis" / "package.json").read_text(encoding="utf-8"))
+    lock = json.loads((ROOT / "packages" / "provider-clis" / "package-lock.json").read_text(encoding="utf-8"))
+
+    assert manifest["private"] is True
+    dependencies = manifest["dependencies"]
+    assert set(dependencies) == set(_PROVIDER_CLI_PACKAGES)
+    for section in ("devDependencies", "optionalDependencies", "peerDependencies", "overrides"):
+        assert section not in manifest, section
+    for package, version in dependencies.items():
+        assert re.fullmatch(r"\d+\.\d+\.\d+", version), (package, version)
+
+    assert lock["lockfileVersion"] == 3
+    assert lock["packages"][""]["dependencies"] == dependencies
+    for path, entry in lock["packages"].items():
+        if not path:
+            continue
+        assert entry["resolved"].startswith("https://registry.npmjs.org/"), path
+        assert entry["integrity"].startswith("sha512-"), path
+    for package, version in dependencies.items():
+        assert lock["packages"][f"node_modules/{package}"]["version"] == version
+
+    contract_pins = {get_contract(p).package: get_contract(p).pinned_version for p in ("claude", "codex", "gemini")}
+    assert contract_pins == dependencies
+
+
+def test_provider_cli_package_is_built_scanned_and_kept_out_of_the_pnpm_workspace() -> None:
+    workspace = yaml.safe_load((ROOT / "pnpm-workspace.yaml").read_text(encoding="utf-8"))
+    assert "!packages/provider-clis" in workspace["packages"]
+
+    ignored = {line.strip().rstrip("/") for line in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()}
+    assert not ignored & {"packages", "packages/*", "packages/**", "packages/provider-clis"}
+
+    # pnpm audit cannot see this lockfile, so the dependency audits run npm audit on it.
+    audit = "npm audit --prefix packages/provider-clis --omit=dev --audit-level=moderate"
+    for workflow in ("security.yml", "release.yml"):
+        assert audit in (ROOT / ".github" / "workflows" / workflow).read_text(encoding="utf-8"), workflow
+    snyk_workflow = (ROOT / ".github" / "workflows" / "snyk.yml").read_text(encoding="utf-8")
+    assert "--all-projects" in snyk_workflow
+    assert "provider-clis" not in snyk_workflow
+
+
+def test_ci_checks_the_pinned_provider_clis_against_the_contract() -> None:
+    workflow = yaml.safe_load((ROOT / ".github" / "workflows" / "pr-quality.yml").read_text(encoding="utf-8"))
+    jobs = workflow["jobs"]
+
+    contract_job = jobs["provider-cli-contract"]
+    steps = contract_job["steps"]
+    install = next(step for step in steps if _PROVIDER_CLI_INSTALL in str(step.get("run", "")))
+    assert install["working-directory"] == "packages/provider-clis"
+    assert "node node_modules/@anthropic-ai/claude-code/install.cjs" in install["run"]
+    check_runs = "\n".join(str(step.get("run", "")) for step in steps)
+    assert "packages/provider-clis/node_modules/.bin" in check_runs
+    assert "python -m koda.services.provider_cli_contract" in check_runs
+    setup_node = next(step for step in steps if str(step.get("uses", "")).startswith("actions/setup-node@"))
+    node_base = _node_base_stage((ROOT / "Dockerfile").read_text(encoding="utf-8"))
+    assert f"FROM node:{setup_node['with']['node-version']}-" in node_base
+
+    # Both built images are checked inside the running stack by the shared smoke script.
+    docker_smoke = jobs["docker-smoke"]
+    assert "provider-cli-contract" in docker_smoke["needs"]
+    assert any(step.get("run") == "bash scripts/docker_smoke.sh" for step in docker_smoke["steps"])
+    smoke_script = (ROOT / "scripts" / "docker_smoke.sh").read_text(encoding="utf-8")
+    assert "for service in app runtime-kernel; do" in smoke_script
+    assert 'compose exec -T "${service}" python -m koda.services.provider_cli_contract' in smoke_script
+    assert re.search(r"^  verify_provider_cli_contract$", smoke_script, re.MULTILINE)

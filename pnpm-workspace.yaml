@@ -1,6 +1,9 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # Installed with npm ci from its own package-lock.json by the Docker images,
+  # never by the pnpm workspace (see packages/provider-clis/package.json).
+  - "!packages/provider-clis"
 
 ignoredBuiltDependencies:
   - sharp

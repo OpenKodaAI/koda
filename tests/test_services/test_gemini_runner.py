@@ -20,6 +20,13 @@ def _clear_capabilities():
     clear_gemini_capability_cache()
 
 
+@pytest.fixture(autouse=True)
+def _gemini_binary_installed():
+    """These tests assume an installed ``gemini``; there is no npx fallback (ADR-002 AG-02)."""
+    with patch("koda.services.provider_auth.resolve_provider_command", return_value=("gemini",)):
+        yield
+
+
 def _ready_capability(turn_mode: str) -> ProviderCapabilities:
     return ProviderCapabilities(
         provider="gemini",

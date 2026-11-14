@@ -87,6 +87,14 @@ docker compose exec app python3 scripts/doctor.py --strict
 Strict mode adds the [hardening](hardening.md) checklist to the
 default doctor checks. Any failure aborts the upgrade.
 
+Then confirm that both images carry the pinned provider CLIs (see
+[Provider CLI versions](#provider-cli-versions)):
+
+```bash
+docker compose exec -T app python -m koda.services.provider_cli_contract
+docker compose exec -T runtime-kernel python -m koda.services.provider_cli_contract
+```
+
 ## Step 4 — smoke a representative request
 
 Send a known query through your usual interface (Telegram bot,
@@ -118,6 +126,59 @@ migration design (additive ALTERs, never DROP COLUMN in the same
 release that introduces the column) keeps rollback safe. If a
 release notes called out a destructive migration, follow the
 release-specific rollback in `docs/release-notes/<version>.md`.
+
+## Provider CLI versions
+
+The `app` and `runtime-kernel` images install Claude Code, Codex and
+Gemini CLI from one lockfile, `packages/provider-clis/package-lock.json`,
+at the exact versions listed in `packages/provider-clis/package.json`.
+Nothing in a running image can install or update a package: npm and
+npx are not in the image, and Gemini no longer falls back to
+`npx @google/gemini-cli` when its binary is missing.
+
+Before a provider's first turn, Koda checks the installed binary
+against its contract in `koda/services/provider_cli_contract.py`: the
+version must equal the pin, every option Koda passes must have its own
+entry in `--help` with each value Koda passes listed in that entry,
+and options that `--help` hides must be accepted by the parser. Each
+runner repeats the check once its cached result is 30 seconds old, so
+a binary replaced in place is probed again. If any check fails, the
+provider is unavailable for turns and its health entry shows the
+reason:
+
+| Reason | Meaning |
+|---|---|
+| `unavailable:unverified_cli_version` | The installed CLI is not the pinned version, or it does not accept an option Koda passes. |
+| `unavailable:cli_not_installed` | The CLI is not on `PATH`. |
+| `unavailable:cli_probe_failed` | `--version` or `--help` did not finish, so nothing could be verified. |
+
+Koda never runs a turn on an unverified CLI. Rebuild or pull the
+images to get the pinned versions. Native (non-Docker) runs must
+install exactly the versions in `packages/provider-clis/package.json`.
+The `gemini_bin` system setting (`GEMINI_BIN`) is the path of one
+executable, the pinned `gemini` binary. A command line such as
+`npx -y @google/gemini-cli` is not a valid value: Koda reads the
+whole value as one path, finds no such executable, and treats the
+CLI as not installed.
+
+`python -m koda.services.provider_cli_contract` prints the check for
+every provider as JSON and exits non-zero on any mismatch. It runs
+only `--version`, `--help` and a parser check, with no model call and
+no credentials. It starts each CLI the way the runners do: with the
+same command and the same allowlisted environment, so database,
+object-storage and other container secrets never reach the CLIs.
+
+### Changing a pinned version
+
+1. Change the version in `packages/provider-clis/package.json`, then
+   run `npm install --package-lock-only` in that directory.
+2. Update `pinned_version` and the option tokens in
+   `koda/services/provider_cli_contract.py`, checking each token
+   against the new version's real `--help` output. For Claude Code,
+   also refresh the recorded outputs in `tests/fixtures/provider_cli/`.
+3. Merge only when the `provider-cli-contract` CI job passes. It
+   installs the lockfile the way the images do and probes the
+   binaries against the contract.
 
 ## Tracking upgrade history
 

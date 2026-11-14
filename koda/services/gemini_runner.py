@@ -12,6 +12,7 @@ from typing import Any
 
 from koda.config import AGENT_ID, GEMINI_FIRST_CHUNK_TIMEOUT, GEMINI_TIMEOUT
 from koda.logging_config import get_logger
+from koda.services import provider_cli_contract
 from koda.services.provider_auth import (
     PROVIDER_API_KEY_ENV_KEYS,
     PROVIDER_AUTH_MODE_ENV_KEYS,
@@ -107,8 +108,7 @@ def _build_cmd(
     from koda.services.provider_auth import resolve_provider_command
 
     approval_mode = _effective_approval_mode(permission_mode, dry_run=dry_run)
-    return [
-        *resolve_provider_command("gemini"),
+    args = [
         "--model",
         model,
         "--output-format",
@@ -120,6 +120,10 @@ def _build_cmd(
         "--prompt",
         prompt,
     ]
+    cmd = [*resolve_provider_command("gemini"), *args]
+    # Everything after the executable is checked, including tokens that came with the command.
+    provider_cli_contract.validate_args("gemini", cmd[1:])
+    return cmd
 
 
 def _extract_text(value: Any) -> str:
@@ -175,6 +179,45 @@ def _cache_capability(capability: ProviderCapabilities) -> None:
             if warning not in clone.warnings:
                 clone.warnings.append(warning)
         _CAPABILITY_CACHE[turn_mode] = (timestamp, clone)
+
+
+async def _verify_gemini_cli_contract() -> ProviderCapabilities | None:
+    """Fail closed unless the installed ``gemini`` is the pinned, contract-verified version."""
+    from koda.services.provider_auth import resolve_provider_command
+
+    try:
+        command = resolve_provider_command("gemini")
+    except FileNotFoundError as exc:
+        check = provider_cli_contract.not_installed_check("gemini", str(exc) or "gemini")
+    else:
+        check = await provider_cli_contract.verify_provider_cli(
+            "gemini", command, env=build_llm_subprocess_env(provider="gemini")
+        )
+    if check.ok:
+        return None
+    return ProviderCapabilities(
+        provider="gemini",
+        turn_mode="new_turn",
+        status="unavailable",
+        can_execute=False,
+        supports_native_resume=False,
+        errors=[check.error],
+        checked_via="cli_contract",
+    )
+
+
+def _contract_error_result(exc: ValueError, turn_mode: TurnMode, capabilities: ProviderCapabilities) -> dict[str, Any]:
+    return {
+        "result": str(exc),
+        "session_id": None,
+        "cost_usd": 0.0,
+        "usage": {},
+        "error": True,
+        "_retryable": False,
+        "_error_kind": "adapter_contract",
+        "_turn_mode": turn_mode,
+        "_supports_native_resume": capabilities.supports_native_resume,
+    }
 
 
 async def _probe_gemini_auth_status() -> ProviderCapabilities:
@@ -251,7 +294,7 @@ async def get_gemini_capabilities(turn_mode: TurnMode) -> ProviderCapabilities:
         if cached and now - cached[0] < _CAPABILITY_CACHE_TTL_SECONDS:
             return cached[1].clone()
 
-        capability = await _probe_gemini_auth_status()
+        capability = await _verify_gemini_cli_contract() or await _probe_gemini_auth_status()
         _cache_capability(capability)
         return _CAPABILITY_CACHE[turn_mode][1].clone()
 
@@ -302,14 +345,17 @@ async def run_gemini(
         }
 
     prompt = _build_prompt(query, system_prompt)
-    cmd = _build_cmd(
-        model=model,
-        work_dir=work_dir,
-        prompt=prompt,
-        permission_mode=permission_mode,
-        dry_run=dry_run,
-        output_format="json",
-    )
+    try:
+        cmd = _build_cmd(
+            model=model,
+            work_dir=work_dir,
+            prompt=prompt,
+            permission_mode=permission_mode,
+            dry_run=dry_run,
+            output_format="json",
+        )
+    except provider_cli_contract.ProviderCliContractError as exc:
+        return _contract_error_result(exc, turn_mode, capabilities)
     started_at = time.monotonic()
     runtime_env = build_llm_subprocess_env(provider="gemini")
     if runtime_task_id is not None:
@@ -473,14 +519,22 @@ async def run_gemini_streaming(
         return
 
     prompt = _build_prompt(query, system_prompt)
-    cmd = _build_cmd(
-        model=model,
-        work_dir=work_dir,
-        prompt=prompt,
-        permission_mode=permission_mode,
-        dry_run=dry_run,
-        output_format="text",
-    )
+    try:
+        cmd = _build_cmd(
+            model=model,
+            work_dir=work_dir,
+            prompt=prompt,
+            permission_mode=permission_mode,
+            dry_run=dry_run,
+            output_format="text",
+        )
+    except provider_cli_contract.ProviderCliContractError as exc:
+        if metadata_collector is not None:
+            metadata_collector["error"] = True
+            metadata_collector["error_kind"] = "adapter_contract"
+            metadata_collector["retryable"] = False
+            metadata_collector["error_message"] = str(exc)
+        return
     runtime_env = build_llm_subprocess_env(provider="gemini")
     if runtime_task_id is not None:
         from koda.services.runtime.kernel_subprocess import create_runtime_kernel_process

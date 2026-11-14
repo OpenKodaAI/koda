@@ -131,6 +131,19 @@ def test_resolve_provider_command_raises_file_not_found_when_cli_missing(monkeyp
         provider_auth.resolve_provider_command("claude")
 
 
+def test_missing_gemini_binary_never_falls_back_to_npx(monkeypatch):
+    """ADR-002 AG-02: an unpinned ``npx -y @google/gemini-cli`` must never stand in for the pinned CLI."""
+
+    def fake_which(executable: str, path: str | None = None):
+        return "/usr/bin/npx" if executable == "npx" else None
+
+    monkeypatch.setattr(provider_auth.shutil, "which", fake_which)
+
+    with pytest.raises(FileNotFoundError, match="gemini"):
+        provider_auth.resolve_provider_command("gemini", base_env={"PATH": "/usr/bin"})
+    assert provider_auth.provider_command_present("gemini", base_env={"PATH": "/usr/bin"}) is False
+
+
 def test_start_login_process_raises_file_not_found_when_cli_missing(monkeypatch):
     monkeypatch.setattr(provider_auth.shutil, "which", lambda *a, **kw: None)
 

@@ -61,6 +61,33 @@ def _default_state_backend():
         yield
 
 
+@pytest.fixture(autouse=True)
+def _stub_provider_cli_contract_probe(request):
+    """Treat the installed provider CLIs as the pinned contract versions.
+
+    The real probe runs ``<cli> --version`` and ``--help``, so without this stub a test's
+    outcome would depend on which CLIs the machine has installed. Tests marked
+    ``real_cli_contract_probe`` exercise the real probe against fake CLI output instead.
+    """
+    if request.node.get_closest_marker("real_cli_contract_probe"):
+        yield
+        return
+    from koda.services import provider_cli_contract
+
+    async def _verified(provider, command, *, env=None):
+        contract = provider_cli_contract.get_contract(provider)
+        return provider_cli_contract.CliContractCheck(
+            provider=contract.provider,
+            contract_id=contract.contract_id,
+            ok=True,
+            observed_version=contract.pinned_version,
+            version_matches=True,
+        )
+
+    with patch.object(provider_cli_contract, "verify_provider_cli", _verified):
+        yield
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _no_repo_root_database_residue():
     """Fail closed if tests leak local database artifacts into the repository root."""
