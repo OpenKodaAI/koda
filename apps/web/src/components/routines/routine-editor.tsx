@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SoftTabs } from "@/components/ui/soft-tabs";
+import { StatusBadge } from "@/components/ui/status-badge";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
   useAnimatedPresence,
@@ -111,6 +112,19 @@ function jobInstructions(job: CronJob | null | undefined): string {
   );
 }
 
+// The read-only flag and allowed paths a routine already stores in its payload. They are shown
+// as stored and never edited here: runs do not enforce them yet (D-006, M3-E1-T4).
+function jobPermissions(job: CronJob): Pick<FormState, "readOnly" | "allowedPaths"> {
+  const payload = job.payload || {};
+  const allowedPaths = Array.isArray(payload.allowed_paths)
+    ? payload.allowed_paths.filter((path): path is string => typeof path === "string")
+    : [];
+  return {
+    readOnly: Boolean(payload.read_only),
+    allowedPaths: allowedPaths.join("\n"),
+  };
+}
+
 function jobOneShotAt(job: CronJob | null | undefined): string {
   if (!job?.schedule_expr) return defaultDateTimeLocal();
   const trimmed = job.schedule_expr.trim();
@@ -156,8 +170,7 @@ function buildInitialState(
       connectors: [],
       notificationMode,
       verificationMode,
-      readOnly: false,
-      allowedPaths: "",
+      ...jobPermissions(job),
     };
   }
 
@@ -718,26 +731,30 @@ function RefineStep({
         </div>
       ) : null}
 
+      {/* D-006 interim (M1-E8-T1, ADR-037 rule 4): runs ignore read_only and allowed_paths, so
+          both controls are labelled "Not enforced yet" and stay disabled. A new routine cannot
+          set them; an existing routine shows what it stores, and saving it keeps those values.
+          M3-E1-T4 enforces them, re-enables the controls and removes the label. */}
       {activeTab === "permissions" ? (
         <div className="flex flex-col gap-4">
-          <label
-            className={cn(
-              "flex items-start gap-3 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3.5 py-3",
-              disabled && "opacity-60",
-            )}
-          >
+          <InlineAlert tone="warning">
+            <p className="m-0 font-medium">{t("routines.editor.permissions.notEnforced")}</p>
+            <p className="m-0 mt-0.5">{t("routines.editor.permissions.notEnforcedDescription")}</p>
+          </InlineAlert>
+          <label className="flex items-start gap-3 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3.5 py-3">
             <input
               type="checkbox"
               checked={state.readOnly}
               onChange={(event) =>
                 setState((prev) => ({ ...prev, readOnly: event.target.checked }))
               }
-              disabled={disabled}
-              className="mt-0.5 h-4 w-4 cursor-pointer accent-[var(--accent)]"
+              disabled
+              className="mt-0.5 h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
             />
             <span className="flex flex-1 flex-col gap-0.5">
-              <span className="text-[0.875rem] font-medium text-[var(--text-primary)]">
+              <span className="flex flex-wrap items-center gap-2 text-[0.875rem] font-medium text-[var(--text-primary)]">
                 {t("routines.editor.permissions.readOnly")}
+                <StatusBadge tone="warning">{t("routines.editor.permissions.notEnforced")}</StatusBadge>
               </span>
               <span className="text-[0.8125rem] text-[var(--text-tertiary)]">
                 {t("routines.editor.permissions.readOnlyDescription")}
@@ -745,8 +762,9 @@ function RefineStep({
             </span>
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+            <span className="flex flex-wrap items-center gap-2 text-[0.75rem] font-medium text-[var(--text-tertiary)]">
               {t("routines.editor.permissions.allowedPaths")}
+              <StatusBadge tone="warning">{t("routines.editor.permissions.notEnforced")}</StatusBadge>
             </span>
             <textarea
               value={state.allowedPaths}
@@ -755,7 +773,7 @@ function RefineStep({
               }
               placeholder={t("routines.editor.permissions.allowedPathsPlaceholder")}
               rows={4}
-              disabled={disabled}
+              disabled
               className="min-h-[96px] w-full resize-y rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3.5 py-2.5 font-mono text-[0.8125rem] leading-[1.5] text-[var(--text-primary)] outline-none transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] placeholder:text-[var(--text-quaternary)] hover:border-[var(--border-strong)] focus-visible:border-[var(--accent)] focus-visible:bg-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-60"
             />
             <span className="text-[0.75rem] text-[var(--text-tertiary)]">
