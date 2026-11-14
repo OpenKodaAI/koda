@@ -701,6 +701,14 @@ PROVIDER_CLI_CREDENTIAL_FILES: dict[str, tuple[str, tuple[str, ...]]] = {
 # provider deletes the credential files there too (koda/control_plane/manager.py), and the
 # file layer refuses the whole dir in every work dir (koda/utils/workdir.py::protected_dirs).
 PROVIDER_CLI_CONFIG_DIR_ENV_KEYS: dict[str, str] = {"claude": "CLAUDE_CONFIG_DIR", "codex": "CODEX_HOME"}
+# The provider CLI config dirs that the shipped compose files give the app container
+# (CLAUDE_CONFIG_DIR in docker-compose.yml and in the release bundle's compose file; a test
+# keeps this list equal to them). The supervisor does not pass that variable on to a worker, so a
+# worker whose agent environment lacks it does not know the dir, and a work dir at
+# RUNTIME_EPHEMERAL_ROOT reaches it there. The file layer refuses each one as a whole in
+# every process all the same, as it refuses the dirs the environment names
+# (koda/utils/workdir.py::protected_dirs).
+COMPOSE_PROVIDER_CLI_CONFIG_DIRS: tuple[str, ...] = ("/var/lib/koda/runtime/claude-config",)
 # Claude Code's global config, as the pinned CLI (packages/provider-clis, 2.1.325) names it
 # in HOME (in CLAUDE_CONFIG_DIR where that is set, a protected dir as a whole): .claude.json,
 # or .claude-<env>-oauth.json for another OAuth environment (CLAUDE_CODE_CUSTOM_OAUTH_URL
@@ -726,24 +734,33 @@ ANTHROPIC_FEDERATION_CACHE_DIR_ENV_KEY = "CLAUDE_CODE_FEDERATION_CACHE_DIR"
 # <name>.backup.<ts> and <name>.corrupted.<ts> in its config dir's backups/) are refused by
 # FILEOPS_CREDENTIAL_COPY_SUFFIXES below wherever they sit, and .claude/backups/ as a
 # whole; the device private keys it keeps where no keychain holds them (.device-keys.json,
-# in its config dir); the background sessions' auth snapshots and socket tokens
-# (.claude/daemon/auth/); the HFI auth file an earlier CLI wrote, which this one only
-# deletes once it is older than its cleanup period (.claude/hfi-auth.json); a remote
-# session's OAuth token, API key and session ingress token (.claude/remote/, which the CLI
-# keeps at a fixed path in a remote session's home, only with CLAUDE_CODE_REMOTE set); and
-# the Anthropic profile store's OAuth tokens in its default location
+# in its config dir); its background sessions' daemon dir as a whole (.claude/daemon/,
+# which the CLI's own sandbox denies its commands as a whole: their auth snapshots in
+# auth/, the roster.json that holds every worker's socket paths and socket tokens, rvAuth
+# and ptyAuth, the dispatch records in dispatch/, the sign-in/ state, and the control.key
+# and pipe.key, also as a temp copy a crash leaves); the IDE lockfiles (.claude/ide/<port>.lock,
+# each with the authToken the CLI opens the IDE's MCP connection with; the CLI reads
+# ~/.claude/ide also where CLAUDE_CONFIG_DIR is set); the server-supplied MCP configs, with
+# their auth headers, that the remote-control bridge writes for each session it spawns
+# (.claude/bridge-spawn/, always in HOME); the HFI auth file an earlier CLI wrote, which
+# this one only deletes once it is older than its cleanup period (.claude/hfi-auth.json);
+# a remote session's OAuth token and API key (.claude/remote/, which the CLI keeps at a
+# fixed path in a remote session's home, only with CLAUDE_CODE_REMOTE set; its session
+# ingress token beside them is refused by name, FILEOPS_CREDENTIAL_NAME_PREFIXES below);
+# and the Anthropic profile store's OAuth tokens in its default location
 # (.config/anthropic/credentials/). Disconnecting the provider does not delete them: the
 # global config is also the operator's settings and project list. The CLI's other keys
-# (.claude/daemon/control.key, pipe.key, sessions/*.key) are refused by extension.
+# (.claude/sessions/*.key) are refused by extension, with their copies.
 CLAUDE_CODE_CREDENTIAL_PATHS: tuple[str, ...] = (
     *CLAUDE_CODE_GLOBAL_CONFIG_FILES,
     ".claude/backups/",
     ".device-keys.json",
-    ".claude/daemon/auth/",
+    ".claude/daemon/",
+    ".claude/ide/",
+    ".claude/bridge-spawn/",
     ".claude/hfi-auth.json",
     ".claude/remote/.oauth_token",
     ".claude/remote/.api_key",
-    ".claude/remote/.session_ingress_token",
     ".config/anthropic/credentials/",
 )
 # Credential stores that the provider and developer CLIs keep in HOME, which is also the
@@ -751,7 +768,8 @@ CLAUDE_CODE_CREDENTIAL_PATHS: tuple[str, ...] = (
 # file tools and browser_upload refuse them like a blocked extension. An entry ending in
 # "/" is a directory, refused with everything below it wherever it appears in a path; any
 # other entry is a file, matched by the last components of the path, together with the
-# copies of it named by FILEOPS_CREDENTIAL_COPY_SUFFIXES. Case-insensitive.
+# copies of it named by FILEOPS_CREDENTIAL_COPY_SUFFIXES. The names of
+# FILEOPS_CREDENTIAL_NAME_PREFIXES are refused with them. Case-insensitive.
 FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
     ".ssh/",
     ".gnupg/",
@@ -778,8 +796,20 @@ FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
 # which a crash mid-write leaves beside it. The CLI itself recognises them by that name,
 # whatever dir holds them. So each file entry of FILEOPS_BLOCKED_CREDENTIAL_PATHS also
 # refuses <entry>.backup, <entry>.backup.1763100000000 and <entry>.tmp.a1b2c3d4, but not
-# <entry>.example or <entry>.backupx.
+# <entry>.example or <entry>.backupx. The copies of a file whose extension is blocked
+# (FILEOPS_BLOCKED_EXTENSIONS) are refused as that file is, since their own extension is
+# the copy's suffix: Claude Code's control.key.tmp.a1b2c3d4 and key.pem.tmp.4242, or
+# prod.env.backup.
 FILEOPS_CREDENTIAL_COPY_SUFFIXES: tuple[str, ...] = (".backup", ".corrupted", ".tmp")
+# Credential files that a CLI names with a fixed prefix and a further suffix, refused by
+# that name wherever they sit: a file whose name is one of these, or one of these followed
+# by a dot and any further suffix. Claude Code keeps a remote session's ingress token as
+# .claude/remote/.session_ingress_token, and a self-hosted runner writes each session's as
+# .session_ingress_token.e<epoch>, through .session_ingress_token.e<epoch>.tmp.<n>, into that
+# session's config dir below the runner's base dir (<base-dir>/_sessions/<id>.claude-config/,
+# wherever --base-dir puts it). The CLI itself treats every name with this prefix as a
+# credential. .session_ingress_tokens and .session_ingress_token_old are not refused.
+FILEOPS_CREDENTIAL_NAME_PREFIXES: tuple[str, ...] = (".session_ingress_token",)
 BLOCKED_SHELL_PATTERN: re.Pattern = re.compile(
     # Destructive filesystem operations
     r"rm\s+-rf|mkfs|dd\s+if=|shutdown|reboot|chmod\s+777\s+/"

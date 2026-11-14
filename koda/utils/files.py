@@ -8,7 +8,12 @@ from pathlib import Path
 from typing import Any
 
 from koda.agent_contract import FILE_COMMAND_ACCESS_LEVELS
-from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS, FILEOPS_BLOCKED_EXTENSIONS, FILEOPS_CREDENTIAL_COPY_SUFFIXES
+from koda.config import (
+    FILEOPS_BLOCKED_CREDENTIAL_PATHS,
+    FILEOPS_BLOCKED_EXTENSIONS,
+    FILEOPS_CREDENTIAL_COPY_SUFFIXES,
+    FILEOPS_CREDENTIAL_NAME_PREFIXES,
+)
 from koda.logging_config import get_logger
 from koda.utils.workdir import protected_dir_for, protected_dir_within, sensitive_dir_for
 
@@ -28,6 +33,22 @@ TEMPLATE_FILE_SUFFIXES: frozenset[str] = frozenset({".example", ".sample", ".tem
 """Final extensions that mark a committed, secret-free template of a secret file."""
 
 
+_COPY_SUFFIX = re.compile("|".join(rf"{re.escape(suffix)}(?=\.|$)" for suffix in FILEOPS_CREDENTIAL_COPY_SUFFIXES))
+"""Where a lowered file name carries a copy suffix: ``.tmp`` followed by a dot or the end of the name."""
+
+
+def _blocked_extension(lowered: str) -> str | None:
+    """Return the blocked extension the lowered file name ``lowered`` itself carries, or None."""
+    _, ext = os.path.splitext(lowered)
+    if ext in FILEOPS_BLOCKED_EXTENSIONS:
+        return ext
+    if lowered.startswith(".") and ext not in TEMPLATE_FILE_SUFFIXES:
+        stem = "." + lowered[1:].split(".", 1)[0]
+        if stem in FILEOPS_BLOCKED_EXTENSIONS:
+            return stem
+    return None
+
+
 def blocked_file_suffix(name: str) -> str | None:
     """Return the blocked extension a file name carries, or None.
 
@@ -37,16 +58,19 @@ def blocked_file_suffix(name: str) -> str | None:
     report as an extension. A dotfile whose final extension is a template suffix
     (``.env.example``, ``.env.sample``, ``.env.template``, ``.env.dist``) is the
     committed template, not the secret, so it stays readable and editable, as
-    ``prod.env.example`` already was.
+    ``prod.env.example`` already was. A copy a CLI writes of a blocked file holds the same
+    secret, and its own extension is the copy's suffix: the blocked name followed by one of
+    ``FILEOPS_CREDENTIAL_COPY_SUFFIXES`` and, optionally, a dot and any further suffix
+    (``control.key.tmp.a1b2c3d4``, ``key.pem.tmp.4242``, ``prod.env.backup``) is blocked as
+    that name is; ``server.key.example.backup`` and ``control.key.tmpx`` are not.
     """
     lowered = name.lower()
-    _, ext = os.path.splitext(lowered)
-    if ext in FILEOPS_BLOCKED_EXTENSIONS:
-        return ext
-    if lowered.startswith(".") and ext not in TEMPLATE_FILE_SUFFIXES:
-        stem = "." + lowered[1:].split(".", 1)[0]
-        if stem in FILEOPS_BLOCKED_EXTENSIONS:
-            return stem
+    found = _blocked_extension(lowered)
+    if found is not None:
+        return found
+    for copy in _COPY_SUFFIX.finditer(lowered):
+        if copy.start() > 0 and (found := _blocked_extension(lowered[: copy.start()])) is not None:
+            return found
     return None
 
 
@@ -75,11 +99,18 @@ def blocked_credential_path(path: str) -> str | None:
     one being that file's name or the name of a copy a CLI writes of it
     (:func:`_names_credential_file`: ``.claude.json.backup.1763100000000`` in any
     ``backups/`` is ``.claude.json``). Components are compared case-insensitively, as a
-    case-insensitive filesystem would open them. These are the credential stores that the
-    CLIs sharing the runtime HOME keep there, and in the Docker layout HOME is the work
-    dir. Returns None for any other path.
+    case-insensitive filesystem would open them. A file whose name is one of
+    ``FILEOPS_CREDENTIAL_NAME_PREFIXES``, or one of them followed by a dot and any further
+    suffix (``.session_ingress_token.e3``), matches that prefix wherever it sits. These are
+    the credential stores that the CLIs sharing the runtime HOME keep there, and in the
+    Docker layout HOME is the work dir. Returns None for any other path.
     """
     parts = [part.lower() for part in path.split(os.sep) if part]
+    name = parts[-1] if parts else ""
+    for prefix in FILEOPS_CREDENTIAL_NAME_PREFIXES:
+        lowered_prefix = prefix.lower()
+        if name == lowered_prefix or name.startswith(lowered_prefix + "."):
+            return prefix
     for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS:
         entry_parts = [part.lower() for part in entry.split("/") if part]
         size = len(entry_parts)
@@ -184,7 +215,7 @@ def protected_move_refusal(source: str, destination: str) -> str | None:
       put the moved data where Koda or a CLI reads that directory from, such as a planted
       bootstrap code or browser session.
 
-    Every other move is left to :func:`secret_move_refusal`.
+    Every other move is left to :func:`secret_move_refusal` and :func:`linked_landing_refusal`.
     """
     moved = protected_dir_within(source)
     if moved is not None:
@@ -192,6 +223,36 @@ def protected_move_refusal(source: str, destination: str) -> str | None:
     target = protected_dir_for(destination) or protected_dir_within(destination)
     if target is not None:
         return f"'{target}' is a sensitive system directory, and the move would put data in its place"
+    return None
+
+
+def move_landing(source: str, destination: str) -> str:
+    """Return the path where ``shutil.move(source, destination)`` puts ``source``.
+
+    Both paths are absolute and resolved. Into an existing destination directory,
+    ``shutil.move`` puts the source at its base name inside it; anywhere else, at
+    ``destination`` itself. The move checks (:func:`protected_move_refusal`,
+    :func:`secret_move_refusal`, :func:`linked_landing_refusal`) are made on that path.
+    """
+    if os.path.isdir(destination):
+        return os.path.join(destination, os.path.basename(source.rstrip(os.sep)))
+    return destination
+
+
+def linked_landing_refusal(landing: str) -> str | None:
+    """Return why a move must not land at ``landing``, a symbolic link, or None.
+
+    ``landing`` is the path :func:`move_landing` returns, below a resolved destination, so
+    only its last component can be a link. A rename replaces a link there. But when the
+    source sits on another filesystem, ``shutil.move`` copies it instead, and the copy
+    writes through the link, to the path the link resolves to, which neither the path
+    policy nor the other move checks saw: inside a protected directory (a planted bootstrap
+    code), at a secret file, or outside the work dir. So a landing that is a link, dangling
+    or not, is refused.
+    """
+    if os.path.islink(landing):
+        name = os.path.basename(landing)
+        return f"'{name}' in the destination is a symbolic link, and the move could write through it"
     return None
 
 

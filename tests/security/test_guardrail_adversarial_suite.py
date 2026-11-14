@@ -1430,9 +1430,12 @@ async def test_file_grep_never_prints_a_cli_credential_store(
 # CLAUDE_CONFIG_DIR is unset, under the names it writes them: its global config (with
 # primaryApiKey) for each OAuth environment, the legacy one, their recovery copies, the
 # timestamped and corrupted copies in backups/ and the temp copies a crash mid-write leaves,
-# the device private keys, the background sessions' auth snapshot and socket tokens, the HFI
-# auth file an earlier CLI left, a remote session's tokens, the Anthropic profile store's
-# OAuth tokens and federation token cache, and the login and keys refused before.
+# the device private keys, the background sessions' daemon dir (auth snapshots, the roster
+# with every worker's socket tokens, dispatch records, the keys and a key's temp copy), the
+# IDE lockfiles with their authToken, the remote-control bridge's MCP configs, the HFI auth
+# file an earlier CLI left, a remote session's tokens and a self-hosted runner's session
+# ingress tokens below its base dir, the Anthropic profile store's OAuth tokens and
+# federation token cache, and the login and keys refused before, with a key's temp copy.
 _NATIVE_CLAUDE_CODE_CREDENTIAL_FILES = [
     ".claude.json",
     ".claude-staging-oauth.json",
@@ -1450,15 +1453,23 @@ _NATIVE_CLAUDE_CODE_CREDENTIAL_FILES = [
     ".claude/.device-keys.json",
     ".claude/daemon/auth/a1b2c3.json",
     ".claude/daemon/auth/a1b2c3.tokens.json",
+    ".claude/daemon/roster.json",
+    ".claude/daemon/dispatch/a1b2c3.json",
+    ".claude/daemon/control.key.tmp.1a2b",
+    ".claude/ide/48123.lock",
+    ".claude/bridge-spawn/session_01/mcp-config.json",
     ".claude/hfi-auth.json",
     ".claude/remote/.oauth_token",
     ".claude/remote/.api_key",
     ".claude/remote/.session_ingress_token",
+    "runner/_sessions/s1.claude-config/.session_ingress_token.e3",
+    "runner/_sessions/s1.claude-config/.session_ingress_token.e3.tmp.42.a1",
     ".config/anthropic/credentials/default.json",
     ".config/anthropic/credentials/federation/fed-x-1.json",
     ".claude/.credentials.json",
     ".claude/daemon/control.key",
     ".claude/sessions/4242.0f1e2d3c.key",
+    ".claude/sessions/4242.0f1e2d3c.key.tmp.a1b2c3d4",
 ]
 
 
@@ -1543,10 +1554,29 @@ async def test_claude_code_credentials_in_a_native_home_are_refused_on_every_sur
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
-@pytest.mark.parametrize("search_path", [None, ".claude", ".claude/daemon", ".config", ".config/anthropic"])
+@pytest.mark.parametrize(
+    "search_path",
+    [
+        None,
+        ".claude",
+        ".claude/daemon",
+        ".claude/ide",
+        ".claude/bridge-spawn",
+        ".claude/sessions",
+        ".config",
+        ".config/anthropic",
+        "runner",
+    ],
+)
 async def test_file_grep_never_prints_claude_code_credentials_in_a_native_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, search_path: str | None
 ) -> None:
+    """file_grep neither prints a credential file nor searches a credential dir it is pointed at.
+
+    ``.claude/daemon``, ``.claude/ide`` and ``.claude/bridge-spawn`` are credential dirs
+    themselves, so a search there is refused, and the session ingress tokens a self-hosted
+    runner writes below its base dir (``runner``) are skipped by their name.
+    """
     from koda.services.tool_dispatcher import _handle_file_grep
 
     home = _native_claude_home(tmp_path, monkeypatch)
@@ -1557,8 +1587,11 @@ async def test_file_grep_never_prints_claude_code_credentials_in_a_native_home(
     with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
         result = await _handle_file_grep(params, ctx)
 
-    assert result.success, result.output
     assert "canary" not in result.output, result.output
+    refused = search_path in (".claude/daemon", ".claude/ide", ".claude/bridge-spawn")
+    assert result.success is not refused, result.output
+    if refused:
+        assert "credential store" in result.output, result.output
     if search_path is None:
         assert "src/main.py:1: print('visible')" in result.output
     if search_path == ".claude":
@@ -1677,6 +1710,10 @@ async def test_file_move_cannot_rename_a_credential_store_out_of_its_name(
     [
         (".claude/hfi-auth.json", ".claude", "claude-old"),
         (".claude/.config.json.tmp.a1b2c3d4", ".claude", "claude-old"),
+        (".claude/ide/48123.lock", ".claude", "claude-old"),
+        (".claude/ide/48123.lock", ".claude/ide", "ide-old"),
+        (".claude/daemon/roster.json", ".claude", "claude-old"),
+        (".claude/bridge-spawn/session_01/mcp-config.json", ".claude", "claude-old"),
         (".config/anthropic/credentials/default.json", ".config/anthropic", "anthropic-old"),
         (".config/anthropic/credentials/federation/fed-x-1.json", ".config", "cfg"),
     ],
@@ -1684,11 +1721,11 @@ async def test_file_move_cannot_rename_a_credential_store_out_of_its_name(
 async def test_file_move_cannot_rename_claude_codes_other_credential_files_out_of_their_name(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: str, source: str, destination: str
 ) -> None:
-    """The HFI auth file, a legacy config's temp copy and the Anthropic profile store are recognised by their parents.
+    """The HFI auth file, a legacy config's temp copy, the IDE lockfiles, the daemon dir and the profile store.
 
-    Renaming ``.claude``, ``.config/anthropic`` or ``.config`` would leave the token under a
-    name the policy does not recognise, and file_read, which needs no approval, would
-    return it there.
+    Each is recognised by its parents. Renaming ``.claude``, ``.claude/ide``,
+    ``.config/anthropic`` or ``.config`` would leave the token under a name the policy does
+    not recognise, and file_read, which needs no approval, would return it there.
     """
     from koda.services.tool_dispatcher import _handle_file_move, _handle_file_read
 
@@ -1931,6 +1968,56 @@ async def test_file_move_still_moves_what_holds_no_protected_dir(
     assert (work / landing).is_file()
     assert not (work / source).exists()
     assert (work / ".koda-state" / "control_plane" / "bootstrap.txt").is_file()
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "target",
+    [".koda-state/control_plane/bootstrap.txt", "image-scratch/browser_sessions/111/bootstrap.txt", "../outside.txt"],
+)
+async def test_file_move_does_not_write_through_a_link_at_its_landing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str
+) -> None:
+    """Across filesystems shutil.move copies, and the copy writes through a link at the landing.
+
+    The move checks saw the landing (``dest/bootstrap.txt``) as written. A rename on the
+    same filesystem replaces a link there, but when the rename fails with EXDEV,
+    ``shutil.move`` copies the source to the landing and so writes through a link already
+    there, here to the control-plane state dir, the browser's saved sessions, or outside the
+    work dir. A landing that is a link is refused; a move into the same dir without one, also
+    as a copy, still works.
+    """
+    import errno
+
+    from koda.services.tool_dispatcher import _handle_file_move
+
+    work = _work_dir_holding_the_protected_dirs(tmp_path, monkeypatch)
+    planted = (work / target).resolve()
+    planted.unlink(missing_ok=True)
+    (work / "dest").mkdir()
+    (work / "dest" / "bootstrap.txt").symlink_to(planted)
+    (work / "bootstrap.txt").write_text("attacker-data\n", encoding="utf-8")
+
+    def cross_device_rename(source: Any, destination: Any) -> None:
+        raise OSError(errno.EXDEV, "Invalid cross-device link", str(source))
+
+    ctx = _file_tool_context(work)
+    with (
+        patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        patch("os.rename", side_effect=cross_device_rename),
+    ):
+        moved = await _handle_file_move({"source": "bootstrap.txt", "destination": "dest"}, ctx)
+        moved_notes = await _handle_file_move({"source": "notes.txt", "destination": "dest"}, ctx)
+
+    assert not moved.success, moved.output
+    assert "symbolic link" in moved.output, moved.output
+    assert not planted.exists()
+    assert (work / "bootstrap.txt").read_text(encoding="utf-8") == "attacker-data\n"
+    assert moved_notes.success, moved_notes.output
+    assert (work / "dest" / "notes.txt").read_text(encoding="utf-8") == "visible\n"
+    assert not (work / "notes.txt").exists()
 
 
 @pytest.mark.security

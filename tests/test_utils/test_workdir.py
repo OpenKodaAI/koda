@@ -349,6 +349,93 @@ class TestTheCredentialDirsBelowTheRuntimeRootStayRefused:
             assert "tasks/7/result.json" in result.output
 
 
+class TestTheComposeClaudeConfigDirIsRefusedWithoutItsVariable:
+    """The compose files set ``CLAUDE_CONFIG_DIR`` for the app container only, and the supervisor does not pass it on.
+
+    A worker whose agent environment lacks it, with its work dir at
+    ``RUNTIME_EPHEMERAL_ROOT``, reached the control plane's Claude Code config there: its
+    ``.credentials.json``, ``.claude.json`` and ``.device-keys.json`` were refused by name,
+    but not its background sessions' ``daemon/`` (OAuth snapshots in ``daemon/auth/``,
+    socket tokens in ``daemon/roster.json``), its ``hfi-auth.json``, a legacy
+    ``.config.json`` or its session transcripts, which the credential entries name only
+    below ``.claude``. The dir the compose files configure is protected whatever the
+    process's environment sets.
+    """
+
+    STORES = (
+        "claude-config/daemon/auth/a1b2c3.tokens.json",
+        "claude-config/daemon/roster.json",
+        "claude-config/hfi-auth.json",
+        "claude-config/.config.json",
+        "claude-config/ide/48123.lock",
+        "claude-config/projects/p/s.jsonl",
+    )
+
+    @pytest.fixture
+    def runtime(self, docker_layout: DockerLayout, monkeypatch: pytest.MonkeyPatch) -> Path:
+        runtime = docker_layout.place(docker_layout.environment["RUNTIME_EPHEMERAL_ROOT"])
+        claude_config = docker_layout.place(docker_layout.environment["CLAUDE_CONFIG_DIR"])
+        for store in self.STORES:
+            (runtime / store).parent.mkdir(parents=True, exist_ok=True)
+            (runtime / store).write_text('{"accessToken": "canary-token"}\n', encoding="utf-8")
+        (runtime / "tasks" / "7" / "result.txt").write_text("visible\n", encoding="utf-8")
+        _set_layout(monkeypatch, COMPOSE_PROVIDER_CLI_CONFIG_DIRS=(str(claude_config),))
+        monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
+        monkeypatch.delenv("CODEX_HOME", raising=False)
+        return runtime
+
+    def test_the_protected_dir_is_the_one_the_compose_files_configure(self, docker_layout: DockerLayout) -> None:
+        from koda.config import COMPOSE_PROVIDER_CLI_CONFIG_DIRS, PROVIDER_CLI_CONFIG_DIR_ENV_KEYS
+
+        variables = set(PROVIDER_CLI_CONFIG_DIR_ENV_KEYS.values())
+        configured = {value for key, value in docker_layout.environment.items() if key in variables}
+        assert configured
+        assert configured == set(COMPOSE_PROVIDER_CLI_CONFIG_DIRS)
+
+    @_SURFACES
+    @pytest.mark.parametrize("store", STORES)
+    def test_a_work_dir_at_the_runtime_root_does_not_reach_it(
+        self, runtime: Path, options: dict[str, bool], store: str
+    ) -> None:
+        resolution = resolve_work_path(store, str(runtime), **options)
+        assert resolution.path is None
+        assert resolution.reason in {"path_sensitive_dir", "path_blocked_file"}
+        assert resolve_work_path("tasks/7/result.txt", str(runtime), **options).path == runtime / "tasks/7/result.txt"
+
+    def test_it_is_not_a_work_dir_and_does_not_move(self, runtime: Path) -> None:
+        from koda.utils.files import protected_move_refusal
+
+        assert validate_work_dir(str(runtime)).ok
+        assert validate_work_dir(str(runtime / "claude-config")).blocked
+        assert protected_move_refusal(str(runtime / "claude-config"), str(runtime / "tasks" / "cfg")) is not None
+        assert protected_move_refusal(str(runtime / "tasks"), str(runtime / "tasks-old")) is None
+
+    @pytest.mark.asyncio
+    async def test_the_agent_tools_neither_read_nor_grep_it(self, runtime: Path) -> None:
+        from unittest.mock import AsyncMock, patch
+
+        from koda.services.tool_dispatcher import ToolContext, _handle_file_grep, _handle_file_read
+
+        ctx = ToolContext(
+            user_id=111,
+            chat_id=111,
+            work_dir=str(runtime),
+            user_data={"work_dir": str(runtime)},
+            agent=AsyncMock(),
+            agent_mode="autonomous",
+        )
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            reads = [await _handle_file_read({"path": store}, ctx) for store in self.STORES]
+            grep = await _handle_file_grep({"pattern": "canary|visible"}, ctx)
+
+        for read in reads:
+            assert not read.success, read.output
+            assert "canary" not in read.output
+        assert grep.success, grep.output
+        assert "canary" not in grep.output
+        assert "tasks/7/result.txt:1: visible" in grep.output
+
+
 class TestControlPlaneStateIsRefusedInsideAWorkDir:
     """Outside Docker the state root (~/.koda-state) sits inside the default work dir (~)."""
 

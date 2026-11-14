@@ -44,6 +44,8 @@ from koda.services.execution_policy import PolicyEvaluation, evaluate_execution_
 from koda.utils.files import (
     PathResolution,
     blocked_credential_path,
+    linked_landing_refusal,
+    move_landing,
     protected_move_refusal,
     resolve_work_path,
     secret_file_refusal,
@@ -2760,9 +2762,11 @@ async def _handle_file_move(params: dict, ctx: ToolContext) -> AgentToolResult:
     if not os.path.exists(resolved_src):
         return AgentToolResult(tool="file_move", success=False, output=f"Source not found: {source}")
     # shutil.move puts the source inside an existing destination directory.
-    landing = (
-        os.path.join(resolved_dst, os.path.basename(resolved_src)) if os.path.isdir(resolved_dst) else resolved_dst
-    )
+    landing = move_landing(resolved_src, resolved_dst)
+    link_refusal = linked_landing_refusal(landing)
+    if link_refusal is not None:
+        _audit_blocked("file_move", "symlink_landing", user_id=ctx.user_id)
+        return AgentToolResult(tool="file_move", success=False, output=f"Access denied: {link_refusal}.")
     protected_refusal = protected_move_refusal(resolved_src, landing)
     if protected_refusal is not None:
         _audit_blocked("file_move", "protected_dir_move", user_id=ctx.user_id)

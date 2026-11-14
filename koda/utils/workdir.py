@@ -10,6 +10,7 @@ from koda.config import (
     ANTHROPIC_FEDERATION_CACHE_DIR_ENV_KEY,
     ANTHROPIC_PROFILE_CONFIG_DIR_ENV_KEY,
     BROWSER_SESSION_DIR,
+    COMPOSE_PROVIDER_CLI_CONFIG_DIRS,
     DEFAULT_WORK_DIR,
     IMAGE_TEMP_DIR,
     PROVIDER_CLI_CONFIG_DIR_ENV_KEYS,
@@ -99,6 +100,20 @@ def provider_cli_config_dirs(environ: Mapping[str, str] | None = None) -> tuple[
     return tuple(dict.fromkeys(_configured_path(value) for value in configured if value.strip()))
 
 
+def compose_provider_cli_config_dirs() -> tuple[str, ...]:
+    """Return the provider CLI config dirs that the shipped compose files configure, as configured.
+
+    The compose files give the app container ``CLAUDE_CONFIG_DIR=/var/lib/koda/runtime/claude-config``
+    (``koda.config.COMPOSE_PROVIDER_CLI_CONFIG_DIRS``), and the supervisor does not pass that
+    variable on to a worker. So a worker whose agent environment lacks it finds no such dir
+    in :func:`provider_cli_config_dirs`, while a work dir at ``RUNTIME_EPHEMERAL_ROOT``
+    reaches it, with the control plane's Claude Code login, its background sessions'
+    ``daemon/`` and its other files that no name below ``.claude`` recognises there. They
+    are among the :func:`protected_dirs` in every process, whatever its environment.
+    """
+    return tuple(dict.fromkeys(_configured_path(directory) for directory in COMPOSE_PROVIDER_CLI_CONFIG_DIRS))
+
+
 def anthropic_profile_credential_dirs(environ: Mapping[str, str] | None = None) -> tuple[str, ...]:
     """Return the Anthropic profile credential dirs that the environment names, as configured.
 
@@ -133,15 +148,17 @@ def protected_dirs() -> tuple[str, ...]:
     They are the control-plane state directory (:func:`control_plane_state_dir`: the master
     key and the bootstrap code), the browser's saved sessions of every chat scope
     (:func:`browser_sessions_dir`), the provider CLI config dirs the environment moves out
-    of HOME (:func:`provider_cli_config_dirs`), and the Anthropic profile credential dirs
+    of HOME (:func:`provider_cli_config_dirs`) and the ones the compose files configure
+    (:func:`compose_provider_cli_config_dirs`), and the Anthropic profile credential dirs
     the environment names (:func:`anthropic_profile_credential_dirs`). In the Docker layout
     the browser's sessions and the Claude Code config dir sit below
-    ``RUNTIME_EPHEMERAL_ROOT`` (``image-scratch/browser_sessions``, and ``claude-config``
-    where ``CLAUDE_CONFIG_DIR`` is set as the app container sets it), which is a valid work
-    dir, and outside Docker the state directory sits in the default work dir ``~``. None of
-    them is Koda's work area: none is ever a work dir, and the file tools, the file commands
-    and ``browser_upload`` refuse every path inside them, whatever the work dir and its
-    waiver (:class:`SensitiveDirs`, :func:`protected_dir_for`).
+    ``RUNTIME_EPHEMERAL_ROOT`` (``image-scratch/browser_sessions``, and ``claude-config``,
+    in every process, whether or not its environment sets ``CLAUDE_CONFIG_DIR`` as the app
+    container's does), which is a valid work dir, and outside Docker the state directory
+    sits in the default work dir ``~``. None of them is Koda's work area: none is ever a
+    work dir, and the file tools, the file commands and ``browser_upload`` refuse every
+    path inside them, whatever the work dir and its waiver (:class:`SensitiveDirs`,
+    :func:`protected_dir_for`).
     """
     return tuple(
         dict.fromkeys(
@@ -149,6 +166,7 @@ def protected_dirs() -> tuple[str, ...]:
                 control_plane_state_dir(),
                 browser_sessions_dir(),
                 *provider_cli_config_dirs(),
+                *compose_provider_cli_config_dirs(),
                 *anthropic_profile_credential_dirs(),
             )
         )
@@ -247,9 +265,10 @@ class SensitiveDirs:
         """Resolve the sensitive roots now, without the ones waived for ``work_dir``.
 
         The :func:`protected_dirs` (the control-plane state directory, the browser's saved
-        sessions, the provider CLI config dirs moved out of HOME and the Anthropic profile
-        credential dirs the environment names) are deny roots too, are never waived, and are
-        compared ignoring case, as :func:`protected_dir_for` compares them.
+        sessions, the provider CLI config dirs moved out of HOME or configured by the compose
+        files, and the Anthropic profile credential dirs the environment names) are deny
+        roots too, are never waived, and are compared ignoring case, as
+        :func:`protected_dir_for` compares them.
         """
         waived = _waived_sensitive_roots(work_dir)
         deny = tuple(

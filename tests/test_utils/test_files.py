@@ -1,5 +1,6 @@
 """Tests for file operations with path traversal protection."""
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -417,12 +418,24 @@ class TestCredentialStoresAreSecretFiles:
             ("/srv/koda-user/.claude/backups", ".claude/backups/"),
             ("/srv/koda-user/.claude/.device-keys.json", ".device-keys.json"),
             ("/srv/secure-storage/.device-keys.json", ".device-keys.json"),
-            ("/srv/koda-user/.claude/daemon/auth/a1b2c3.tokens.json", ".claude/daemon/auth/"),
-            ("/srv/koda-user/.claude/daemon/auth/a1b2c3.json", ".claude/daemon/auth/"),
+            ("/srv/koda-user/.claude/daemon/auth/a1b2c3.tokens.json", ".claude/daemon/"),
+            ("/srv/koda-user/.claude/daemon/auth/a1b2c3.json", ".claude/daemon/"),
+            ("/srv/koda-user/.claude/daemon/roster.json", ".claude/daemon/"),
+            ("/srv/koda-user/.claude/daemon/roster.json.corrupt.1763100000000", ".claude/daemon/"),
+            ("/srv/koda-user/.claude/daemon/dispatch/a1b2c3.json", ".claude/daemon/"),
+            ("/srv/koda-user/.claude/daemon/sign-in/a1b2c3.json", ".claude/daemon/"),
+            ("/srv/koda-user/.claude/daemon/control.key.tmp.1a2b", ".claude/daemon/"),
+            ("/srv/koda-user/.claude/daemon", ".claude/daemon/"),
+            ("/srv/koda-user/.claude/ide/48123.lock", ".claude/ide/"),
+            ("/srv/koda-user/.claude/ide", ".claude/ide/"),
+            ("/srv/koda-user/.claude/bridge-spawn/session_01/mcp-config.json", ".claude/bridge-spawn/"),
             ("/srv/koda-user/.claude/hfi-auth.json", ".claude/hfi-auth.json"),
             ("/srv/koda-user/.claude/remote/.oauth_token", ".claude/remote/.oauth_token"),
             ("/srv/koda-user/.claude/remote/.api_key", ".claude/remote/.api_key"),
-            ("/srv/koda-user/.claude/remote/.session_ingress_token", ".claude/remote/.session_ingress_token"),
+            ("/srv/koda-user/.claude/remote/.session_ingress_token", ".session_ingress_token"),
+            ("/srv/runner/_sessions/s1.claude-config/.session_ingress_token.e3", ".session_ingress_token"),
+            ("/srv/runner/_sessions/s1.claude-config/.session_ingress_token.e3.tmp.42.a1", ".session_ingress_token"),
+            ("/srv/koda-user/.SESSION_INGRESS_TOKEN.E12", ".session_ingress_token"),
             ("/srv/koda-user/.config/anthropic/credentials/default.json", ".config/anthropic/credentials/"),
             ("/srv/koda-user/.config/anthropic/credentials/federation/fed-x-1.json", ".config/anthropic/credentials/"),
             ("/srv/koda-user/.config/anthropic/credentials", ".config/anthropic/credentials/"),
@@ -449,7 +462,10 @@ class TestCredentialStoresAreSecretFiles:
             "/srv/koda-user/.claude/settings.json",
             "/srv/koda-user/.claude/CLAUDE.md",
             "/srv/koda-user/.claude/projects/p/session.jsonl",
-            "/srv/koda-user/.claude/daemon/roster.json",
+            "/srv/koda-user/.claude/daemon.log",
+            "/srv/koda-user/.claude/ide-notes.md",
+            "/srv/koda-user/project/ide/48123.lock",
+            "/srv/koda-user/project/bridge-spawn/config.json",
             "/srv/koda-user/project/.mcp.json",
             "/srv/koda-user/project/.config.json",
             "/srv/koda-user/project/claude.json",
@@ -460,6 +476,9 @@ class TestCredentialStoresAreSecretFiles:
             "/srv/koda-user/.claude/hfi-auth.json.example",
             "/srv/koda-user/.config/anthropic/configs/default.json",
             "/srv/koda-user/.config/anthropic/active_config",
+            "/srv/koda-user/.session_ingress_tokens",
+            "/srv/koda-user/.session_ingress_token_old",
+            "/srv/koda-user/session_ingress_token.e3",
         ],
     )
     def test_other_paths_are_not(self, path):
@@ -551,6 +570,19 @@ class TestCredentialStoresAreSecretFiles:
         clause = row[row.index(" followed by ", start) : row.index(" and, optionally,", start)]
         assert sorted(re.findall(r"`([^`]+)`", clause)) == sorted(FILEOPS_CREDENTIAL_COPY_SUFFIXES)
 
+    def test_the_guardrail_matrix_names_exactly_the_credential_name_prefixes(self):
+        """The File operations row names every ``FILEOPS_CREDENTIAL_NAME_PREFIXES`` entry, and nothing else."""
+        import re
+        from pathlib import Path
+
+        from koda.config import FILEOPS_CREDENTIAL_NAME_PREFIXES
+
+        matrix = (Path(__file__).resolve().parents[2] / "docs/security/guardrail-test-matrix.md").read_text()
+        row = next(line for line in matrix.splitlines() if line.startswith("| File operations |"))
+        start = row.index("(`koda/config.py::FILEOPS_CREDENTIAL_NAME_PREFIXES`:")
+        listing = row[start : row.index(")", start)]
+        assert sorted(re.findall(r"`([^`]+)`", listing)[1:]) == sorted(FILEOPS_CREDENTIAL_NAME_PREFIXES)
+
     def test_the_guardrail_matrix_cites_its_credential_tests_by_name(self):
         """Every test the File operations row cites exists, and the row cites the tests that pin it by name."""
         import ast
@@ -581,6 +613,7 @@ class TestCredentialStoresAreSecretFiles:
         for name in (
             "test_the_guardrail_matrix_lists_exactly_the_refused_credential_paths",
             "test_the_guardrail_matrix_names_exactly_the_copies_refused_with_a_credential_file",
+            "test_the_guardrail_matrix_names_exactly_the_credential_name_prefixes",
             "test_the_guardrail_matrix_cites_its_credential_tests_by_name",
         ):
             assert f"{own}::{name}" in cited, name
@@ -633,6 +666,50 @@ class TestCredentialStoresAreSecretFiles:
         assert f"'{entry}' is a credential store" in (resolution.error or "")
         for visible in (".claude.json.example", "claude-config/backups/notes.txt"):
             assert resolve_work_path(visible, str(home), **options).path == home / visible
+
+    @pytest.mark.parametrize(
+        ("copy", "extension"),
+        [
+            (".claude/daemon-bak/control.key.tmp.1a2b", ".key"),
+            (".claude/sessions/4242.0f1e2d3c.key.tmp.a1b2c3d4", ".key"),
+            (".claude/sessions/4242.0f1e2d3c.key.tmp", ".key"),
+            ("ca/key.pem.tmp.4242", ".pem"),
+            ("certs/server.PEM.backup", ".pem"),
+            ("store.p12.corrupted.1763100000000", ".p12"),
+            ("prod.env.backup", ".env"),
+            ("deploy/prod.env.tmp.4242.a1b2c3", ".env"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"deny_sensitive_dirs": False}, {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True}],
+        ids=["the file tools", "the file commands", "browser_upload"],
+    )
+    def test_the_copies_a_cli_writes_of_a_blocked_file_are_refused_as_that_file(
+        self, tmp_path, monkeypatch, options, copy, extension
+    ):
+        """A blocked file's copy carries the copy's suffix as its own extension, but holds the same secret.
+
+        Claude Code writes each key through ``<name>.tmp.<hex>`` (its CA writes ``key.pem``
+        through ``key.pem.tmp.<pid>``), which a crash mid-write leaves beside it, so
+        ``control.key.tmp.1a2b`` holds the daemon's control key. Each copy is refused as the
+        file it copies; a template's copy and a name that only starts like a copy suffix are not.
+        """
+        home = tmp_path.resolve() / "home"
+        visible = ["certs/server.key.example.backup", "notes/control.key.tmpx", "build.tmp", "a.key.txt"]
+        for path in (copy, *visible):
+            (home / path).parent.mkdir(parents=True, exist_ok=True)
+            (home / path).write_text("canary-key\n")
+        monkeypatch.setenv("HOME", str(home))
+
+        assert files_module.blocked_file_suffix(os.path.basename(copy)) == extension
+        resolution = resolve_work_path(copy, str(home), **options)
+        assert resolution.path is None
+        assert resolution.reason == "path_blocked_file"
+        assert f"files with extension '{extension}' are blocked" in (resolution.error or "")
+        for path in visible:
+            assert files_module.blocked_file_suffix(os.path.basename(path)) is None, path
+            assert resolve_work_path(path, str(home), **options).path == home / path, path
 
     @pytest.mark.parametrize(
         ("env", "stores"),
