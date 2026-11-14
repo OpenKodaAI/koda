@@ -1,0 +1,80 @@
+{
+ "rows": [
+  {
+   "wave": "W1",
+   "name": "Lote de defeitos 1",
+   "scope": "7 defeitos críticos: agendamentos, SSRF, rate limit de login, /cancel, recuperação de senha, circuit breakers, retomada de streams",
+   "status": "merged",
+   "ref": "a4a441e"
+  },
+  {
+   "wave": "W2B",
+   "name": "Onda 2B",
+   "scope": "6 tarefas: rotulagem de rotinas, provedores, contrato dos CLIs, onboarding",
+   "status": "merged",
+   "ref": "6d050b5"
+  },
+  {
+   "wave": "R1",
+   "name": "Replay ao vivo 1",
+   "scope": "Jornadas J-01, J-03, J-07 e J-15 reproduzidas num navegador real",
+   "status": "merged",
+   "ref": "VALIDATION_REPORT"
+  },
+  {
+   "wave": "W3",
+   "name": "Onda 3",
+   "scope": "9 tarefas: rede de segurança de testes, saídas HTTP, autenticação no Postgres",
+   "status": "merged",
+   "ref": "9296448"
+  },
+  {
+   "wave": "W2A",
+   "name": "Onda 2A",
+   "scope": "Governança de ferramentas e arquivos de credencial (M1-E4-T1, T9, T10, T13, M0-E3-T2, M0-E1-T4)",
+   "status": "final_review",
+   "ref": "integrate/wave-2a"
+  },
+  {
+   "wave": "W4",
+   "name": "Onda 4",
+   "scope": "Autenticação e doctor: erro explícito em HTTP, mensagem de rate limit, segredos (D-231, M1-E1-T6, T7, T18)",
+   "status": "final_review",
+   "ref": "integrate/wave-4"
+  },
+  {
+   "wave": "W5",
+   "name": "Onda 5",
+   "scope": "Dependências Python e Node, limites do WebSocket, changelog, processos órfãos (M1-E7-T2, T3, T11, T6, D-254)",
+   "status": "in_review",
+   "ref": "task/M1-E7-*"
+  },
+  {
+   "wave": "W6",
+   "name": "Onda 6",
+   "scope": "Squads, memória e agendador, acessibilidade, estados de erro e navegação mobile (M3, M8)",
+   "status": "implementing",
+   "ref": "task/M3-*, task/M8-*"
+  },
+  {
+   "wave": "ADR",
+   "name": "ADR-002",
+   "scope": "Governança das ferramentas nativas dos agentes (Claude, Codex, Gemini)",
+   "status": "final_review",
+   "ref": "task/ADR-002-r2"
+  },
+  {
+   "wave": "W7",
+   "name": "Próxima onda",
+   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), dados (M2) e código morto (M4)",
+   "status": "queued",
+   "ref": "após a onda 4"
+  }
+ ],
+ "meta": [
+  {
+   "label": "Fonte",
+   "value": "docs/engineering/EXECUTION_STATUS.md e VALIDATION_REPORT.md; branch claude/dreamy-cerf-mhvbwn"
+  }
+ ]
+}

@@ -1,0 +1,52 @@
+{
+ "rows": [
+  {
+   "id": "B1",
+   "item": "Perguntas do operador do ADR-002 (OQ-1 a OQ-10)",
+   "kind": "approval",
+   "detail": "Mudanças de permissão que afetam usuários (MISSION §13); chegam com recomendação quando o ADR fechar"
+  },
+  {
+   "id": "B2",
+   "item": "Reescrita do histórico do git (M1-E7-T7)",
+   "kind": "approval",
+   "detail": "Remove bundles de terceiros do histórico; irreversível"
+  },
+  {
+   "id": "B3",
+   "item": "Canal privado de vulnerabilidades (M1-E7-T8)",
+   "kind": "approval",
+   "detail": "Ativar o private vulnerability reporting no GitHub ou informar um e-mail"
+  },
+  {
+   "id": "B4",
+   "item": "Status checks obrigatórios no branch padrão (M0-E1-T3)",
+   "kind": "approval",
+   "detail": "Configuração do repositório no GitHub"
+  },
+  {
+   "id": "B5",
+   "item": "Segredos e credenciais de teste no CI (M0-E1-T5)",
+   "kind": "approval",
+   "detail": "Pode ter custo; precisa de aprovação"
+  },
+  {
+   "id": "B6",
+   "item": "Defaults de proxy confiável, relay OAuth e CLAUDE_CONFIG_DIR dos workers",
+   "kind": "approval",
+   "detail": "Decisões de segurança expostas: CONTROL_PLANE_TRUSTED_PROXIES, D-069, D-252"
+  },
+  {
+   "id": "B7",
+   "item": "Docker indisponível neste ambiente",
+   "kind": "infra",
+   "detail": "Build de imagens e smoke tests ficam para o CI (M1-E1-T16, AG-02, imagens da onda 5)"
+  }
+ ],
+ "meta": [
+  {
+   "label": "Fonte",
+   "value": "MASTER_PLAN.md (tarefas blocked e gates), EXECUTION_STATUS.md"
+  }
+ ]
+}

@@ -12,6 +12,7 @@ iteration.
 4. Understand → design → implement → validate (CLAUDE.md "Required Validation") → independent review → record evidence here and in `VALIDATION_REPORT.md`.
 5. Commit with a message referencing the task ID and push to the branch.
 6. Never mark a task `done` without recorded evidence (command + result).
+7. **Update the progress tracker at the end of every iteration** (the operator follows it): https://claude.ai/artifact/28r7JGEPHunFQ9VwFygpph (a dashboard). Its data are the JSON files in `docs/engineering/tracker/` (milestones, phases, waves, blockers, log; `index.html` is the page). Edit the files to match the records, upload each changed file to the artifact as an asset, point its `datasets/<id>` document at the new `/_blob/<id>` with fresh `updated` and `edit` stamps, delete the replaced asset, append a `log` row for each event, and commit the files with the records.
 
 ## Workflow rules (no rework, no over-engineering) — 2026-11-14
 

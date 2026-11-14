@@ -1,0 +1,55 @@
+{
+ "rows": [
+  {
+   "id": "L09",
+   "at": "2026-11-14 21:55",
+   "event": "Página de acompanhamento criada; atualizada a cada iteração do loop"
+  },
+  {
+   "id": "L08",
+   "at": "2026-11-14 21:44",
+   "event": "Onda 6 iniciada: jornadas de agentes (M3) e design e acessibilidade (M8) em paralelo"
+  },
+  {
+   "id": "L07",
+   "at": "2026-11-14 21:41",
+   "event": "Regras contra retrabalho e excesso de engenharia gravadas (669fe6b)"
+  },
+  {
+   "id": "L06",
+   "at": "2026-11-14 20:55",
+   "event": "ADR-002: rodadas finais com escopo restrito; pendências menores viram critérios de aceite com teste"
+  },
+  {
+   "id": "L05",
+   "at": "2026-11-14 19:00",
+   "event": "Onda 5 iniciada; defeito D-254 (processos de teste órfãos) registrado"
+  },
+  {
+   "id": "L04",
+   "at": "2026-11-14 18:52",
+   "event": "Integração da onda 4 iniciada"
+  },
+  {
+   "id": "L03",
+   "at": "2026-11-14 17:57",
+   "event": "Onda 3 mesclada: 9 tarefas, 6360 testes passando (9296448)"
+  },
+  {
+   "id": "L02",
+   "at": "2026-11-14",
+   "event": "Onda 2B mesclada e replay ao vivo 1 concluído (6d050b5)"
+  },
+  {
+   "id": "L01",
+   "at": "2026-11-14",
+   "event": "Lote de defeitos 1 mesclado: 7 defeitos críticos corrigidos (a4a441e)"
+  }
+ ],
+ "meta": [
+  {
+   "label": "Fonte",
+   "value": "git log do branch claude/dreamy-cerf-mhvbwn e EXECUTION_STATUS.md"
+  }
+ ]
+}
