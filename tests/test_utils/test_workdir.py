@@ -290,6 +290,37 @@ class TestTheCredentialDirsBelowTheRuntimeRootStayRefused:
         assert "canary" not in grep.output
         assert "image-scratch/111_42.txt:1: visible scratch" in grep.output
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("search_path", [None, "image-scratch"])
+    async def test_file_search_does_not_list_the_files_inside_them(
+        self, runtime: Path, search_path: str | None
+    ) -> None:
+        """file_search walks the tree as file_grep does, so it skips the dirs that file_grep skips."""
+        from unittest.mock import AsyncMock, patch
+
+        from koda.services.tool_dispatcher import ToolContext, _handle_file_search
+
+        (runtime / "tasks" / "7" / "result.json").write_text("{}\n")
+        (runtime / "image-scratch" / "upload.json").write_text("{}\n")
+        ctx = ToolContext(
+            user_id=111,
+            chat_id=111,
+            work_dir=str(runtime),
+            user_data={"work_dir": str(runtime)},
+            agent=AsyncMock(),
+            agent_mode="autonomous",
+        )
+        params = {"pattern": "*.json*"} if search_path is None else {"pattern": "*.json*", "path": search_path}
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_search(params, ctx)
+
+        assert result.success, result.output
+        assert "bank.json" not in result.output
+        assert "s.jsonl" not in result.output
+        assert "upload.json" in result.output
+        if search_path is None:
+            assert "tasks/7/result.json" in result.output
+
 
 class TestControlPlaneStateIsRefusedInsideAWorkDir:
     """Outside Docker the state root (~/.koda-state) sits inside the default work dir (~)."""

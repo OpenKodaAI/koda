@@ -2589,6 +2589,26 @@ async def _handle_file_list(params: dict, ctx: ToolContext) -> AgentToolResult:
         return AgentToolResult(tool="file_list", success=False, output=f"Error listing directory: {e}")
 
 
+def _searchable_subdirs(root: str, dirs: list[str], sensitive_dirs: SensitiveDirs) -> list[str]:
+    """Return the subdirectories of ``root`` that ``file_search`` and ``file_grep`` descend into.
+
+    Hidden directories are skipped, and so is every directory the file layer refuses to
+    read: one inside a sensitive directory that is not waived for the work dir or inside a
+    protected directory (``sensitive_dirs``, see :func:`koda.utils.workdir.protected_dirs`),
+    and a credential-store directory (:func:`blocked_credential_path`). So neither tool
+    names or reads a file that ``file_list`` and ``file_read`` would refuse to show.
+    """
+    import os
+
+    return [
+        name
+        for name in dirs
+        if not name.startswith(".")
+        and sensitive_dirs.containing(os.path.join(root, name)) is None
+        and blocked_credential_path(os.path.join(root, name)) is None
+    ]
+
+
 async def _handle_file_search(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_fileops_available("file_search")
     if err:
@@ -2606,8 +2626,9 @@ async def _handle_file_search(params: dict, ctx: ToolContext) -> AgentToolResult
     resolved = str(resolution.path)
     try:
         matches: list[str] = []
+        sensitive_dirs = SensitiveDirs.for_work_dir(ctx.work_dir)
         for root, dirs, files in os.walk(resolved):
-            dirs[:] = [d for d in dirs if not d.startswith(".")]
+            dirs[:] = _searchable_subdirs(root, dirs, sensitive_dirs)
             for name in files:
                 if fnmatch.fnmatch(name, pattern):
                     rel = os.path.relpath(os.path.join(root, name), resolved)
@@ -2651,20 +2672,14 @@ async def _handle_file_grep(params: dict, ctx: ToolContext) -> AgentToolResult:
         # Every file read follows the file-tool policy and stays inside the search root,
         # which is resolved and checked above (by a path-scoped grant too). os.walk does not
         # descend into directory symlinks, so below it a regular file is inside the root and
-        # only the secret-file policy is left to check; sensitive directories (other than
-        # the ones waived for the work dir) and credential-store directories are pruned. A
-        # file symlink goes through the full resolver in the work dir and must also land
-        # inside the search root, so a link to a file elsewhere in the work dir is skipped.
+        # only the secret-file policy is left to check; the directories file_search skips are
+        # pruned (_searchable_subdirs). A file symlink goes through the full resolver in the
+        # work dir and must also land inside the search root, so a link to a file elsewhere
+        # in the work dir is skipped.
         sensitive_dirs = SensitiveDirs.for_work_dir(ctx.work_dir)
         search_root = resolved.rstrip(os.sep) + os.sep
         for root, dirs, files in os.walk(resolved):
-            dirs[:] = [
-                d
-                for d in dirs
-                if not d.startswith(".")
-                and sensitive_dirs.containing(os.path.join(root, d)) is None
-                and blocked_credential_path(os.path.join(root, d)) is None
-            ]
+            dirs[:] = _searchable_subdirs(root, dirs, sensitive_dirs)
             for name in files:
                 if not fnmatch.fnmatch(name, glob_filter):
                     continue
