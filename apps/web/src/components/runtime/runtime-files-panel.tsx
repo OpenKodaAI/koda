@@ -1501,7 +1501,7 @@ export function RuntimeFilesPanel({
           </div>
         </aside>
 
-        <main className="runtime-files-workbench">
+        <div className="runtime-files-workbench">
           <div className="runtime-files-project-search">
             <div className="runtime-files-project-search__field">
               <Search className="h-3.5 w-3.5 shrink-0" />
@@ -1968,7 +1968,7 @@ export function RuntimeFilesPanel({
               )}
             </div>
           </div>
-        </main>
+        </div>
       </div>
     </TooltipProvider>
   );

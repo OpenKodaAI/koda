@@ -333,7 +333,10 @@ export function Sidebar({
             </Link>
           </div>
 
-          <nav className={cn("mt-5", collapsed && "lg:mt-3 lg:items-center")}>
+          <nav
+            aria-label={t("sidebar.ariaLabel")}
+            className={cn("mt-5", collapsed && "lg:mt-3 lg:items-center")}
+          >
             <SidebarNavList
               items={primaryItems}
               pathname={pathname}
@@ -346,7 +349,10 @@ export function Sidebar({
           </nav>
 
           <div className="mt-auto pt-4">
-            <nav className={cn(collapsed && "lg:items-center")}>
+            <nav
+              aria-label={t("sidebar.sections.system")}
+              className={cn(collapsed && "lg:items-center")}
+            >
               <SidebarNavList
                 items={footerItems}
                 pathname={pathname}

@@ -202,9 +202,9 @@ function RuntimeTaskHeader({
             <LiveRuntimeBadge />
           </div>
 
-          <h1 className="m-0 mt-2 max-w-[860px] text-[1.125rem] font-medium leading-[1.24] tracking-[var(--tracking-tight)] text-[var(--text-primary)] [text-wrap:balance] sm:text-[1.25rem]">
+          <h2 className="m-0 mt-2 max-w-[860px] text-[1.125rem] font-medium leading-[1.24] tracking-[var(--tracking-tight)] text-[var(--text-primary)] [text-wrap:balance] sm:text-[1.25rem]">
             {title}
-          </h1>
+          </h2>
 
           {branchName ? (
             <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">

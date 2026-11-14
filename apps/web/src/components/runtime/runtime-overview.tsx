@@ -371,9 +371,9 @@ export function RuntimeOverviewScreen({
       >
         <div className="min-w-0">
           <p className="eyebrow">{t("runtime.overview.title")}</p>
-          <h1 className="m-0 mt-1 text-[1.375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+          <h2 className="m-0 mt-1 text-[1.375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
             {t("runtime.controlCard.title", undefined)}
-          </h1>
+          </h2>
         </div>
 
         <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:justify-end">

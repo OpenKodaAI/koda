@@ -61,7 +61,10 @@ export function SetupFrame({ children, top, className }: SetupFrameProps) {
         </div>
       </header>
 
-      <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-5 pb-16 pointer-events-none">
+      <main
+        id="conteudo-principal"
+        className="relative z-10 flex flex-1 flex-col items-center justify-center px-5 pb-16 pointer-events-none"
+      >
         <div className="pointer-events-auto flex w-full max-w-[440px] flex-col items-stretch gap-8">
           {top}
           <div className="min-h-[300px]">{children}</div>

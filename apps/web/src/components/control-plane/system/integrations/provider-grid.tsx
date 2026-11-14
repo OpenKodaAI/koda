@@ -288,9 +288,9 @@ function ProviderListView({
   return (
     <motion.div {...viewOut}>
       <div className="integration-marketplace-hero">
-        <h1 className="text-xl font-bold tracking-[-0.04em] text-[var(--text-primary)] sm:text-2xl">
+        <h2 className="text-xl font-bold tracking-[-0.04em] text-[var(--text-primary)] sm:text-2xl">
           {t("generated.controlPlane.conecte_seus_provedores_ae92d64b")}
-        </h1>
+        </h2>
         <p className="mt-1.5 text-sm text-[var(--text-tertiary)]">
           {t("generated.controlPlane.configure_os_provedores_de_ia_para_modelos_d_46847e7c")}
         </p>

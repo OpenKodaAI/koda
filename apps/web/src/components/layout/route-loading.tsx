@@ -262,7 +262,10 @@ export function AuthRouteLoading() {
           <SkeletonLine className="h-9 w-9 rounded-[var(--radius-input)]" />
         </div>
       </header>
-      <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-5 pb-16">
+      <main
+        id="conteudo-principal"
+        className="relative z-10 flex flex-1 flex-col items-center justify-center px-5 pb-16"
+      >
         <div className="flex w-full max-w-[440px] flex-col items-stretch gap-8">
           <div className="min-h-[300px]">
             <div className="auth-form">
@@ -951,7 +954,7 @@ export function ControlPlaneSystemLoading() {
       </div>
 
       {/* Content area — matches real: px-6 pt-6 lg:px-10 */}
-      <main className="flex flex-1 min-h-0 flex-col overflow-hidden">
+      <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto px-6 pt-6 lg:px-10">
           <div className="space-y-6">
             {/* Section title + description */}
@@ -996,7 +999,7 @@ export function ControlPlaneSystemLoading() {
         <div className="shrink-0 flex items-center justify-end gap-3 border-t border-[var(--border-subtle)] bg-[var(--canvas)] px-6 py-3 lg:px-10">
           <SkeletonLine className="h-9 w-32 rounded-lg" />
         </div>
-      </main>
+      </div>
     </div>
   );
 }
