@@ -12,7 +12,9 @@ Pinned guarantees:
     compare-and-swap, so a concurrent edit is never overwritten.
   * Expired-lease recovery runs in every dispatch cycle: a run whose completion
     callback was lost leaves ``running`` once its lease expires and is re-run,
-    without restarting the dispatcher.
+    without restarting the dispatcher. A live run keeps its lease instead: one
+    whose runtime task is still active, or whose dispatch is still running in
+    this process, is never recovered or dispatched a second time.
   * ``POST /api/runtime/schedules`` queues a validation run for the new job
     instead of attempting an activation that the scheduler always rejects, and
     the queued validation activates the job when it passes (or leaves it
@@ -265,6 +267,108 @@ async def test_run_with_lost_callback_is_recovered_by_a_later_cycle_without_rest
     assert recovered_run["status"] == scheduled_jobs.RUN_STATUS_SUCCEEDED, recovered_run.get("error_message")
     [recovered_event] = _events(job_id, "run.lease_recovered")
     assert recovered_event["status_to"] == scheduled_jobs.RUN_STATUS_RETRYING
+
+
+async def _claimed_normal_run(application: Any) -> tuple[int, dict[str, Any]]:
+    """Activate a reminder job and claim its first automatic run without dispatching it."""
+    from koda.services import scheduled_job_runtime, scheduled_jobs
+
+    job_id = await _active_reminder_job(application)
+    scheduled_jobs._touch_job(job_id, next_run_at=scheduled_jobs._iso(scheduled_jobs._utcnow() - timedelta(seconds=5)))
+    with patch.object(scheduled_job_runtime, "_dispatch_run", AsyncMock()):
+        assert (await _run_dispatch_cycle(application))["claimed"] == 1
+    [run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert run["status"] == scheduled_jobs.RUN_STATUS_RUNNING
+    return job_id, run
+
+
+def _expire_lease(run_id: int) -> None:
+    from koda.services import scheduled_jobs
+
+    expired_at = scheduled_jobs._utcnow() - timedelta(seconds=1)
+    scheduled_jobs._touch_run(run_id, lease_expires_at=scheduled_jobs._iso(expired_at))
+
+
+async def test_run_with_live_runtime_task_keeps_its_lease_across_later_cycles(scheduler_db: str) -> None:
+    from koda.services import scheduled_job_runtime, scheduled_jobs
+
+    application = _fake_application()
+    job_id, run = await _claimed_normal_run(application)
+    run_id = int(run["id"])
+    # Explicit id: other suites insert task rows with explicit ids, so the sequence can lag behind.
+    task_id = int(scheduled_jobs._store().fetch_val("SELECT COALESCE(MAX(id), 0) + 1 FROM tasks"))
+    scheduled_jobs._store().execute(
+        "INSERT INTO tasks (id, agent_id, user_id, chat_id, status, query_text, created_at)"
+        " VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (task_id, "default", 111, 222, "running", "scheduled query", scheduled_jobs._iso(scheduled_jobs._utcnow())),
+    )
+    scheduled_jobs._touch_run(run_id, task_id=task_id)
+
+    # The lease runs out while the runtime task is still running: a later cycle extends the lease.
+    _expire_lease(run_id)
+    redispatch = AsyncMock()
+    with patch.object(scheduled_job_runtime, "_dispatch_run", redispatch):
+        cycle = await _run_dispatch_cycle(application)
+
+    assert cycle["claimed"] == 0
+    redispatch.assert_not_called()
+    [live_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert live_run["status"] == scheduled_jobs.RUN_STATUS_RUNNING
+    assert live_run["lease_recovery_count"] == 0
+    lease_expires_at = scheduled_jobs._parse_dt(live_run["lease_expires_at"])
+    assert lease_expires_at is not None and lease_expires_at > scheduled_jobs._utcnow()
+    [refreshed_event] = _events(job_id, "run.lease_refreshed")
+    assert refreshed_event["details"]["task_id"] == task_id
+    assert _events(job_id, "run.lease_recovered") == []
+
+    # Once the task ends without a callback, the next expired lease is recovered.
+    scheduled_jobs._store().execute("UPDATE tasks SET status = ? WHERE id = ?", ("completed", task_id))
+    _expire_lease(run_id)
+    await _run_dispatch_cycle(application)
+
+    [recovered_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert recovered_run["lease_recovery_count"] == 1
+    assert len(_events(job_id, "run.lease_recovered")) == 1
+
+
+async def test_dispatch_still_running_in_this_process_is_not_recovered_and_runs_once(scheduler_db: str) -> None:
+    from koda.services import scheduled_job_dispatcher, scheduled_jobs
+
+    application = _fake_application()
+    job_id = await _active_reminder_job(application)
+    send_started = asyncio.Event()
+    release_send = asyncio.Event()
+
+    async def _slow_send(**_kwargs: Any) -> None:
+        send_started.set()
+        await release_send.wait()
+
+    application.bot.send_message = AsyncMock(side_effect=_slow_send)
+    scheduled_jobs._touch_job(job_id, next_run_at=scheduled_jobs._iso(scheduled_jobs._utcnow() - timedelta(seconds=5)))
+    assert (await scheduled_jobs.run_dispatch_cycle(application))["claimed"] == 1
+    await asyncio.wait_for(send_started.wait(), timeout=10)
+    [run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+
+    # The reminder's Telegram send outlives the lease (a short operator lease): the next cycle
+    # must not recover the run this process is still executing, nor dispatch it a second time.
+    _expire_lease(int(run["id"]))
+    cycle = await scheduled_jobs.run_dispatch_cycle(application)
+
+    assert cycle["claimed"] == 0
+    [live_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert live_run["status"] == scheduled_jobs.RUN_STATUS_RUNNING
+    assert _events(job_id, "run.lease_recovered") == []
+    assert len(_events(job_id, "run.lease_refreshed")) == 1
+
+    release_send.set()
+    await asyncio.gather(*list(scheduled_job_dispatcher._inflight_dispatch_tasks))
+    [finished_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert finished_run["status"] == scheduled_jobs.RUN_STATUS_SUCCEEDED, finished_run.get("error_message")
+    assert finished_run["lease_recovery_count"] == 0
+    reminders = [
+        call for call in application.bot.send_message.await_args_list if "Reminder:" in str(call.kwargs.get("text"))
+    ]
+    assert len(reminders) == 1
 
 
 class _AllowRuntimeAccess:

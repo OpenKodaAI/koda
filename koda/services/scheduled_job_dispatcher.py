@@ -20,6 +20,8 @@ _dispatcher_application: Any | None = None
 _dispatcher_event = asyncio.Event()
 _dispatcher_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 _inflight_dispatch_tasks: set[asyncio.Task[None]] = set()
+# Run id of each `_dispatch_run` still executing in this process; its lease is live even when it expired.
+_inflight_run_ids: dict[asyncio.Task[None], int] = {}
 
 _RUNTIME_TASK_TERMINAL_STATUSES = {"completed", "failed", "cancelled", "needs_review"}
 _RUNTIME_QUEUE_LIVE_STATUSES = {"queued", "running"}
@@ -319,7 +321,9 @@ async def run_dispatch_cycle(application: Any) -> dict[str, int]:
     for run in claimed:
         task = asyncio.create_task(_dispatch_run(application, run))
         _inflight_dispatch_tasks.add(task)
+        _inflight_run_ids[task] = int(run["id"])
         task.add_done_callback(_inflight_dispatch_tasks.discard)
+        task.add_done_callback(lambda done: _inflight_run_ids.pop(done, None))
     return {"materialized": materialized, "claimed": len(claimed), "inflight": len(_inflight_dispatch_tasks)}
 
 
@@ -421,7 +425,9 @@ def recover_expired_leases() -> int:
         scheduled_job_id = int(row["scheduled_job_id"])
         trace_id = str(row.get("trace_id") or "") or None
         task_id = cast(int | None, row.get("task_id"))
-        if _task_still_active(task_id):
+        # A reminder or shell run has no runtime task and no heartbeat: while its dispatch still
+        # runs here, an expired lease means a slow send or command, not a lost callback.
+        if run_id in _inflight_run_ids.values() or _task_still_active(task_id):
             new_expiry = now + timedelta(seconds=jobs.SCHEDULER_LEASE_SECONDS)
             _store().execute(
                 """
