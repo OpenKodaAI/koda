@@ -326,6 +326,49 @@ describe("RoutineEditor", () => {
       expect(allowedPaths).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
     });
 
+    // Routines created before the Permissions tab existed store neither key, and some have no
+    // payload at all. They must open as off and empty, still disabled and labelled.
+    it.each([
+      ["stores no permission keys", existingJob({})],
+      ["has no payload", { ...existingJob({}), payload: undefined }],
+    ])("shows an existing routine that %s as off and empty", async (_case, job) => {
+      renderEditor({ mode: "edit", job });
+      await openPermissionsTab();
+
+      const { readOnly, allowedPaths } = permissionControls();
+      expect(readOnly).not.toBeChecked();
+      expect(readOnly).toBeDisabled();
+      expect(allowedPaths).toHaveValue("");
+      expect(allowedPaths).toBeDisabled();
+      expect(readOnly).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
+      expect(allowedPaths).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
+    });
+
+    // The create API stores the payload as given, so `allowed_paths` may not be a list of
+    // strings. Only string entries of an actual array are shown; anything else shows nothing.
+    it.each([
+      ["a string", "/repo", ""],
+      ["an object", { path: "/repo" }, ""],
+      ["null", null, ""],
+      ["a list with non-string entries", ["/a", 3, null, { path: "/b" }, true, "/c"], "/a\n/c"],
+    ])(
+      "shows only the string paths when an existing routine stores allowed_paths as %s",
+      async (_case, storedPaths, shownPaths) => {
+        renderEditor({
+          mode: "edit",
+          job: existingJob({ read_only: true, allowed_paths: storedPaths }),
+        });
+        await openPermissionsTab();
+
+        const { readOnly, allowedPaths } = permissionControls();
+        expect(allowedPaths).toHaveValue(shownPaths);
+        expect(allowedPaths).toBeDisabled();
+        expect(allowedPaths).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
+        expect(readOnly).toBeChecked();
+        expect(readOnly).toBeDisabled();
+      },
+    );
+
     it.each(SUPPORTED_LANGUAGES)(
       "never promises blocked writes or restricted paths in %s",
       async (language) => {
