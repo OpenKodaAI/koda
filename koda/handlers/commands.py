@@ -103,7 +103,7 @@ from koda.utils.command_helpers import (
     set_provider_model,
     sync_user_data_with_runtime_settings,
 )
-from koda.utils.files import list_directory, safe_resolve
+from koda.utils.files import list_directory, resolve_work_path
 from koda.utils.formatting import escape_html
 from koda.utils.messaging import send_long_message
 from koda.utils.rate_limiter import acquire_rate_limit
@@ -1198,11 +1198,11 @@ async def cmd_file(update: Update, context: BotContext) -> None:
         return
 
     work_dir = context.user_data["work_dir"]
-    target = safe_resolve(args, work_dir)
-
-    if target is None:
-        await update.message.reply_text("Access denied: path is outside working directory.")
+    resolution = resolve_work_path(args, work_dir, deny_sensitive_dirs=False)
+    if resolution.path is None:
+        await update.message.reply_text(resolution.error or "Access denied.")
         return
+    target = resolution.path
 
     if not target.exists():
         await update.message.reply_text(f"File not found: {args}")

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -73,6 +73,70 @@ def test_fileops_rejects_symlink_escape_and_sensitive_extensions(tmp_path: Path)
     assert "outside" in symlink_error or "not allowed" in symlink_error
     assert extension_error is not None
     assert "blocked" in extension_error.lower()
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "allowed"),
+    [
+        ("notes.txt", True),
+        ("sub/notes.txt", True),
+        (".env", False),
+        (".env.local", False),
+        ("prod.env", False),
+        ("linked-env.txt", False),
+        ("../outside/secret.txt", False),
+    ],
+)
+async def test_cat_command_and_file_read_reach_the_same_path_decision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_update: Any,
+    mock_context: Any,
+    path: str,
+    allowed: bool,
+) -> None:
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.tool_dispatcher import ToolContext, _handle_file_read
+
+    canary = "canary-secret-value"
+    work = tmp_path / "work"
+    (work / "sub").mkdir(parents=True)
+    for name in ("notes.txt", "sub/notes.txt"):
+        (work / name).write_text("visible", encoding="utf-8")
+    for name in (".env", ".env.local", "prod.env"):
+        (work / name).write_text(f"TOKEN={canary}\n", encoding="utf-8")
+    (work / "linked-env.txt").symlink_to(work / ".env")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text(canary, encoding="utf-8")
+    monkeypatch.chdir(outside)
+
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = [path]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send:
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        result = await _handle_file_read({"path": path}, ctx)
+
+    assert not any(canary in text for text in shown)
+    assert canary not in result.output
+    cat_allowed = any("visible" in text for text in shown)
+    assert cat_allowed == allowed
+    assert result.success == allowed
 
 
 @pytest.mark.security

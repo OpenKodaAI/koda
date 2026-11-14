@@ -24,6 +24,22 @@ def normalize_work_dir(path: str | None) -> str:
     return os.path.realpath(os.path.expanduser(raw_path))
 
 
+def sensitive_dir_for(path: str) -> str | None:
+    """Return the sensitive system directory that contains ``path``, or None.
+
+    ``path`` must be absolute and already resolved. Each entry of ``SENSITIVE_DIRS`` is
+    compared as written and in its resolved form (``/var/run`` is ``/run`` on most Linux
+    hosts, ``/etc`` is ``/private/etc`` on macOS), by whole path component, so ``/etc``
+    matches ``/etc/ssh`` but not ``/etcetera``. Work directories and the paths that the
+    file commands and file tools resolve inside them share this one deny-root check.
+    """
+    for sensitive in sorted(SENSITIVE_DIRS):
+        for root in {sensitive, normalize_work_dir(sensitive)}:
+            if path == root or path.startswith(root.rstrip(os.sep) + os.sep):
+                return sensitive
+    return None
+
+
 def validate_work_dir(
     path: str | None,
     *,
@@ -31,15 +47,13 @@ def validate_work_dir(
 ) -> WorkDirValidation:
     """Validate a work directory against existence and sensitive-path rules."""
     candidate = normalize_work_dir(path)
-    for sensitive in SENSITIVE_DIRS:
-        sensitive_path = normalize_work_dir(sensitive)
-        if candidate == sensitive_path or candidate.startswith(sensitive_path + os.sep):
-            return WorkDirValidation(
-                ok=False,
-                path=candidate,
-                reason=f"Blocked: '{candidate}' is a sensitive system directory.",
-                blocked=True,
-            )
+    if sensitive_dir_for(candidate) is not None:
+        return WorkDirValidation(
+            ok=False,
+            path=candidate,
+            reason=f"Blocked: '{candidate}' is a sensitive system directory.",
+            blocked=True,
+        )
 
     if os.path.isdir(candidate):
         return WorkDirValidation(ok=True, path=candidate)

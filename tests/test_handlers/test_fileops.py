@@ -112,3 +112,57 @@ async def test_cat_no_args(mock_update, mock_context):
     mock_context.args = []
     await cmd_cat(mock_update, mock_context)
     assert "Usage" in mock_update.message.reply_text.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cat_refuses_dotenv(mock_update, mock_context, tmp_path):
+    (tmp_path / ".env").write_text("TOKEN=canary-secret\n")
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = [".env"]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in mock_send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+    assert shown
+    assert not any("canary-secret" in text for text in shown)
+    assert any("blocked" in text.lower() for text in shown)
+
+
+@pytest.mark.asyncio
+async def test_write_dotenv_is_refused_before_approval(mock_update, mock_context, tmp_path):
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = [".env", "TOKEN=x"]
+    await cmd_write(mock_update, mock_context)
+    reply = mock_update.message.reply_text.call_args.args[0]
+    assert "blocked" in reply.lower()
+    assert "Confirmacao necessaria" not in reply
+    assert not (tmp_path / ".env").exists()
+
+
+@pytest.mark.asyncio
+async def test_rm_secret_file_is_refused_before_approval(mock_update, mock_context, tmp_path):
+    secret = tmp_path / "prod.env"
+    secret.write_text("TOKEN=x\n")
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = ["prod.env"]
+    await cmd_rm(mock_update, mock_context)
+    reply = mock_update.message.reply_text.call_args.args[0]
+    assert "blocked" in reply.lower()
+    assert "Confirmacao necessaria" not in reply
+    assert secret.exists()
+
+
+@pytest.mark.asyncio
+async def test_cat_relative_path_resolves_under_work_dir(mock_update, mock_context, tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    (work / "src").mkdir(parents=True)
+    (work / "src" / "main.py").write_text("work tree")
+    decoy = tmp_path / "decoy"
+    (decoy / "src").mkdir(parents=True)
+    (decoy / "src" / "main.py").write_text("decoy tree")
+    monkeypatch.chdir(decoy)
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = ["src/main.py"]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_cat(mock_update, mock_context)
+    assert "work tree" in mock_send.call_args[0][1]

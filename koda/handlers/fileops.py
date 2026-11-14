@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 
 from koda.utils.approval import with_approval
 from koda.utils.command_helpers import authorized
-from koda.utils.files import safe_resolve
+from koda.utils.files import resolve_work_path
 from koda.utils.messaging import send_long_message
 
 
@@ -41,10 +41,11 @@ async def cmd_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     content = " ".join(args[1:])
     work_dir = context.user_data["work_dir"]
 
-    target = safe_resolve(path_arg, work_dir)
-    if target is None:
-        await update.message.reply_text("Access denied: path is outside working directory.")
+    resolution = resolve_work_path(path_arg, work_dir, deny_sensitive_dirs=False)
+    if resolution.path is None:
+        await update.message.reply_text(resolution.error or "Access denied.")
         return
+    target = resolution.path
 
     if not target.exists():
         await update.message.reply_text(f"File not found: {path_arg}")
@@ -85,10 +86,11 @@ async def cmd_mkdir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
 
     work_dir = context.user_data["work_dir"]
-    target = safe_resolve(path_arg, work_dir)
-    if target is None:
-        await update.message.reply_text("Access denied: path is outside working directory.")
+    resolution = resolve_work_path(path_arg, work_dir, deny_sensitive_dirs=False)
+    if resolution.path is None:
+        await update.message.reply_text(resolution.error or "Access denied.")
         return
+    target = resolution.path
 
     if target.exists():
         await update.message.reply_text(f"Already exists: {path_arg}")

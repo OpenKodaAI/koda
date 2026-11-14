@@ -39,13 +39,6 @@ def redact_runtime_value(value: Any, *, key_hint: str | None = None) -> Any:
     return get_security_guard_client().redact_value(value, key_hint=key_hint)
 
 
-def validate_runtime_file_path(path: str, *, require_file: bool = True) -> str:
-    try:
-        return get_security_guard_client().validate_file_policy(path=path, require_file=require_file)
-    except Exception as exc:
-        raise ValueError(str(exc)) from exc
-
-
 def validate_scoped_object_key(*, agent_id: str, object_key: str) -> str:
     try:
         return get_security_guard_client().validate_object_key(agent_id=agent_id, object_key=object_key)

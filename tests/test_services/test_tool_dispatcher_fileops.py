@@ -284,3 +284,146 @@ class TestFileInfoHandler:
         with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
             result = await _handle_file_info({"path": str(tmp_path / "nope.txt")}, ctx)
         assert not result.success
+
+
+class TestSecretFilesAreBlocked:
+    def test_dotenv_absolute_path_is_blocked(self, tmp_path):
+        err = _validate_file_path(str(tmp_path / ".env"), str(tmp_path))
+        assert err is not None
+        assert "blocked" in err.lower()
+
+    def test_dotenv_variant_is_blocked(self, tmp_path):
+        err = _validate_file_path(str(tmp_path / ".env.production"), str(tmp_path))
+        assert err is not None
+        assert "blocked" in err.lower()
+
+    @pytest.mark.asyncio
+    async def test_file_read_refuses_dotenv(self, tmp_path):
+        (tmp_path / ".env").write_text("TOKEN=canary-secret\n")
+        from koda.services.tool_dispatcher import _handle_file_read
+
+        ctx = _make_ctx(str(tmp_path))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_read({"path": str(tmp_path / ".env")}, ctx)
+        assert not result.success
+        assert "canary-secret" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_grep_skips_secret_files_and_symlink_escapes(self, tmp_path):
+        work = tmp_path / "work"
+        work.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (work / ".env").write_text("TOKEN=canary-env\n")
+        (work / "prod.env").write_text("TOKEN=canary-prod\n")
+        (outside / "secret.txt").write_text("TOKEN=canary-outside\n")
+        (work / "linked.txt").symlink_to(outside / "secret.txt")
+        (work / "code.py").write_text("TOKEN = read_from_vault()\n")
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        ctx = _make_ctx(str(work))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            result = await _handle_file_grep({"pattern": "TOKEN", "path": "."}, ctx)
+        assert result.success
+        assert "code.py" in result.output
+        assert "canary" not in result.output
+
+
+class TestDocumentedRelativePathsResolveUnderWorkDir:
+    """The tool prompt documents paths relative to the work directory (D-066)."""
+
+    @pytest.fixture
+    def work(self, tmp_path, monkeypatch):
+        work = tmp_path / "work"
+        (work / "src").mkdir(parents=True)
+        (work / "src" / "main.py").write_text("# TODO: work tree\nfoo = 1\n")
+        (work / "temp.txt").write_text("temp")
+        (work / "old.txt").write_text("old")
+        # The process CWD holds a decoy tree with the same layout.
+        decoy = tmp_path / "decoy"
+        (decoy / "src").mkdir(parents=True)
+        (decoy / "src" / "main.py").write_text("# TODO: decoy tree\nfoo = 1\n")
+        (decoy / "temp.txt").write_text("decoy")
+        (decoy / "old.txt").write_text("decoy")
+        monkeypatch.chdir(decoy)
+        return work
+
+    async def _call(self, handler_name: str, params: dict, work):
+        from koda.services import tool_dispatcher
+
+        handler = getattr(tool_dispatcher, handler_name)
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            return await handler(params, _make_ctx(str(work)))
+
+    @pytest.mark.asyncio
+    async def test_file_read(self, work):
+        result = await self._call("_handle_file_read", {"path": "src/main.py"}, work)
+        assert result.success, result.output
+        assert "work tree" in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_write(self, work, tmp_path):
+        result = await self._call("_handle_file_write", {"path": "output.txt", "content": "Hello world"}, work)
+        assert result.success, result.output
+        assert (work / "output.txt").read_text() == "Hello world"
+        assert not (tmp_path / "decoy" / "output.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_file_edit(self, work, tmp_path):
+        result = await self._call(
+            "_handle_file_edit", {"path": "src/main.py", "old_string": "foo = 1", "new_string": "foo = 2"}, work
+        )
+        assert result.success, result.output
+        assert "foo = 2" in (work / "src" / "main.py").read_text()
+        assert "foo = 1" in (tmp_path / "decoy" / "src" / "main.py").read_text()
+
+    @pytest.mark.asyncio
+    async def test_file_list(self, work):
+        result = await self._call("_handle_file_list", {"path": "src/"}, work)
+        assert result.success, result.output
+        assert "main.py" in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_list_defaults_to_work_dir(self, work):
+        result = await self._call("_handle_file_list", {}, work)
+        assert result.success, result.output
+        assert "[d] src" in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_search(self, work):
+        result = await self._call("_handle_file_search", {"pattern": "*.py", "path": "src/"}, work)
+        assert result.success, result.output
+        assert "main.py" in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_grep(self, work):
+        result = await self._call("_handle_file_grep", {"pattern": "TODO", "path": "src/", "glob": "*.py"}, work)
+        assert result.success, result.output
+        assert "work tree" in result.output
+        assert "decoy" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_delete(self, work, tmp_path):
+        result = await self._call("_handle_file_delete", {"path": "temp.txt"}, work)
+        assert result.success, result.output
+        assert not (work / "temp.txt").exists()
+        assert (tmp_path / "decoy" / "temp.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_file_move(self, work, tmp_path):
+        result = await self._call("_handle_file_move", {"source": "old.txt", "destination": "new.txt"}, work)
+        assert result.success, result.output
+        assert (work / "new.txt").read_text() == "old"
+        assert (tmp_path / "decoy" / "old.txt").exists()
+
+    @pytest.mark.asyncio
+    async def test_file_info(self, work):
+        result = await self._call("_handle_file_info", {"path": "src/main.py"}, work)
+        assert result.success, result.output
+        assert f"Path: {(work / 'src' / 'main.py').resolve()}" in result.output
+
+    @pytest.mark.asyncio
+    async def test_relative_traversal_is_still_refused(self, work):
+        result = await self._call("_handle_file_read", {"path": "../decoy/temp.txt"}, work)
+        assert not result.success
+        assert "outside" in result.output

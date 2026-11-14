@@ -2,34 +2,102 @@
 
 import os
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
+from koda.config import FILEOPS_BLOCKED_EXTENSIONS
 from koda.logging_config import get_logger
+from koda.utils.workdir import sensitive_dir_for
 
 log = get_logger(__name__)
 
 
-def safe_resolve(path_str: str, work_dir: str) -> Path | None:
-    """Resolve a path safely within work_dir.
+@dataclass(frozen=True, slots=True)
+class PathResolution:
+    """Decision of :func:`resolve_work_path`: the resolved path, or why it was refused."""
 
-    Returns the resolved Path if it's inside work_dir, or None if path traversal detected.
+    path: Path | None
+    reason: str | None = None
+    error: str | None = None
+
+
+def blocked_file_suffix(name: str) -> str | None:
+    """Return the blocked extension a file name carries, or None.
+
+    A name is blocked when its extension is in ``FILEOPS_BLOCKED_EXTENSIONS``
+    (``prod.env``, ``server.pem``), or when it is a dotfile whose first segment is one
+    (``.env``, ``.env.local``, ``.env.production``), which ``os.path.splitext`` does not
+    report as an extension.
     """
-    work_dir_resolved = Path(work_dir).resolve()
+    lowered = name.lower()
+    _, ext = os.path.splitext(lowered)
+    if ext in FILEOPS_BLOCKED_EXTENSIONS:
+        return ext
+    if lowered.startswith("."):
+        stem = "." + lowered[1:].split(".", 1)[0]
+        if stem in FILEOPS_BLOCKED_EXTENSIONS:
+            return stem
+    return None
 
-    # Handle relative and absolute paths
-    if os.path.isabs(path_str):
-        target = Path(path_str).resolve()
-    else:
-        target = (work_dir_resolved / path_str).resolve()
 
-    # Check that target is inside work_dir
+def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool = True) -> PathResolution:
+    """Resolve a path for the file commands and the agent file tools.
+
+    This is the single path policy behind ``/cat``, ``/write``, ``/edit``, ``/rm``,
+    ``/mkdir``, ``/file``, ``/ls`` and the ``file_*`` agent tools, so the same path gets
+    the same decision everywhere:
+
+    - ``~`` is expanded, a relative path is joined with ``work_dir`` (never the process
+      CWD), and symlinks are resolved;
+    - the result must be ``work_dir`` or inside it (``path_outside_workdir``);
+    - it must not be inside a sensitive system directory (``path_sensitive_dir``);
+    - neither the requested name nor the name it resolves to may be a blocked secret
+      file (``path_blocked_file``, see :func:`blocked_file_suffix`).
+
+    ``deny_sensitive_dirs=False`` skips only the sensitive-directory check, and only the
+    file commands pass it: they have never applied that check, and the Docker default
+    work directory (``HOME``) sits under ``/var/lib``. The flag changes a decision only
+    when the work directory is inside or contains a sensitive directory.
+    """
+    if not path_str or not path_str.strip():
+        return PathResolution(None, "path_missing", "Missing path.")
     try:
-        target.relative_to(work_dir_resolved)
-    except ValueError:
-        log.warning("path_traversal_blocked", path=path_str, work_dir=work_dir)
-        return None
+        root = os.path.realpath(work_dir)
+        requested = os.path.expanduser(path_str)
+        resolved = os.path.realpath(os.path.join(root, requested))
+    except (OSError, ValueError):
+        return _refuse(path_str, work_dir, "path_invalid", f"Access denied: '{path_str}' is not a valid path.")
+    if resolved != root and not resolved.startswith(root.rstrip(os.sep) + os.sep):
+        return _refuse(
+            path_str, work_dir, "path_outside_workdir", f"Access denied: '{path_str}' is outside the working directory."
+        )
+    sensitive = sensitive_dir_for(resolved) if deny_sensitive_dirs else None
+    if sensitive is not None:
+        return _refuse(
+            path_str, work_dir, "path_sensitive_dir", f"Access denied: '{sensitive}' is a sensitive system directory."
+        )
+    if resolved != root:
+        suffix = blocked_file_suffix(os.path.basename(requested.rstrip(os.sep))) or blocked_file_suffix(
+            os.path.basename(resolved)
+        )
+        if suffix is not None:
+            return _refuse(
+                path_str,
+                work_dir,
+                "path_blocked_file",
+                f"Access denied: files with extension '{suffix}' are blocked for safety.",
+            )
+    return PathResolution(Path(resolved))
 
-    return target
+
+def _refuse(path_str: str, work_dir: str, reason: str, error: str) -> PathResolution:
+    log.warning("path_access_blocked", reason=reason, path=path_str, work_dir=work_dir)
+    return PathResolution(None, reason, error)
+
+
+def safe_resolve(path_str: str, work_dir: str) -> Path | None:
+    """Resolve a path with :func:`resolve_work_path`; return None when it is refused."""
+    return resolve_work_path(path_str, work_dir).path
 
 
 def list_directory(path_str: str | None, work_dir: str) -> tuple[str, bool]:
@@ -38,9 +106,10 @@ def list_directory(path_str: str | None, work_dir: str) -> tuple[str, bool]:
     Returns (listing_text, success).
     """
     if path_str:
-        target = safe_resolve(path_str, work_dir)
-        if target is None:
-            return "Access denied: path is outside working directory.", False
+        resolution = resolve_work_path(path_str, work_dir, deny_sensitive_dirs=False)
+        if resolution.path is None:
+            return resolution.error or "Access denied.", False
+        target = resolution.path
     else:
         target = Path(work_dir)
 
@@ -77,9 +146,10 @@ def list_directory(path_str: str | None, work_dir: str) -> tuple[str, bool]:
 
 def safe_write(path_str: str, content: str, work_dir: str) -> str:
     """Write content to a file within work_dir. Returns status message."""
-    target = safe_resolve(path_str, work_dir)
-    if target is None:
-        return "Access denied: path is outside working directory."
+    resolution = resolve_work_path(path_str, work_dir, deny_sensitive_dirs=False)
+    if resolution.path is None:
+        return resolution.error or "Access denied."
+    target = resolution.path
 
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -91,9 +161,10 @@ def safe_write(path_str: str, content: str, work_dir: str) -> str:
 
 def safe_delete(path_str: str, work_dir: str) -> str:
     """Delete a file within work_dir. Returns status message."""
-    target = safe_resolve(path_str, work_dir)
-    if target is None:
-        return "Access denied: path is outside working directory."
+    resolution = resolve_work_path(path_str, work_dir, deny_sensitive_dirs=False)
+    if resolution.path is None:
+        return resolution.error or "Access denied."
+    target = resolution.path
 
     if not target.exists():
         return f"File not found: {path_str}"
@@ -110,9 +181,10 @@ def safe_delete(path_str: str, work_dir: str) -> str:
 
 def safe_read(path_str: str, work_dir: str, max_size: int = 100_000) -> str:
     """Read a file within work_dir. Returns file content or error."""
-    target = safe_resolve(path_str, work_dir)
-    if target is None:
-        return "Access denied: path is outside working directory."
+    resolution = resolve_work_path(path_str, work_dir, deny_sensitive_dirs=False)
+    if resolution.path is None:
+        return resolution.error or "Access denied."
+    target = resolution.path
 
     if not target.exists():
         return f"File not found: {path_str}"

@@ -21,7 +21,6 @@ from koda.config import (
     ALLOWED_GIT_CMDS,
     BROWSER_FEATURES_ENABLED,
     BROWSER_TOOL_TIMEOUT,
-    FILEOPS_BLOCKED_EXTENSIONS,
     FILEOPS_ENABLED,
     FILEOPS_MAX_READ_SIZE,
     GIT_ENABLED,
@@ -39,6 +38,7 @@ from koda.knowledge.types import EffectiveExecutionPolicy
 from koda.logging_config import get_logger
 from koda.services import blocked_patterns as _blocked_patterns_module
 from koda.services.execution_policy import PolicyEvaluation, evaluate_execution_policy
+from koda.utils.files import PathResolution, resolve_work_path
 from koda.utils.workdir import validate_work_dir
 
 log = get_logger(__name__)
@@ -2386,25 +2386,16 @@ async def _check_fileops_available(tool: str) -> AgentToolResult | None:
     return None
 
 
+def _resolve_file_path(path: Any, work_dir: str) -> PathResolution:
+    """Resolve a file-tool path with the policy the file commands use (relative to ``work_dir``)."""
+    if not isinstance(path, str) or not path.strip():
+        return PathResolution(None, "path_missing", "Missing required param: 'path'.")
+    return resolve_work_path(path, work_dir)
+
+
 def _validate_file_path(path: str, work_dir: str) -> str | None:
     """Validate file path is within work_dir and not a sensitive file. Returns error string or None."""
-    import os
-
-    if not path:
-        return "Missing required param: 'path'."
-    resolved = os.path.realpath(os.path.expanduser(path))
-    work_resolved = os.path.realpath(work_dir)
-    if not resolved.startswith(work_resolved + os.sep) and resolved != work_resolved:
-        return f"Path '{path}' is outside the working directory."
-    from koda.config import SENSITIVE_DIRS
-
-    for sensitive in SENSITIVE_DIRS:
-        if resolved.startswith(sensitive):
-            return f"Access to '{sensitive}' is not allowed."
-    _, ext = os.path.splitext(resolved)
-    if ext.lower() in FILEOPS_BLOCKED_EXTENSIONS:
-        return f"Files with extension '{ext}' are blocked for safety."
-    return None
+    return _resolve_file_path(path, work_dir).error
 
 
 async def _handle_file_read(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -2412,12 +2403,12 @@ async def _handle_file_read(params: dict, ctx: ToolContext) -> AgentToolResult:
     if err:
         return err
     path = params.get("path", "")
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_read", success=False, output=path_err)
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_read", success=False, output=resolution.error or "Access denied.")
     import os
 
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolved = str(resolution.path)
     if not os.path.isfile(resolved):
         return AgentToolResult(tool="file_read", success=False, output=f"File not found: {path}")
     try:
@@ -2452,12 +2443,12 @@ async def _handle_file_write(params: dict, ctx: ToolContext) -> AgentToolResult:
     content = params.get("content")
     if content is None:
         return AgentToolResult(tool="file_write", success=False, output="Missing required param: 'content'.")
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_write", success=False, output=path_err)
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_write", success=False, output=resolution.error or "Access denied.")
     import os
 
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolved = str(resolution.path)
     try:
         os.makedirs(os.path.dirname(resolved), exist_ok=True)
         with open(resolved, "w") as f:
@@ -2477,12 +2468,12 @@ async def _handle_file_edit(params: dict, ctx: ToolContext) -> AgentToolResult:
     new_string = params.get("new_string", "")
     if not old_string:
         return AgentToolResult(tool="file_edit", success=False, output="Missing required param: 'old_string'.")
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_edit", success=False, output=path_err)
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_edit", success=False, output=resolution.error or "Access denied.")
     import os
 
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolved = str(resolution.path)
     if not os.path.isfile(resolved):
         return AgentToolResult(tool="file_edit", success=False, output=f"File not found: {path}")
     try:
@@ -2517,10 +2508,10 @@ async def _handle_file_list(params: dict, ctx: ToolContext) -> AgentToolResult:
     import os
 
     path = params.get("path", ctx.work_dir)
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_list", success=False, output=path_err)
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_list", success=False, output=resolution.error or "Access denied.")
+    resolved = str(resolution.path)
     if not os.path.isdir(resolved):
         return AgentToolResult(tool="file_list", success=False, output=f"Not a directory: {path}")
     try:
@@ -2553,10 +2544,10 @@ async def _handle_file_search(params: dict, ctx: ToolContext) -> AgentToolResult
     if not pattern:
         return AgentToolResult(tool="file_search", success=False, output="Missing required param: 'pattern'.")
     search_path = params.get("path", ctx.work_dir)
-    path_err = _validate_file_path(search_path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_search", success=False, output=path_err)
-    resolved = os.path.realpath(os.path.expanduser(search_path))
+    resolution = _resolve_file_path(search_path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_search", success=False, output=resolution.error or "Access denied.")
+    resolved = str(resolution.path)
     try:
         matches: list[str] = []
         for root, dirs, files in os.walk(resolved):
@@ -2589,10 +2580,10 @@ async def _handle_file_grep(params: dict, ctx: ToolContext) -> AgentToolResult:
     if not pattern:
         return AgentToolResult(tool="file_grep", success=False, output="Missing required param: 'pattern'.")
     search_path = params.get("path", ctx.work_dir)
-    path_err = _validate_file_path(search_path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_grep", success=False, output=path_err)
-    resolved = os.path.realpath(os.path.expanduser(search_path))
+    resolution = _resolve_file_path(search_path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_grep", success=False, output=resolution.error or "Access denied.")
+    resolved = str(resolution.path)
     try:
         regex = re_mod.compile(pattern, re_mod.IGNORECASE if params.get("ignore_case") else 0)
     except re_mod.error as e:
@@ -2607,6 +2598,9 @@ async def _handle_file_grep(params: dict, ctx: ToolContext) -> AgentToolResult:
                 if not fnmatch.fnmatch(name, glob_filter):
                     continue
                 fpath = os.path.join(root, name)
+                # Every file read goes through the same policy: no secret files, no symlink escapes.
+                if resolve_work_path(fpath, ctx.work_dir).path is None:
+                    continue
                 rel = os.path.relpath(fpath, resolved)
                 try:
                     with open(fpath, errors="replace") as f:
@@ -2637,10 +2631,10 @@ async def _handle_file_delete(params: dict, ctx: ToolContext) -> AgentToolResult
     import os
 
     path = params.get("path", "")
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_delete", success=False, output=path_err)
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_delete", success=False, output=resolution.error or "Access denied.")
+    resolved = str(resolution.path)
     if not os.path.exists(resolved):
         return AgentToolResult(tool="file_delete", success=False, output=f"File not found: {path}")
     if os.path.isdir(resolved):
@@ -2665,14 +2659,14 @@ async def _handle_file_move(params: dict, ctx: ToolContext) -> AgentToolResult:
         return AgentToolResult(
             tool="file_move", success=False, output="Missing required params: 'source' and 'destination'."
         )
-    src_err = _validate_file_path(source, ctx.work_dir)
-    if src_err:
-        return AgentToolResult(tool="file_move", success=False, output=src_err)
-    dst_err = _validate_file_path(destination, ctx.work_dir)
-    if dst_err:
-        return AgentToolResult(tool="file_move", success=False, output=dst_err)
-    resolved_src = os.path.realpath(os.path.expanduser(source))
-    resolved_dst = os.path.realpath(os.path.expanduser(destination))
+    src_resolution = _resolve_file_path(source, ctx.work_dir)
+    if src_resolution.path is None:
+        return AgentToolResult(tool="file_move", success=False, output=src_resolution.error or "Access denied.")
+    dst_resolution = _resolve_file_path(destination, ctx.work_dir)
+    if dst_resolution.path is None:
+        return AgentToolResult(tool="file_move", success=False, output=dst_resolution.error or "Access denied.")
+    resolved_src = str(src_resolution.path)
+    resolved_dst = str(dst_resolution.path)
     if not os.path.exists(resolved_src):
         return AgentToolResult(tool="file_move", success=False, output=f"Source not found: {source}")
     try:
@@ -2692,10 +2686,10 @@ async def _handle_file_info(params: dict, ctx: ToolContext) -> AgentToolResult:
     from datetime import datetime as _datetime
 
     path = params.get("path", "")
-    path_err = _validate_file_path(path, ctx.work_dir)
-    if path_err:
-        return AgentToolResult(tool="file_info", success=False, output=path_err)
-    resolved = os.path.realpath(os.path.expanduser(path))
+    resolution = _resolve_file_path(path, ctx.work_dir)
+    if resolution.path is None:
+        return AgentToolResult(tool="file_info", success=False, output=resolution.error or "Access denied.")
+    resolved = str(resolution.path)
     if not os.path.exists(resolved):
         return AgentToolResult(tool="file_info", success=False, output=f"Not found: {path}")
     try:

@@ -49,7 +49,7 @@ from koda.state.pending_approvals import (
 )
 from koda.telegram_types import BotContext, MessageUpdate
 from koda.utils.command_helpers import ensure_canonical_session_id, require_message, require_user_data, require_user_id
-from koda.utils.files import safe_resolve
+from koda.utils.files import resolve_work_path
 from koda.utils.formatting import escape_html
 
 log = get_logger(__name__)
@@ -646,18 +646,17 @@ def _resolve_operational_command(
             return None
         resolved_path = None
         if work_dir:
-            resolved = safe_resolve(tokens[0], work_dir)
-            resolved_path = str(resolved) if resolved is not None else None
-        action_id = f"fileops.{command}"
-        if resolved_path is None and work_dir:
-            return _OperationalActionResolution(
-                integration_id="fileops",
-                action_id=action_id,
-                access_level="write" if command != "cat" else "read",
-                path=None,
-                deny_reason="path_outside_workdir",
-                deny_message="Access denied: path is outside working directory.",
-            )
+            resolution = resolve_work_path(tokens[0], work_dir, deny_sensitive_dirs=False)
+            if resolution.path is None:
+                return _OperationalActionResolution(
+                    integration_id="fileops",
+                    action_id=f"fileops.{command}",
+                    access_level="write" if command != "cat" else "read",
+                    path=None,
+                    deny_reason=resolution.reason or "path_denied",
+                    deny_message=escape_html(resolution.error or "Access denied."),
+                )
+            resolved_path = str(resolution.path)
         return _operational_resolution_from_contract(
             command,
             raw_args=args,
