@@ -68,12 +68,19 @@ installer generates random values; manual installs use `scripts/generate_env_sec
 A small public whitelist bypasses the bearer check (these endpoints carry their own
 credential or are required to bootstrap auth itself):
 
-- `/api/control-plane/onboarding/status`
+- `/api/control-plane/onboarding/status` (two fields before login, see below)
 - `/api/control-plane/auth/status`
 - `/api/control-plane/auth/bootstrap/exchange`
 - `/api/control-plane/auth/login`
 - `/api/control-plane/auth/register-owner`
 - `/api/control-plane/auth/password/recover`
+
+The dashboard uses the same list. `apps/web/src/lib/public-control-plane-paths.ts` is read by
+both the Next.js proxy (`apps/web/src/proxy.ts`) and the catch-all BFF route, and
+`tests/test_control_plane_public_paths.py` fails when it differs from the backend list or when
+the OpenAPI stops marking one of these routes as callable without a token. Every other
+control-plane route, including `/api/control-plane/onboarding/readiness`, needs an operator
+session in the dashboard as well as in the backend.
 
 There is **no** development/open mode that disables the middleware. Any local process
 (browser extension, neighbor container reaching `host.docker.internal`, ad-hoc script) that
@@ -81,6 +88,29 @@ talks directly to `127.0.0.1:8090` without a valid session will be rejected. The
 proxy at `5174` is defence in depth, not the only line of defence: `apps/web/src/lib/control-plane.ts`
 unseals the operator-session cookie and forwards the bearer token to the backend, so the
 normal dashboard flow is unaffected.
+
+### Onboarding status before login
+
+`GET /api/control-plane/onboarding/status` is polled before anyone can log in: by the CLI
+(`koda doctor`, `koda auth issue-code`) and by `scripts/doctor.py`. Without a valid operator
+credential it answers only whether setup is still needed:
+
+```json
+{"has_owner": true, "bootstrap_required": false}
+```
+
+With a valid session token, personal API token or break-glass token it returns the full status:
+agents, owner name, email and GitHub, the Telegram allowlist, provider connection state, storage
+health, the bootstrap file path and the remaining auth flags. An unknown, expired or revoked
+token gets the two-field answer. Either way the call writes the first-run setup-code file when no
+owner exists yet.
+
+When the status cannot be computed, the route still answers `200` so pollers can retry. Before
+login that answer is `{"status": "degraded", "error": "onboarding_status_failed"}`, with no
+exception text; operators get the degraded status payload with the error message. Through the
+dashboard, a caller without a session gets the same two fields, or a plain `503` when the
+control plane is unreachable: the dashboard's empty "upstream unavailable" stand-in payloads are
+served only to signed-in operators.
 
 ## Session model
 

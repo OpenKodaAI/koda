@@ -9367,10 +9367,9 @@
     "/api/control-plane/onboarding/readiness": {
       "get": {
         "summary": "Onboarding readiness checklist",
-        "security": [],
         "responses": {
           "200": {
-            "description": "Versioned onboarding_readiness.v1 checks for provider, runtime, sandbox, MCP, memory, channel, first task, first trace, docs, and release quality."
+            "description": "Versioned onboarding_readiness.v1 checks for provider, runtime, storage, channel, first task, first trace, and release quality."
           }
         },
         "tags": [
@@ -9382,16 +9381,49 @@
     "/api/control-plane/onboarding/status": {
       "get": {
         "summary": "Onboarding status",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Current quickstart, provider, agent, and storage status"
+            "description": "Without an operator credential: only whether an owner exists and whether first-run setup is still required. With a valid operator session or token: the full quickstart, provider, agent, storage and system status, plus the auth flags. A transient failure returns a 2xx degraded payload; before login it carries only status and error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "description": "Answer to a caller without an operator credential.",
+                      "required": [
+                        "has_owner",
+                        "bootstrap_required"
+                      ],
+                      "properties": {
+                        "has_owner": {
+                          "type": "boolean"
+                        },
+                        "bootstrap_required": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "$ref": "#/components/schemas/GenericJsonObject"
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "tags": [
           "Onboarding"
         ],
-        "security": [],
-        "description": "Stable Koda control-plane route. See linked architecture and runbook docs for domain behavior."
+        "description": "Public route with an optional bearer. Agents, owner contact details, the Telegram allowlist, provider connection state and server paths are returned only to an authenticated operator. See docs/security/authentication.md."
       }
     },
     "/api/control-plane/providers/downloads/active": {
