@@ -27,6 +27,39 @@ def artifact_cache_dir(tmp_path, monkeypatch):
     return cache_dir
 
 
+def _text_pdf(page_texts: list[str]) -> bytes:
+    """Build a small, valid PDF whose pages draw ``page_texts`` in Helvetica.
+
+    Written by hand, with a correct xref table, so the real pypdf reader parses
+    it exactly as it would a user upload; nothing here depends on pypdf's writer.
+    """
+    page_ids = [4 + 2 * index for index in range(len(page_texts))]
+    kids = " ".join(f"{page_id} 0 R" for page_id in page_ids)
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        f"<< /Type /Pages /Kids [{kids}] /Count {len(page_texts)} >>".encode(),
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    for page_id, text in zip(page_ids, page_texts, strict=True):
+        objects.append(
+            f"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            f"/Resources << /Font << /F1 3 0 R >> >> /Contents {page_id + 1} 0 R >>".encode()
+        )
+        content = f"BT /F1 18 Tf 72 720 Td ({text}) Tj ET".encode()
+        objects.append(b"<< /Length %d >>\nstream\n%b\nendstream" % (len(content), content))
+
+    out = bytearray(b"%PDF-1.4\n")
+    offsets = []
+    for number, body in enumerate(objects, start=1):
+        offsets.append(len(out))
+        out += b"%d 0 obj\n%b\nendobj\n" % (number, body)
+    xref_offset = len(out)
+    out += b"xref\n0 %d\n0000000000 65535 f \n" % (len(objects) + 1)
+    out += b"".join(b"%010d 00000 n \n" % offset for offset in offsets)
+    out += b"trailer\n<< /Size %d /Root 1 0 R >>\nstartxref\n%d\n%%%%EOF\n" % (len(objects) + 1, xref_offset)
+    return bytes(out)
+
+
 def _ref(path: Path, kind: ArtifactKind, *, mime_type: str = "") -> ArtifactRef:
     return ArtifactRef(
         artifact_id=f"artifact-{path.stem}",
@@ -663,6 +696,30 @@ class TestArtifactExtraction:
         assert extracted.status == ArtifactStatus.PARTIAL
         assert "Could not extract readable text" in extracted.summary
         assert any("No readable text extracted from page 1." in warning for warning in extracted.warnings)
+
+    @pytest.mark.asyncio
+    async def test_extract_pdf_reads_text_from_a_real_document(self, tmp_path, artifact_cache_dir):
+        pdf_path = tmp_path / "release.pdf"
+        pdf_path.write_bytes(_text_pdf(["Koda release notes SIM-410", "Rollback plan for SIM-411"]))
+
+        extracted = await extract_artifact(_ref(pdf_path, ArtifactKind.PDF, mime_type="application/pdf"))
+
+        assert extracted.status == ArtifactStatus.COMPLETE
+        assert "[page 1] Koda release notes SIM-410" in extracted.text_content
+        assert "[page 2] Rollback plan for SIM-411" in extracted.text_content
+        assert extracted.citations[:2] == ["release.pdf p.1", "release.pdf p.2"]
+        assert not extracted.warnings
+
+    @pytest.mark.asyncio
+    async def test_extract_pdf_reports_a_corrupt_document_as_unresolved(self, tmp_path, artifact_cache_dir):
+        pdf_path = tmp_path / "broken.pdf"
+        pdf_path.write_bytes(b"%PDF-1.4\nthis is not a PDF body\n")
+
+        extracted = await extract_artifact(_ref(pdf_path, ArtifactKind.PDF, mime_type="application/pdf"))
+
+        assert extracted.status == ArtifactStatus.UNRESOLVED
+        assert extracted.summary == "Could not extract broken.pdf."
+        assert extracted.warnings
 
     @pytest.mark.asyncio
     async def test_extract_spreadsheet_summarizes_hidden_sheets_and_formulas(self, tmp_path, artifact_cache_dir):
