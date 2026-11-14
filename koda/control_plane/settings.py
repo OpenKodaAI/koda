@@ -9,6 +9,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from koda.config import is_placeholder_secret
+
 ROOT_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(ROOT_DIR / ".env")
 
@@ -61,7 +63,21 @@ CONTROL_PLANE_INLINE_RUNTIME_ASSETS: bool = (
 CONTROL_PLANE_BIND: str = os.environ.get("CONTROL_PLANE_BIND", "127.0.0.1")
 CONTROL_PLANE_PORT: int = int(os.environ.get("CONTROL_PLANE_PORT", "8090"))
 CONTROL_PLANE_API_TOKEN: str = os.environ.get("CONTROL_PLANE_API_TOKEN", "")
-CONTROL_PLANE_API_TOKENS: list[str] = [t.strip() for t in CONTROL_PLANE_API_TOKEN.split(",") if t.strip()]
+
+
+def parse_api_tokens(raw: str) -> tuple[list[str], int]:
+    """Split the comma-separated break-glass tokens.
+
+    Returns the usable tokens and how many ``.env.example`` placeholders were
+    dropped: an unedited placeholder is publicly known, so it must never
+    authenticate.
+    """
+    candidates = [token.strip() for token in str(raw or "").split(",") if token.strip()]
+    usable = [token for token in candidates if not is_placeholder_secret(token)]
+    return usable, len(candidates) - len(usable)
+
+
+CONTROL_PLANE_API_TOKENS, CONTROL_PLANE_API_TOKEN_PLACEHOLDERS_IGNORED = parse_api_tokens(CONTROL_PLANE_API_TOKEN)
 CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS: int = int(os.environ.get("CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS", "900"))
 CONTROL_PLANE_REGISTRATION_TOKEN_TTL_SECONDS: int = int(
     os.environ.get("CONTROL_PLANE_REGISTRATION_TOKEN_TTL_SECONDS", "1800")

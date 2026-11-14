@@ -647,7 +647,35 @@ def _split_health_url(url: str) -> tuple[int, str]:
     return port, path
 
 
+def _warn_about_placeholder_secrets() -> None:
+    """Explain at startup why placeholder credentials do not authenticate."""
+    from koda.config import AGENT_ID, is_placeholder_secret
+    from koda.control_plane.settings import CONTROL_PLANE_API_TOKEN_PLACEHOLDERS_IGNORED
+
+    if CONTROL_PLANE_API_TOKEN_PLACEHOLDERS_IGNORED:
+        log.error(
+            "control_plane_api_token_placeholder_ignored",
+            detail=(
+                "CONTROL_PLANE_API_TOKEN still contains the .env.example placeholder; break-glass token "
+                "auth stays disabled until it is set to a random value. Owner login is unaffected."
+            ),
+        )
+    runtime_keys = [f"{AGENT_ID.upper()}_RUNTIME_LOCAL_UI_TOKEN"] if AGENT_ID else []
+    runtime_keys.append("RUNTIME_LOCAL_UI_TOKEN")
+    placeholder_keys = [key for key in runtime_keys if is_placeholder_secret(os.environ.get(key))]
+    if placeholder_keys:
+        log.error(
+            "runtime_local_ui_token_placeholder_ignored",
+            keys=placeholder_keys,
+            detail=(
+                "The runtime UI token still contains the .env.example placeholder and is ignored; runtime UI "
+                "access is denied unless a token is stored in the control plane."
+            ),
+        )
+
+
 async def run_supervisor() -> None:
+    _warn_about_placeholder_secrets()
     supervisor = ControlPlaneSupervisor()
     await supervisor.start()
     stop_event = asyncio.Event()

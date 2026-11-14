@@ -62,6 +62,15 @@ def fetch_status(url: str, *, timeout: float = 5.0, headers: dict[str, str] | No
         }
 
 
+PLACEHOLDER_SECRET_PREFIX = "replace-with-"
+
+
+def _is_real_secret(value: str) -> bool:
+    """True for a configured value that is not an unedited .env.example placeholder."""
+    cleaned = str(value or "").strip()
+    return bool(cleaned) and not cleaned.lower().startswith(PLACEHOLDER_SECRET_PREFIX)
+
+
 def run_doctor(
     *,
     env: dict[str, str],
@@ -87,8 +96,8 @@ def run_doctor(
     checks: list[dict[str, Any]] = [
         {"name": "control_plane_port", "ok": bool(port), "value": port},
         {"name": "web_port", "ok": bool(web_port), "value": web_port},
-        {"name": "control_plane_api_token", "ok": bool(api_token)},
-        {"name": "runtime_local_ui_token", "ok": bool(runtime_token)},
+        {"name": "control_plane_api_token", "ok": _is_real_secret(api_token)},
+        {"name": "runtime_local_ui_token", "ok": _is_real_secret(runtime_token)},
         {"name": "object_storage_endpoint", "ok": bool(object_storage_endpoint), "value": object_storage_endpoint},
         {"name": "object_storage_bucket", "ok": bool(object_storage_bucket), "value": object_storage_bucket},
         {"name": "object_storage_access_key", "ok": bool(object_storage_access_key)},
@@ -240,7 +249,7 @@ def run_strict_hardening(env: dict[str, str], *, env_file: Path) -> list[dict[st
     checks.append(
         {
             "name": "control_plane_api_token_strong",
-            "ok": len(api_token) >= 32 and not api_token.startswith("replace-with"),
+            "ok": len(api_token) >= 32 and _is_real_secret(api_token),
             "length": len(api_token),
         }
     )
@@ -249,7 +258,7 @@ def run_strict_hardening(env: dict[str, str], *, env_file: Path) -> list[dict[st
     checks.append(
         {
             "name": "web_operator_session_secret_strong",
-            "ok": len(session_secret) >= 32 and not session_secret.startswith("replace-with"),
+            "ok": len(session_secret) >= 32 and _is_real_secret(session_secret),
             "length": len(session_secret),
         }
     )
@@ -258,7 +267,7 @@ def run_strict_hardening(env: dict[str, str], *, env_file: Path) -> list[dict[st
     checks.append(
         {
             "name": "runtime_local_ui_token_strong",
-            "ok": len(runtime_token) >= 32 and not runtime_token.startswith("replace-with"),
+            "ok": len(runtime_token) >= 32 and _is_real_secret(runtime_token),
             "length": len(runtime_token),
         }
     )

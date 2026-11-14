@@ -55,6 +55,16 @@ token is resolved by `OperatorAuthService.resolve_bearer_token`, which accepts s
 (`cp_operator_sessions`) and the break-glass `CONTROL_PLANE_API_TOKEN(S)`. Anything else
 returns `401`.
 
+Unedited `.env.example` placeholders (values starting with `replace-with-`) never
+authenticate: they are dropped from `CONTROL_PLANE_API_TOKEN(S)` and treated as an unset
+`RUNTIME_LOCAL_UI_TOKEN`, and the supervisor logs `control_plane_api_token_placeholder_ignored`
+/ `runtime_local_ui_token_placeholder_ignored` at startup. The web app likewise treats a
+placeholder `WEB_OPERATOR_SESSION_SECRET` as unconfigured and refuses to seal sessions in
+production; the login and owner-registration routes check this before contacting the control
+plane, so a misconfigured dashboard never consumes a setup code or recovery codes. The packaged
+installer generates random values; manual installs use `scripts/generate_env_secrets.py`
+(see `docs/install/local.md`, including the upgrade path for existing installs).
+
 A small public whitelist bypasses the bearer check (these endpoints carry their own
 credential or are required to bootstrap auth itself):
 

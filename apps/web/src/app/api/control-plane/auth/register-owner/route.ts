@@ -8,6 +8,7 @@ import {
 } from "@/lib/api-utils";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
+  assertWebOperatorSessionSecretConfigured,
   setOwnerExistsHintCookie,
   setPendingRecoveryCookie,
   setWebOperatorSessionCookie,
@@ -36,6 +37,7 @@ export async function POST(request: NextRequest) {
     );
   }
   try {
+    assertWebOperatorSessionSecretConfigured();
     const payload = parseSchemaOrThrow(
       registerSchema,
       await request.json().catch(() => ({})),

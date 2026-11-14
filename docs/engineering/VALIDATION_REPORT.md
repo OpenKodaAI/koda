@@ -63,3 +63,34 @@ Follow-ups (not done here):
 - Make `python-postgres-tests` a required status check (repository settings; operator action).
 - `_build_store` in the runtime isolation/extended tests permanently sets `koda.config.AGENT_ID` and reloads `postgres_store` (pre-existing; harmless in the current suite).
 - The new CI job has not run yet (push blocked).
+
+## SEC-PLACEHOLDER-SECRETS — publicly known placeholder credentials
+
+Vulnerability (verified in code by the orchestrator): `docs/install/local.md` instructed
+`cp .env.example .env && docker compose up`, leaving `CONTROL_PLANE_API_TOKEN=replace-with-a-random-token`;
+`OperatorAuthService.resolve_bearer_token` accepted it as a break-glass credential carrying the
+owner identity, on port 8090 published on all interfaces by `docker-compose.yml`. Same pattern for
+`RUNTIME_LOCAL_UI_TOKEN` and `WEB_OPERATOR_SESSION_SECRET`. The packaged installer was not affected.
+
+Fix: `koda.config.is_placeholder_secret` / `_env_secret`; `settings.parse_api_tokens` drops placeholders;
+runtime-token broker refuses to sign with one; supervisor logs why at startup; web treats a placeholder
+session secret as unset and checks it before contacting the control plane (login + owner registration);
+`scripts/generate_env_secrets.py` for manual installs (new install: all placeholders; existing: auth only
+unless `--all`; 0600 via mkstemp + atomic replace); doctor placeholder checks case-insensitive;
+CI docker smoke uses the generator.
+
+| Command | Result |
+|---|---|
+| `pytest` (full, no DSN) | 4895 passed, 200 skipped (baseline 4874 + 21 new tests) |
+| `pnpm test:web` | 157 files, 692 tests (baseline 686 + 6 new) |
+| new web tests against old code | placeholder-secret test and register-owner pre-flight test fail without the fix |
+| `ruff check` / `ruff format --check` / `mypy koda/` | clean |
+| `pnpm lint:web` | 0 errors, 40 warnings (unchanged) |
+| `pnpm build:web` | pass (one transient Turbopack next/font failure earlier, passed on retry) |
+| generator on real `.env.example` + `doctor.py --strict` | three strong-secret checks pass; raw `.env.example` fails them |
+
+Reviews: independent security reviewer, two rounds. Round 1 request changes (re-running the docs
+snippet rotated the Postgres password; web threw after owner registration, losing recovery codes; plus
+6 minor) → fixed. Round 2 approve with 4 minor (default mode rotated storage keys on existing installs;
+fixed temp name followed symlinks; narrower placeholder detection; login echoed the internal error) → fixed
+with tests. Deferred items are listed under "Pending findings" in `EXECUTION_STATUS.md`.

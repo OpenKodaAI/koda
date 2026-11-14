@@ -7,6 +7,7 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 from koda.agent_contract import normalize_integration_grants, normalize_string_list
+from koda.config import is_placeholder_secret
 from koda.services.runtime_access_service import RuntimeAccessService
 
 from .agent_spec import _safe_json_object, normalize_knowledge_policy
@@ -80,9 +81,11 @@ class ControlPlaneRuntimeAccessBroker:
         normalized_agent_id = str(agent_id or "").strip().upper()
         if normalized_agent_id:
             scoped_value = str(os.environ.get(f"{normalized_agent_id}_RUNTIME_LOCAL_UI_TOKEN") or "").strip()
-            if scoped_value:
+            if scoped_value and not is_placeholder_secret(scoped_value):
                 return scoped_value
-        return str(os.environ.get("RUNTIME_LOCAL_UI_TOKEN") or "").strip()
+        value = str(os.environ.get("RUNTIME_LOCAL_UI_TOKEN") or "").strip()
+        # An unedited .env.example placeholder is public: never sign with it.
+        return "" if is_placeholder_secret(value) else value
 
     def resolve_runtime_secret(self, agent_id: str, snapshot: dict[str, Any] | None = None) -> str:
         return self._resolve_runtime_secret(agent_id, _safe_json_object(snapshot))

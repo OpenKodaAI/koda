@@ -8,6 +8,7 @@ import {
 } from "@/lib/api-utils";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
+  assertWebOperatorSessionSecretConfigured,
   setOwnerExistsHintCookie,
   setWebOperatorSessionCookie,
 } from "@/lib/web-operator-session";
@@ -28,6 +29,7 @@ export async function POST(request: NextRequest) {
     );
   }
   try {
+    assertWebOperatorSessionSecretConfigured();
     const payload = parseSchemaOrThrow(
       loginSchema,
       await request.json().catch(() => ({})),
@@ -62,6 +64,6 @@ export async function POST(request: NextRequest) {
     setOwnerExistsHintCookie(response, true);
     return response;
   } catch (error) {
-    return jsonErrorResponse(error, String((error as { message?: string })?.message || error));
+    return jsonErrorResponse(error, "Unable to sign in.");
   }
 }

@@ -954,3 +954,26 @@ def test_legacy_exchange_method_is_removed() -> None:
     service = operator_auth_mod.OperatorAuthService()
 
     assert not hasattr(service, "exchange_legacy_token")
+
+
+def test_break_glass_accepts_configured_token(fake_operator_db: FakeOperatorAuthDb) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+
+    context = service.resolve_bearer_token("legacy-break-glass")
+
+    assert context is not None
+    assert context.auth_kind == "break_glass"
+
+
+def test_break_glass_never_accepts_env_example_placeholder(
+    fake_operator_db: FakeOperatorAuthDb, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from koda.control_plane.settings import parse_api_tokens
+
+    # A deployment that copied .env.example without editing it.
+    tokens, ignored = parse_api_tokens("replace-with-a-random-token")
+    monkeypatch.setattr(operator_auth_mod, "CONTROL_PLANE_API_TOKENS", tokens)
+    service = operator_auth_mod.OperatorAuthService()
+
+    assert ignored == 1
+    assert service.resolve_bearer_token("replace-with-a-random-token") is None

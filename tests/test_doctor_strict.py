@@ -128,3 +128,23 @@ def test_argparse_accepts_strict_flag(doctor_module) -> None:
     assert args.strict is True
     args = parser.parse_args([])
     assert args.strict is False
+
+
+def test_strong_token_check_rejects_uppercase_placeholder(doctor_module, tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("CONTROL_PLANE_API_TOKEN=REPLACE-WITH-" + ("x" * 40) + "\n")
+    env = doctor_module.load_env_file(env_file)
+    checks = doctor_module.run_strict_hardening(env, env_file=env_file)
+    assert _by_name(checks, "control_plane_api_token_strong")["ok"] is False
+
+
+def test_basic_token_checks_do_not_accept_placeholders(doctor_module, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Socket probes are irrelevant here; HTTP probes hit a closed local port and fail fast.
+    monkeypatch.setattr(doctor_module, "check_socket", lambda *_args, **_kwargs: {"ok": False})
+    env = {
+        "CONTROL_PLANE_API_TOKEN": "replace-with-a-random-token",
+        "RUNTIME_LOCAL_UI_TOKEN": "replace-with-a-random-runtime-token",
+    }
+    result = doctor_module.run_doctor(env=env, base_url="http://127.0.0.1:1")
+    assert _by_name(result["checks"], "control_plane_api_token")["ok"] is False
+    assert _by_name(result["checks"], "runtime_local_ui_token")["ok"] is False

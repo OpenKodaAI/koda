@@ -113,14 +113,36 @@ The doctor validates bootstrap files, secrets, storage, control-plane reachabili
 
 ## Manual Startup
 
+Every `replace-with-...` value in `.env.example` must become a random secret before the first
+start. Koda never authenticates with an unedited placeholder: break-glass and runtime tokens stay
+disabled and the dashboard refuses to start sessions until real values are set.
+`scripts/generate_env_secrets.py` creates `.env` from `.env.example` (mode `0600`) when it does
+not exist and fills every placeholder. On an existing `.env` it only fills the authentication
+placeholders and never changes values that were already customised, so it is safe to re-run.
+
 ```bash
-cp .env.example .env
+python3 scripts/generate_env_secrets.py
 docker compose up -d --build
 python3 scripts/doctor.py \
   --env-file .env \
   --base-url http://127.0.0.1:8090 \
   --dashboard-url http://127.0.0.1:3000
 ```
+
+### Upgrading a manual install that still has placeholders
+
+Older manual installs may still carry `replace-with-...` values. Running the generator on an
+existing `.env` replaces only the authentication placeholders; then restart:
+
+```bash
+python3 scripts/generate_env_secrets.py
+docker compose up -d
+```
+
+This rotates `CONTROL_PLANE_API_TOKEN`, `RUNTIME_LOCAL_UI_TOKEN` and `WEB_OPERATOR_SESSION_SECRET`
+(dashboard users sign in again). `POSTGRES_PASSWORD` and the `S3_*` values must keep matching the
+data already on disk: rotate them in Postgres (`ALTER USER ... PASSWORD ...`) and object storage
+first, then update `.env` (or run the generator with `--all` before the first start only).
 
 ## Troubleshooting
 

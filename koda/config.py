@@ -35,6 +35,23 @@ def _env(key: str, default: str | None = None) -> str | None:
     return os.environ.get(key, default)
 
 
+# Prefix of every credential placeholder shipped in .env.example. A deployment
+# that still carries one would be using a publicly known secret, so
+# security-sensitive settings treat these values as unset (fail closed).
+PLACEHOLDER_SECRET_PREFIX = "replace-with-"
+
+
+def is_placeholder_secret(value: str | None) -> bool:
+    """Return True when *value* is an unedited ``.env.example`` placeholder."""
+    return str(value or "").strip().lower().startswith(PLACEHOLDER_SECRET_PREFIX)
+
+
+def _env_secret(key: str) -> str:
+    """Read a credential, treating ``.env.example`` placeholders as unset."""
+    value = (_env(key, "") or "").strip()
+    return "" if is_placeholder_secret(value) else value
+
+
 def _env_required(key: str) -> str:
     """Get required env var with AGENT_ID prefix fallback."""
     val = _env(key)
@@ -1353,7 +1370,7 @@ RUNTIME_RESOURCE_SAMPLE_INTERVAL_SECONDS: int = int(_env("RUNTIME_RESOURCE_SAMPL
 RUNTIME_RECOVERY_SWEEP_INTERVAL_SECONDS: int = int(_env("RUNTIME_RECOVERY_SWEEP_INTERVAL_SECONDS", "120"))
 RUNTIME_CLEANUP_SWEEP_INTERVAL_SECONDS: int = int(_env("RUNTIME_CLEANUP_SWEEP_INTERVAL_SECONDS", "300"))
 RUNTIME_LOCAL_UI_BIND: str = _env("RUNTIME_LOCAL_UI_BIND", _env("HEALTH_BIND", "127.0.0.1"))
-RUNTIME_LOCAL_UI_TOKEN: str = _env("RUNTIME_LOCAL_UI_TOKEN", "")
+RUNTIME_LOCAL_UI_TOKEN: str = _env_secret("RUNTIME_LOCAL_UI_TOKEN")
 RUNTIME_SUPERVISED_ATTACH_ENABLED: bool = _env("RUNTIME_SUPERVISED_ATTACH_ENABLED", "true").lower() == "true"
 
 RUNTIME_OPERATOR_SESSION_TTL_SECONDS: int = int(_env("RUNTIME_OPERATOR_SESSION_TTL_SECONDS", "1800"))

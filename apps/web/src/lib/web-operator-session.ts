@@ -21,8 +21,14 @@ declare global {
   var __kodaWebOperatorSessionSecret: SessionSecretState | undefined;
 }
 
+// Prefix of every credential placeholder shipped in .env.example. An unedited
+// placeholder is publicly known, so it is treated as "not configured".
+const PLACEHOLDER_SECRET_PREFIX = "replace-with-";
+
 function getSessionSecret(): Buffer {
-  const configuredSecret = process.env.WEB_OPERATOR_SESSION_SECRET?.trim();
+  const rawSecret = process.env.WEB_OPERATOR_SESSION_SECRET?.trim();
+  const configuredSecret =
+    rawSecret && !rawSecret.toLowerCase().startsWith(PLACEHOLDER_SECRET_PREFIX) ? rawSecret : "";
   if (configuredSecret) {
     return createHash("sha256").update(configuredSecret).digest();
   }
@@ -38,7 +44,7 @@ function getSessionSecret(): Buffer {
       .toLowerCase() === "true";
   if (!allowEphemeralSessionSecret) {
     throw new Error(
-      "WEB_OPERATOR_SESSION_SECRET must be configured. To allow an ephemeral dev-only secret, set ALLOW_INSECURE_WEB_OPERATOR_SESSION_SECRET=true outside production.",
+      "WEB_OPERATOR_SESSION_SECRET must be configured with a random value (the .env.example placeholder is rejected). To allow an ephemeral dev-only secret, set ALLOW_INSECURE_WEB_OPERATOR_SESSION_SECRET=true outside production.",
     );
   }
 
@@ -47,6 +53,26 @@ function getSessionSecret(): Buffer {
   }
 
   return globalThis.__kodaWebOperatorSessionSecret.key;
+}
+
+/**
+ * Throws when the session secret is missing or still the .env.example
+ * placeholder. Call before any upstream request whose result must end up in a
+ * session cookie, so a misconfiguration fails before the control plane acts
+ * (e.g. before owner registration consumes the setup code).
+ */
+let sessionSecretErrorLogged = false;
+
+export function assertWebOperatorSessionSecretConfigured(): void {
+  try {
+    getSessionSecret();
+  } catch (error) {
+    if (!sessionSecretErrorLogged) {
+      sessionSecretErrorLogged = true;
+      console.error("[web-operator-session]", error instanceof Error ? error.message : error);
+    }
+    throw error;
+  }
 }
 
 export function sealWebOperatorToken(token: string): string {

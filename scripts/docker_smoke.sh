@@ -76,6 +76,7 @@ main() {
 
   rm -rf "${ARTIFACT_DIR}"
   cp .env.example .env
+  python3 scripts/generate_env_secrets.py
   compose config -q
   compose up -d --build
 
