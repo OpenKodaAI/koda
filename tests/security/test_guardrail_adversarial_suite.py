@@ -29,13 +29,23 @@ from koda.services.tool_dispatcher import (
     _handle_shell_kill,
     _handle_shell_output,
     _handle_shell_status,
-    _validate_file_path,
+    _resolve_file_path,
     execute_tool,
 )
 from koda.utils.approval import _execution_approved
 
 # Captured before any test forbids local spawning, so the kernel double below can still spawn.
 _KERNEL_CREATE_SUBPROCESS_SHELL = asyncio.create_subprocess_shell
+
+
+@pytest.fixture(autouse=True)
+def _fresh_tool_rate_window() -> Iterator[None]:
+    """execute_tool counts calls per user and minute; each scenario starts with an empty window."""
+    from koda.services import tool_dispatcher
+
+    tool_dispatcher._tool_rate_windows.clear()
+    yield
+    tool_dispatcher._tool_rate_windows.clear()
 
 
 @dataclass(frozen=True)
@@ -85,13 +95,155 @@ def test_fileops_rejects_symlink_escape_and_sensitive_extensions(tmp_path: Path)
     symlink = workdir / "linked-secret.txt"
     symlink.symlink_to(secret)
 
-    symlink_error = _validate_file_path(str(symlink), str(workdir))
-    extension_error = _validate_file_path(str(workdir / "prod.env"), str(workdir))
+    symlink_error = _resolve_file_path(str(symlink), str(workdir)).error
+    extension_error = _resolve_file_path(str(workdir / "prod.env"), str(workdir)).error
 
     assert symlink_error is not None
     assert "outside" in symlink_error or "not allowed" in symlink_error
     assert extension_error is not None
     assert "blocked" in extension_error.lower()
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "allowed"),
+    [
+        ("notes.txt", True),
+        ("sub/notes.txt", True),
+        (".env.example", True),
+        (".env", False),
+        (".env.local", False),
+        ("prod.env", False),
+        ("linked-env.txt", False),
+        ("../outside/secret.txt", False),
+    ],
+)
+async def test_cat_command_and_file_read_reach_the_same_path_decision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_update: Any,
+    mock_context: Any,
+    path: str,
+    allowed: bool,
+) -> None:
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.tool_dispatcher import ToolContext, _handle_file_read
+
+    canary = "canary-secret-value"
+    work = tmp_path / "work"
+    (work / "sub").mkdir(parents=True)
+    for name in ("notes.txt", "sub/notes.txt", ".env.example"):
+        (work / name).write_text("visible", encoding="utf-8")
+    for name in (".env", ".env.local", "prod.env"):
+        (work / name).write_text(f"TOKEN={canary}\n", encoding="utf-8")
+    (work / "linked-env.txt").symlink_to(work / ".env")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text(canary, encoding="utf-8")
+    monkeypatch.chdir(outside)
+
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = [path]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send:
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        result = await _handle_file_read({"path": path}, ctx)
+
+    assert not any(canary in text for text in shown)
+    assert canary not in result.output
+    cat_allowed = any("visible" in text for text in shown)
+    assert cat_allowed == allowed
+    assert result.success == allowed
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "allowed"),
+    [
+        ("src/main.py", True),
+        ("src/../src/main.py", True),
+        ("{work}/src/main.py", True),
+        ("{work}/src/../.git/config", False),
+        ("src/../.git/config", False),
+        ("top.txt", False),
+        ("src/link-to-top.txt", False),
+        # Telegram splits on whitespace: the gate must check the joined path /cat reads.
+        ("src/x /../../.git/config", False),
+        ("src/x /../main.py", True),
+    ],
+)
+async def test_cat_command_and_file_read_reach_the_same_grant_decision(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_update: Any,
+    mock_context: Any,
+    path: str,
+    allowed: bool,
+) -> None:
+    """A path-scoped fileops grant sees the resolved path from /cat and from file_read alike."""
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.tool_dispatcher import AgentToolCall, ToolContext, execute_tool
+
+    work = (tmp_path / "work").resolve()
+    (work / "src").mkdir(parents=True)
+    (work / ".git").mkdir()
+    (work / "src" / "main.py").write_text("granted-source", encoding="utf-8")
+    (work / ".git" / "config").write_text("canary-git-config", encoding="utf-8")
+    (work / "top.txt").write_text("canary-top", encoding="utf-8")
+    (work / "src" / "link-to-top.txt").symlink_to(work / "top.txt")
+    monkeypatch.chdir(tmp_path)
+    requested = path.format(work=work)
+    policy = {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(work / "src")]}}}
+
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = requested.split()
+    with (
+        patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", policy),
+        patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send,
+    ):
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with (
+        patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", policy),
+        patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["file_read"]}),
+        patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+        patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+    ):
+        result = await execute_tool(AgentToolCall("file_read", {"path": requested}, ""), ctx)
+
+    assert not any("canary" in text for text in shown)
+    assert "canary" not in result.output
+    cat_allowed = any("granted-source" in text for text in shown)
+    assert cat_allowed == allowed
+    assert result.success == allowed
+    if not allowed:
+        assert any("outside the granted scope" in text for text in shown)
+        assert "outside the granted scope" in result.output
 
 
 @pytest.mark.security
@@ -674,6 +826,669 @@ async def test_browser_download_blocks_private_redirect_before_network(tmp_path:
     assert not (tmp_path / "payload.txt").exists()
 
 
+def _fileops_grant_work(tmp_path: Path) -> Path:
+    work = (tmp_path / "work").resolve()
+    (work / "src").mkdir(parents=True)
+    (work / ".git").mkdir()
+    (work / "src" / "main.py").write_text("granted-source", encoding="utf-8")
+    (work / ".git" / "config").write_text("canary-git-config", encoding="utf-8")
+    (work / "top.txt").write_text("canary-top", encoding="utf-8")
+    return work
+
+
+def _src_grant(work: Path) -> dict[str, Any]:
+    return {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(work / "src")]}}}
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+async def test_rm_deletes_only_a_path_the_grant_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any
+) -> None:
+    """/rm joins its args into one path; the grant must see that path, not the first shell token."""
+    from koda.handlers.fileops import cmd_rm
+
+    work = _fileops_grant_work(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.user_data["_approved"] = True  # as if the confirmation had been approved
+    mock_context.args = ["src/x", "/../../top.txt"]  # Telegram splits "/rm src/x /../../top.txt" on spaces
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", _src_grant(work)):
+        await cmd_rm(mock_update, mock_context)
+
+    reply = mock_update.message.reply_text.call_args.args[0]
+    assert "outside the granted scope" in reply
+    assert (work / "top.txt").exists()
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+async def test_rm_confirmation_previews_the_path_it_deletes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any
+) -> None:
+    from koda.handlers.fileops import cmd_rm
+
+    work = _fileops_grant_work(tmp_path)
+    (work / "src" / "a b.txt").write_text("to delete", encoding="utf-8")
+    (work / "src" / "a").write_text("keep", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = ["src/a", "b.txt"]
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", _src_grant(work)):
+        await cmd_rm(mock_update, mock_context)
+        preview = mock_update.message.reply_text.call_args.args[0]
+        mock_context.user_data["_approved"] = True
+        await cmd_rm(mock_update, mock_context)
+
+    assert "Confirmacao necessaria" in preview
+    assert f"path: {work}/src/a b.txt" in preview
+    assert not (work / "src" / "a b.txt").exists()
+    assert (work / "src" / "a").read_text(encoding="utf-8") == "keep"
+
+
+def _two_work_dirs(tmp_path: Path) -> tuple[Path, Path]:
+    """Two work dirs ``a`` and ``b`` with the same layout, so a relative path names a file in each."""
+    dirs = []
+    for name in ("a", "b"):
+        work = (tmp_path / name).resolve()
+        (work / "src").mkdir(parents=True)
+        (work / "src" / "x.txt").write_text(f"{name}-original\n", encoding="utf-8")
+        dirs.append(work)
+    return dirs[0], dirs[1]
+
+
+def _grant(*allowed_paths: Path) -> dict[str, Any]:
+    return {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(p) for p in allowed_paths]}}}
+
+
+def _file_command_effects(work: Path) -> dict[str, Any]:
+    """What /rm, /write, /edit and /mkdir on ``src/x.txt`` (or ``src/new``) changed in ``work``."""
+    target = work / "src" / "x.txt"
+    return {
+        "x.txt": target.read_text(encoding="utf-8") if target.exists() else None,
+        "new": (work / "src" / "new").exists(),
+    }
+
+
+_FILE_COMMANDS_NEEDING_CONFIRMATION = [
+    ("rm", ["src/x.txt"]),
+    ("write", ["src/x.txt", "overwritten"]),
+    ("edit", ["src/x.txt", "appended"]),
+    ("mkdir", ["src/new"]),
+]
+
+
+def _file_command_handler(command: str) -> Any:
+    from koda.handlers.fileops import cmd_edit, cmd_mkdir, cmd_rm, cmd_write
+
+    return {"rm": cmd_rm, "write": cmd_write, "edit": cmd_edit, "mkdir": cmd_mkdir}[command]
+
+
+async def _request_confirmation(handler: Any, update: Any, context: Any) -> str:
+    """Send a file command that needs confirmation; return the id of the pending operation."""
+    await handler(update, context)
+    assert "Confirmacao necessaria" in update.message.reply_text.call_args.args[0]
+    return str(context.user_data["_pending_op_id"])
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("granted", ["a only", "a and b"])
+@pytest.mark.parametrize(("command", "args"), _FILE_COMMANDS_NEEDING_CONFIRMATION)
+async def test_an_approved_file_command_does_not_follow_a_work_dir_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_update: Any,
+    mock_context: Any,
+    command: str,
+    args: list[str],
+    granted: str,
+) -> None:
+    """A confirmation is pinned to the path it showed: approving it after /setdir runs nothing.
+
+    The gate resolves and grant-checks ``src/x.txt`` against ``a`` when the command arrives
+    (the ``/rm`` preview shows ``a/src/x.txt``). If the work dir becomes ``b`` before the
+    approval, the handler would act on ``b/src/x.txt``, a path that was never confirmed and,
+    with ``a only``, never granted. The approval is refused and both work dirs stay as they were.
+    """
+    from koda.utils.approval import dispatch_approved_operation
+
+    a, b = _two_work_dirs(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    policy = _grant(a / "src") if granted == "a only" else _grant(a / "src", b / "src")
+    mock_context.user_data["work_dir"] = str(a)
+    mock_context.args = list(args)
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", policy):
+        op_id = await _request_confirmation(_file_command_handler(command), mock_update, mock_context)
+        before = {work: _file_command_effects(work) for work in (a, b)}
+        mock_context.user_data["work_dir"] = str(b)  # /setdir b, agent_set_workdir, or a queued task
+        await dispatch_approved_operation(op_id)
+
+    assert {work: _file_command_effects(work) for work in (a, b)} == before
+    reply = mock_update.message.reply_text.call_args.args[0]
+    assert "Not run" in reply, reply
+    assert f"{a}/src/" in reply
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+async def test_an_approved_rm_does_not_follow_the_work_dir_to_its_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any
+) -> None:
+    """The agent moves the work dir from ``<work>/src`` to ``<work>`` before ``/rm foo.txt`` is approved."""
+    from koda.handlers.fileops import cmd_rm
+    from koda.utils.approval import dispatch_approved_operation
+
+    work = (tmp_path / "work").resolve()
+    (work / "src").mkdir(parents=True)
+    (work / "src" / "foo.txt").write_text("granted", encoding="utf-8")
+    (work / "foo.txt").write_text("outside-the-grant", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    mock_context.user_data["work_dir"] = str(work / "src")
+    mock_context.args = ["foo.txt"]
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", _grant(work / "src")):
+        op_id = await _request_confirmation(cmd_rm, mock_update, mock_context)
+        assert f"path: {work}/src/foo.txt" in mock_update.message.reply_text.call_args.args[0]
+        mock_context.user_data["work_dir"] = str(work)  # agent_set_workdir <work>
+        await dispatch_approved_operation(op_id)
+
+    assert (work / "foo.txt").read_text(encoding="utf-8") == "outside-the-grant"
+    assert (work / "src" / "foo.txt").exists()
+    assert "Not run" in mock_update.message.reply_text.call_args.args[0]
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("command", "args"), _FILE_COMMANDS_NEEDING_CONFIRMATION)
+async def test_an_approved_file_command_runs_on_the_path_it_showed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_update: Any,
+    mock_context: Any,
+    command: str,
+    args: list[str],
+) -> None:
+    from koda.utils.approval import dispatch_approved_operation
+
+    a, b = _two_work_dirs(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    mock_context.user_data["work_dir"] = str(a)
+    mock_context.args = list(args)
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", _grant(a / "src")):
+        op_id = await _request_confirmation(_file_command_handler(command), mock_update, mock_context)
+        untouched = _file_command_effects(b)
+        await dispatch_approved_operation(op_id)
+
+    expected = {
+        "rm": {"x.txt": None, "new": False},
+        "write": {"x.txt": "overwritten", "new": False},
+        "edit": {"x.txt": "a-original\nappended\n", "new": False},
+        "mkdir": {"x.txt": "a-original\n", "new": True},
+    }[command]
+    assert _file_command_effects(a) == expected
+    assert _file_command_effects(b) == untouched
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+async def test_an_approved_rm_is_refused_when_the_grant_no_longer_covers_its_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any
+) -> None:
+    """The grant is checked again when the confirmation is approved, on the same resolved path."""
+    from koda.handlers.fileops import cmd_rm
+    from koda.utils.approval import dispatch_approved_operation
+
+    a, _ = _two_work_dirs(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    mock_context.user_data["work_dir"] = str(a)
+    mock_context.args = ["src/x.txt"]
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", _grant(a / "src")):
+        op_id = await _request_confirmation(cmd_rm, mock_update, mock_context)
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", _grant(a / "docs")):
+        await dispatch_approved_operation(op_id)
+
+    assert (a / "src" / "x.txt").exists()
+    assert "outside the granted scope" in mock_update.message.reply_text.call_args.args[0]
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+async def test_an_approved_rm_is_refused_when_a_link_on_its_path_changed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any
+) -> None:
+    """Same work dir, but ``src/cur`` now points elsewhere: the path no longer names the previewed file."""
+    from koda.handlers.fileops import cmd_rm
+    from koda.utils.approval import dispatch_approved_operation
+
+    work = (tmp_path / "work").resolve()
+    for name in ("old", "new"):
+        (work / "src" / name).mkdir(parents=True)
+        (work / "src" / name / "x.txt").write_text(name, encoding="utf-8")
+    (work / "src" / "cur").symlink_to(work / "src" / "old")
+    monkeypatch.chdir(tmp_path)
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = ["src/cur/x.txt"]
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", _grant(work / "src")):
+        op_id = await _request_confirmation(cmd_rm, mock_update, mock_context)
+        assert f"path: {work}/src/old/x.txt" in mock_update.message.reply_text.call_args.args[0]
+        (work / "src" / "cur").unlink()
+        (work / "src" / "cur").symlink_to(work / "src" / "new")
+        await dispatch_approved_operation(op_id)
+
+    assert (work / "src" / "old" / "x.txt").exists()
+    assert (work / "src" / "new" / "x.txt").exists()
+    assert "Not run" in mock_update.message.reply_text.call_args.args[0]
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+async def test_cat_reads_a_sensitive_dir_inside_the_work_dir_that_file_read_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any
+) -> None:
+    """The one documented difference: a work dir that contains a sensitive dir (``/`` contains ``/etc``).
+
+    The file commands, their approval gate included, skip the sensitive-directory check;
+    the file tools apply it.
+    """
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.tool_dispatcher import AgentToolCall, ToolContext, execute_tool
+
+    work = (tmp_path / "work").resolve()
+    (work / "etc").mkdir(parents=True)
+    (work / "etc" / "hosts").write_text("127.0.0.1 localhost-marker\n", encoding="utf-8")
+    monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(work / "etc")}))
+    monkeypatch.chdir(tmp_path)
+
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = ["etc/hosts"]
+    with (
+        patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", _grant(work)),
+        patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send,
+    ):
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with (
+        patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", _grant(work)),
+        patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["file_read"]}),
+        patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+        patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+    ):
+        result = await execute_tool(AgentToolCall("file_read", {"path": "etc/hosts"}, ""), ctx)
+
+    assert any("localhost-marker" in text for text in shown), mock_update.message.reply_text.call_args_list
+    assert not result.success
+    assert "sensitive system directory" in result.output
+    assert "localhost-marker" not in result.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("path", "allowed"), [("src/main.py", True), ("top.txt", False)])
+async def test_cat_and_file_read_expand_a_home_relative_grant_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_update: Any,
+    mock_context: Any,
+    path: str,
+    allowed: bool,
+) -> None:
+    """An ``allowed_paths`` entry written as ``~/...`` covers the paths below it on both surfaces."""
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.tool_dispatcher import AgentToolCall, ToolContext, execute_tool
+
+    work = _fileops_grant_work(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    policy = {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": ["~/work/src"]}}}
+
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = [path]
+    with (
+        patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", policy),
+        patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send,
+    ):
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with (
+        patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", policy),
+        patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["file_read"]}),
+        patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+        patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+    ):
+        result = await execute_tool(AgentToolCall("file_read", {"path": path}, ""), ctx)
+
+    assert not any("canary" in text for text in shown)
+    assert any("granted-source" in text for text in shown) == allowed, shown
+    assert result.success == allowed, result.output
+
+
+_DOCKER_HOME_CREDENTIAL_STORES = [
+    ".codex/auth.json",
+    ".gemini/oauth_creds.json",
+    ".claude/.credentials.json",
+    ".config/gh/hosts.yml",
+    ".config/gcloud/application_default_credentials.json",
+    ".ssh/id_ed25519",
+    ".ssh/config",
+    ".gnupg/private-keys-v1.d/key.key",
+    ".git-credentials",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    ".pgpass",
+    ".docker/config.json",
+    ".kube/config",
+    ".aws/credentials",
+    ".azure/msal_token_cache.json",
+]
+
+
+def _docker_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """The default Docker layout: the work dir is the runtime HOME, under the sensitive /var/lib."""
+    sensitive = tmp_path.resolve() / "var-lib"
+    home = sensitive / "koda" / "runtime" / "home"
+    (home / "src").mkdir(parents=True)
+    (home / "src" / "main.py").write_text("print('visible')\n", encoding="utf-8")
+    for store in _DOCKER_HOME_CREDENTIAL_STORES:
+        (home / store).parent.mkdir(parents=True, exist_ok=True)
+        (home / store).write_text("TOKEN=canary-credential\n", encoding="utf-8")
+    monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive)}))
+    monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(home))
+    monkeypatch.chdir(tmp_path)
+    return home
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("store", [*_DOCKER_HOME_CREDENTIAL_STORES, "src/main.py"])
+async def test_cli_credential_stores_in_the_docker_home_are_refused_on_both_surfaces(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any, store: str
+) -> None:
+    """The provider CLIs share the runtime HOME, the Docker work dir; their credentials stay unreadable."""
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.tool_dispatcher import ToolContext, _handle_file_read
+
+    home = _docker_home(tmp_path, monkeypatch)
+    allowed = store == "src/main.py"
+    mock_context.user_data["work_dir"] = str(home)
+    mock_context.args = [store]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send:
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(home),
+        user_data={"work_dir": str(home)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        result = await _handle_file_read({"path": store}, ctx)
+        absolute = await _handle_file_read({"path": str(home / store)}, ctx)
+
+    assert not any("canary" in text for text in shown)
+    assert "canary" not in result.output + absolute.output
+    assert any("visible" in text for text in shown) == allowed, shown
+    assert result.success == absolute.success == allowed, result.output
+    if not allowed:
+        assert "blocked for safety" in result.output, result.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("search_path", [None, ".config", ".ssh", ".aws"])
+async def test_file_grep_never_prints_a_cli_credential_store(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, search_path: str | None
+) -> None:
+    from koda.services.tool_dispatcher import ToolContext, _handle_file_grep
+
+    home = _docker_home(tmp_path, monkeypatch)
+    (home / "src" / "settings.py").write_text("TOKEN=visible-setting\n", encoding="utf-8")
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(home),
+        user_data={"work_dir": str(home)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    params = {"pattern": "TOKEN"} if search_path is None else {"pattern": "TOKEN", "path": search_path}
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        result = await _handle_file_grep(params, ctx)
+
+    assert "canary" not in result.output, result.output
+    if search_path is None:
+        assert result.success, result.output
+        assert "visible-setting" in result.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("swapped", ["a validated work dir", "the configured DEFAULT_WORK_DIR"])
+@pytest.mark.parametrize(
+    ("tool", "params"),
+    [
+        ("file_read", {"path": "shadow"}),
+        ("file_read", {"path": "{etc}/shadow"}),
+        ("file_list", {}),
+        ("file_grep", {"pattern": "canary"}),
+    ],
+)
+async def test_a_work_dir_swapped_for_a_symlink_into_a_sensitive_dir_gets_no_waiver(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, swapped: str, tool: str, params: dict[str, str]
+) -> None:
+    """The sensitive-dir waiver follows where the operator configured the work dir, never a symlink target.
+
+    A work dir that passed validate_work_dir, or the operator's DEFAULT_WORK_DIR configured
+    under ``var-lib``, is later replaced with a symlink to the sensitive ``etc``. The file
+    tools must not take ``etc`` for the work dir and read it.
+    """
+    from koda.services.tool_dispatcher import AgentToolCall, ToolContext, execute_tool
+    from koda.utils.workdir import validate_work_dir
+
+    root = tmp_path.resolve()
+    etc = root / "etc"
+    etc.mkdir()
+    (etc / "shadow").write_text("canary-shadow\n", encoding="utf-8")
+    var_lib = root / "var-lib"
+    (root / "home").mkdir()
+    monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(etc), str(var_lib)}))
+    if swapped == "a validated work dir":
+        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(root / "home"))
+        (root / "proj").mkdir()
+        validation = validate_work_dir(str(root / "proj"))
+        assert validation.ok, validation.reason
+        work = validation.path
+    else:
+        work = str(var_lib / "koda" / "home")
+        Path(work).mkdir(parents=True)
+        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", work)
+    Path(work).rmdir()
+    Path(work).symlink_to(etc)
+    monkeypatch.chdir(root)
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=work,
+        user_data={"work_dir": work},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with (
+        patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", _grant()),
+        patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+        patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+        patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+    ):
+        call = AgentToolCall(tool, {key: value.format(etc=etc) for key, value in params.items()}, "")
+        result = await execute_tool(call, ctx)
+
+    assert not result.success, result.output
+    assert "canary" not in result.output
+    assert "sensitive system directory" in result.output, result.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("command", "args", "tool", "tool_params", "allowed"),
+    [
+        ("file", "src/main.py", "file_read", {"path": "src/main.py"}, True),
+        ("file", "top.txt", "file_read", {"path": "top.txt"}, False),
+        ("file", "src/x /../../top.txt", "file_read", {"path": "src/x /../../top.txt"}, False),
+        ("file", "src/../.git/config", "file_read", {"path": "src/../.git/config"}, False),
+        ("ls", "src", "file_list", {"path": "src"}, True),
+        ("ls", "src/../.git", "file_list", {"path": "src/../.git"}, False),
+        ("ls", "", "file_list", {}, False),
+    ],
+)
+async def test_file_and_ls_commands_reach_the_same_grant_decision_as_the_tools(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_update: Any,
+    mock_context: Any,
+    command: str,
+    args: str,
+    tool: str,
+    tool_params: dict[str, Any],
+    allowed: bool,
+) -> None:
+    """/file and /ls are grant-gated like /cat, on the path they act on (/ls alone lists the work dir)."""
+    from koda.handlers.commands import cmd_file, cmd_ls
+    from koda.services.tool_dispatcher import AgentToolCall, ToolContext, execute_tool
+
+    work = _fileops_grant_work(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    policy = _src_grant(work)
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = args.split()
+    handler = {"file": cmd_file, "ls": cmd_ls}[command]
+    with (
+        patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", policy),
+        patch("koda.handlers.commands.send_long_message", new_callable=AsyncMock) as send,
+    ):
+        await handler(mock_update, mock_context)
+    replies = [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+    command_allowed = bool(send.await_count or mock_update.message.reply_document.await_count)
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with (
+        patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", policy),
+        patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+        patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+        patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+    ):
+        result = await execute_tool(AgentToolCall(tool, tool_params, ""), ctx)
+
+    assert command_allowed == allowed, replies
+    assert result.success == allowed, result.output
+    if not allowed:
+        assert any("outside the granted scope" in text for text in replies)
+        assert "outside the granted scope" in result.output
+        mock_update.message.reply_document.assert_not_awaited()
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "allowed"),
+    [("src/main.py", True), ("{link}/src/main.py", True), ("src/../top.txt", False), ("{link}/top.txt", False)],
+)
+async def test_cat_and_file_read_agree_on_a_grant_root_written_through_a_symlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mock_update: Any,
+    mock_context: Any,
+    path: str,
+    allowed: bool,
+) -> None:
+    """``allowed_paths`` entries are canonicalised like the call path on both surfaces."""
+    from koda.handlers.fileops import cmd_cat
+    from koda.services.tool_dispatcher import AgentToolCall, ToolContext, execute_tool
+
+    real = _fileops_grant_work(tmp_path)
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    monkeypatch.chdir(tmp_path)
+    requested = path.format(link=link)
+    policy = _src_grant(link)
+
+    mock_context.user_data["work_dir"] = str(link)
+    mock_context.args = requested.split()
+    with (
+        patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", policy),
+        patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send,
+    ):
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(link),
+        user_data={"work_dir": str(link)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with (
+        patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", policy),
+        patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["file_read"]}),
+        patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+        patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+    ):
+        result = await execute_tool(AgentToolCall("file_read", {"path": requested}, ""), ctx)
+
+    assert not any("canary" in text for text in shown)
+    assert "canary" not in result.output
+    assert any("granted-source" in text for text in shown) == allowed, shown
+    assert result.success == allowed, result.output
+
+
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
@@ -692,6 +1507,107 @@ async def test_browser_upload_rejects_path_outside_workdir(tmp_path: Path) -> No
 
     assert result.startswith("Error:")
     assert "outside allowed browser upload root" in result
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "path",
+    [".env", "{work}/.env", "config/.env.local", "linked-env.txt", "../outside.txt", ".ssh/id_ed25519", ".netrc"],
+)
+async def test_browser_upload_refuses_what_file_read_refuses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    from koda.services.browser_manager import browser_manager
+    from koda.services.tool_dispatcher import ToolContext, _handle_browser_upload, _handle_file_read
+
+    work = (tmp_path / "work").resolve()
+    (work / "config").mkdir(parents=True)
+    (work / ".env").write_text("TOKEN=canary-secret\n", encoding="utf-8")
+    (work / "config" / ".env.local").write_text("TOKEN=canary-secret\n", encoding="utf-8")
+    (work / "linked-env.txt").symlink_to(work / ".env")
+    (work / ".ssh").mkdir()
+    (work / ".ssh" / "id_ed25519").write_text("canary-private-key\n", encoding="utf-8")
+    (work / ".netrc").write_text("machine example.com password canary-netrc\n", encoding="utf-8")
+    (tmp_path / "outside.txt").write_text("canary-outside", encoding="utf-8")
+    monkeypatch.chdir(work)
+    requested = path.format(work=work)
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        read = await _handle_file_read({"path": requested}, ctx)
+    with (
+        patch("koda.services.tool_dispatcher._check_browser_available", new_callable=AsyncMock, return_value=None),
+        patch.object(browser_manager, "upload_file", new_callable=AsyncMock, return_value="Uploaded") as upload,
+    ):
+        result = await _handle_browser_upload({"file_path": requested}, ctx)
+
+    assert not read.success
+    assert not result.success
+    assert result.output == read.output
+    upload.assert_not_awaited()
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["report.pdf", "{work}/report.pdf", "etc/notes.pdf"])
+async def test_browser_upload_keeps_its_reach_when_the_work_dir_is_under_a_sensitive_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
+) -> None:
+    """The Docker default work dir (HOME under /var/lib) stays uploadable, as it was before the shared resolver.
+
+    browser_upload keeps its old reach, anything inside the work dir (a sensitive root inside
+    it included), and gains the resolver's relative-path and secret-name checks.
+    """
+    from koda.services.browser_manager import browser_manager
+    from koda.services.tool_dispatcher import ToolContext, _handle_browser_upload
+
+    root = tmp_path.resolve()
+    sensitive = root / "var-lib"
+    work = sensitive / "koda" / "runtime" / "home"
+    (work / "etc").mkdir(parents=True)
+    (work / "report.pdf").write_bytes(b"%PDF-1.4")
+    (work / "etc" / "notes.pdf").write_bytes(b"%PDF-1.4")
+    (work / ".env").write_text("TOKEN=canary-secret\n", encoding="utf-8")
+    (work / ".ssh").mkdir()
+    (work / ".ssh" / "id_ed25519").write_text("canary-private-key\n", encoding="utf-8")
+    monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(work / "etc")}))
+    monkeypatch.chdir(root)
+    requested = path.format(work=work)
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+
+    with (
+        patch("koda.services.tool_dispatcher._check_browser_available", new_callable=AsyncMock, return_value=None),
+        patch.object(browser_manager, "upload_file", new_callable=AsyncMock, return_value="Uploaded") as upload,
+    ):
+        result = await _handle_browser_upload({"file_path": requested}, ctx)
+        secret = await _handle_browser_upload({"file_path": ".env"}, ctx)
+        ssh_key = await _handle_browser_upload({"file_path": ".ssh/id_ed25519"}, ctx)
+
+    assert result.success, result.output
+    upload.assert_awaited_once()
+    assert upload.await_args.args[2] == str(work / requested.removeprefix(f"{work}/"))
+    assert upload.await_args.kwargs["allowed_root"] == str(work)
+    assert not secret.success
+    assert "blocked" in secret.output
+    assert not ssh_key.success
+    assert "blocked for safety" in ssh_key.output
 
 
 class _RedirectResponse:

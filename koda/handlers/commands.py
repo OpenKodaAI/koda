@@ -25,7 +25,6 @@ from koda.config import (
     MAX_BUDGET_USD,
     PROJECT_DIRS,
     PROVIDER_MODELS,
-    SENSITIVE_DIRS,
     SHELL_ENABLED,
     TTS_DEFAULT_VOICE,
 )
@@ -103,10 +102,11 @@ from koda.utils.command_helpers import (
     set_provider_model,
     sync_user_data_with_runtime_settings,
 )
-from koda.utils.files import list_directory, safe_resolve
+from koda.utils.files import file_command_path, list_directory, resolve_work_path
 from koda.utils.formatting import escape_html
 from koda.utils.messaging import send_long_message
 from koda.utils.rate_limiter import acquire_rate_limit
+from koda.utils.workdir import validate_work_dir
 
 log = get_logger(__name__)
 _FUNCTION_DEFINITIONS = {str(item["id"]): dict(item) for item in resolve_model_function_catalog()}
@@ -374,14 +374,14 @@ async def cmd_setdir(update: Update, context: BotContext) -> None:
     args = context.args
 
     if args:
-        path = " ".join(args)
-        path = os.path.expanduser(path)
-        # Block sensitive system directories (use resolved path consistently)
-        resolved = os.path.realpath(path)
-        if any(resolved == s or resolved.startswith(s + "/") for s in SENSITIVE_DIRS):
+        # The shared work-dir check (agent_set_workdir uses it too): the resolved path is
+        # compared with each sensitive directory as written and resolved (/var/run is /run).
+        validation = validate_work_dir(" ".join(args))
+        resolved = validation.path
+        if validation.blocked:
             await update.message.reply_text("Access denied: sensitive system directory.")
             return
-        if os.path.isdir(resolved):
+        if validation.ok:
             context.user_data["work_dir"] = resolved
             await update.message.reply_text(
                 f"Working directory set to: <code>{escape_html(resolved)}</code>", parse_mode=ParseMode.HTML
@@ -1186,23 +1186,21 @@ async def cmd_export(update: Update, context: BotContext) -> None:
 # --- File commands ---
 
 
+@authorized
+@with_approval("file")
 async def cmd_file(update: Update, context: BotContext) -> None:
     """Send a file from the working directory."""
-    if not auth_check(update):
-        return await reject_unauthorized(update)
-
-    init_user_data(context.user_data, user_id=update.effective_user.id)
-    args = " ".join(context.args) if context.args else ""
+    args = file_command_path("file", context.args)
     if not args:
         await update.message.reply_text("Usage: /file <path>")
         return
 
     work_dir = context.user_data["work_dir"]
-    target = safe_resolve(args, work_dir)
-
-    if target is None:
-        await update.message.reply_text("Access denied: path is outside working directory.")
+    resolution = resolve_work_path(args, work_dir, deny_sensitive_dirs=False)
+    if resolution.path is None:
+        await update.message.reply_text(resolution.error or "Access denied.")
         return
+    target = resolution.path
 
     if not target.exists():
         await update.message.reply_text(f"File not found: {args}")
@@ -1229,19 +1227,17 @@ async def cmd_file(update: Update, context: BotContext) -> None:
         await update.message.reply_text(f"Error sending file: {e}")
 
 
+@authorized
+@with_approval("ls")
 async def cmd_ls(update: Update, context: BotContext) -> None:
     """List directory contents within work_dir."""
-    if not auth_check(update):
-        return await reject_unauthorized(update)
-
-    init_user_data(context.user_data, user_id=update.effective_user.id)
-    path_arg = " ".join(context.args) if context.args else None
+    requested = " ".join(context.args) if context.args else ""
     work_dir = context.user_data["work_dir"]
 
-    listing, success = list_directory(path_arg, work_dir)
+    listing, success = list_directory(file_command_path("ls", context.args), work_dir)
 
     if success:
-        header = f"📁 {path_arg or work_dir}\n\n"
+        header = f"📁 {requested or work_dir}\n\n"
         await send_long_message(update, header + listing)
     else:
         await update.message.reply_text(listing)

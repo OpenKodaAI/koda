@@ -19,8 +19,10 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
 from koda.agent_contract import (
+    FILE_COMMAND_ACCESS_LEVELS,
     ActionEnvelope,
     normalize_integration_grants,
+    path_in_allowed_paths,
     resolve_integration_action,
 )
 from koda.config import (
@@ -49,7 +51,7 @@ from koda.state.pending_approvals import (
 )
 from koda.telegram_types import BotContext, MessageUpdate
 from koda.utils.command_helpers import ensure_canonical_session_id, require_message, require_user_data, require_user_id
-from koda.utils.files import safe_resolve
+from koda.utils.files import FILE_COMMANDS, file_command_path, resolve_work_path
 from koda.utils.formatting import escape_html
 
 log = get_logger(__name__)
@@ -353,19 +355,6 @@ def _matches_action_pattern(pattern: str, action_id: str) -> bool:
     return normalized_action == normalized_pattern
 
 
-def _path_allowed(path: str | None, allowed_paths: list[str]) -> bool:
-    normalized_path = str(path or "").strip()
-    if not normalized_path:
-        return False
-    for allowed in allowed_paths:
-        candidate = str(allowed or "").strip()
-        if not candidate:
-            continue
-        if normalized_path == candidate or normalized_path.startswith(candidate.rstrip("/") + "/"):
-            return True
-    return False
-
-
 def _operational_resolution_from_contract(
     command_name: str,
     *,
@@ -392,12 +381,8 @@ _OPS_COMMANDS = frozenset(
         "pip",
         "npm",
         "http_request",
-        "write",
-        "edit",
-        "rm",
-        "mkdir",
-        "cat",
     }
+    | FILE_COMMANDS
 )
 _OPS_SHELL_READ_CMDS = frozenset(
     {
@@ -525,17 +510,55 @@ _OPS_NPM_WRITE_CMDS = frozenset(
 )
 
 
+def _resolve_file_command(
+    command: str,
+    path_arg: str,
+    *,
+    raw_args: str,
+    work_dir: str | None,
+) -> _OperationalActionResolution | None:
+    """Resolve a file command on the path its handler acts on (``path_arg``)."""
+    if not path_arg:
+        return None
+    resolved_path = None
+    if work_dir:
+        resolution = resolve_work_path(path_arg, work_dir, deny_sensitive_dirs=False)
+        if resolution.path is None:
+            return _OperationalActionResolution(
+                integration_id="fileops",
+                action_id=f"fileops.{command}",
+                access_level=FILE_COMMAND_ACCESS_LEVELS[command],
+                path=None,
+                deny_reason=resolution.reason or "path_denied",
+                deny_message=escape_html(resolution.error or "Access denied."),
+            )
+        resolved_path = str(resolution.path)
+    return _operational_resolution_from_contract(command, raw_args=raw_args, path=resolved_path)
+
+
 def _resolve_operational_command(
     command_name: str,
     raw_args: str,
     *,
     work_dir: str | None = None,
+    file_path: str | None = None,
 ) -> _OperationalActionResolution | None:
+    """Resolve a Koda operational command to its integration action, or a deny.
+
+    For a file command, ``file_path`` is the path its handler acts on, from
+    :func:`koda.utils.files.file_command_path`; :func:`with_approval` passes it, so the
+    grant decides on that path. Without it, the path is parsed the same way from
+    ``raw_args`` split on whitespace, as Telegram splits a command's arguments.
+    """
     command = str(command_name or "").strip().lower()
     if command not in _OPS_COMMANDS:
         return None
 
     args = str(raw_args or "").strip()
+    if command in FILE_COMMANDS:
+        path_arg = file_path if file_path is not None else file_command_path(command, args.split())
+        return _resolve_file_command(command, path_arg, raw_args=args, work_dir=work_dir)
+
     if not args:
         return None
 
@@ -639,29 +662,6 @@ def _resolve_operational_command(
             access_level="write",
             deny_reason="npm_subcommand_not_allowed",
             deny_message="npm subcommand is not allowed by the registry.",
-        )
-
-    if command in {"write", "edit", "rm", "mkdir", "cat"}:
-        if not tokens:
-            return None
-        resolved_path = None
-        if work_dir:
-            resolved = safe_resolve(tokens[0], work_dir)
-            resolved_path = str(resolved) if resolved is not None else None
-        action_id = f"fileops.{command}"
-        if resolved_path is None and work_dir:
-            return _OperationalActionResolution(
-                integration_id="fileops",
-                action_id=action_id,
-                access_level="write" if command != "cat" else "read",
-                path=None,
-                deny_reason="path_outside_workdir",
-                deny_message="Access denied: path is outside working directory.",
-            )
-        return _operational_resolution_from_contract(
-            command,
-            raw_args=args,
-            path=resolved_path,
         )
 
     if command == "http_request":
@@ -816,10 +816,53 @@ def _evaluate_operational_grant(
     if allowed_paths:
         if not resolution.path:
             return False, "Blocked by integration policy: this path is outside the granted scope."
-        if not _path_allowed(resolution.path, allowed_paths):
+        if not path_in_allowed_paths(resolution.path, allowed_paths):
             return False, "Blocked by integration policy: this path is outside the granted scope."
 
     return True, None
+
+
+@dataclass(frozen=True, slots=True)
+class _ApprovedFileTarget:
+    """The path a file command's confirmation was shown for, as the gate resolved it.
+
+    ``with_approval`` stores it with the pending operation, and
+    :func:`dispatch_approved_operation` runs the gate again before the handler, so an
+    approval runs the command only on this path.
+    """
+
+    command: str
+    raw_args: str
+    path_arg: str
+    path: str | None
+
+
+def _approved_file_target_refusal(target: _ApprovedFileTarget, user_data: dict[str, Any]) -> str | None:
+    """Return why an approved file command cannot run as it was confirmed, or None.
+
+    The handler resolves its path again against the work dir current at approval time,
+    which ``/setdir``, ``agent_set_workdir`` or a queued task may have changed since the
+    request, and a link on the path may point elsewhere by now. So the gate runs again on
+    the same parsed path: it must still pass the path policy, resolve to the path the
+    confirmation was shown for, and be allowed by the integration grant.
+    """
+    work_dir = str(user_data.get("work_dir") or "").strip() or None
+    resolution = _resolve_operational_command(
+        target.command, target.raw_args, work_dir=work_dir, file_path=target.path_arg
+    )
+    if resolution is not None and resolution.deny_reason:
+        return resolution.deny_message or "Blocked by integration policy."
+    if (resolution.path if resolution is not None else None) != target.path:
+        return (
+            f"Not run: <code>{escape_html(target.path_arg)}</code> no longer resolves to "
+            f"<code>{escape_html(target.path or '')}</code>, the path this confirmation was for "
+            "(the working directory or a link on the path changed). Send the command again."
+        )
+    if resolution is not None:
+        allowed, deny_message = _evaluate_operational_grant(resolution, work_dir=work_dir)
+        if not allowed:
+            return deny_message or "Blocked by integration policy."
+    return None
 
 
 def _resource_policy_for_operational_resolution(
@@ -992,6 +1035,7 @@ WRITE_CLASSIFIERS: dict[str, Callable[[str], bool]] = {
     "mkdir": _always_write,
     # Always READ
     "cat": _always_read,
+    "file": _always_read,
     "ls": _always_read,
     "search": _always_read,
     "fetch": _always_read,
@@ -1035,8 +1079,13 @@ async def _show_approval_keyboard(
     *,
     preview_text: str | None = None,
     requests: list[dict[str, Any]] | None = None,
+    approved_target: _ApprovedFileTarget | None = None,
 ) -> None:
-    """Show an InlineKeyboard asking the user to approve/deny the operation."""
+    """Show an InlineKeyboard asking the user to approve/deny the operation.
+
+    ``approved_target`` pins a file command to the path its gate resolved, so the approval
+    runs it only on that path (:func:`dispatch_approved_operation`).
+    """
     await _ensure_persistence_loaded()
     _cleanup_stale_ops()
     message = require_message(update)
@@ -1066,6 +1115,7 @@ async def _show_approval_keyboard(
         "agent_id": agent_id,
         "requests": list(requests or []),
         "grants": [],
+        "approved_target": approved_target,
     }
     user_data["_pending_op_id"] = op_id
 
@@ -1121,6 +1171,22 @@ async def dispatch_approved_operation(op_id: str) -> None:
     chat_id = pending.get("chat_id")
 
     original_user_data = require_user_data(original_context)
+    approved_target = pending.get("approved_target")
+    if isinstance(approved_target, _ApprovedFileTarget):
+        refusal = _approved_file_target_refusal(approved_target, original_user_data)
+        if refusal is not None:
+            _audit_operational_block(
+                str(pending.get("cmd_name") or approved_target.command), "approved_path_changed", user_id or None
+            )
+            log.warning(
+                "approved_operation_not_run",
+                op_id=op_id,
+                cmd=pending.get("cmd_name"),
+                path=approved_target.path,
+            )
+            await require_message(original_update).reply_text(refusal, parse_mode=ParseMode.HTML)
+            return
+
     original_user_data["_approved"] = True
     _execution_approved.set(True)
     success = False
@@ -1174,8 +1240,13 @@ def with_approval(
             policy_command_name, policy_raw_args = _canonical_operational_request(command_name, raw_args)
             resolution: _OperationalActionResolution | None = None
             policy_params: dict[str, Any] | None = None
+            approved_target: _ApprovedFileTarget | None = None
+            # A file command is checked on the very path its handler acts on (/ls alone: ".").
+            file_path = (
+                file_command_path(policy_command_name, context_args) if policy_command_name in FILE_COMMANDS else None
+            )
 
-            if not raw_args.strip():
+            if not raw_args.strip() and not file_path:
                 _execution_approved.set(True)
                 try:
                     return await func(update, context, *args, **kwargs)
@@ -1194,6 +1265,7 @@ def with_approval(
                     policy_command_name,
                     policy_raw_args,
                     work_dir=str(user_data.get("work_dir") or "").strip() or None,
+                    file_path=file_path,
                 )
                 policy_params = _policy_params_for_manual_command(
                     policy_command_name,
@@ -1210,6 +1282,13 @@ def with_approval(
                         parse_mode=ParseMode.HTML,
                     )
                     return None
+                if resolution and file_path is not None:
+                    approved_target = _ApprovedFileTarget(
+                        command=policy_command_name,
+                        raw_args=policy_raw_args,
+                        path_arg=file_path,
+                        path=resolution.path,
+                    )
                 if resolution:
                     allowed, deny_message = _evaluate_operational_grant(
                         resolution,
@@ -1291,6 +1370,7 @@ def with_approval(
                         func,
                         preview_text=policy_evaluation.preview_text,
                         requests=approval_requests,
+                        approved_target=approved_target,
                     )
                     return None
 
@@ -1351,7 +1431,9 @@ def with_approval(
                 return result
 
             # Needs approval → show keyboard, store, return
-            await _show_approval_keyboard(update, context, command_name, raw_args, func)
+            await _show_approval_keyboard(
+                update, context, command_name, raw_args, func, approved_target=approved_target
+            )
             return None
 
         return cast(

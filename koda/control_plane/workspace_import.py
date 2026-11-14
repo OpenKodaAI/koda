@@ -14,7 +14,7 @@ from typing import Any
 
 import yaml
 
-from koda.config import DEFAULT_WORK_DIR, PROJECT_DIRS, SENSITIVE_DIRS
+from koda.config import DEFAULT_WORK_DIR, PROJECT_DIRS
 from koda.skills._package import SkillPackageError, scan_skill_package
 from koda.utils.workdir import validate_work_dir
 
@@ -213,15 +213,11 @@ def workspace_source_from_dict(value: dict[str, Any]) -> WorkspaceScanSource:
 
 
 def validate_workspace_root(path: str) -> Path:
+    """Validate a workspace root with the shared work-dir check (sensitive dirs included)."""
     validation = validate_work_dir(path)
     if not validation.ok:
         raise ValueError(validation.reason or "Invalid workspace directory.")
-    root = Path(validation.path)
-    for sensitive in SENSITIVE_DIRS:
-        sensitive_path = Path(os.path.realpath(os.path.expanduser(sensitive)))
-        if root == sensitive_path or sensitive_path in root.parents:
-            raise ValueError(f"Blocked workspace root: {root}")
-    return root
+    return Path(validation.path)
 
 
 def directory_roots_payload() -> dict[str, Any]:

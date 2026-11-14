@@ -684,6 +684,30 @@ FILEOPS_MAX_READ_SIZE: int = int(_env("FILEOPS_MAX_READ_SIZE", "1048576"))  # 1M
 FILEOPS_BLOCKED_EXTENSIONS: frozenset[str] = frozenset(
     {".env", ".key", ".pem", ".p12", ".pfx", ".jks", ".keystore", ".secret", ".credentials"}
 )
+# Credential stores that the provider and developer CLIs keep in HOME, which is also the
+# default Docker work dir (HOME=/var/lib/koda/runtime/home). The file commands, the agent
+# file tools and browser_upload refuse them like a blocked extension. An entry ending in
+# "/" is a directory, refused with everything below it wherever it appears in a path; any
+# other entry is a file, matched by the last components of the path. Case-insensitive.
+FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
+    ".ssh/",
+    ".gnupg/",
+    ".aws/",
+    ".azure/",
+    ".config/gcloud/",
+    ".claude/.credentials.json",
+    ".codex/auth.json",
+    ".gemini/oauth_creds.json",
+    ".config/gh/hosts.yml",
+    ".docker/config.json",
+    ".kube/config",
+    ".git-credentials",
+    ".netrc",
+    "_netrc",
+    ".pgpass",
+    ".npmrc",
+    ".pypirc",
+)
 BLOCKED_SHELL_PATTERN: re.Pattern = re.compile(
     # Destructive filesystem operations
     r"rm\s+-rf|mkfs|dd\s+if=|shutdown|reboot|chmod\s+777\s+/"

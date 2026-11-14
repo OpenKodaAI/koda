@@ -112,3 +112,87 @@ async def test_cat_no_args(mock_update, mock_context):
     mock_context.args = []
     await cmd_cat(mock_update, mock_context)
     assert "Usage" in mock_update.message.reply_text.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_cat_refuses_dotenv(mock_update, mock_context, tmp_path):
+    (tmp_path / ".env").write_text("TOKEN=canary-secret\n")
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = [".env"]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_cat(mock_update, mock_context)
+    shown = [call.args[1] for call in mock_send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+    assert shown
+    assert not any("canary-secret" in text for text in shown)
+    assert any("blocked" in text.lower() for text in shown)
+
+
+@pytest.mark.asyncio
+async def test_write_dotenv_is_refused_before_approval(mock_update, mock_context, tmp_path):
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = [".env", "TOKEN=x"]
+    await cmd_write(mock_update, mock_context)
+    reply = mock_update.message.reply_text.call_args.args[0]
+    assert "blocked" in reply.lower()
+    assert "Confirmacao necessaria" not in reply
+    assert not (tmp_path / ".env").exists()
+
+
+@pytest.mark.asyncio
+async def test_rm_secret_file_is_refused_before_approval(mock_update, mock_context, tmp_path):
+    secret = tmp_path / "prod.env"
+    secret.write_text("TOKEN=x\n")
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = ["prod.env"]
+    await cmd_rm(mock_update, mock_context)
+    reply = mock_update.message.reply_text.call_args.args[0]
+    assert "blocked" in reply.lower()
+    assert "Confirmacao necessaria" not in reply
+    assert secret.exists()
+
+
+@pytest.mark.asyncio
+async def test_cat_relative_path_resolves_under_work_dir(mock_update, mock_context, tmp_path, monkeypatch):
+    work = tmp_path / "work"
+    (work / "src").mkdir(parents=True)
+    (work / "src" / "main.py").write_text("work tree")
+    decoy = tmp_path / "decoy"
+    (decoy / "src").mkdir(parents=True)
+    (decoy / "src" / "main.py").write_text("decoy tree")
+    monkeypatch.chdir(decoy)
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.args = ["src/main.py"]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_cat(mock_update, mock_context)
+    assert "work tree" in mock_send.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_cat_reads_a_name_the_shell_cannot_split(mock_update, mock_context, tmp_path):
+    """The approval gate checks the path /cat reads; it does not shell-split it, so a quote is just a character."""
+    (tmp_path / "it's.txt").write_text("quoted name")
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = ["it's.txt"]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_cat(mock_update, mock_context)
+    assert "quoted name" in mock_send.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_write_gate_checks_the_path_the_handler_writes(mock_update, mock_context, tmp_path):
+    """/write takes ``<path> <content>``: the grant checks the first arg, which the gate does not unquote either.
+
+    Shell-splitting ``"src/a ../../top.txt" body`` would show the grant ``<work>/src/top.txt``
+    while the handler writes ``<work>/"src/a``, outside the grant.
+    """
+    work = tmp_path.resolve()
+    (work / "src").mkdir()
+    grant = {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(work / "src")]}}}
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.user_data["_approved"] = True
+    mock_context.args = ['"src/a', '../../top.txt"', "body"]
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", grant):
+        await cmd_write(mock_update, mock_context)
+    assert "outside the granted scope" in mock_update.message.reply_text.call_args.args[0]
+    assert not (work / '"src').exists()
