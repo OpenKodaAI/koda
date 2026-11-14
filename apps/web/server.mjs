@@ -1,6 +1,6 @@
 import next from "next";
 import { WebSocket, WebSocketServer } from "ws";
-import { createDashboardServer } from "./src/lib/dashboard-server.mjs";
+import { createDashboardServer, parseRequestUrl } from "./src/lib/dashboard-server.mjs";
 import { parseTrustedProxies } from "./src/lib/forwarded-for.mjs";
 
 const dev = process.env.NODE_ENV !== "production";
@@ -56,9 +56,8 @@ function closeSocket(socket, code, reason) {
 }
 
 async function handleRelayConnection(client, request) {
-  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
-  const relayId = url.pathname.slice(relayPathPrefix.length);
-  const descriptor = readRelayDescriptor(relayId);
+  const url = parseRequestUrl(request);
+  const descriptor = url ? readRelayDescriptor(url.pathname.slice(relayPathPrefix.length)) : null;
 
   if (!descriptor?.upstreamUrl) {
     closeSocket(client, 4404, "relay_not_found");
@@ -134,7 +133,11 @@ relayWss.on("connection", (client, request) => {
 });
 
 function handleUpgrade(request, socket, head) {
-  const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+  const url = parseRequestUrl(request);
+  if (!url) {
+    socket.destroy();
+    return;
+  }
 
   if (url.pathname.startsWith(relayPathPrefix)) {
     relayWss.handleUpgrade(request, socket, head, (client) => {

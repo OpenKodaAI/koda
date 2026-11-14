@@ -189,6 +189,13 @@ triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
   `WEB_TRUSTED_PROXIES=gateway,203.0.113.5`. `WEB_TRUSTED_PROXIES` takes no hostnames, so a
   proxy container on the Compose network is trusted by a fixed `ipv4_address`
   ([VPS Install](../install/vps.md#reverse-proxy)).
+- A trusted proxy must add the address it received the request from to `X-Forwarded-For`,
+  appended or replacing the header: nginx
+  `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (or `$remote_addr`), as in the
+  bundled `proxy/nginx.conf`; HAProxy `option forwardfor` (without `if-none`); Caddy and Traefik
+  do it by default. The last entry is the one a trusted peer vouches for, so a proxy that passes
+  the client's header through unchanged (nginx and HAProxy otherwise) lets each client name its
+  own bucket, and clients that send no header all share one bucket.
 - Trust only peers you control: a trusted peer can claim any client address. Docker hides
   the real client behind the gateway whenever its userland proxy carries the connection
   (Docker Desktop, rootless Docker, or an IPv6 host address on an IPv4-only network), so

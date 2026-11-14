@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import socket
 import struct
 import subprocess
@@ -437,6 +438,36 @@ def test_compose_trusts_the_dashboard_service_and_docker_gateway(path: Path) -> 
     services = yaml.safe_load(path.read_text(encoding="utf-8"))["services"]
     assert services["app"]["environment"]["CONTROL_PLANE_TRUSTED_PROXIES"] == "${CONTROL_PLANE_TRUSTED_PROXIES:-web}"
     assert services["web"]["environment"]["WEB_TRUSTED_PROXIES"] == "${WEB_TRUSTED_PROXIES:-gateway}"
+
+
+# Both services believe X-Forwarded-For from the Docker gateway, so a proxy on the host must add the
+# address it received each request from. nginx and HAProxy otherwise pass the client's own header
+# through, which lets a client pick its rate-limit bucket.
+NGINX_ADDS_PEER = "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;"
+
+
+def test_bundled_nginx_proxy_adds_the_peer_to_x_forwarded_for() -> None:
+    text = (ROOT / "packages" / "cli" / "release" / "bundle" / "proxy" / "nginx.conf").read_text(encoding="utf-8")
+    proxied = [body for body in re.findall(r"location[^{]*\{([^}]*)\}", text) if "proxy_pass" in body]
+    assert proxied
+    for body in proxied:
+        assert NGINX_ADDS_PEER in body, body
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        ROOT / "docs" / "install" / "vps.md",
+        ROOT / "docs" / "security" / "authentication.md",
+        ROOT / "docs" / "operations" / "hardening.md",
+    ],
+    ids=lambda path: path.name,
+)
+def test_proxy_docs_require_the_proxy_to_add_x_forwarded_for(path: Path) -> None:
+    text = " ".join(path.read_text(encoding="utf-8").split())
+    assert "needs nothing extra" not in text
+    assert NGINX_ADDS_PEER in text
+    assert "option forwardfor" in text
 
 
 def test_unusable_trusted_proxy_entries_are_logged_and_dropped() -> None:

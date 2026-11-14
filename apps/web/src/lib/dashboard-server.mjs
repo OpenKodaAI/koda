@@ -19,13 +19,34 @@ import { rewriteForwardedFor } from "./forwarded-for.mjs";
  */
 
 /**
+ * The request target as a URL, or null when it does not parse. Only the path
+ * and query are read, so the base is fixed instead of taken from the client's
+ * `Host` header. A `new URL` that throws inside a listener is uncaught and
+ * would stop the process (`Host: a b`, or a target such as `//a%zz/`).
+ * @param {http.IncomingMessage} request
+ * @returns {URL | null}
+ */
+export function parseRequestUrl(request) {
+  try {
+    return new URL(request.url ?? "/", "http://localhost");
+  } catch {
+    return null;
+  }
+}
+
+/**
  * @param {DashboardServerOptions} options
  * @returns {http.Server}
  */
 export function createDashboardServer({ handle, upgrade, isTrusted }) {
   const server = http.createServer((request, response) => {
     rewriteForwardedFor(request, isTrusted);
-    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
+    const url = parseRequestUrl(request);
+    if (!url) {
+      response.writeHead(400, { Connection: "close" });
+      response.end();
+      return;
+    }
     if (url.pathname === "/api/health") {
       response.writeHead(200, {
         "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
@@ -40,6 +61,10 @@ export function createDashboardServer({ handle, upgrade, isTrusted }) {
 
   server.on("upgrade", (request, socket, head) => {
     rewriteForwardedFor(request, isTrusted);
+    if (!parseRequestUrl(request)) {
+      socket.end("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+      return;
+    }
     upgrade(request, socket, head);
   });
 

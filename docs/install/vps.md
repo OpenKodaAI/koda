@@ -34,6 +34,8 @@ from the network until a reverse proxy publishes it. A reverse proxy should:
 - publish `/api/control-plane/*`
 - publish `/api/runtime/*`
 - publish `/openapi/control-plane.json`
+- add the address each request came from to `X-Forwarded-For`, appended or replacing the header
+  (see the rate-limit notes below)
 
 Recommended model:
 
@@ -53,10 +55,16 @@ sessions) but not the control-plane API, so API-token clients and `/openapi/cont
 need a proxy on the Koda host. Plain-HTTP access from other machines does not work: production
 operator session cookies are `Secure`, so browsers only keep them on HTTPS (or `localhost`).
 
-Login and recovery are rate limited per client address. A proxy on the Koda host needs
-nothing extra for browser traffic. It reaches the dashboard from the Docker gateway, whose
-`X-Forwarded-For` the dashboard believes (`WEB_TRUSTED_PROXIES=gateway` in Compose), and the
-API believes the dashboard (`CONTROL_PLANE_TRUSTED_PROXIES=web`). If your proxy also forwards
+Login and recovery are rate limited per client address. A proxy on the Koda host reaches the
+dashboard from the Docker gateway, whose `X-Forwarded-For` the dashboard believes
+(`WEB_TRUSTED_PROXIES=gateway` in Compose), and the API believes the dashboard
+(`CONTROL_PLANE_TRUSTED_PROXIES=web`). The proxy must therefore add the address it received each
+request from to `X-Forwarded-For`, appended or replacing the header. nginx needs
+`proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (or `$remote_addr`) in every
+`location`, as in the bundled `proxy/nginx.conf`; HAProxy needs `option forwardfor` (without
+`if-none`); Caddy and Traefik do it by default. A proxy that passes the client's header through
+unchanged, which nginx and HAProxy do otherwise, lets each client name its own rate-limit bucket,
+and clients that send no header all share one bucket. If your proxy also forwards
 `/api/control-plane/*` straight to the API, as the bundled `proxy/nginx.conf` does, set
 `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`, or all of its clients share one budget. A proxy
 on another host needs its address added: `WEB_TRUSTED_PROXIES=gateway,<proxy-ip>`.
