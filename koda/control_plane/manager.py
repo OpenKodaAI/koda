@@ -72,6 +72,7 @@ from koda.services.embedding_catalog import (
 from koda.services.embedding_catalog import (
     model_disk_bytes as _embedding_model_disk_bytes,
 )
+from koda.services.http_client import guarded_urlopen
 from koda.services.kokoro_manager import (
     KOKORO_DEFAULT_LANGUAGE_ID,
     KOKORO_DEFAULT_VOICE_ID,
@@ -2736,7 +2737,9 @@ class ControlPlaneManager:
             headers=request_headers,
         )
         try:
-            with urllib.request.urlopen(request, timeout=10) as response:
+            # A local-mode server is the one the operator configured: a
+            # private-network grant for that origin. Ollama Cloud gets none.
+            with guarded_urlopen(request, timeout=10, allow_private=auth_mode != "api_key") as response:
                 data = json.loads(response.read().decode("utf-8"))
         except Exception:
             if cached:
@@ -3970,7 +3973,9 @@ class ControlPlaneManager:
                 method="GET",
             )
             try:
-                with urllib.request.urlopen(request, timeout=1.5) as response:
+                # The agent's runtime API (loopback or the supervised endpoint):
+                # a private-network grant for that origin only.
+                with guarded_urlopen(request, timeout=1.5, allow_private=True) as response:
                     status = int(getattr(response, "status", 200) or 200)
                     if 200 <= status < 300:
                         return True
@@ -4023,7 +4028,7 @@ class ControlPlaneManager:
 
         for attempt in range(2):
             try:
-                with urllib.request.urlopen(build_request(), timeout=20) as response:
+                with guarded_urlopen(build_request(), timeout=20, allow_private=True) as response:
                     return cast(dict[str, Any], json.loads(response.read().decode("utf-8")))
             except urllib.error.HTTPError as exc:
                 message = self._runtime_http_error_message(exc)

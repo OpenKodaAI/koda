@@ -283,19 +283,28 @@ class _CapturedResponse:
         return self._body
 
 
-def _patch_urlopen(monkeypatch, body: bytes = b'{"data": []}'):
-    """Patch `urlopen` and return the dict that captures each call."""
+def _patch_fetch(monkeypatch, fake):
+    """Send verifier fetches to *fake*: fixed vendor URLs use `urlopen`, base-URL ones the guarded client."""
     from urllib import request as urllib_request
 
+    from koda.services import http_client
+
+    monkeypatch.setattr(urllib_request, "urlopen", fake)
+    monkeypatch.setattr(http_client, "guarded_urlopen", fake)
+
+
+def _patch_urlopen(monkeypatch, body: bytes = b'{"data": []}'):
+    """Patch `urlopen` and return the dict that captures each call."""
     captured: dict[str, object] = {}
 
-    def _fake(request, timeout=10):  # noqa: ARG001
+    def _fake(request, timeout=10, **guard_kwargs):  # noqa: ARG001
         captured["url"] = request.full_url
         captured["headers"] = {key.lower(): value for key, value in request.header_items()}
         captured["method"] = request.get_method()
+        captured["guard_kwargs"] = guard_kwargs
         return _CapturedResponse(body)
 
-    monkeypatch.setattr(urllib_request, "urlopen", _fake)
+    _patch_fetch(monkeypatch, _fake)
     return captured
 
 
@@ -448,14 +457,14 @@ def test_openai_compatible_verify_exposes_detected_model_ids(monkeypatch):
     assert result.verified is True
     assert captured["url"] == "https://api.mistral.ai/v1/models"
     assert result.details["model_ids"] == ["mistral-large-latest", "codestral-latest"]
+    # The vendor endpoint goes through the SSRF guard with no private-network grant.
+    assert captured["guard_kwargs"] == {"allow_private": False, "follow_redirects": True}
 
 
 def test_openrouter_verify_uses_key_endpoint_before_model_discovery(monkeypatch):
-    from urllib import request as urllib_request
-
     calls: list[dict[str, object]] = []
 
-    def _fake(request, timeout=10):  # noqa: ARG001
+    def _fake(request, timeout=10, **_guard_kwargs):  # noqa: ARG001
         url = str(request.full_url)
         calls.append(
             {
@@ -470,7 +479,7 @@ def test_openrouter_verify_uses_key_endpoint_before_model_discovery(monkeypatch)
             return _CapturedResponse(b'{"data": [{"id": "openrouter/auto"}, {"id": "~openai/gpt-mini-latest"}]}')
         raise AssertionError(f"unexpected URL: {url}")
 
-    monkeypatch.setattr(urllib_request, "urlopen", _fake)
+    _patch_fetch(monkeypatch, _fake)
 
     result = provider_auth.verify_provider_api_key("openrouter", "sk-or-v1-test")
 
@@ -489,11 +498,10 @@ def test_openrouter_verify_uses_key_endpoint_before_model_discovery(monkeypatch)
 def test_openrouter_verify_rejects_invalid_key_before_models(monkeypatch):
     import io
     from urllib import error as urllib_error
-    from urllib import request as urllib_request
 
     calls: list[str] = []
 
-    def _fake(request, timeout=10):  # noqa: ARG001
+    def _fake(request, timeout=10, **_guard_kwargs):  # noqa: ARG001
         calls.append(str(request.full_url))
         raise urllib_error.HTTPError(
             str(request.full_url),
@@ -503,7 +511,7 @@ def test_openrouter_verify_rejects_invalid_key_before_models(monkeypatch):
             fp=io.BytesIO(b'{"error":"invalid key"}'),
         )
 
-    monkeypatch.setattr(urllib_request, "urlopen", _fake)
+    _patch_fetch(monkeypatch, _fake)
 
     result = provider_auth.verify_provider_api_key("openrouter", "sk-or-v1-bad")
 

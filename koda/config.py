@@ -804,6 +804,10 @@ SQUAD_TELEGRAM_STRICT_ADMIN_CHECK: bool = _env("SQUAD_TELEGRAM_STRICT_ADMIN_CHEC
 MCP_ENABLED: bool = _env("MCP_ENABLED", "false").lower() in ("1", "true", "yes")
 MCP_OAUTH_ENABLED: bool = _env("MCP_OAUTH_ENABLED", "true").lower() in ("1", "true", "yes")
 MCP_OAUTH_CALLBACK_BASE_URL: str = _env("MCP_OAUTH_CALLBACK_BASE_URL", "")
+# Private-network grant for remote (HTTP) MCP servers: comma-separated CIDRs they may be
+# reached on besides public addresses, e.g. 100.64.0.0/10 for a Tailscale tailnet. Loopback,
+# link-local (cloud metadata), unspecified and multicast addresses are never granted.
+MCP_ALLOWED_PRIVATE_NETWORKS: list[str] = _env_csv("MCP_ALLOWED_PRIVATE_NETWORKS")
 
 # --- PostgreSQL ---
 POSTGRES_ENABLED: bool = STATE_BACKEND == "postgres" or _env("POSTGRES_ENABLED", "false").lower() == "true"

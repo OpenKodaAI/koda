@@ -60,6 +60,25 @@ Security notes:
 - `RUNTIME_KERNEL_SOCKET`
 - `PLAYWRIGHT_BROWSERS_PATH`
 
+### Outbound Network
+
+Outbound requests whose destination comes from a user, a third-party response or an
+operator setting go through one SSRF guard: agent web tools, link previews and artifact
+downloads, MCP HTTP servers, generated-image downloads, OpenAI-compatible providers and
+their key checks, Ollama, and the agent runtime API. The guard speaks http and https only,
+connects only to the addresses it checked (public unicast ones), follows no redirect to
+another origin, and does not use the `*_proxy` environment variables. Endpoints the
+operator configures (`OLLAMA_BASE_URL`, a provider base URL other than the vendor's, the
+runtime API) may be on a private network; their redirects still never leave them.
+
+- `MCP_ALLOWED_PRIVATE_NETWORKS` — private networks remote (HTTP) MCP servers may be
+  reached on, as comma-separated CIDRs, for example `100.64.0.0/10` for a Tailscale tailnet
+  (prefer each server's own `/32`: the same range also holds `100.100.100.200`, a cloud
+  metadata address). Unset, MCP servers must be on public addresses. Loopback, link-local
+  (cloud metadata), unspecified and multicast addresses are never granted, whatever the list
+  covers; entries that are not CIDRs are logged and ignored. Set it in the host's `.env`: the
+  control plane checks registrations against it and passes it on to every agent worker
+
 ### Postgres
 
 - `KNOWLEDGE_V2_POSTGRES_DSN`
