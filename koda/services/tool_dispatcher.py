@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from koda.agent_contract import (
+    FILE_TOOL_PATH_PARAMS,
+    WORK_DIR_DEFAULT_PATH_TOOLS,
     evaluate_integration_grant,
     is_known_dispatcher_tool,
     resolve_integration_action,
@@ -480,24 +482,22 @@ def _record_runtime_integration_health(
         return
 
 
-_FILE_TOOL_PATH_PARAMS: tuple[str, ...] = ("path", "source", "destination")
-_FILE_TOOLS_DEFAULTING_TO_WORK_DIR: frozenset[str] = frozenset({"file_list", "file_search", "file_grep"})
-
-
 def _file_tool_policy_params(tool: str, params: dict[str, object], work_dir: str) -> dict[str, object]:
     """Show the policy and grant gate the paths a file tool will touch, as the commands do.
 
     The approval layer gives the policy the resolved path of ``/cat``, ``/write`` and the
     other file commands, so each file-tool path param is replaced the same way, by the
     absolute, symlink-resolved path it names under the work dir (``src/main.py`` and
-    ``<work>/src/../src/main.py`` both become ``<work>/src/main.py``). ``file_list``,
-    ``file_search`` and ``file_grep`` read the work dir when ``path`` is omitted, so they
-    are checked against it. The handlers still apply :func:`resolve_work_path` themselves.
+    ``<work>/src/../src/main.py`` both become ``<work>/src/main.py``), for each param of
+    ``koda.agent_contract.FILE_TOOL_PATH_PARAMS``. The tools of
+    ``koda.agent_contract.WORK_DIR_DEFAULT_PATH_TOOLS`` (``file_list``, ``file_search`` and
+    ``file_grep``) read the work dir when ``path`` is omitted, so they are checked against
+    it. The handlers still apply :func:`resolve_work_path` themselves.
     """
     canonical = dict(params)
-    if tool in _FILE_TOOLS_DEFAULTING_TO_WORK_DIR and "path" not in canonical:
+    if tool in WORK_DIR_DEFAULT_PATH_TOOLS and "path" not in canonical:
         canonical["path"] = work_dir
-    for key in _FILE_TOOL_PATH_PARAMS:
+    for key in FILE_TOOL_PATH_PARAMS:
         value = canonical.get(key)
         if isinstance(value, str) and value.strip():
             with contextlib.suppress(OSError, ValueError):

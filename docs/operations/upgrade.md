@@ -133,10 +133,15 @@ existing rules are validated and simulated:
   `allow` path rule, wherever they reach the engine unresolved: in the
   worker that is only `agent_set_workdir`'s `path`, which is passed as
   written; in the simulator, which evaluates the params as you send
-  them, it is every such path. So for a relative or `~` file-tool path
-  the simulator can show a stricter decision than the worker makes,
-  never a looser one. To see the worker's decision, send the absolute
-  path the call resolves to.
+  them, it is every such path. The `fileops` grant's `allowed_paths`
+  check sees the same paths, and no `allowed_paths` entry covers a path
+  that cannot be placed, so in the simulator a `file_list`, `file_search`
+  or `file_grep` without a `path` is outside every path-scoped grant,
+  while the worker checks the working directory it reads. So for a
+  relative or `~` file-tool path, and for a listing, search or grep
+  without a `path`, the simulator can show a stricter decision than the
+  worker makes, never a looser one. To see the worker's decision, send
+  the absolute path the call resolves to.
 - **A restrictive rule written through a symlinked directory applies to
   the resolved path.** The worker gives the rules a file tool's path
   symlink-resolved, so a rule for `/srv/app/config/secrets`, where

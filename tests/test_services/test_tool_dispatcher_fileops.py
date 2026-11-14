@@ -933,6 +933,157 @@ class TestGrantChecksThePathWithItsWhitespace:
         assert resolve_integration_action(tool, {"path": path}).path is None
 
 
+class TestTheSimulatorIsNeverLooserThanTheWorkerOnAGrantScope:
+    """A path-scoped fileops grant decides ``file_list``, ``file_search`` and ``file_grep`` without a path too.
+
+    In the worker the dispatcher hands the grant the work dir for them, the directory they
+    read. The simulate route has no work dir, so it checks the unplaceable ``.``, which no
+    ``allowed_paths`` entry covers: it may deny a call the worker allows, never allow one
+    the worker denies.
+    """
+
+    @pytest.fixture
+    def work(self, tmp_path, monkeypatch):
+        work = (tmp_path / "work").resolve()
+        (work / "src").mkdir(parents=True)
+        (work / "src" / "main.py").write_text("TOKEN = 'granted'\n")
+        (work / "secret.txt").write_text("TOKEN = 'canary-outside-grant'\n")
+        monkeypatch.chdir(tmp_path)
+        return work
+
+    @staticmethod
+    def _grant(*allowed_paths) -> dict:
+        return {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(p) for p in allowed_paths]}}}
+
+    @staticmethod
+    def _simulate(tool: str, params: dict, grant: dict) -> dict:
+        from koda.control_plane.execution_policy import simulate_execution_policy
+        from koda.services.execution_policy import feature_flags_from_env
+
+        return simulate_execution_policy(
+            {},
+            {"tool_id": tool, "params": params},
+            agent_id="AGENT_A",
+            agent_spec={"tool_policy": {"allowed_tool_ids": [tool]}, "resource_access_policy": grant},
+            feature_flags=feature_flags_from_env({"FILEOPS_ENABLED": "true"}),
+        )
+
+    @staticmethod
+    async def _execute(tool: str, params: dict, work_dir: str, grant: dict):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", grant),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(work_dir))
+
+    _PATHLESS_CALLS = [("file_list", {}), ("file_grep", {"pattern": "TOKEN"}), ("file_search", {"pattern": "*"})]
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("tool", "params"), _PATHLESS_CALLS)
+    async def test_a_call_without_a_path_outside_the_grant_is_denied_on_both_sides(self, work, tool, params):
+        grant = self._grant(work / "src")
+
+        simulated = self._simulate(tool, params, grant)
+        worker = await self._execute(tool, params, str(work), grant)
+
+        assert (simulated["decision"], simulated["reason_code"]) == ("deny", "path_not_granted")
+        assert not worker.success, worker.output
+        assert "outside the granted scope" in worker.output
+        assert "secret.txt" not in worker.output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("tool", "params"), _PATHLESS_CALLS)
+    async def test_where_the_grant_covers_the_work_dir_only_the_simulator_denies(self, work, tool, params):
+        grant = self._grant(work)
+
+        simulated = self._simulate(tool, params, grant)
+        worker = await self._execute(tool, params, str(work), grant)
+
+        assert (simulated["decision"], simulated["reason_code"]) == ("deny", "path_not_granted")
+        assert worker.success, worker.output
+        assert "secret.txt" in worker.output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("tool", "params"), _PATHLESS_CALLS)
+    async def test_the_same_call_with_the_work_dir_as_its_path_is_decided_alike(self, work, tool, params):
+        call = {**params, "path": str(work)}
+
+        for grant, allowed in ((self._grant(work / "src"), False), (self._grant(work), True)):
+            simulated = self._simulate(tool, call, grant)
+            worker = await self._execute(tool, call, str(work), grant)
+            assert (simulated["decision"] == "allow") is allowed, simulated
+            assert worker.success is allowed, worker.output
+
+    def test_the_contract_grant_check_places_a_pathless_call_nowhere(self):
+        from koda.agent_contract import evaluate_integration_grant
+
+        for tool, params in self._PATHLESS_CALLS:
+            decision = evaluate_integration_grant(tool, params, self._grant("/"))
+            assert (decision.allowed, decision.reason) == (False, "path_not_granted"), tool
+            assert evaluate_integration_grant(tool, params, self._grant()).allowed, tool
+
+
+class TestOneListOfFileToolPaths:
+    """Which file tools act on the work dir without a ``path``, and which params name a path, is listed once.
+
+    ``koda.agent_contract`` holds both lists. The worker's dispatcher hands the policy and
+    the grant the work dir for the first (``_file_tool_policy_params``), the policy engine
+    evaluates ``.`` for them (``resolve_action_paths``), the grant refuses ``.`` under
+    ``allowed_paths``, and the handlers' own default must agree.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_handlers_default_to_the_work_dir_exactly_for_the_listed_tools(self, tmp_path):
+        from koda.agent_contract import WORK_DIR_DEFAULT_PATH_TOOLS
+        from koda.services.tool_dispatcher import _TOOL_HANDLERS
+
+        work = tmp_path.resolve()
+        (work / "notes.txt").write_text("notes visible\n")
+        params = {"pattern": "notes*", "content": "x", "old_text": "notes", "new_text": "x"}
+        acted_on_the_work_dir = set()
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            for tool in sorted(name for name in _TOOL_HANDLERS if name.startswith("file_")):
+                result = await _TOOL_HANDLERS[tool](dict(params), _make_ctx(str(work)))
+                if result.success:
+                    assert "notes" in result.output, (tool, result.output)
+                    acted_on_the_work_dir.add(tool)
+                else:
+                    assert "Missing" in result.output, (tool, result.output)
+
+        assert acted_on_the_work_dir == WORK_DIR_DEFAULT_PATH_TOOLS
+        assert sorted(os.listdir(work)) == ["notes.txt"]
+        assert (work / "notes.txt").read_text() == "notes visible\n"
+
+    def test_the_dispatcher_and_the_policy_paths_read_the_same_lists(self, tmp_path):
+        from koda.agent_contract import FILE_TOOL_PATH_PARAMS, WORK_DIR_DEFAULT_PATH_TOOLS, resolve_action_paths
+        from koda.services.tool_dispatcher import _TOOL_HANDLERS, _file_tool_policy_params
+
+        work = tmp_path.resolve()
+        file_tools = sorted(name for name in _TOOL_HANDLERS if name.startswith("file_"))
+        assert WORK_DIR_DEFAULT_PATH_TOOLS.issubset(file_tools)
+        assert len(WORK_DIR_DEFAULT_PATH_TOOLS) < len(file_tools)
+        for tool in file_tools:
+            worker = _file_tool_policy_params(tool, {"pattern": "*"}, str(work))
+            engine = resolve_action_paths(tool, {"pattern": "*"})
+            if tool in WORK_DIR_DEFAULT_PATH_TOOLS:
+                assert worker["path"] == str(work), tool
+                assert engine == (".",), tool
+            else:
+                assert "path" not in worker, tool
+                assert engine == (), tool
+
+        written = {key: f"sub/../{key}.txt" for key in FILE_TOOL_PATH_PARAMS}
+        canonical = _file_tool_policy_params("file_move", written, str(work))
+        assert {key: canonical[key] for key in FILE_TOOL_PATH_PARAMS} == {
+            key: str(work / f"{key}.txt") for key in FILE_TOOL_PATH_PARAMS
+        }
+        assert resolve_action_paths("file_move", written) == tuple(written[key] for key in FILE_TOOL_PATH_PARAMS)
+
+
 class TestPathRulesCoverWhatASubtreeToolReads:
     """A restrictive path rule on a directory decides a grep, search, listing or move of an ancestor of it."""
 

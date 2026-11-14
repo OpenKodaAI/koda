@@ -1729,14 +1729,18 @@ def given_path(value: object) -> str | None:
 def _grant_scoped_paths(resolution: IntegrationActionResolution, params: dict[str, Any]) -> list[str]:
     """Return every path an action touches that a grant's ``allowed_paths`` must cover.
 
-    That is the envelope path, except for ``file_move``, which writes its destination as
-    well as reading its source, so both ends are checked. Each is the param as given
-    (:func:`given_path`).
+    For a ``file_*`` tool these are the paths the execution policy evaluates
+    (:func:`resolve_action_paths`): each path param it is given
+    (:data:`FILE_TOOL_PATH_PARAMS`), so both ends of a ``file_move``, and for a tool that
+    reads the work dir when the call gives no ``path`` (:data:`WORK_DIR_DEFAULT_PATH_TOOLS`)
+    the relative ``.``, which no ``allowed_paths`` entry covers. The worker's dispatcher
+    sets such a call's ``path`` to the work dir first, so ``.`` is checked only where no
+    work dir is known, as in the execution-policy simulator, which may then deny a call
+    the worker allows but never allows one it denies. For any other tool it is the
+    envelope path. Each is the param as given (:func:`given_path`).
     """
-    if resolution.tool_id == "file_move":
-        ends = [given_path(params.get(key)) for key in ("source", "destination")]
-        if any(end is not None for end in ends):
-            return [end for end in ends if end is not None]
+    if resolution.tool_id.startswith("file_"):
+        return [path for path in resolve_action_paths(resolution.tool_id, params) if given_path(path) is not None]
     return [resolution.path] if resolution.path else []
 
 
@@ -2015,9 +2019,21 @@ def _infer_mcp_access_level(tool_name: str) -> str:
     return _action_level_from_tokens(action_token, read_actions=_MCP_READ_ACTION_TOKENS)
 
 
-# The tools that act on the working directory when the call gives no ``path``
-# (``params.get("path", ctx.work_dir)`` in koda.services.tool_dispatcher).
-_WORK_DIR_DEFAULT_PATH_TOOLS = frozenset({"file_list", "file_search", "file_grep"})
+FILE_TOOL_PATH_PARAMS: tuple[str, ...] = ("path", "source", "destination")
+"""The params in which a ``file_*`` tool names a path it acts on.
+
+The worker's dispatcher resolves each of them under the work dir before the policy and
+the grant see the call (``koda.services.tool_dispatcher._file_tool_policy_params``), and
+the execution policy and the grant evaluate each of them (:func:`resolve_action_paths`).
+"""
+
+WORK_DIR_DEFAULT_PATH_TOOLS: frozenset[str] = frozenset({"file_list", "file_search", "file_grep"})
+"""The ``file_*`` tools that act on the work dir when the call gives no ``path``.
+
+Their handlers read ``params.get("path", ctx.work_dir)``; the worker's dispatcher hands
+the policy and the grant the work dir for them, and where no work dir is known the
+execution policy and the grant check the unplaceable ``.`` (:func:`resolve_action_paths`).
+"""
 
 SUBTREE_PATH_TOOLS: frozenset[str] = frozenset({"file_search", "file_grep", "file_move"})
 """Tools that act on everything below each path they are given, not on that path alone.
@@ -2066,11 +2082,11 @@ def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> 
     if tool in FILE_COMMAND_ACCESS_LEVELS or tool.startswith("agent_"):
         keys = ("path",)
     elif tool.startswith("file_"):
-        keys = ("path", "source", "destination")
+        keys = FILE_TOOL_PATH_PARAMS
     else:
         return ()
     paths = tuple(str(payload[key]) for key in keys if payload.get(key) not in (None, ""))
-    if tool in _WORK_DIR_DEFAULT_PATH_TOOLS and "path" not in payload:
+    if tool in WORK_DIR_DEFAULT_PATH_TOOLS and "path" not in payload:
         return (".", *paths)
     return paths
 
@@ -2333,7 +2349,7 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             "move": "write",
             "delete": "destructive",
         }.get(action_suffix, "write")
-        path = given_path(payload.get("path") or payload.get("source") or payload.get("destination"))
+        path = given_path(next((payload[key] for key in FILE_TOOL_PATH_PARAMS if payload.get(key)), None))
         return IntegrationActionResolution(
             integration_id=integration.id,
             action_id=action_id,
