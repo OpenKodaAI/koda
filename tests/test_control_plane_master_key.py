@@ -92,6 +92,7 @@ def key_paths(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespac
     monkeypatch.setattr(crypto, "CONTROL_PLANE_MASTER_KEY_FILE", key_file)
     monkeypatch.setattr(crypto, "CONTROL_PLANE_MASTER_KEY_PREVIOUS", "")
     monkeypatch.setattr(crypto, "CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE", previous_file)
+    monkeypatch.setattr(crypto, "_REPORTED_EXPOSURES", set())
     crypto.clear_fernet_cache()
     yield SimpleNamespace(state_root=state_root, key_file=key_file, previous_file=previous_file)
     crypto.clear_fernet_cache()
@@ -190,6 +191,9 @@ def test_key_mode_the_filesystem_ignores_is_logged_once(
     monkeypatch.setattr(Path, "chmod", lambda self, mode: None)
 
     assert crypto.get_signing_key() == key
+    assert crypto.get_signing_key() == key
+    # ensure_master_key clears the Fernet cache at every start; that must not re-arm the warning.
+    crypto.clear_fernet_cache()
     assert crypto.get_signing_key() == key
     assert [event for event, _ in warnings] == ["control_plane_master_key_permissions_too_open"]
     assert warnings[0][1]["mode"] == "0o644"

@@ -531,10 +531,13 @@ def rotate_master_key(encrypted_values: list[str]) -> list[str]:
 
 
 def clear_fernet_cache() -> None:
-    """Clear cached Fernet instances, e.g. after key rotation, and report key-file exposure again."""
+    """Clear cached Fernet instances, e.g. after key rotation.
+
+    Reported key-file exposures are kept: ``ensure_master_key`` clears the cache at every start,
+    and the exposure is logged once per file and mode for the life of the process.
+    """
     get_fernet.cache_clear()
     get_previous_fernet.cache_clear()
-    _REPORTED_EXPOSURES.clear()
 
 
 def mask_secret(value: str) -> str:

@@ -1874,3 +1874,21 @@ def test_wipe_provider_credential_files_clears_known_dirs(monkeypatch, tmp_path)
     # mounts.
     assert config_dir.is_dir()
     assert list(config_dir.iterdir()) == []
+
+
+@pytest.mark.parametrize("provider", ["perplexity", "groq", "openrouter", "elevenlabs", "gemini"])
+def test_disconnect_runs_the_real_logout_and_removes_the_stored_key(monkeypatch, tmp_path, provider):
+    """Review: disconnecting a provider without a CLI logout must not stop before the key is wiped.
+
+    ``run_provider_logout`` is not mocked here: an HTTP provider has no CLI, and Gemini's CLI
+    has no logout subcommand (and is not on this PATH).
+    """
+    import koda.control_plane.manager as manager_mod
+
+    manager, _rows, _meta, secrets, _sessions = _make_manager(monkeypatch)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    secrets[provider] = "sk-test"
+
+    manager_mod.ControlPlaneManager.disconnect_provider_connection(manager, provider)
+
+    assert provider not in secrets

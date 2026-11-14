@@ -424,6 +424,10 @@ def _provider_command_env(base_env: dict[str, str] | None = None) -> dict[str, s
 
 # Providers Koda runs as a local CLI, and the setting that names the executable when one does.
 _CLI_PROVIDER_IDS = frozenset({"claude", "codex", "gemini", "ollama"})
+# Providers whose CLI has its own subscription login (claude.ai, ChatGPT, Google account), and
+# the subcommand that logs each one out where the CLI has one (Gemini has none).
+SUBSCRIPTION_LOGIN_PROVIDER_IDS = frozenset({"claude", "codex", "gemini"})
+_LOGOUT_SUBCOMMANDS: dict[str, tuple[str, ...]] = {"claude": ("auth", "logout"), "codex": ("logout",)}
 _PROVIDER_EXECUTABLE_SETTINGS: dict[str, tuple[str, str]] = {
     "codex": ("CODEX_BIN", "codex"),
     "gemini": ("GEMINI_BIN", "gemini"),
@@ -474,6 +478,9 @@ def provider_login_command(
     project_id: str = "",
     base_env: dict[str, str] | None = None,
 ) -> tuple[str, ...]:
+    if provider_id not in SUBSCRIPTION_LOGIN_PROVIDER_IDS:
+        title = PROVIDER_TITLES.get(provider_id, provider_id)
+        raise ValueError(f"{title} does not support subscription login")
     command = resolve_provider_command(provider_id, base_env=base_env)
     if provider_id == "claude":
         # ``setup-token`` is the headless-friendly variant of ``auth login``:
@@ -483,8 +490,6 @@ def provider_login_command(
         return (*command, "setup-token")
     if provider_id == "codex":
         return (*command, "login", "--device-auth")
-    if provider_id in {"elevenlabs", "ollama"}:
-        raise ValueError(f"{PROVIDER_TITLES[provider_id]} does not support subscription login")
     del project_id
     return command
 
@@ -494,16 +499,15 @@ def provider_logout_command(
     *,
     base_env: dict[str, str] | None = None,
 ) -> tuple[str, ...] | None:
-    if provider_id == "ollama":
+    """The CLI command that logs ``provider_id`` out, or ``None`` when there is none.
+
+    Only Claude and Codex have a logout subcommand; Gemini, Ollama and the HTTP providers do not,
+    and nothing is resolved for them. ``FileNotFoundError`` when the CLI is not installed.
+    """
+    subcommand = _LOGOUT_SUBCOMMANDS.get(provider_id)
+    if subcommand is None:
         return None
-    command = resolve_provider_command(provider_id, base_env=base_env)
-    if provider_id == "claude":
-        return (*command, "auth", "logout")
-    if provider_id == "codex":
-        return (*command, "logout")
-    if provider_id == "elevenlabs":
-        return None
-    return None
+    return (*resolve_provider_command(provider_id, base_env=base_env), *subcommand)
 
 
 def build_provider_process_env(
@@ -788,7 +792,11 @@ def run_provider_logout(
     base_env: dict[str, str] | None = None,
     work_dir: str | None = None,
 ) -> tuple[bool, str]:
-    command = provider_logout_command(provider_id, base_env=base_env)
+    try:
+        command = provider_logout_command(provider_id, base_env=base_env)
+    except FileNotFoundError as exc:
+        # A missing CLI must not stop a disconnect: the caller still wipes stored credentials.
+        return False, f"{exc.args[0] if exc.args else provider_id} not found on PATH"
     if command is None:
         return False, "logout not supported"
     env = build_provider_process_env(
@@ -1341,12 +1349,15 @@ def verify_provider_subscription_login(
     base_env: dict[str, str] | None = None,
     work_dir: str | None = None,
 ) -> ProviderVerificationResult:
-    if provider_id in {"elevenlabs", "ollama"}:
+    if provider_id not in SUBSCRIPTION_LOGIN_PROVIDER_IDS:
+        # The branches below are Claude, Codex and Gemini; any other provider would otherwise
+        # fall through to the Gemini probe and run a real model call.
+        title = PROVIDER_TITLES.get(provider_id, provider_id)
         return ProviderVerificationResult(
             provider_id=provider_id,
             auth_mode="subscription_login",
             verified=False,
-            last_error=f"{PROVIDER_TITLES[provider_id]} does not support subscription login in this flow.",
+            last_error=f"{title} does not support subscription login in this flow.",
             checked_via="runtime",
             details={},
         )

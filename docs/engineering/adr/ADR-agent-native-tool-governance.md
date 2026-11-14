@@ -179,7 +179,7 @@ Each runner compiles the effective level from **one table** in `koda/services/pr
 
 **Gemini** (every value is `[I]`; AG-02 and AG-25)
 
-> Implementation note (2026-11-14, AG-02 integration review). gemini-cli parses argv with yargs, which reads a separate value that starts with `-` as an option: the pinned 0.68.0 takes `--prompt -y` as `--yolo`. The contract therefore requires attached values (`--flag=value`), and `validate_args` refuses the separate form. The argv below uses the attached form; the decision is unchanged.
+> Implementation note (2026-11-14, AG-02 integration review). gemini-cli parses argv with yargs, which reads a separate value that starts with `-` as an option: the pinned 0.68.0 reads the `-y` in `--prompt -y` as `--yolo` and rejects the call ("Not enough arguments following: prompt"). The contract therefore requires attached values (`--flag=value`), and `validate_args` refuses the separate form. The argv below uses the attached form; the decision is unchanged.
 
 - **Every level:** `gemini --model=M --output-format=json|stream-json --extensions=none`.
   - The env sets `GEMINI_CLI_SYSTEM_SETTINGS_PATH=<task_tmp>/gemini-settings.json`. Koda writes that file with `mcpServers={}`, no `tools.discoveryCommand`, and `tools.exclude` set per level.
