@@ -256,22 +256,97 @@ class TestCommandHelpersApplyTheFilePolicy:
 
 
 class TestWorkDirInsideSensitiveDirectory:
-    """The default Docker work dir (HOME) sits under /var/lib, which SENSITIVE_DIRS lists."""
+    """The default Docker work dir (HOME=/var/lib/koda/runtime/home) sits under /var/lib, a SENSITIVE_DIRS root.
 
-    def test_only_the_sensitive_dir_check_differs_between_tools_and_commands(self, tmp_path, monkeypatch):
-        sensitive = tmp_path / "var-lib"
-        work = sensitive / "koda" / "home"
-        work.mkdir(parents=True)
+    The work dir and the paths inside it are allowed on both surfaces; a sensitive root that
+    does not contain the work dir stays denied, and the secret-file policy applies everywhere.
+    """
+
+    @pytest.fixture
+    def docker_layout(self, tmp_path, monkeypatch):
+        root = tmp_path.resolve()
+        sensitive = root / "var-lib"
+        other = root / "etc"
+        work = sensitive / "koda" / "runtime" / "home"
+        (work / "src").mkdir(parents=True)
+        other.mkdir()
         (work / "notes.txt").write_text("visible")
+        (work / "src" / "main.py").write_text("granted")
         (work / ".env").write_text("TOKEN=canary-secret\n")
-        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive)}))
+        (other / "passwd").write_text("canary-passwd")
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(other)}))
+        return work, other
 
-        # File tools (default) keep refusing paths under a sensitive directory.
-        assert resolve_work_path("notes.txt", str(work)).reason == "path_sensitive_dir"
-        # The file commands keep working there, as before.
-        assert resolve_work_path("notes.txt", str(work), deny_sensitive_dirs=False).path == work / "notes.txt"
+    def test_file_tools_allow_the_work_dir_and_paths_inside_it(self, docker_layout):
+        work, _ = docker_layout
+        assert resolve_work_path("notes.txt", str(work)).path == work / "notes.txt"
+        assert resolve_work_path(str(work / "src" / "main.py"), str(work)).path == work / "src" / "main.py"
+        assert resolve_work_path(".", str(work)).path == work
+        assert resolve_work_path(str(work), str(work)).path == work
+
+    def test_both_surfaces_give_the_same_decision(self, docker_layout):
+        work, other = docker_layout
+        for path in ("notes.txt", "src/main.py", ".env", "../../x", str(other / "passwd")):
+            tools = resolve_work_path(path, str(work))
+            commands = resolve_work_path(path, str(work), deny_sensitive_dirs=False)
+            assert (tools.path, tools.reason) == (commands.path, commands.reason), path
         assert safe_read("notes.txt", str(work)) == "visible"
-        # Containment and the secret-file policy apply to both.
-        assert resolve_work_path(".env", str(work), deny_sensitive_dirs=False).reason == "path_blocked_file"
+
+    def test_secret_names_and_containment_still_apply(self, docker_layout):
+        work, other = docker_layout
+        assert resolve_work_path(".env", str(work)).reason == "path_blocked_file"
         assert "canary-secret" not in safe_read(".env", str(work))
-        assert resolve_work_path("../../x", str(work), deny_sensitive_dirs=False).reason == "path_outside_workdir"
+        assert resolve_work_path("../../x", str(work)).reason == "path_outside_workdir"
+        assert resolve_work_path(str(other / "passwd"), str(work)).path is None
+
+    def test_a_sensitive_root_inside_the_work_dir_stays_denied(self, tmp_path, monkeypatch):
+        sensitive = tmp_path.resolve() / "var-lib"
+        work = sensitive / "koda" / "home"
+        inner = work / "etc"
+        inner.mkdir(parents=True)
+        (inner / "hosts").write_text("canary-hosts")
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(inner)}))
+        resolution = resolve_work_path("etc/hosts", str(work))
+        assert resolution.path is None
+        assert resolution.reason == "path_sensitive_dir"
+        assert sensitive_dir_for(str(inner / "hosts"), work_dir=str(work)) == str(inner)
+        # The one documented difference: the file commands skip the check and read it.
+        assert resolve_work_path("etc/hosts", str(work), deny_sensitive_dirs=False).path == inner / "hosts"
+        assert safe_read("etc/hosts", str(work)) == "canary-hosts"
+
+    def test_the_waiver_follows_the_resolved_form_of_the_sensitive_root(self, tmp_path, monkeypatch):
+        """``/var/run`` is ``/run``: a work dir under the resolved form is under the written one."""
+        real = tmp_path.resolve() / "run"
+        work = real / "koda"
+        work.mkdir(parents=True)
+        alias = tmp_path.resolve() / "var-run"
+        alias.symlink_to(real)
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(alias)}))
+        assert sensitive_dir_for(str(work / "x.txt")) == str(alias)
+        assert sensitive_dir_for(str(work / "x.txt"), work_dir=str(work)) is None
+        assert resolve_work_path("x.txt", str(work)).path == work / "x.txt"
+        assert resolve_work_path("x.txt", str(alias / "koda")).path == work / "x.txt"
+
+
+class TestFileCommandPath:
+    """The one parse of a file command's path, shared by its handler and the approval gate."""
+
+    @pytest.mark.parametrize(
+        ("command", "args", "expected"),
+        [
+            ("write", ["notes.txt", "hello", "world"], "notes.txt"),
+            ("edit", ['"src/a', 'b.txt"', "line"], '"src/a'),
+            ("write", [], ""),
+            ("cat", ["src/x", "/../../.git/config"], "src/x /../../.git/config"),
+            ("rm", ["it's.txt"], "it's.txt"),
+            ("mkdir", ["build", "out"], "build out"),
+            ("file", ["report", "final.pdf"], "report final.pdf"),
+            ("cat", [], ""),
+            ("ls", [], "."),
+            ("ls", ["src"], "src"),
+        ],
+    )
+    def test_path_is_parsed_without_shell_splitting(self, command, args, expected):
+        from koda.utils.files import file_command_path
+
+        assert file_command_path(command, args) == expected

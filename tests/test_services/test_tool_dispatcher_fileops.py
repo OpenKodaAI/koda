@@ -635,3 +635,187 @@ class TestPathScopedGrantsSeeResolvedFileToolPaths:
         assert "outside the granted scope" in result.output
         assert (work / "src" / "main.py").exists()
         assert not (work / "main.py").exists()
+
+    @pytest.mark.asyncio
+    async def test_grep_does_not_follow_a_symlink_out_of_the_granted_search_root(self, work):
+        """A link inside the grant to a file elsewhere in the work dir is refused, as /cat and file_read refuse it."""
+        (work / "src" / "link-to-top.txt").symlink_to(work / "top.txt")
+        (work / "src" / "alias.py").symlink_to(work / "src" / "main.py")
+        result = await self._execute("file_grep", {"pattern": "TOKEN", "path": "src"}, work, work / "src")
+        assert result.success, result.output
+        assert "canary-outside-grant" not in result.output
+        assert "link-to-top.txt" not in result.output
+        assert "main.py:1: TOKEN = 'granted'" in result.output
+        # A link that stays inside the search root is still followed.
+        assert "alias.py:1: TOKEN = 'granted'" in result.output
+        refused = await self._execute("file_read", {"path": "src/link-to-top.txt"}, work, work / "src")
+        assert not refused.success
+        assert "outside the granted scope" in refused.output
+
+    @pytest.mark.asyncio
+    async def test_grep_keeps_every_file_it_reads_inside_the_search_root(self, work):
+        """Without a grant too: the search root, not only the work dir, bounds what grep prints."""
+        from koda.services.tool_dispatcher import _handle_file_grep
+
+        (work / "src" / "link-to-top.txt").symlink_to(work / "top.txt")
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            scoped = await _handle_file_grep({"pattern": "TOKEN", "path": "src"}, _make_ctx(str(work)))
+            whole = await _handle_file_grep({"pattern": "TOKEN", "path": "."}, _make_ctx(str(work)))
+        assert scoped.success, scoped.output
+        assert "canary-outside-grant" not in scoped.output
+        assert "src/link-to-top.txt:1: TOKEN = 'canary-outside-grant'" in whole.output
+
+
+class TestGrantRootsWrittenThroughASymlink:
+    """``allowed_paths`` entries are canonicalised like the call path, so a symlinked grant root still matches."""
+
+    @pytest.fixture
+    def linked_work(self, tmp_path, monkeypatch):
+        real = (tmp_path / "work").resolve()
+        (real / "src").mkdir(parents=True)
+        (real / "src" / "main.py").write_text("granted-source\n")
+        (real / "top.txt").write_text("canary-top\n")
+        link = tmp_path / "link"
+        link.symlink_to(real)
+        monkeypatch.chdir(tmp_path)
+        return link
+
+    @staticmethod
+    def _grant(*allowed_paths) -> dict:
+        return {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(p) for p in allowed_paths]}}}
+
+    async def _read(self, path: str, link, *allowed_paths):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", self._grant(*allowed_paths)),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["file_read"]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall("file_read", {"path": path}, ""), _make_ctx(str(link)))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["{link}/src/main.py", "src/main.py", "src/../src/main.py"])
+    async def test_paths_inside_a_symlinked_grant_root_are_granted(self, linked_work, path):
+        result = await self._read(path.format(link=linked_work), linked_work, linked_work / "src")
+        assert result.success, result.output
+        assert "granted-source" in result.output
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["{link}/top.txt", "src/../top.txt"])
+    async def test_paths_outside_a_symlinked_grant_root_are_still_refused(self, linked_work, path):
+        result = await self._read(path.format(link=linked_work), linked_work, linked_work / "src")
+        assert not result.success
+        assert "outside the granted scope" in result.output
+        assert "canary-top" not in result.output
+
+    def test_the_contract_grant_check_canonicalises_entries(self, linked_work):
+        from koda.agent_contract import evaluate_integration_grant
+
+        real = linked_work.resolve()
+        grant = self._grant(linked_work / "src")
+        assert evaluate_integration_grant("file_read", {"path": str(real / "src" / "main.py")}, grant).allowed
+        refused = evaluate_integration_grant("file_read", {"path": str(real / "top.txt")}, grant)
+        assert not refused.allowed
+        assert refused.reason == "path_not_granted"
+
+    def test_a_relative_entry_is_not_resolved_against_the_process_cwd(self, linked_work):
+        """The CWD is the parent of ``link``: resolving ``link/src`` there would widen the grant."""
+        from koda.agent_contract import evaluate_integration_grant
+
+        real = linked_work.resolve()
+        grant = self._grant("link/src")
+        decision = evaluate_integration_grant("file_read", {"path": str(real / "src" / "main.py")}, grant)
+        assert not decision.allowed
+        assert decision.reason == "path_not_granted"
+
+
+class TestWorkDirUnderASensitiveRoot:
+    """The Docker default work dir (HOME=/var/lib/koda/runtime/home) is under /var/lib, a SENSITIVE_DIRS root.
+
+    The file tools must work there: the work dir and the paths inside it are allowed, a
+    sensitive root that does not contain the work dir stays denied, and secret names stay
+    blocked.
+    """
+
+    @pytest.fixture
+    def docker_work(self, tmp_path, monkeypatch):
+        root = tmp_path.resolve()
+        sensitive = root / "var-lib"
+        work = sensitive / "koda" / "runtime" / "home"
+        (work / "src" / "pkg").mkdir(parents=True)
+        (work / "src" / "main.py").write_text("TOKEN = 'top-level'\n")
+        (work / "src" / "pkg" / "mod.py").write_text("TOKEN = 'nested'\n")
+        (work / ".env").write_text("TOKEN=canary-secret\n")
+        (root / "etc").mkdir()
+        (root / "etc" / "passwd").write_text("TOKEN=canary-passwd\n")
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(root / "etc")}))
+        monkeypatch.chdir(root)
+        return work
+
+    async def _execute(self, tool: str, params: dict, work):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        fileops_enabled = {"integration_grants": {"fileops": {"enabled": True}}}
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", fileops_enabled),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(str(work)))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["src/main.py", "{work}/src/main.py"])
+    async def test_file_read_works_inside_the_work_dir(self, docker_work, path):
+        result = await self._execute("file_read", {"path": path.format(work=docker_work)}, docker_work)
+        assert result.success, result.output
+        assert "top-level" in result.output
+
+    @pytest.mark.asyncio
+    async def test_file_write_and_list_work_inside_the_work_dir(self, docker_work):
+        from koda.services.tool_dispatcher import _handle_file_write
+
+        # file_write needs a human approval through execute_tool; the handler applies the path policy.
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            written = await _handle_file_write(
+                {"path": "notes/todo.md", "content": "ship"}, _make_ctx(str(docker_work))
+            )
+        assert written.success, written.output
+        assert (docker_work / "notes" / "todo.md").read_text() == "ship"
+        listed = await self._execute("file_list", {}, docker_work)
+        assert listed.success, listed.output
+        assert "src" in listed.output
+
+    @pytest.mark.asyncio
+    async def test_file_grep_descends_into_subdirectories(self, docker_work):
+        result = await self._execute("file_grep", {"pattern": "TOKEN"}, docker_work)
+        assert result.success, result.output
+        assert "src/main.py:1: TOKEN = 'top-level'" in result.output
+        assert "src/pkg/mod.py:1: TOKEN = 'nested'" in result.output
+        assert "canary" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_secret_files_and_other_sensitive_roots_stay_refused(self, docker_work):
+        secret = await self._execute("file_read", {"path": ".env"}, docker_work)
+        assert not secret.success
+        assert "blocked" in secret.output
+        passwd = docker_work.parents[3] / "etc" / "passwd"
+        outside = await self._execute("file_read", {"path": str(passwd)}, docker_work)
+        assert not outside.success
+        assert "canary" not in outside.output
+
+    @pytest.mark.asyncio
+    async def test_grep_still_prunes_a_sensitive_root_inside_the_work_dir(self, docker_work, monkeypatch):
+        (docker_work / "etc").mkdir()
+        (docker_work / "etc" / "shadow.txt").write_text("TOKEN=canary-inner\n")
+        sensitive = docker_work.parents[2]
+        monkeypatch.setattr("koda.utils.workdir.SENSITIVE_DIRS", frozenset({str(sensitive), str(docker_work / "etc")}))
+        result = await self._execute("file_grep", {"pattern": "TOKEN"}, docker_work)
+        assert result.success, result.output
+        assert "src/pkg/mod.py" in result.output
+        assert "canary-inner" not in result.output
+        read = await self._execute("file_read", {"path": "etc/shadow.txt"}, docker_work)
+        assert not read.success
+        assert "sensitive system directory" in read.output

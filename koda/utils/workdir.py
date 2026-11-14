@@ -24,7 +24,12 @@ def normalize_work_dir(path: str | None) -> str:
     return os.path.realpath(os.path.expanduser(raw_path))
 
 
-def sensitive_dir_for(path: str) -> str | None:
+def _is_within(path: str, root: str) -> bool:
+    """Return whether ``path`` is ``root`` or below it, by whole path component."""
+    return path == root or path.startswith(root.rstrip(os.sep) + os.sep)
+
+
+def sensitive_dir_for(path: str, *, work_dir: str | None = None) -> str | None:
     """Return the sensitive system directory that contains ``path``, or None.
 
     ``path`` must be absolute and already resolved. Each entry of ``SENSITIVE_DIRS`` is
@@ -35,11 +40,20 @@ def sensitive_dir_for(path: str) -> str | None:
     setdir buttons, ``agent_set_workdir``, workspace roots), the paths that the file tools
     resolve inside them, and the directories that ``file_grep`` walks share this one
     deny-root check.
+
+    ``work_dir`` (absolute and resolved) is the work directory that ``path`` was resolved
+    in. A sensitive directory that is ``work_dir`` or contains it does not count: the work
+    dir is the one the runtime chose, which is either validated or the operator's
+    ``DEFAULT_WORK_DIR``, such as the Docker default ``HOME=/var/lib/koda/runtime/home``
+    under ``/var/lib``. A sensitive directory that does not contain the work dir still
+    matches, including one inside it (a work dir of ``/`` contains ``/etc``).
     """
     for sensitive in sorted(SENSITIVE_DIRS):
-        for root in dict.fromkeys((sensitive, normalize_work_dir(sensitive))):
-            if path == root or path.startswith(root.rstrip(os.sep) + os.sep):
-                return sensitive
+        roots = tuple(dict.fromkeys((sensitive, normalize_work_dir(sensitive))))
+        if work_dir is not None and any(_is_within(work_dir, root) for root in roots):
+            continue
+        if any(_is_within(path, root) for root in roots):
+            return sensitive
     return None
 
 

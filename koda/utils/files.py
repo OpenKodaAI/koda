@@ -2,6 +2,7 @@
 
 import os
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -58,24 +59,57 @@ def work_path_location(path_str: str, work_dir: str) -> str:
     return os.path.realpath(os.path.join(os.path.realpath(work_dir), os.path.expanduser(path_str)))
 
 
+FILE_COMMANDS: frozenset[str] = frozenset({"cat", "file", "ls", "write", "edit", "rm", "mkdir"})
+"""Telegram commands that act on one path in the work dir, grant-gated by the approval layer."""
+
+_FILE_COMMANDS_WITH_CONTENT: frozenset[str] = frozenset({"write", "edit"})
+
+
+def file_command_path(command: str, args: Sequence[str] | None) -> str:
+    """Return the path a Telegram file command acts on, parsed from its arguments.
+
+    ``/write`` and ``/edit`` take ``<path> <content>``, so the path is the first argument.
+    ``/cat``, ``/file``, ``/rm``, ``/mkdir`` and ``/ls`` take one path, which may contain
+    spaces, so it is every argument joined by a space; ``/ls`` without one lists the work
+    dir, ``"."``. Arguments are never shell-split or unquoted. The handlers and the
+    approval gate (:func:`koda.utils.approval.with_approval`) both take the path from
+    here, so the integration grant decides on the path that the handler then resolves and
+    acts on. Returns ``""`` when the command names no path.
+    """
+    items = [str(item) for item in args or []]
+    if command in _FILE_COMMANDS_WITH_CONTENT:
+        return items[0] if items else ""
+    joined = " ".join(items)
+    if command == "ls" and not joined.strip():
+        return "."
+    return joined
+
+
 def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool = True) -> PathResolution:
     """Resolve a path for the file commands and the agent file tools.
 
     This is the single path policy behind ``/cat``, ``/write``, ``/edit``, ``/rm``,
-    ``/mkdir``, ``/file``, ``/ls`` and the ``file_*`` agent tools, so the same path gets
-    the same decision everywhere:
+    ``/mkdir``, ``/file``, ``/ls``, the ``file_*`` agent tools and ``browser_upload``, so
+    the same path gets the same decision everywhere:
 
     - ``~`` is expanded, a relative path is joined with ``work_dir`` (never the process
       CWD), and symlinks are resolved (:func:`work_path_location`);
     - the result must be ``work_dir`` or inside it (``path_outside_workdir``);
-    - it must not be inside a sensitive system directory (``path_sensitive_dir``);
+    - it must not be inside a sensitive system directory that does not contain
+      ``work_dir`` (``path_sensitive_dir``, see :func:`koda.utils.workdir.sensitive_dir_for`):
+      ``work_dir`` and the paths inside it stay usable when the work dir itself is under
+      one, such as the Docker default ``HOME`` under ``/var/lib``;
     - neither the requested name nor the name it resolves to may be a blocked secret
       file (``path_blocked_file``, see :func:`blocked_file_suffix`).
 
-    ``deny_sensitive_dirs=False`` skips only the sensitive-directory check, and only the
-    file commands pass it: they have never applied that check, and the Docker default
-    work directory (``HOME``) sits under ``/var/lib``. The flag changes a decision only
-    when the work directory is inside or contains a sensitive directory.
+    ``work_dir`` is the work dir the runtime chose for the caller: every entry point
+    validates it (:func:`koda.utils.workdir.validate_work_dir`), or it is the operator's
+    ``DEFAULT_WORK_DIR``.
+
+    ``deny_sensitive_dirs=False`` skips only the sensitive-directory check. The file
+    commands and ``browser_upload`` pass it: they have never applied that check, and
+    anything inside the work dir stays uploadable. It changes a decision only when the
+    work dir contains a sensitive directory (a work dir of ``/`` contains ``/etc``).
     """
     if not path_str or not path_str.strip():
         return PathResolution(None, "path_missing", "Missing path.")
@@ -89,7 +123,7 @@ def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool
         return _refuse(
             path_str, work_dir, "path_outside_workdir", f"Access denied: '{path_str}' is outside the working directory."
         )
-    sensitive = sensitive_dir_for(resolved) if deny_sensitive_dirs else None
+    sensitive = sensitive_dir_for(resolved, work_dir=root) if deny_sensitive_dirs else None
     if sensitive is not None:
         return _refuse(
             path_str, work_dir, "path_sensitive_dir", f"Access denied: '{sensitive}' is a sensitive system directory."

@@ -2851,6 +2851,8 @@ async def list_agent_tools_catalog_route(request: web.Request) -> web.Response: 
         "rm": "Remove a file",
         "mkdir": "Create a directory",
         "cat": "Read a file",
+        "file": "Send a file",
+        "ls": "List a directory",
         "search": "Search the web or docs",
         "fetch": "Fetch a URL",
         "curl": "HTTP request via curl",

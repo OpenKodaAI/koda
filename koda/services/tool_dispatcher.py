@@ -1975,9 +1975,10 @@ async def _handle_browser_upload(params: dict, ctx: ToolContext) -> AgentToolRes
         return AgentToolResult(tool="browser_upload", success=False, output="Missing required param: 'file_path'.")
     if not selector:
         selector = 'input[type="file"]'
-    # The file the page receives follows the file-tool path policy: relative to the work
-    # dir, inside it, and never a secret file such as .env.
-    resolution = _resolve_file_path(file_path, ctx.work_dir)
+    # The file the page receives follows the shared path policy: relative to the work dir,
+    # inside it, and never a secret file such as .env. Like the file commands, uploads skip
+    # the sensitive-directory check and keep their reach, anything inside the work dir.
+    resolution = _resolve_file_path(file_path, ctx.work_dir, deny_sensitive_dirs=False)
     if resolution.path is None:
         return AgentToolResult(tool="browser_upload", success=False, output=resolution.error or "Access denied.")
     from koda.services.browser_manager import browser_manager
@@ -2420,11 +2421,11 @@ async def _check_fileops_available(tool: str) -> AgentToolResult | None:
     return None
 
 
-def _resolve_file_path(path: Any, work_dir: str) -> PathResolution:
+def _resolve_file_path(path: Any, work_dir: str, *, deny_sensitive_dirs: bool = True) -> PathResolution:
     """Resolve a file-tool path with the policy the file commands use (relative to ``work_dir``)."""
     if not isinstance(path, str) or not path.strip():
         return PathResolution(None, "path_missing", "Missing required param: 'path'.")
-    return resolve_work_path(path, work_dir)
+    return resolve_work_path(path, work_dir, deny_sensitive_dirs=deny_sensitive_dirs)
 
 
 async def _handle_file_read(params: dict, ctx: ToolContext) -> AgentToolResult:
@@ -2621,19 +2622,26 @@ async def _handle_file_grep(params: dict, ctx: ToolContext) -> AgentToolResult:
         glob_filter = params.get("glob", "*")
         results: list[str] = []
         total_matches = 0
-        # Every file read follows the file-tool policy. The search root is resolved and
-        # checked above, and os.walk does not descend into directory symlinks, so below it
-        # a regular file is inside the work dir and its name is all that is left to check;
-        # sensitive directories are pruned, and only a file symlink needs the full resolver.
+        # Every file read follows the file-tool policy and stays inside the search root,
+        # which is resolved and checked above (by a path-scoped grant too). os.walk does not
+        # descend into directory symlinks, so below it a regular file is inside the root and
+        # its name is all that is left to check; sensitive directories that do not contain
+        # the work dir are pruned, and a file symlink is resolved with the search root as
+        # its bound, so a link to a file elsewhere in the work dir is skipped as well.
+        work_root = os.path.realpath(ctx.work_dir)
         for root, dirs, files in os.walk(resolved):
-            dirs[:] = [d for d in dirs if not d.startswith(".") and sensitive_dir_for(os.path.join(root, d)) is None]
+            dirs[:] = [
+                d
+                for d in dirs
+                if not d.startswith(".") and sensitive_dir_for(os.path.join(root, d), work_dir=work_root) is None
+            ]
             for name in files:
                 if not fnmatch.fnmatch(name, glob_filter):
                     continue
                 fpath = os.path.join(root, name)
                 if blocked_file_suffix(name) is not None:
                     continue
-                if os.path.islink(fpath) and resolve_work_path(fpath, ctx.work_dir).path is None:
+                if os.path.islink(fpath) and resolve_work_path(fpath, resolved).path is None:
                     continue
                 rel = os.path.relpath(fpath, resolved)
                 try:

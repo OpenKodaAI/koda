@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import ipaddress
 import json
+import os
 import re
 import shlex
 from dataclasses import dataclass
@@ -1246,6 +1247,16 @@ _SCRIPT_LIBRARY_ACTION_LEVELS: dict[str, str] = {
     "delete": "destructive",
     "auto_extract": "write",
 }
+FILE_COMMAND_ACCESS_LEVELS: dict[str, str] = {
+    "cat": "read",
+    "file": "read",
+    "ls": "read",
+    "write": "write",
+    "edit": "write",
+    "mkdir": "write",
+    "rm": "destructive",
+}
+"""Telegram file commands (``/cat``, ``/file``, ``/ls``, ...) as ``fileops.<command>`` actions."""
 _CACHE_ACTION_LEVELS: dict[str, str] = {
     "lookup": "read",
     "stats": "read",
@@ -1521,7 +1532,7 @@ def resolve_core_integration_action_catalog() -> dict[str, list[dict[str, Any]]]
         "fileops": _action_catalog(
             "fileops",
             {
-                "fileops.cat": "read",
+                **{f"fileops.{command}": level for command, level in FILE_COMMAND_ACCESS_LEVELS.items()},
                 "fileops.read": "read",
                 "fileops.list": "read",
                 "fileops.search": "read",
@@ -1530,8 +1541,6 @@ def resolve_core_integration_action_catalog() -> dict[str, list[dict[str, Any]]]
                 "fileops.write": "write",
                 "fileops.edit": "write",
                 "fileops.move": "write",
-                "fileops.mkdir": "write",
-                "fileops.rm": "destructive",
                 "fileops.delete": "destructive",
             },
         ),
@@ -1611,7 +1620,30 @@ def _domain_allowed(host: str | None, allowed_domains: list[str]) -> bool:
     return False
 
 
-def _path_allowed(path: str | None, allowed_paths: list[str]) -> bool:
+def _canonical_allowed_path(entry: str) -> str:
+    """Return a grant's ``allowed_paths`` entry in the form the file layer gives the call path.
+
+    The file commands and the file tools hand the grant an absolute, symlink-resolved path
+    (:func:`koda.utils.files.work_path_location`), so an absolute entry (``~`` expanded) is
+    resolved the same way: a grant root written through a symlink, such as a symlinked
+    project dir or macOS ``/tmp`` (``/private/tmp``), still covers the paths below it. A
+    relative entry is compared as written; resolving it would join it with the process CWD.
+    """
+    expanded = os.path.expanduser(entry)
+    if not os.path.isabs(expanded):
+        return entry
+    try:
+        return os.path.realpath(expanded)
+    except (OSError, ValueError):
+        return entry
+
+
+def path_in_allowed_paths(path: str | None, allowed_paths: list[str]) -> bool:
+    """Return whether ``path`` is one of ``allowed_paths`` or below one, by path component.
+
+    The one ``allowed_paths`` check for integration grants, shared by the policy gate
+    (:func:`evaluate_integration_grant`) and the Telegram command approval layer.
+    """
     normalized_path = str(path or "").strip()
     if not normalized_path:
         return False
@@ -1619,6 +1651,7 @@ def _path_allowed(path: str | None, allowed_paths: list[str]) -> bool:
         candidate = str(allowed or "").strip()
         if not candidate:
             continue
+        candidate = _canonical_allowed_path(candidate)
         if normalized_path == candidate or normalized_path.startswith(candidate.rstrip("/") + "/"):
             return True
     return False
@@ -1838,7 +1871,7 @@ def build_action_envelope(
         tool_id in CORE_TOOL_CATALOG
         or parsed_mcp_tool is not None
         or tool_id in {"shell", "git", "docker", "pip", "npm"}
-        or tool_id in {"write", "edit", "rm", "mkdir", "cat"}
+        or tool_id in FILE_COMMAND_ACCESS_LEVELS
     )
     return ActionEnvelope(
         tool_id=tool_id,
@@ -2130,16 +2163,10 @@ def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = Non
             resource_method=action_id,
         )
 
-    if tool in {"write", "edit", "rm", "mkdir", "cat"}:
+    if tool in FILE_COMMAND_ACCESS_LEVELS:
         integration = _integration_defaults("fileops")
         action_id = f"fileops.{tool}"
-        access_level = {
-            "cat": "read",
-            "write": "write",
-            "edit": "write",
-            "mkdir": "write",
-            "rm": "destructive",
-        }.get(tool, "write")
+        access_level = FILE_COMMAND_ACCESS_LEVELS[tool]
         return IntegrationActionResolution(
             integration_id=integration.id,
             action_id=action_id,
@@ -2404,7 +2431,7 @@ def evaluate_integration_grant(
 
     allowed_paths = [str(item) for item in grant.get("allowed_paths") or []]
     if allowed_paths and any(
-        not _path_allowed(path, allowed_paths) for path in _grant_scoped_paths(resolution, params or {})
+        not path_in_allowed_paths(path, allowed_paths) for path in _grant_scoped_paths(resolution, params or {})
     ):
         return IntegrationGrantDecision(
             allowed=False,

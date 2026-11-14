@@ -166,3 +166,33 @@ async def test_cat_relative_path_resolves_under_work_dir(mock_update, mock_conte
     with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
         await cmd_cat(mock_update, mock_context)
     assert "work tree" in mock_send.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_cat_reads_a_name_the_shell_cannot_split(mock_update, mock_context, tmp_path):
+    """The approval gate checks the path /cat reads; it does not shell-split it, so a quote is just a character."""
+    (tmp_path / "it's.txt").write_text("quoted name")
+    mock_context.user_data["work_dir"] = str(tmp_path)
+    mock_context.args = ["it's.txt"]
+    with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_cat(mock_update, mock_context)
+    assert "quoted name" in mock_send.call_args[0][1]
+
+
+@pytest.mark.asyncio
+async def test_write_gate_checks_the_path_the_handler_writes(mock_update, mock_context, tmp_path):
+    """/write takes ``<path> <content>``: the grant checks the first arg, which the gate does not unquote either.
+
+    Shell-splitting ``"src/a ../../top.txt" body`` would show the grant ``<work>/src/top.txt``
+    while the handler writes ``<work>/"src/a``, outside the grant.
+    """
+    work = tmp_path.resolve()
+    (work / "src").mkdir()
+    grant = {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(work / "src")]}}}
+    mock_context.user_data["work_dir"] = str(work)
+    mock_context.user_data["_approved"] = True
+    mock_context.args = ['"src/a', '../../top.txt"', "body"]
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", grant):
+        await cmd_write(mock_update, mock_context)
+    assert "outside the granted scope" in mock_update.message.reply_text.call_args.args[0]
+    assert not (work / '"src').exists()
