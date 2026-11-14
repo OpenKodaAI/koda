@@ -23,6 +23,8 @@ from typing import Any
 import asyncpg
 import pytest
 
+from tests.postgres_fixtures import close_shared_postgres_backends
+
 pytestmark = [pytest.mark.postgres]
 
 
@@ -32,9 +34,7 @@ async def runtime_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) ->
     JSONB codec, truncated tables. The DSN itself comes from the autouse
     ``_postgres_dsn_scope`` fixture in tests/postgres_fixtures.py.
     """
-    from koda.knowledge.v2 import common as common_mod
-
-    common_mod._SHARED_POSTGRES_BACKENDS.clear()
+    close_shared_postgres_backends()
 
     from koda.state import primary as primary_mod
 
@@ -71,7 +71,7 @@ async def runtime_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) ->
     try:
         yield migrated_postgres
     finally:
-        common_mod._SHARED_POSTGRES_BACKENDS.clear()
+        close_shared_postgres_backends()
 
 
 def _build_store(agent_id: str):

@@ -13,6 +13,7 @@ logic is caught immediately.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import patch
 
 import pytest
@@ -74,6 +75,40 @@ async def test_db_connection_executes_simple_query(db_connection) -> None:
 
     result = await db_connection.fetchval("SELECT 42")
     assert int(result) == 42
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_close_shared_postgres_backends_closes_bridge_pools(migrated_postgres: str) -> None:
+    """Sync code under test (audit events, the control-plane store) opens a
+    shared-backend pool on the primary-state bridge loop. Resetting the cache
+    between tests must close that pool; dropping it leaked one connection per
+    such test for the rest of the session until the server refused new
+    clients (D-225)."""
+    import asyncpg  # type: ignore[import-not-found]
+
+    from koda.state.primary import primary_fetch_val, run_coro_sync
+
+    bridge_backend_pid = run_coro_sync(primary_fetch_val("SELECT pg_backend_pid()"))
+
+    async def _bridge_connection_open() -> bool:
+        conn = await asyncpg.connect(migrated_postgres)
+        try:
+            count = await conn.fetchval("SELECT count(*) FROM pg_stat_activity WHERE pid = $1", bridge_backend_pid)
+        finally:
+            await conn.close()
+        return bool(count)
+
+    assert await _bridge_connection_open()
+
+    postgres_fixtures.close_shared_postgres_backends()
+
+    # The server process exits shortly after the client closes the socket.
+    for _ in range(100):
+        if not await _bridge_connection_open():
+            break
+        await asyncio.sleep(0.05)
+    assert not await _bridge_connection_open()
 
 
 def test_collection_hook_skips_postgres_when_unavailable(pytestconfig) -> None:

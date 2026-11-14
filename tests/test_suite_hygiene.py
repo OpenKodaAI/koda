@@ -6,6 +6,9 @@
 - Postgres tests empty squad tables only through
   ``tests.postgres_fixtures.reset_squad_runtime_tables``, so a new squad table
   or foreign key needs one change instead of one per test file.
+- Tests reset the shared Postgres backends only through
+  ``tests.postgres_fixtures.close_shared_postgres_backends``, which closes
+  their pools; clearing the cache directly leaks connections (D-225).
 """
 
 from __future__ import annotations
@@ -17,10 +20,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 TESTS = ROOT / "tests"
 _THIS_FILE = Path(__file__).resolve()
-_SQUAD_RESET_HELPER = TESTS / "postgres_fixtures.py"
+_POSTGRES_FIXTURES = TESTS / "postgres_fixtures.py"
 
 _CWD_RELATIVE_REPO_PATH = re.compile(r"""\bPath\(\s*f?["'](?:\./)?(?:koda|docs)/""")
 _SQUAD_TRUNCATE = re.compile(r"\bTRUNCATE\b[^\n]*\bsquad_", re.IGNORECASE)
+_SHARED_BACKEND_CACHE_CLEAR = re.compile(r"_SHARED_POSTGRES_BACKENDS\.clear\(\)")
 
 
 def _test_sources() -> Iterator[tuple[Path, str]]:
@@ -50,11 +54,23 @@ def test_squad_tables_are_reset_only_through_the_shared_helper() -> None:
     offenders = [
         f"{path.relative_to(ROOT)}:{_line_of(text, match.start())}"
         for path, text in _test_sources()
-        if path != _SQUAD_RESET_HELPER
+        if path != _POSTGRES_FIXTURES
         for match in _SQUAD_TRUNCATE.finditer(text)
     ]
     assert offenders == [], (
         f"Use tests.postgres_fixtures.reset_squad_runtime_tables instead of truncating squad tables: {offenders}"
+    )
+
+
+def test_shared_postgres_backends_are_reset_only_through_the_closing_helper() -> None:
+    offenders = [
+        f"{path.relative_to(ROOT)}:{_line_of(text, match.start())}"
+        for path, text in _test_sources()
+        if path != _POSTGRES_FIXTURES
+        for match in _SHARED_BACKEND_CACHE_CLEAR.finditer(text)
+    ]
+    assert offenders == [], (
+        f"Use tests.postgres_fixtures.close_shared_postgres_backends so the dropped pools are closed: {offenders}"
     )
 
 

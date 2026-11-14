@@ -31,6 +31,7 @@ database in ``POSTGRES_TEST_DSN``.
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from collections.abc import AsyncIterator
@@ -87,10 +88,33 @@ def postgres_url() -> str:
 _DSN_ATTR = "KNOWLEDGE_V2_POSTGRES_DSN"
 
 
-def _clear_shared_postgres_backends() -> None:
-    from koda.knowledge.v2 import common as knowledge_common
+def close_shared_postgres_backends() -> None:
+    """Close every cached shared Postgres backend, then empty the cache.
 
+    Sync code under test (audit events, the control-plane store) reaches
+    Postgres through the persistent bridge loop in ``koda.state.primary``,
+    and the shared backend it caches keeps an asyncpg pool open on that
+    loop. Emptying the cache without closing the pool leaves those
+    connections open for the rest of the session: one ``-m postgres`` run
+    used to hold about 65 idle connections by the end, enough for two
+    concurrent sessions to exhaust a default ``max_connections=100`` server
+    and fail with ``TooManyConnectionsError`` (D-225). Fixtures that reset
+    the shared backends call this instead of clearing the cache themselves.
+    """
+    from koda.knowledge.v2 import common as knowledge_common
+    from koda.state import primary as primary_state
+
+    backends = list(knowledge_common._SHARED_POSTGRES_BACKENDS.values())
     knowledge_common._SHARED_POSTGRES_BACKENDS.clear()
+    bridge_loop = primary_state._active_bridge_loop()
+    if bridge_loop is None:
+        return
+    for backend in backends:
+        future = asyncio.run_coroutine_threadsafe(backend.close(), bridge_loop)
+        try:
+            future.result(timeout=10)
+        except Exception:
+            future.cancel()
 
 
 def _koda_modules_holding_dsn() -> list[Any]:
@@ -129,7 +153,7 @@ def _postgres_dsn_scope(request: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     dsn = request.getfixturevalue("postgres_url")
     # Import (and empty) the shared backend cache before patching so the
     # cache module itself is patched rather than imported with the test DSN.
-    _clear_shared_postgres_backends()
+    close_shared_postgres_backends()
     import koda.knowledge.config as knowledge_config
 
     original_dsn = knowledge_config.KNOWLEDGE_V2_POSTGRES_DSN
@@ -149,7 +173,7 @@ def _postgres_dsn_scope(request: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
         for module in _koda_modules_holding_dsn():
             if module.__dict__.get(_DSN_ATTR) == dsn:
                 setattr(module, _DSN_ATTR, original_dsn)
-        _clear_shared_postgres_backends()
+        close_shared_postgres_backends()
 
 
 @pytest.fixture(scope="session")

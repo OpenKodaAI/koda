@@ -31,6 +31,8 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
+from tests.postgres_fixtures import close_shared_postgres_backends
+
 pytestmark = [pytest.mark.postgres]
 
 _SCHEDULER_TABLES = ("scheduled_job_events", "scheduled_job_runs", "scheduled_jobs")
@@ -38,17 +40,11 @@ _SCHEDULER_TABLES = ("scheduled_job_events", "scheduled_job_runs", "scheduled_jo
 
 def _stop_primary_bridge() -> None:
     """Stop the sync->async bridge thread these tests start, so later tests run without it."""
-    from koda.knowledge.v2 import common as common_mod
     from koda.state import primary as primary_mod
 
+    close_shared_postgres_backends()
     loop = primary_mod._active_bridge_loop()
     if loop is not None:
-        for backend in list(common_mod._SHARED_POSTGRES_BACKENDS.values()):
-            future = asyncio.run_coroutine_threadsafe(backend.close(), loop)
-            try:
-                future.result(timeout=10)
-            except Exception:
-                future.cancel()
         loop.call_soon_threadsafe(loop.stop)
         thread = primary_mod._BRIDGE_THREAD
         if thread is not None:
@@ -57,14 +53,11 @@ def _stop_primary_bridge() -> None:
             primary_mod._BRIDGE_LOOP = None
             primary_mod._BRIDGE_THREAD = None
             primary_mod._BRIDGE_OWNER_PID = None
-    common_mod._SHARED_POSTGRES_BACKENDS.clear()
 
 
 @pytest.fixture
 async def scheduler_db(migrated_postgres: str) -> AsyncIterator[str]:
-    from koda.knowledge.v2 import common as common_mod
-
-    common_mod._SHARED_POSTGRES_BACKENDS.clear()
+    close_shared_postgres_backends()
     conn = await asyncpg.connect(migrated_postgres)
     try:
         tables = ", ".join(f'knowledge_v2."{name}"' for name in _SCHEDULER_TABLES)

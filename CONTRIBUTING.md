@@ -57,6 +57,9 @@ postgres`); otherwise they are skipped. They share one schema in that database a
 with `TRUNCATE` between tests, so the Postgres suite is serial-only: do not run it with parallel
 workers, and give each concurrent session its own database. Squad tests reset their tables with
 `reset_squad_runtime_tables` from `tests/postgres_fixtures.py` instead of truncating them directly.
+Fixtures that reset Koda's shared Postgres backends call `close_shared_postgres_backends` from the
+same module, which closes their connection pools; clearing the cache directly leaves those
+connections open until the server refuses new clients.
 
 To run the same local gate from one command:
 
