@@ -6,8 +6,8 @@ Exercises the full register → enqueue (via gateway store) → subscribe
 - In-memory store (DSN empty in env so the binary uses InMemoryStore).
 - Python ``BotGatewayClient`` over a real gRPC channel.
 
-Auto-skipped when cargo or Python deps are missing (see
-``tests/integration/conftest.py``).
+Skipped when cargo is missing or the build fails, and failed instead
+under CI (see ``tests/integration/conftest.py``).
 """
 
 from __future__ import annotations

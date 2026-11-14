@@ -52,6 +52,11 @@ unreachable. A shared guard runs whatever build it was started from, so do not s
 validating changes to `rust/koda-security-*`. `KODA_SECURITY_GUARD_STARTUP_TIMEOUT` (seconds)
 raises the startup wait for cold builds.
 
+The cross-language tests in `tests/integration` run `cargo build --release -p <crate>` once per
+session, even when a binary already exists (the build is incremental, so an up-to-date crate
+takes seconds), and run the binary that build produced, never an older one. When `cargo` is
+missing or the build fails, those tests are skipped locally and fail under `CI`.
+
 To run the same local gate from one command:
 
 ```bash
