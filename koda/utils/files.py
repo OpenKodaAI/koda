@@ -2,6 +2,7 @@
 
 import os
 import re
+import stat
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -292,19 +293,27 @@ def move_landing(source: str, destination: str) -> str:
 
 
 def linked_landing_refusal(landing: str) -> str | None:
-    """Return why a move must not land at ``landing``, a symbolic link, or None.
+    """Return why a move must not land at ``landing``, a link to another file, or None.
 
     ``landing`` is the path :func:`move_landing` returns, below a resolved destination, so
     only its last component can be a link. A rename replaces a link there. But when the
     source sits on another filesystem, ``shutil.move`` copies it instead, and the copy
-    writes through the link, to the path the link resolves to, which neither the path
-    policy nor the other move checks saw: inside a protected directory (a planted bootstrap
-    code), at a secret file, or outside the work dir. So a landing that is a link, dangling
-    or not, is refused.
+    writes through the link, to the file the link names, which neither the path policy nor
+    the other move checks saw: inside a protected directory (a planted bootstrap code), at
+    a secret file, or outside the work dir. A symbolic link, dangling or not, names that
+    file by its path; a hard link is that file's inode under a second name, which
+    ``copy2`` truncates and rewrites. So a landing that is a symbolic link, or a file that
+    is not a directory and has another hard link, is refused.
     """
-    if os.path.islink(landing):
-        name = os.path.basename(landing)
+    try:
+        status = os.lstat(landing)
+    except OSError:
+        return None
+    name = os.path.basename(landing)
+    if stat.S_ISLNK(status.st_mode):
         return f"'{name}' in the destination is a symbolic link, and the move could write through it"
+    if not stat.S_ISDIR(status.st_mode) and status.st_nlink > 1:
+        return f"'{name}' in the destination is a hard link to another file, and the move could write through it"
     return None
 
 

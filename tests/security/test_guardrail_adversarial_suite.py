@@ -2134,6 +2134,60 @@ async def test_file_move_does_not_write_through_a_link_at_its_landing(
 @pytest.mark.guardrail
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("target", "content"),
+    [
+        (".koda-state/control_plane/bootstrap.txt", "canary-bootstrap\n"),
+        ("image-scratch/browser_sessions/111/bank.json", '{"cookies": [{"value": "canary-cookie"}]}\n'),
+        ("../outside.txt", "canary-outside\n"),
+    ],
+)
+async def test_file_move_does_not_write_through_a_hard_link_at_its_landing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str, content: str
+) -> None:
+    """A hard link at the landing shares the file's inode, so a cross-device copy rewrites that file.
+
+    ``harmless.txt`` is a hard link to the bootstrap code, a saved browser session or a file
+    outside the work dir. The path policy and the protected-dir check see only its path.
+    A rename on the same filesystem replaces the link's name, but when the rename fails with
+    EXDEV, ``shutil.move`` copies the source over the landing, and ``copy2`` truncates and
+    rewrites the shared inode. A landing that is a file with another hard link is refused,
+    as a symbolic link is; a move over a file with no other link, also as a copy, still works.
+    """
+    import errno
+
+    from koda.services.tool_dispatcher import _handle_file_move
+
+    work = _work_dir_holding_the_protected_dirs(tmp_path, monkeypatch)
+    linked = (work / target).resolve()
+    linked.write_text(content, encoding="utf-8")
+    os.link(linked, work / "harmless.txt")
+    (work / "evil.txt").write_text("attacker-data\n", encoding="utf-8")
+    (work / "plain.txt").write_text("old\n", encoding="utf-8")
+
+    def cross_device_rename(source: Any, destination: Any) -> None:
+        raise OSError(errno.EXDEV, "Invalid cross-device link", str(source))
+
+    ctx = _file_tool_context(work)
+    with (
+        patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        patch("os.rename", side_effect=cross_device_rename),
+    ):
+        moved = await _handle_file_move({"source": "evil.txt", "destination": "harmless.txt"}, ctx)
+        moved_notes = await _handle_file_move({"source": "notes.txt", "destination": "plain.txt"}, ctx)
+
+    assert not moved.success, moved.output
+    assert "hard link" in moved.output, moved.output
+    assert linked.read_text(encoding="utf-8") == content
+    assert (work / "evil.txt").read_text(encoding="utf-8") == "attacker-data\n"
+    assert moved_notes.success, moved_notes.output
+    assert (work / "plain.txt").read_text(encoding="utf-8") == "visible\n"
+    assert not (work / "notes.txt").exists()
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("variant", "inner", "source"),
     [
         (".KODA-STATE/control_plane", "bootstrap.txt", ".KODA-STATE"),

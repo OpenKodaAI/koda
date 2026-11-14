@@ -2766,7 +2766,7 @@ async def _handle_file_move(params: dict, ctx: ToolContext) -> AgentToolResult:
     landing = move_landing(resolved_src, resolved_dst)
     link_refusal = linked_landing_refusal(landing)
     if link_refusal is not None:
-        _audit_blocked("file_move", "symlink_landing", user_id=ctx.user_id)
+        _audit_blocked("file_move", "linked_landing", user_id=ctx.user_id)
         return AgentToolResult(tool="file_move", success=False, output=f"Access denied: {link_refusal}.")
     protected_refusal = protected_move_refusal(resolved_src, landing)
     if protected_refusal is not None:
