@@ -182,6 +182,8 @@ describe("createDashboardServer", () => {
 
     expect(source).not.toMatch(/new URL\(/);
     expect(source).not.toMatch(/headers\.host/);
-    expect(source.match(/\bparseRequestUrl\(request\)/g)).toHaveLength(2);
+    // Once, in the upgrade router; the relay reads the URL it is handed
+    // (runtime-relay-server.test.ts checks that module).
+    expect(source.match(/\bparseRequestUrl\(request\)/g)).toHaveLength(1);
   });
 });
