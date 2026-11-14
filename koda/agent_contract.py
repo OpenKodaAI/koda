@@ -2019,14 +2019,22 @@ def _infer_mcp_access_level(tool_name: str) -> str:
 # (``params.get("path", ctx.work_dir)`` in koda.services.tool_dispatcher).
 _WORK_DIR_DEFAULT_PATH_TOOLS = frozenset({"file_list", "file_search", "file_grep"})
 
-SUBTREE_PATH_TOOLS: frozenset[str] = frozenset({"file_list", "file_search", "file_grep", "file_move", "ls"})
+SUBTREE_PATH_TOOLS: frozenset[str] = frozenset({"file_search", "file_grep", "file_move"})
 """Tools that act on everything below each path they are given, not on that path alone.
 
-``file_list`` and the operator command ``/ls`` list the entries below their path,
-``file_search`` and ``file_grep`` walk the whole tree below it, and ``file_move`` moves a
-directory source with everything below it and can create everything below its
-destination. Execution-policy path rules therefore also match these calls below their
-paths (koda.services.execution_policy).
+``file_search`` and ``file_grep`` walk the whole tree below their path, and ``file_move``
+moves a directory source with everything below it and can create everything below its
+destination (or, into an existing directory, below it). The policy cannot tell whether a
+move's source is a directory, so both ends of every move count. Execution-policy path
+rules therefore also match these calls below their paths (koda.services.execution_policy).
+"""
+
+ENTRY_LISTING_PATH_TOOLS: frozenset[str] = frozenset({"file_list", "ls"})
+"""Tools that read the direct entries of their path (each one's name, kind and size), and nothing deeper.
+
+``file_list`` and the operator command ``/ls`` list one directory. Execution-policy path
+rules therefore also match these calls on a direct entry of their path, never deeper
+(koda.services.execution_policy).
 """
 
 

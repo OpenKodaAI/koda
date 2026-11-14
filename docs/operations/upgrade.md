@@ -77,20 +77,41 @@ existing rules are validated and simulated:
   case. When two rules with the winning decision match different
   spellings, the higher priority (then the lower name) decides, as for
   any other tie.
-- **A path rule also covers a listing, search, grep or move of an
-  ancestor.** `file_list`, `file_search`, `file_grep`, `file_move` and
-  `/ls` act on everything below their path (a moved directory takes its
-  contents along, and a move can create a directory's contents at its
-  destination). For these tools a `deny`, `require_approval` or
-  `allow_with_preview` path rule now also matches when its path lies
-  below the call's path. So `file_grep` with its `path` set to the
-  working directory, or `file_search` from `/`, is denied by a deny rule
-  on a directory inside it, as `file_grep` without a `path` already was,
-  and moving a directory that holds a gated path, or onto one, needs
-  that rule's approval or preview. A rule path with a wildcard segment
-  counts when the call's path is at, above or below the segments before
-  the wildcard, and one that starts with `*` always counts. An `allow`
-  path rule still has to cover the call's path itself.
+- **A path rule also covers a search, grep or move of an ancestor.**
+  `file_search`, `file_grep` and `file_move` act on everything below
+  their path (a moved directory takes its contents along, and a move can
+  create a directory's contents at its destination). For these tools a
+  `deny`, `require_approval` or `allow_with_preview` path rule now also
+  matches when its path lies below the call's path. So `file_grep` with
+  its `path` set to the working directory, or `file_search` from `/`, is
+  denied by a deny rule on a directory inside it, as `file_grep` without
+  a `path` already was, and moving a directory that holds a gated path,
+  or onto one, needs that rule's approval or preview. A rule path with a
+  wildcard segment counts when the call's path is at, above or below the
+  segments before the wildcard, and one that starts with `*` always
+  counts. An `allow` path rule still has to cover the call's path
+  itself.
+- **A move counts as a directory move.** The rules cannot tell whether a
+  move's source is a directory (the simulator has no filesystem, and in
+  the worker the answer can change while an approval is pending), so
+  both ends of every `file_move` count as directories. A single-file move
+  or rename is therefore decided by a restrictive path rule below its
+  source or destination, and by one that starts with `*`: with a deny
+  rule for `*.pem`, `file_move` of `a.txt` to `b.txt` is denied too.
+  Write a restrictive rule for a directory or a fixed path rather than a
+  `*`-prefixed one where file moves must keep working.
+- **A path rule covers a listing of the directory that holds it.**
+  `file_list` and `/ls` show the direct entries of their path, each
+  one's name, kind and size, and nothing below them. A `deny`,
+  `require_approval` or `allow_with_preview` path rule now also matches
+  a listing when its path can be one of those entries: a rule for
+  `/srv/work/secrets` or `/srv/work/key.pem` decides a listing of
+  `/srv/work`, and a rule for `/srv/work/a/b/secret` does not. A rule
+  path with a wildcard segment counts when the listed directory is at or
+  below the segments before the wildcard (`/srv/work/*.pem` decides a
+  listing of `/srv/work`, `/srv/work/a/*.pem` does not), and one that
+  starts with `*` decides every listing, since the rules do not know
+  which entries a directory holds.
 - **The worker resolves a file tool's relative paths before the rules
   see them.** In the worker, each file tool's `path`, `source` and
   `destination` reaches the rules as the absolute, symlink-resolved path

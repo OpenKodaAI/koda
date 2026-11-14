@@ -994,6 +994,28 @@ class TestPathRulesCoverWhatASubtreeToolReads:
         assert result.success, result.output
         assert "visible" in result.output
 
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("params", [{}, {"path": "."}, {"path": "{work}"}])
+    async def test_a_listing_above_the_entry_that_holds_a_denied_path_runs(self, work, monkeypatch, params):
+        """file_list shows its direct entries only: ``secrets`` is listed, nothing inside it is read."""
+        policy = {
+            "version": 1,
+            "rules": [
+                {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+                {"name": "deny-notes", "match": {"path": str(work / "secrets" / "notes.txt")}, "decision": "deny"},
+            ],
+        }
+        monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+
+        listed = await self._execute("file_list", {k: v.format(work=work) for k, v in params.items()}, work)
+        inside = await self._execute("file_list", {"path": "secrets"}, work)
+
+        assert listed.success, listed.output
+        assert "[d] secrets" in listed.output
+        assert "notes.txt" not in listed.output
+        assert not inside.success
+        assert inside.output == "Matched execution-policy rule."
+
 
 class TestRestrictivePathRulesWrittenThroughASymlink:
     """The worker hands the policy the resolved path, so a restrictive rule is also matched in its resolved form.

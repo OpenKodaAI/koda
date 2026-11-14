@@ -285,6 +285,38 @@ async def test_path_rules_decide_what_file_and_ls_read(command, args, mock_updat
     assert mock_update.message.reply_text.call_args.args[0] == "Matched execution-policy rule."
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("args", [[], ["."], ["src"]])
+async def test_a_deny_deeper_than_the_listed_entries_does_not_decide_ls(
+    args, mock_update, mock_context, tmp_path, monkeypatch
+):
+    """/ls shows its directory's direct entries only, so a rule on a path deeper than them leaves it to run."""
+    from koda.handlers.commands import cmd_ls
+
+    work_dir = tmp_path.resolve()
+    (work_dir / "src" / "pkg" / "secrets").mkdir(parents=True)
+    (work_dir / "src" / "pkg" / "secrets" / "key").write_text("SECRET")
+    (work_dir / "src" / "main.py").write_text("print('visible')\n")
+    policy = {
+        "version": 1,
+        "rules": [
+            {"name": "allow-ls", "match": {"tool_id": "ls"}, "decision": "allow"},
+            {"name": "deny-secrets", "match": {"path": str(work_dir / "src" / "pkg" / "secrets")}, "decision": "deny"},
+        ],
+    }
+    monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy)
+    mock_context.user_data["work_dir"] = str(work_dir)
+    mock_context.args = args
+
+    with patch("koda.handlers.commands.send_long_message", new_callable=AsyncMock) as mock_send:
+        await cmd_ls(mock_update, mock_context)
+
+    mock_send.assert_called_once()
+    listing = mock_send.call_args.args[1]
+    assert "SECRET" not in listing
+    assert ("main.py" in listing) is (args == ["src"])
+
+
 def test_path_rules_evaluate_the_path_of_every_gated_file_command():
     from koda.agent_contract import FILE_COMMAND_ACCESS_LEVELS, resolve_action_paths
     from koda.utils.files import FILE_COMMANDS

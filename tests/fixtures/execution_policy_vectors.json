@@ -1013,6 +1013,99 @@
       "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-secrets"}
     },
     {
+      "id": "path-deny-on-a-file-entry-decides-a-listing",
+      "description": "file_list shows each direct entry's name, kind and size, so a deny path rule on a file directly in the listed directory decides the listing.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-key", "match": {"path": "/srv/work/key.pem"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_list", "params": {"path": "/srv/work"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-key"}
+    },
+    {
+      "id": "path-deny-two-levels-below-does-not-decide-a-listing",
+      "description": "file_list reads only its direct entries: a deny path rule deeper than them, which the listing shows nothing of, does not decide it.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-deep-secret", "match": {"path": "/srv/work/a/b/c/secret"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_list", "params": {"path": "/srv/work"}},
+      "expected": {"decision": "allow", "reason_code": "rule_match", "rule_id": "allow-file-tools"}
+    },
+    {
+      "id": "path-deny-with-a-wildcard-below-an-entry-does-not-decide-a-listing",
+      "description": "A rule path whose fixed part lies below the listed directory's entries cannot match one of them.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-nested-pem", "match": {"path": "/srv/work/a/*.pem"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_list", "params": {"path": "/srv/work"}},
+      "expected": {"decision": "allow", "reason_code": "rule_match", "rule_id": "allow-file-tools"}
+    },
+    {
+      "id": "path-deny-with-a-wildcard-entry-decides-a-listing",
+      "description": "A rule path whose wildcard segment follows the listed directory can match one of its entries, so it decides the listing (the engine does not know the entries).",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-top-pem", "match": {"path": "/srv/work/*.pem"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_list", "params": {"path": "/srv/work"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-top-pem"}
+    },
+    {
+      "id": "path-deny-starting-with-a-wildcard-decides-every-listing",
+      "description": "A rule path that starts with * can match an entry of any directory, so it decides every listing, also of a directory that holds no such entry.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-pem", "match": {"path": "*.pem"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_list", "params": {"path": "/srv/work/docs"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-pem"}
+    },
+    {
+      "id": "path-deny-starting-with-a-wildcard-decides-every-move",
+      "description": "The engine cannot tell whether a move's source is a directory, so both ends count as directories and a rule path that starts with * decides every move, a file rename included.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-pem", "match": {"path": "*.pem"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_move", "params": {"source": "/srv/work/a.txt", "destination": "/srv/work/b.txt"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-pem"}
+    },
+    {
+      "id": "path-deny-below-a-destination-decides-a-move-of-a-file",
+      "description": "A move into an existing directory lands below it, and a moved directory takes its contents along, so a deny path rule below either end decides the move even when the source is a single file.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-out-secret", "match": {"path": "/srv/work/out/secret.txt"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_move", "params": {"source": "/srv/work/a.txt", "destination": "/srv/work/out"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-out-secret"}
+    },
+    {
       "id": "path-deny-covers-a-move-of-an-ancestor",
       "description": "file_move moves a directory with everything below it, so a deny path rule below the source decides the move.",
       "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},

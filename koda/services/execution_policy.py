@@ -29,14 +29,21 @@ Rule semantics:
   of ``git_diff`` and ``git_log`` and ``job_create``'s ``work_dir`` are not
   evaluated, nor is anything a shell command touches, so a path rule does not
   keep those tools out of a directory (owner: AG-12).
-* ``file_list``, ``file_search``, ``file_grep``, both ends of ``file_move`` and
-  ``/ls`` act on everything below their path (:data:`koda.agent_contract.SUBTREE_PATH_TOOLS`).
-  For them a deny, require_approval or allow_with_preview path rule also matches
-  when its path lies below a spelling of the call's path, so a listing, search,
-  grep or move of an ancestor of the rule's directory does not step around it. A
-  rule path with a wildcard segment counts when the call's path is at, above or
-  below the segments before the wildcard, and one that starts with ``*`` always
-  counts. An allow path rule must still cover the call's path itself.
+* ``file_search``, ``file_grep`` and both ends of ``file_move`` act on everything
+  below their path (:data:`koda.agent_contract.SUBTREE_PATH_TOOLS`). For them a
+  deny, require_approval or allow_with_preview path rule also matches when its
+  path lies below a spelling of the call's path, so a search, grep or move of an
+  ancestor of the rule's directory does not step around it. A rule path with a
+  wildcard segment counts when the call's path is at, above or below the segments
+  before the wildcard, and one that starts with ``*`` always counts. The engine
+  cannot tell whether a move's source is a directory, so a single-file move or
+  rename counts too: a restrictive rule below either end, or one that starts with
+  ``*``, decides it. ``file_list`` and ``/ls`` show the direct entries of their
+  path (:data:`koda.agent_contract.ENTRY_LISTING_PATH_TOOLS`), so such a rule also
+  matches a listing when its path can be one of those entries (a direct entry; a
+  wildcard segment right after the listed directory, or above it; or a leading
+  ``*``), and not when it lies deeper. An allow path rule must still cover the
+  call's path itself.
 * An absolute path is evaluated once for each of its spellings: lexically
   normalized (``.``, ``..`` and repeated ``/`` resolved) and as written, each
   compared with case and ignoring case. The as-written spelling is the one
@@ -87,6 +94,7 @@ from typing import Any
 
 from koda.agent_contract import (
     CORE_TOOL_CATALOG,
+    ENTRY_LISTING_PATH_TOOLS,
     SUBTREE_PATH_TOOLS,
     ActionEnvelope,
     IntegrationGrantDecision,
@@ -733,16 +741,19 @@ def _within(path: str, root: str) -> bool:
     return path == root or root == "/" or path.startswith(root + "/")
 
 
-def _path_pattern_reaches_below(path: str, pattern: str) -> bool:
-    """Return whether ``pattern`` can match a path strictly below ``path``.
+def _path_pattern_reaches_below(path: str, pattern: str, *, entries_only: bool = False) -> bool:
+    """Return whether ``pattern`` can match a path strictly below ``path``, or a direct entry of it (``entries_only``).
 
     ``pattern`` is normalized (:func:`_normalize_path_pattern`). Its fixed part is the
     segments before its first segment with a wildcard; every path it matches starts with
-    that part. Without a wildcard, the pattern itself must lie strictly below ``path``.
-    With one, a match can lie below ``path`` when the fixed part is ``path``, below it or
-    above it: ``*`` also matches ``/``, so the wildcard can stand for several segments,
-    and the check fails closed instead of reasoning about what it can match. A pattern
-    that starts with ``*`` matches at any depth, so it can lie below any path.
+    that part. Without a wildcard, the pattern itself must lie strictly below ``path``
+    (be a direct entry of it). With one, a match can lie below ``path`` when the fixed part
+    is ``path``, below it or above it: ``*`` also matches ``/``, so the wildcard can stand
+    for several segments, and the check fails closed instead of reasoning about what it
+    can match. A match can be a direct entry of ``path`` only when the fixed part is
+    ``path`` or above it: below it, every match lies under one of the entries. A pattern
+    that starts with ``*`` matches at any depth, so it can lie below any path and match
+    an entry of any directory.
     """
     if not pattern.startswith("/"):
         return True
@@ -751,10 +762,14 @@ def _path_pattern_reaches_below(path: str, pattern: str) -> bool:
     for segment in pattern.strip("/").split("/"):
         if _GLOB_CHARACTERS & set(segment):
             prefix = "/" + "/".join(fixed)
+            if entries_only:
+                return _within(root, prefix)
             return _within(prefix, root) or _within(root, prefix)
         if segment:
             fixed.append(segment)
     prefix = "/" + "/".join(fixed)
+    if entries_only:
+        return prefix != root and posixpath.dirname(prefix) == root
     return prefix != root and _within(prefix, root)
 
 
@@ -800,18 +815,22 @@ def _path_matches(
     patterns: tuple[str, ...],
     *,
     decision: str,
-    subtree: bool = False,
+    reach: str = "path",
 ) -> bool:
     """Return whether one spelling of a call's path matches a ``path`` selector of a rule with ``decision``.
 
     A call without a path matches no path selector. A path the engine cannot place
     matches the path selector of every deny, require_approval and allow_with_preview
     rule, and of no allow rule, so it fails closed whatever the worker resolves it to.
-    For a tool that acts on everything below its path (``subtree``, see
+    ``reach`` says what else below its path the call acts on (:func:`_path_reach`). For a
+    tool that acts on everything below its path (``"subtree"``, see
     :data:`koda.agent_contract.SUBTREE_PATH_TOOLS`), a deny, require_approval or
     allow_with_preview rule also matches when its path can lie below the call's path
     (:func:`_path_pattern_reaches_below`), so naming an ancestor of a restrictive rule's
-    directory does not step around it; an allow rule must still cover the path itself.
+    directory does not step around it. For a listing (``"entries"``, see
+    :data:`koda.agent_contract.ENTRY_LISTING_PATH_TOOLS`), such a rule also matches when
+    its path can be a direct entry of the call's path, since the listing shows that
+    entry, and not when it lies deeper. An allow rule must still cover the path itself.
     A restrictive rule's paths are also compared with their fixed part symlink-resolved
     (:func:`_restrictive_rule_paths`).
     """
@@ -826,7 +845,19 @@ def _path_matches(
         path, patterns = path.lower(), tuple(pattern.lower() for pattern in patterns)
     if any(_path_pattern_matches(path, pattern) for pattern in patterns):
         return True
-    return subtree and decision != "allow" and any(_path_pattern_reaches_below(path, pattern) for pattern in patterns)
+    if decision == "allow" or reach == "path":
+        return False
+    entries_only = reach == "entries"
+    return any(_path_pattern_reaches_below(path, pattern, entries_only=entries_only) for pattern in patterns)
+
+
+def _path_reach(tool_id: str) -> str:
+    """Return what a tool acts on below each of its paths: ``"subtree"``, ``"entries"`` or ``"path"`` alone."""
+    if tool_id in SUBTREE_PATH_TOOLS:
+        return "subtree"
+    if tool_id in ENTRY_LISTING_PATH_TOOLS:
+        return "entries"
+    return "path"
 
 
 def _effect_tags_match(effect_tags: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
@@ -848,7 +879,7 @@ def _selector_matches(
             path_spelling,
             _normalize_match_values(value, fold_case=False),
             decision=decision,
-            subtree=envelope.tool_id in SUBTREE_PATH_TOOLS,
+            reach=_path_reach(envelope.tool_id),
         )
     patterns = _normalize_match_values(value)
     if key == "effect_tags":
