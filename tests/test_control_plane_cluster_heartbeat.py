@@ -22,9 +22,11 @@ from pathlib import Path
 
 from koda.control_plane import supervisor as supervisor_mod
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 def _read_source() -> str:
-    return Path("koda/control_plane/supervisor.py").read_text(encoding="utf-8")
+    return (ROOT / "koda" / "control_plane" / "supervisor.py").read_text(encoding="utf-8")
 
 
 def test_supervisor_has_heartbeat_task_field() -> None:

@@ -16,9 +16,11 @@ import pytest
 
 from koda.services import policy_engine_runtime
 
+ROOT = Path(__file__).resolve().parents[2]
+
 
 def _read_queue_manager() -> str:
-    return Path("koda/services/queue_manager.py").read_text(encoding="utf-8")
+    return (ROOT / "koda" / "services" / "queue_manager.py").read_text(encoding="utf-8")
 
 
 def test_enqueue_calls_check_ingest_or_allow() -> None:

@@ -70,6 +70,15 @@ test never reads or deletes your files. Provider disconnect tests remove CLI log
 `~/.claude`, `~/.codex` and `~/.gemini`. Write tests against `os.environ["HOME"]`, never against
 your real home directory.
 
+Tests marked `postgres` run only when `POSTGRES_TEST_DSN` points at a database (`pytest -m
+postgres`); otherwise they are skipped. They share one schema in that database and empty tables
+with `TRUNCATE` between tests, so the Postgres suite is serial-only: do not run it with parallel
+workers, and give each concurrent session its own database. Squad tests reset their tables with
+`reset_squad_runtime_tables` from `tests/postgres_fixtures.py` instead of truncating them directly.
+Fixtures that reset Koda's shared Postgres backends call `close_shared_postgres_backends` from the
+same module, which closes their connection pools; clearing the cache directly leaves those
+connections open until the server refuses new clients.
+
 To run the same local gate from one command:
 
 ```bash

@@ -15,6 +15,7 @@ from koda.squads.capabilities import (
     build_capability_summary,
     format_capability_block,
 )
+from tests.postgres_fixtures import reset_squad_runtime_tables
 
 
 def _schema() -> str:
@@ -164,7 +165,7 @@ async def clean_capabilities(migrated_postgres: str) -> AsyncIterator[str]:
     schema = _schema()
     conn = await asyncpg.connect(migrated_postgres)
     try:
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_member_capabilities"')
+        await reset_squad_runtime_tables(conn, schema)
     finally:
         await conn.close()
     yield migrated_postgres

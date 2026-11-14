@@ -7,6 +7,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_PATH = ROOT / "scripts" / "review_dependency_changes.py"
 
@@ -94,7 +96,9 @@ def test_node_dependency_review_blocks_git_sources() -> None:
     assert failures == ["apps/web/package.json::dependencies.bad-lib -> github:someone/bad-lib#main"]
 
 
-def test_cargo_dependency_review_allows_internal_workspace_paths_only() -> None:
+def test_cargo_dependency_review_allows_internal_workspace_paths_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     module = load_module()
     old_snapshot = module.parse_cargo_snapshot(
         """
@@ -109,11 +113,15 @@ def test_cargo_dependency_review_allows_internal_workspace_paths_only() -> None:
         koda-proto = { path = "../koda-proto" }
         """
     )
+    # The script resolves dependency paths from the manifest's directory, so a
+    # relative manifest path would be judged against the cwd. Run from outside
+    # the repository and pass an anchored manifest path (D-173).
+    monkeypatch.chdir(tmp_path)
 
     failures = module.cargo_dependency_change_details(
         old_snapshot,
         new_snapshot,
-        Path("rust/koda-runtime-kernel/Cargo.toml"),
+        ROOT / "rust" / "koda-runtime-kernel" / "Cargo.toml",
     )
 
     assert failures == []
