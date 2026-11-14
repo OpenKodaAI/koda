@@ -38,7 +38,11 @@ SECURITY_FLOORS: dict[str, tuple[str, str]] = {
     # 2026.10.18 fixes the advisory but also drops the unaffected emSign roots,
     # which 2026.10.19 restores.
     "certifi": ("2026.10.19", "GHSA-6q48-6c7w-9gw2"),
-    "cryptography": ("48.0.1", "GHSA-537c-gmf6-5ccf"),
+    "cryptography": (
+        "50.0.0",
+        "GHSA-537c-gmf6-5ccf, GHSA-g6cj-pr64-35w5, GHSA-jwv3-5hgf-82ww, GHSA-m2h6-j472-rp4c",
+    ),
+    "filelock": ("4.2.1", "9 advisories, among them GHSA-v4x8-3wr5-3wq8 and GHSA-j8f7-rjxc-mr56"),
     "fsspec": ("2026.6.0", "GHSA-27vj-qcqg-25rc"),
     # dev group only (pip-audit -> cachecontrol); the images export with --no-dev.
     "msgpack": ("1.2.3", "GHSA-6v7p-g79w-8964, GHSA-j586-36cw-2gc2"),
@@ -47,6 +51,8 @@ SECURITY_FLOORS: dict[str, tuple[str, str]] = {
     # The dev group's pip (via pip-audit) and the pip each Python image pins.
     "pip": ("26.2", "GHSA-qwm4-qh6w-59xr, GHSA-wf93-45jw-7689"),
     "pypdf": ("6.21.4", "45 advisories, among them GHSA-5849-834g-hvw5 and GHSA-jr96-gvgh-j3r4"),
+    # soupsieve 3.0.2 and later require Python >= 3.11.5, hence pyproject's requires-python.
+    "soupsieve": ("4.0.0", "8 advisories, among them GHSA-6655-6qjp-jx7x and GHSA-mmhr-3c5m-f64f"),
     "urllib3": ("2.8.0", "GHSA-vxq7-64xx-v4gw, GHSA-8988-9cw3-xx77, GHSA-gh4c-6fx4-qh6g"),
 }
 

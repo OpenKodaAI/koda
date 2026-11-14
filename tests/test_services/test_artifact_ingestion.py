@@ -13,6 +13,7 @@ from koda.services.artifact_ingestion import (
     ArtifactRef,
     ArtifactStatus,
     _cache_path,
+    _extract_direct_video_url,
     _maybe_cleanup_artifact_cache,
     build_local_artifact_bundle,
     extract_artifact,
@@ -1031,6 +1032,51 @@ class TestArtifactExtraction:
         assert extracted.status == ArtifactStatus.PARTIAL
         assert extracted.ref.kind == ArtifactKind.VIDEO
         assert "could not be fully extracted automatically" in extracted.summary
+
+
+class TestDirectVideoUrlSelectors:
+    """The CSS selectors (soupsieve, through BeautifulSoup) that find a page's direct video URL."""
+
+    @pytest.mark.parametrize(
+        ("html", "expected"),
+        [
+            (
+                '<html><head><meta property="og:video" content="/media/a.mp4"></head></html>',
+                "https://example.com/media/a.mp4",
+            ),
+            (
+                '<head><meta property="og:video:url" content="https://cdn.example.com/b.mp4"></head>',
+                "https://cdn.example.com/b.mp4",
+            ),
+            (
+                '<head><meta property="og:video:secure_url" content="//cdn.example.com/c.mp4"></head>',
+                "https://cdn.example.com/c.mp4",
+            ),
+            (
+                '<head><meta name="twitter:player:stream" content="d.mp4"></head>',
+                "https://example.com/watch/d.mp4",
+            ),
+            ('<body><video><source src="e.webm" type="video/webm"></video></body>', "https://example.com/watch/e.webm"),
+            # og:video outranks a <source> that comes first in the document.
+            (
+                '<body><video><source src="late.mp4"></video></body><meta property="og:video" content="/first.mp4">',
+                "https://example.com/first.mp4",
+            ),
+        ],
+    )
+    def test_finds_the_direct_video_url(self, html, expected):
+        assert _extract_direct_video_url(html, "https://example.com/watch/page") == expected
+
+    @pytest.mark.parametrize(
+        "html",
+        [
+            "<html><body><p>No video here</p></body></html>",
+            '<head><meta property="og:video" content=""></head>',
+            '<head><meta property="og:videos" content="/wrong.mp4"><meta name="og:video" content="/x.mp4"></head>',
+        ],
+    )
+    def test_returns_none_without_a_usable_video_url(self, html):
+        assert _extract_direct_video_url(html, "https://example.com/watch/page") is None
 
 
 class TestYtDlpOnlySeesCanonicalWatchUrls:
