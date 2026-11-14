@@ -1,5 +1,7 @@
 """Tests for URL detection and classification utilities."""
 
+import pytest
+
 from koda.utils.url_detector import (
     LinkType,
     classify_url,
@@ -90,6 +92,23 @@ class TestExtractYoutubeId:
 
     def test_watch_with_params(self):
         assert extract_youtube_id("https://youtube.com/watch?v=abc12345678&list=PLxyz") == "abc12345678"
+
+    def test_youtube_subdomain(self):
+        assert extract_youtube_id("https://music.youtube.com/watch?v=dQw4w9WgXcQ") == "dQw4w9WgXcQ"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://169.254.169.254/latest/meta-data/?youtu.be/AAAAAAAAAAA",
+            "http://127.0.0.1:2375/containers/json#youtube.com/embed/AAAAAAAAAAA",
+            "http://0.0.0.0:8080/x?q=youtube.com/watch?v=AAAAAAAAAAA",
+            "https://evil-youtube.com/watch?v=AAAAAAAAAAA",
+            "https://youtube.com.evil.test/watch?v=AAAAAAAAAAA",
+        ],
+    )
+    def test_youtube_pattern_on_other_host_is_not_a_video(self, url):
+        """A YouTube-looking path or query on another host must not reach the yt-dlp branch."""
+        assert extract_youtube_id(url) is None
 
 
 class TestUrlHash:

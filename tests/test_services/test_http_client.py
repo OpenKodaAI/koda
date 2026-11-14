@@ -232,3 +232,285 @@ async def test_module_close_session():
         mock_holder.close = AsyncMock()
         await close_session()
         mock_holder.close.assert_awaited_once()
+
+
+# --- SSRF guard: address classification, connect-time pinning, redirects ---
+
+
+@pytest.mark.parametrize(
+    "ip",
+    [
+        "0.0.0.0",  # "this host": Linux routes it to local listeners
+        "0.1.2.3",
+        "::",
+        "100.64.0.1",  # RFC 6598 shared address space (carrier-grade NAT)
+        "100.127.255.254",
+        "::ffff:127.0.0.1",  # IPv4-mapped IPv6 loopback
+        "::ffff:10.0.0.1",
+        "::ffff:169.254.169.254",  # IPv4-mapped cloud metadata endpoint
+        "::ffff:0.0.0.0",
+        "224.0.0.1",
+        "ff02::1",
+        "240.0.0.1",
+        "255.255.255.255",
+        "198.18.0.1",
+        "fec0::1",
+        "fe80::1%eth0",
+        "64:ff9b::7f00:1",  # NAT64 of 127.0.0.1
+        "64:ff9b::a00:1",  # NAT64 of 10.0.0.1
+        "not-an-ip",
+    ],
+)
+def test_private_ip_detection_blocks_non_public_ranges(ip):
+    assert _is_private_ip(ip) is True
+
+
+@pytest.mark.parametrize("ip", ["8.8.8.8", "::ffff:8.8.8.8", "64:ff9b::808:808", "2001:4860:4860::8888", "100.128.0.1"])
+def test_private_ip_detection_allows_public_unicast(ip):
+    assert _is_private_ip(ip) is False
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://0.0.0.0:8080/",
+        "http://[::]:8080/",
+        "http://[::ffff:127.0.0.1]:8080/",
+        "http://[::ffff:a9fe:a9fe]/latest/meta-data/",
+        "http://100.64.0.1/",
+    ],
+)
+def test_url_safety_blocks_unspecified_shared_and_mapped_literals(url):
+    result = _check_url_safety(url)
+    assert result is not None
+    assert "private" in result.lower()
+
+
+async def _start_local_server():
+    from aiohttp import web
+
+    async def secret(_request):
+        return web.Response(text="internal-secret")
+
+    app = web.Application()
+    app.router.add_get("/secret", secret)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = runner.addresses[0][1]
+    return runner, port
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_cannot_reach_local_service_via_unspecified_address():
+    runner, port = await _start_local_server()
+    holder = _SessionHolder()
+    try:
+        with patch("koda.services.http_client._holder", holder):
+            result = await fetch_url(f"http://0.0.0.0:{port}/secret")
+    finally:
+        await holder.close()
+        await runner.cleanup()
+
+    assert "internal-secret" not in result
+    assert result.startswith("Error:")
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_pins_connection_against_dns_rebinding():
+    """Every safety pre-check sees a public IP; the lookup used to connect rebinds to loopback.
+
+    ``_check_url_safety`` resolves with no port while aiohttp resolves with the
+    request port, which lets the fake DNS answer differently for the connection
+    itself -- exactly what a TTL-0 rebinding server does between check and use.
+    """
+    import socket as socket_module
+
+    runner, port = await _start_local_server()
+    real_getaddrinfo = socket_module.getaddrinfo
+    lookups: list[str] = []
+
+    def rebinding_getaddrinfo(host, service, *args, **kwargs):
+        if host != "rebind.koda.test":
+            return real_getaddrinfo(host, service, *args, **kwargs)
+        ip = "93.184.216.34" if service is None else "127.0.0.1"
+        lookups.append(ip)
+        return [(socket_module.AF_INET, socket_module.SOCK_STREAM, 6, "", (ip, service or 0))]
+
+    holder = _SessionHolder()
+    try:
+        with (
+            patch("koda.services.http_client._holder", holder),
+            patch.object(socket_module, "getaddrinfo", rebinding_getaddrinfo),
+        ):
+            result = await fetch_url(f"http://rebind.koda.test:{port}/secret")
+    finally:
+        await holder.close()
+        await runner.cleanup()
+
+    assert "93.184.216.34" in lookups
+    assert lookups[-1] == "127.0.0.1"  # the connect-time answer was consulted
+    assert "internal-secret" not in result
+    assert result.startswith("Error:")
+    assert "private/reserved" in result
+
+
+def _public_example_getaddrinfo(real_getaddrinfo):
+    def fake(host, service, *args, **kwargs):
+        if host == "example.com":
+            return [(2, 1, 6, "", ("93.184.216.34", service or 0))]
+        return real_getaddrinfo(host, service, *args, **kwargs)
+
+    return fake
+
+
+@pytest.mark.asyncio
+async def test_fetch_url_blocks_redirect_to_unspecified_address():
+    import socket as socket_module
+
+    redirect = MagicMock()
+    redirect.status = 302
+    redirect.headers = {"Location": "http://0.0.0.0:2375/containers/json"}
+    redirect.release = MagicMock()
+
+    mock_session = AsyncMock()
+    mock_session.request = AsyncMock(return_value=redirect)
+
+    with (
+        patch.object(socket_module, "getaddrinfo", _public_example_getaddrinfo(socket_module.getaddrinfo)),
+        patch("koda.services.http_client._get_session", return_value=mock_session),
+    ):
+        result = await fetch_url("https://example.com/")
+
+    assert result.startswith("Error: Redirect blocked")
+    assert mock_session.request.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_search_web_revalidates_redirects():
+    redirect = MagicMock()
+    redirect.status = 302
+    redirect.headers = {"Location": "http://169.254.169.254/latest/meta-data/"}
+    redirect.release = MagicMock()
+
+    mock_session = AsyncMock()
+    mock_session.request = AsyncMock(return_value=redirect)
+
+    from koda.services.http_client import search_web
+
+    def fake_getaddrinfo(host, *_args, **_kwargs):
+        return [(2, 1, 6, "", ("52.0.0.1" if host == "html.duckduckgo.com" else host, 0))]
+
+    with (
+        patch("koda.services.http_client.socket.getaddrinfo", side_effect=fake_getaddrinfo),
+        patch("koda.services.http_client._get_session", return_value=mock_session),
+    ):
+        result = await search_web("koda")
+
+    assert result.startswith("Error:")
+    assert "private/reserved" in result
+    assert mock_session.request.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_public_only_resolver_rejects_private_answers():
+    from koda.services.http_client import _PublicOnlyResolver
+
+    resolver = _PublicOnlyResolver()
+    private_answer = [{"hostname": "h", "host": "10.0.0.5", "port": 80, "family": 2, "proto": 6, "flags": 0}]
+    with (
+        patch.object(resolver._resolver, "resolve", AsyncMock(return_value=private_answer)),
+        pytest.raises(OSError, match="private/reserved"),
+    ):
+        await resolver.resolve("h", 80)
+
+    public_answer = [{"hostname": "h", "host": "93.184.216.34", "port": 80, "family": 2, "proto": 6, "flags": 0}]
+    with patch.object(resolver._resolver, "resolve", AsyncMock(return_value=public_answer)):
+        assert await resolver.resolve("h", 80) == public_answer
+    await resolver.close()
+
+
+@pytest.mark.asyncio
+async def test_private_access_uses_a_separate_unguarded_session():
+    """allow_private gets its own session; the guarded one still refuses a private DNS answer.
+
+    The unguarded session connects first, so a shared connector would serve the
+    guarded request from its DNS cache and skip the connect-time check.
+    """
+    import socket as socket_module
+
+    import aiohttp
+
+    from koda.services.http_client import _get_session
+
+    runner, port = await _start_local_server()
+    real_getaddrinfo = socket_module.getaddrinfo
+
+    def internal_getaddrinfo(host, service, *args, **kwargs):
+        if host == "internal.koda.test":
+            return [(socket_module.AF_INET, socket_module.SOCK_STREAM, 6, "", ("127.0.0.1", service or 0))]
+        return real_getaddrinfo(host, service, *args, **kwargs)
+
+    url = f"http://internal.koda.test:{port}/secret"
+    strict = _SessionHolder()
+    permissive = _SessionHolder(allow_private=True)
+    try:
+        with (
+            patch("koda.services.http_client._holder", strict),
+            patch("koda.services.http_client._private_holder", permissive),
+            patch.object(socket_module, "getaddrinfo", internal_getaddrinfo),
+        ):
+            guarded = await _get_session()
+            unguarded = await _get_session(allow_private=True)
+            assert guarded is not unguarded
+
+            async with unguarded.get(url) as resp:
+                assert await resp.text() == "internal-secret"
+            with pytest.raises(aiohttp.ClientConnectorError, match="private/reserved"):
+                async with guarded.get(url):
+                    pass
+    finally:
+        await strict.close()
+        await permissive.close()
+        await runner.cleanup()
+
+
+@pytest.mark.asyncio
+async def test_url_safety_dns_lookup_runs_off_the_event_loop():
+    """The pre-check's getaddrinfo blocks, so it must not run on the event loop thread."""
+    import threading
+
+    from koda.services.http_client import search_web
+
+    loop_thread = threading.current_thread()
+    lookup_threads: list[threading.Thread] = []
+
+    def fake_getaddrinfo(host, *_args, **_kwargs):
+        lookup_threads.append(threading.current_thread())
+        return [(2, 1, 6, "", ("93.184.216.34", 0))]
+
+    response = MagicMock()
+    response.status = 200
+    response.headers = {}
+    response.text = AsyncMock(return_value="<html></html>")
+    response.release = MagicMock()
+    mock_session = AsyncMock()
+    mock_session.request = AsyncMock(return_value=response)
+    # make_http_request uses ``session.request`` as an async context manager.
+    request_context = MagicMock()
+    request_context.__aenter__.return_value = response
+    direct_session = MagicMock()
+    direct_session.request = MagicMock(return_value=request_context)
+
+    with patch("koda.services.http_client.socket.getaddrinfo", side_effect=fake_getaddrinfo):
+        with patch("koda.services.http_client._get_session", return_value=mock_session):
+            await search_web("koda")
+            await fetch_url("https://example.com/")
+            await inspect_url("https://example.com/")
+            await download_url_bytes("https://example.com/", max_size=10)
+        with patch("koda.services.http_client._get_session", return_value=direct_session):
+            assert (await make_http_request("GET", "https://example.com/")).startswith("HTTP 200")
+
+    assert len(lookup_threads) >= 5
+    assert loop_thread not in lookup_threads

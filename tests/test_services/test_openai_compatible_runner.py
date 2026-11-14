@@ -545,3 +545,172 @@ class TestProviderHttpProfile:
         assert headers["HTTP-Referer"] == "https://koda.example"
         assert headers["X-OpenRouter-Title"] == "Koda"
         assert headers["X-OpenRouter-Categories"] == "cli-agent,personal-agent"
+
+
+# SSRF: provider calls to a non-private base URL stay on public addresses
+
+
+_PROVIDER_HOST = "provider.koda.test"
+
+
+def _completion(text: str) -> dict:
+    return {"choices": [{"message": {"role": "assistant", "content": text}}], "usage": {}}
+
+
+async def _start_provider_server(*, redirect_chat: bool = False):
+    """Loopback stand-in for a provider; records every path it serves."""
+    from aiohttp import web
+
+    hits: list[str] = []
+
+    async def models(request):
+        hits.append(request.path)
+        return web.json_response({"data": []})
+
+    async def chat(request):
+        hits.append(request.path)
+        if redirect_chat:
+            raise web.HTTPTemporaryRedirect("/internal")  # 307 keeps the POST and its headers
+        return web.json_response(_completion("reached"))
+
+    async def internal(request):
+        hits.append(request.path)
+        return web.json_response(_completion("internal-secret"))
+
+    app = web.Application()
+    app.router.add_get("/v1/models", models)
+    app.router.add_post("/v1/chat/completions", chat)
+    app.router.add_post("/internal", internal)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    return runner, runner.addresses[0][1], hits
+
+
+def _provider_dns(*, precheck_ip: str, connect_ip: str):
+    """Fake DNS for the provider host.
+
+    ``_check_url_safety`` resolves with no port while aiohttp resolves with the
+    request port, so the two lookups can get different answers, as they do when
+    a TTL-0 rebinding server changes its answer between check and connect.
+    """
+    import socket as socket_module
+
+    real_getaddrinfo = socket_module.getaddrinfo
+
+    def fake(host, service, *args, **kwargs):
+        if host != _PROVIDER_HOST:
+            return real_getaddrinfo(host, service, *args, **kwargs)
+        ip = precheck_ip if service is None else connect_ip
+        return [(socket_module.AF_INET, socket_module.SOCK_STREAM, 6, "", (ip, service or 0))]
+
+    return patch.object(socket_module, "getaddrinfo", fake)
+
+
+def _local_provider_profile(port: int) -> ProviderHttpProfile:
+    return ProviderHttpProfile(provider_id="generic", base_url=f"http://{_PROVIDER_HOST}:{port}", auth_mode="local")
+
+
+def _no_provider_env():
+    return patch("koda.services.openai_compatible_runner.build_llm_subprocess_env", return_value={})
+
+
+def _loopback_counts_as_public():
+    """Let the guarded client reach the loopback test server, so only redirect handling is under test."""
+    return patch("koda.services.http_client._is_private_ip", lambda ip: False)
+
+
+class TestProviderRequestsStayOnPublicAddresses:
+    @pytest.mark.asyncio
+    async def test_chat_request_is_pinned_against_dns_rebinding(self, ready_capability):
+        from koda.services.openai_compatible_runner import run_openai_compatible
+
+        runner, port, hits = await _start_provider_server()
+        try:
+            with _no_provider_env(), _provider_dns(precheck_ip="93.184.216.34", connect_ip="127.0.0.1"):
+                result = await run_openai_compatible(
+                    profile=_local_provider_profile(port),
+                    query="hi",
+                    work_dir="/tmp",
+                    model="m",
+                    capabilities=ready_capability,
+                )
+        finally:
+            await runner.cleanup()
+
+        assert hits == []
+        assert result["error"] is True
+        assert "private/reserved" in result["result"]
+
+    @pytest.mark.asyncio
+    async def test_capability_probe_is_pinned_against_dns_rebinding(self):
+        from koda.services.openai_compatible_runner import _probe_capabilities
+
+        runner, port, hits = await _start_provider_server()
+        try:
+            with _no_provider_env(), _provider_dns(precheck_ip="93.184.216.34", connect_ip="127.0.0.1"):
+                capability = await _probe_capabilities(_local_provider_profile(port), "new_turn")
+        finally:
+            await runner.cleanup()
+
+        assert hits == []
+        assert capability.can_execute is False
+        assert "private/reserved" in capability.errors[0]
+
+    @pytest.mark.asyncio
+    async def test_chat_request_does_not_follow_unchecked_redirects(self, ready_capability):
+        from koda.services.openai_compatible_runner import run_openai_compatible
+
+        runner, port, hits = await _start_provider_server(redirect_chat=True)
+        try:
+            with (
+                _no_provider_env(),
+                _loopback_counts_as_public(),
+                _provider_dns(precheck_ip="127.0.0.1", connect_ip="127.0.0.1"),
+            ):
+                result = await run_openai_compatible(
+                    profile=_local_provider_profile(port),
+                    query="hi",
+                    work_dir="/tmp",
+                    model="m",
+                    capabilities=ready_capability,
+                )
+        finally:
+            await runner.cleanup()
+
+        assert hits == ["/v1/chat/completions"]
+        assert result["error"] is True
+        assert "HTTP 307" in result["result"]
+        assert "internal-secret" not in result["result"]
+
+    @pytest.mark.asyncio
+    async def test_streaming_request_does_not_follow_unchecked_redirects(self, ready_capability):
+        from koda.services.openai_compatible_runner import run_openai_compatible_streaming
+
+        runner, port, hits = await _start_provider_server(redirect_chat=True)
+        collector: dict = {}
+        try:
+            with (
+                _no_provider_env(),
+                _loopback_counts_as_public(),
+                _provider_dns(precheck_ip="127.0.0.1", connect_ip="127.0.0.1"),
+            ):
+                chunks = [
+                    chunk
+                    async for chunk in run_openai_compatible_streaming(
+                        profile=_local_provider_profile(port),
+                        query="hi",
+                        work_dir="/tmp",
+                        model="m",
+                        capabilities=ready_capability,
+                        metadata_collector=collector,
+                    )
+                ]
+        finally:
+            await runner.cleanup()
+
+        assert hits == ["/v1/chat/completions"]
+        assert chunks == []
+        assert collector["error"] is True
+        assert "HTTP 307" in collector["error_message"]

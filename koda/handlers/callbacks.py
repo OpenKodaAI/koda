@@ -1520,7 +1520,7 @@ async def callback_link_analysis(update: Update, context: BotContext) -> None:
 
     # Transcript: direct action without provider execution — send formatted text directly
     if action == "transcript" and meta.youtube_id:
-        transcript_text = await fetch_youtube_transcript(meta.url)
+        transcript_text = await fetch_youtube_transcript(meta.youtube_id)
         if not transcript_text:
             await context.bot.send_message(
                 chat_id=chat_id,
