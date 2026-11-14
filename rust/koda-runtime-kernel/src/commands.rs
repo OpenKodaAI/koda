@@ -106,6 +106,36 @@ pub(crate) struct ExecutedCommandOutcome {
     pub(crate) finished_at_ms: u64,
 }
 
+/// SIGKILLs a command's process group unless the command ran to completion.
+///
+/// Dropping the request future (a cancelled RPC or an expired deadline) drops
+/// this guard while it is armed, so no process still in the command's group
+/// outlives the request. Process groups exist only with `start_new_session`; without one,
+/// `kill_on_drop` still kills the direct child.
+struct ProcessGroupGuard {
+    pgid: i32,
+    armed: bool,
+}
+
+impl ProcessGroupGuard {
+    fn kill(&mut self) {
+        if self.armed && self.pgid > 0 {
+            let _ = send_process_signal(Some(self.pgid), None, libc::SIGKILL);
+        }
+        self.armed = false;
+    }
+
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for ProcessGroupGuard {
+    fn drop(&mut self) {
+        self.kill();
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn execute_shell_command(
     command: &str,
@@ -141,6 +171,7 @@ pub(crate) async fn execute_shell_command(
     command_builder.stdin(std::process::Stdio::piped());
     command_builder.stdout(std::process::Stdio::piped());
     command_builder.stderr(std::process::Stdio::piped());
+    command_builder.kill_on_drop(true);
 
     let started_at_ms = now_ms();
     let mut child = command_builder.spawn().map_err(|error| {
@@ -153,6 +184,7 @@ pub(crate) async fn execute_shell_command(
         .map(|value| i32::try_from(value).unwrap_or_default())
         .unwrap_or_default();
     let pgid = if start_new_session { pid } else { 0 };
+    let mut group_guard = ProcessGroupGuard { pgid, armed: true };
     let stdout = child
         .stdout
         .take()
@@ -193,6 +225,8 @@ pub(crate) async fn execute_shell_command(
                 let _ = child.start_kill();
                 let _ = child.wait().await;
             }
+            // Members that ignored SIGTERM would otherwise hold the output pipes open.
+            group_guard.kill();
             124
         }
     };
@@ -204,6 +238,7 @@ pub(crate) async fn execute_shell_command(
         .await
         .map_err(|error| Status::internal(format!("failed to join stderr reader: {error}")))?
         .map_err(|error| Status::internal(format!("failed to read stderr: {error}")))?;
+    group_guard.disarm();
     Ok(ExecutedCommandOutcome {
         stdout,
         stderr,
@@ -253,6 +288,68 @@ mod tests {
         CommandPolicy::from_allow_network(true)
             .validate("curl", &["https://example.com".to_string()])
             .unwrap();
+    }
+
+    /// True while any non-zombie process belongs to process group `pgid`.
+    #[cfg(target_os = "linux")]
+    fn process_group_has_live_members(pgid: i32) -> bool {
+        let Ok(entries) = std::fs::read_dir("/proc") else {
+            return false;
+        };
+        entries.flatten().any(|entry| {
+            let Ok(stat) = std::fs::read_to_string(entry.path().join("stat")) else {
+                return false;
+            };
+            // `pid (comm) state ppid pgrp ...`; comm may contain spaces and parentheses.
+            let Some((_, fields)) = stat.rsplit_once(')') else {
+                return false;
+            };
+            let fields: Vec<&str> = fields.split_whitespace().collect();
+            fields.len() > 2
+                && fields[0] != "Z"
+                && fields[0] != "X"
+                && fields[2] == pgid.to_string()
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn dropping_execute_shell_command_kills_its_process_group() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let pgid_file = tempdir.path().join("pgid");
+        let script = format!("echo $$ > {}; sleep 30 & sleep 30", pgid_file.display());
+        let request = tokio::spawn(async move {
+            execute_shell_command(&script, &[], "", &HashMap::new(), b"", 30, true, false).await
+        });
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        let pgid = loop {
+            if let Some(pgid) = std::fs::read_to_string(&pgid_file)
+                .ok()
+                .and_then(|value| value.trim().parse::<i32>().ok())
+            {
+                break pgid;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "command never started"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        };
+        assert!(process_group_has_live_members(pgid));
+
+        // A cancelled RPC or an expired deadline drops the request future.
+        request.abort();
+        assert!(request.await.unwrap_err().is_cancelled());
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while process_group_has_live_members(pgid) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "process group {pgid} outlived the dropped request"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     #[tokio::test]
