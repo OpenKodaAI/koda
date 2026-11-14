@@ -11,6 +11,7 @@ import pytest
 from koda.squads import threads as thread_module
 from koda.squads.replies import ThreadReplyError, ThreadReplyService
 from koda.squads.threads import SquadThreadStore
+from tests.postgres_fixtures import reset_squad_runtime_tables
 
 
 def _schema() -> str:
@@ -35,11 +36,7 @@ async def clean_squad_state(migrated_postgres: str) -> AsyncIterator[str]:
     schema = _schema()
     conn = await asyncpg.connect(migrated_postgres)
     try:
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_reply_obligations" RESTART IDENTITY CASCADE')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_message_recipients"')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_thread_participants"')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_threads"')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_messages" RESTART IDENTITY CASCADE')
+        await reset_squad_runtime_tables(conn, schema)
     finally:
         await conn.close()
     yield migrated_postgres

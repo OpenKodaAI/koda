@@ -12,6 +12,7 @@ import pytest
 from koda.agents.message_bus_iface import MessageBus
 from koda.agents.models import DelegationRequest, DelegationResult
 from koda.agents.postgres_message_bus import PostgresMessageBus
+from tests.postgres_fixtures import reset_squad_runtime_tables
 
 
 def test_postgres_satisfies_messagebus_protocol() -> None:
@@ -35,8 +36,7 @@ async def clean_squad_messages(migrated_postgres: str) -> AsyncIterator[str]:
     schema = _schema()
     conn = await asyncpg.connect(migrated_postgres)
     try:
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_message_recipients"')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_messages" RESTART IDENTITY CASCADE')
+        await reset_squad_runtime_tables(conn, schema)
     finally:
         await conn.close()
     yield migrated_postgres

@@ -87,16 +87,23 @@ def test_collection_hook_skips_postgres_when_unavailable(pytestconfig) -> None:
         pytest.skip("Postgres fixture is available — collection hook is a no-op here.")
 
     class _FakeItem:
-        def __init__(self) -> None:
+        def __init__(self, *, marked: bool) -> None:
+            # A parametrize id such as ``[postgres]`` also lands in keywords;
+            # only the real marker may trigger the skip.
             self.keywords = {"postgres": True}
+            self._marked = marked
             self.markers: list[Any] = []
+
+        def get_closest_marker(self, name: str) -> Any:
+            return pytest.mark.postgres.mark if self._marked and name == "postgres" else None
 
         def add_marker(self, marker: Any) -> None:
             self.markers.append(marker)
 
-    items = [_FakeItem()]
-    postgres_fixtures.pytest_collection_modifyitems(pytestconfig, items)
-    assert items[0].markers, "expected an auto-skip marker on a postgres-tagged item"
+    marked, keyword_only = _FakeItem(marked=True), _FakeItem(marked=False)
+    postgres_fixtures.pytest_collection_modifyitems(pytestconfig, [marked, keyword_only])
+    assert marked.markers, "expected an auto-skip marker on a postgres-marked item"
+    assert not keyword_only.markers, "a 'postgres' keyword without the marker must not be skipped"
 
 
 # Quiet the type checker on the loose ``Any`` import above.

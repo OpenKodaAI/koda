@@ -37,9 +37,11 @@ iteration.
 - P0-BASELINE — all required gates executed; results in `QUALITY_BASELINE.md`.
 - P0-FIX-CARGOFMT — documented `cargo fmt --check --manifest-path rust/Cargo.toml` fails on rustfmt 1.9 ("Failed to find targets"); corrected to `cargo fmt --all --check ...` in CLAUDE.md, README.md, packages/cli/README.md. Evidence: new command rc=0; `tests/test_installation_assets.py` + `tests/test_top_tier_roadmap_assurance.py` 41 passed.
 
+- M0-PG-FIXTURES — Postgres-marked suite (186 tests) now runs and passes; DSN scoped per test with no session leaks; new `python-postgres-tests` CI job. Reviewed (approved; major + minor items fixed). Evidence: `VALIDATION_REPORT.md`.
+
 ## Active tasks
 
-- P0-DISCOVERY — multi-agent subsystem inventory.
+- P0-DISCOVERY — multi-agent subsystem inventory (workflow running; early unverified findings: provider CLIs run tools with permissions bypassed, public break-glass admin token on manual install, retries re-run side-effecting tools, squad post-processing deadlock).
 
 ## Blocked tasks
 
@@ -47,4 +49,4 @@ iteration.
 
 ## Discovered regressions
 
-_None recorded (no code changes made yet)._
+_None._ Note: test runs sharing the machine with audit agents must use their own database and `SECURITY_GRPC_TARGET` port; a shared run produced 111 spurious failures when another session's security-guard service on port 50065 went away.

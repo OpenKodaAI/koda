@@ -30,28 +30,20 @@ pytestmark = [pytest.mark.postgres]
 
 @pytest.fixture
 async def runtime_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[str]:
-    """Yield the migrated DSN with runtime tables truncated and config reloaded.
+    """Yield the migrated DSN with runtime tables truncated.
 
-    The migrated_postgres fixture sets KNOWLEDGE_V2_POSTGRES_DSN in os.environ,
-    but the constant inside koda.knowledge.config was captured at import time
-    against an empty string. We reload the relevant modules so subsequent
-    backend lookups see the test DSN.
+    The autouse ``_postgres_dsn_scope`` fixture (tests/postgres_fixtures.py)
+    points every loaded copy of KNOWLEDGE_V2_POSTGRES_DSN at the test
+    database; here we only drop cached backends so they rebuild against it.
 
     We also extend the asyncpg codec installer to register a JSONB codec
     that round-trips Python dict/list — required because runtime_events
     and runtime_port_allocations use JSONB columns and the default codec
     rejects Python objects.
     """
-    # Reload configs that captured env at import time.
-    import koda.knowledge.config as kn_config
-
-    importlib.reload(kn_config)
-
-    # Clear shared backend cache so reload takes effect.
     from koda.knowledge.v2 import common as common_mod
 
-    if hasattr(common_mod, "_SHARED_BACKENDS"):
-        common_mod._SHARED_BACKENDS.clear()  # type: ignore[attr-defined]
+    common_mod._SHARED_POSTGRES_BACKENDS.clear()
 
     # Install a JSONB codec for the test session. The runtime store passes
     # already-redacted JSON *strings* into JSONB columns — asyncpg's default
@@ -93,8 +85,7 @@ async def runtime_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) ->
     try:
         yield migrated_postgres
     finally:
-        if hasattr(common_mod, "_SHARED_BACKENDS"):
-            common_mod._SHARED_BACKENDS.clear()  # type: ignore[attr-defined]
+        common_mod._SHARED_POSTGRES_BACKENDS.clear()
 
 
 def _build_store(agent_id: str):

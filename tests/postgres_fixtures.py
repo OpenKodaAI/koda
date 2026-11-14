@@ -26,6 +26,7 @@ without paying the full migration cost.
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -72,10 +73,77 @@ def postgres_url() -> str:
         # testcontainers' default DSN uses ``postgresql+psycopg2``;
         # asyncpg expects ``postgresql://``. Normalize.
         url = container.get_connection_url().replace("postgresql+psycopg2", "postgresql")
-        os.environ["KNOWLEDGE_V2_POSTGRES_DSN"] = url
         yield url
     finally:
         container.stop()
+
+
+_DSN_ATTR = "KNOWLEDGE_V2_POSTGRES_DSN"
+
+
+def _clear_shared_postgres_backends() -> None:
+    from koda.knowledge.v2 import common as knowledge_common
+
+    knowledge_common._SHARED_POSTGRES_BACKENDS.clear()
+
+
+def _koda_modules_holding_dsn() -> list[Any]:
+    """Loaded koda modules that captured ``KNOWLEDGE_V2_POSTGRES_DSN`` at import."""
+    return [
+        module
+        for name, module in list(sys.modules.items())
+        if module is not None
+        and (name == "koda" or name.startswith("koda."))
+        and isinstance(module.__dict__.get(_DSN_ATTR), str)
+    ]
+
+
+def _is_postgres_test(node: Any) -> bool:
+    return node.get_closest_marker("postgres") is not None
+
+
+@pytest.fixture(autouse=True)
+def _postgres_dsn_scope(request: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
+    """Point Koda's Postgres-backed code at the test database for the duration
+    of each ``@pytest.mark.postgres`` test only.
+
+    Koda reads ``KNOWLEDGE_V2_POSTGRES_DSN`` from the environment and from
+    module constants that several modules copy at import time (e.g.
+    ``koda.knowledge.config``, ``koda.knowledge.v2.common``,
+    ``koda.services.audit``, ``koda.control_plane.manager``). During the test
+    every loaded copy points at the test database; afterwards each copy,
+    including ones first imported or reloaded during the test, gets its
+    pre-test value back, so later non-postgres tests keep their file or
+    in-memory backends instead of silently sharing the test database.
+    """
+    if not _is_postgres_test(request.node):
+        yield
+        return
+
+    dsn = request.getfixturevalue("postgres_url")
+    # Import (and empty) the shared backend cache before patching so the
+    # cache module itself is patched rather than imported with the test DSN.
+    _clear_shared_postgres_backends()
+    import koda.knowledge.config as knowledge_config
+
+    original_dsn = knowledge_config.KNOWLEDGE_V2_POSTGRES_DSN
+    snapshot = {
+        name: getattr(knowledge_config, name) for name in dir(knowledge_config) if name.startswith("KNOWLEDGE_V2_")
+    }
+    monkeypatch.setenv(_DSN_ATTR, dsn)
+    for module in _koda_modules_holding_dsn():
+        monkeypatch.setattr(module, _DSN_ATTR, dsn)
+    try:
+        yield
+    finally:
+        for name, value in snapshot.items():
+            setattr(knowledge_config, name, value)
+        # Modules first imported (or reloaded) during the test captured the
+        # test DSN and are not covered by monkeypatch's undo.
+        for module in _koda_modules_holding_dsn():
+            if module.__dict__.get(_DSN_ATTR) == dsn:
+                setattr(module, _DSN_ATTR, original_dsn)
+        _clear_shared_postgres_backends()
 
 
 @pytest.fixture(scope="session")
@@ -96,6 +164,27 @@ async def migrated_postgres(postgres_url: str) -> str:
     if not ok:
         pytest.fail(f"failed to bootstrap migrations against {postgres_url}")
     return postgres_url
+
+
+# Squad runtime tables, truncated together so foreign keys between them
+# (e.g. squad_reply_obligations -> squad_threads / squad_messages) never
+# block cleanup when a new referencing table is added.
+SQUAD_RUNTIME_TABLES = (
+    "squad_reply_obligations",
+    "squad_message_recipients",
+    "squad_messages",
+    "squad_tasks",
+    "squad_thread_participants",
+    "squad_threads",
+    "squad_coordinator_state",
+    "squad_coordinator_history",
+)
+
+
+async def reset_squad_runtime_tables(conn: Any, schema: str) -> None:
+    """Empty every squad runtime table in one statement."""
+    tables = ", ".join(f'"{schema}"."{name}"' for name in SQUAD_RUNTIME_TABLES)
+    await conn.execute(f"TRUNCATE TABLE {tables} RESTART IDENTITY CASCADE")
 
 
 @pytest.fixture
@@ -126,5 +215,5 @@ def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:
         return
     skip_marker = pytest.mark.skip(reason="postgres fixture unavailable (no DSN, no testcontainers/Docker)")
     for item in items:
-        if "postgres" in item.keywords:
+        if _is_postgres_test(item):
             item.add_marker(skip_marker)

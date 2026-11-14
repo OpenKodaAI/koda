@@ -14,6 +14,7 @@ from koda.squads.coordinator import REQUIRED_COORDINATOR_TOOL_IDS
 from koda.squads.router import SquadRouter, SweepReport
 from koda.squads.tasks import ExpiredClaim, SquadTaskStore
 from koda.squads.threads import SquadThreadStore
+from tests.postgres_fixtures import reset_squad_runtime_tables
 
 
 def _schema() -> str:
@@ -140,14 +141,7 @@ async def clean_state(migrated_postgres: str) -> AsyncIterator[str]:
     schema = _schema()
     conn = await asyncpg.connect(migrated_postgres)
     try:
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_coordinator_history" RESTART IDENTITY')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_coordinator_state"')
-        await conn.execute(
-            f'TRUNCATE TABLE "{schema}"."squad_message_recipients", "{schema}"."squad_messages" RESTART IDENTITY'
-        )
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_tasks"')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_thread_participants"')
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_threads"')
+        await reset_squad_runtime_tables(conn, schema)
     finally:
         await conn.close()
     yield migrated_postgres

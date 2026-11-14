@@ -31,7 +31,6 @@ Use a real Postgres instance before enabling the Postgres bus:
 
 ```bash
 POSTGRES_TEST_DSN=postgresql://koda:koda@127.0.0.1:55432/koda \
-KNOWLEDGE_V2_POSTGRES_DSN=postgresql://koda:koda@127.0.0.1:55432/koda \
 uv run pytest -m postgres -q
 ```
 

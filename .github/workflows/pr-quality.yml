@@ -104,6 +104,47 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  python-postgres-tests:
+    # Runs the @pytest.mark.postgres suite against a real pgvector Postgres.
+    # Without a DSN (and with no testcontainers dependency) these tests skip,
+    # so this job is the only place the production persistence path runs.
+    name: python-postgres-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: koda
+          POSTGRES_USER: koda
+          POSTGRES_PASSWORD: koda
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U koda -d koda"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Run Postgres-backed tests
+        run: uv run pytest -q -m postgres
+        env:
+          POSTGRES_TEST_DSN: postgresql://koda:koda@127.0.0.1:5432/koda
+          AGENT_TOKEN: "test-token"
+          ALLOWED_USER_IDS: "123456789"
+          KODA_SECURITY_GUARD_STARTUP_TIMEOUT: "120"
+
   web-quality:
     name: web-quality
     runs-on: ubuntu-latest

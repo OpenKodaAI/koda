@@ -29,7 +29,8 @@ Environment: `AGENT_TOKEN=test-token`, `ALLOWED_USER_IDS=123456789` (CI dummy va
   - 47 errors: test fixture `TRUNCATE`s `squad_threads` / `squad_messages` without `CASCADE` while `squad_reply_obligations` references them.
   - 19 failures: `KNOWLEDGE_V2_POSTGRES_DSN` not set by the fixture when `POSTGRES_TEST_DSN` is used (only the testcontainers path sets it).
   - Remaining failures not yet triaged.
-- Consequence: the production persistence path (Postgres) is effectively untested in this environment and possibly in CI; this is a release blocker until triaged.
+- Consequence at baseline time: the production persistence path (Postgres) was untested everywhere, CI included (no DSN, no `testcontainers` dependency).
+- Resolved by M0-PG-FIXTURES (see `VALIDATION_REPORT.md`): 186 passed, 2 skipped with a DSN; new `python-postgres-tests` CI job.
 
 ## Python line coverage by package
 

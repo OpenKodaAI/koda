@@ -20,7 +20,6 @@ Pinned guarantees:
 from __future__ import annotations
 
 import contextlib
-import importlib
 import json as _json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
@@ -36,21 +35,16 @@ pytestmark = [pytest.mark.postgres]
 
 @pytest.fixture
 async def cluster_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[str]:
-    """Migrated DSN with cp_* tables truncated and primary modules reloaded.
+    """Migrated DSN with cp_* tables truncated and fresh shared backends.
 
-    Same pattern as test_runtime_postgres_isolation: reload knowledge config
-    so KNOWLEDGE_V2_POSTGRES_DSN is honored, install JSONB codec for any
+    Same pattern as test_runtime_postgres_isolation: the DSN comes from the
+    autouse ``_postgres_dsn_scope`` fixture; we install a JSONB codec for any
     tables that need it (cluster tables don't, but some adjacent ones might
-    be touched by the control-plane store), and reset the cp_* tables.
+    be touched by the control-plane store) and reset the cp_* tables.
     """
-    import koda.knowledge.config as kn_config
-
-    importlib.reload(kn_config)
-
     from koda.knowledge.v2 import common as common_mod
 
-    if hasattr(common_mod, "_SHARED_BACKENDS"):
-        common_mod._SHARED_BACKENDS.clear()  # type: ignore[attr-defined]
+    common_mod._SHARED_POSTGRES_BACKENDS.clear()
 
     from koda.state import primary as primary_mod
 
@@ -79,8 +73,7 @@ async def cluster_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) ->
     try:
         yield migrated_postgres
     finally:
-        if hasattr(common_mod, "_SHARED_BACKENDS"):
-            common_mod._SHARED_BACKENDS.clear()  # type: ignore[attr-defined]
+        common_mod._SHARED_POSTGRES_BACKENDS.clear()
 
 
 def _make_config(supervisor_id: str, *, capacity: int = 0, stale_seconds: int = 30) -> ClusterConfig:
