@@ -5,6 +5,12 @@ set -euo pipefail
 ARTIFACT_DIR="${ARTIFACT_DIR:-artifacts/docker}"
 WAIT_ATTEMPTS="${WAIT_ATTEMPTS:-90}"
 WAIT_SLEEP_SECONDS="${WAIT_SLEEP_SECONDS:-2}"
+# The bundled reverse proxy runs in a pinned nginx on the host network, in front
+# of the ports the stack publishes on loopback, as on an operator's host.
+PROXY_TEMPLATE="packages/cli/release/bundle/proxy/nginx.conf"
+PROXY_IMAGE="${PROXY_IMAGE:-nginx:1.30.6-alpine@sha256:901e593c95dc85f5a729f5765516321366ef4ac401821431d408897e95287d0a}"
+PROXY_PORT="${PROXY_PORT:-18080}"
+PROXY_CONTAINER="${PROXY_CONTAINER:-koda-docker-smoke-proxy}"
 COMPOSE_ARGS=()
 
 if [ -n "${COMPOSE_FILE:-}" ]; then
@@ -47,6 +53,12 @@ capture_diagnostics() {
   if [ -n "${container_ids}" ]; then
     docker inspect ${container_ids} > "${ARTIFACT_DIR}/docker-inspect.json" 2>&1 || true
   fi
+
+  docker logs "${PROXY_CONTAINER}" > "${ARTIFACT_DIR}/proxy.log" 2>&1 || true
+}
+
+stop_bundled_proxy() {
+  docker rm -f "${PROXY_CONTAINER}" >/dev/null 2>&1 || true
 }
 
 wait_for_url() {
@@ -99,8 +111,41 @@ print(" ".join(sorted({info[4][0] for info in socket.getaddrinfo("web", None)}))
   esac
 }
 
+# Load the bundled proxy/nginx.conf into a real nginx and prove through it that
+# browser sign-in, the runtime relay WebSocket and API-token calls reach the
+# right upstream (scripts/proxy_smoke.py lists the checks).
+verify_bundled_proxy() {
+  local config bootstrap_code
+  mkdir -p "${ARTIFACT_DIR}"
+  config="$(cd "${ARTIFACT_DIR}" && pwd)/proxy-nginx.conf"
+  python3 scripts/proxy_smoke.py render --listen "127.0.0.1:${PROXY_PORT}" "${PROXY_TEMPLATE}" > "${config}"
+
+  stop_bundled_proxy
+  # conf.d/default.conf is included in the image's http context, like
+  # /etc/nginx/conf.d/koda.conf on a host; replacing it drops the stock site.
+  docker run --rm --network host \
+    -v "${config}:/etc/nginx/conf.d/default.conf:ro" \
+    "${PROXY_IMAGE}" nginx -t
+  docker run -d --name "${PROXY_CONTAINER}" --network host \
+    -v "${config}:/etc/nginx/conf.d/default.conf:ro" \
+    "${PROXY_IMAGE}" >/dev/null
+  wait_for_url "bundled proxy" "http://127.0.0.1:${PROXY_PORT}/api/health"
+
+  # The control plane writes the first-boot setup code when its auth status is
+  # first read; read it from the file, as an operator does over SSH.
+  probe_url "http://127.0.0.1:8090/api/control-plane/auth/status"
+  bootstrap_code="$(compose exec -T app sh -c 'head -n 1 "${STATE_ROOT_DIR:-/var/lib/koda/state}/control_plane/bootstrap.txt"')"
+  if [ -z "${bootstrap_code}" ]; then
+    echo "[docker-smoke] no first-boot setup code; the proxy smoke needs a fresh stack" >&2
+    return 1
+  fi
+
+  KODA_PROXY_SMOKE_BOOTSTRAP_CODE="${bootstrap_code}" python3 scripts/proxy_smoke.py check \
+    --proxy-url "http://127.0.0.1:${PROXY_PORT}" --env-file .env
+}
+
 main() {
-  trap 'status=$?; if [ "${status}" -ne 0 ]; then capture_diagnostics; fi; exit "${status}"' EXIT
+  trap 'status=$?; if [ "${status}" -ne 0 ]; then capture_diagnostics; fi; stop_bundled_proxy; exit "${status}"' EXIT
 
   rm -rf "${ARTIFACT_DIR}"
   cp .env.example .env
@@ -123,6 +168,7 @@ main() {
   probe_url "http://127.0.0.1:3000/control-plane"
   probe_url "http://127.0.0.1:8090/openapi/control-plane.json"
   verify_dashboard_is_trusted_by_api
+  verify_bundled_proxy
 
   echo "[docker-smoke] stack passed endpoint verification"
 }

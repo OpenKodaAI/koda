@@ -33,7 +33,10 @@ from the network until a reverse proxy publishes it. A reverse proxy should:
   Only the dashboard turns the HTTP-only session cookie into the API's bearer token, so browser
   requests sent straight to the API fail
 - pass WebSocket upgrades on `/api/runtime/relay/*` (the runtime terminal and browser panels) to
-  the dashboard, and keep those connections open while idle
+  the dashboard, and keep those connections and the runtime event streams
+  (`/api/runtime/agents/*/stream`) open while idle: neither sends a heartbeat
+- pass the `Host` header the browser sent, port included, and the scheme in `X-Forwarded-Proto`:
+  the dashboard accepts a sign-in or any other change only when its `Origin` matches them
 - send to the control-plane API only the `/api/control-plane/*` requests that carry
   `Authorization: Bearer` (API-token clients), and `/openapi/control-plane.json`
 - optionally keep `/control-plane/setup` as a compatibility redirect to `/setup`
@@ -52,8 +55,14 @@ The bundled `proxy/nginx.conf` routes this way: browser requests go to `127.0.0.
 `/openapi/control-plane.json`, go to `127.0.0.1:8090`. Only bearer tokens select the API, so HTTP
 Basic auth added in front of Koda still sends browsers to the dashboard. It targets `127.0.0.1`
 (not `localhost`, which may resolve to `::1` first while Koda publishes on IPv4 loopback only).
-Include it in nginx's `http` context (for example `/etc/nginx/conf.d/koda.conf`), add your TLS
-settings, then run `nginx -t` and reload nginx.
+Include it in nginx's `http` context (for example `/etc/nginx/conf.d/koda.conf`), set
+`server_name` to your domain, and add your TLS settings (`listen 443 ssl;` with `ssl_certificate`
+and `ssl_certificate_key`). Then run `nginx -t` and reload nginx. The template ships with
+`server_name _`, which matches no domain, so nginx sends your domain's requests to the default
+server of the port. Where the distribution's stock site is enabled, that is the stock site: Debian
+and Ubuntu ship `sites-enabled/default` with `listen 80 default_server`, and `nginx -t` then only
+warns about a conflicting server name `_`. Keep your domain in `server_name`, or disable the stock
+site.
 
 The control-plane API is always published on loopback only; the dashboard reaches it over the
 Docker network (`http://app:8090`) and a host reverse proxy reaches it on `127.0.0.1`.
@@ -100,8 +109,9 @@ services:
         ipv4_address: 172.30.0.10
 ```
 
-If that proxy also forwards `/api/control-plane/*` straight to `app:8090`, add its service name
-to `CONTROL_PLANE_TRUSTED_PROXIES` (`web,proxy`), which does accept hostnames.
+If that proxy also forwards API-token requests (`/api/control-plane/*` with `Authorization: Bearer`)
+straight to `app:8090`, add its service name to `CONTROL_PLANE_TRUSTED_PROXIES` (`web,proxy`), which
+does accept hostnames. Browser requests must still go to the dashboard (`web:3000`), as above.
 
 When `WEB_PUBLISH_ADDRESS` publishes the dashboard beyond loopback, firewall its port so only
 your proxy can reach it. A client that connects directly is charged to its own address, but

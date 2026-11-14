@@ -15,8 +15,11 @@ The routing follows the auth model in docs/install/vps.md ("Reverse Proxy"):
 The config is parsed and routed by a small model of nginx: exact and longest-prefix ``location``
 matching, ``if`` with ``return``, ``error_page ... = @named``, ``map`` without regexes, and the
 variables the config uses. Anything outside that model fails the test instead of being skipped,
-so a change to the config either stays inside it or extends it. The runtime proof (browser login,
-the relay WebSocket and an API-token call through a real nginx) is the docker smoke in CI.
+so a change to the config either stays inside it or extends it. The runtime proof is
+``scripts/proxy_smoke.py``: ``scripts/docker_smoke.sh`` (the CI docker-smoke jobs) loads this
+config into a real nginx in front of the Compose stack and runs it there (browser login, the relay
+WebSocket and API-token calls), and ``tests/test_proxy_smoke.py`` runs the same checks through a
+real nginx when one is installed.
 """
 
 from __future__ import annotations
@@ -500,6 +503,63 @@ def test_every_route_appends_the_peer_to_x_forwarded_for(nginx: NginxModel, rout
     # The dashboard checks a mutation's Origin against these two (apps/web/src/lib/request-origin.ts).
     assert direct.headers["host"] == HOST
     assert direct.headers["x-forwarded-proto"] == nginx.scheme
+
+
+@pytest.mark.parametrize("route", ALL_ROUTES, ids=[_route_id(route) for route in ALL_ROUTES])
+def test_every_route_passes_the_host_the_browser_sent_with_its_port(
+    nginx: NginxModel, route: tuple[str, dict[str, str]]
+) -> None:
+    """The dashboard accepts a sign-in only when its Origin is X-Forwarded-Proto://Host.
+
+    Browsers put a non-default port in both Origin and Host; nginx's $host drops it, so behind a
+    proxy on such a port (https://koda.example.com:8443) every sign-in would be refused as
+    cross-site.
+    """
+    path, headers = route
+    browser_host = f"{HOST}:8443"
+
+    routed = nginx.route(path, {**headers, "Host": browser_host})
+
+    assert routed.headers["host"] == browser_host
+    assert f"{routed.headers['x-forwarded-proto']}://{routed.headers['host']}" == f"{nginx.scheme}://{browser_host}"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/api/runtime/agents/agent-1/stream",
+        "/api/runtime/agents/agent-1/sessions/session-1/stream",
+    ],
+)
+def test_runtime_event_streams_stay_open_while_idle(nginx: NginxModel, path: str) -> None:
+    """The runtime event streams send no heartbeat; nginx's default 60 s read timeout would cut them."""
+    routed = nginx.route(f"{path}?after_seq=0", {**SESSION_COOKIE, "Accept": "text/event-stream"})
+
+    assert routed.upstream == DASHBOARD
+    assert routed.target == f"{path}?after_seq=0"
+    assert routed.http_version == "1.1"
+    assert _seconds(routed.location.one("proxy_read_timeout").args[0]) >= 3600
+
+
+def test_install_guide_and_template_tell_operators_to_name_their_domain() -> None:
+    """`server_name _` matches no domain; a stock `default_server` site would answer instead."""
+    guide = " ".join((ROOT / "docs" / "install" / "vps.md").read_text(encoding="utf-8").split())
+    template = NGINX_CONF.read_text(encoding="utf-8")
+
+    assert "set `server_name` to your domain" in guide
+    assert "`sites-enabled/default` with `listen 80 default_server`" in guide
+    assert "`server_name koda.example.com;`" in template
+    assert "sites-enabled/default with `listen 80 default_server`" in template
+
+
+def test_install_guide_sends_only_api_token_requests_straight_to_the_api() -> None:
+    guide = " ".join((ROOT / "docs" / "install" / "vps.md").read_text(encoding="utf-8").split())
+
+    assert "forwards `/api/control-plane/*` straight to" not in guide
+    assert (
+        "If that proxy also forwards API-token requests (`/api/control-plane/*` with `Authorization: Bearer`)"
+        " straight to `app:8090`" in guide
+    )
 
 
 async def test_api_rate_limiter_charges_the_client_behind_the_proxy(nginx: NginxModel) -> None:
