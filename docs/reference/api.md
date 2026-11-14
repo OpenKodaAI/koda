@@ -111,6 +111,17 @@ WebSocket routes:
 - `GET /ws/runtime/tasks/{task_id}/terminals/{terminal_id}`
 - `GET /ws/runtime/tasks/{task_id}/browser`
 
+### Event stream resume
+
+`GET /api/runtime/stream`, `GET /ws/runtime`, `GET /ws/runtime/events`, and `GET /api/runtime/tasks/{task_id}/events` accept `after_seq`, a resume cursor. Each event's `seq` is the agent-wide `runtime_events` id, so the cursor keeps growing across tasks. Clients reconnect with the highest `seq` they received. `after_seq` accepts any integer from `0` to `9223372036854775807`. A missing value means `0`. A value that is not an integer or is out of range returns `400` (`invalid after_seq`).
+
+The stream and WebSocket routes also accept the optional filters `task_id` and `env_id`, in the same integer range. An invalid filter returns `400` (`invalid task_id`, `invalid env_id`). All of these parameters are checked before the stream starts or the WebSocket is upgraded, so an invalid request gets a `400` instead of an empty stream.
+
+The dashboard relays (`/api/runtime/agents/{agentId}/stream` and `/api/runtime/agents/{agentId}/sessions/{sessionId}/stream`) treat failures in two ways:
+
+- A transient failure gets a non-`200` JSON error, so the browser `EventSource` fails without opening and the dashboard reconnects with its normal backoff. Every runtime status other than `400`, `404`, and `422` is transient, for example `401`, `403`, `408`, `429`, and `5xx`. An unreachable runtime and any failure before the runtime answers are transient too. A `401` or `403` usually means the relay could not get a runtime token from the control plane. A failure before the runtime answers includes a control plane that is unavailable, which the relay reports as `Agent not found` (`404`) because it cannot tell the two cases apart.
+- A request the runtime itself rejected (`400`, `404`, or `422`) is delivered as one `stream_error` event on a `200` event stream, with data `{"status": <code>, "error": "<message>"}`. `EventSource` cannot read HTTP statuses, which is why the relay sends the rejection as an event. The dashboard hooks then wait 60 seconds before they try again, instead of a few seconds. The session stream hook keeps the message in its `error` field, but the dashboard does not show it. The pages keep polling for updates until the stream reconnects.
+
 ## Status And Errors
 
 Stable operator-facing failures should use Koda's operational error envelope where the boundary has been formalized:

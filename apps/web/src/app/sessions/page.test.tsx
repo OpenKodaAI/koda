@@ -845,6 +845,7 @@ describe("SessionsPage chat redesign", () => {
       public onmessage: ((event: MessageEvent) => void) | null = null;
       public onerror: (() => void) | null = null;
       public close = vi.fn();
+      public addEventListener = vi.fn();
 
       constructor(public url: string) {
         sources.push(this);
@@ -949,6 +950,7 @@ describe("SessionsPage chat redesign", () => {
       public onmessage: ((event: MessageEvent) => void) | null = null;
       public onerror: (() => void) | null = null;
       public close = vi.fn();
+      public addEventListener = vi.fn();
 
       constructor(public url: string) {
         sources.push(this);

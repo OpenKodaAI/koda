@@ -176,10 +176,37 @@ def _parse_positive_int(
     if raw_value is None or raw_value == "":
         value = default
     else:
-        value = int(raw_value)
+        try:
+            value = int(raw_value)
+        except ValueError as exc:
+            raise web.HTTPBadRequest(text=f"invalid {name}") from exc
     if value < minimum or value > maximum:
         raise web.HTTPBadRequest(text=f"invalid {name}")
     return value
+
+
+# Runtime ids are Postgres BIGINTs. ``after_seq`` in particular is a resume cursor
+# over ``runtime_events.id``, a BIGSERIAL shared by every task of the agent, not a
+# page size, so any non-negative int64 is valid.
+_MAX_RUNTIME_ID = 2**63 - 1
+
+
+def _parse_after_seq(request: web.Request) -> int:
+    return _parse_positive_int(
+        request.query.get("after_seq"),
+        name="after_seq",
+        default=0,
+        minimum=0,
+        maximum=_MAX_RUNTIME_ID,
+    )
+
+
+def _parse_optional_runtime_id(request: web.Request, name: str) -> int | None:
+    """Optional id filter; must be validated before a stream response is prepared."""
+    raw_value = request.query.get(name)
+    if raw_value is None or raw_value == "":
+        return None
+    return _parse_positive_int(raw_value, name=name, default=0, minimum=0, maximum=_MAX_RUNTIME_ID)
 
 
 def _tail_text(path: Path, *, max_bytes: int = 4096) -> str:
@@ -814,7 +841,7 @@ async def _runtime_task_events(request: web.Request) -> web.Response:
     if auth:
         return auth
     task_id = int(request.match_info["task_id"])
-    after_seq = _parse_positive_int(request.query.get("after_seq"), name="after_seq", default=0, minimum=0)
+    after_seq = _parse_after_seq(request)
     items = get_runtime_controller().store.list_events(task_id=task_id, after_seq=after_seq)
     return web.json_response({"items": items})
 
@@ -1230,14 +1257,16 @@ async def _runtime_stream_sse(request: web.Request) -> web.StreamResponse:
     auth = _authorize_runtime_access(request)
     if auth:
         return auth
-    task_id = request.query.get("task_id")
-    env_id = request.query.get("env_id")
+    # Validate every query parameter before ``prepare``: once the 200 headers are
+    # sent, an error can no longer reach the client as a status code.
+    task_id = _parse_optional_runtime_id(request, "task_id")
+    env_id = _parse_optional_runtime_id(request, "env_id")
     session_id = (request.query.get("session_id") or "").strip() or None
-    after_seq = _parse_positive_int(request.query.get("after_seq"), name="after_seq", default=0, minimum=0)
+    after_seq = _parse_after_seq(request)
     controller = get_runtime_controller()
 
     task_ids_refresh = None
-    if session_id and not task_id:
+    if session_id and task_id is None:
 
         def task_ids_refresh() -> set[int]:
             return set(controller.store.list_task_ids_for_session(session_id))
@@ -1254,9 +1283,9 @@ async def _runtime_stream_sse(request: web.Request) -> web.StreamResponse:
     )
     await response.prepare(request)
     async for event in controller.events.iter_events(
-        task_id=int(task_id) if task_id else None,
+        task_id=task_id,
         task_ids_refresh=task_ids_refresh,
-        env_id=int(env_id) if env_id else None,
+        env_id=env_id,
         after_seq=after_seq,
     ):
         await response.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode())
@@ -1267,16 +1296,17 @@ async def _runtime_stream_ws(request: web.Request) -> web.WebSocketResponse:
     auth = _authorize_runtime_access(request)
     if auth:
         raise web.HTTPForbidden(text=json.dumps({"error": "invalid runtime token"}))
-    task_id = request.query.get("task_id")
-    env_id = request.query.get("env_id")
+    # Validated before the upgrade so a bad value fails the handshake with 400.
+    task_id = _parse_optional_runtime_id(request, "task_id")
+    env_id = _parse_optional_runtime_id(request, "env_id")
     session_id = (request.query.get("session_id") or "").strip() or None
-    after_seq = _parse_positive_int(request.query.get("after_seq"), name="after_seq", default=0, minimum=0)
+    after_seq = _parse_after_seq(request)
     ws = web.WebSocketResponse(heartbeat=30)
     await ws.prepare(request)
     controller = get_runtime_controller()
 
     task_ids_refresh = None
-    if session_id and not task_id:
+    if session_id and task_id is None:
 
         def task_ids_refresh() -> set[int]:
             return set(controller.store.list_task_ids_for_session(session_id))
@@ -1284,9 +1314,9 @@ async def _runtime_stream_ws(request: web.Request) -> web.WebSocketResponse:
     RUNTIME_WS_CLIENTS_ACTIVE.inc()
     try:
         async for event in controller.events.iter_events(
-            task_id=int(task_id) if task_id else None,
+            task_id=task_id,
             task_ids_refresh=task_ids_refresh,
-            env_id=int(env_id) if env_id else None,
+            env_id=env_id,
             after_seq=after_seq,
         ):
             await ws.send_json(event)

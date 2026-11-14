@@ -4,6 +4,7 @@ import {
   startTransition,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -18,6 +19,7 @@ import type {
   RuntimeMutationResult,
   RuntimeTaskBundle,
 } from "@/lib/runtime-types";
+import { STREAM_ERROR_EVENT, STREAM_REJECTED_RETRY_MS } from "@/lib/sse";
 
 function mergeEvents(current: RuntimeEvent[], incoming: RuntimeEvent[]) {
   const bySeq = new Map<number, RuntimeEvent>();
@@ -61,7 +63,12 @@ export function useRuntimeTask(
   const [connected, setConnected] = useState(false);
   const lastSeqRef = useRef(0);
 
-  const taskQueryKey = queryKeys.runtime.task(agentId, taskId);
+  // Stable identity: the stream effect below depends on it and would otherwise
+  // reopen the EventSource on every render.
+  const taskQueryKey = useMemo(
+    () => queryKeys.runtime.task(agentId, taskId),
+    [agentId, taskId],
+  );
 
   const fetchBundle = useCallback(
     async (signal?: AbortSignal) => {
@@ -173,12 +180,23 @@ export function useRuntimeTask(
   useEffect(() => {
     let disposed = false;
     let reconnectTimer: number | null = null;
+    // The latest connection; reconnects replace it, and cleanup must close it.
+    let eventSource: EventSource | null = null;
 
     const connect = () => {
       if (disposed) return;
       const es = new EventSource(
         `/api/runtime/agents/${agentId}/stream?task_id=${taskId}&after_seq=${lastSeqRef.current}`,
       );
+      eventSource = es;
+
+      const reconnectAfter = (delayMs: number) => {
+        setConnected(false);
+        es.close();
+        if (disposed) return;
+        if (reconnectTimer) window.clearTimeout(reconnectTimer);
+        reconnectTimer = window.setTimeout(connect, delayMs);
+      };
 
       es.onopen = () => {
         setConnected(true);
@@ -211,22 +229,22 @@ export function useRuntimeTask(
         }
       };
 
-      es.onerror = () => {
-        setConnected(false);
-        es.close();
-        if (!disposed) {
-          reconnectTimer = window.setTimeout(connect, 3000);
-        }
-      };
+      // The runtime rejected this request: retry only after a long delay
+      // instead of every few seconds; the bundle query keeps polling.
+      es.addEventListener(STREAM_ERROR_EVENT, () => {
+        reconnectAfter(STREAM_REJECTED_RETRY_MS);
+      });
 
-      return es;
+      es.onerror = () => {
+        reconnectAfter(3000);
+      };
     };
 
-    const source = connect();
+    connect();
 
     return () => {
       disposed = true;
-      source?.close();
+      eventSource?.close();
       if (reconnectTimer) window.clearTimeout(reconnectTimer);
     };
   }, [agentId, queryClient, taskId, taskQueryKey]);
