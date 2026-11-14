@@ -109,7 +109,7 @@ describe("useRuntimeOverview event stream", () => {
     expect(result.current.connected["agent-1"]).toBe(true);
 
     act(() => {
-      source.dispatch("stream_error", { status: 400, error: "invalid after_seq" });
+      source.dispatch("stream_error", { status: 400 });
       // The relay then ends the response; a closed EventSource reports nothing.
       source.fail();
     });

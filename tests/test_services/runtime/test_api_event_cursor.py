@@ -22,6 +22,7 @@ from koda.services.runtime.api import (
     _runtime_stream_ws,
     _runtime_task_events,
 )
+from koda.services.runtime_access_service import RuntimeAccessService
 
 _INT64_MAX = 2**63 - 1
 
@@ -91,6 +92,51 @@ async def client(controller: SimpleNamespace) -> AsyncIterator[TestClient]:
 
 
 _HEADERS = {"X-Runtime-Token": "signed"}
+
+
+# No token, and a token the real access service rejects (bad signature).
+_NO_TOKEN: dict[str, str] = {}
+_FORGED_TOKEN = {"X-Runtime-Token": "forged.token"}
+
+
+@pytest.mark.parametrize(
+    ("headers", "error"),
+    [
+        pytest.param(_NO_TOKEN, "missing runtime token", id="no-token"),
+        pytest.param(_FORGED_TOKEN, "invalid runtime token", id="rejected-token"),
+    ],
+)
+@pytest.mark.parametrize("path", ["/api/runtime/stream", "/api/runtime/tasks/7/events"])
+async def test_http_routes_check_the_token_before_the_query(
+    client: TestClient, controller: SimpleNamespace, path: str, headers: dict[str, str], error: str
+) -> None:
+    # An invalid query must not answer an unauthenticated caller with 400.
+    with patch("koda.services.runtime.api.RuntimeAccessService", RuntimeAccessService):
+        response = await client.get(f"{path}?after_seq=abc", headers=headers)
+
+    assert response.status == 403
+    assert await response.json() == {"error": error}
+    assert controller.events.calls == []
+    assert controller.store.calls == []
+
+
+@pytest.mark.parametrize(
+    "headers",
+    [pytest.param(_NO_TOKEN, id="no-token"), pytest.param(_FORGED_TOKEN, id="rejected-token")],
+)
+@pytest.mark.parametrize("path", ["/ws/runtime", "/ws/runtime/events"])
+async def test_ws_routes_check_the_token_before_the_query(
+    client: TestClient, controller: SimpleNamespace, path: str, headers: dict[str, str]
+) -> None:
+    with (
+        patch("koda.services.runtime.api.RuntimeAccessService", RuntimeAccessService),
+        pytest.raises(WSServerHandshakeError) as excinfo,
+    ):
+        await client.ws_connect(f"{path}?after_seq=abc", headers=headers)
+
+    assert excinfo.value.status == 403
+    assert controller.events.calls == []
+    assert controller.store.calls == []
 
 
 def test_parse_positive_int_rejects_non_numeric_values_with_400() -> None:

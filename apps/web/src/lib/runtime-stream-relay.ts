@@ -2,12 +2,7 @@ import "server-only";
 
 import { NextResponse } from "next/server";
 import { runtimeFetch, RuntimeRequestError } from "@/lib/runtime-api";
-import {
-  isRejectedStreamStatus,
-  SSE_RESPONSE_HEADERS,
-  streamErrorResponse,
-  upstreamStreamErrorMessage,
-} from "@/lib/sse";
+import { isRejectedStreamStatus, SSE_RESPONSE_HEADERS, streamErrorResponse } from "@/lib/sse";
 
 const STREAM_TIMEOUT_MS = 15 * 60_000;
 
@@ -53,10 +48,7 @@ export async function relayRuntimeEventStream(
 
   const text = await upstream.text().catch(() => "");
   if (isRejectedStreamStatus(upstream.status)) {
-    return streamErrorResponse(
-      upstream.status,
-      upstreamStreamErrorMessage(text, upstream.status),
-    );
+    return streamErrorResponse(upstream.status);
   }
   return NextResponse.json(
     { error: text || `Unable to open runtime stream (${upstream.status})` },
