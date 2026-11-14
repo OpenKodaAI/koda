@@ -66,7 +66,7 @@ jump ahead of high-severity items in a later milestone just because of their mil
 | `TD-NNN` | Debt item in TECHNICAL_DEBT.md Part 2 |
 | `SM-NN` | Runtime-smoke defect FEATURE_MATRIX.md §3.4 `D-NN` (renamed here to avoid a clash with `D-NNN`) |
 | `J-NN` | Journey in FEATURE_MATRIX.md §3.2 |
-| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-24 are added in section 5. |
+| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-26 are added in section 5. |
 | `P<n>` | Design principle in REFERENCE_RESEARCH.md §6 |
 | `ADR-NNN` | Entry in DECISIONS.md |
 | `R-NN` | Entry in REMAINING_RISKS.md |
@@ -278,6 +278,8 @@ in `koda/knowledge`). Both are cheap to leave; revisit only if the code is touch
 | Q-22 | Remove the opt-in policy-engine and bot-gateway sidecars? (FEATURE_MATRIX §6 decision 3) | Remove both | open | M5-E5-T6, M5-E5-T7 |
 | Q-23 | Enforce per-agent budgets, or remove the budget setting? (D-052, R-26) | Enforce, with a visible "budget reached" state and a changelog entry | open | M2-E4-T5 |
 | Q-24 | Keep the reranker? (TD-103) | Keep only if the M9-E1-T6 eval shows a measurable gain | open | M9-E1-T6, M9-E1-T2 |
+| Q-25 | Should provider failover ask the operator before switching? (P22) | No: keep the automatic switch, and M6-E3-T8 makes it visible | open (§13: changes configured fallback behaviour) | none until decided |
+| Q-26 | Structured operator questions with options? (P21) | No, until a requirement exists | open | none |
 
 ### 5.2 Approvals required
 
@@ -327,7 +329,7 @@ each answer in DECISIONS.md.
 |---|---|---|
 | 1 | Now | Q-2 (J-11 is broken); M3-E3-T1 (with its impact report); M1-E4-T4 and M1-E1-T10 (the full fixes behind the M1-E8 interim mitigations); M1-E6-T1; M1-E1-T9; M1-E4-T7; M1-E1-T12; M0-E1-T5 |
 | 2 | After the first restore drill passes (M2-E6-T1) | M1-E2-T3, M1-E2-T5, M2-E3-T3 with Q-11, M2-E3-T5, M2-E5-T2, M2-E5-T3, M5-E1-T5, M5-E6-T11, M7-E2-T3 |
-| 3 | After M3 exit | Scope and removals: Q-1, Q-3, Q-6, Q-8, Q-9, Q-12, Q-14, Q-17, Q-21, Q-22, Q-23, Q-24 and the removal tasks they gate (M1-E7-T7, M4-E1-T12, M4-E2-T5, M4-E3-T3, M4-E3-T4, M5-E5-T6, M5-E5-T7, M5-E6-T9, M6-E1-T3, M6-E2-T2, M6-E3-T3, M7-E2-T5, M7-E3-T3) |
+| 3 | After M3 exit | Scope and removals: Q-1, Q-3, Q-6, Q-8, Q-9, Q-12, Q-14, Q-17, Q-21, Q-22, Q-23, Q-24, Q-25, Q-26 and the removal tasks they gate (M1-E7-T7, M4-E1-T12, M4-E2-T5, M4-E3-T3, M4-E3-T4, M5-E5-T6, M5-E5-T7, M5-E6-T9, M6-E1-T3, M6-E2-T2, M6-E3-T3, M7-E2-T5, M7-E3-T3) |
 | 4 | After the offline policy replay report (M5-E3-T2) | Q-5, M5-E3-T3, M5-E3-T5, M5-E3-T12 to T17 |
 
 ### 5.4 Reference principles (REFERENCE_RESEARCH §6)
@@ -357,8 +359,8 @@ revisited at the M10-E1-T4 refresh.
 | P18 | Agent profile organized around activity | Defer | UX review first (M8-E2-T5) |
 | P19 | Three planes and a Needs-you count | Partial: the Needs-you rail group is accepted; the cross-plane count stays deferred | M8-E2-T6 builds the rail group after the M8-E2-T5 review places it; the global count across approvals, learnings, pairing and skills waits for that review |
 | P20 | Row-first, low density | Accept (already the design rule) | Applied by M8-E5 tasks; no separate task |
-| P21 | Questions and approvals share one waiting state | Accept (one wait state, receipts); the question card is deferred | M6-E2-T5. A structured question card waits for a requirement (operator question); if built, it uses the broker's `respond` path, not `ui_choice` |
-| P22 | Provider failover is visible and never repeats side effects | Accept (visibility, side-effect safety); ask-first is the operator's call | M6-E3-T8 (the note), M2-E4-T1 (no tool replay). Asking before a switch changes how a configured fallback behaves for users (MISSION §13); no task until the operator decides |
+| P21 | Questions and approvals share one waiting state | Accept (one wait state, receipts); the question card is deferred | M6-E2-T5. A structured question card waits for a requirement (Q-26); if built, it uses the broker's `respond` path, not `ui_choice` |
+| P22 | Provider failover is visible and never repeats side effects | Accept (visibility, side-effect safety); ask-first is the operator's call | M6-E3-T8 (the note), M2-E4-T1 (no tool replay). Asking before a switch changes how a configured fallback behaves for users (MISSION §13); no task until the operator decides Q-25 |
 | P23 | Every turn leaves a receipt | Partial | M6-E3-T8 (child runs, provider switch). The memory row waits for P14's write record; the time-axis RunGraph view is evaluated in M8-E2-T5 |
 | P24 | The conversation says who, which model and what state | Accept | M3-E5-T2 (recipient, configured model, paused state). The waiting reason for queued messages waits for M3-E2-T3, which reworks the per-user lock |
 | P25 | System events read as sentences | Accept | M6-E2-T7 (rendering), M3-E6-T4 and M3-E6-T5 (limit and pause events) |
@@ -1729,9 +1731,9 @@ Owner FE · Risk low · Gate none · **ready** · Deps —
   - keep the `@token` text until mentions work end to end, so nothing is silently dropped;
   - the slash menu uses the static catalog;
   - remove the no-op `/context`;
-  - the placeholder names the recipient ("Message <agent>", or the room's name in a room) instead of the generic "Send a message…";
+  - the placeholder names the recipient (`Message <agent>`) instead of the generic "Send a message…";
   - the toolbar's model label shows the provider, model and effort from the agent's published configuration, not the model of the last reply. It stays read-only; changes stay in the agent editor and its publish step.
-- **Done when:** a send to a paused agent never returns 400, no mention disappears, and there are no 404 fetches. The placeholder names the selected agent or room in both locales. For a fixture agent whose last reply came from another model, the toolbar shows the configured model and effort.
+- **Done when:** a send to a paused agent never returns 400, no mention disappears, and there are no 404 fetches. The placeholder names the selected agent in both locales. For a fixture agent whose last reply came from another model, the toolbar shows the configured model and effort.
 - **Tests:** web component tests; G · **Evidence:** —
 
 #### M3-E5-T3 · Telegram optional per agent; dashboard-only agents answer
@@ -1779,9 +1781,9 @@ Owner AIM (SEC) · Risk med · Gate none · **ready** · Deps —
 #### M3-E6-T5 · Budget pause enforced; expired claims redispatched
 Owner AIM · Risk med · Gate none · **ready** · Deps —
 - **Addresses:** D-075, D-097, F-SQD-19, F-SQD-15, F-SQD-18; P25 (the pause reason is visible)
-- **Files:** `koda/squads/router.py` (~388), `koda/squads/tasks.py` (~478), `koda/squads/dispatch.py`
-- **Do:** gate `dispatch_squad_turn` and `enqueue_squad_agent_task` on `status == 'open'` and on cost being under the cap. Keep the planned assignee, and redispatch or escalate a claim that expires. When a thread pauses, post one `system_event` whose metadata gives the reason (budget reached, or paused by the operator), so the room says why nothing runs (P25; REFERENCE_RESEARCH §3.8, stated waiting reasons).
-- **Done when:** a paused thread runs no turns, and an expired claim progresses. A pause leaves exactly one system event that names its reason.
+- **Files:** `koda/squads/router.py` (~388), `koda/squads/tasks.py` (~478), `koda/squads/dispatch.py`, `koda/control_plane/api.py` (~2414)
+- **Do:** gate `dispatch_squad_turn` and `enqueue_squad_agent_task` on `status == 'open'` and on cost being under the cap. Keep the planned assignee, and redispatch or escalate a claim that expires. The budget auto-pause already posts `budget_exceeded_auto_pause` (`router.py` ~399). Post the same kind of `system_event`, with metadata reason `"operator"`, when the operator pauses a thread through `update_thread_status` (`api.py` ~2414), so the room says why nothing runs (P25; REFERENCE_RESEARCH §3.8, stated waiting reasons).
+- **Done when:** a paused thread runs no turns, and an expired claim progresses. A pause, by the budget or by the operator, leaves exactly one system event that names its reason.
 - **Tests:** G-PG · **Evidence:** —
 
 #### M3-E6-T6 · Live room events stay connected
@@ -2756,8 +2758,8 @@ Owner FE · Risk med · Gate none · **ready** · Deps —
 #### M6-E2-T5 · Approval cards and stop dialogs
 Owner UX (FE, SEC) · Risk med · Gate none · **pending** · Deps M3-E3-T2
 - **Addresses:** P15, P17, P21, F-GOV-05, F-GOV-06; REFERENCE_RESEARCH §3.8 (one design for every waiting card; a collapsed receipt after the answer)
-- **Files:** the dashboard approval UI (`apps/web/src/components/sessions/chat/approval-prompt.tsx`, `assistant-message.tsx`), the session detail that lists a turn's approvals (`koda/state/dashboard_store.py`, `koda/control_plane/dashboard_service.py`), the Telegram approval keyboard (`koda/utils/approval.py`; keep the PT-BR labels), the cancel and stop dialogs
-- **Do:** use the same verbs in both channels (allow once, allow scope, deny with a reason), and have the card show the exact grant scope and its expiry. Stop and cancel dialogs list the side effects already executed (from the trace) and whether child runs are affected. Approval and respond requests share one card layout: the action or question, the agent's reasons, the scope and expiry, then the verbs, with "Waiting for your decision" while open. Once decided, the card collapses to a one-line receipt in the thread (decision, scope, when), read from the recorded decision. "Allow scope" never widens beyond the scope the card shows.
+- **Files:** the dashboard approval UI (`apps/web/src/components/sessions/chat/approval-prompt.tsx`, `assistant-message.tsx`), the session detail that lists a turn's approvals (`koda/state/dashboard_store.py`), the Telegram approval keyboard (`koda/utils/approval.py`; keep the PT-BR labels), the cancel and stop dialogs
+- **Do:** use the same verbs in both channels (allow once, allow scope, deny with a reason), and have the card show the exact grant scope and its expiry. Stop and cancel dialogs list the side effects already executed (from the trace) and whether child runs are affected. The approval card shows the action, the agent's reasons, the scope and expiry, then the verbs (approve, edit, respond, reject), with "Waiting for your decision" while open. Once decided, the card collapses to a one-line receipt in the thread (decision, scope, when), read from the recorded decision. "Allow scope" never widens beyond the scope the card shows.
 - **Done when:** a dashboard approval of a scoped grant shows the scope, and the stop dialog lists the executed writes. A decided approval leaves a one-line receipt in its turn that is still there after a page reload, in both locales.
 - **Tests:** web tests; G-PG · **Evidence:** —
 
@@ -2773,8 +2775,8 @@ Owner AIM (SEC) · Risk med · Gate none · **ready** · Deps —
 Owner FE (AIM) · Risk med · Gate none · **ready** · Deps —
 - **Addresses:** F-SQD-27, P5 (current owner and open obligations visible), P25 (system events read as sentences), ARCHITECTURE_AUDIT §3.3 (backend capabilities with no UI); REFERENCE_RESEARCH §3.8 (handover as a readable message; "Waiting for replies" block)
 - **Files:** `apps/web/src/components/sessions/*` (room rail, room settings drawer, `chat/room-chat-pane.tsx`), i18n resources, the existing squad task claim, complete, escalate and metrics routes
-- **Do:** show the squad task list with claim, complete and escalate actions, plus thread metrics and open reply obligations, using the existing backend routes. Show the open task's current owner, and a waiting block that lists each agent the thread waits on, with its obligation state (waiting or answered). Render `system_event` messages (routing, handoff, the limit and pause events from M3-E6-T4 and M3-E6-T5) as one short muted sentence built from the event metadata with i18n keys, for example "Ada handed the task to Linus: <reason>". The stored message content stays as it is.
-- **Done when:** an operator can see and act on squad tasks from the room. No room message shows a raw `[routing_decision]` or `[handoff_event]` tag in either locale, and an event whose metadata cannot be read falls back to a generic translated line.
+- **Do:** show the squad task list with claim, complete and escalate actions, plus thread metrics and open reply obligations, using the existing backend routes. Show the open task's current owner, and a waiting block that lists each agent the thread waits on, with its obligation state (waiting or answered). Render every `system_event` message (routing, handoff, dispatch and mention failures, timeouts, claim, budget and coordinator events, and the limit and pause events from M3-E6-T4 and M3-E6-T5) as one short muted sentence built from the event metadata with i18n keys, for example `<agent> handed the task to <agent>: <reason>`. The stored message content stays as it is.
+- **Done when:** an operator can see and act on squad tasks from the room. No room `system_event` message shows its raw `[event_type] …` content in either locale. Known event types render from metadata, and others use the generic translated line.
 - **Tests:** web tests; G-PG for the routes · **Evidence:** —
 
 #### M6-E3 — Providers and composer
@@ -2838,13 +2840,13 @@ Owner SEC (AIM) · Risk low · Gate none · **pending** · Deps M1-E4-T3
 #### M6-E3-T8 · The chat shows child runs and provider switches
 Owner FE (AIM) · Risk low · Gate none · **ready** · Deps —
 - **Addresses:** P8 (in-chat child-run row), P22 (failover is visible), P23 (turn receipts); REFERENCE_RESEARCH §3.8 (turn summary rows, provider-switch note). Journeys: chat in `/sessions` (J-11) and delegation with child runs (the M3 cancel journey). Today the operator must open execution detail to learn that a turn started child runs or moved to another provider.
-- **Files:** `koda/control_plane/dashboard_service.py` (~883) and `koda/state/dashboard_store.py` (~1445), whichever builds the session detail's `linked_execution` (search for `linked_execution`); `koda/services/child_runs.py` (`list_child_runs_for_parent_sync`, read only); `apps/web/src/components/sessions/chat/assistant-message.tsx`, `tool-call-card.tsx`; the session contract under `apps/web/src/lib/contracts/`; i18n resources
+- **Files:** `koda/state/dashboard_store.py` (`get_session` ~1393, `_task_row_to_summary` ~664), reached from `koda/control_plane/manager.py` ~3934; `koda/services/child_runs.py` (the `child_runs` table, read only); `apps/web/src/components/sessions/chat/assistant-message.tsx`, `tool-call-card.tsx`; the session contract under `apps/web/src/lib/contracts/`; i18n resources
 - **Do:**
-  - add two fields to the `linked_execution` summary: child-run counts by status, and, when the turn switched provider, the providers before and after. Derive the switch from the trace's existing `provider fallback: <a> -> <b>` warning, with a unit test that pins that format. `queue_manager.py` does not change;
-  - under the assistant message, show one collapsed row ("2 child runs · 2 done · 41s") that expands to one line per child (goal, status, duration) and links to the existing child-runs panel;
+  - add two fields to the `linked_execution` summary: child-run counts by status, and, when the turn switched provider, the providers before and after. Read the child-run counts with one grouped query over the session's task ids (`child_runs` GROUP BY `parent_task_id`, `status`), not one `list_child_runs_for_parent_sync` call per execution. Derive the switch from the trace's existing `provider fallback: <a> -> <b>` warning, with a unit test that pins that format. `queue_manager.py` does not change;
+  - under the assistant message, show one collapsed row (`<n> child runs · <done> done · <duration>`) that expands to one line per child (goal, status, duration) and links to the existing child-runs panel. The per-child lines load when the row opens, from the execution detail that already returns `child_runs`;
   - when the provider switched, show one muted line naming both providers;
   - add no new controls: stopping children stays with M3-E2-T4 and M6-E2-T5.
-- **Done when:** for a seeded parent task with two child runs, the thread shows the collapsed row with the count, and both children after expanding. For a seeded task whose trace records a provider switch, the thread shows one line naming both providers. Both work in both locales, and execution detail is unchanged.
+- **Done when:** for a seeded parent task with two child runs, the thread shows the collapsed row with the count, and both children after expanding. For a seeded task whose trace records a provider switch, the thread shows one line naming both providers. Both work in both locales, and execution detail is unchanged. The session detail reads the child-run counts in one query, however many executions it holds.
 - **Tests:** G-PG for the summary fields; web component tests; G; changelog entry (session detail response body) · **Evidence:** —
 
 #### M6-E4 — Learning and memory curation (ADR-031)
@@ -3121,7 +3123,7 @@ Owner UX (PROD, FE) · Risk low · Gate none · **ready** · Deps —
   - whether the agent's settings open from the chat header in the side panel, and how the editor's steps group into identity, knowledge, tools and rules (P1);
   - whether session rows and the chat header show the agent glyph and mission role once M4-E3-T3 lands (P1);
   - whether the composer shows a context meter fed by the context-governance totals (P12), a structured question card exists (P21), RunGraph gets a time-axis view opened from the turn row (P23), and messages get a Copy action;
-  - keep or drop for chat folders, conversation tabs and message search in the palette.
+  - keep or drop for message search in the palette.
 - **Done when:** the review lists each finding with a screenshot, and every finding is either a new task in this plan or a recorded "no change" with a reason. Each decision listed under Do is recorded the same way.
 - **Tests:** none (review) · **Evidence:** —
 

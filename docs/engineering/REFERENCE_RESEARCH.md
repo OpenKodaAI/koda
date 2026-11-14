@@ -223,7 +223,7 @@ the browser, routines, mobile, channels and remote servers.
 | Agent identity | Name, avatar, title and a short description, plus standing rules in an `AGENTS.md` instructions file. Since 0.57.0 the description is "a short summary that teammates read to choose who does a task". Name and title repeat in the tab, the header, the list row and search. When the agent edits its own instructions, the chat shows "Updated its instructions" with View and Undo. | `docs` (changelog 0.57.0); `observed` (`/app-preview` header and list) |
 | What an agent owns | A workspace folder, one durable thread, its identity, and a private provider session kept apart from the thread, so that "a model is just a setting". | `docs` (guides/openbot-101, news/one-agent-many-providers) |
 | Agent creation | The user describes the agent in one prompt, reviews the generated instructions, then saves. Agents can create and configure other agents. Only the user can grant Full access, turn on Computer Use, change auto-approve or change MCP servers (0.24.0). Only the user's own message can make an agent change, delete or run a workflow (0.61.0). | `docs` (home FAQ; changelog 0.23.0, 0.24.0, 0.61.0) |
-| Channels | A channel is a shared thread added on top of each agent's private thread, not a merged agent. One agent owns the task at a time and hands it on in a message ("you can read who took the work and why"). Controls: Stop, Resume, Reassign, Archive, Restore, and Cancel task. Greetings and unclear messages go to the lead (0.66.0). A fan-out collapses into one row such as "Assigned to Chief, Builder and Launch". A member may ask another member at most 2 short questions per request (0.62.0). A waiting request says why it waits, for example "the channel already runs 2 tasks" (0.71.0). | `docs` (guides/openbot-101; news/channels-put-agents-in-one-room; changelog) |
+| Channels | A channel is a shared thread added on top of each agent's private thread, not a merged agent. One agent owns the task at a time and hands it on in a message ("you can read who took the work and why"). Controls: Stop, Resume, Reassign, Archive, Restore, and Cancel task. Greetings and unclear messages go to the lead (0.66.0). A fan-out collapses into one row such as "Assigned to Chief, Builder and Launch". A member may ask another member at most 2 short questions per request (0.62.0). A waiting request says why it waits. The channel names the channel its agent is working in, or says that the agent starts when a running task ends (0.71.0). | `docs` (guides/openbot-101; news/channels-put-agents-in-one-room; changelog) |
 | Agent-to-agent messages | Ask or tell, with "no reply due" messages that open no turn (0.13.0). A "Waiting for replies" block shows each teammate as asked, working, replied or failed, and the agent reads all replies in one turn (0.23.0). An agent can stop only turns that its own messages started. | `docs` (changelog 0.13.0, 0.23.0, 0.71.0) |
 | Busy agents | Each agent has a queue that shows why a message waits; queued messages can be edited, reordered, sent now or run in a new thread (0.10.0, 0.11.0). Since 0.69.0 a message steers into the running turn by default. A provider that cannot steer falls back to the queue with a "Not steered" reason. The home FAQ still says that messages wait in a queue. | `docs` (changelog; home FAQ) |
 | Provider failover | Backup models: an ordered list, with "Ask before switching" on by default. A note in the chat marks each switch, and since 0.70.0 names the model that failed and the fix. The agent returns to its main model when the limit ends, or 10 minutes after a provider error. "A turn that already used a tool still does not run again, so a tool does not run two times" (0.68.0, #6594). Completed tool results carry over (0.51.0). After a switch the new model gets "selected parts" of the history, not a full replay. | `docs` (changelog 0.40.0, 0.48.2, 0.51.0, 0.68.0, 0.70.0; guides/ai-workspace-vs-chat); `observed` (`/app-preview` Backup models screen) |
@@ -321,13 +321,13 @@ Checked at commit `eca031f` for the OpenBot mapping (section 3.8):
 
 | Area | What exists | Location | Evidence |
 |---|---|---|---|
-| Sessions rail | Two fixed sections, Rooms and Conversations, sorted by recency. Session rows show a generic chat icon, not the agent. Rows have `aria-current` but no summary label. | `apps/web/src/components/sessions/rail/session-rail.tsx`, `session-row.tsx` | `inv` |
-| Composer | Generic placeholder "Send a message…". The toolbar's model label comes from the last message that names a model, not from the agent's configuration. | `apps/web/src/components/sessions/chat/composer/chat-composer.tsx`, `apps/web/src/components/features/sessions/sessions-page-client.tsx` (`modelLabel`) | `inv` |
-| Turn in the chat | `ToolCallCard` shows status and duration, and expands to task, tools, cost, model and attempts. `ReasoningBlock` collapses with its duration. Child runs and warnings reach execution detail only, not the chat's `linked_execution` summary. | `apps/web/src/components/sessions/chat/tool-call-card.tsx`, `assistant-message.tsx`; `koda/control_plane/dashboard_service.py` | `inv` |
+| Sessions rail | Two fixed sections, Rooms and Conversations, sorted by recency. Session rows show the agent name as the title with a generic `MessageCircle` glyph and no role tag; rows have `aria-current` but no summary label. | `apps/web/src/components/sessions/rail/session-rail.tsx`, `session-row.tsx` | `inv` |
+| Composer | Generic placeholder "Send a message…" in a direct chat; rooms already use "Send a message to this room" (`sessions.room.composer.placeholder`, `room-chat-pane.tsx` ~1093). The toolbar's model label comes from the last message that names a model, not from the agent's configuration. | `apps/web/src/components/sessions/chat/composer/chat-composer.tsx`, `apps/web/src/components/features/sessions/sessions-page-client.tsx` (`modelLabel`) | `inv` |
+| Turn in the chat | `ToolCallCard` shows status and duration, and expands to task, tools, cost, model and attempts. `ReasoningBlock` collapses with its duration. Child runs and warnings reach execution detail only, not the chat's `linked_execution` summary. | `apps/web/src/components/sessions/chat/tool-call-card.tsx`, `assistant-message.tsx`; `koda/state/dashboard_store.py` (`get_session` ~1393, `_task_row_to_summary` ~664), reached from `koda/control_plane/manager.py` ~3934 | `inv` |
 | Approvals in the chat | `ApprovalPrompt` renders inline with approve, edit, respond and reject. The broker accepts a `respond` decision, which requires response text. A resolved prompt disappears from the thread and leaves no receipt. | `apps/web/src/components/sessions/chat/approval-prompt.tsx`, `assistant-message.tsx`; `koda/services/approval_broker.py` | `inv` |
 | Pending approvals | Listed per agent at `/agents/{agent_id}/approvals`; each item carries `agent_id` and `session_id`. The command palette asks only for the first agent in the catalog. | `apps/web/src/hooks/use-command-catalog.ts`, `apps/web/src/components/command-bar/command-bar-modal.tsx` | `inv` |
 | Provider fallback | The chain is the primary provider, then the configured `PROVIDER_FALLBACK_ORDER` (empty unless set), filtered by eligibility. A switch is recorded only as the execution warning `provider fallback: <a> -> <b>`. | `koda/services/llm_runner.py` (`get_provider_fallback_chain`), `koda/services/queue_manager.py` | `inv` |
-| Room system events | Routing and handoff events are posted as `system_event` messages whose content is a raw tag (`[routing_decision] …`, `[handoff_event] …`); the room shows them muted. | `koda/squads/dispatch.py`, `apps/web/src/components/sessions/chat/room-chat-pane.tsx` | `inv` |
+| Room system events | Squad events are posted as `system_event` messages whose content is a raw tag: `[routing_decision] …`, `[handoff_event] …`, `[agent_dispatch_unavailable] …` and `[mention_unresolved] …` in `dispatch.py`; `[budget_80_percent] …`, `[budget_exceeded_auto_pause] …`, `[claim_expired] …`, `[delegation_timeout] …`, `[reply_obligation_timeout] …` and `[inbox_dead_letter] …` in `router.py`; `[semantic_router_unavailable] …` and `[coordination_decision] …` in `coordinator_engine.py`; `[<kind>] coordinator changed: …` in `coordinator.py`; `[squad_awareness_fanout] …` and `[contribution_proposal] …` in `triage.py`. The room shows them muted. | `koda/squads/dispatch.py`, `router.py`, `triage.py`, `coordinator.py`, `coordinator_engine.py`, `apps/web/src/components/sessions/chat/room-chat-pane.tsx` | `inv` |
 | Context accounting | Context governance estimates included, dropped and review-required tokens per turn. The composer shows none of it. | `koda/services/context_governance.py` | `inv` |
 | Memory-write counts | The queue counts memory writes as a quality counter only for denied child-run writes; no per-turn count reaches the chat. | `koda/services/queue_manager.py` (`record_memory_quality_counter`) | `inv` (grep) |
 
@@ -350,8 +350,8 @@ The agent's name and role appear wherever the agent does (list rows, chat header
 settings open from the chat header, grouped by what the operator is deciding: who it is, what it
 knows, what it can do, and its rules.
 - Basis: OpenClaw workspace / agentDir / session split and "never reuse agentDir" (`docs`); Grok Bot roles and memory per Bot (`docs`); OpenBot identity (name, title, description that teammates read to route work) shown in every list row and header, and settings grouped Brain / Knows / Does / Rules in a side panel opened from the header (`docs`, `observed`).
-- Koda today: control-plane agent documents compile into the runtime prompt contract (`claimed`, CLAUDE.md core invariant); draft and published snapshots exist (`inv`); squad routing reads each agent's mission profile (`koda/squads/capabilities.py`, `inv`); session rows show a generic icon (`inv`), and no link to the agent's settings was found in the chat header (`inv`, grep).
-- Gap: whether the agent editor separates these three layers, and whether child runs carry the operating contract, was not checked. The agent's identity is missing from session rows and the chat header.
+- Koda today: control-plane agent documents compile into the runtime prompt contract (`claimed`, CLAUDE.md core invariant); draft and published snapshots exist (`inv`); squad routing reads each agent's mission profile (`koda/squads/capabilities.py`, `inv`); rows and the header name the agent (`session-row.tsx` ~90, `chat-header.tsx` ~77; `inv`), and no link to the agent's settings was found in the chat header (`inv`, grep).
+- Gap: whether the agent editor separates these three layers, and whether child runs carry the operating contract, was not checked. No role tag, a generic glyph in rows, and no link from the chat header to the agent settings.
 
 **P2. Show the effective config and its origin.** Every resolved value shows where it came from
 (workspace default, squad, agent override). Lists state explicitly whether they replace or merge with
@@ -409,8 +409,9 @@ depth x concurrency cost preview.
 
 **P8. Child runs panel with stated cascade behavior.** Each task room shows Running and Finished child
 runs with model, cost, depth, status, transcript link and Stop. Pause and Stop say whether they cascade
-to child runs. In the chat, the parent's turn carries one collapsed row ("2 child runs · 2 done · 3s")
-that opens to one line per child (goal, outcome, duration) and links to the panel.
+to child runs. In the chat, the parent's turn carries one collapsed row
+(`<n> child runs · <done> done · <duration>`) that opens to one line per child (goal, outcome,
+duration) and links to the panel.
 - Basis: OpenClaw Subagents panel (`docs`); Dots Pause not cascading (`unverified`); OpenBot "Ran 2 subagents · 2 done · 3s" row with one result card per child (`observed`) and "Waiting for sub-tasks" rows with Stop, then Continue, Reassign or Cancel (`docs`).
 - Koda today: child runs appear in RunGraph panels, runtime task room and execution detail (`inv`), not in the chat thread (`inv`, section 5).
 - Gap: Running/Finished split, per-row Stop and cascade wording not checked; the in-chat child-run row.
@@ -461,8 +462,8 @@ directly; everyone else's are suggestions. Personal learning stays private to th
 
 **P14. Every learned item is inspectable, editable and deletable.** Each item shows provenance (source
 run, channel, connector), last-recalled time and utility. Revoking a connector or identity offers to
-purge what was derived from it. A turn that wrote memory says so in the chat ("Memory: 1 saved") and
-links to the item, so a wrong memory can be corrected while the context is fresh.
+purge what was derived from it. A turn that wrote memory says so in the chat with a memory-write
+count and links to the item, so a wrong memory can be corrected while the context is fresh.
 - Basis: avoids the reported Dots anti-pattern (`unverified`); OpenBot per-turn "Memory: 1 saved" in the turn footer (`observed`).
 - Koda today: provenance, drop reasons and utility feedback exist (`claimed`); no per-turn memory-write count reaches the chat (`inv`, section 5).
 - Gap: per-item edit/delete and purge-on-revoke not checked; a per-turn write record is needed before a receipt can be shown.
@@ -500,13 +501,13 @@ decided, by whom and when. Approval cards keep the P15 verbs and scope. A questi
 permission.
 - Basis: OpenBot one card design for every wait (changelog 0.66.0), plain questions moved out of approval button cards (0.68.0) (`docs`), and the question card that collapses to "Answers sent" (`observed`).
 - Koda today: `ApprovalPrompt` offers approve, edit, respond and reject; the broker's `respond` needs response text; a resolved prompt leaves no receipt in the thread (`inv`, section 5). The generative `ui_choice` block has no backend producer (FEATURE_MATRIX F-CNV-07).
-- Gap: receipts after a decision. A structured question card has no requirement yet; if one comes, it is built on the broker's `respond` path, not on `ui_choice`.
+- Gap: receipts after a decision. A structured question card has no requirement yet (MASTER_PLAN Q-26); if one comes, it is built on the broker's `respond` path, not on `ui_choice`.
 
 **P22. Provider failover is visible and never repeats side effects.** When a turn moves to another
 provider, the thread shows one muted line naming both providers and the reason class, and the
 execution record says the same. A turn that already ran a write tool is never re-run on the next
 provider: it continues from its tool results or fails visibly. Each agent's order is explicit. Whether
-a switch asks the operator first is an operator decision (section 9).
+a switch asks the operator first is an operator decision (section 9; MASTER_PLAN Q-25).
 - Basis: OpenBot backup models with "Ask before switching" on by default, a note in the chat that names the model that failed, return to the main model, and no re-run of a turn that used a tool (`docs`, changelog 0.40.0, 0.48.2, 0.68.0, 0.70.0; `observed`, Backup models screen).
 - Koda today: the fallback chain comes from the primary provider and the configured order, and a switch is recorded only as an execution warning (`inv`, section 5); tool replay on retry is a known defect (D-051).
 - Gap: the thread note; the ask-first option.
@@ -565,15 +566,15 @@ published configuration rather than from the last reply. When the agent is worki
 operator or paused, the composer says so and offers the matching action: stop, go to the waiting card,
 or activate. A message that waits behind a running turn stays visible with the reason it waits.
 - Basis: OpenBot composer placeholder that names the recipient, header model chip with effort, and composer states (`observed`); the queue that shows why a message waits (`docs`, changelog 0.10.0).
-- Koda today: generic placeholder; the model label comes from the last message; a send to a paused agent returns 400 (D-206); pending messages show optimistically with retry, but the backend queue is not shown (`inv`, section 5).
+- Koda today: a generic placeholder in a direct chat (rooms already use "Send a message to this room"); the model label comes from the last message; a send to a paused agent returns 400 (D-206); pending messages show optimistically with retry, but the backend queue is not shown (`inv`, section 5).
 - Gap: recipient naming and the configured-model label (small); the waiting reason for queued messages.
 
 **P25. System events read as sentences.** Handoffs, routing decisions, provider switches, and paused
 or limited threads appear as short muted lines. Each line is built from the event's metadata and
-translated, for example "Ada handed the task to Linus: needs a code review". Raw tags and ids never
+translated, for example `<agent> handed the task to <agent>: <reason>`. Raw tags and ids never
 appear. A line that reports a limit names it: depth, hop count or budget.
 - Basis: OpenBot handoff and provider-switch lines (`observed`, home page illustrations) and stated waiting reasons (`docs`, changelog 0.71.0).
-- Koda today: rooms show raw `[routing_decision]` and `[handoff_event]` text, muted (`inv`, section 5).
+- Koda today: rooms show the raw tag text, muted: `[routing_decision]` and `[handoff_event]`, and also `[agent_dispatch_unavailable]` and `[mention_unresolved]` (`dispatch.py`), `[budget_80_percent]`, `[budget_exceeded_auto_pause]`, `[claim_expired]`, `[delegation_timeout]`, `[reply_obligation_timeout]` and `[inbox_dead_letter]` (`router.py`), `[semantic_router_unavailable]` and `[coordination_decision]` (`coordinator_engine.py`), the coordinator-change events (`coordinator.py`), and `[squad_awareness_fanout]` and `[contribution_proposal]` (`triage.py`) (`inv`, section 5).
 - Gap: render from metadata with i18n keys; the stored message content can stay as it is.
 
 **P26. Calm surfaces in Koda's own tokens.**
@@ -616,7 +617,7 @@ covers interface copy only. Agent-facing PT-BR prompt text is not translated or 
 | Pill-shaped controls everywhere; instant (0 s) hover | A matter of taste, not a gap. Koda keeps its radius tokens and 120 ms colour transitions. |
 | Intent cue attributes (`data-cuelume-*`) | Their purpose is unverified, and no requirement asks for them. |
 | "What's new" tips in a menu | The design guide forbids tip cards and promo callouts; `CHANGELOG.md` covers releases. |
-| Window tabs, back/forward history, chat folders | No requirement for a single-owner console; M8-E2-T5 records keep or drop. |
+| Window tabs, back/forward history, chat folders | No requirement; not evaluated further. |
 | Full access by default; "Always allow" that promotes an agent | See section 8. Koda is governed by default (ADR-002). |
 
 ## 7. Principle-to-surface map
@@ -626,7 +627,7 @@ covers interface copy only. Agent-facing PT-BR prompt text is not translated or 
 | P1-P3 | Agents | `koda/control_plane/manager.py`, `koda/control_plane/operator_auth.py`, runtime prompt contract | `/control-plane/agents`, `components/control-plane/editor`, `components/sessions/chat/chat-header.tsx`, `components/sessions/rail/session-row.tsx` |
 | P4 | Channels | `koda/channels/gateway.py` | Channel gateway UI |
 | P5-P6 | Squads | `koda/squads/coordinator_engine.py`, `mentions.py`, `replies.py`, `synthesis_gate.py` | `components/sessions/`, `squad-spec-editor.tsx` |
-| P7-P8 | Delegation | `koda/services/child_runs.py`, `koda/services/queue_manager.py`, `koda/control_plane/dashboard_service.py` (execution summary) | `components/runtime/`, `components/executions/`, `components/sessions/chat/assistant-message.tsx` |
+| P7-P8 | Delegation | `koda/services/child_runs.py`, `koda/services/queue_manager.py`, `koda/state/dashboard_store.py` (execution summary) | `components/runtime/`, `components/executions/`, `components/sessions/chat/assistant-message.tsx` |
 | P9-P11 | Skills | `koda/skills/`, `koda/services/improvement_proposals.py` | Control-plane catalog |
 | P12-P14 | Memory | `koda/memory/`, `koda/control_plane/dashboard_memory.py`, `koda/services/context_governance.py` | `/memory`, `/memory/review`, the composer |
 | P15-P17 | Governance | `koda/utils/approval.py`, `koda/services/approval_broker.py`, `koda/control_plane/audit.py` | Approval cards, audit components |
@@ -634,9 +635,9 @@ covers interface copy only. Agent-facing PT-BR prompt text is not translated or 
 | P19-P20 | IA and density | Pending approvals (`/agents/{agent_id}/approvals`), reply obligations | App shell, sidebar, list pages, `components/sessions/rail/session-rail.tsx` |
 | P21 | Questions and approvals | `koda/services/approval_broker.py` (`respond`), audit | `components/sessions/chat/approval-prompt.tsx`, `assistant-message.tsx` |
 | P22 | Provider failover | `koda/services/llm_runner.py` (`get_provider_fallback_chain`), `koda/services/queue_manager.py` (fallback loop), the execution summary | `assistant-message.tsx`; the agent editor's resources tab |
-| P23 | Turn receipts | `koda/control_plane/dashboard_service.py`, `koda/state/dashboard_store.py` (`linked_execution`), `koda/services/run_graph.py` | `components/sessions/chat/tool-call-card.tsx`, `assistant-message.tsx`, `components/runtime/run-graph-panels.tsx` |
+| P23 | Turn receipts | `koda/state/dashboard_store.py` (`linked_execution`), `koda/services/run_graph.py` | `components/sessions/chat/tool-call-card.tsx`, `assistant-message.tsx`, `components/runtime/run-graph-panels.tsx` |
 | P24 | Composer and header | The agent's published snapshot (provider, model, effort) | `components/sessions/chat/composer/`, `chat-header.tsx`, `components/features/sessions/sessions-page-client.tsx` |
-| P25 | System lines | `koda/squads/dispatch.py` (event metadata) | `components/sessions/chat/room-chat-pane.tsx`, i18n resources |
+| P25 | System lines | `koda/squads/dispatch.py`, `router.py`, `triage.py`, `coordinator.py`, `coordinator_engine.py` (event metadata) | `components/sessions/chat/room-chat-pane.tsx`, i18n resources |
 | P26-P28 | Visual system, motion, focus, copy | n/a | `apps/web/src/app/globals.css`, `components/ui/`, `apps/web/CLAUDE.md`, i18n resources |
 
 ## 8. Anti-patterns to avoid
@@ -681,8 +682,8 @@ covers interface copy only. Agent-facing PT-BR prompt text is not translated or 
    - Is a Manager / Collaborator role split (P3, P13) in scope for a self-hosted single-owner product?
    - Should "Allow for this session" (P15) be added alongside the existing once / scope grants?
    - Where should memory review and improvement proposals converge (P13)?
-   - Should provider failover ask the operator before switching (P22)? Today a configured fallback order switches automatically, and the turn's context goes to the next provider. Asking first would change an existing behaviour that users rely on (MISSION §13).
-   - Should agents be able to ask the operator structured questions with options (P21)? No requirement exists yet.
+   - Should provider failover ask the operator before switching (P22)? Today a configured fallback order switches automatically, and the turn's context goes to the next provider. Asking first would change an existing behaviour that users rely on (MISSION §13). Tracked as MASTER_PLAN Q-25.
+   - Should agents be able to ask the operator structured questions with options (P21)? No requirement exists yet. Tracked as MASTER_PLAN Q-26.
 
 ## 10. Sources
 
