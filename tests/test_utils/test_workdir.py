@@ -406,3 +406,33 @@ class TestControlPlaneStateIsRefusedInsideAWorkDir:
         assert resolution.reason == "path_sensitive_dir"
         assert resolve_work_path("notes.txt", str(home), **options).path == home / "notes.txt"
         assert resolve_work_path(".koda-state", str(home), **options).path == home / ".koda-state"
+
+    @_SURFACES
+    @pytest.mark.parametrize("variant", [".KODA-STATE", ".Koda-State"])
+    def test_a_case_variant_of_its_path_is_refused_too(
+        self, home: Path, options: dict[str, bool], variant: str
+    ) -> None:
+        """On a case-insensitive filesystem (the macOS default), a case variant opens the state dir.
+
+        ``os.path.realpath`` keeps the case it is given, so the protected directories are
+        compared ignoring case, as the credential stores are. This test filesystem is case
+        sensitive, so a separate tree stands for what a case-insensitive one would open.
+        """
+        from koda.utils.files import protected_move_refusal
+
+        state = str(home / ".koda-state" / "control_plane")
+        control_plane = home / variant / "Control_Plane"
+        control_plane.mkdir(parents=True)
+        (control_plane / "bootstrap.txt").write_text("canary-bootstrap\n", encoding="utf-8")
+
+        assert workdir.protected_dir_for(str(control_plane / "bootstrap.txt")) == state
+        assert workdir.protected_dir_within(str(home / variant)) == state
+        assert sensitive_dir_for(str(control_plane), work_dir=str(home)) == state
+        assert validate_work_dir(str(control_plane)).blocked
+        resolution = resolve_work_path(f"{variant}/Control_Plane/bootstrap.txt", str(home), **options)
+        assert resolution.path is None
+        assert resolution.reason == "path_sensitive_dir"
+        assert protected_move_refusal(str(home / variant), str(home / "state-old")) is not None
+        assert protected_move_refusal(str(home / "notes.txt"), str(control_plane / "bootstrap.txt")) is not None
+        assert resolve_work_path(variant, str(home), **options).path == home / variant
+        assert protected_move_refusal(str(home / "notes.txt"), str(home / variant / "notes.txt")) is None

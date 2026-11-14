@@ -7,6 +7,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 
 from koda.config import (
+    ANTHROPIC_FEDERATION_CACHE_DIR_ENV_KEY,
+    ANTHROPIC_PROFILE_CONFIG_DIR_ENV_KEY,
     BROWSER_SESSION_DIR,
     DEFAULT_WORK_DIR,
     IMAGE_TEMP_DIR,
@@ -97,33 +99,85 @@ def provider_cli_config_dirs(environ: Mapping[str, str] | None = None) -> tuple[
     return tuple(dict.fromkeys(_configured_path(value) for value in configured if value.strip()))
 
 
+def anthropic_profile_credential_dirs(environ: Mapping[str, str] | None = None) -> tuple[str, ...]:
+    """Return the Anthropic profile credential dirs that the environment names, as configured.
+
+    Claude Code keeps an Anthropic profile's user OAuth tokens, and the federation token
+    cache, in ``credentials/`` of the profile config dir, which is ``ANTHROPIC_CONFIG_DIR``,
+    else ``$XDG_CONFIG_HOME/anthropic``, else ``~/.config/anthropic``, and the cache in
+    ``CLAUDE_CODE_FEDERATION_CACHE_DIR`` where that is set (``koda.config``). The default
+    ``~/.config/anthropic/credentials`` is refused by its name
+    (``koda.config.CLAUDE_CODE_CREDENTIAL_PATHS``). These are the other ones, named by those
+    variables in ``environ``, by default this process's environment: each one the
+    environment names, whichever of them a CLI uses, since a CLI started with another
+    environment, such as one without ``ANTHROPIC_CONFIG_DIR``, takes the next. They are
+    among the :func:`protected_dirs`. A variable that is unset or blank names none.
+    """
+    env = os.environ if environ is None else environ
+    named: list[str] = []
+    config_dir = env.get(ANTHROPIC_PROFILE_CONFIG_DIR_ENV_KEY, "").strip()
+    if config_dir:
+        named.append(os.path.join(config_dir, "credentials"))
+    xdg_config_home = env.get("XDG_CONFIG_HOME", "").strip()
+    if xdg_config_home:
+        named.append(os.path.join(xdg_config_home, "anthropic", "credentials"))
+    federation_cache = env.get(ANTHROPIC_FEDERATION_CACHE_DIR_ENV_KEY, "")
+    if federation_cache.strip():
+        named.append(federation_cache)
+    return tuple(dict.fromkeys(_configured_path(directory) for directory in named))
+
+
 def protected_dirs() -> tuple[str, ...]:
     """Return the directories that hold Koda's or a provider CLI's credentials, as configured now.
 
     They are the control-plane state directory (:func:`control_plane_state_dir`: the master
     key and the bootstrap code), the browser's saved sessions of every chat scope
-    (:func:`browser_sessions_dir`), and the provider CLI config dirs the environment moves
-    out of HOME (:func:`provider_cli_config_dirs`). In the Docker layout the last two sit
-    below ``RUNTIME_EPHEMERAL_ROOT`` (``image-scratch/browser_sessions``, and
-    ``claude-config`` where ``CLAUDE_CONFIG_DIR`` is set as the app container sets it),
-    which is a valid work dir, and outside Docker the state directory sits in the default
-    work dir ``~``. None of them is Koda's work area: none is ever a work dir, and the file
-    tools, the file commands and ``browser_upload`` refuse every path inside them, whatever
-    the work dir and its waiver (:class:`SensitiveDirs`, :func:`protected_dir_for`).
+    (:func:`browser_sessions_dir`), the provider CLI config dirs the environment moves out
+    of HOME (:func:`provider_cli_config_dirs`), and the Anthropic profile credential dirs
+    the environment names (:func:`anthropic_profile_credential_dirs`). In the Docker layout
+    the browser's sessions and the Claude Code config dir sit below
+    ``RUNTIME_EPHEMERAL_ROOT`` (``image-scratch/browser_sessions``, and ``claude-config``
+    where ``CLAUDE_CONFIG_DIR`` is set as the app container sets it), which is a valid work
+    dir, and outside Docker the state directory sits in the default work dir ``~``. None of
+    them is Koda's work area: none is ever a work dir, and the file tools, the file commands
+    and ``browser_upload`` refuse every path inside them, whatever the work dir and its
+    waiver (:class:`SensitiveDirs`, :func:`protected_dir_for`).
     """
-    return tuple(dict.fromkeys((control_plane_state_dir(), browser_sessions_dir(), *provider_cli_config_dirs())))
+    return tuple(
+        dict.fromkeys(
+            (
+                control_plane_state_dir(),
+                browser_sessions_dir(),
+                *provider_cli_config_dirs(),
+                *anthropic_profile_credential_dirs(),
+            )
+        )
+    )
+
+
+def _is_within_ignoring_case(path: str, root: str) -> bool:
+    """Return whether ``path`` is ``root`` or below it, by whole path component, ignoring case.
+
+    A protected directory is recognised by its location, and on a case-insensitive
+    filesystem (the macOS default) ``~/.KODA-STATE/control_plane`` opens the control-plane
+    state directory, while ``os.path.realpath`` keeps the case it was given. So the
+    protected directories are compared case-insensitively, as
+    :func:`koda.utils.files.blocked_credential_path` compares the credential stores.
+    """
+    return _is_within(path.lower(), root.lower())
 
 
 def protected_dir_for(path: str) -> str | None:
     """Return the one of :func:`protected_dirs` that contains ``path``, or None.
 
     ``path`` is absolute and resolved; each directory is compared as configured and
-    resolved, by whole path component. They are never waived, so every caller of the shared
-    path policy applies this check, also those that skip ``SENSITIVE_DIRS``
-    (:func:`koda.utils.files.resolve_work_path` with ``deny_sensitive_dirs=False``).
+    resolved, by whole path component and ignoring case (:func:`_is_within_ignoring_case`).
+    They are never waived, so every caller of the shared path policy applies this check,
+    also those that skip ``SENSITIVE_DIRS`` (:func:`koda.utils.files.resolve_work_path`
+    with ``deny_sensitive_dirs=False``).
     """
     for protected in protected_dirs():
-        if any(_is_within(path, root) for root in _sensitive_roots(protected)):
+        if any(_is_within_ignoring_case(path, root) for root in _sensitive_roots(protected)):
             return protected
     return None
 
@@ -132,14 +186,14 @@ def protected_dir_within(path: str) -> str | None:
     """Return the one of :func:`protected_dirs` that is ``path`` or lies below it, or None.
 
     ``path`` is absolute and resolved; each directory is compared as configured and
-    resolved, by whole path component, as :func:`protected_dir_for` compares them. A
-    protected directory is recognised by its location alone, so moving ``path`` would take
-    that directory to a path no check recognises, and putting something at ``path`` would
-    put it where Koda or a CLI reads that directory from
+    resolved, by whole path component and ignoring case, as :func:`protected_dir_for`
+    compares them. A protected directory is recognised by its location alone, so moving
+    ``path`` would take that directory to a path no check recognises, and putting something
+    at ``path`` would put it where Koda or a CLI reads that directory from
     (:func:`koda.utils.files.protected_move_refusal`).
     """
     for protected in protected_dirs():
-        if any(_is_within(root, path) for root in _sensitive_roots(protected)):
+        if any(_is_within_ignoring_case(root, path) for root in _sensitive_roots(protected)):
             return protected
     return None
 
@@ -185,13 +239,17 @@ class SensitiveDirs:
     deny: tuple[tuple[str, str], ...]
     """``(entry as configured, root)`` pairs, the root being the entry as written or resolved."""
 
+    protected: tuple[tuple[str, str], ...] = ()
+    """The same pairs for the :func:`protected_dirs`, which are compared ignoring case."""
+
     @classmethod
     def for_work_dir(cls, work_dir: str | None = None) -> SensitiveDirs:
         """Resolve the sensitive roots now, without the ones waived for ``work_dir``.
 
         The :func:`protected_dirs` (the control-plane state directory, the browser's saved
-        sessions and the provider CLI config dirs moved out of HOME) are deny roots too, and
-        are never waived.
+        sessions, the provider CLI config dirs moved out of HOME and the Anthropic profile
+        credential dirs the environment names) are deny roots too, are never waived, and are
+        compared ignoring case, as :func:`protected_dir_for` compares them.
         """
         waived = _waived_sensitive_roots(work_dir)
         deny = tuple(
@@ -201,13 +259,16 @@ class SensitiveDirs:
             if root not in waived
         )
         protected = tuple((directory, root) for directory in protected_dirs() for root in _sensitive_roots(directory))
-        return cls(deny + protected)
+        return cls(deny, protected)
 
     def containing(self, path: str) -> str | None:
-        """Return the ``SENSITIVE_DIRS`` entry whose directory contains ``path``, or None."""
+        """Return the ``SENSITIVE_DIRS`` entry or protected directory that contains ``path``, or None."""
         for sensitive, root in self.deny:
             if _is_within(path, root):
                 return sensitive
+        for protected, root in self.protected:
+            if _is_within_ignoring_case(path, root):
+                return protected
         return None
 
 

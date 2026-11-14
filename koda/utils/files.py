@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from koda.agent_contract import FILE_COMMAND_ACCESS_LEVELS
-from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS, FILEOPS_BLOCKED_EXTENSIONS
+from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS, FILEOPS_BLOCKED_EXTENSIONS, FILEOPS_CREDENTIAL_COPY_SUFFIXES
 from koda.logging_config import get_logger
 from koda.utils.workdir import protected_dir_for, protected_dir_within, sensitive_dir_for
 
@@ -50,15 +50,34 @@ def blocked_file_suffix(name: str) -> str | None:
     return None
 
 
+def _names_credential_file(name: str, file_name: str) -> bool:
+    """Return whether the lowered ``name`` is the credential file ``file_name`` or a copy of it.
+
+    A copy is the file name followed by one of ``FILEOPS_CREDENTIAL_COPY_SUFFIXES`` and,
+    optionally, a dot and any further suffix (``.claude.json.backup``,
+    ``.claude.json.backup.1763100000000``, ``.claude.json.tmp.a1b2c3d4``), as the CLIs write
+    them; ``.claude.json.example`` and ``.claude.json.backupx`` are not.
+    """
+    if name == file_name:
+        return True
+    if not name.startswith(file_name):
+        return False
+    rest = name[len(file_name) :]
+    return any(rest == suffix or rest.startswith(suffix + ".") for suffix in FILEOPS_CREDENTIAL_COPY_SUFFIXES)
+
+
 def blocked_credential_path(path: str) -> str | None:
     """Return the ``FILEOPS_BLOCKED_CREDENTIAL_PATHS`` entry that ``path`` is, or is inside.
 
     ``path`` is absolute and normalised. A directory entry (``.ssh/``, ``.aws/``) matches
     that directory and every path below it, wherever it appears in ``path``; a file entry
-    (``.codex/auth.json``, ``.netrc``) matches the last components of ``path``. Components
-    are compared case-insensitively, as a case-insensitive filesystem would open them.
-    These are the credential stores that the CLIs sharing the runtime HOME keep there, and
-    in the Docker layout HOME is the work dir. Returns None for any other path.
+    (``.codex/auth.json``, ``.netrc``) matches the last components of ``path``, the last
+    one being that file's name or the name of a copy a CLI writes of it
+    (:func:`_names_credential_file`: ``.claude.json.backup.1763100000000`` in any
+    ``backups/`` is ``.claude.json``). Components are compared case-insensitively, as a
+    case-insensitive filesystem would open them. These are the credential stores that the
+    CLIs sharing the runtime HOME keep there, and in the Docker layout HOME is the work
+    dir. Returns None for any other path.
     """
     parts = [part.lower() for part in path.split(os.sep) if part]
     for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS:
@@ -67,7 +86,11 @@ def blocked_credential_path(path: str) -> str | None:
         if entry.endswith("/"):
             if any(parts[start : start + size] == entry_parts for start in range(len(parts) - size + 1)):
                 return entry
-        elif parts[-size:] == entry_parts:
+        elif (
+            len(parts) >= size
+            and parts[len(parts) - size : -1] == entry_parts[:-1]
+            and _names_credential_file(parts[-1], entry_parts[-1])
+        ):
             return entry
     return None
 
@@ -87,11 +110,19 @@ def secret_file_refusal(path: str) -> str | None:
     return None
 
 
-def _children_named(directory: str, name: str) -> list[str]:
-    """Return the entries of ``directory`` named ``name``, ignoring case as the policy compares names."""
+def _children_named(directory: str, name: str, *, with_copies: bool = False) -> list[str]:
+    """Return the entries of ``directory`` named ``name``, ignoring case as the policy compares names.
+
+    With ``with_copies``, ``name`` is a credential file's name, and the copies a CLI writes
+    of it beside it (:func:`_names_credential_file`) are returned too.
+    """
     try:
         with os.scandir(directory) as entries:
-            return [entry.path for entry in entries if entry.name.lower() == name]
+            return [
+                entry.path
+                for entry in entries
+                if entry.name.lower() == name or (with_copies and _names_credential_file(entry.name.lower(), name))
+            ]
     except OSError:
         return []
 
@@ -108,7 +139,8 @@ def secret_move_refusal(source: str, destination: str) -> str | None:
     ``.config/gh/hosts.yml``, ``.config/gcloud/``). When ``source`` ends with the first
     components of such an entry and holds the rest, moving or renaming ``source`` could
     leave that store under a name the policy does not recognise, and the read tools would
-    return it. So each such path below ``source`` must still be refused
+    return it. So each such path below ``source``, and each copy a CLI writes beside such a
+    file (``.claude/.config.json.tmp.a1b2c3d4``), must still be refused
     (:func:`secret_file_refusal`) at its new place.
     """
     source = source.rstrip(os.sep) or os.sep
@@ -119,8 +151,11 @@ def secret_move_refusal(source: str, destination: str) -> str | None:
             if source_parts[-split:] != entry_parts[:split]:
                 continue
             below = [source]
-            for name in entry_parts[split:]:
-                below = [child for directory in below for child in _children_named(directory, name)]
+            for index, name in enumerate(entry_parts[split:], start=split):
+                with_copies = index == len(entry_parts) - 1 and not entry.endswith("/")
+                below = [
+                    child for directory in below for child in _children_named(directory, name, with_copies=with_copies)
+                ]
             for path in below:
                 refusal = secret_file_refusal(path)
                 moved = destination.rstrip(os.sep) + path[len(source) :]
@@ -136,11 +171,11 @@ def protected_move_refusal(source: str, destination: str) -> str | None:
     Both paths are absolute and resolved. ``source`` and the destination the caller named
     passed :func:`resolve_work_path`, so neither lies inside one of the
     :func:`koda.utils.workdir.protected_dirs` (the control-plane state directory, the
-    browser's saved sessions, and ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` where the
-    environment sets them). ``destination`` is where ``source`` ends up (for ``shutil.move``
-    into an existing directory, the path inside it). A protected directory is recognised by
-    its location, not its name, so the move is refused
-    (:func:`koda.utils.workdir.protected_dir_within`):
+    browser's saved sessions, ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` where the environment
+    sets them, and the Anthropic profile credential dirs it names). ``destination`` is where
+    ``source`` ends up (for ``shutil.move`` into an existing directory, the path inside it).
+    A protected directory is recognised by its location, not its name, compared ignoring
+    case, so the move is refused (:func:`koda.utils.workdir.protected_dir_within`):
 
     - when ``source`` is, or contains, a protected directory (``.koda-state`` holds
       ``control_plane``): the move would take its data to a path no check recognises, and
@@ -241,8 +276,9 @@ def resolve_work_path(
       or a provider CLI's credentials (``path_sensitive_dir``, see
       :func:`koda.utils.workdir.sensitive_dir_for` and
       :func:`koda.utils.workdir.protected_dirs`: the control-plane state directory, the
-      browser's saved sessions, and ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` where the
-      environment sets them), except the sensitive directories one of Koda's runtime roots
+      browser's saved sessions, ``CLAUDE_CONFIG_DIR`` and ``CODEX_HOME`` where the
+      environment sets them, and the Anthropic profile credential dirs it names, all
+      compared ignoring case), except the sensitive directories one of Koda's runtime roots
       is configured under, when ``work_dir`` is that runtime root or below it: the Docker
       default ``HOME`` under ``/var/lib`` and the paths inside it stay usable;
     - neither the requested path nor the path it resolves to may be a secret file

@@ -710,32 +710,48 @@ CLAUDE_CODE_GLOBAL_CONFIG_FILES: tuple[str, ...] = (
     *(f".claude{suffix}.json" for suffix in ("", "-staging-oauth", "-local-oauth", "-custom-oauth")),
     ".claude/.config.json",
 )
+# Claude Code's Anthropic profile store, as the pinned CLI resolves it: the profile config
+# dir is ANTHROPIC_CONFIG_DIR, else $XDG_CONFIG_HOME/anthropic, else ~/.config/anthropic,
+# and its credentials/ dir holds each profile's user OAuth tokens (credentials/<profile>.json,
+# rewritten with the new access and refresh token on every refresh) and the federation token
+# cache (credentials/federation/, or CLAUDE_CODE_FEDERATION_CACHE_DIR where that is set).
+# The default location is one of CLAUDE_CODE_CREDENTIAL_PATHS below; where the process
+# environment names another, the file layer refuses each one it names in every work dir
+# (koda/utils/workdir.py::anthropic_profile_credential_dirs), whichever of them a CLI uses.
+ANTHROPIC_PROFILE_CONFIG_DIR_ENV_KEY = "ANTHROPIC_CONFIG_DIR"
+ANTHROPIC_FEDERATION_CACHE_DIR_ENV_KEY = "CLAUDE_CODE_FEDERATION_CACHE_DIR"
 # The other files that hold a Claude Code credential in HOME, besides its login
-# (.claude/.credentials.json above, which also holds the MCP servers' OAuth tokens): the
-# global config, the copy of it the CLI recovers from (<name>.backup) and its timestamped
-# copies in .claude/backups/; the device private keys it keeps where no keychain holds
-# them (.device-keys.json, in its config dir); the background sessions' auth snapshots and
-# socket tokens (.claude/daemon/auth/); and a remote session's OAuth token, API key and
-# session ingress token (.claude/remote/, which the CLI keeps at a fixed path in a remote
-# session's home, only with CLAUDE_CODE_REMOTE set). Disconnecting the provider does not
-# delete them: the global config is also the operator's settings and project list. The
-# CLI's other keys (.claude/daemon/control.key, pipe.key, sessions/*.key) are refused by
-# extension.
+# (.claude/.credentials.json above, which also holds the MCP servers' OAuth tokens), as the
+# pinned CLI names them: the global config, whose copies (<name>.backup beside it, and
+# <name>.backup.<ts> and <name>.corrupted.<ts> in its config dir's backups/) are refused by
+# FILEOPS_CREDENTIAL_COPY_SUFFIXES below wherever they sit, and .claude/backups/ as a
+# whole; the device private keys it keeps where no keychain holds them (.device-keys.json,
+# in its config dir); the background sessions' auth snapshots and socket tokens
+# (.claude/daemon/auth/); the HFI auth file an earlier CLI wrote, which this one only
+# deletes once it is older than its cleanup period (.claude/hfi-auth.json); a remote
+# session's OAuth token, API key and session ingress token (.claude/remote/, which the CLI
+# keeps at a fixed path in a remote session's home, only with CLAUDE_CODE_REMOTE set); and
+# the Anthropic profile store's OAuth tokens in its default location
+# (.config/anthropic/credentials/). Disconnecting the provider does not delete them: the
+# global config is also the operator's settings and project list. The CLI's other keys
+# (.claude/daemon/control.key, pipe.key, sessions/*.key) are refused by extension.
 CLAUDE_CODE_CREDENTIAL_PATHS: tuple[str, ...] = (
     *CLAUDE_CODE_GLOBAL_CONFIG_FILES,
-    *(f"{name}.backup" for name in CLAUDE_CODE_GLOBAL_CONFIG_FILES),
     ".claude/backups/",
     ".device-keys.json",
     ".claude/daemon/auth/",
+    ".claude/hfi-auth.json",
     ".claude/remote/.oauth_token",
     ".claude/remote/.api_key",
     ".claude/remote/.session_ingress_token",
+    ".config/anthropic/credentials/",
 )
 # Credential stores that the provider and developer CLIs keep in HOME, which is also the
 # default Docker work dir (HOME=/var/lib/koda/runtime/home). The file commands, the agent
 # file tools and browser_upload refuse them like a blocked extension. An entry ending in
 # "/" is a directory, refused with everything below it wherever it appears in a path; any
-# other entry is a file, matched by the last components of the path. Case-insensitive.
+# other entry is a file, matched by the last components of the path, together with the
+# copies of it named by FILEOPS_CREDENTIAL_COPY_SUFFIXES. Case-insensitive.
 FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
     ".ssh/",
     ".gnupg/",
@@ -754,6 +770,16 @@ FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
     ".npmrc",
     ".pypirc",
 )
+# The copies a CLI writes of a credential file, which hold the same secret: the file name
+# followed by one of these and, optionally, a dot and any further suffix. Claude Code keeps
+# <name>.backup beside its global config to recover from, writes <name>.backup.<ts> and
+# <name>.corrupted.<ts> into its config dir's backups/ ($CLAUDE_CONFIG_DIR/backups/ where
+# that is set), and writes each file through <name>.tmp.<hex> (or <name>.tmp.<pid>.<hex>),
+# which a crash mid-write leaves beside it. The CLI itself recognises them by that name,
+# whatever dir holds them. So each file entry of FILEOPS_BLOCKED_CREDENTIAL_PATHS also
+# refuses <entry>.backup, <entry>.backup.1763100000000 and <entry>.tmp.a1b2c3d4, but not
+# <entry>.example or <entry>.backupx.
+FILEOPS_CREDENTIAL_COPY_SUFFIXES: tuple[str, ...] = (".backup", ".corrupted", ".tmp")
 BLOCKED_SHELL_PATTERN: re.Pattern = re.compile(
     # Destructive filesystem operations
     r"rm\s+-rf|mkfs|dd\s+if=|shutdown|reboot|chmod\s+777\s+/"

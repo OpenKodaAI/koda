@@ -409,18 +409,24 @@ class TestCredentialStoresAreSecretFiles:
             ("/srv/koda-user/.claude-staging-oauth.json", ".claude-staging-oauth.json"),
             ("/srv/koda-user/.claude-local-oauth.json", ".claude-local-oauth.json"),
             ("/srv/koda-user/.claude/.config.json", ".claude/.config.json"),
-            ("/srv/koda-user/.claude.json.backup", ".claude.json.backup"),
-            ("/srv/koda-user/.claude-custom-oauth.json.backup", ".claude-custom-oauth.json.backup"),
-            ("/srv/koda-user/.claude/.config.json.backup", ".claude/.config.json.backup"),
-            ("/srv/koda-user/.claude/backups/.claude.json.backup.1763100000000", ".claude/backups/"),
+            ("/srv/koda-user/.claude.json.backup", ".claude.json"),
+            ("/srv/koda-user/.claude-custom-oauth.json.backup", ".claude-custom-oauth.json"),
+            ("/srv/koda-user/.claude/.config.json.backup", ".claude/.config.json"),
+            ("/srv/koda-user/.claude/backups/.claude.json.backup.1763100000000", ".claude.json"),
+            ("/srv/koda-user/.claude/backups/.config.json.backup.1763100000000", ".claude/backups/"),
             ("/srv/koda-user/.claude/backups", ".claude/backups/"),
             ("/srv/koda-user/.claude/.device-keys.json", ".device-keys.json"),
             ("/srv/secure-storage/.device-keys.json", ".device-keys.json"),
             ("/srv/koda-user/.claude/daemon/auth/a1b2c3.tokens.json", ".claude/daemon/auth/"),
             ("/srv/koda-user/.claude/daemon/auth/a1b2c3.json", ".claude/daemon/auth/"),
+            ("/srv/koda-user/.claude/hfi-auth.json", ".claude/hfi-auth.json"),
             ("/srv/koda-user/.claude/remote/.oauth_token", ".claude/remote/.oauth_token"),
             ("/srv/koda-user/.claude/remote/.api_key", ".claude/remote/.api_key"),
             ("/srv/koda-user/.claude/remote/.session_ingress_token", ".claude/remote/.session_ingress_token"),
+            ("/srv/koda-user/.config/anthropic/credentials/default.json", ".config/anthropic/credentials/"),
+            ("/srv/koda-user/.config/anthropic/credentials/federation/fed-x-1.json", ".config/anthropic/credentials/"),
+            ("/srv/koda-user/.config/anthropic/credentials", ".config/anthropic/credentials/"),
+            ("/srv/koda-user/.config/Anthropic/Credentials/work.json", ".config/anthropic/credentials/"),
         ],
     )
     def test_credential_stores_are_matched(self, path, entry):
@@ -448,6 +454,12 @@ class TestCredentialStoresAreSecretFiles:
             "/srv/koda-user/project/.config.json",
             "/srv/koda-user/project/claude.json",
             "/srv/koda-user/.claude.json.example",
+            "/srv/koda-user/.claude.json.backupx",
+            "/srv/koda-user/.claude.jsonl",
+            "/srv/koda-user/project/.config.json.tmp.a1b2c3d4",
+            "/srv/koda-user/.claude/hfi-auth.json.example",
+            "/srv/koda-user/.config/anthropic/configs/default.json",
+            "/srv/koda-user/.config/anthropic/active_config",
         ],
     )
     def test_other_paths_are_not(self, path):
@@ -525,6 +537,157 @@ class TestCredentialStoresAreSecretFiles:
             entry for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS if entry.endswith("/")
         )
         assert not re.findall(r"`([^`]+/)`", files)
+
+    def test_the_guardrail_matrix_names_exactly_the_copies_refused_with_a_credential_file(self):
+        """The File operations row names every ``FILEOPS_CREDENTIAL_COPY_SUFFIXES`` entry, and nothing else."""
+        import re
+        from pathlib import Path
+
+        from koda.config import FILEOPS_CREDENTIAL_COPY_SUFFIXES
+
+        matrix = (Path(__file__).resolve().parents[2] / "docs/security/guardrail-test-matrix.md").read_text()
+        row = next(line for line in matrix.splitlines() if line.startswith("| File operations |"))
+        start = row.index("Each file entry also refuses the copies a CLI writes of that file")
+        clause = row[row.index(" followed by ", start) : row.index(" and, optionally,", start)]
+        assert sorted(re.findall(r"`([^`]+)`", clause)) == sorted(FILEOPS_CREDENTIAL_COPY_SUFFIXES)
+
+    def test_the_guardrail_matrix_cites_its_credential_tests_by_name(self):
+        """Every test the File operations row cites exists, and the row cites the tests that pin it by name."""
+        import ast
+        import re
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        matrix = (root / "docs/security/guardrail-test-matrix.md").read_text()
+        row = next(line for line in matrix.splitlines() if line.startswith("| File operations |"))
+        cells = [cell.strip() for cell in row.strip().strip("|").split(" | ")]
+        assert len(cells) == 3
+        cited = re.findall(r"`(tests/[^`]+)`", cells[2])
+        for test_id in cited:
+            path, *names = test_id.split("::")
+            scope = ast.parse((root / path).read_text()).body
+            for name in names:
+                node = next(
+                    (
+                        node
+                        for node in scope
+                        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef) and node.name == name
+                    ),
+                    None,
+                )
+                assert node is not None, test_id
+                scope = getattr(node, "body", [])
+        own = "tests/test_utils/test_files.py::TestCredentialStoresAreSecretFiles"
+        for name in (
+            "test_the_guardrail_matrix_lists_exactly_the_refused_credential_paths",
+            "test_the_guardrail_matrix_names_exactly_the_copies_refused_with_a_credential_file",
+            "test_the_guardrail_matrix_cites_its_credential_tests_by_name",
+        ):
+            assert f"{own}::{name}" in cited, name
+
+    @pytest.mark.parametrize(
+        ("copy", "entry"),
+        [
+            (".claude.json.backup", ".claude.json"),
+            (".claude-custom-oauth.json.backup", ".claude-custom-oauth.json"),
+            (".claude.json.tmp.a1b2c3d4", ".claude.json"),
+            (".claude.json.tmp.4242.a1b2c3d4e5f6", ".claude.json"),
+            (".claude/.config.json.backup", ".claude/.config.json"),
+            (".claude/.config.json.tmp.a1b2c3d4", ".claude/.config.json"),
+            (".claude/backups/.claude.json.backup.1763100000000", ".claude.json"),
+            (".claude/backups/.claude.json.corrupted.1763100000000", ".claude.json"),
+            ("claude-config/backups/.claude.json.backup.1763100000000", ".claude.json"),
+            ("claude-config/backups/.claude.json.corrupted.1763100000000", ".claude.json"),
+            ("claude-config/backups/.claude-staging-oauth.json.corrupted.1763100000000", ".claude-staging-oauth.json"),
+            ("claude-config/.CLAUDE.JSON.BACKUP", ".claude.json"),
+            (".device-keys.json.tmp.a1b2c3d4", ".device-keys.json"),
+            (".codex/auth.json.tmp.a1b2c3d4", ".codex/auth.json"),
+            (".netrc.backup", ".netrc"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"deny_sensitive_dirs": False}, {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True}],
+        ids=["the file tools", "the file commands", "browser_upload"],
+    )
+    def test_the_copies_a_cli_writes_of_a_credential_file_are_refused_wherever_they_sit(
+        self, tmp_path, monkeypatch, options, copy, entry
+    ):
+        """Claude Code writes copies of its global config, with ``primaryApiKey``, beside it and into its backups.
+
+        ``<name>.backup`` beside it, ``<name>.backup.<ts>`` and ``<name>.corrupted.<ts>`` in
+        its config dir's ``backups/`` (``$CLAUDE_CONFIG_DIR/backups/`` where that is set, as
+        ``claude-config`` is for the compose app container only, not for a worker whose work
+        dir is the runtime root), and ``<name>.tmp.<hex>`` while it writes it, left behind
+        by a crash. Each is refused by the name of the file it copies, wherever it sits.
+        """
+        home = tmp_path.resolve() / "home"
+        for path in (copy, ".claude.json.example", "claude-config/backups/notes.txt"):
+            (home / path).parent.mkdir(parents=True, exist_ok=True)
+            (home / path).write_text('{"primaryApiKey": "sk-ant-canary"}\n')
+        monkeypatch.setenv("HOME", str(home))
+
+        resolution = resolve_work_path(copy, str(home), **options)
+        assert resolution.path is None
+        assert resolution.reason == "path_blocked_file"
+        assert f"'{entry}' is a credential store" in (resolution.error or "")
+        for visible in (".claude.json.example", "claude-config/backups/notes.txt"):
+            assert resolve_work_path(visible, str(home), **options).path == home / visible
+
+    @pytest.mark.parametrize(
+        ("env", "stores"),
+        [
+            (
+                {"ANTHROPIC_CONFIG_DIR": "profiles"},
+                ["profiles/credentials/default.json", "profiles/credentials/federation/fed-x-1.json"],
+            ),
+            (
+                {"XDG_CONFIG_HOME": "xdg"},
+                ["xdg/anthropic/credentials/default.json", "xdg/anthropic/credentials/federation/fed-x-1.json"],
+            ),
+            (
+                {"ANTHROPIC_CONFIG_DIR": "profiles", "XDG_CONFIG_HOME": "xdg"},
+                ["profiles/credentials/default.json", "xdg/anthropic/credentials/default.json"],
+            ),
+            ({"CLAUDE_CODE_FEDERATION_CACHE_DIR": "fed-cache"}, ["fed-cache/fed-x-1.json"]),
+        ],
+        ids=["ANTHROPIC_CONFIG_DIR", "XDG_CONFIG_HOME", "both", "CLAUDE_CODE_FEDERATION_CACHE_DIR"],
+    )
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"deny_sensitive_dirs": False}, {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True}],
+        ids=["the file tools", "the file commands", "browser_upload"],
+    )
+    def test_the_anthropic_profile_store_is_refused_where_the_environment_moves_it(
+        self, tmp_path, monkeypatch, options, env, stores
+    ):
+        """Claude Code keeps an Anthropic profile's OAuth tokens in ``<config dir>/credentials/``.
+
+        The config dir is ``ANTHROPIC_CONFIG_DIR``, else ``$XDG_CONFIG_HOME/anthropic``, else
+        ``~/.config/anthropic`` (refused by name), and the federation token cache is
+        ``CLAUDE_CODE_FEDERATION_CACHE_DIR`` where that is set. Each location the environment
+        names is refused, wherever it is; the profile's settings beside it are not.
+        """
+        home = tmp_path.resolve() / "home"
+        visible = [path.replace("/credentials/", "/configs/") for path in stores if "/credentials/" in path]
+        for path in [*stores, *visible, "notes.txt"]:
+            (home / path).parent.mkdir(parents=True, exist_ok=True)
+            (home / path).write_text('{"refresh_token": "canary-refresh"}\n')
+        monkeypatch.setenv("HOME", str(home))
+        for key in ("ANTHROPIC_CONFIG_DIR", "XDG_CONFIG_HOME", "CLAUDE_CODE_FEDERATION_CACHE_DIR"):
+            monkeypatch.delenv(key, raising=False)
+        for path in stores:
+            assert resolve_work_path(path, str(home), **options).path == home / path, path
+        for key, value in env.items():
+            monkeypatch.setenv(key, str(home / value))
+
+        for path in stores:
+            resolution = resolve_work_path(path, str(home), **options)
+            assert resolution.path is None, path
+            assert resolution.reason == "path_sensitive_dir", path
+            assert not validate_work_dir(str((home / path).parent)).ok, path
+        for path in [*visible, "notes.txt"]:
+            assert resolve_work_path(path, str(home), **options).path == home / path, path
 
     @pytest.mark.parametrize(("provider", "env_key"), [("claude", "CLAUDE_CONFIG_DIR"), ("codex", "CODEX_HOME")])
     @pytest.mark.parametrize(

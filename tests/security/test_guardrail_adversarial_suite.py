@@ -1428,9 +1428,11 @@ async def test_file_grep_never_prints_a_cli_credential_store(
 
 # The files that hold a credential which the pinned Claude Code CLI keeps in HOME when
 # CLAUDE_CONFIG_DIR is unset, under the names it writes them: its global config (with
-# primaryApiKey) for each OAuth environment, the legacy one, their recovery copies and the
-# timestamped backups, the device private keys, the background sessions' auth snapshot and
-# socket tokens, a remote session's tokens, and the login and keys refused before.
+# primaryApiKey) for each OAuth environment, the legacy one, their recovery copies, the
+# timestamped and corrupted copies in backups/ and the temp copies a crash mid-write leaves,
+# the device private keys, the background sessions' auth snapshot and socket tokens, the HFI
+# auth file an earlier CLI left, a remote session's tokens, the Anthropic profile store's
+# OAuth tokens and federation token cache, and the login and keys refused before.
 _NATIVE_CLAUDE_CODE_CREDENTIAL_FILES = [
     ".claude.json",
     ".claude-staging-oauth.json",
@@ -1441,12 +1443,19 @@ _NATIVE_CLAUDE_CODE_CREDENTIAL_FILES = [
     ".claude/.config.json",
     ".claude/.config.json.backup",
     ".claude/backups/.claude.json.backup.1763100000000",
+    ".claude/backups/.claude.json.corrupted.1763100000000",
+    ".claude.json.tmp.a1b2c3d4",
+    ".claude.json.tmp.4242.a1b2c3d4e5f6",
+    ".claude/.config.json.tmp.a1b2c3d4",
     ".claude/.device-keys.json",
     ".claude/daemon/auth/a1b2c3.json",
     ".claude/daemon/auth/a1b2c3.tokens.json",
+    ".claude/hfi-auth.json",
     ".claude/remote/.oauth_token",
     ".claude/remote/.api_key",
     ".claude/remote/.session_ingress_token",
+    ".config/anthropic/credentials/default.json",
+    ".config/anthropic/credentials/federation/fed-x-1.json",
     ".claude/.credentials.json",
     ".claude/daemon/control.key",
     ".claude/sessions/4242.0f1e2d3c.key",
@@ -1463,6 +1472,10 @@ def _native_claude_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
     (home / "src" / "main.py").write_text("print('visible')\n", encoding="utf-8")
     (home / ".claude").mkdir()
     (home / ".claude" / "settings.json").write_text('{"theme": "visible"}\n', encoding="utf-8")
+    (home / ".config" / "anthropic" / "configs").mkdir(parents=True)
+    (home / ".config" / "anthropic" / "configs" / "default.json").write_text(
+        '{"profile": "visible"}\n', encoding="utf-8"
+    )
     for store in _NATIVE_CLAUDE_CODE_CREDENTIAL_FILES:
         (home / store).parent.mkdir(parents=True, exist_ok=True)
         (home / store).write_text('{"primaryApiKey": "sk-ant-canary"}\n', encoding="utf-8")
@@ -1477,7 +1490,15 @@ def _native_claude_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
-@pytest.mark.parametrize("store", [*_NATIVE_CLAUDE_CODE_CREDENTIAL_FILES, "src/main.py", ".claude/settings.json"])
+@pytest.mark.parametrize(
+    "store",
+    [
+        *_NATIVE_CLAUDE_CODE_CREDENTIAL_FILES,
+        "src/main.py",
+        ".claude/settings.json",
+        ".config/anthropic/configs/default.json",
+    ],
+)
 async def test_claude_code_credentials_in_a_native_home_are_refused_on_every_surface(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any, store: str
 ) -> None:
@@ -1492,7 +1513,7 @@ async def test_claude_code_credentials_in_a_native_home_are_refused_on_every_sur
     from koda.services.tool_dispatcher import _handle_browser_upload, _handle_file_read
 
     home = _native_claude_home(tmp_path, monkeypatch)
-    allowed = store in ("src/main.py", ".claude/settings.json")
+    allowed = store in ("src/main.py", ".claude/settings.json", ".config/anthropic/configs/default.json")
     mock_context.user_data["work_dir"] = str(home)
     mock_context.args = [store]
     with patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send:
@@ -1522,7 +1543,7 @@ async def test_claude_code_credentials_in_a_native_home_are_refused_on_every_sur
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
-@pytest.mark.parametrize("search_path", [None, ".claude", ".claude/daemon"])
+@pytest.mark.parametrize("search_path", [None, ".claude", ".claude/daemon", ".config", ".config/anthropic"])
 async def test_file_grep_never_prints_claude_code_credentials_in_a_native_home(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, search_path: str | None
 ) -> None:
@@ -1542,6 +1563,8 @@ async def test_file_grep_never_prints_claude_code_credentials_in_a_native_home(
         assert "src/main.py:1: print('visible')" in result.output
     if search_path == ".claude":
         assert 'settings.json:1: {"theme": "visible"}' in result.output
+    if search_path in (".config", ".config/anthropic"):
+        assert 'configs/default.json:1: {"profile": "visible"}' in result.output
 
 
 @pytest.mark.security
@@ -1641,6 +1664,46 @@ async def test_file_move_cannot_rename_a_credential_store_out_of_its_name(
     assert not moved.success, moved.output
     assert "credential store" in moved.output, moved.output
     assert (home / source).is_dir()
+    assert not (home / destination).exists()
+    assert not read.success
+    assert "canary" not in read.output
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("store", "source", "destination"),
+    [
+        (".claude/hfi-auth.json", ".claude", "claude-old"),
+        (".claude/.config.json.tmp.a1b2c3d4", ".claude", "claude-old"),
+        (".config/anthropic/credentials/default.json", ".config/anthropic", "anthropic-old"),
+        (".config/anthropic/credentials/federation/fed-x-1.json", ".config", "cfg"),
+    ],
+)
+async def test_file_move_cannot_rename_claude_codes_other_credential_files_out_of_their_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, store: str, source: str, destination: str
+) -> None:
+    """The HFI auth file, a legacy config's temp copy and the Anthropic profile store are recognised by their parents.
+
+    Renaming ``.claude``, ``.config/anthropic`` or ``.config`` would leave the token under a
+    name the policy does not recognise, and file_read, which needs no approval, would
+    return it there.
+    """
+    from koda.services.tool_dispatcher import _handle_file_move, _handle_file_read
+
+    home = _native_claude_home(tmp_path, monkeypatch) / "other-home"
+    (home / store).parent.mkdir(parents=True)
+    (home / store).write_text('{"refresh_token": "canary-token"}\n', encoding="utf-8")
+    moved_store = destination + store[len(source) :]
+    ctx = _file_tool_context(home)
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        moved = await _handle_file_move({"source": source, "destination": destination}, ctx)
+        read = await _handle_file_read({"path": moved_store}, ctx)
+
+    assert not moved.success, moved.output
+    assert "credential store" in moved.output, moved.output
+    assert (home / store).is_file()
     assert not (home / destination).exists()
     assert not read.success
     assert "canary" not in read.output
@@ -1868,6 +1931,46 @@ async def test_file_move_still_moves_what_holds_no_protected_dir(
     assert (work / landing).is_file()
     assert not (work / source).exists()
     assert (work / ".koda-state" / "control_plane" / "bootstrap.txt").is_file()
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("variant", "inner", "source"),
+    [
+        (".KODA-STATE/control_plane", "bootstrap.txt", ".KODA-STATE"),
+        (".Koda-State/Control_Plane", "bootstrap.txt", ".Koda-State/Control_Plane"),
+        ("Image-Scratch/Browser_Sessions/111", "bank.json", "Image-Scratch"),
+        ("CLI/Codex-Home", "auth.json", "CLI"),
+    ],
+)
+async def test_a_case_variant_of_a_protected_dir_is_refused_as_the_dir_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, variant: str, inner: str, source: str
+) -> None:
+    """On a case-insensitive filesystem (the macOS default), a case variant of a protected path opens it.
+
+    ``os.path.realpath`` keeps the case it is given, so ``file_read .KODA-STATE/control_plane/
+    bootstrap.txt`` and ``file_move .KODA-STATE state-old`` passed both protected-dir checks
+    and reached the bootstrap code. This test filesystem is case sensitive, so a separate
+    tree stands for what a case-insensitive one would open.
+    """
+    from koda.services.tool_dispatcher import _handle_file_move, _handle_file_read
+
+    work = _work_dir_holding_the_protected_dirs(tmp_path, monkeypatch)
+    (work / variant).mkdir(parents=True)
+    (work / variant / inner).write_text("canary-variant\n", encoding="utf-8")
+    ctx = _file_tool_context(work)
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        read = await _handle_file_read({"path": f"{variant}/{inner}"}, ctx)
+        moved = await _handle_file_move({"source": source, "destination": "moved-out"}, ctx)
+
+    for result in (read, moved):
+        assert not result.success, result.output
+        assert "sensitive system directory" in result.output, result.output
+        assert "canary" not in result.output
+    assert (work / variant / inner).read_text(encoding="utf-8") == "canary-variant\n"
+    assert not (work / "moved-out").exists()
 
 
 @pytest.mark.security
