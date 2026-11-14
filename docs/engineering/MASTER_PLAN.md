@@ -805,50 +805,56 @@ Owner FE (SEC) · Risk low · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-0
 
 #### M1-E2 — Agent-native tool governance (ADR-002, Option C approved)
 
+The detailed design is `docs/engineering/adr/ADR-agent-native-tool-governance.md` (revision 2). Its AG items carry out M1-E2-T2, T3 and T4 as mapped below (ADR §7.1); each AG item is scheduled by its own dependencies in ADR §7, and a task closes when all its AG items are done. AG-06 is carried by M1-E4-T9 (ADR-039).
+
 #### M1-E2-T1 · Finish the native tool governance ADR
 Owner SEC (ARCH, review REV) · Risk low · Gate approved (Q-4) · **in-review** · Deps —
 - **Addresses:** D-002, F-GOV-10, Q-4, R-01
-- **Files:** `docs/engineering/adr/ADR-agent-native-tool-governance.md`, `docs/engineering/DECISIONS.md` (ADR-002 link)
-- **Do:** produce a per-provider permission-mode matrix: Claude permission modes with allowed and disallowed tools; Codex sandbox and approval policy; Gemini approval modes. Map it from the Koda execution policy. Define the per-agent opt-in field, the operator migration notice and the test plan. Also define how policy-approved `<agent_cmd>` shell, git and supervised writes are authorised (D-011) and how pending approvals cross processes (D-012), since M3-E3-T1 and M3-E3-T2 implement them.
+- **Files:** `docs/engineering/adr/ADR-agent-native-tool-governance.md`, `docs/engineering/DECISIONS.md` (ADR-002 link), this M1-E2 block
+- **Do:** produce a per-provider permission-mode matrix: Claude permission modes with allowed and disallowed tools; Codex sandbox and approval policy; Gemini approval modes. Map it from the Koda execution policy. Define the per-agent opt-in field, the operator migration notice and the test plan. Also define how policy-approved `<agent_cmd>` shell, git and supervised writes are authorised (D-011) and how pending approvals cross processes (D-012), since M3-E3-T1 and M3-E3-T2 implement them. Map M1-E2-T2 to T4 to the AG items.
 - **Done when:** the ADR contains:
   - a matrix with one row per provider mode (each Claude permission mode, each Codex sandbox and approval-policy pair, each Gemini approval mode), naming the Koda policy state that selects it and the argv it produces;
   - the schema of the per-agent opt-in field and its audit event;
   - the text of the operator migration notice;
-  - a test plan that names each argv test M1-E2-T2 must add and each D-011 and D-012 test M3-E3-T1 and M3-E3-T2 must add;
+  - a test plan that names each argv test M1-E2-T2's AG items (AG-22 to AG-25) must add and each D-011 and D-012 test M3-E3-T1 and M3-E3-T2 must add;
 
   and SEC and REV each record an approving review in VALIDATION_REPORT.md.
-- **Tests:** none (design) · **Evidence:** **Missing for done:** the round-1 SEC and REV reviews (VALIDATION_REPORT "M1-E2-T1 reviews") requested changes: every done-when item is unmet, and D-011 and D-012 are not designed. Needed: an ADR revision, then approving reviews. `docs/engineering/adr/ADR-agent-native-tool-governance.md` (commit d72ac53): judge-panel design (3 designs, 3 judges), per-provider matrix, invariants, backlog AG-01..AG-32, operator resolutions O-1..O-8 (§9)
+- **Tests:** none (design) · **Evidence:** round 1 (VALIDATION_REPORT "M1-E2-T1 reviews"): SEC and REV requested changes. Revision 2 of the ADR answers every round-1 finding (its "Revision 2 log": the matrix in §2.3, the schema and event in §2.2.2 and §2.6.1, the notice in §2.8.4, the named tests in §5.2, D-011 and D-012 in §2.9). **Missing for done:** approving round-2 SEC and REV reviews, and the operator answers to ADR §9.1 for the tasks they gate.
 
 #### M1-E2-T2 · Governed-by-default provider permission modes
-Owner SEC (AIM, review REV) · Risk high · Gate approved (Q-4; impact accepted) · **pending** · Deps M1-E2-T1, M0-E3-T2
+Owner SEC (AIM, review REV) · Risk high · Gate approved (Q-4; impact accepted); ADR §9.1 OQ-2, OQ-3 and OQ-4 before the AG items they name go live, and AG-10b's conditional §13 gate · **pending** · Deps M1-E2-T1; per AG item as in ADR §7 (AG-27 and the release gate also need M0-E3-T2)
 - **Addresses:** D-002, F-GOV-10, F-ORC-26, F-ORC-27, F-ORC-28, R-01
-- **Files:** `koda/services/claude_runner.py` (~339), `codex_runner.py` (~278), `gemini_runner.py`, `queue_manager.py` (~3101), `koda/config.py` (~226-227, `CODEX_SANDBOX`), `koda/agent_contract.py`, publish checks in `koda/control_plane/manager.py`, the web execution-policy editor, docs
-- **Do:** default to governed modes. Use `bypassPermissions`, `danger-full-access` or `yolo` only when the agent's published policy opts into native autonomy; the opt-in is visible and audited. Supervised agents never bypass. Publish warns and lists the agents affected.
-- **Done when:** argv tests show governed flags by default and bypass only with the opt-in, and a release note describes the migration.
-- **Tests:** per-runner argv unit tests; policy publish test; G; changelog entry · **Evidence:** —
+- **Carried out by:** AG-02 (done, 6d050b5), AG-07, AG-08, AG-09, AG-10a, AG-10b, AG-11, AG-13a, AG-13b, AG-14, AG-15, AG-16, AG-19b, AG-20 to AG-31
+- **Files:** as listed per AG item in ADR §7 (chiefly `koda/services/claude_runner.py`, `codex_runner.py`, `gemini_runner.py`, `provider_cli_contract.py`, new `provider_builtin_tools.py`, `queue_manager.py`, `koda/config.py`, `koda/control_plane/manager.py` `publish_agent`, `rust/koda-runtime-kernel`, the web execution-policy editor, docs)
+- **Do:** compile each provider CLI's argv from the agent's signed, published `execution_policy.provider_builtin_tools.level` (default `read_only`), lowered by the ceilings of ADR §2.2.4, as the matrix of ADR §2.3 gives it. Never emit `bypassPermissions` or `plan`, Gemini `plan`, or a Codex approval policy other than `never`; Codex `danger-full-access` only at `workspace_exec` under Koda's L2 confinement. Raising the level or the capability, a provider switch included, needs a confirmed, audited publish inside `publish_agent` (ADR §2.2.3). Supervised agents are capped at `read_only`. Existing agents get a `read_only` version built from their last published version, with the notice of ADR §2.8.4.
+- **Done when:** the argv tests of ADR §5.2 (A-P, A-C, A-X, A-G, A-K) and the publish-gate tests for every caller pass; the live checks of ADR §5.3 and the Docker checks of §5.4 are recorded; the release note carries the ADR §2.8.4 notice.
+- **Tests:** ADR §5.1 to §5.4; G; G-PG; G-RS; G-CI; changelog entry · **Evidence:** AG-02 in VALIDATION_REPORT WAVE-2B
 
-#### M1-E2-T3 · Master key off the runtime-kernel volume
-Owner OPS (SEC, review REV) · Risk high · Gate needs-approval (§13: operation on the key material of existing installs; Option C approved in principle, migration plan needs sign-off) · **blocked** · Deps M1-E2-T1, M1-E1-T1, M2-E6-T1
-- **Addresses:** D-047, TD-078 (part), ADR-002, ADR-026, R-01, R-07
-- **Files:** `docker-compose.yml`, the release compose file, `Dockerfile.runtime-kernel`, `koda/control_plane/crypto.py` (key path), `packages/cli/bin/koda.mjs` (install and update migration), `docs/operations/backup-restore.md`
-- **Do:** keep the master key on an app-only volume, and have the runtime-kernel mount only what workers need. The installer takes a backup with M2-E6-T1's tooling, copies the key, checks that every secret decrypts, and only then removes the old copy. Rollback keeps the old copy until verification passes.
+#### M1-E2-T3 · `koda-state` off the runtime-kernel (the master key stays put)
+Owner OPS (SEC, review REV) · Risk high · Gate needs-approval (§13: volume layout around the key material on existing installs; ADR §9.2 O-1 records the approval of AG-19's plan) · **blocked** · Deps M1-E2-T1, M1-E1-T1, M2-E6-T1
+- **Addresses:** D-047, TD-078 (part), ADR-002, ADR-026 (its relocation step is superseded), R-01, R-07
+- **Carried out by:** AG-05 (done, 6d050b5), AG-17, AG-18, AG-19, AG-32
+- **Files:** `docker-compose.yml`, the release compose file, CHECKSUMS, `koda/control_plane/api.py` (internal worker-broker routes), `koda/control_plane/supervisor.py`, `koda/config.py` (`WORKER_STATE_ROOT`), `packages/cli/bin/koda.mjs` (install and update), `docs/operations/backup-restore.md`
+- **Do:** `runtime-kernel` stops mounting `koda-state`. Worker data is copied, not moved, to a `koda-worker-state` volume mounted in both `app` and `runtime-kernel`, with checksums and a marker. Workers stop decrypting: dynamic secrets come from a control-plane broker with per-worker tokens. The master key is never moved, copied or rewritten. The installer takes a backup with M2-E6-T1's tooling first; the legacy copies are deleted one release later (AG-32).
 - **Done when:**
-  - workers cannot see the key path;
-  - an existing install migrates and decrypts every secret;
-  - rollback is tested.
-- **Tests:** CLI migration test with a fake docker; compose render test; G; G-CI · **Evidence:** —
+  - `/var/lib/koda/state` does not exist in `runtime-kernel`;
+  - an existing install upgrades, keeps its skill locks, gateway config and room photos, and decrypts every secret;
+  - the worker entrypoint cannot import `decrypt_secret` or `encrypt_secret`;
+  - rollback to the previous images is tested.
+- **Tests:** CLI migration test with a fake docker; compose render test; G-PG two-process broker test; G; G-CI · **Evidence:** AG-05 in VALIDATION_REPORT WAVE-2B
 
 #### M1-E2-T4 · Environment and working-directory allowlist for spawned processes
-Owner SEC · Risk high · Gate approved (Q-4) · **pending** · Deps M1-E2-T1, M1-E4-T10
+Owner SEC · Risk high · Gate approved (Q-4) · **pending** · Deps M1-E2-T1, M1-E4-T10, M1-E4-T13
 - **Addresses:** D-047, D-002, R-01
-- **Files:** `koda/services/provider_env.py`, `koda/services/cli_runner.py`, `koda/services/shell_runner.py`, `koda/services/shell_tools.py`, the spawn environment in `rust/koda-runtime-kernel/src/*`
-- **Do:** every process a worker spawns (provider CLIs, `<agent_cmd>` shell and git, background shell) gets an explicit environment allowlist. The allowlist excludes the Postgres DSN, the S3 secret, the master-key path and the runtime-kernel RPC token (M1-E6-T1). State-volume paths stay out of the cwd and the arguments. Network limits are out of scope: they wait for a concrete kernel mechanism and a requirement (R-01 records the residual).
-- **Done when:** a regression test spawns each kind of process through the real worker path and shows that none of the excluded variables is in its environment and that its cwd is outside the state volume. If a same-user process can still read the worker's own `/proc/<pid>/environ`, the test records it and R-01 names the residual.
-- **Tests:** unit and integration tests; G; G-RS · **Evidence:** —
+- **Carried out by:** AG-03, AG-04 (done, 6d050b5), AG-12
+- **Files:** `koda/services/provider_env.py`, `koda/services/cli_runner.py`, `koda/services/shell_runner.py`, `koda/services/shell_tools.py`, the MCP and media spawn sites (ADR AG-03), `koda/config.py` (`AGENT_WORKSPACE_ROOT`), `koda/utils/workdir.py`, the spawn environment in `rust/koda-runtime-kernel/src/*`
+- **Do:** every process a worker spawns (provider CLIs, `<agent_cmd>` shell and git, background shell, MCP stdio servers, media tools) gets an explicit environment allowlist that excludes the Postgres DSN, the S3 secret, granted secrets, the master-key path and the runtime-kernel (M1-E6-T1) and broker tokens. Worker-side git runs with the hardened git configuration of ADR AG-03. Work dirs default to `<AGENT_WORKSPACE_ROOT>/<agent_id>` and never equal or contain HOME, a state root, a provider home or a login home. Landlock confinement is M1-E2-T2's AG-08 and AG-14; network limits come with it.
+- **Done when:** a regression test spawns each kind of process through the real worker path and shows that none of the excluded variables is in its environment and that its cwd is outside the state volumes. The worker stays non-dumpable (AG-04), and the startup-window residual stays recorded (ADR §2.5.4 R-2) until AG-14, AG-15 and AG-16 close it.
+- **Tests:** unit and integration tests; G; G-RS · **Evidence:** AG-04 in VALIDATION_REPORT WAVE-2B
 
 #### M1-E2-T5 · Scoped Postgres role for agent workers
 Owner OPS (SEC) · Risk high · Gate needs-approval (§13: new production credentials) · **blocked** · Deps M2-E2-T2, M2-E6-T1
-- **Addresses:** D-047, R-01. This is the one M1 task that waits on M2 work; it does not hold M1 open and closes with M2 (section 3).
+- **Addresses:** D-047, R-01. This is the one M1 task that waits on M2 work; it does not hold M1 open and closes with M2 (section 3). ADR-002 relies on it to close residuals R-3 to R-5, so the role does not write the approval tables, `cp_agent_config_versions` or `cp_agent_definitions` (ADR §2.5.4).
 - **Files:** migrations (GRANTs), `koda/config.py`, compose files, the installer
 - **Do:** workers connect as a role that has DML only on the tables they use, and no access to `cp_secret_values` or `cp_operator_*`.
 - **Done when:** a worker cannot select from secret tables, and the full suite passes with the role.

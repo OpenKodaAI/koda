@@ -101,7 +101,7 @@ Rules:
 
 ## ADR-002 — Agent-native tool governance (Option C)
 
-- **Status:** accepted. The operator approved Option C on 2026-11-14 (EXECUTION_STATUS.md). The detailed design is in progress in `docs/engineering/adr/ADR-agent-native-tool-governance.md` (M1-E2-T1). Sequencing note (revision 1): the first confinement task (M1-E2-T4) covers the environment and working-directory allowlist only; network limits wait for a concrete kernel mechanism, and R-01 records that residual. The decision itself is unchanged.
+- **Status:** accepted. The operator approved Option C on 2026-11-14 (EXECUTION_STATUS.md). The detailed design is `docs/engineering/adr/ADR-agent-native-tool-governance.md`, **revision 2** (2026-11-14, in review under M1-E2-T1), which answers the round-1 SEC and REV reviews. Revision 2 carries out M1-E2-T2 to T4 through its AG items, designs D-011 and D-012 for M3-E3-T1 and T2, and reframes the key step: `koda-state` stops being mounted in `runtime-kernel` and the key is not moved (it supersedes ADR-026's relocation step). Its §9.1 lists the questions that still need §13 sign-off. Sequencing note (revision 1): the first confinement task (M1-E2-T4) covers the environment and working-directory allowlist only; network limits wait for a concrete kernel mechanism, and R-01 records that residual. The decision itself is unchanged.
 - **Context:**
   - Provider CLIs run with every native tool enabled and approvals off: Claude with `bypassPermissions` and no tool lists, even for supervised agents; Codex with `danger-full-access` and `approval_policy=never`; Gemini with `yolo`.
   - Koda's policy gate, approval broker and command guard therefore govern only `<agent_cmd>` calls (D-002, F-GOV-10).
