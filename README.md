@@ -261,7 +261,7 @@ pnpm build:web
 If you touch the Rust workspace, also run:
 
 ```bash
-cargo fmt --check --manifest-path rust/Cargo.toml
+cargo fmt --all --check --manifest-path rust/Cargo.toml
 cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings
 cargo test --manifest-path rust/Cargo.toml --workspace
 ```

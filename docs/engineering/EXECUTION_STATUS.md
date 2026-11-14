@@ -27,23 +27,23 @@ iteration.
 | Step | Status | Evidence |
 |---|---|---|
 | Mission stored durably | done | `docs/engineering/MISSION.md` |
-| Validation baseline run | running | `QUALITY_BASELINE.md` (pending) |
+| Validation baseline run | done | `QUALITY_BASELINE.md`: all gates green except the documented `cargo fmt` command (tooling bug, fixed); 188 Postgres tests skipped |
 | Subsystem discovery (multi-agent) | running | `SYSTEM_INVENTORY.md`, `ARCHITECTURE_AUDIT.md`, `FEATURE_MATRIX.md`, `TECHNICAL_DEBT.md` (pending) |
 | Reference-product research | running | `REFERENCE_RESEARCH.md` (pending) |
 | Granular backlog | pending | `MASTER_PLAN.md` |
 
 ## Completed tasks
 
-_None yet._
+- P0-BASELINE — all required gates executed; results in `QUALITY_BASELINE.md`.
+- P0-FIX-CARGOFMT — documented `cargo fmt --check --manifest-path rust/Cargo.toml` fails on rustfmt 1.9 ("Failed to find targets"); corrected to `cargo fmt --all --check ...` in CLAUDE.md, README.md, packages/cli/README.md. Evidence: new command rc=0; `tests/test_installation_assets.py` + `tests/test_top_tier_roadmap_assurance.py` 41 passed.
 
 ## Active tasks
 
-- P0-BASELINE — run all required validation commands and record results.
 - P0-DISCOVERY — multi-agent subsystem inventory.
 
 ## Blocked tasks
 
-_None yet._
+- PUSH — `git push` to `OpenKodaAI/koda` returns 403 (Claude GitHub App not installed / account not linked for the org). Commits stay local on `claude/dreamy-cerf-mhvbwn` until the operator fixes access at https://claude.ai/connect-github; container reclaim would lose unpushed work.
 
 ## Discovered regressions
 

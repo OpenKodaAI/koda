@@ -70,6 +70,6 @@ Run after every code change before considering the task complete:
 
 When the change touches the Rust workspace, also run:
 
-- `cargo fmt --check --manifest-path rust/Cargo.toml`
+- `cargo fmt --all --check --manifest-path rust/Cargo.toml`
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings`
 - `cargo test --manifest-path rust/Cargo.toml --workspace`
