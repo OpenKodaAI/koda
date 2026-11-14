@@ -13,19 +13,19 @@
    "milestone": "M1",
    "name": "Segurança",
    "total": 68,
-   "done": 8,
-   "in_progress": 11,
+   "done": 11,
+   "in_progress": 13,
    "awaiting_evidence": 2,
-   "remaining": 47
+   "remaining": 42
   },
   {
    "milestone": "M2",
    "name": "Integridade de dados",
    "total": 24,
    "done": 0,
-   "in_progress": 0,
+   "in_progress": 2,
    "awaiting_evidence": 0,
-   "remaining": 24
+   "remaining": 22
   },
   {
    "milestone": "M3",
@@ -41,9 +41,9 @@
    "name": "Remoção de código morto",
    "total": 22,
    "done": 0,
-   "in_progress": 0,
+   "in_progress": 2,
    "awaiting_evidence": 0,
-   "remaining": 22
+   "remaining": 20
   },
   {
    "milestone": "M5",

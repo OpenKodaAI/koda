@@ -1,6 +1,16 @@
 {
  "rows": [
   {
+   "id": "L14",
+   "at": "2026-11-14 22:38",
+   "event": "Onda 7 iniciada: autenticação, integridade de dados (M2) e remoção de código morto (M4)"
+  },
+  {
+   "id": "L13",
+   "at": "2026-11-14 22:38",
+   "event": "Onda 4 mesclada (06cde4d): erro explícito para HTTP aberto, mensagem de rate limit, doctor protegendo o token; 6777 testes Python e 1055 web passando"
+  },
+  {
    "id": "L12",
    "at": "2026-11-14 22:19",
    "event": "ADR-002 aprovado e mesclado (d21c2b3): governança das ferramentas nativas dos agentes; M1-E2-T1 concluída; perguntas OQ-1 a OQ-12 enviadas para sua decisão"

@@ -39,8 +39,8 @@
    "wave": "W4",
    "name": "Onda 4",
    "scope": "Autenticação e doctor: erro explícito em HTTP, mensagem de rate limit, segredos (D-231, M1-E1-T6, T7, T18)",
-   "status": "final_review",
-   "ref": "integrate/wave-4 (gates finais)"
+   "status": "merged",
+   "ref": "06cde4d"
   },
   {
    "wave": "W5",
@@ -72,10 +72,17 @@
   },
   {
    "wave": "W7",
+   "name": "Onda 7",
+   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), retenção e codecs do Postgres (M2-E5-T1, M2-E2-T4), código morto do knowledge e catálogo MCP duplicado (M4-E1-T6, T9)",
+   "status": "implementing",
+   "ref": "task/M1-E1-*, task/M2-*, task/M4-*"
+  },
+  {
+   "wave": "W8",
    "name": "Próxima onda",
-   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), dados (M2) e código morto (M4)",
+   "scope": "Ajustes do plano vindos do openbot.run, mais jornadas de agentes (M3), design system (M8-E5) e dados (M2)",
    "status": "queued",
-   "ref": "após a onda 4"
+   "ref": "após as ondas 2A e 5"
   }
  ],
  "meta": [
