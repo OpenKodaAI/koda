@@ -52,6 +52,12 @@ unreachable. A shared guard runs whatever build it was started from, so do not s
 validating changes to `rust/koda-security-*`. `KODA_SECURITY_GUARD_STARTUP_TIMEOUT` (seconds)
 raises the startup wait for cold builds.
 
+Tests marked `postgres` run only when `POSTGRES_TEST_DSN` points at a database (`pytest -m
+postgres`); otherwise they are skipped. They share one schema in that database and empty tables
+with `TRUNCATE` between tests, so the Postgres suite is serial-only: do not run it with parallel
+workers, and give each concurrent session its own database. Squad tests reset their tables with
+`reset_squad_runtime_tables` from `tests/postgres_fixtures.py` instead of truncating them directly.
+
 To run the same local gate from one command:
 
 ```bash

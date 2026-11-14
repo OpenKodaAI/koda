@@ -12,6 +12,7 @@ from koda.squads.telegram_bridge import (
     SquadTelegramBindingService,
     TelegramBindingConflictError,
 )
+from tests.postgres_fixtures import reset_squad_runtime_tables
 
 
 def _schema() -> str:
@@ -30,7 +31,7 @@ async def clean_state(migrated_postgres: str) -> AsyncIterator[str]:
     schema = _schema()
     conn = await asyncpg.connect(migrated_postgres)
     try:
-        await conn.execute(f'TRUNCATE TABLE "{schema}"."squad_telegram_bindings"')
+        await reset_squad_runtime_tables(conn, schema)
     finally:
         await conn.close()
     yield migrated_postgres

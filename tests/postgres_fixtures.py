@@ -18,9 +18,15 @@ Migrations apply via the production code path
 (``KnowledgeV2PostgresBackend.bootstrap``) so the fixture verifies
 the same DDL we'd ship to a real deploy.
 
-Per-test isolation: ``db_transaction`` opens a transaction at test
-start and rolls back at end so successive tests see a clean state
-without paying the full migration cost.
+Per-test isolation: every Postgres test shares one database and one
+schema (``KNOWLEDGE_V2_POSTGRES_SCHEMA``, default ``knowledge_v2``).
+Most tests reset the tables they use with ``TRUNCATE`` in their own
+fixtures; squad tests call ``reset_squad_runtime_tables``. Only the
+smoke test uses ``db_connection``, a connection inside a transaction
+that rolls back at the end. Because tests truncate shared tables, the
+Postgres suite is serial-only: do not run it with parallel workers,
+and give each concurrent ``pytest -m postgres`` session its own
+database in ``POSTGRES_TEST_DSN``.
 """
 
 from __future__ import annotations
@@ -166,9 +172,11 @@ async def migrated_postgres(postgres_url: str) -> str:
     return postgres_url
 
 
-# Squad runtime tables, truncated together so foreign keys between them
+# Every squad table, truncated together so foreign keys between them
 # (e.g. squad_reply_obligations -> squad_threads / squad_messages) never
 # block cleanup when a new referencing table is added.
+# tests/test_suite_hygiene.py fails when a squad table in the migrations is
+# missing here, or when a test truncates a squad table directly.
 SQUAD_RUNTIME_TABLES = (
     "squad_reply_obligations",
     "squad_message_recipients",
@@ -178,20 +186,24 @@ SQUAD_RUNTIME_TABLES = (
     "squad_threads",
     "squad_coordinator_state",
     "squad_coordinator_history",
+    "squad_member_capabilities",
+    "squad_telegram_bindings",
+    "squad_artifacts",
 )
 
 
 async def reset_squad_runtime_tables(conn: Any, schema: str) -> None:
-    """Empty every squad runtime table in one statement."""
+    """Empty every squad table in one statement. Postgres tests use this
+    instead of truncating squad tables themselves."""
     tables = ", ".join(f'"{schema}"."{name}"' for name in SQUAD_RUNTIME_TABLES)
     await conn.execute(f"TRUNCATE TABLE {tables} RESTART IDENTITY CASCADE")
 
 
 @pytest.fixture
 async def db_connection(migrated_postgres: str) -> AsyncIterator[Any]:
-    """Per-test asyncpg connection wrapped in a transaction that
-    rolls back at end. Successive tests see a clean state without
-    re-running migrations."""
+    """Per-test asyncpg connection wrapped in a transaction that rolls
+    back at the end. Only writes made through this connection are undone;
+    code under test that opens its own pool is not covered."""
     import asyncpg  # type: ignore[import-not-found]
 
     conn = await asyncpg.connect(migrated_postgres)
