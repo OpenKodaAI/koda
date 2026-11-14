@@ -80,34 +80,78 @@ function plainHttpOrigin(headers: HeaderReader, requestUrl?: RequestUrl): URL | 
   return parseWebOrigin(`${proto}://${host}`);
 }
 
-/** How long one origin's `[cookie-transport]` warning stands for its later requests. */
+/**
+ * The `[cookie-transport]` logging window. It opens with the first warning
+ * after the last one closed; within it each origin is named at most once.
+ */
 export const INSECURE_TRANSPORT_LOG_INTERVAL_MS = 60 * 60 * 1000;
-/** Most origins named per interval, so spoofed `Host` headers cannot flood the log. */
+/**
+ * Most origins named per window, so made-up `Origin` and `Host` headers cannot
+ * flood the log. Requests from later origins are counted instead.
+ */
 export const INSECURE_TRANSPORT_LOG_MAX_ORIGINS = 32;
 
+type LogWindow = {
+  /** When the window opened, in epoch milliseconds. */
+  start: number;
+  /** The origins named in this window; never more than the cap. */
+  named: Set<string>;
+  /** Requests refused in this window from origins past the cap, which go unnamed. */
+  unnamed: number;
+};
+
 // Next.js bundles this module separately for the proxy, the pages and each
-// route, so the origins already logged live on globalThis, one map per process.
-const LOG_STATE_KEY = Symbol.for("koda.web.insecure-cookie-transport-log");
-type LogStateHost = typeof globalThis & { [LOG_STATE_KEY]?: Map<string, number> };
+// route, so the window lives on globalThis, one per process.
+const LOG_STATE_KEY = Symbol.for("koda.web.insecure-cookie-transport-log-window");
+type LogStateHost = typeof globalThis & { [LOG_STATE_KEY]?: LogWindow };
+
+function windowEnd(logWindow: LogWindow): string {
+  return new Date(logWindow.start + INSECURE_TRANSPORT_LOG_INTERVAL_MS).toISOString();
+}
+
+function unnamedCountLine(logWindow: LogWindow): string {
+  const requests =
+    logWindow.unnamed === 1
+      ? "1 plain-HTTP request from an address that was not named was"
+      : `${logWindow.unnamed} plain-HTTP requests from addresses that were not named were`;
+  return `[cookie-transport] ${requests} refused between ${new Date(logWindow.start).toISOString()} and ${windowEnd(logWindow)}.`;
+}
 
 /**
- * Warn once per origin per interval. The origin comes from the request's
- * headers, which any client can set, so one line per origin keeps a scanner's
- * request from standing in for the operator's own address, and the cap bounds
- * what a stream of made-up hosts can write.
+ * Warn once per origin per window. The origin comes from the request's headers,
+ * which any client can set, so one line per origin keeps a scanner's made-up
+ * address from standing in for the operator's own, and the cap bounds what a
+ * stream of made-up hosts can write. Past the cap one line says that addresses
+ * are no longer named, and the first warning after the window gives the count,
+ * so a scanner can push the operator's address out of the log but not hide that
+ * it did.
  */
 function logInsecureTransport(origin: string): void {
   const host = globalThis as LogStateHost;
-  const loggedAt = (host[LOG_STATE_KEY] ??= new Map<string, number>());
   const now = Date.now();
-  for (const [logged, at] of loggedAt) {
-    if (now - at >= INSECURE_TRANSPORT_LOG_INTERVAL_MS) loggedAt.delete(logged);
+  let current = host[LOG_STATE_KEY];
+  if (current && now - current.start >= INSECURE_TRANSPORT_LOG_INTERVAL_MS) {
+    if (current.unnamed > 0) console.warn(unnamedCountLine(current));
+    current = undefined;
   }
-  if (loggedAt.has(origin) || loggedAt.size >= INSECURE_TRANSPORT_LOG_MAX_ORIGINS) return;
-  loggedAt.set(origin, now);
-  console.warn(
-    `[cookie-transport] A browser opened the dashboard over plain HTTP at ${origin}. Session cookies are Secure, so sign-in is refused there; serve the dashboard over HTTPS through a reverse proxy, or open it at a localhost address.`,
-  );
+  if (!current) {
+    current = { start: now, named: new Set(), unnamed: 0 };
+    host[LOG_STATE_KEY] = current;
+  }
+  if (current.named.has(origin)) return;
+  if (current.named.size < INSECURE_TRANSPORT_LOG_MAX_ORIGINS) {
+    current.named.add(origin);
+    console.warn(
+      `[cookie-transport] A browser opened the dashboard over plain HTTP at ${origin}. Session cookies are Secure, so sign-in is refused there; serve the dashboard over HTTPS through a reverse proxy, or open it at a localhost address.`,
+    );
+    return;
+  }
+  if (current.unnamed === 0) {
+    console.warn(
+      `[cookie-transport] More than ${INSECURE_TRANSPORT_LOG_MAX_ORIGINS} addresses opened the dashboard over plain HTTP since ${new Date(current.start).toISOString()}. Further addresses are still refused, but not named before ${windowEnd(current)}; the first plain-HTTP request after that logs how many requests went unnamed.`,
+    );
+  }
+  current.unnamed += 1;
 }
 
 /**

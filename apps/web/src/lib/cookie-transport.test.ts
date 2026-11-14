@@ -7,9 +7,9 @@ import {
   secureCookiesEnabled,
 } from "@/lib/cookie-transport";
 
-// Where insecureCookieTransport() keeps the origins it has logged, shared by
-// every bundle of the module in one process.
-const LOG_STATE_KEY = Symbol.for("koda.web.insecure-cookie-transport-log");
+// Where insecureCookieTransport() keeps its logging window, shared by every
+// bundle of the module in one process.
+const LOG_STATE_KEY = Symbol.for("koda.web.insecure-cookie-transport-log-window");
 type LogStateHost = typeof globalThis & { [LOG_STATE_KEY]?: unknown };
 let savedLogState: unknown;
 
@@ -229,22 +229,62 @@ describe("the [cookie-transport] warning", () => {
     expect(warnings()).toHaveLength(2);
   });
 
-  it("names a bounded number of origins per interval, so spoofed hosts cannot flood the log", () => {
+  it("names a bounded number of origins per interval, then says the rest are counted but not named", () => {
     production();
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-11-14T12:00:00Z"));
-    for (let index = 0; index <= INSECURE_TRANSPORT_LOG_MAX_ORIGINS; index += 1) {
-      // Still refused, logged or not.
-      expect(insecureCookieTransport(plainHttp(`10.0.${index}.1:3000`))).toEqual({
-        origin: `http://10.0.${index}.1:3000`,
+    // A scanner's made-up hosts, one port each, use up every named line of the interval.
+    for (let index = 0; index < INSECURE_TRANSPORT_LOG_MAX_ORIGINS; index += 1) {
+      expect(insecureCookieTransport(plainHttp(`scan.invalid:${4000 + index}`))).toEqual({
+        origin: `http://scan.invalid:${4000 + index}`,
       });
     }
     expect(warnings()).toHaveLength(INSECURE_TRANSPORT_LOG_MAX_ORIGINS);
 
+    // The operator's own address comes next: still refused and not named, but
+    // the log says that from here on addresses are only counted.
+    vi.advanceTimersByTime(10 * 60 * 1000);
+    expect(insecureCookieTransport(plainHttp("10.0.0.5:3000"))).toEqual({ origin: "http://10.0.0.5:3000" });
+    expect(warnings()).toHaveLength(INSECURE_TRANSPORT_LOG_MAX_ORIGINS + 1);
+    expect(warnings().at(-1)).toBe(
+      `[cookie-transport] More than ${INSECURE_TRANSPORT_LOG_MAX_ORIGINS} addresses opened the dashboard over plain HTTP since 2026-11-14T12:00:00.000Z. Further addresses are still refused, but not named before 2026-11-14T13:00:00.000Z; the first plain-HTTP request after that logs how many requests went unnamed.`,
+    );
+
+    // One such line per interval, however many more requests and origins follow.
+    expect(insecureCookieTransport(plainHttp("10.0.0.5:3000"))).toEqual({ origin: "http://10.0.0.5:3000" });
+    expect(insecureCookieTransport(plainHttp("scan.invalid:5000"))).toEqual({ origin: "http://scan.invalid:5000" });
+    insecureCookieTransport(plainHttp("scan.invalid:4000"));
+    expect(warnings()).toHaveLength(INSECURE_TRANSPORT_LOG_MAX_ORIGINS + 1);
+
+    // The first request after the interval reports the count, then is named itself.
+    vi.advanceTimersByTime(INSECURE_TRANSPORT_LOG_INTERVAL_MS - 10 * 60 * 1000);
+    insecureCookieTransport(plainHttp("192.168.1.10:3000"));
+    expect(warnings()).toHaveLength(INSECURE_TRANSPORT_LOG_MAX_ORIGINS + 3);
+    expect(warnings().at(-2)).toBe(
+      "[cookie-transport] 3 plain-HTTP requests from addresses that were not named were refused between 2026-11-14T12:00:00.000Z and 2026-11-14T13:00:00.000Z.",
+    );
+    expect(warnings().at(-1)).toContain("http://192.168.1.10:3000");
+
+    // An interval that names every address reports no count.
     vi.advanceTimersByTime(INSECURE_TRANSPORT_LOG_INTERVAL_MS);
     insecureCookieTransport(plainHttp("192.168.1.10:3000"));
-    expect(warnings()).toHaveLength(INSECURE_TRANSPORT_LOG_MAX_ORIGINS + 1);
+    expect(warnings()).toHaveLength(INSECURE_TRANSPORT_LOG_MAX_ORIGINS + 4);
     expect(warnings().at(-1)).toContain("http://192.168.1.10:3000");
+  });
+
+  it("counts a single unnamed request in the singular", () => {
+    production();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-11-14T12:00:00Z"));
+    for (let index = 0; index <= INSECURE_TRANSPORT_LOG_MAX_ORIGINS; index += 1) {
+      insecureCookieTransport(plainHttp(`scan.invalid:${4000 + index}`));
+    }
+    vi.advanceTimersByTime(INSECURE_TRANSPORT_LOG_INTERVAL_MS);
+    insecureCookieTransport(plainHttp("192.168.1.10:3000"));
+
+    expect(warnings().at(-2)).toBe(
+      "[cookie-transport] 1 plain-HTTP request from an address that was not named was refused between 2026-11-14T12:00:00.000Z and 2026-11-14T13:00:00.000Z.",
+    );
   });
 
   it("is not logged for a request whose browser keeps the cookies", () => {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -986,6 +987,34 @@ def test_auth_doc_quotes_the_forwarded_proto_the_bundled_nginx_sends() -> None:
     assert sentences
     for sentence in sentences:
         assert "`X-Forwarded-Proto $scheme`" in sentence, sentence
+
+
+def test_auth_doc_states_the_cookie_transport_logging_rule() -> None:
+    """The doc's `[cookie-transport]` bullet matches cookie-transport.ts.
+
+    It states the cap and the interval the code uses, names every header the
+    logged address can come from, and says what happens past the cap.
+    """
+    source = (ROOT / "apps" / "web" / "src" / "lib" / "cookie-transport.ts").read_text(encoding="utf-8")
+    cap_match = re.search(r"INSECURE_TRANSPORT_LOG_MAX_ORIGINS = (\d+);", source)
+    interval_match = re.search(r"INSECURE_TRANSPORT_LOG_INTERVAL_MS = ([\d *]+);", source)
+    assert cap_match and interval_match
+    cap = int(cap_match.group(1))
+    assert math.prod(int(factor) for factor in interval_match.group(1).split("*")) == 60 * 60 * 1000
+    # The browser's Origin on a POST, else the forwarded host, else Host.
+    for header in ("origin", "x-forwarded-host", "host"):
+        assert f'headers.get("{header}")' in source, header
+
+    text = (ROOT / "docs" / "security" / "authentication.md").read_text(encoding="utf-8")
+    start = text.index("### Plain HTTP")
+    items = re.split(r"\n(?:- |\n)", text[start : text.index("\n## ", start)])
+    bullets = [" ".join(item.split()) for item in items if "`[cookie-transport]`" in item]
+    assert len(bullets) == 1, bullets
+    bullet = bullets[0]
+
+    assert f"at most {cap} addresses within an hour" in bullet
+    assert "`Origin`, `X-Forwarded-Host` or `Host` header" in bullet
+    assert f"Past {cap} addresses in that hour the rest are counted but not named" in bullet
 
 
 def test_runtime_dockerfile_exports_locked_python_dependencies() -> None:

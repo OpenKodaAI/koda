@@ -186,11 +186,15 @@ dashboard therefore fails explicitly there instead of bouncing the operator back
   works over HTTPS and on a localhost address. The refusal depends only on the transport,
   never on the credentials, so the screens show their own message for it and every
   credential failure keeps the single generic message.
-- The web container logs a `[cookie-transport]` warning naming the address, once per address
-  per hour, for at most 32 addresses within an hour. The address comes from the request's
-  `Host` or `X-Forwarded-Host` header, which any client can set, so one line per address keeps
-  a scanner's request from standing in for the operator's own, and the cap keeps a stream of
-  made-up hosts from flooding the log.
+- The web container logs a `[cookie-transport]` warning naming the address (scheme, host and
+  port), once per address per hour, for at most 32 addresses within an hour; each hour starts
+  with the first warning after the previous one ended. The address comes from the request's
+  `Origin`, `X-Forwarded-Host` or `Host` header, which any client can set, so one line per
+  address keeps a scanner's made-up address from standing in for the operator's own unless 32
+  of them arrive first. Past 32 addresses in that hour the rest are counted but not named: one
+  line says so when the first of them arrives, and the first plain-HTTP request after the hour
+  logs how many requests went unnamed. Those requests are refused like any other; only their
+  address is left out of the log, so a stream of made-up hosts cannot flood it.
 
 The dashboard decides from the request, and refuses only when it is sure: the browser's
 `Origin` header when it sent one; otherwise no refusal when the request carries Fetch Metadata
