@@ -65,6 +65,21 @@ def fetch_status(url: str, *, timeout: float = 5.0, headers: dict[str, str] | No
         }
 
 
+def read_bootstrap_file_path(base_url: str) -> str | None:
+    """Where the setup-code file is, or None once an owner exists.
+
+    Before login, onboarding/status answers only has_owner and
+    bootstrap_required. The public auth/status still names the file while no
+    owner exists, which is the only time the file is there.
+    """
+    try:
+        payload = fetch_json(f"{base_url.rstrip('/')}/api/control-plane/auth/status")
+    except Exception:
+        return None
+    value = payload.get("bootstrap_file_path")
+    return str(value) if value else None
+
+
 PLACEHOLDER_SECRET_PREFIX = "replace-with-"
 # Copy of koda.config.STORAGE_SECRET_ENV_SOURCES: doctor runs on the host without
 # Koda's dependencies. tests/test_doctor_strict.py keeps the two in sync.
@@ -197,7 +212,7 @@ def run_doctor(
                 "ok": True,
                 "has_owner": bool(onboarding_payload.get("has_owner")),
                 "bootstrap_required": bool(onboarding_payload.get("bootstrap_required")),
-                "bootstrap_file_path": onboarding_payload.get("bootstrap_file_path"),
+                "bootstrap_file_path": read_bootstrap_file_path(base_url),
             }
         )
     except Exception as exc:  # pragma: no cover - exercised via failure payload expectations

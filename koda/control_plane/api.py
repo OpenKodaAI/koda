@@ -128,6 +128,8 @@ def _clip_preview_text(value: Any, *, limit: int) -> str | None:
     return text[: max(0, limit - 1)].rstrip() + "…"
 
 
+# Keep in sync with apps/web/src/lib/public-control-plane-paths.ts
+# (tests/test_control_plane_public_paths.py compares the two lists).
 _PUBLIC_CONTROL_PLANE_API_PATHS: tuple[str, ...] = (
     "/api/control-plane/onboarding/status",
     "/api/control-plane/auth/status",
@@ -440,15 +442,29 @@ async def setup_page(request: web.Request) -> web.Response:
     return web.Response(text=render_setup_page(request), content_type="text/html")
 
 
+# What onboarding/status tells a caller without an operator credential.
+_PRE_LOGIN_ONBOARDING_STATUS_FIELDS: tuple[str, ...] = ("has_owner", "bootstrap_required")
+
+
 async def onboarding_status(request: web.Request) -> web.Response:
     # This endpoint is a *health snapshot* polled by the CLI, setup wizard
     # and release smoke. A transient failure (seed race, lazy provider row,
     # storage not yet reachable) should degrade the payload but keep a 2xx
     # — fail-closed with 4xx/5xx here makes ``koda install --headless``
     # abort mid-bootstrap instead of letting the caller re-poll.
+    #
+    # The route is public, so a caller without an operator credential only
+    # learns whether setup is still needed. Agents, owner contact details,
+    # the Telegram allowlist, provider state and server paths need a session.
+    authenticated = False
     try:
+        authenticated = _request_auth_context(request) is not None
+        # Always computed: it also writes the first-run setup-code file.
+        auth_payload = _auth_service().onboarding_payload()
+        if not authenticated:
+            return web.json_response({field: auth_payload[field] for field in _PRE_LOGIN_ONBOARDING_STATUS_FIELDS})
         payload = dict(_manager().get_onboarding_status())
-        payload.update(_auth_service().onboarding_payload())
+        payload.update(auth_payload)
         return web.json_response(payload)
     except Exception as exc:
         log.warning(
@@ -457,6 +473,8 @@ async def onboarding_status(request: web.Request) -> web.Response:
             error=str(exc),
             exc_info=True,
         )
+        if not authenticated:
+            return web.json_response({"status": "degraded", "error": "onboarding_status_failed"})
         return web.json_response(
             {
                 "status": "degraded",

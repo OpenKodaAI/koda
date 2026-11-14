@@ -1,4 +1,7 @@
+import re
 from pathlib import Path
+
+from koda.services.onboarding_readiness import build_onboarding_readiness
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -202,3 +205,29 @@ def test_phase6_channel_gateway_and_onboarding_do_not_drift() -> None:
         "/api/control-plane/agents/{agent_id}/channels/gateway/unknown-senders",
     ]:
         assert path in openapi
+
+
+def _check_key(prose: str) -> str:
+    """'and release quality checks' -> 'release_quality'."""
+    name = prose.strip().removeprefix("and ").removesuffix(" checks")
+    return name.replace(" ", "_")
+
+
+def test_docs_list_exactly_the_onboarding_readiness_checks_the_backend_returns() -> None:
+    """Every prose list of readiness checks names the live checks and no removed ones (D-193)."""
+    backend_checks = {check["key"] for check in build_onboarding_readiness(status={})["checks"]}
+
+    listings = 0
+    for relative in (
+        "docs/operations/top-tier-roadmap-assurance.md",
+        "docs/architecture/top-tier-phase-contracts.md",
+        "docs/operations/top-tier-release-train.md",
+        "docs/architecture/channel-gateway-onboarding.md",
+    ):
+        text = " ".join(_read(relative).split())
+        for match in re.finditer(r"provider, runtime,([^.|]*)", text):
+            listings += 1
+            listed = {"provider", "runtime"} | {_check_key(item) for item in match.group(1).split(",")}
+            assert listed == backend_checks, f"{relative}: {match.group(0)}"
+
+    assert listings >= 5

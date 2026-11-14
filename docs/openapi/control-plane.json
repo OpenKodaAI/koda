@@ -6691,13 +6691,13 @@
         "security": [],
         "responses": {
           "200": {
-            "description": "Current auth mode, owner bootstrap requirements, and active operator session details when authenticated."
+            "description": "Current auth mode, owner bootstrap requirements, and active operator session details when authenticated. Without an operator credential, bootstrap_file_path and loopback_trust_enabled are returned only while no owner exists, and recovery_available is not returned."
           }
         },
         "tags": [
           "Auth"
         ],
-        "description": "Stable Koda control-plane route. See linked architecture and runbook docs for domain behavior."
+        "description": "Public route read by the login and setup screens and by the doctors. Before setup it names the absolute bootstrap file path to any caller, because the setup screen shows it; once an owner exists only an authenticated operator gets it. See docs/security/authentication.md."
       }
     },
     "/api/control-plane/auth/tokens": {
@@ -9367,10 +9367,9 @@
     "/api/control-plane/onboarding/readiness": {
       "get": {
         "summary": "Onboarding readiness checklist",
-        "security": [],
         "responses": {
           "200": {
-            "description": "Versioned onboarding_readiness.v1 checks for provider, runtime, sandbox, MCP, memory, channel, first task, first trace, docs, and release quality."
+            "description": "Versioned onboarding_readiness.v1 checks for provider, runtime, storage, channel, first task, first trace, and release quality."
           }
         },
         "tags": [
@@ -9382,16 +9381,49 @@
     "/api/control-plane/onboarding/status": {
       "get": {
         "summary": "Onboarding status",
+        "security": [
+          {},
+          {
+            "bearerAuth": []
+          }
+        ],
         "responses": {
           "200": {
-            "description": "Current quickstart, provider, agent, and storage status"
+            "description": "Without an operator credential: only whether an owner exists and whether first-run setup is still required. With a valid operator session or token: the full quickstart, provider, agent, storage and system status, plus the auth flags. A transient failure returns a 2xx degraded payload; before login it carries only status and error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "description": "Answer to a caller without an operator credential.",
+                      "required": [
+                        "has_owner",
+                        "bootstrap_required"
+                      ],
+                      "properties": {
+                        "has_owner": {
+                          "type": "boolean"
+                        },
+                        "bootstrap_required": {
+                          "type": "boolean"
+                        }
+                      },
+                      "additionalProperties": false
+                    },
+                    {
+                      "$ref": "#/components/schemas/GenericJsonObject"
+                    }
+                  ]
+                }
+              }
+            }
           }
         },
         "tags": [
           "Onboarding"
         ],
-        "security": [],
-        "description": "Stable Koda control-plane route. See linked architecture and runbook docs for domain behavior."
+        "description": "Public route with an optional bearer. This route returns agents, owner contact details, the Telegram allowlist, provider connection state and the bootstrap file path only to an authenticated operator. Before an owner exists, the public GET /api/control-plane/auth/status still names the bootstrap file for the setup screen. See docs/security/authentication.md."
       }
     },
     "/api/control-plane/providers/downloads/active": {

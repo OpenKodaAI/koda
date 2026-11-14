@@ -75,12 +75,19 @@ operator-only route that returns key names and the rotation link, never values.
 A small public whitelist bypasses the bearer check (these endpoints carry their own
 credential or are required to bootstrap auth itself):
 
-- `/api/control-plane/onboarding/status`
+- `/api/control-plane/onboarding/status` (two fields before login, see below)
 - `/api/control-plane/auth/status`
 - `/api/control-plane/auth/bootstrap/exchange`
 - `/api/control-plane/auth/login`
 - `/api/control-plane/auth/register-owner`
 - `/api/control-plane/auth/password/recover`
+
+The dashboard uses the same list. `apps/web/src/lib/public-control-plane-paths.ts` is read by
+both the Next.js proxy (`apps/web/src/proxy.ts`) and the catch-all BFF route, and
+`tests/test_control_plane_public_paths.py` fails when it differs from the backend list or when
+the OpenAPI stops marking one of these routes as callable without a token. Every other
+control-plane route, including `/api/control-plane/onboarding/readiness`, needs an operator
+session in the dashboard as well as in the backend.
 
 There is **no** development/open mode that disables the middleware. Any local process
 (browser extension, neighbor container reaching `host.docker.internal`, ad-hoc script) that
@@ -88,6 +95,49 @@ talks directly to `127.0.0.1:8090` without a valid session will be rejected. The
 proxy at `5174` is defence in depth, not the only line of defence: `apps/web/src/lib/control-plane.ts`
 unseals the operator-session cookie and forwards the bearer token to the backend, so the
 normal dashboard flow is unaffected.
+
+### Onboarding status before login
+
+`GET /api/control-plane/onboarding/status` is polled before anyone can log in: by the CLI
+(`koda doctor`, `koda auth issue-code`) and by `scripts/doctor.py`. Without a valid operator
+credential it answers only whether setup is still needed:
+
+```json
+{"has_owner": true, "bootstrap_required": false}
+```
+
+With a valid session token, personal API token or break-glass token it returns the full status:
+agents, owner name, email and GitHub, the Telegram allowlist, provider connection state, storage
+health, the bootstrap file path and the remaining auth flags. An unknown, expired or revoked
+token gets the two-field answer. Either way the call writes the first-run setup-code file when no
+owner exists yet.
+
+When the status cannot be computed, the route still answers `200` so pollers can retry. Before
+login that answer is `{"status": "degraded", "error": "onboarding_status_failed"}`, with no
+exception text; operators get the degraded status payload with the error message. Through the
+dashboard, a caller without a session gets the same two fields, or a plain `503` when the
+control plane is unreachable: the dashboard's empty "upstream unavailable" stand-in payloads are
+served only to signed-in operators.
+
+### Auth status before login
+
+`GET /api/control-plane/auth/status` is public as well, on `:8090` and through the dashboard:
+the login and setup screens read it before anyone has a session. Without a valid operator
+credential it returns `has_owner`, `bootstrap_required`, `auth_mode`, `session_required`,
+`onboarding_complete` and `authenticated: false`, plus two fields that only apply while no owner
+exists:
+
+- `bootstrap_file_path`, the absolute path of the setup-code file on the server. The setup
+  screen tells the operator to read the code from it, and `koda doctor` and `scripts/doctor.py`
+  report it from this route, because onboarding/status no longer does before login.
+- `loopback_trust_enabled`, which tells the setup screen whether a loopback request needs no
+  code.
+
+So until the owner registers, anyone who can reach the control plane learns where the setup-code
+file is, though not the code. Once an owner exists the file is deleted and anonymous callers get
+neither field. `recovery_available` (whether a break-glass token is configured) is returned only
+to an operator. With a valid session, personal API token or break-glass token the route returns
+every field and the operator's profile.
 
 ## Session model
 
