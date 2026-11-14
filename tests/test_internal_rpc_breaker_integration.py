@@ -28,6 +28,8 @@ from koda.internal_rpc.circuit_breaker import (
     reset_registry_for_tests,
 )
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 @pytest.fixture(autouse=True)
 def _reset_registry() -> None:
@@ -35,7 +37,7 @@ def _reset_registry() -> None:
 
 
 def _read_source(rel_path: str) -> str:
-    return Path(rel_path).read_text(encoding="utf-8")
+    return (ROOT / rel_path).read_text(encoding="utf-8")
 
 
 CLIENTS_REQUIRING_BREAKER = (

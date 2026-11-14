@@ -18,9 +18,15 @@ Migrations apply via the production code path
 (``KnowledgeV2PostgresBackend.bootstrap``) so the fixture verifies
 the same DDL we'd ship to a real deploy.
 
-Per-test isolation: ``db_transaction`` opens a transaction at test
-start and rolls back at end so successive tests see a clean state
-without paying the full migration cost.
+Per-test isolation: every Postgres test shares one database and one
+schema (``KNOWLEDGE_V2_POSTGRES_SCHEMA``, default ``knowledge_v2``).
+Most tests reset the tables they use with ``TRUNCATE`` in their own
+fixtures; squad tests call ``reset_squad_runtime_tables``. Only the
+smoke test uses ``db_connection``, a connection inside a transaction
+that rolls back at the end. Because tests truncate shared tables, the
+Postgres suite is serial-only: do not run it with parallel workers,
+and give each concurrent ``pytest -m postgres`` session its own
+database in ``POSTGRES_TEST_DSN``.
 """
 
 from __future__ import annotations
@@ -82,10 +88,33 @@ def postgres_url() -> str:
 _DSN_ATTR = "KNOWLEDGE_V2_POSTGRES_DSN"
 
 
-def _clear_shared_postgres_backends() -> None:
-    from koda.knowledge.v2 import common as knowledge_common
+def close_shared_postgres_backends() -> None:
+    """Close every cached shared Postgres backend, then empty the cache.
 
+    Sync code under test (audit events, the control-plane store) reaches
+    Postgres through the persistent bridge loop in ``koda.state.primary``,
+    and the shared backend it caches keeps an asyncpg pool open on that
+    loop. Emptying the cache without closing the pool leaves those
+    connections open for the rest of the session: one ``-m postgres`` run
+    used to hold about 65 idle connections by the end, enough for two
+    concurrent sessions to exhaust a default ``max_connections=100`` server
+    and fail with ``TooManyConnectionsError`` (D-225). Fixtures that reset
+    the shared backends call this instead of clearing the cache themselves.
+    """
+    from koda.knowledge.v2 import common as knowledge_common
+    from koda.state import primary as primary_state
+
+    backends = list(knowledge_common._SHARED_POSTGRES_BACKENDS.values())
     knowledge_common._SHARED_POSTGRES_BACKENDS.clear()
+    bridge_loop = primary_state._active_bridge_loop()
+    if bridge_loop is None:
+        return
+    for backend in backends:
+        future = asyncio.run_coroutine_threadsafe(backend.close(), bridge_loop)
+        try:
+            future.result(timeout=10)
+        except Exception:
+            future.cancel()
 
 
 def stop_primary_bridge() -> None:
@@ -98,17 +127,11 @@ def stop_primary_bridge() -> None:
     stopped and its thread joined, and the module forgets both. Safe to call
     when no bridge is running.
     """
-    from koda.knowledge.v2 import common as common_mod
     from koda.state import primary as primary_mod
 
+    close_shared_postgres_backends()
     loop = primary_mod._active_bridge_loop()
     if loop is not None:
-        for backend in list(common_mod._SHARED_POSTGRES_BACKENDS.values()):
-            future = asyncio.run_coroutine_threadsafe(backend.close(), loop)
-            try:
-                future.result(timeout=10)
-            except Exception:
-                future.cancel()
         loop.call_soon_threadsafe(loop.stop)
         thread = primary_mod._BRIDGE_THREAD
         if thread is not None:
@@ -117,7 +140,6 @@ def stop_primary_bridge() -> None:
             primary_mod._BRIDGE_LOOP = None
             primary_mod._BRIDGE_THREAD = None
             primary_mod._BRIDGE_OWNER_PID = None
-    common_mod._SHARED_POSTGRES_BACKENDS.clear()
 
 
 def _koda_modules_holding_dsn() -> list[Any]:
@@ -156,7 +178,7 @@ def _postgres_dsn_scope(request: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
     dsn = request.getfixturevalue("postgres_url")
     # Import (and empty) the shared backend cache before patching so the
     # cache module itself is patched rather than imported with the test DSN.
-    _clear_shared_postgres_backends()
+    close_shared_postgres_backends()
     import koda.knowledge.config as knowledge_config
 
     original_dsn = knowledge_config.KNOWLEDGE_V2_POSTGRES_DSN
@@ -176,7 +198,7 @@ def _postgres_dsn_scope(request: Any, monkeypatch: pytest.MonkeyPatch) -> Any:
         for module in _koda_modules_holding_dsn():
             if module.__dict__.get(_DSN_ATTR) == dsn:
                 setattr(module, _DSN_ATTR, original_dsn)
-        _clear_shared_postgres_backends()
+        close_shared_postgres_backends()
 
 
 @pytest.fixture(scope="session")
@@ -199,9 +221,11 @@ async def migrated_postgres(postgres_url: str) -> str:
     return postgres_url
 
 
-# Squad runtime tables, truncated together so foreign keys between them
+# Every squad table, truncated together so foreign keys between them
 # (e.g. squad_reply_obligations -> squad_threads / squad_messages) never
 # block cleanup when a new referencing table is added.
+# tests/test_suite_hygiene.py fails when a squad table in the migrations is
+# missing here, or when a test truncates a squad table directly.
 SQUAD_RUNTIME_TABLES = (
     "squad_reply_obligations",
     "squad_message_recipients",
@@ -211,20 +235,24 @@ SQUAD_RUNTIME_TABLES = (
     "squad_threads",
     "squad_coordinator_state",
     "squad_coordinator_history",
+    "squad_member_capabilities",
+    "squad_telegram_bindings",
+    "squad_artifacts",
 )
 
 
 async def reset_squad_runtime_tables(conn: Any, schema: str) -> None:
-    """Empty every squad runtime table in one statement."""
+    """Empty every squad table in one statement. Postgres tests use this
+    instead of truncating squad tables themselves."""
     tables = ", ".join(f'"{schema}"."{name}"' for name in SQUAD_RUNTIME_TABLES)
     await conn.execute(f"TRUNCATE TABLE {tables} RESTART IDENTITY CASCADE")
 
 
 @pytest.fixture
 async def db_connection(migrated_postgres: str) -> AsyncIterator[Any]:
-    """Per-test asyncpg connection wrapped in a transaction that
-    rolls back at end. Successive tests see a clean state without
-    re-running migrations."""
+    """Per-test asyncpg connection wrapped in a transaction that rolls
+    back at the end. Only writes made through this connection are undone;
+    code under test that opens its own pool is not covered."""
     import asyncpg  # type: ignore[import-not-found]
 
     conn = await asyncpg.connect(migrated_postgres)

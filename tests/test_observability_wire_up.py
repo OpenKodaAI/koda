@@ -19,9 +19,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 def _read_source(rel_path: str) -> str:
-    return Path(rel_path).read_text(encoding="utf-8")
+    return (ROOT / rel_path).read_text(encoding="utf-8")
 
 
 def test_main_worker_calls_init_tracing() -> None:

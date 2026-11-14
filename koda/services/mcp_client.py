@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import functools
 import ipaddress
 import json
 import socket
-import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin
 
+from aiohttp.helpers import is_ip_address
+from yarl import URL
+
+from koda.config import MCP_ALLOWED_PRIVATE_NETWORKS
 from koda.logging_config import get_logger
+from koda.services.http_client import IPNetwork, _is_blocked_ip, _origin, guarded_urlopen
 
 logger = get_logger(__name__)
 
@@ -279,42 +284,53 @@ class StdioTransport:
 # HTTP transport
 
 
+@functools.lru_cache(maxsize=8)
+def _parse_private_networks(entries: tuple[str, ...]) -> tuple[IPNetwork, ...]:
+    networks: list[IPNetwork] = []
+    for entry in entries:
+        try:
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            logger.warning("mcp_private_network_entry_ignored", entry=entry)
+    return tuple(networks)
+
+
+def _granted_private_networks() -> tuple[IPNetwork, ...]:
+    """The operator's private-network grant for MCP servers (``MCP_ALLOWED_PRIVATE_NETWORKS``)."""
+    return _parse_private_networks(tuple(MCP_ALLOWED_PRIVATE_NETWORKS))
+
+
 def _validate_url(url: str) -> None:
-    """Validate that a URL is safe for MCP HTTP transport (no SSRF)."""
-    parsed = urlparse(url)
+    """Validate that a URL is safe for MCP HTTP transport (no SSRF).
+
+    Addresses are judged by the shared classifier in
+    :mod:`koda.services.http_client`, with ``MCP_ALLOWED_PRIVATE_NETWORKS`` as
+    the only private-network grant.  The host is read as aiohttp connects to it.
+    """
+    try:
+        parsed = URL(url)
+    except ValueError as exc:
+        raise ValueError(f"Invalid MCP HTTP URL: {url!r}") from exc
     if parsed.scheme not in ("http", "https"):
         raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
-    hostname = parsed.hostname or ""
+    hostname = parsed.raw_host or ""
     if hostname in ("localhost", ""):
         raise ValueError("localhost URLs not allowed for MCP HTTP transport")
 
-    def _blocked_ip(value: str) -> bool:
-        ip = ipaddress.ip_address(value)
-        return (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_multicast
-            or ip.is_reserved
-            or ip.is_unspecified
-        )
-
-    try:
-        if _blocked_ip(hostname):
+    networks = _granted_private_networks()
+    if is_ip_address(hostname):
+        if _is_blocked_ip(hostname, networks):
             raise ValueError(f"Private/internal IP not allowed: {hostname}")
-    except ValueError as exc:
-        # Re-raise our own validation errors
-        if "not allowed" in str(exc) or "Unsupported" in str(exc):
-            raise
-        # hostname is a domain name, not an IP - validate all resolved targets.
-        try:
-            resolved = socket.getaddrinfo(hostname, parsed.port or 443, type=socket.SOCK_STREAM)
-        except socket.gaierror as resolve_exc:
-            raise ValueError(f"Unable to resolve MCP HTTP host: {hostname}") from resolve_exc
-        for _, _, _, _, sockaddr in resolved:
-            resolved_host = str(sockaddr[0]).strip()
-            if resolved_host and _blocked_ip(resolved_host):
-                raise ValueError(f"Private/internal destination not allowed: {hostname}") from None
+        return
+    # hostname is a domain name, not an IP - validate all resolved targets.
+    try:
+        resolved = socket.getaddrinfo(hostname, parsed.port or 443, type=socket.SOCK_STREAM)
+    except (socket.gaierror, UnicodeError) as resolve_exc:
+        raise ValueError(f"Unable to resolve MCP HTTP host: {hostname}") from resolve_exc
+    for _, _, _, _, sockaddr in resolved:
+        resolved_host = str(sockaddr[0]).strip()
+        if resolved_host and _is_blocked_ip(resolved_host, networks):
+            raise ValueError(f"Private/internal destination not allowed: {hostname}")
 
 
 def validate_mcp_http_url(url: str) -> None:
@@ -323,7 +339,7 @@ def validate_mcp_http_url(url: str) -> None:
 
 
 class HttpSseTransport:
-    """Speaks JSON-RPC 2.0 over HTTP POST (stdlib only)."""
+    """Speaks JSON-RPC 2.0 over HTTP POST, through the shared SSRF-guarded client."""
 
     def __init__(self, url: str, headers: dict[str, str] | None = None) -> None:
         _validate_url(url)
@@ -396,29 +412,20 @@ class HttpSseTransport:
         return True  # Stateless; always considered alive.
 
 
-class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Disable urllib's automatic redirect following so we can revalidate hops."""
-
-    def redirect_request(
-        self,
-        req: urllib.request.Request,
-        fp: Any,
-        code: int,
-        msg: str,
-        headers: Any,
-        newurl: str,
-    ) -> urllib.request.Request | None:
-        return None
-
-
 def _open_url_without_redirects(req: urllib.request.Request, *, timeout: float) -> Any:
-    opener = urllib.request.build_opener(_NoRedirectHandler)
-    try:
-        return opener.open(req, timeout=timeout)
-    except urllib.error.HTTPError as exc:
-        if exc.code in (301, 302, 303, 307, 308):
-            return exc
-        raise
+    """Send one MCP HTTP hop through the shared SSRF guard, without following redirects.
+
+    The connection goes only to addresses the guard validated (public ones, plus
+    ``MCP_ALLOWED_PRIVATE_NETWORKS``), so DNS rebinding after :func:`_validate_url`
+    cannot reach a private host, and ``*_proxy`` environment variables are not used.
+    A 3xx comes back as the response; 4xx and 5xx raise ``HTTPError`` as before.
+    """
+    return guarded_urlopen(
+        req,
+        timeout=timeout,
+        private_networks=_granted_private_networks(),
+        follow_redirects=False,
+    )
 
 
 def _response_status(response: Any) -> int:
@@ -432,14 +439,22 @@ def _response_status(response: Any) -> int:
 
 
 def _urlopen_safely(req: urllib.request.Request, *, timeout: float, max_redirects: int = 10) -> bytes:
-    """Open an MCP HTTP request while revalidating every redirect target."""
+    """Open an MCP HTTP request while revalidating every redirect target.
+
+    Redirects stay within the server's origin (scheme, host, port): one to
+    another origin is refused, so the request and its credential headers never
+    leave the server the operator configured.
+    """
     current_url = req.full_url
+    origin = _origin(current_url)
     body = req.data
     method = req.get_method()
     headers = dict(req.header_items())
 
     for _ in range(max_redirects + 1):
         _validate_url(current_url)
+        if _origin(current_url) != origin:
+            raise ValueError(f"MCP HTTP redirect to another origin not allowed: {current_url}")
         current_req = urllib.request.Request(
             current_url,
             data=body,

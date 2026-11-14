@@ -24,6 +24,7 @@ import asyncpg
 import pytest
 
 from koda.knowledge.v2.common import get_shared_postgres_backend
+from tests.postgres_fixtures import close_shared_postgres_backends
 
 pytestmark = [pytest.mark.postgres]
 
@@ -41,9 +42,7 @@ async def runtime_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) ->
     and runtime_port_allocations use JSONB columns and the default codec
     rejects Python objects.
     """
-    from koda.knowledge.v2 import common as common_mod
-
-    common_mod._SHARED_POSTGRES_BACKENDS.clear()
+    close_shared_postgres_backends()
 
     # Install a JSONB codec for the test session. The runtime store passes
     # already-redacted JSON *strings* into JSONB columns — asyncpg's default
@@ -85,7 +84,7 @@ async def runtime_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) ->
     try:
         yield migrated_postgres
     finally:
-        common_mod._SHARED_POSTGRES_BACKENDS.clear()
+        close_shared_postgres_backends()
 
 
 def _build_store(agent_id: str):

@@ -29,6 +29,7 @@ import asyncpg
 import pytest
 
 from koda.control_plane.cluster import ClusterClient, ClusterConfig
+from tests.postgres_fixtures import close_shared_postgres_backends
 
 pytestmark = [pytest.mark.postgres]
 
@@ -42,9 +43,7 @@ async def cluster_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) ->
     tables that need it (cluster tables don't, but some adjacent ones might
     be touched by the control-plane store) and reset the cp_* tables.
     """
-    from koda.knowledge.v2 import common as common_mod
-
-    common_mod._SHARED_POSTGRES_BACKENDS.clear()
+    close_shared_postgres_backends()
 
     from koda.state import primary as primary_mod
 
@@ -73,7 +72,7 @@ async def cluster_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) ->
     try:
         yield migrated_postgres
     finally:
-        common_mod._SHARED_POSTGRES_BACKENDS.clear()
+        close_shared_postgres_backends()
 
 
 def _make_config(supervisor_id: str, *, capacity: int = 0, stale_seconds: int = 30) -> ClusterConfig:

@@ -27,13 +27,35 @@ Koda publishes the dashboard and the control-plane API on the host's loopback in
 (packaged installs, `docker-compose.yml` and the production overlay alike), so nothing is reachable
 from the network until a reverse proxy publishes it. A reverse proxy should:
 
-- publish `/` to the Koda web UI
-- publish `/setup`, `/login`, `/forgot-password`, and `/control-plane` to the Koda dashboard
 - terminate TLS
+- send browser traffic to the Koda dashboard: `/`, `/setup`, `/login`, `/forgot-password`,
+  `/control-plane`, and the browser-facing `/api/control-plane/*` and `/api/runtime/*` routes.
+  Only the dashboard turns the HTTP-only session cookie into the API's bearer token, so browser
+  requests sent straight to the API fail
+- pass WebSocket upgrades on `/api/runtime/relay/*` (the runtime terminal and browser panels) to
+  the dashboard, and keep those connections and the runtime event streams
+  (`/api/runtime/agents/*/stream`) open while idle: neither sends a heartbeat
+- pass the `Host` header the browser sent, port included, and the scheme in `X-Forwarded-Proto`:
+  the dashboard accepts a sign-in or any other change only when its `Origin` matches them. Give a
+  request that arrives without a `Host` (an HTTP/1.0 health check) your domain instead: the
+  dashboard refuses an HTTP/1.1 request without one
+- send to the control-plane API only the `/api/control-plane/*` requests that carry
+  `Authorization: Bearer` (API-token clients), and `/openapi/control-plane.json`
+- keep request bodies the dashboard gets to 1 MiB, nginx's default `client_max_body_size`: the
+  dashboard buffers a request body (up to 10 MiB) before it checks the session, so a larger limit
+  lets clients without a session make it hold large bodies. The dashboard's own photo uploads fit,
+  as its photo editors send a cropped 512-pixel JPEG
+- accept request bodies of up to 13 MiB on the two photo upload routes,
+  `/api/control-plane/auth/profile/photo` and
+  `/api/control-plane/dashboard/squads/threads/<id>/photo`, only when they carry
+  `Authorization: Bearer` and go to the API: an API-token client may upload a profile or room
+  photo of up to 12 MiB, sent as a multipart form, and the API checks the token before it reads
+  the body. nginx checks a declared `Content-Length` against the location it selects, before an
+  `if` inside that location runs, so the bundled `proxy/nginx.conf` checks the token in the
+  `server` block: a rewrite sends those requests to an internal location with
+  `client_max_body_size 13m;` (where nginx also checks a chunked body), and every other request
+  keeps the default
 - optionally keep `/control-plane/setup` as a compatibility redirect to `/setup`
-- publish `/api/control-plane/*`
-- publish `/api/runtime/*`
-- publish `/openapi/control-plane.json`
 - add the address each request came from to `X-Forwarded-For`, appended or replacing the header
   (see the rate-limit notes below)
 
@@ -44,8 +66,19 @@ Recommended model:
 - your reverse proxy handles TLS and public routing
 - product configuration remains inside the control plane instead of host env files
 
-The bundled `proxy/nginx.conf` targets `127.0.0.1` (not `localhost`, which may resolve to `::1`
-first while Koda publishes on IPv4 loopback only).
+The bundled `proxy/nginx.conf` routes this way: browser requests go to `127.0.0.1:3000`, and
+`/api/control-plane/*` requests with an `Authorization: Bearer` header, plus
+`/openapi/control-plane.json`, go to `127.0.0.1:8090`. Only bearer tokens select the API, so HTTP
+Basic auth added in front of Koda still sends browsers to the dashboard. It targets `127.0.0.1`
+(not `localhost`, which may resolve to `::1` first while Koda publishes on IPv4 loopback only).
+Include it in nginx's `http` context (for example `/etc/nginx/conf.d/koda.conf`), set
+`server_name` to your domain, and add your TLS settings (`listen 443 ssl;` with `ssl_certificate`
+and `ssl_certificate_key`). Then run `nginx -t` and reload nginx. The template ships with
+`server_name _`, which matches no domain, so nginx sends your domain's requests to the default
+server of the port. Where the distribution's stock site is enabled, that is the stock site: Debian
+and Ubuntu ship `sites-enabled/default` with `listen 80 default_server`, and `nginx -t` then only
+warns about a conflicting server name `_`. Keep your domain in `server_name`, or disable the stock
+site.
 
 The control-plane API is always published on loopback only; the dashboard reaches it over the
 Docker network (`http://app:8090`) and a host reverse proxy reaches it on `127.0.0.1`.
@@ -64,10 +97,12 @@ request from to `X-Forwarded-For`, appended or replacing the header. nginx needs
 `location`, as in the bundled `proxy/nginx.conf`; HAProxy needs `option forwardfor` (without
 `if-none`); Caddy and Traefik do it by default. A proxy that passes the client's header through
 unchanged, which nginx and HAProxy do otherwise, lets each client name its own rate-limit bucket,
-and clients that send no header all share one bucket. If your proxy also forwards
-`/api/control-plane/*` straight to the API, as the bundled `proxy/nginx.conf` does, set
-`CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`, or all of its clients share one budget. A proxy
-on another host needs its address added: `WEB_TRUSTED_PROXIES=gateway,<proxy-ip>`.
+and clients that send no header all share one bucket. Browser requests reach the API through
+the dashboard, so the defaults charge each browser to its own address. Requests a proxy forwards
+straight to the API, such as the API-token requests in the bundled `proxy/nginx.conf`, arrive
+from the Docker gateway: set `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`, or all of them share
+one budget. A proxy on another host needs its address added:
+`WEB_TRUSTED_PROXIES=gateway,<proxy-ip>`.
 
 A proxy that runs as a container on Koda's Compose network (Traefik or Caddy attached to
 `frontend`) connects from its own container address. `WEB_TRUSTED_PROXIES` takes addresses,
@@ -90,8 +125,9 @@ services:
         ipv4_address: 172.30.0.10
 ```
 
-If that proxy also forwards `/api/control-plane/*` straight to `app:8090`, add its service name
-to `CONTROL_PLANE_TRUSTED_PROXIES` (`web,proxy`), which does accept hostnames.
+If that proxy also forwards API-token requests (`/api/control-plane/*` with `Authorization: Bearer`)
+straight to `app:8090`, add its service name to `CONTROL_PLANE_TRUSTED_PROXIES` (`web,proxy`), which
+does accept hostnames. Browser requests must still go to the dashboard (`web:3000`), as above.
 
 When `WEB_PUBLISH_ADDRESS` publishes the dashboard beyond loopback, firewall its port so only
 your proxy can reach it. A client that connects directly is charged to its own address, but

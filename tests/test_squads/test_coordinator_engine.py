@@ -27,6 +27,8 @@ from koda.squads.semantic_router import SemanticAgentScore, SemanticRoutingResul
 from koda.squads.tasks import TaskDescriptor
 from koda.squads.threads import ParticipantInfo, ThreadDescriptor
 
+ROOT = Path(__file__).resolve().parents[2]
+
 
 def _thread(**overrides: object) -> ThreadDescriptor:
     base: dict[str, object] = {
@@ -383,7 +385,7 @@ async def test_llm_planner_falls_back_to_semantic_plan(monkeypatch: pytest.Monke
 
 
 def test_coordinator_engine_has_no_keyword_intent_tables() -> None:
-    source = Path("koda/squads/coordinator_engine.py").read_text(encoding="utf-8")
+    source = (ROOT / "koda" / "squads" / "coordinator_engine.py").read_text(encoding="utf-8")
     assert "_DELIVERABLE_RE" not in source
     assert "_COMPLEX_OBJECT_RE" not in source
     assert "_ROLE_TERMS" not in source

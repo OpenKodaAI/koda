@@ -111,14 +111,14 @@ class TestOllamaBaseUrlResolution:
                     }
                 ).encode("utf-8")
 
-        def _fake_urlopen(request, timeout=None):  # noqa: ARG001
+        def _fake_urlopen(request, timeout=None, **guard_kwargs):  # noqa: ARG001
             captured["url"] = request.full_url
             captured["headers"] = {key.lower(): value for key, value in request.header_items()}
+            captured["guard_kwargs"] = guard_kwargs
             return _Resp()
 
-        monkeypatch.setattr("urllib.request.urlopen", _fake_urlopen)
-        # The runner imports urlopen via the ``urllib_request`` alias.
-        monkeypatch.setattr(ollama_runner.urllib_request, "urlopen", _fake_urlopen)
+        # The runner sends the chat through the SSRF-guarded client.
+        monkeypatch.setattr(ollama_runner, "guarded_urlopen", _fake_urlopen)
 
         result = await run_ollama(
             query="hi",
@@ -136,6 +136,8 @@ class TestOllamaBaseUrlResolution:
         headers = captured.get("headers") or {}
         assert isinstance(headers, dict)
         assert headers.get("authorization") == "Bearer ollama-cloud-key"
+        # Ollama Cloud is a public endpoint: no private-network grant.
+        assert captured["guard_kwargs"] == {"allow_private": False}
         # Suppress the unused stdlib import (we monkey-patched the module
         # import path instead).
         del io

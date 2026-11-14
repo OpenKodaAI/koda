@@ -109,8 +109,10 @@ def test_send_dashboard_session_message_wakes_and_retries_active_runtime(monkeyp
     )
     post_attempts = 0
 
-    def fake_urlopen(request: urllib.request.Request, timeout: float):
+    def fake_urlopen(request: urllib.request.Request, timeout: float, **guard_kwargs: Any):
         nonlocal post_attempts
+        # The runtime API is a configured local endpoint: a private-network grant.
+        assert guard_kwargs == {"allow_private": True}
         url = request.full_url
         if url.endswith("/api/runtime/sessions/messages"):
             post_attempts += 1
@@ -121,7 +123,7 @@ def test_send_dashboard_session_message_wakes_and_retries_active_runtime(monkeyp
             return _RuntimeResponse({"ready": True})
         raise AssertionError(f"unexpected URL {url}")
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("koda.control_plane.manager.guarded_urlopen", fake_urlopen)
 
     result = manager.send_dashboard_session_message("ATLAS", text="hello", session_id="session-1")
 
@@ -143,13 +145,14 @@ def test_send_dashboard_squad_message_posts_squad_payload(monkeypatch):
     )
     sent_payload: dict[str, Any] = {}
 
-    def fake_urlopen(request: urllib.request.Request, timeout: float):
+    def fake_urlopen(request: urllib.request.Request, timeout: float, **guard_kwargs: Any):
+        assert guard_kwargs == {"allow_private": True}
         assert request.full_url.endswith("/api/runtime/sessions/messages")
         assert request.headers["X-runtime-token"] == "runtime-token"
         sent_payload.update(json.loads((request.data or b"{}").decode("utf-8")))
         return _RuntimeResponse({"accepted": True, "session_id": "squad-session", "task_id": 9})
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr("koda.control_plane.manager.guarded_urlopen", fake_urlopen)
 
     result = manager.send_dashboard_squad_message(
         "ATLAS",
@@ -219,6 +222,7 @@ def test_send_dashboard_session_message_rejects_paused_agent_without_runtime_cal
         raise AssertionError("runtime should not be contacted for paused agents")
 
     monkeypatch.setattr("urllib.request.urlopen", fail_urlopen)
+    monkeypatch.setattr("koda.control_plane.manager.guarded_urlopen", fail_urlopen)
 
     with pytest.raises(ValueError, match="activate it before sending"):
         manager.send_dashboard_session_message("ATLAS", text="hello", session_id="session-1")

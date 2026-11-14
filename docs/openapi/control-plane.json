@@ -6897,7 +6897,6 @@
         "tags": [
           "Connections"
         ],
-        "security": [],
         "responses": {
           "200": {
             "description": "Endpoint-specific JSON response; see the route handler and dashboard contract for field-level shape.",
@@ -9126,7 +9125,6 @@
         "tags": [
           "MCP"
         ],
-        "security": [],
         "responses": {
           "200": {
             "description": "Endpoint-specific JSON response; see the route handler and dashboard contract for field-level shape.",
@@ -9301,7 +9299,6 @@
             }
           }
         ],
-        "security": [],
         "responses": {
           "200": {
             "description": "Endpoint-specific JSON response; see the route handler and dashboard contract for field-level shape.",

@@ -13,6 +13,7 @@ logic is caught immediately.
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import patch
 
 import pytest
@@ -92,6 +93,83 @@ async def test_db_connection_executes_simple_query(db_connection) -> None:
 
     result = await db_connection.fetchval("SELECT 42")
     assert int(result) == 42
+
+
+async def _backend_connected(dsn: str, pid: int) -> bool:
+    import asyncpg  # type: ignore[import-not-found]
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        count = await conn.fetchval("SELECT count(*) FROM pg_stat_activity WHERE pid = $1", pid)
+    finally:
+        await conn.close()
+    return bool(count)
+
+
+async def _wait_for_disconnect(dsn: str, pid: int) -> None:
+    # The server process exits shortly after the client closes the socket.
+    for _ in range(100):
+        if not await _backend_connected(dsn, pid):
+            return
+        await asyncio.sleep(0.05)
+
+
+def _open_bridge_pool_connection() -> int:
+    """Run a query the way sync code under test does from async code: on the
+    primary-state bridge loop, through the cached shared backend's pool.
+    Returns the server pid of the pooled connection that ran it."""
+    from koda.state.primary import primary_fetch_val, run_coro_sync
+
+    return int(run_coro_sync(primary_fetch_val("SELECT pg_backend_pid()")))
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_close_shared_postgres_backends_closes_bridge_pools(migrated_postgres: str) -> None:
+    """Sync code under test (audit events, the control-plane store) opens a
+    shared-backend pool on the primary-state bridge loop. Resetting the cache
+    between tests must close that pool; dropping it leaked one connection per
+    such test for the rest of the session until the server refused new
+    clients (D-225)."""
+    bridge_backend_pid = _open_bridge_pool_connection()
+
+    assert await _backend_connected(migrated_postgres, bridge_backend_pid)
+
+    postgres_fixtures.close_shared_postgres_backends()
+
+    await _wait_for_disconnect(migrated_postgres, bridge_backend_pid)
+    assert not await _backend_connected(migrated_postgres, bridge_backend_pid)
+
+
+# The next two tests run in file order as a pair: the first leaves a bridge
+# pool open when it ends, the second checks that the autouse
+# ``_postgres_dsn_scope`` fixture closed it in between. That fixture runs
+# around every Postgres test, so it is where the D-225 leak came from.
+_BRIDGE_PIDS_LEFT_OPEN: list[int] = []
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_bridge_pool_left_open_when_a_postgres_test_ends(migrated_postgres: str) -> None:
+    _BRIDGE_PIDS_LEFT_OPEN.clear()
+    bridge_backend_pid = _open_bridge_pool_connection()
+
+    assert await _backend_connected(migrated_postgres, bridge_backend_pid)
+    _BRIDGE_PIDS_LEFT_OPEN.append(bridge_backend_pid)
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_postgres_fixture_closed_the_previous_tests_bridge_pool(migrated_postgres: str) -> None:
+    if not _BRIDGE_PIDS_LEFT_OPEN:
+        pytest.skip("needs test_bridge_pool_left_open_when_a_postgres_test_ends to run first")
+    bridge_backend_pid = _BRIDGE_PIDS_LEFT_OPEN.pop()
+
+    await _wait_for_disconnect(migrated_postgres, bridge_backend_pid)
+    assert not await _backend_connected(migrated_postgres, bridge_backend_pid), (
+        "the bridge pool opened by the previous Postgres test is still connected: "
+        "_postgres_dsn_scope must close the shared backends, not just drop them"
+    )
 
 
 def test_collection_hook_skips_postgres_when_unavailable(pytestconfig) -> None:

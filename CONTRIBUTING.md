@@ -42,6 +42,19 @@ If your change touches the Rust workspace, also run:
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings`
 - `cargo test --manifest-path rust/Cargo.toml --workspace`
 
+The cross-language tests in `tests/integration` run `cargo build --release -p <crate>` once per
+session, even when a binary already exists (the build is incremental, so an up-to-date crate
+takes seconds), and run the executable that build reports, never an older one. When `cargo` is
+missing or the build fails, those tests are skipped locally and fail under `CI`. In a checkout
+with no earlier release build, the first run compiles the crate and its dependencies from
+scratch (for `koda-bot-gateway`, about 530 MB of release output and a few minutes on 4 CPUs).
+Copying or hard-linking a prebuilt binary into `rust/target/release` does not avoid that build:
+cargo has no record of it, so it rebuilds and replaces the file. A `CARGO_TARGET_DIR` set in the
+environment is honoured, but do not share one target directory between checkouts that run these
+tests at the same time: every build writes the same `release/<crate>` path, so another
+checkout's build can replace the binary after this session built it and before a test runs it.
+Keep one target directory per checkout; the download cache in `CARGO_HOME` is already shared.
+
 `pytest` starts its own Rust security guard (through `cargo run`) on a private Unix socket for
 each session, so concurrent runs on one host do not interfere and an ambient
 `SECURITY_GRPC_TARGET` is ignored. Without `cargo` every test is skipped with a banner (and the
@@ -57,12 +70,19 @@ test never reads or deletes your files. Provider disconnect tests remove CLI log
 `~/.claude`, `~/.codex` and `~/.gemini`. Write tests against `os.environ["HOME"]`, never against
 your real home directory.
 
-Tests marked `@pytest.mark.postgres` are skipped unless `POSTGRES_TEST_DSN` points at a
-disposable database (they empty the tables they use): run them with
-`POSTGRES_TEST_DSN=postgresql://… pytest -m postgres`. The end-to-end agent-turn tests in
-`tests/test_services/test_agent_turn_e2e.py` run real turns through the queue worker and replace
-only the provider adapter (`tests/fakes/provider.py`) and Telegram (`tests/fakes/telegram.py`).
-Reuse those fakes for new end-to-end tests instead of patching the orchestration path.
+Tests marked `postgres` run only when `POSTGRES_TEST_DSN` points at a database (`pytest -m
+postgres`); otherwise they are skipped. They share one schema in that database and empty tables
+with `TRUNCATE` between tests, so the Postgres suite is serial-only: do not run it with parallel
+workers, and give each concurrent session its own database. Squad tests reset their tables with
+`reset_squad_runtime_tables` from `tests/postgres_fixtures.py` instead of truncating them directly.
+Fixtures that reset Koda's shared Postgres backends call `close_shared_postgres_backends` from the
+same module, which closes their connection pools; clearing the cache directly leaves those
+connections open until the server refuses new clients.
+
+The end-to-end agent-turn tests in `tests/test_services/test_agent_turn_e2e.py` run real turns
+through the queue worker and replace only the provider adapter (`tests/fakes/provider.py`) and
+Telegram (`tests/fakes/telegram.py`). Reuse those fakes for new end-to-end tests instead of
+patching the orchestration path.
 
 To run the same local gate from one command:
 

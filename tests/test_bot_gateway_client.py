@@ -25,6 +25,8 @@ import pytest
 
 from koda.internal_rpc import bot_gateway as client_mod
 
+ROOT = Path(__file__).resolve().parents[1]
+
 
 class _FakeStub:
     def __init__(self) -> None:
@@ -136,7 +138,7 @@ def test_default_flag_is_off() -> None:
 def test_main_dispatches_to_runner_only_when_flag_is_set() -> None:
     """Search the source so the test stays stable through formatter
     reflows: __main__ must guard the gateway runner behind the flag."""
-    src = Path("koda/__main__.py").read_text()
+    src = (ROOT / "koda" / "__main__.py").read_text()
     assert "if BOT_GATEWAY_ENABLED:" in src
     assert "run_bot_gateway_consumer(app)" in src
     # Legacy path must still exist for the off-flag case.

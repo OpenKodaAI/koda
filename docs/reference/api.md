@@ -20,7 +20,7 @@ Most control-plane routes require one of:
 - a bearer token created by `/api/control-plane/auth/tokens`
 - the break-glass `CONTROL_PLANE_API_TOKEN`, when configured
 
-Public or bootstrap routes are explicitly marked with `security: []` in the OpenAPI. `GET /api/control-plane/onboarding/status` is public with an optional bearer (`security: [{}, {"bearerAuth": []}]`): without a credential it returns only `has_owner` and `bootstrap_required`; see [`../security/authentication.md`](../security/authentication.md). Auth-adjacent routes are rate-limited more strictly than normal operator routes.
+Public or bootstrap routes are explicitly marked with `security: []` in the OpenAPI; `tests/test_control_plane_auth_matrix.py` checks the OpenAPI security of every operation against what its route does without a session. `GET /api/control-plane/onboarding/status` is public with an optional bearer (`security: [{}, {"bearerAuth": []}]`): without a credential it returns only `has_owner` and `bootstrap_required`; see [`../security/authentication.md`](../security/authentication.md). Auth-adjacent routes are rate-limited more strictly than normal operator routes.
 
 ## Control Plane
 
@@ -51,6 +51,15 @@ Rule semantics: among the rules that match a call, the most restrictive decision
 ## Runtime API
 
 The runtime API powers the dashboard's live operational rooms. It is not published as a separate OpenAPI document; use this inventory together with `koda/services/runtime/api.py` and the dashboard runtime contracts.
+
+Every runtime route, including the WebSocket upgrades, needs an `X-Runtime-Token` header. This is a short-lived token that the control plane signs with the agent's `RUNTIME_LOCAL_UI_TOKEN`. It is scoped to one agent and to a capability. The worker compares the token's agent with its own `AGENT_ID`, but it skips this check when either one is empty. A token without an agent scope, or any token sent to a worker started without `AGENT_ID`, passes the agent check. The control plane always signs a token for one agent and the supervisor always sets `AGENT_ID`, so supervised workers are not affected. Set `AGENT_ID` on any worker you start by hand. The control plane issues the token as `runtime_request_token` from `GET /api/control-plane/agents/{agent_id}/runtime-access?capability=read|mutate|attach`, and the dashboard relay fetches it on the server side.
+
+- Read routes and the WebSocket routes need `read`.
+- Write and control routes need `mutate`. The two `attach` routes need `attach`.
+- The terminal and browser WebSockets also need the attach token that the matching `attach` route returns. Send it in `X-Koda-Attach-Token` or in the `token` query parameter.
+- `GET /api/runtime/tasks/{task_id}?include_sensitive=true` also needs a sensitive scope token in `X-Runtime-Access-Scope`. The control plane returns it as `access_scope_token` when you call it with `include_sensitive=true`.
+
+The worker answers `403` to a missing, forged, expired or wrongly scoped token, and to any token when it has no `RUNTIME_LOCAL_UI_TOKEN`. A WebSocket upgrade is refused with `403`. `/health`, `/ready` and `/metrics` on the same port need no token.
 
 Read routes:
 
@@ -117,7 +126,9 @@ Automatic (scheduled and catch-up) runs follow the agent's current policy rather
 `payload.read_only` and `payload.allowed_paths` are stored with the job but are not enforced yet: a run is not stopped from writing and is not limited to those paths. `read_only: true` only pins `safety_mode` to `dry_run_required`, which is already the default. The dashboard routine editor labels both settings "Not enforced yet", does not set them on new routines, and leaves the values an existing routine stores unchanged when it is edited.
 
 `POST /api/runtime/tasks/{task_id}/cancel` and `/interrupt` stop a task that is queued, running, or
-retrying and return `action: "cancelled"` (or `"interrupted"`) with its `final_phase`. A task without a
+retrying and return `action: "cancelled"` (or `"interrupted"`) with its `final_phase`. A stopped task
+delivers no response and starts no further provider run (no streaming fallback, provider fallback, or
+retry), also when its provider exits while the runtime kernel is still stopping it. A task without a
 runtime environment that has already finished (for example completed, failed, cancelled, or
 `needs_review`) is left as it is: the route answers `409` with `error`, `action: "not_running"`,
 `ok: false`, its `status`, and its unchanged `final_phase`.

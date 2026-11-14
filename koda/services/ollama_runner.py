@@ -14,6 +14,7 @@ from urllib import request as urllib_request
 
 from koda.config import AGENT_ID, OLLAMA_TIMEOUT
 from koda.logging_config import get_logger
+from koda.services.http_client import guarded_urlopen
 from koda.services.provider_auth import (
     PROVIDER_API_KEY_ENV_KEYS,
     PROVIDER_AUTH_MODE_ENV_KEYS,
@@ -215,7 +216,10 @@ def _perform_chat_request(
         headers=_request_headers(env),
         method="POST",
     )
-    with urllib_request.urlopen(request, timeout=OLLAMA_TIMEOUT) as response:
+    # Local mode talks to the server the operator configured (or the local
+    # default), often on loopback or a LAN: a private-network grant for that
+    # origin. Ollama Cloud is a public endpoint and gets no grant.
+    with guarded_urlopen(request, timeout=OLLAMA_TIMEOUT, allow_private=auth_mode != "api_key") as response:
         body = response.read().decode("utf-8")
     return json.loads(body or "{}"), auth_mode
 

@@ -10,6 +10,8 @@ import pytest
 from koda.squads.capabilities import CapabilitySummary
 from koda.squads.semantic_router import SquadSemanticRouter, reset_semantic_router_cache_for_tests
 
+ROOT = Path(__file__).resolve().parents[2]
+
 
 def _summary(agent_id: str, *, role: str = "", delegate_when: str = "", do_not_delegate: str = "") -> CapabilitySummary:
     return CapabilitySummary(
@@ -128,8 +130,8 @@ async def test_capability_vectors_are_cached(monkeypatch: pytest.MonkeyPatch) ->
 
 
 def test_routing_source_keeps_only_mention_regex() -> None:
-    routing_source = Path("koda/squads/routing.py").read_text(encoding="utf-8")
-    engine_source = Path("koda/squads/coordinator_engine.py").read_text(encoding="utf-8")
+    routing_source = (ROOT / "koda" / "squads" / "routing.py").read_text(encoding="utf-8")
+    engine_source = (ROOT / "koda" / "squads" / "coordinator_engine.py").read_text(encoding="utf-8")
 
     assert "_COLLABORATION_RE" not in routing_source
     assert "_STOPWORDS" not in routing_source

@@ -18,10 +18,13 @@ to silent message loss.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
 from koda.state import telegram_offsets
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_get_last_offset_returns_zero_for_unknown_agent() -> None:
@@ -88,8 +91,6 @@ def test_default_dropping_pending_updates_is_false() -> None:
 def test_main_module_uses_config_flag_not_hardcoded_true() -> None:
     """``__main__.py`` must read the env-driven flag, not pass a literal
     ``True`` into ``run_polling``."""
-    from pathlib import Path
-
-    src = Path("koda/__main__.py").read_text()
+    src = (ROOT / "koda" / "__main__.py").read_text()
     assert "drop_pending_updates=TELEGRAM_DROP_PENDING_UPDATES" in src
     assert "drop_pending_updates=True" not in src

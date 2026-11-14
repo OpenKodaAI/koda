@@ -33,6 +33,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from koda.control_plane import crypto
+from tests.postgres_fixtures import close_shared_postgres_backends
 
 pytestmark = [pytest.mark.postgres]
 
@@ -73,9 +74,7 @@ async def _clear_key_tables(dsn: str) -> None:
 async def key_db(
     migrated_postgres: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> AsyncIterator[SimpleNamespace]:
-    from koda.knowledge.v2 import common as common_mod
-
-    common_mod._SHARED_POSTGRES_BACKENDS.clear()
+    close_shared_postgres_backends()
     await _clear_key_tables(migrated_postgres)
     key_file = tmp_path / "state" / "control_plane" / ".master.key"
     monkeypatch.setattr(crypto, "CONTROL_PLANE_MASTER_KEY", "")
@@ -88,7 +87,7 @@ async def key_db(
     finally:
         crypto.clear_fernet_cache()
         await _clear_key_tables(migrated_postgres)
-        common_mod._SHARED_POSTGRES_BACKENDS.clear()
+        close_shared_postgres_backends()
 
 
 async def _fingerprint_rows(dsn: str) -> list[asyncpg.Record]:

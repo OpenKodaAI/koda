@@ -108,10 +108,6 @@ def _random_code() -> str:
     return "-".join(chunks)
 
 
-def _normalize_bootstrap_code(value: Any) -> str:
-    return str(value or "").strip().upper()
-
-
 def _normalize_recovery_code(value: Any) -> str:
     """Return the canonical ``XXXX-XXXX-XXXX`` form of a typed recovery code.
 
@@ -125,6 +121,17 @@ def _normalize_recovery_code(value: Any) -> str:
     """
     compact = "".join(ch for ch in str(value or "") if ch.isascii() and ch.isalnum()).upper()
     return "-".join(compact[index : index + 4] for index in range(0, len(compact), 4))
+
+
+def _normalize_bootstrap_code(value: Any) -> str:
+    """Return the canonical form of a setup (bootstrap) code.
+
+    Setup codes share the recovery-code canonicalizer, so dashes, spaces and
+    case never matter. It is applied on both sides: to the stored code (the
+    issued hash, the ``bootstrap.txt`` code, a ``CONTROL_PLANE_BOOTSTRAP_CODE``
+    seed) and to what the operator types.
+    """
+    return _normalize_recovery_code(value)
 
 
 @lru_cache(maxsize=1)
@@ -251,7 +258,7 @@ class OperatorAuthService:
         for _ in range(_BOOTSTRAP_INSERT_ATTEMPTS):
             code = _random_code()
             bootstrap_id = f"boot_{uuid4().hex}"
-            code_hash = _hash_secret(code)
+            code_hash = _hash_secret(_normalize_bootstrap_code(code))
             issued_at = now_iso()
             try:
                 inserted = execute(
@@ -342,17 +349,18 @@ class OperatorAuthService:
         return fetch_one("SELECT * FROM cp_bootstrap_codes WHERE code_hash = ?", (_hash_secret(normalized),))
 
     def _bootstrap_file_matches(self, code: str) -> bool:
-        file_code = read_bootstrap_file()
-        if not file_code:
-            return False
-        return compare_digest(_normalize_bootstrap_code(file_code), _normalize_bootstrap_code(code))
+        file_code = _normalize_bootstrap_code(read_bootstrap_file())
+        typed = _normalize_bootstrap_code(code)
+        # Both canonical forms are ASCII; an empty one (no letters or digits)
+        # never matches, not even another empty one.
+        return bool(file_code and typed) and compare_digest(file_code, typed)
 
     def exchange_bootstrap_code(self, code: str) -> dict[str, Any]:
         if self.has_owner():
             raise ValueError("Owner account already exists. Sign in instead.")
-        normalized = _normalize_bootstrap_code(code)
-        if not normalized:
+        if not str(code or "").strip():
             raise ValueError("Setup code is required.")
+        normalized = _normalize_bootstrap_code(code)
         row = fetch_one("SELECT * FROM cp_bootstrap_codes WHERE code_hash = ?", (_hash_secret(normalized),))
         if row is None and self._bootstrap_file_matches(normalized):
             row = self._insert_bootstrap_code(code=normalized, label="bootstrap_file")

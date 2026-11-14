@@ -31,7 +31,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from tests.postgres_fixtures import stop_primary_bridge
+from tests.postgres_fixtures import close_shared_postgres_backends, stop_primary_bridge
 
 pytestmark = [pytest.mark.postgres]
 
@@ -40,9 +40,7 @@ _SCHEDULER_TABLES = ("scheduled_job_events", "scheduled_job_runs", "scheduled_jo
 
 @pytest.fixture
 async def scheduler_db(migrated_postgres: str) -> AsyncIterator[str]:
-    from koda.knowledge.v2 import common as common_mod
-
-    common_mod._SHARED_POSTGRES_BACKENDS.clear()
+    close_shared_postgres_backends()
     conn = await asyncpg.connect(migrated_postgres)
     try:
         tables = ", ".join(f'knowledge_v2."{name}"' for name in _SCHEDULER_TABLES)

@@ -15,12 +15,42 @@ mechanisms, checked in priority order:
 1. **Legacy registration token** — obtained via `koda auth issue-code`, then
    `POST /api/control-plane/auth/bootstrap/exchange`. Still supported for automated installs.
 2. **Bootstrap code (recommended for VPS)** — on first boot the control plane writes
-   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) and prints it to the
-   container log once. The operator SSHs in, reads the file, pastes it into `/setup`, and the
+   `${STATE_ROOT_DIR}/control_plane/bootstrap.txt` (mode `0600`) and prints a generated code to
+   the container log once (never a `CONTROL_PLANE_BOOTSTRAP_CODE` seed). The operator SSHs in, reads the file, pastes it into `/setup`, and the
    file is deleted after registration.
 3. **Loopback trust (dev only)** — when `ALLOW_LOOPBACK_BOOTSTRAP=true` and the request comes
    from `127.0.0.1` / `::1` with no `X-Forwarded-For` hop, no code is required. This mode is
    refused at boot when `KODA_ENV=production`.
+
+Setup codes are matched in the same canonical form as recovery codes (see
+[Recovery code lifecycle](#recovery-code-lifecycle)), on both sides: the stored code (the hash
+of a `koda auth issue-code` code, the code in `bootstrap.txt`, or a `CONTROL_PLANE_BOOTSTRAP_CODE`
+seed) and the code the operator types are reduced to their ASCII letters and digits,
+upper-cased and regrouped in fours (`_normalize_bootstrap_code` in
+`koda/control_plane/operator_auth.py`). `abcd efgh jklm`, `ABCDEFGHJKLM` and
+` abcd-efgh-jklm ` all register the owner with the issued `ABCD-EFGH-JKLM`, through
+`POST /api/control-plane/auth/register-owner` and `POST /api/control-plane/auth/bootstrap/exchange`
+alike. Every other character is ignored: whitespace, separators of any kind (an en dash, a
+trailing non-breaking space) and any other non-ASCII character, so `ABCD-EFGH-JKLMé` matches
+too. A missing, wrong or extra letter or digit, or a non-ASCII look-alike typed in place of one
+(for example `ſ` in place of `S`), fails with the same generic `Setup code is invalid or expired.`
+The `/setup` screen's code field takes at most 12 characters, from
+`ABCDEFGHJKLMNPQRSTUVWXYZ23456789` only (no `I`, `O`, `0` or `1`), the alphabet of generated codes:
+it drops any other character as it is typed and submits the dashed, uppercase form.
+
+The same rule applies to a `CONTROL_PLANE_BOOTSTRAP_CODE` seed: only its ASCII letters and digits
+count towards its strength. `Hunter2!!` is matched as `HUNT-ER2` (7 letters and digits), and
+`!!!!a!!!!` is matched by a typed `a`. A seed meant to be typed on `/setup` should therefore be
+exactly 12 characters from that alphabet, separators aside (fewer is weaker than a generated code):
+`Wb7k-Qz3m-Np4x` is typed and matched as `WB7K-QZ3M-NP4X`. A seed with more letters and digits, or with `I`, `O`, `0` or `1`, can only be sent
+to the API (`POST /api/control-plane/auth/register-owner`): the `/setup` field would submit fewer
+characters than the seed has, and the code would not match. When the control plane writes
+`bootstrap.txt`, its `bootstrap_file_written` log line carries a generated code, once, but never a
+seed: for a seed it names `code_source=CONTROL_PLANE_BOOTSTRAP_CODE` instead, as the operator
+already knows the code. From a seed it also logs a `bootstrap_code_seed_weak` warning when the seed
+has fewer than 12 ASCII letters and digits (a generated code has 12) and a
+`bootstrap_code_seed_not_typeable` warning when the `/setup` field cannot take it, neither with the
+seed; a seed with no ASCII letter or digit never matches.
 
 Passwords are hashed with **Argon2id** (`argon2-cffi` defaults). The password must:
 
@@ -105,6 +135,20 @@ talks directly to `127.0.0.1:8090` without a valid session will be rejected. The
 proxy at `5174` is defence in depth, not the only line of defence: `apps/web/src/lib/control-plane.ts`
 unseals the operator-session cookie and forwards the bearer token to the backend, so the
 normal dashboard flow is unaffected.
+
+The middleware checks only `/api/control-plane/*`. The supervisor's other routes (`/`, `/setup`,
+`/health`, `/openapi/control-plane.json` and the `/cluster/*` deploy hooks) answer without a
+session. `tests/test_control_plane_auth_matrix.py` sends a request to every route the supervisor
+registers, through its own middleware stack, without a session and with one. It fails when a
+route answers without a session and the OpenAPI document does not let that operation through
+without a token. It also fails when the routes that answer without a session differ, by path or
+method, from the public routes listed above or from the dashboard list. Outside
+`/api/control-plane/` it pins the supervisor routes listed here (`ANONYMOUS_ROOT_ROUTES` in the
+test, with their `HEAD` twins): a new route there that answers without a session fails the test,
+even when the OpenAPI document marks it `security: []`, until it is added to that set. It sends
+other spellings of each public path (a sub-path, a trailing slash, another case or method, dot
+segments, encoded slashes) and routes added under or next to one, and fails if any of them
+reaches a handler without a session.
 
 ### Onboarding status before login
 
@@ -261,9 +305,10 @@ triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
   hop. Requests from any other browser carry its address like every other auth call.
 - `gateway` (in either setting) is the container's IPv4 default gateway, which is where
   Docker's port proxy connects from: a reverse proxy on the Docker host reaches the
-  dashboard, and the API, from that address. A reverse proxy that forwards
-  `/api/control-plane/*` straight to the API, such as the bundled `proxy/nginx.conf`, needs
-  `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`; until then all of its clients share one
+  dashboard, and the API, from that address. Browser requests reach the API through the
+  dashboard. A reverse proxy that forwards requests straight to the API, as the bundled
+  `proxy/nginx.conf` does for API-token requests (`Authorization: Bearer`), needs
+  `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`; until then all of those clients share one
   bucket. A proxy on another host (`WEB_PUBLISH_ADDRESS`) is trusted by its IP:
   `WEB_TRUSTED_PROXIES=gateway,203.0.113.5`. `WEB_TRUSTED_PROXIES` takes no hostnames, so a
   proxy container on the Compose network is trusted by a fixed `ipv4_address`

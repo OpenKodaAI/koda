@@ -487,20 +487,20 @@ Owner QA · Risk low · Gate none · **done** · Deps —
 - **Tests:** two concurrent `pytest` sessions; unit test for port selection · **Evidence:** VALIDATION_REPORT.md "M0-E2-T1" (two concurrent full runs 4928 passed each with a decoy guard on 50065; per-session Unix socket instead of a port, after review)
 
 #### M0-E2-T2 · Integration fixture fails instead of skipping in CI
-Owner QA · Risk low · Gate none · **ready** · Deps —
+Owner QA · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-174, F-QA-04
 - **Files:** `tests/integration/conftest.py` (~44)
 - **Do:** under `CI=1`, a failed `cargo build` fails the session. Always run the incremental build, and never reuse a stale binary.
 - **Done when:** a simulated build failure turns the job red. Local behaviour without CI is unchanged.
-- **Tests:** fixture unit test with a failing build command · **Evidence:** —
+- **Tests:** fixture unit test with a failing build command · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (tests/integration/test_rust_build_fixture.py: a simulated build failure fails under CI and skips with a message locally)
 
 #### M0-E2-T3 · Test hygiene: anchored paths, shared truncate helper, fixture docs
-Owner QA · Risk low · Gate none · **ready** · Deps —
+Owner QA · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-173, D-146, D-155
 - **Files:** the 7 tests that read `Path('koda/...')` or `Path('docs/...')` (for example `tests/test_telegram_offset_persistence.py`), `tests/test_squads/*`, `tests/postgres_fixtures.py`
 - **Do:** anchor paths with `Path(__file__).resolve().parents[N]`. Extend `reset_squad_runtime_tables` to every squad table and use it everywhere. Fix the `db_transaction` docstring and document that the Postgres suite is serial-only.
 - **Done when:** the 7 files pass when pytest runs from `/tmp`. No direct squad `TRUNCATE` remains.
-- **Tests:** G, G-PG · **Evidence:** —
+- **Tests:** G, G-PG · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (the 7 files pass from /tmp; squad tables reset only through reset_squad_runtime_tables; leaked bridge-loop pools closed)
 
 #### M0-E2-T4 · Global approval fixture becomes opt-in; D-011 regression tests
 Owner QA (SEC) · Risk med · Gate none · **ready** · Deps —
@@ -535,22 +535,22 @@ Owner FE (QA) · Risk low · Gate none · **ready** · Deps —
 - **Tests:** G · **Evidence:** —
 
 #### M0-E2-T8 · Squads projection tests are independent of machine speed
-Owner QA · Risk low · Gate none · **ready** · Deps —
+Owner QA · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-225
 - **Files:** `tests/test_squads/test_projections.py`, `koda/squads/projections.py`, `koda/squads/coordinator_engine.py` (TTL inputs only if the cause is there)
 - **Do:** reproduce the two observed failures under CPU pressure; find the time-dependent input; make the tests set or freeze time instead of relying on wall-clock speed. If the root cause is in production code (a lease that can lapse mid-request), fix it there and test that path.
 - **Done when:** the two tests pass 50 consecutive runs under induced load, and the root cause is recorded in TECHNICAL_DEBT.md.
-- **Tests:** the reproduction loop; G-PG · **Evidence:** —
+- **Tests:** the reproduction loop; G-PG · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (50 of 50 consecutive runs of the two projection tests under 3 CPU burners; root cause recorded in TECHNICAL_DEBT.md D-225)
 
 #### M0-E3 — Characterisation safety net
 
 #### M0-E3-T1 · Control-plane auth middleware route-matrix test
-Owner SEC (QA) · Risk low · Gate none · **ready** · Deps —
+Owner SEC (QA) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-048, F-QA-22, F-SET-11, TD-079 (part)
 - **Files:** new `tests/test_control_plane_auth_matrix.py`. Read `koda/control_plane/api.py:329-368` and the public list in `apps/web/src/proxy.ts`.
 - **Do:** use an aiohttp TestClient over the supervisor-built middlewares and enumerate every registered route. Assert 401 without credentials except for the public allowlist. Assert the allowlist equals the OpenAPI `security: []` set. Record any difference from the web list (a known drift is `onboarding/readiness`). Cover prefix variants such as `/auth/login/x`.
 - **Done when:** all 302 routes are covered, and adding an unauthenticated route fails the test.
-- **Tests:** the new test; G · **Evidence:** —
+- **Tests:** the new test; G · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (tests/test_control_plane_auth_matrix.py covers every registered route from the router, compares with the route-based public table and the OpenAPI, and pins anonymous root routes; a new unauthenticated route fails it)
 
 #### M0-E3-T2 · Agent-turn characterisation tests on real Postgres
 Owner QA (BE) · Risk low · Gate none · **ready** · Deps —
@@ -592,12 +592,12 @@ Owner QA (AIM) · Risk low · Gate none · **ready** · Deps —
 - **Tests:** G-PG, G-RS (build) · **Evidence:** —
 
 #### M0-E3-T6 · Operator auth on real Postgres
-Owner QA (SEC) · Risk low · Gate none · **ready** · Deps —
+Owner QA (SEC) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-187, F-SET-01..05
 - **Files:** `tests/test_control_plane_operator_auth.py:19-500`
 - **Do:** replace the SQL-string fake with Postgres-backed tests for setup, login, recovery, password change and personal API tokens. Keep the DB-free unit tests.
 - **Done when:** the fake is gone and the auth flows pass on Postgres. Behaviour is unchanged, so authentication.md needs no update.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (the SQL-string fake is gone; tests/test_control_plane_operator_auth.py runs every auth flow on real Postgres, including the wave-2B onboarding and auth-status tests ported in the integration)
 
 #### M0-E3-T7 · Playwright smoke in CI
 Owner QA (OPS) · Risk med · Gate infra: Docker (evidence from CI) · **ready** · Deps —
@@ -616,7 +616,7 @@ Owner QA · Risk low · Gate none · **pending** · Deps M0-E1-T2, M0-E3-T2
 - **Tests:** G · **Evidence:** —
 
 #### M0-E3-T9 · Worker runtime API authorization matrix
-Owner SEC (QA) · Risk low · Gate none · **ready** · Deps —
+Owner SEC (QA) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** mission §8 (authorization on every privileged operation); F-MON-15; R-57
 - **Files:** read `koda/services/runtime/api.py` (`setup_runtime_routes` ~1802) and `koda/services/runtime_access_service.py`; new `tests/test_services/runtime/test_runtime_api_auth_matrix.py`
 - **Do:** start the worker health server app in an aiohttp TestClient and enumerate every route that `setup_runtime_routes` registers (about 57 HTTP and WebSocket routes). For each route assert:
@@ -626,7 +626,7 @@ Owner SEC (QA) · Risk low · Gate none · **ready** · Deps —
 
   Any route that fails becomes a strict xfail that names a new task.
 - **Done when:** every registered route is in the matrix, and registering a new route without an authorization decision fails the test.
-- **Tests:** the new test; G · **Evidence:** —
+- **Tests:** the new test; G · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (tests/test_services/runtime/test_runtime_api_auth_matrix.py: every registered worker route has an authorization decision; 169 strict xfails pin the empty-agent-scope gap D-241)
 
 #### M0-E3-T10 · BFF route inventory test
 Owner FE (SEC) · Risk low · Gate none · **ready** · Deps —
@@ -794,20 +794,20 @@ Owner SEC (AIM) · Risk med · Gate needs-approval (§13: new unauthenticated ro
 - **Tests:** route matrix; relay unit tests; changelog entry · **Evidence:** —
 
 #### M1-E1-T16 · Bundled reverse proxy matches the auth model
-Owner OPS (SEC) · Risk med · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-004) merged
+Owner OPS (SEC) · Risk med · Gate none · **in-review** · Deps DEFECT-BATCH-1 (D-004) merged
 - **Addresses:** D-220, D-004 (remainder), R-35
 - **Files:** `packages/cli/release/bundle/proxy/nginx.conf`, `packages/cli/release/bundle/MIGRATION.md`, `docs/install/vps.md`, `CHECKSUMS.txt` (via `scripts/release_metadata.py --write`)
 - **Do:** route `/`, `/setup`, `/login`, `/forgot-password`, `/control-plane` and the browser-facing `/api/control-plane/*` and `/api/runtime/*` paths to the dashboard; send to :8090 only requests that carry `Authorization` (API-token clients) and `/openapi/control-plane.json`; add WebSocket upgrade headers for the runtime relay; set `X-Forwarded-For` so `CONTROL_PLANE_TRUSTED_PROXIES` sees the real client.
 - **Done when:** a contract test over the rendered config proves each route's upstream, and browser login, the runtime relay WebSocket and an API-token call work through it (docker smoke in CI).
-- **Tests:** config contract test; G; G-CI; changelog entry · **Evidence:** —
+- **Tests:** config contract test; G; G-CI; changelog entry · **Evidence:** **Missing for done:** the docker smoke run in CI (scripts/docker_smoke.sh verify_bundled_proxy). VALIDATION_REPORT.md "WAVE-3": tests/test_release_proxy_routing.py contract test over the rendered config, and the proxy tests against a real nginx 1.24 binary (9 of 9) with stub upstreams; client_max_body_size 13m and the Host port fixed in the integration
 
 #### M1-E1-T17 · Setup codes accept the same input forms as recovery codes
-Owner SEC · Risk low · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-018) merged
+Owner SEC · Risk low · Gate none · **done** · Deps DEFECT-BATCH-1 (D-018) merged
 - **Addresses:** D-221
 - **Files:** `koda/control_plane/operator_auth.py` (`_normalize_bootstrap_code` ~107, bootstrap comparison), `koda/control_plane/bootstrap_file.py`, `docs/security/authentication.md`, tests
 - **Do:** canonicalize setup codes with the recovery-code canonicalizer on both the stored and the typed side, so dashes, spaces and case do not matter.
 - **Done when:** a setup code typed without dashes, with spaces or in lower case registers the owner; a wrong code still fails with the generic error.
-- **Tests:** unit tests; route test; G · **Evidence:** —
+- **Tests:** unit tests; route test; G · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (setup codes typed lowercase, compact or with spaces register the owner; a wrong code keeps the generic error; seeds are never logged)
 
 #### M1-E1-T18 · Account-independent rate-limit message on auth screens
 Owner FE (SEC) · Risk low · Gate none · **in-progress** (`wf_3b822fa2-abc`, wave 4) · Deps DEFECT-BATCH-1 (D-004) merged
@@ -928,12 +928,12 @@ Owner SEC · Risk low · Gate none · **pending** · Deps M1-E3-T1
 - **Tests:** unit tests; G · **Evidence:** —
 
 #### M1-E3-T8 · Remaining outbound fetches go through the guarded client
-Owner SEC · Risk med · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-003) merged; coordinate with M1-E3-T3, M1-E3-T4 and M1-E3-T7 (same files)
+Owner SEC · Risk med · Gate none · **done** · Deps DEFECT-BATCH-1 (D-003) merged; coordinate with M1-E3-T3, M1-E3-T4 and M1-E3-T7 (same files)
 - **Addresses:** D-223, TD-040 (classifier part)
 - **Files:** `koda/services/mcp_client.py` (`_validate_url`, `_urlopen_safely`), `koda/services/artifact_ingestion.py` (yt-dlp), `koda/services/generation_stubs.py` (`_download_image_url`), `koda/services/provider_auth.py` (verifier), the Ollama and control-plane runtime fetches
 - **Do:** use the M1-E3-T1 classifier and validated-IP connect for every listed fetch, ignore `*_proxy` env for guarded requests, normalize yt-dlp input to a canonical watch URL as `link_analyzer` does, and give operator-configured local endpoints (Ollama, Tailscale MCP servers) an explicit private-network grant instead of a blanket bypass.
 - **Done when:** the SSRF probe matrix (0.0.0.0, IPv4-mapped IPv6, 100.64.0.0/10, NAT64, DNS rebinding, cross-origin redirect) is rejected on every listed path, and configured local endpoints still work.
-- **Tests:** shared probe matrix applied per path; G · **Evidence:** —
+- **Tests:** shared probe matrix applied per path; G · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (tests/security/test_outbound_fetch_guard.py: the probe matrix rejected on every listed path, 71 of 85 new cases failing before; configured local endpoints still work)
 
 #### M1-E4 — Tool execution and prompt-injection safety
 
@@ -1610,12 +1610,12 @@ Owner BE (SEC, FE) · Risk med · Gate none · **pending** · Deps M3-E2-T4
 - **Tests:** G-PG scenario; web component test for the confirmation; route matrix · **Evidence:** —
 
 #### M3-E2-T6 · Env-backed cancellation cannot fall through to a fallback
-Owner BE · Risk low · Gate none · **ready** · Deps DEFECT-BATCH-1 (D-009) merged
+Owner BE · Risk low · Gate none · **done** · Deps DEFECT-BATCH-1 (D-009) merged
 - **Addresses:** D-222
 - **Files:** `koda/services/queue_manager.py` (cancel path for env-backed tasks), `koda/services/runtime/controller.py`
 - **Do:** mark the task cancelled before signalling the kernel, and check the flag before any retry or streaming fallback.
 - **Done when:** a fake-kernel test that exits the provider during termination shows no fallback and a cancelled final phase.
-- **Tests:** unit test with a fake kernel; G · **Evidence:** —
+- **Tests:** unit test with a fake kernel; G · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (fake-kernel tests: provider exit during termination shows no fallback and a cancelled final phase; integration fixed a CancelledError in _run_fallback's finally)
 
 #### M3-E3 — Governed tools (journey: a gated tool call is approved and executed)
 
