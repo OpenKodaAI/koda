@@ -74,7 +74,7 @@ describe("ForgotPasswordScreen", () => {
     expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
   });
 
-  it("shows the recovery code in the issued uppercase format and submits it upper-cased", async () => {
+  it("shows the recovery code in the issued uppercase format and submits it as typed", async () => {
     (requestJson as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true });
     const user = userEvent.setup();
     render(
@@ -99,10 +99,39 @@ describe("ForgotPasswordScreen", () => {
       RequestInit,
     ];
     expect(url).toBe("/api/control-plane/auth/password/recover");
+    // The control plane is the only canonicalizer; the client just trims.
     expect(JSON.parse(String(init.body))).toMatchObject({
       identifier: "owner",
-      recovery_code: "ABCD-EFGH-JKLM",
+      recovery_code: "abcd-efgh-jklm",
     });
+  });
+
+  it("does not case-map non-ASCII look-alikes into the submitted recovery code", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true });
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|username/i), "owner");
+    // JS toUpperCase() folds "ſ" (long s) into "S", which would turn this into the
+    // valid-looking ABSD-EFGH-JKLM. The control plane drops non-ASCII instead, so
+    // the client must pass the code through without case mapping.
+    await user.type(screen.getByLabelText(/recovery/i), "abſd-efgh-jklm");
+    const passwordFields = screen.getAllByLabelText(/password/i);
+    await user.type(passwordFields[0], "BrandNewPassw0rd!Now");
+    await user.type(passwordFields[1], "BrandNewPassw0rd!Now");
+    await user.click(screen.getByRole("button", { name: /reset/i }));
+
+    expect(requestJson).toHaveBeenCalledTimes(1);
+    const [, init] = (requestJson as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    const body = JSON.parse(String(init.body)) as { recovery_code: string };
+    expect(body.recovery_code).toBe("abſd-efgh-jklm");
+    expect(body.recovery_code).not.toBe("ABSD-EFGH-JKLM");
   });
 
   it("keeps the caret in place when the recovery code is edited mid-string", async () => {
