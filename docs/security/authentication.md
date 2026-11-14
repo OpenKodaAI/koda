@@ -310,22 +310,39 @@ one of them is compromised the whole sheet has to be rotated.
 
 ## Rate limits (bucket budgets)
 
-Per client address, enforced in `koda/control_plane/rate_limit.py`:
+Per client address, enforced in `koda/control_plane/rate_limit.py`. A bucket allows its
+whole budget as a burst and frees capacity evenly over its window, so once a burst has used
+it up, the next request is allowed after the window divided by the budget:
 
-| Endpoint                                            | Budget               |
-| --------------------------------------------------- | -------------------- |
-| `POST /auth/login`                                  | 10 requests / 5 min  |
-| `POST /auth/password/recover`                       | 10 requests / hour   |
-| `POST /auth/password/change`                        | 20 requests / hour   |
-| `PATCH /auth/profile`                               | 60 requests / hour   |
-| `POST /auth/register-owner`                         | 30 requests / hour   |
-| `POST /auth/recovery-codes/regenerate`              | 10 requests / hour   |
-| `POST /auth/bootstrap/exchange`                     | 30 requests / hour   |
-| `POST /auth/bootstrap/codes`                        | 10 requests / hour   |
+| Endpoint                               | Budget              | Wait after a burst |
+| -------------------------------------- | ------------------- | ------------------ |
+| `POST /auth/login`                     | 10 requests / 5 min | 30 s               |
+| `POST /auth/password/recover`          | 10 requests / hour  | 6 min              |
+| `POST /auth/password/change`           | 20 requests / hour  | 3 min              |
+| `PATCH /auth/profile`                  | 60 requests / hour  | 1 min              |
+| `POST /auth/register-owner`            | 30 requests / hour  | 2 min              |
+| `POST /auth/recovery-codes/regenerate` | 10 requests / hour  | 6 min              |
+| `POST /auth/bootstrap/exchange`        | 30 requests / hour  | 2 min              |
+| `POST /auth/bootstrap/codes`           | 10 requests / hour  | 6 min              |
 
 Plus the per-address general bucket (`CONTROL_PLANE_RATE_LIMIT`, default 120/min) and
 the stricter auth-failure bucket (`CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT`, default 5/min
-triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
+triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After` set to the
+whole seconds, rounded up, until the bucket that refused the request takes the next one:
+`Retry-After: 30` for login after a burst, `360` for recovery, `120` for setup. A bucket
+does not draw from a request it refuses, so retrying early does not extend its wait. The
+value follows only the client address's own requests, so it reveals nothing about an
+account.
+
+The dashboard's login, setup and recovery routes pass the `429` and its `Retry-After`
+through (`apps/web/src/lib/auth-rate-limited-response.ts`), and the `/login`, `/setup` and
+`/forgot-password` screens show a localized message with that wait, such as "Too many
+attempts. Wait 6 minutes and try again." (ADR-038). These buckets count requests per client
+address and answer the same way for existing and unknown accounts, so the message reveals
+nothing about an account. The dashboard's own per-client window (`apps/web/src/proxy.ts`,
+120 requests a minute) answers `429` with `Retry-After: 60`, the length of its window, and
+the screens show the same message. The `/settings/account` screen and its password-change
+and recovery-code routes do not show the wait yet.
 
 ### Which address a request is charged to
 
@@ -386,18 +403,26 @@ Account-level lockout remains on top of the rate limits: after
 `CONTROL_PLANE_OPERATOR_LOGIN_MAX_FAILURES` failed attempts, the row locks for
 `CONTROL_PLANE_OPERATOR_LOGIN_LOCKOUT_SECONDS`. This lockout is per account, not per client,
 so anyone who knows the identifier can still trigger it; the per-client buckets only stop one
-client from spending everyone else's budget.
+client from spending everyone else's budget. A locked account is not a `429`: it answers
+exactly like a wrong password, and the screens show the generic error, because a lockout
+message would reveal that the account exists.
 
 ## Side-channel mitigations
 
-- All auth-failure paths pad to a 300 ms floor (`_FAILURE_TIMING_FLOOR_SECONDS`) so the
-  caller cannot distinguish `user not found` from `wrong password` from `invalid recovery
-  code`.
+- Planned, not yet in place (timing floor pending M1-E1-T13): every auth-failure path pads
+  to a 300 ms floor (`_FAILURE_TIMING_FLOOR_SECONDS`) so the caller cannot distinguish
+  `user not found` from `wrong password` from `invalid recovery code` by response time.
+  Today the constant is `0.0` and nothing applies it: a login for an unknown identifier or a
+  locked account fails before any password hash is checked, so it answers faster than a
+  wrong password for an existing account.
 - Responses use a single generic error (`"Invalid credentials."`, or equivalent) without
-  leaking whether the identifier exists. The i18n layer binds every failure mode to the same
-  message in every language. The one exception is the plain-HTTP refusal
+  leaking whether the identifier exists. The i18n layer binds every failure mode (wrong
+  password, unknown user, locked account, invalid recovery code) to the same message in
+  every language. Two answers get their own message, because neither depends on the account:
+  the per-client `429`, which shows the wait since it is the same for every identifier (see
+  [Rate limits](#rate-limits-bucket-budgets)), and the plain-HTTP refusal
   (`error.code: "INSECURE_TRANSPORT"`), which the dashboard decides from the transport before
-  it reads any credential; see [Plain HTTP](#plain-http).
+  it reads any credential (see [Plain HTTP](#plain-http)).
 - The structured logging pipeline redacts `password`, `new_password`, `current_password`,
   `recovery_code`, `session_token`, `registration_token`, `bootstrap_code`, `code`,
   `totp_secret`, `api_key`, `secret`, `token`, `authorization`, and `cookie` keys.

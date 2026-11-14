@@ -6,10 +6,12 @@ import { INSECURE_TRANSPORT_ERROR_CODE } from "@/lib/web-operator-session-consta
 
 /**
  * The auth screens fold every credential failure into one generic message
- * (apps/web/CLAUDE.md, "Auth screens"). The plain-HTTP refusal is the one
- * exception, because the routes decide it from the transport before reading
- * any credential. This pins both halves: the guide names the exception, and no
- * screen branches on any other error code.
+ * (apps/web/CLAUDE.md, "Auth screens"). Two answers are the exceptions, because
+ * neither depends on an account: the plain-HTTP refusal, which the routes decide
+ * from the transport before reading any credential, and the per-client rate
+ * limit (a 429, ADR-038), which `rateLimitedAuthMessage` reads from the status.
+ * This pins both halves: the guide names the exceptions, and no screen branches
+ * on any error code but the transport refusal.
  */
 
 const WEB_ROOT = resolve(__dirname, "../..");
@@ -93,12 +95,14 @@ function reasonReads(fileName: string, source: string): ReasonRead[] {
 }
 
 describe("auth screens error contract", () => {
-  it("apps/web/CLAUDE.md names the transport refusal as the only specific auth error", () => {
+  it("apps/web/CLAUDE.md names the transport refusal and the rate limit as the only specific auth errors", () => {
     const rule = authScreensRule();
     expect(rule).toContain("Never introduce a branch that renders a specific error message");
+    expect(rule).toMatch(/only allowed exceptions are two/i);
     expect(rule).toContain(`\`${INSECURE_TRANSPORT_ERROR_CODE}\``);
-    expect(rule).toMatch(/only allowed exception/i);
     expect(rule).toMatch(/before any credential is read/i);
+    expect(rule).toContain("`rateLimitedAuthMessage`");
+    expect(rule).toContain("`429`");
   });
 
   it("branches on no error code but the transport refusal", () => {

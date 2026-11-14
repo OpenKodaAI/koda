@@ -1,9 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { SetupScreen } from "@/components/setup/setup-screen";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { ApiError } from "@/lib/errors";
+import {
+  type AppLanguage,
+  LOCALE_COOKIE_KEY,
+  SUPPORTED_LANGUAGES,
+  translateForLanguage,
+} from "@/lib/i18n";
 
 const replaceMock = vi.fn();
 const refreshMock = vi.fn();
@@ -24,11 +31,10 @@ vi.mock("@/lib/http-client", async () => {
 });
 
 import { requestJson } from "@/lib/http-client";
-import { ApiError } from "@/lib/errors";
 
-function renderSetup(props = {}) {
+function renderSetup(props = {}, language?: AppLanguage) {
   return render(
-    <I18nProvider>
+    <I18nProvider initialLanguage={language}>
       <SetupScreen
         authStatus={{
           authenticated: false,
@@ -51,6 +57,10 @@ beforeEach(() => {
   refreshMock.mockClear();
   (requestJson as ReturnType<typeof vi.fn>).mockReset();
   window.sessionStorage.clear();
+  // The i18n provider persists the active language and applies it on the next mount; reset
+  // it so every test, in any order, renders the language it asks for.
+  window.localStorage.clear();
+  document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
 });
 
 describe("SetupScreen (create account step)", () => {
@@ -185,5 +195,66 @@ describe("SetupScreen (create account step)", () => {
     expect(continueButton).toBeDisabled();
     await user.click(screen.getByRole("checkbox"));
     expect(continueButton).not.toBeDisabled();
+  });
+});
+
+describe("SetupScreen rate limiting (ADR-038)", () => {
+  function tr(language: AppLanguage, key: string, options?: Record<string, unknown>) {
+    return translateForLanguage(language, key, options);
+  }
+
+  function minutes(language: AppLanguage, value: number) {
+    return new Intl.NumberFormat(language, { style: "unit", unit: "minute", unitDisplay: "long" }).format(value);
+  }
+
+  async function submitSetup(language: AppLanguage) {
+    const user = userEvent.setup();
+    renderSetup({}, language);
+    // Look every field up before typing: the strength meter joins the password label.
+    const email = screen.getByLabelText(tr(language, "auth.setup.create_account.email"));
+    const password = screen.getByLabelText(tr(language, "auth.setup.create_account.password"));
+    const confirm = screen.getByLabelText(tr(language, "auth.setup.create_account.confirm_password"));
+    fireEvent.change(email, { target: { value: "owner@example.com" } });
+    fireEvent.change(password, { target: { value: "CorrectHorseBattery!9" } });
+    fireEvent.change(confirm, { target: { value: "CorrectHorseBattery!9" } });
+    await user.click(
+      screen.getByRole("button", { name: tr(language, "auth.setup.create_account.submit") }),
+    );
+  }
+
+  it.each(SUPPORTED_LANGUAGES)("tells a rate-limited client how long to wait in %s", async (language) => {
+    // The setup bucket (30 per hour) takes its next request 2 minutes after a burst.
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Too many attempts. Try again later.", 429, { retryAfterSeconds: 120 }),
+    );
+
+    await submitSetup(language);
+
+    const expected = tr(language, "auth.rate_limited.with_wait", { duration: minutes(language, 2) });
+    expect(expected).not.toBe("auth.rate_limited.with_wait");
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText("Too many attempts. Try again later.")).not.toBeInTheDocument();
+  });
+
+  it("asks to wait a moment when the response names no wait", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("rate limit exceeded", 429),
+    );
+
+    await submitSetup("en-US");
+
+    expect(await screen.findByText(tr("en-US", "auth.rate_limited.no_wait"))).toBeInTheDocument();
+    expect(screen.queryByText("rate limit exceeded")).not.toBeInTheDocument();
+  });
+
+  it("keeps any other setup failure on its own message", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Setup code is invalid or expired.", 400),
+    );
+
+    await submitSetup("en-US");
+
+    expect(await screen.findByText("Setup code is invalid or expired.")).toBeInTheDocument();
+    expect(screen.queryByText(tr("en-US", "auth.rate_limited.no_wait"))).not.toBeInTheDocument();
   });
 });

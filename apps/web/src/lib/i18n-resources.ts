@@ -700,6 +700,10 @@ export const resources = {
           fix_localhost: "Or open it on the host itself at a localhost address, for example through an SSH tunnel.",
           form_error: "This browser will not keep the session cookie over plain HTTP. Open the dashboard over HTTPS or at a localhost address.",
         },
+        rate_limited: {
+          with_wait: "Too many attempts. Wait {{duration}} and try again.",
+          no_wait: "Too many attempts. Wait a moment and try again.",
+        },
         session_expired: "Your session has expired. Sign in again to continue.",
         account_menu: {
           trigger_label: "Open account menu",
@@ -1403,6 +1407,10 @@ export const resources = {
           fix_proxy: "Sirva o painel por HTTPS através de um proxy reverso, como Caddy, Traefik, nginx ou tailscale serve.",
           fix_localhost: "Ou abra-o no próprio host por um endereço localhost, por exemplo através de um túnel SSH.",
           form_error: "Este navegador não guarda o cookie de sessão por HTTP simples. Abra o painel por HTTPS ou por um endereço localhost.",
+        },
+        rate_limited: {
+          with_wait: "Muitas tentativas. Aguarde {{duration}} e tente novamente.",
+          no_wait: "Muitas tentativas. Aguarde um momento e tente novamente.",
         },
         session_expired: "Sua sessão expirou. Entre novamente para continuar.",
         account_menu: {
@@ -2108,6 +2116,10 @@ export const resources = {
           fix_proxy: "Sirve el panel por HTTPS a través de un proxy inverso como Caddy, Traefik, nginx o tailscale serve.",
           fix_localhost: "O ábrelo en el propio host con una dirección localhost, por ejemplo a través de un túnel SSH.",
           form_error: "Este navegador no conserva la cookie de sesión por HTTP sin cifrar. Abre el panel por HTTPS o con una dirección localhost.",
+        },
+        rate_limited: {
+          with_wait: "Demasiados intentos. Espera {{duration}} y vuelve a intentarlo.",
+          no_wait: "Demasiados intentos. Espera un momento y vuelve a intentarlo.",
         },
         session_expired: "Tu sesión ha caducado. Inicia sesión de nuevo para continuar.",
         account_menu: {
@@ -2818,6 +2830,10 @@ export const resources = {
           fix_localhost: "Ou ouvrez-le sur l'hôte lui-même avec une adresse localhost, par exemple via un tunnel SSH.",
           form_error: "Ce navigateur ne conserve pas le cookie de session en HTTP non chiffré. Ouvrez le tableau de bord en HTTPS ou avec une adresse localhost.",
         },
+        rate_limited: {
+          with_wait: "Trop de tentatives. Patientez {{duration}} puis réessayez.",
+          no_wait: "Trop de tentatives. Patientez un instant puis réessayez.",
+        },
         session_expired: "Votre session a expiré. Connectez-vous à nouveau pour continuer.",
         account_menu: {
           trigger_label: "Ouvrir le menu du compte",
@@ -3526,6 +3542,10 @@ export const resources = {
           fix_proxy: "Stellen Sie das Dashboard über HTTPS hinter einem Reverse Proxy wie Caddy, Traefik, nginx oder tailscale serve bereit.",
           fix_localhost: "Oder öffnen Sie es auf dem Host selbst über eine localhost-Adresse, zum Beispiel über einen SSH-Tunnel.",
           form_error: "Dieser Browser speichert das Sitzungs-Cookie über unverschlüsseltes HTTP nicht. Öffnen Sie das Dashboard über HTTPS oder über eine localhost-Adresse.",
+        },
+        rate_limited: {
+          with_wait: "Zu viele Versuche. Bitte {{duration}} warten und erneut versuchen.",
+          no_wait: "Zu viele Versuche. Bitte einen Moment warten und erneut versuchen.",
         },
         session_expired: "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
         account_menu: {

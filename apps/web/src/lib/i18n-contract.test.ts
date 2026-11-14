@@ -29,6 +29,8 @@ const SMOKE_KEYS = [
   "common.search",
   "routeMeta.runtime.title",
   "auth.login.submit",
+  "auth.rate_limited.with_wait",
+  "auth.rate_limited.no_wait",
   "account.profile.photo.choose",
   "settings.sections.models.label",
   "runtime.attach.terminalTimeout",
@@ -147,6 +149,26 @@ describe("i18n contract", () => {
         expect(translated, `${language}.${key}`).toBeTruthy();
         expect(translated, `${language}.${key}`).not.toBe(key);
       }
+    }
+  });
+
+  it("gives the per-client rate limit its own message, with the wait, in every language (ADR-038)", () => {
+    for (const language of SUPPORTED_LANGUAGES) {
+      const withWait = translateForLanguage(language, "auth.rate_limited.with_wait", {
+        duration: "__WAIT__",
+      });
+      const noWait = translateForLanguage(language, "auth.rate_limited.no_wait");
+      const credentialErrors = [
+        translateForLanguage(language, "auth.login.generic_error"),
+        translateForLanguage(language, "auth.forgot.generic_error"),
+        translateForLanguage(language, "auth.setup.create_account.errors.generic"),
+      ];
+
+      expect(withWait, `${language} with_wait`).toContain("__WAIT__");
+      expect(noWait, `${language} no_wait`).not.toBe("auth.rate_limited.no_wait");
+      expect(noWait, `${language} no_wait`).not.toContain("{{");
+      expect(credentialErrors, `${language} with_wait`).not.toContain(withWait);
+      expect(credentialErrors, `${language} no_wait`).not.toContain(noWait);
     }
   });
 

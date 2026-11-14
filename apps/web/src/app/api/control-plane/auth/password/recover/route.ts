@@ -6,6 +6,7 @@ import {
   parseSchemaOrThrow,
   upstreamFetch,
 } from "@/lib/api-utils";
+import { rateLimitedAuthResponse } from "@/lib/auth-rate-limited-response";
 import { forwardedClientIpHeaders } from "@/lib/client-ip";
 import { insecureCookieTransport, insecureCookieTransportResponse } from "@/lib/cookie-transport";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
@@ -54,10 +55,14 @@ export async function POST(request: NextRequest) {
       },
       { label: "Recovery service" },
     );
+    // The per-client rate limit keeps its 429 and wait: it is the same for every
+    // identifier, so it reveals nothing about an account (ADR-038).
+    const rateLimited = rateLimitedAuthResponse(upstream);
+    if (rateLimited) return rateLimited;
     if (!upstream.ok) {
       // Generic message — recovery flow is also identifier-bearing and must
-      // stay indistinguishable across "unknown user" / "wrong code" / "rate
-      // limited" (CLAUDE.md auth contract).
+      // stay indistinguishable across "unknown user" / "wrong code" / "locked
+      // account" (CLAUDE.md auth contract).
       return NextResponse.json(
         { error: "Invalid recovery details." },
         { status: upstream.status || 400, headers: { "Cache-Control": "no-store" } },
