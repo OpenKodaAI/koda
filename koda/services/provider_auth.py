@@ -454,8 +454,8 @@ def resolve_provider_command(provider_id: str, base_env: dict[str, str] | None =
         raise FileNotFoundError(executable or "gemini")
     if shutil.which("gemini", path=env.get("PATH")):
         return ("gemini",)
-    if shutil.which("npx", path=env.get("PATH")):
-        return ("npx", "-y", "@google/gemini-cli")
+    # Never fall back to an unpinned ``npx -y @google/gemini-cli`` (ADR-002 AG-02): a missing
+    # binary means the provider is unavailable until the pinned CLI is installed.
     raise FileNotFoundError("gemini")
 
 
@@ -1180,11 +1180,16 @@ def _verify_claude_local_cli(
     try:
         cmd = (*resolve_provider_command("claude", base_env=base_env), "auth", "status", "--json")
     except (KeyError, FileNotFoundError):
+        from koda.services.provider_cli_contract import get_contract
+
         return ProviderVerificationResult(
             provider_id="claude",
             auth_mode="local",
             verified=False,
-            last_error="Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code",
+            last_error=(
+                "Claude Code CLI not found. Install the pinned version: npm install -g "
+                f"@anthropic-ai/claude-code@{get_contract('claude').pinned_version}"
+            ),
             checked_via="local_cli",
         )
     env = build_provider_process_env(

@@ -1,11 +1,16 @@
 # Multi-stage build: Python + Node (for provider CLIs)
 FROM node:26-slim AS node-base
 
-# Install provider CLIs globally
-RUN npm install -g \
-    @anthropic-ai/claude-code \
-    @openai/codex \
-    @google/gemini-cli
+# Provider CLIs at the exact versions pinned in packages/provider-clis (ADR-002
+# AG-02). package-lock.json pins every package by integrity hash and install
+# scripts stay off, so nothing outside the lockfile is fetched. Claude Code's own
+# postinstall only links its platform binary from the locked optional
+# dependency, so it runs explicitly. Keep this stage identical in Dockerfile and
+# Dockerfile.runtime-kernel.
+WORKDIR /opt/provider-clis
+COPY packages/provider-clis/package.json packages/provider-clis/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && node node_modules/@anthropic-ai/claude-code/install.cjs
 
 # Keep the runtime image on Python 3.12: kokoro-onnx 0.5.x supports <3.14,
 # while rapidocr-onnxruntime 1.4.x still requires <3.13.
@@ -19,13 +24,13 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/var/lib/koda/playwright-browsers
 
 RUN python -m pip install --no-cache-dir --upgrade pip==26.0 uv==${UV_VERSION}
 
-# Copy Node.js, npm helpers, and provider CLIs from node stage
+# Node.js and the pinned provider CLIs. npm, npx and corepack stay in the node
+# stage: nothing in the runtime image can install or fetch a package.
 COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
-COPY --from=node-base /usr/local/lib/node_modules /usr/local/lib/node_modules
-COPY --from=node-base /usr/local/bin/claude /usr/local/bin/claude
-RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack \
-    && ln -sf /usr/local/lib/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
-    && ln -sf /usr/local/lib/node_modules/@google/gemini-cli/dist/index.js /usr/local/bin/gemini
+COPY --from=node-base /opt/provider-clis /opt/provider-clis
+RUN ln -sf /opt/provider-clis/node_modules/@anthropic-ai/claude-code/bin/claude.exe /usr/local/bin/claude \
+    && ln -sf /opt/provider-clis/node_modules/@openai/codex/bin/codex.js /usr/local/bin/codex \
+    && ln -sf /opt/provider-clis/node_modules/@google/gemini-cli/bundle/gemini.js /usr/local/bin/gemini
 
 # Install system dependencies and local runtime tools
 RUN apt-get update \

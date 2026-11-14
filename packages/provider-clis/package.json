@@ -1,0 +1,15 @@
+{
+  "name": "koda-provider-clis",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Exact provider CLI versions installed into the Koda images. Must match koda/services/provider_cli_contract.py.",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.325",
+    "@google/gemini-cli": "0.68.0",
+    "@openai/codex": "0.169.0"
+  }
+}
