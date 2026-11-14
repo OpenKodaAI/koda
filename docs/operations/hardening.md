@@ -39,6 +39,12 @@ Every item below is verifiable. The matching checks live in
 - [ ] `CONTROL_PLANE_TRUSTED_PROXIES` and `WEB_TRUSTED_PROXIES` list only
       the dashboard and proxies you run (Compose: `web` and `gateway`).
       A trusted peer can claim any client address for rate limiting.
+- [ ] Every trusted proxy adds the address each request came from to
+      `X-Forwarded-For`, appended or replacing the header: nginx
+      `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`
+      (as in the bundled `proxy/nginx.conf`), HAProxy `option forwardfor`;
+      Caddy and Traefik do it by default. A proxy that passes the client's
+      header through lets each client choose its own rate-limit bucket.
 - [ ] If `WEB_PUBLISH_ADDRESS` publishes the dashboard beyond loopback,
       its port is firewalled so only your reverse proxy can reach it.
       Docker can hide a direct client behind the trusted gateway, which
