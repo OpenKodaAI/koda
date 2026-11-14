@@ -3,6 +3,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use koda_security_core::validate_shell_command;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::watch;
 use tonic::Status;
 
 use crate::processes::{default_shell_command, prepare_process_command, send_process_signal};
@@ -11,14 +12,32 @@ const COMMAND_OUTPUT_BYTE_LIMIT: usize = 1024 * 1024;
 const COMMAND_TRUNCATION_SUFFIX: &[u8] =
     b"\n[runtime-kernel truncated command output after 1048576 bytes]\n";
 
-async fn read_to_capped_bytes<R>(mut reader: R, limit: usize) -> Result<Vec<u8>, std::io::Error>
+/// Seconds a command that outlived its timeout gets between SIGTERM and SIGKILL.
+const COMMAND_TERMINATION_GRACE: Duration = Duration::from_secs(2);
+/// How long the output readers get once the command's process group is killed. Only a
+/// process that left the group (`setsid`, a daemonizing fork) can hold the output open
+/// after that; the reply then carries the output read so far.
+const COMMAND_OUTPUT_DRAIN_GRACE: Duration = Duration::from_secs(1);
+
+/// Reads `reader` to its end, keeping at most `limit` bytes.
+///
+/// Returns what it has read so far as soon as `stop` turns true or its sender is
+/// dropped, so a process that keeps the pipe open cannot hold the reply.
+async fn read_to_capped_bytes<R>(
+    mut reader: R,
+    limit: usize,
+    mut stop: watch::Receiver<bool>,
+) -> Result<Vec<u8>, std::io::Error>
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
     let mut buffer = Vec::new();
     let mut scratch = [0u8; 8192];
     loop {
-        let read = reader.read(&mut scratch).await?;
+        let read = tokio::select! {
+            read = reader.read(&mut scratch) => read?,
+            _ = stop.wait_for(|stop| *stop) => break,
+        };
         if read == 0 {
             break;
         }
@@ -29,13 +48,9 @@ where
                 buffer.extend_from_slice(COMMAND_TRUNCATION_SUFFIX);
             }
         }
-        if buffer.len() >= limit {
-            // Drain the child pipe so the process is not blocked by a full pipe.
-            while reader.read(&mut scratch).await? != 0 {}
-            if !buffer.ends_with(COMMAND_TRUNCATION_SUFFIX) {
-                buffer.extend_from_slice(COMMAND_TRUNCATION_SUFFIX);
-            }
-            break;
+        // Past the limit, keep draining the pipe so the process is not blocked by a full pipe.
+        if buffer.len() >= limit && !buffer.ends_with(COMMAND_TRUNCATION_SUFFIX) {
+            buffer.extend_from_slice(COMMAND_TRUNCATION_SUFFIX);
         }
     }
     Ok(buffer)
@@ -200,12 +215,26 @@ pub(crate) async fn execute_shell_command(
             let _ = stdin.shutdown().await;
         });
     }
-    let stdout_task = tokio::spawn(read_to_capped_bytes(stdout, COMMAND_OUTPUT_BYTE_LIMIT));
-    let stderr_task = tokio::spawn(read_to_capped_bytes(stderr, COMMAND_OUTPUT_BYTE_LIMIT));
-    let timeout = Duration::from_secs(u64::from(timeout_seconds.max(1)));
+    let (stop_readers, readers_stop) = watch::channel(false);
+    let stdout_task = tokio::spawn(read_to_capped_bytes(
+        stdout,
+        COMMAND_OUTPUT_BYTE_LIMIT,
+        readers_stop.clone(),
+    ));
+    let stderr_task = tokio::spawn(read_to_capped_bytes(
+        stderr,
+        COMMAND_OUTPUT_BYTE_LIMIT,
+        readers_stop,
+    ));
+    let readers = async move { (stdout_task.await, stderr_task.await) };
+    tokio::pin!(readers);
+    // The command, and every process that keeps its output open, gets `timeout`. After
+    // that the kernel answers within the termination and drain grace periods, so the
+    // caller's deadline only passes when the kernel itself is not answering.
+    let deadline =
+        tokio::time::Instant::now() + Duration::from_secs(u64::from(timeout_seconds.max(1)));
     let mut timed_out = false;
-    let mut killed = false;
-    let exit_code = match tokio::time::timeout(timeout, child.wait()).await {
+    let mut exit_code = match tokio::time::timeout_at(deadline, child.wait()).await {
         Ok(result) => match result {
             Ok(status) => status.code().unwrap_or_default(),
             Err(error) => {
@@ -216,9 +245,8 @@ pub(crate) async fn execute_shell_command(
         },
         Err(_) => {
             timed_out = true;
-            killed = true;
             let _ = send_process_signal(Some(pgid), Some(pid), libc::SIGTERM);
-            if tokio::time::timeout(Duration::from_secs(2), child.wait())
+            if tokio::time::timeout(COMMAND_TERMINATION_GRACE, child.wait())
                 .await
                 .is_err()
             {
@@ -230,12 +258,35 @@ pub(crate) async fn execute_shell_command(
             124
         }
     };
-    let stdout = stdout_task
-        .await
+    let mut outputs = None;
+    if !timed_out {
+        outputs = tokio::time::timeout_at(deadline, &mut readers).await.ok();
+        if outputs.is_none() {
+            // The command exited, but a process it started still holds its output open.
+            timed_out = true;
+            exit_code = 124;
+            let _ = send_process_signal(Some(pgid), None, libc::SIGTERM);
+            outputs = tokio::time::timeout(COMMAND_TERMINATION_GRACE, &mut readers)
+                .await
+                .ok();
+            group_guard.kill();
+        }
+    }
+    let (stdout, stderr) = match outputs {
+        Some(outputs) => outputs,
+        None => match tokio::time::timeout(COMMAND_OUTPUT_DRAIN_GRACE, &mut readers).await {
+            Ok(outputs) => outputs,
+            Err(_) => {
+                let _ = stop_readers.send(true);
+                readers.await
+            }
+        },
+    };
+    let killed = timed_out;
+    let stdout = stdout
         .map_err(|error| Status::internal(format!("failed to join stdout reader: {error}")))?
         .map_err(|error| Status::internal(format!("failed to read stdout: {error}")))?;
-    let stderr = stderr_task
-        .await
+    let stderr = stderr
         .map_err(|error| Status::internal(format!("failed to join stderr reader: {error}")))?
         .map_err(|error| Status::internal(format!("failed to read stderr: {error}")))?;
     group_guard.disarm();
@@ -264,7 +315,8 @@ mod tests {
     #[tokio::test]
     async fn read_to_capped_bytes_truncates_and_marks_output() {
         let (reader, mut writer) = tokio::io::duplex(64);
-        let reader_task = tokio::spawn(read_to_capped_bytes(reader, 8));
+        let (_stop, stop) = watch::channel(false);
+        let reader_task = tokio::spawn(read_to_capped_bytes(reader, 8, stop));
 
         writer.write_all(b"abcdefghijklmnop").await.unwrap();
         drop(writer);
@@ -272,6 +324,27 @@ mod tests {
         let output = reader_task.await.unwrap().unwrap();
         assert_eq!(&output[..8], b"abcdefgh");
         assert!(output.ends_with(COMMAND_TRUNCATION_SUFFIX));
+    }
+
+    #[tokio::test]
+    async fn read_to_capped_bytes_returns_what_it_read_when_stopped() {
+        let (reader, mut writer) = tokio::io::duplex(64);
+        let (stop_reader, stop) = watch::channel(false);
+        let reader_task = tokio::spawn(read_to_capped_bytes(reader, 1024, stop));
+
+        writer.write_all(b"partial").await.unwrap();
+        writer.flush().await.unwrap();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        // The writer stays open, as a process that keeps the pipe would.
+        stop_reader.send(true).unwrap();
+
+        let output = tokio::time::timeout(Duration::from_secs(5), reader_task)
+            .await
+            .expect("a stopped reader returns")
+            .unwrap()
+            .unwrap();
+        assert_eq!(output, b"partial");
+        drop(writer);
     }
 
     #[test]
@@ -350,6 +423,126 @@ mod tests {
             );
             tokio::time::sleep(Duration::from_millis(20)).await;
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    async fn read_pgid(path: &std::path::Path) -> i32 {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(pgid) = std::fs::read_to_string(path)
+                .ok()
+                .and_then(|value| value.trim().parse::<i32>().ok())
+            {
+                return pgid;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "command never started"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// The longest the kernel takes to answer a command that outlives `timeout`, plus slack.
+    fn answer_bound(timeout: Duration) -> Duration {
+        timeout + COMMAND_TERMINATION_GRACE + COMMAND_OUTPUT_DRAIN_GRACE + Duration::from_secs(1)
+    }
+
+    #[tokio::test]
+    async fn execute_shell_command_returns_output_and_exit_code() {
+        let outcome = execute_shell_command(
+            "echo out; echo err >&2; exit 3",
+            &[],
+            "",
+            &HashMap::new(),
+            b"",
+            30,
+            true,
+            false,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(outcome.stdout, b"out\n");
+        assert_eq!(outcome.stderr, b"err\n");
+        assert_eq!(outcome.exit_code, 3);
+        assert!(!outcome.timed_out);
+        assert!(!outcome.killed);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_process_holding_the_output_open_is_stopped_at_the_timeout() {
+        let tempdir = tempfile::TempDir::new().unwrap();
+        let pgid_file = tempdir.path().join("pgid");
+        // The shell exits at once; the sleep it leaves in its group keeps stdout open.
+        let script = format!("echo $$ > {}; sleep 30 & echo started", pgid_file.display());
+        let started = std::time::Instant::now();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(15),
+            execute_shell_command(&script, &[], "", &HashMap::new(), b"", 1, true, false),
+        )
+        .await
+        .expect("the kernel answers once the timeout and its grace periods have passed")
+        .unwrap();
+
+        assert!(started.elapsed() < answer_bound(Duration::from_secs(1)));
+        assert!(outcome.timed_out);
+        assert!(outcome.killed);
+        assert_eq!(outcome.exit_code, 124);
+        assert_eq!(outcome.stdout, b"started\n");
+        let pgid = read_pgid(&pgid_file).await;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while process_group_has_live_members(pgid) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "process group {pgid} outlived the timed-out command"
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn a_process_that_left_the_group_cannot_hold_the_reply() {
+        // setsid takes the sleep out of the command's process group, so no group kill reaches
+        // it; it prints its pid and keeps stdout open for 30 s.
+        let started = std::time::Instant::now();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(15),
+            execute_shell_command(
+                "setsid sleep 30 & echo $!",
+                &[],
+                "",
+                &HashMap::new(),
+                b"",
+                1,
+                true,
+                false,
+            ),
+        )
+        .await
+        .expect("the kernel answers although a process outside the group holds the output")
+        .unwrap();
+        let escaped = String::from_utf8_lossy(&outcome.stdout)
+            .trim()
+            .parse::<i32>()
+            .unwrap_or_default();
+        if escaped > 1 {
+            unsafe {
+                libc::kill(escaped, libc::SIGKILL);
+            }
+        }
+
+        assert!(started.elapsed() < answer_bound(Duration::from_secs(1)));
+        assert!(
+            escaped > 1,
+            "stdout read before the cut-off: {:?}",
+            outcome.stdout
+        );
+        assert!(outcome.timed_out);
+        assert!(outcome.killed);
+        assert_eq!(outcome.exit_code, 124);
     }
 
     #[tokio::test]

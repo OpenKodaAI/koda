@@ -98,6 +98,10 @@ class BackgroundProcessManager:
             bg.stderr_buf = str(execution.get("stderr") or "")[:SHELL_BG_OUTPUT_MAX]
             bg.timed_out = bool(execution.get("timed_out", False))
             bg.exit_code = -1 if bg.timed_out else int(cast(Any, execution.get("exit_code", 0)) or 0)
+        except ShellCommandRejected as e:
+            # The kernel's own command check or network policy refused it: shell_execute's answer.
+            bg.stderr_buf = str(e)
+            bg.exit_code = -1
         except asyncio.CancelledError:
             bg.exit_code = -1
             raise

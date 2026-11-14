@@ -424,6 +424,47 @@ async def test_background_shell_runs_allowed_command_through_runtime_kernel(
     assert output.output == "Exit 0:\nbuilt"
 
 
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+async def test_background_shell_gets_the_answer_of_shell_execute_when_the_runtime_kernel_refuses(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    background_shell: BackgroundProcessManager,
+) -> None:
+    """The kernel's network policy and command check hold shell_bg exactly as they hold shell_execute.
+
+    The command guard lets ``curl`` through; the kernel refuses it without allow_network.
+    """
+    import grpc
+    import grpc.aio
+
+    refusal = grpc.aio.AioRpcError(
+        code=grpc.StatusCode.PERMISSION_DENIED,
+        initial_metadata=grpc.aio.Metadata(),
+        trailing_metadata=grpc.aio.Metadata(),
+        details="network command execution requires allow_network=true",
+        debug_error_string="UNKNOWN:Error received from peer {grpc_status:7}",
+    )
+    kernel = MagicMock()
+    kernel.execute_command = AsyncMock(side_effect=refusal)
+    _install_kernel(monkeypatch, kernel)
+    ctx = _shell_ctx(tmp_path)
+    command = "curl -s https://example.com -o /dev/null"
+
+    foreground = await _handle_shell_execute({"command": command}, ctx)
+    started = await _handle_shell_bg({"command": command}, ctx)
+
+    assert foreground.success is False
+    assert foreground.output == "Blocked: this command is not allowed for safety reasons."
+    assert started.success is True, started.output
+    ((handle_id, bg),) = background_shell._processes.items()
+    await _wait_until_finished(bg)
+    assert kernel.execute_command.await_count == 2
+    output = await _handle_shell_output({"handle_id": handle_id}, ctx)
+    assert output.output == f"Exit -1:\n{foreground.output}"
+
+
 def _live_process_group_members(pgid: int) -> list[int]:
     """Pids of the non-zombie processes in process group ``pgid``."""
     members = []

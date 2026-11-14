@@ -4,8 +4,10 @@ The unit and adversarial tests stand in for the kernel. These tests run
 ``shell_bg``, ``shell_kill`` and ``shell_execute`` through the real
 ``koda-runtime-kernel`` binary over gRPC, and check what only the kernel can
 show: an allowed command's output comes back through ExecuteCommand, a kill
-leaves no process in the command's process group, and command timeouts come
-back as timeouts without opening the runtime-kernel circuit breaker.
+leaves no process in the command's process group, command timeouts and
+commands the kernel refuses come back as the command's own outcome without
+opening the runtime-kernel circuit breaker, and a kernel that stops answering
+does count against it.
 
 Opt-in. Set ``KODA_TEST_RUNTIME_KERNEL_BIN`` to a built ``koda-runtime-kernel``
 binary, or ``KODA_TEST_RUNTIME_KERNEL=1`` to build it with
@@ -102,7 +104,7 @@ async def kernel_shell(
 
     bind = f"127.0.0.1:{free_port}"
     runtime_root = tmp_path / "runtime-kernel"
-    spawn_rust_binary(
+    process = spawn_rust_binary(
         "koda-runtime-kernel",
         env={"RUNTIME_KERNEL_SOCKET": bind, "RUNTIME_KERNEL_ROOT": str(runtime_root), "RUST_LOG": "warn"},
         grpc_target=bind,
@@ -135,7 +137,7 @@ async def kernel_shell(
         agent_mode="autonomous",
     )
     try:
-        yield SimpleNamespace(client=client, manager=manager, work_dir=work_dir, ctx=ctx)
+        yield SimpleNamespace(client=client, manager=manager, work_dir=work_dir, ctx=ctx, process=process)
     finally:
         for bg in manager._processes.values():
             task = bg._collection_task
@@ -227,17 +229,97 @@ async def test_timeouts_come_back_as_timeouts_and_leave_the_breaker_closed(kerne
 async def test_command_holding_its_output_open_times_out_and_is_cleaned_up(kernel_shell: SimpleNamespace) -> None:
     pgid: int | None = None
     try:
-        # The shell exits at once, but the sleep it leaves behind keeps the output pipe open,
-        # so the kernel only stops it when the call's deadline passes.
+        # The shell exits at once, but the sleep it leaves behind keeps the output pipe open.
+        # The kernel stops it at the command's timeout and answers with what it read.
+        started = time.monotonic()
         handle_id = await _start(kernel_shell, "echo $$ > pgid; sleep 30 & echo started", timeout=1)
         pgid = await _read_pgid(kernel_shell.work_dir / "pgid")
         await _wait_finished(kernel_shell, [handle_id], within=20)
 
+        assert time.monotonic() - started < 5
         status = await _handle_shell_status({"handle_id": handle_id}, kernel_shell.ctx)
         assert "Status: timed_out" in status.output, status.output
         output = await _handle_shell_output({"handle_id": handle_id}, kernel_shell.ctx)
-        assert "AioRpcError" not in output.output
+        assert output.output == "Exit -1:\nstarted"
         assert kernel_shell.client._breaker.state is State.CLOSED
         assert await _wait_for_empty_group(pgid, within=5) == []
     finally:
         _kill_group(pgid)
+
+
+@pytest.mark.asyncio
+async def test_process_that_left_the_group_cannot_hold_the_reply(kernel_shell: SimpleNamespace) -> None:
+    from koda.services.shell_runner import run_shell_command
+
+    escaped: int | None = None
+    try:
+        # setsid takes the sleep out of the command's process group, so no kill reaches it,
+        # and it keeps stdout open for 30 s. The kernel still answers within the grace periods.
+        started = time.monotonic()
+        handle_id = await _start(kernel_shell, "setsid sleep 30 & echo $! > escaped; echo started", timeout=1)
+        await _wait_finished(kernel_shell, [handle_id], within=20)
+        escaped = int((kernel_shell.work_dir / "escaped").read_text(encoding="utf-8").strip())
+
+        assert time.monotonic() - started < 1 + 2 + 1 + 2
+        status = await _handle_shell_status({"handle_id": handle_id}, kernel_shell.ctx)
+        assert "Status: timed_out" in status.output, status.output
+        output = await _handle_shell_output({"handle_id": handle_id}, kernel_shell.ctx)
+        assert output.output == "Exit -1:\nstarted"
+        assert kernel_shell.client._breaker.state is State.CLOSED
+        assert await run_shell_command("echo still-works", str(kernel_shell.work_dir), timeout=5) == (
+            "Exit 0:\nstill-works"
+        )
+    finally:
+        if escaped is not None and escaped > 1:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(escaped, signal.SIGKILL)
+
+
+@pytest.mark.asyncio
+async def test_commands_the_kernel_refuses_get_the_guard_answer_and_leave_the_breaker_closed(
+    kernel_shell: SimpleNamespace,
+) -> None:
+    from koda import config
+    from koda.services.shell_runner import BLOCKED_MESSAGE, run_shell_command
+    from koda.services.shell_tools import SHELL_BG_MAX_PROCESSES
+
+    # The command guard lets curl through; the kernel's network policy refuses it without
+    # allow_network, which the shell tools never set.
+    command = "curl -s https://example.com -o /dev/null"
+    attempts = max(1, config.INTERNAL_RPC_BREAKER_THRESHOLD)
+    handle_ids: list[str] = []
+    for batch_start in range(0, attempts, SHELL_BG_MAX_PROCESSES):
+        batch = [
+            await _start(kernel_shell, command, timeout=5)
+            for _ in range(batch_start, min(attempts, batch_start + SHELL_BG_MAX_PROCESSES))
+        ]
+        await _wait_finished(kernel_shell, batch, within=20)
+        handle_ids.extend(batch)
+    foreground = await _handle_shell_execute({"command": command}, kernel_shell.ctx)
+
+    assert (foreground.success, foreground.output) == (False, BLOCKED_MESSAGE)
+    for handle_id in handle_ids:
+        output = await _handle_shell_output({"handle_id": handle_id}, kernel_shell.ctx)
+        assert output.output == f"Exit -1:\n{BLOCKED_MESSAGE}"
+    assert kernel_shell.client._breaker.state is State.CLOSED
+    assert await run_shell_command("echo still-works", str(kernel_shell.work_dir), timeout=5) == "Exit 0:\nstill-works"
+
+
+@pytest.mark.asyncio
+async def test_a_kernel_that_stops_answering_is_a_kernel_failure(kernel_shell: SimpleNamespace) -> None:
+    from koda.internal_rpc.runtime_kernel import EXECUTE_COMMAND_DEADLINE_GRACE_SECONDS
+    from koda.services.shell_runner import run_shell_command
+
+    kernel_shell.process.send_signal(signal.SIGSTOP)
+    try:
+        started = time.monotonic()
+        result = await run_shell_command("echo hi", str(kernel_shell.work_dir), timeout=1)
+        elapsed = time.monotonic() - started
+    finally:
+        kernel_shell.process.send_signal(signal.SIGCONT)
+
+    assert result.startswith("Error: "), result
+    assert "DEADLINE_EXCEEDED" in result
+    assert elapsed >= 1 + EXECUTE_COMMAND_DEADLINE_GRACE_SECONDS - 0.5
+    # It counts on the breaker like any other kernel failure; a command timeout does not.
+    assert len(kernel_shell.client._breaker._state.failures_window) == 1

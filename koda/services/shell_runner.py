@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 from koda.config import AGENT_ID, SHELL_TIMEOUT
+from koda.internal_rpc.runtime_kernel import is_command_refusal
 from koda.logging_config import get_logger
 from koda.services.provider_env import (
     build_tool_subprocess_env,
@@ -22,7 +23,7 @@ BLOCKED_MESSAGE = "Blocked: this command is not allowed for safety reasons."
 
 
 class ShellCommandRejected(Exception):
-    """The approval gate or the command guard refused a shell command before it ran."""
+    """The approval gate, the command guard or the runtime kernel refused a shell command before it ran."""
 
 
 def guard_shell_command(command: str, work_dir: str) -> tuple[str, str]:
@@ -57,19 +58,34 @@ async def execute_in_runtime_kernel(
 
     The command runs in its own process group. Cancelling this call cancels the
     RPC, and the kernel then kills every process still in that group.
+
+    Raises :class:`ShellCommandRejected` with the command guard's answer when the
+    kernel's own command check or network policy refuses the command.
     """
     proc_env = build_tool_subprocess_env(env_overrides=env)
     runtime_kernel = get_runtime_controller().runtime_kernel
-    return await runtime_kernel.execute_command(
-        agent_id=AGENT_ID,
-        command=command,
-        working_directory=work_dir,
-        environment_overrides=proc_env,
-        timeout_seconds=max(1, int(timeout)),
-        purpose="shell",
-        env_labels={"command_kind": command_kind},
-        start_new_session=True,
-    )
+    try:
+        return await runtime_kernel.execute_command(
+            agent_id=AGENT_ID,
+            command=command,
+            working_directory=work_dir,
+            environment_overrides=proc_env,
+            timeout_seconds=max(1, int(timeout)),
+            purpose="shell",
+            env_labels={"command_kind": command_kind},
+            start_new_session=True,
+        )
+    except Exception as e:
+        if not is_command_refusal(e):
+            raise
+        details = getattr(e, "details", None)
+        log.warning(
+            "shell_command_blocked_by_runtime_kernel",
+            command=command[:100],
+            command_kind=command_kind,
+            reason=str(details() if callable(details) else e)[:200],
+        )
+        raise ShellCommandRejected(BLOCKED_MESSAGE) from e
 
 
 async def run_shell_command(
@@ -103,6 +119,8 @@ async def run_shell_command(
             output = output[:4000] + "\n… (truncated)"
         exit_code = int(cast(Any, execution.get("exit_code", 0)) or 0)
         return f"Exit {exit_code}:\n{output}" if output else f"Exit {exit_code}: (no output)"
+    except ShellCommandRejected as e:
+        return str(e)
     except ValueError as e:
         log.warning("shell_command_blocked", command=command[:100], reason=str(e))
         return BLOCKED_MESSAGE

@@ -123,8 +123,8 @@ class CircuitBreaker:
         """Like :meth:`run`, for a call that can fail without the upstream being at fault.
 
         An exception for which ``is_expected`` returns true is the call's own
-        outcome, such as a command that ran out its own time budget. It still
-        propagates, but counts neither as a failure nor as a success.
+        outcome, such as the upstream refusing a command it will not run. It
+        still propagates, but counts neither as a failure nor as a success.
         """
         return await self._call(fn, args, kwargs, is_expected=is_expected)
 

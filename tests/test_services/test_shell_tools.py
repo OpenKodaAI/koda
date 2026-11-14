@@ -391,22 +391,22 @@ class _KernelTimingStub:
 
     The kernel answers a command that outlives its timeout ``answers_after`` seconds
     later: almost at once when the command obeys SIGTERM, after its 2 s grace period
-    and SIGKILL when it ignores SIGTERM. If the caller's deadline comes first, grpc
-    raises DEADLINE_EXCEEDED instead. With ``holds_output_open`` a process the command
-    started keeps its output pipe open, so the kernel never answers in time.
+    and SIGKILL when it ignores SIGTERM, and 1 s after that when a process outside the
+    command's process group keeps its output open. If the caller's deadline comes
+    first, grpc raises DEADLINE_EXCEEDED instead. A ``hung`` kernel never answers.
     """
 
-    def __init__(self, *, answers_after: float = 0.05, holds_output_open: bool = False) -> None:
+    def __init__(self, *, answers_after: float = 0.05, hung: bool = False) -> None:
         self.answers_after = answers_after
-        self.holds_output_open = holds_output_open
+        self.hung = hung
         self.deadlines: list[float] = []
 
     async def ExecuteCommand(self, request, *, timeout, metadata):
+        self.deadlines.append(timeout)
+        if self.hung or timeout < request.timeout_seconds + self.answers_after:
+            raise _deadline_exceeded()
         if request.command == "echo still-works":
             return self._response(request, stdout="still-works\n", exit_code=0, timed_out=False)
-        self.deadlines.append(timeout)
-        if self.holds_output_open or timeout < request.timeout_seconds + self.answers_after:
-            raise _deadline_exceeded()
         return self._response(request, stdout="partial\n", exit_code=124, timed_out=True)
 
     @staticmethod
@@ -467,7 +467,11 @@ class TestBackgroundTimeoutsThroughRuntimeKernelClient:
         return handle_id
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize("answers_after", [0.05, 2.05], ids=["obeys-sigterm", "ignores-sigterm"])
+    @pytest.mark.parametrize(
+        "answers_after",
+        [0.05, 2.05, 3.05],
+        ids=["obeys-sigterm", "ignores-sigterm", "output-held-open-outside-the-group"],
+    )
     async def test_kernel_timeouts_come_back_as_timeouts(self, kernel_client, manager, tmp_path, answers_after):
         from koda import config
         from koda.internal_rpc.circuit_breaker import State
@@ -495,22 +499,74 @@ class TestBackgroundTimeoutsThroughRuntimeKernelClient:
         assert await run_shell_command("echo still-works", str(tmp_path), timeout=5) == "Exit 0:\nstill-works"
 
     @pytest.mark.asyncio
-    async def test_deadline_exceeded_is_a_timeout_that_stays_off_the_breaker(self, kernel_client, manager, tmp_path):
+    async def test_a_kernel_that_does_not_answer_in_time_counts_on_the_breaker(self, kernel_client, manager, tmp_path):
+        """The kernel answers within the timeout and its grace periods, so a missed deadline is the kernel failing."""
         from koda import config
         from koda.internal_rpc.circuit_breaker import State
         from koda.services.shell_runner import run_shell_command
         from koda.services.tool_dispatcher import _handle_shell_output, _handle_shell_status
 
-        client = kernel_client(_KernelTimingStub(holds_output_open=True))
+        client = kernel_client(_KernelTimingStub(hung=True))
+        ctx = _make_ctx(work_dir=str(tmp_path))
+
+        foreground = await run_shell_command("echo hi", str(tmp_path), timeout=1)
+        assert foreground.startswith("Error: ")
+        assert "DEADLINE_EXCEEDED" in foreground
+        for _ in range(max(1, config.INTERNAL_RPC_BREAKER_THRESHOLD) - 1):
+            handle_id = await self._run_background(manager, ctx, "echo hi", timeout=1)
+            status = await _handle_shell_status({"handle_id": handle_id}, ctx)
+            assert "Status: finished" in status.output
+            assert "Exit code: -1" in status.output
+            output = await _handle_shell_output({"handle_id": handle_id}, ctx)
+            assert output.output.startswith("Exit -1:\nError: ")
+            assert "DEADLINE_EXCEEDED" in output.output
+
+        assert client._breaker.state is State.OPEN
+        still_works = await run_shell_command("echo still-works", str(tmp_path), timeout=5)
+        assert still_works.startswith("Error: circuit_breaker_open:runtime_kernel")
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("code", "details"),
+        [
+            ("PERMISSION_DENIED", "network command execution requires allow_network=true"),
+            ("INVALID_ARGUMENT", "command is not allowed for safety reasons"),
+        ],
+        ids=["network-policy", "command-check"],
+    )
+    async def test_kernel_refusals_get_the_guard_answer_and_stay_off_the_breaker(
+        self, kernel_client, manager, tmp_path, code, details
+    ):
+        import grpc
+        import grpc.aio
+
+        from koda import config
+        from koda.internal_rpc.circuit_breaker import State
+        from koda.services.shell_runner import BLOCKED_MESSAGE, run_shell_command
+        from koda.services.tool_dispatcher import _handle_shell_execute, _handle_shell_output, _handle_shell_status
+
+        async def execute_command(request, *, timeout, metadata):
+            if request.command == "echo still-works":
+                return _KernelTimingStub._response(request, stdout="still-works\n", exit_code=0, timed_out=False)
+            raise grpc.aio.AioRpcError(
+                code=getattr(grpc.StatusCode, code),
+                initial_metadata=grpc.aio.Metadata(),
+                trailing_metadata=grpc.aio.Metadata(),
+                details=details,
+                debug_error_string="UNKNOWN:Error received from peer",
+            )
+
+        client = kernel_client(SimpleNamespace(ExecuteCommand=execute_command))
         ctx = _make_ctx(work_dir=str(tmp_path))
 
         for _ in range(max(1, config.INTERNAL_RPC_BREAKER_THRESHOLD)):
-            handle_id = await self._run_background(manager, ctx, "sleep 30 & echo started", timeout=2)
+            foreground = await _handle_shell_execute({"command": "make deploy"}, ctx)
+            assert (foreground.success, foreground.output) == (False, BLOCKED_MESSAGE)
+            handle_id = await self._run_background(manager, ctx, "make deploy", timeout=5)
             status = await _handle_shell_status({"handle_id": handle_id}, ctx)
-            assert "Status: timed_out" in status.output
+            assert "Status: finished" in status.output
             output = await _handle_shell_output({"handle_id": handle_id}, ctx)
-            assert output.output == "Exit -1:\n(no output)"
-            assert await run_shell_command("sleep 30 & echo started", str(tmp_path), timeout=2) == "Timeout after 2s."
+            assert output.output == f"Exit -1:\n{BLOCKED_MESSAGE}"
 
         assert client._breaker.state is State.CLOSED
         assert await run_shell_command("echo still-works", str(tmp_path), timeout=5) == "Exit 0:\nstill-works"
