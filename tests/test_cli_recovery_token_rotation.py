@@ -128,9 +128,11 @@ async def _issue_code(tmp_path: Path, port: int, configured: str) -> tuple[int, 
         (" new-recovery-token , old-recovery-token ", "new-recovery-token"),
         # The control plane never accepts an unedited placeholder, so the CLI skips it like the server does.
         ("replace-with-a-random-token,new-recovery-token", "new-recovery-token"),
+        # The server matches the placeholder prefix whatever its case (is_placeholder_secret).
+        ("Replace-With-a-random-token,new-recovery-token", "new-recovery-token"),
         ("only-recovery-token", "only-recovery-token"),
     ],
-    ids=["new-old-rotation", "spaces-around-tokens", "placeholder-first", "single-token"],
+    ids=["new-old-rotation", "spaces-around-tokens", "placeholder-first", "mixed-case-placeholder", "single-token"],
 )
 async def test_auth_issue_code_sends_one_token_of_the_configured_list(
     control_plane: _ControlPlane,

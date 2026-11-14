@@ -126,13 +126,24 @@ and object-storage keys from them. A native install sets `KNOWLEDGE_V2_POSTGRES_
 Compose does not publish Postgres or SeaweedFS on the host. When this host cannot resolve their service
 names (`postgres`, `seaweedfs`), doctor opens the connection from the app container with
 `docker compose exec app`, in the Compose project of the `--env-file` directory. For a project started with `-p`, set `COMPOSE_PROJECT_NAME`.
+When Compose cannot parse the `.env` (an unterminated quote, or a `$` that Compose reads as a variable),
+its error repeats the offending value, so doctor reports only that the file could not be parsed. Run
+`docker compose --env-file .env config -q` to see where.
 With `OBJECT_STORAGE_REQUIRED=false`, the object-storage checks are still reported, marked
-`"required": false`, and do not fail doctor.
+`"required": false`, and do not fail doctor. An unset value means `true`. An empty value means `true`
+under Compose (`${OBJECT_STORAGE_REQUIRED:-true}`) and `false` on a native install, as Koda reads its own
+`.env`; doctor reads a `.env` that sets `KNOWLEDGE_V2_POSTGRES_DSN` as a native install's.
 
-Doctor itself needs only the Python standard library. Its sandbox check imports Koda, so under a `python3`
-that lacks Koda's dependencies it reports that check as `skipped`: doctor still passes, and `--strict`
-fails. To include the sandbox check, run doctor with Koda's environment from the source checkout:
+Doctor itself needs only the Python standard library. Its sandbox check imports Koda. Under a `python3` that
+is not Koda's environment, such as the system Python, the check is `skipped`: doctor still passes, and
+`--strict` fails. Koda's environment is an interpreter that has Koda installed, or that runs from the
+checkout's `.venv` or from the environment that `VIRTUAL_ENV` or `UV_PROJECT_ENVIRONMENT` names. There, a
+missing dependency is a broken install: the check is `unavailable` and doctor fails. To include the
+sandbox check, run doctor with Koda's environment from the source checkout:
 `uv run python scripts/doctor.py --env-file .env`.
+
+During a token rotation (`CONTROL_PLANE_API_TOKEN=new-token,old-token`), doctor's token check passes while
+one token of the list is not a placeholder, and `--provider` authenticates with the first such token.
 
 ## Manual Startup
 

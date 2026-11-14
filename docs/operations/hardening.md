@@ -86,7 +86,8 @@ start.
 ## Auth
 
 - [ ] `CONTROL_PLANE_API_TOKEN` is at least 32 random bytes (use
-      `openssl rand -hex 32`).
+      `openssl rand -hex 32`). During a rotation (`new-token,old-token`)
+      each token of the list must be, since each one authenticates.
 - [ ] `WEB_OPERATOR_SESSION_SECRET` is at least 32 random bytes.
 - [ ] `RUNTIME_LOCAL_UI_TOKEN` is at least 32 random bytes.
 - [ ] `ALLOWED_USER_IDS` is set; empty means "reject every message".

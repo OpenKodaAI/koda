@@ -54,6 +54,29 @@ def test_strong_token_check_fails_for_default_placeholder(doctor_module, tmp_pat
     assert _by_name(checks, "control_plane_api_token_strong")["ok"] is False
 
 
+@pytest.mark.parametrize(
+    ("configured", "ok"),
+    [
+        ("n" * 64 + "," + "o" * 64, True),
+        # The control plane ignores an unedited placeholder, so only the real token counts.
+        ("replace-with-a-random-token," + "n" * 64, True),
+        # Each token authenticates on its own, so each one must be strong.
+        ("n" * 64 + ",short-old-token", False),
+        (",".join(["weak"] * 10), False),
+        (" , ", False),
+    ],
+    ids=["rotation", "placeholder-first", "one-weak-token", "weak-tokens-long-list", "empty-list"],
+)
+def test_strong_token_check_judges_each_token_of_a_rotation_list(
+    doctor_module, tmp_path: Path, configured: str, ok: bool
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text(f"CONTROL_PLANE_API_TOKEN={configured}\n")
+    env = doctor_module.load_env_file(env_file)
+    checks = doctor_module.run_strict_hardening(env, env_file=env_file)
+    assert _by_name(checks, "control_plane_api_token_strong")["ok"] is ok
+
+
 def test_browser_private_network_disabled_by_default(doctor_module, tmp_path: Path) -> None:
     env_file = tmp_path / ".env"
     env_file.write_text("# no browser config\n")
