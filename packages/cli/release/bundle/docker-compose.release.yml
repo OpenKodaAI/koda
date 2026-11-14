@@ -96,8 +96,8 @@ services:
       CONTROL_PLANE_BASE_URL: "http://app:8090"
       WEB_OPERATOR_SESSION_SECRET: "${WEB_OPERATOR_SESSION_SECRET:?Set WEB_OPERATOR_SESSION_SECRET in .env}"
     ports:
-      # Dashboard: loopback by default. Set WEB_PUBLISH_ADDRESS=0.0.0.0 only
-      # to open it on other interfaces without a reverse proxy.
+      # Dashboard: loopback by default. WEB_PUBLISH_ADDRESS opens it on another
+      # interface only for a TLS-terminating proxy on another host.
       - "${WEB_PUBLISH_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}:3000"
     healthcheck:
       test:

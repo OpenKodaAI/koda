@@ -16,7 +16,9 @@
 set -euo pipefail
 
 PROJECT="${COMPOSE_PROJECT_NAME:-koda}"
-SUPERVISOR_PORT="${CONTROL_PLANE_PORT:-8090}"
+# Probes run inside the containers, where the control plane always listens on
+# 8090 (CONTROL_PLANE_PORT only selects the published host port).
+SUPERVISOR_PORT=8090
 PG_USER="${POSTGRES_USER:-koda}"
 PG_DB="${POSTGRES_DB:-koda}"
 

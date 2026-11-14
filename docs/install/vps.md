@@ -47,10 +47,11 @@ first while Koda publishes on IPv4 loopback only).
 
 The control-plane API is always published on loopback only; the dashboard reaches it over the
 Docker network (`http://app:8090`) and a host reverse proxy reaches it on `127.0.0.1`.
-`WEB_PUBLISH_ADDRESS` publishes the dashboard on another address instead of loopback, for example
-a tailnet IP served with TLS or an interface used by a TLS-terminating proxy on another host.
-Plain-HTTP access from other machines does not work: production operator session cookies are
-`Secure`, so browsers only keep them on HTTPS (or `localhost`).
+`WEB_PUBLISH_ADDRESS` publishes the dashboard on another interface instead of loopback, only for a
+TLS-terminating proxy running on another host. Such a proxy can reach the dashboard (browser
+sessions) but not the control-plane API, so API-token clients and `/openapi/control-plane.json`
+need a proxy on the Koda host. Plain-HTTP access from other machines does not work: production
+operator session cookies are `Secure`, so browsers only keep them on HTTPS (or `localhost`).
 
 ## Tailscale And External Hosting Layers
 
@@ -59,8 +60,8 @@ Koda is intentionally decoupled from the outer delivery layer. A VPS provider pa
 - run the Docker Compose stack
 - preserve the persistent volumes
 - route HTTPS traffic to the dashboard on the host's loopback (for example
-  `tailscale serve --https=443 http://127.0.0.1:3000`), or publish it on the tailnet IP with
-  `WEB_PUBLISH_ADDRESS` behind TLS
+  `tailscale serve --bg --https=443 http://127.0.0.1:3000`; publishing plain HTTP on the tailnet IP
+  does not work because session cookies are `Secure`)
 - keep bootstrap secrets available to the containers
 
 Providers, agents, secrets, and integrations remain part of the Koda product layer, not the hosting layer.

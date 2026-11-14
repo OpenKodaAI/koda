@@ -20,8 +20,8 @@ Control Plane
   container always listens on 8090
 - `CONTROL_PLANE_PUBLIC_PORT` — set by Docker Compose to the published port for host-facing URLs
   (OAuth relay); native runs fall back to `CONTROL_PLANE_PORT`
-- `WEB_PUBLISH_ADDRESS` — address the dashboard is published on (default `127.0.0.1`); use it for
-  a tailnet IP or a TLS-terminating proxy on another host, never plain HTTP
+- `WEB_PUBLISH_ADDRESS` — address the dashboard is published on (default `127.0.0.1`); change it
+  only for a TLS-terminating proxy on another host, never for plain-HTTP access
 - `CONTROL_PLANE_API_TOKEN`
 - `WEB_OPERATOR_SESSION_SECRET`
 - `CONTROL_PLANE_MASTER_KEY_FILE`

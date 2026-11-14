@@ -143,5 +143,5 @@ reference updated; release CHECKSUMS regenerated.
 | reviewer `docker compose config` (base, +prod, +dev, +cluster, release) | app → 127.0.0.1:8090, web → 127.0.0.1:3000, no duplicates |
 
 Review: independent reviewer, round 1 request changes (2 major docs issues: silent `koda update` behaviour
-change; plain-HTTP LAN advice incompatible with Secure cookies; plus minors) → all addressed; round 2 pending.
+change; plain-HTTP LAN advice incompatible with Secure cookies; plus minors) → all addressed; round 2 approve (see above).
 Follow-up: cluster overlay `replicas: 3` with a fixed host port (pre-existing).
