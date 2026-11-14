@@ -8,6 +8,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+import koda.config as config_module
 from koda.config import AGENT_ID, POD_NAME
 from koda.logging_config import get_logger
 from koda.state.primary import (
@@ -1419,46 +1420,37 @@ def dlq_mark_retried(dlq_id: int, *, metadata_json: str | None = None) -> bool:
         return False
 
 
-def run_maintenance() -> dict[str, Any]:
-    cutoff = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=90)).isoformat()
-    result: dict[str, Any] = {}
-    backend = _primary_backend()
-    if backend is not None:
-        try:
-            result["queries_deleted"] = int(
-                run_coro_sync(
-                    primary_execute(
-                        "DELETE FROM queries WHERE timestamp < ?",
-                        (cutoff,),
-                        agent_id=AGENT_ID,
-                    )
-                )
-                or 0
-            )
-            result["audit_log_deleted"] = int(
-                run_coro_sync(
-                    primary_execute(
-                        "DELETE FROM audit_log WHERE timestamp < ?",
-                        (cutoff,),
-                        agent_id=AGENT_ID,
-                    )
-                )
-                or 0
-            )
-            result["mode"] = "primary"
-        except Exception as exc:  # noqa: BLE001
-            log.warning("db_maintenance_error", error=str(exc))
-            result["error"] = str(exc)
-        return result
+# The daily retention job only reports for now: deletes wait until the
+# retention defaults are approved. Query history has no setting yet.
+_QUERY_HISTORY_RETENTION_DAYS = 90
+_EXPIRED_ROWS_SQL = {
+    "query_history": "SELECT COUNT(*) FROM query_history WHERE agent_id = ? AND timestamp < ?",
+    "audit_events": "SELECT COUNT(*) FROM audit_events WHERE agent_id = ? AND timestamp < ?",
+}
 
+
+def run_maintenance() -> dict[str, Any]:
+    """Daily retention job, report-only: count rows past retention, delete nothing.
+
+    Counts this agent's ``query_history`` rows older than 90 days and
+    ``audit_events`` rows older than ``AUDIT_RETENTION_DAYS``, comparing the
+    TIMESTAMPTZ ``timestamp`` column with an aware UTC cutoff.
+    """
+    now = datetime.now(UTC)
+    windows = {
+        "query_history": _QUERY_HISTORY_RETENTION_DAYS,
+        "audit_events": int(config_module.AUDIT_RETENTION_DAYS),
+    }
+    scope = _current_agent_scope()
+    result: dict[str, Any] = {"mode": "report_only"}
+    _primary_backend()
     try:
-        with _history_backend_removed() as conn:
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            result["wal_checkpoint"] = "ok"
-            row = conn.execute("PRAGMA integrity_check").fetchone()
-            result["integrity_check"] = row[0] if row else "unknown"
-            result["audit_log_deleted"] = conn.execute("DELETE FROM audit_log WHERE timestamp < ?", (cutoff,)).rowcount
-            result["queries_deleted"] = conn.execute("DELETE FROM queries WHERE timestamp < ?", (cutoff,)).rowcount
+        for table, days in windows.items():
+            cutoff = now - timedelta(days=days)
+            result[f"{table}_retention_days"] = days
+            result[f"{table}_cutoff"] = cutoff.isoformat()
+            expired = run_coro_sync(primary_fetch_val(_EXPIRED_ROWS_SQL[table], (scope, cutoff), agent_id=AGENT_ID))
+            result[f"{table}_expired"] = int(expired or 0)
     except Exception as exc:  # noqa: BLE001
         log.warning("db_maintenance_error", error=str(exc))
         result["error"] = str(exc)

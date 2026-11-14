@@ -814,7 +814,8 @@ def main() -> None:
 
         await loop_supervisor.start_loop("approval_cleanup", start_approval_cleanup)
 
-        # Start periodic database maintenance (WAL checkpoint, integrity check, old row cleanup)
+        # Start the daily retention job. It is report-only: it logs how many
+        # query_history and audit_events rows are past retention and deletes none.
         async def _db_maintenance_loop() -> None:
             while True:
                 await asyncio.sleep(86400)  # 24 hours
