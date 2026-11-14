@@ -199,6 +199,17 @@ def test_cargo_target_dir_reaches_the_build(
     assert cargo_build_release(crate) == binary
 
 
+def test_contributing_warns_against_a_target_dir_shared_by_concurrent_checkouts() -> None:
+    """The session runs the ``<target>/release/<crate>`` path cargo reports, which every build in that
+    target dir rewrites. A checkout sharing the dir can replace the binary mid-session, so the docs
+    that say CARGO_TARGET_DIR is honoured must also say not to share one."""
+    contributing = (integration_conftest.REPO_ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    [paragraph] = [" ".join(p.split()) for p in contributing.split("\n\n") if "CARGO_TARGET_DIR" in p]
+
+    assert "`CARGO_TARGET_DIR` set in the environment is honoured" in paragraph
+    assert "do not share one target directory between checkouts that run these tests at the same time" in paragraph
+
+
 def test_successful_build_without_the_binary_fails_under_ci(
     cargo_build_release: Build, rust_dir: Path, fake_cargo: InstallCargo, crate: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

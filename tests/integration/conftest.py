@@ -27,7 +27,9 @@ def _build_release_binary(crate: str) -> Path | str:
     """Run the incremental release build of ``crate``; return its binary, or why there is none.
 
     The binary is the one cargo reports for this build, so a binary left by an earlier build
-    (or in another target directory) is never run in its place.
+    (or in another target directory) is never run in its place. That path is
+    ``<target>/release/<crate>``, which every build in the target dir rewrites, so the target
+    dir must not be shared with a checkout that builds while this session runs.
     """
     if not shutil.which("cargo"):
         return "cargo not on PATH — cannot build the Rust binaries for the integration tests"

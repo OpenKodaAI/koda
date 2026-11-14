@@ -42,6 +42,19 @@ If your change touches the Rust workspace, also run:
 - `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings`
 - `cargo test --manifest-path rust/Cargo.toml --workspace`
 
+The cross-language tests in `tests/integration` run `cargo build --release -p <crate>` once per
+session, even when a binary already exists (the build is incremental, so an up-to-date crate
+takes seconds), and run the executable that build reports, never an older one. When `cargo` is
+missing or the build fails, those tests are skipped locally and fail under `CI`. In a checkout
+with no earlier release build, the first run compiles the crate and its dependencies from
+scratch (for `koda-bot-gateway`, about 530 MB of release output and a few minutes on 4 CPUs).
+Copying or hard-linking a prebuilt binary into `rust/target/release` does not avoid that build:
+cargo has no record of it, so it rebuilds and replaces the file. A `CARGO_TARGET_DIR` set in the
+environment is honoured, but do not share one target directory between checkouts that run these
+tests at the same time: every build writes the same `release/<crate>` path, so another
+checkout's build can replace the binary after this session built it and before a test runs it.
+Keep one target directory per checkout; the download cache in `CARGO_HOME` is already shared.
+
 `pytest` starts its own Rust security guard (through `cargo run`) on a private Unix socket for
 each session, so concurrent runs on one host do not interfere and an ambient
 `SECURITY_GRPC_TARGET` is ignored. Without `cargo` every test is skipped with a banner (and the
@@ -51,16 +64,6 @@ run fails under `CI`). To reuse one already-running guard across several checkou
 unreachable. A shared guard runs whatever build it was started from, so do not share one when
 validating changes to `rust/koda-security-*`. `KODA_SECURITY_GUARD_STARTUP_TIMEOUT` (seconds)
 raises the startup wait for cold builds.
-
-The cross-language tests in `tests/integration` run `cargo build --release -p <crate>` once per
-session, even when a binary already exists (the build is incremental, so an up-to-date crate
-takes seconds), and run the binary that build produced, never an older one. When `cargo` is
-missing or the build fails, those tests are skipped locally and fail under `CI`. In a checkout
-with no earlier release build, the first run compiles the crate and its dependencies from
-scratch (for `koda-bot-gateway`, about 530 MB of release output and a few minutes on 4 CPUs).
-Copying or hard-linking a prebuilt binary into `rust/target/release` does not avoid that build:
-cargo has no record of it, so it rebuilds and replaces the file. The tests run the executable
-cargo reports, so a `CARGO_TARGET_DIR` set in the environment is honoured.
 
 To run the same local gate from one command:
 
