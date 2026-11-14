@@ -9,12 +9,15 @@ binary can be missing at runtime — every browser tool then fails with
 
 The supervisor calls ``ensure_browser_installed()`` at startup so the app
 boots ready-to-use instead of asking the operator to run ``playwright
-install`` manually. The check is cheap when browsers are already present
-(a single exists() probe) and emits a clear log when it has to install.
+install`` manually. Presence is decided by the executable the pinned
+Playwright itself launches, asked from its own driver (one short Node run)
+and probed with a single exists() check; it emits a clear log when it has to
+install.
 """
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
@@ -26,23 +29,83 @@ from koda.logging_config import get_logger
 log = get_logger(__name__)
 
 _DEFAULT_BROWSERS_PATH = "/var/lib/koda/playwright-browsers"
+_LOOKUP_TIMEOUT_SECONDS = 30.0
+
+# Run by the pinned Playwright driver's Node with its package directory as
+# argument. Its own launch code picks the executable for
+# ``chromium.launch(headless=True)``, the launch ``BrowserManager`` performs,
+# and its registry maps that to a path for this host, revision and
+# PLAYWRIGHT_BROWSERS_PATH. Prints {"executablePath": <path or null>}; null
+# means Playwright has no build for this host.
+_LAUNCH_EXECUTABLE_LOOKUP = """
+const path = require("path");
+const server = require(path.join(process.argv[1], "lib", "server", "index.js"));
+const chromium = server.createPlaywright({ sdkLanguage: "python" }).chromium;
+const executable = server.registry.findExecutable(chromium.getExecutableName({ headless: true }));
+process.stdout.write(JSON.stringify({ executablePath: (executable && executable.executablePath()) || null }));
+"""
+
+
+class _LookupUnavailableError(Exception):
+    """The pinned Playwright driver could not say which executable it launches."""
 
 
 def _browsers_path() -> Path:
     return Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or _DEFAULT_BROWSERS_PATH)
 
 
-def _chromium_present(browsers_path: Path) -> bool:
-    """Return True when a usable chromium build is under ``browsers_path``."""
-    if not browsers_path.is_dir():
-        return False
-    executable_patterns = (
-        "chromium-*/chrome-linux/chrome",
-        "chromium_headless_shell-*/chrome-linux/headless_shell",
-        "chromium-*/chrome-mac/Chromium.app/Contents/MacOS/Chromium",
-        "chromium-*/chrome-win/chrome.exe",
-    )
-    return any(candidate.is_file() for pattern in executable_patterns for candidate in browsers_path.glob(pattern))
+def _launch_executable(browsers_path: Path) -> Path | None:
+    """Return the executable the pinned Playwright launches for headless Chromium.
+
+    ``None`` means the pinned Playwright has no Chromium build for this host.
+    Raises ``_LookupUnavailableError`` when its driver cannot be asked.
+    """
+    try:
+        from playwright._impl._driver import compute_driver_executable, get_driver_env
+
+        node, cli = compute_driver_executable()
+        env = get_driver_env()
+    except Exception as exc:
+        raise _LookupUnavailableError(f"playwright driver not found: {exc!r}") from exc
+    env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_path)
+    try:
+        result = subprocess.run(
+            [node, "-e", _LAUNCH_EXECUTABLE_LOOKUP, str(Path(cli).parent)],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=_LOOKUP_TIMEOUT_SECONDS,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise _LookupUnavailableError(f"playwright driver did not run: {exc!r}") from exc
+    if result.returncode != 0:
+        raise _LookupUnavailableError(f"playwright driver exited {result.returncode}: {result.stderr.strip()[-500:]}")
+    try:
+        payload = json.loads(result.stdout)
+    except ValueError as exc:
+        raise _LookupUnavailableError(f"unreadable driver answer: {result.stdout[:200]!r}") from exc
+    executable = payload.get("executablePath") if isinstance(payload, dict) else ""
+    if executable is None:
+        return None
+    if not isinstance(executable, str) or not executable:
+        raise _LookupUnavailableError(f"unexpected driver answer: {result.stdout[:200]!r}")
+    return Path(executable)
+
+
+def _chromium_present(browsers_path: Path) -> bool | None:
+    """Return whether the executable the pinned Playwright launches is installed.
+
+    ``None`` when its driver cannot be asked: the caller then falls back to
+    ``playwright install``, which skips builds that already finished
+    installing, so a complete install is not downloaded again.
+    """
+    try:
+        executable = _launch_executable(browsers_path)
+    except _LookupUnavailableError as exc:
+        log.warning("browser_bootstrap_lookup_unavailable", path=str(browsers_path), reason=str(exc))
+        return None
+    return executable is not None and os.path.isfile(executable)
 
 
 def ensure_browser_installed_in_background() -> None:
@@ -99,7 +162,10 @@ def ensure_browser_installed() -> None:
         log.exception("browser_bootstrap_install_error")
         return
 
-    if _chromium_present(browsers_path):
+    present = _chromium_present(browsers_path)
+    if present:
         log.info("browser_bootstrap_installed", path=str(browsers_path))
+    elif present is None:
+        log.info("browser_bootstrap_install_finished_unverified", path=str(browsers_path))
     else:
         log.warning("browser_bootstrap_install_completed_but_binary_missing", path=str(browsers_path))
