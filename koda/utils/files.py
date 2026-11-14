@@ -62,12 +62,17 @@ def blocked_file_suffix(name: str) -> str | None:
     secret, and its own extension is the copy's suffix: the blocked name followed by one of
     ``FILEOPS_CREDENTIAL_COPY_SUFFIXES`` and, optionally, a dot and any further suffix
     (``control.key.tmp.a1b2c3d4``, ``key.pem.tmp.4242``, ``prod.env.backup``) is blocked as
-    that name is; ``server.key.example.backup`` and ``control.key.tmpx`` are not.
+    that name is; ``server.key.example.backup`` and ``control.key.tmpx`` are not. Nor is a
+    name whose final extension is a template suffix, whatever comes before it
+    (``.env.backup.example``, ``prod.env.backup.dist``): that is a committed template, as
+    ``.env.example`` is, and no CLI names a copy that way.
     """
     lowered = name.lower()
     found = _blocked_extension(lowered)
     if found is not None:
         return found
+    if os.path.splitext(lowered)[1] in TEMPLATE_FILE_SUFFIXES:
+        return None
     for copy in _COPY_SUFFIX.finditer(lowered):
         if copy.start() > 0 and (found := _blocked_extension(lowered[: copy.start()])) is not None:
             return found

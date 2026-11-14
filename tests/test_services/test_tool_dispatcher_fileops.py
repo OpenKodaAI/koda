@@ -438,6 +438,24 @@ class TestEnvTemplatesStayEditable:
         assert (tmp_path / ".env.example").read_text() == "TOKEN=\nNEW_SETTING=\n"
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("template", [".env.backup.example", ".env.tmp.sample", "prod.env.backup.dist"])
+    async def test_file_read_and_edit_allow_a_template_named_like_a_copy(self, tmp_path, template):
+        """A copy suffix before the template suffix does not make the template a secret's copy."""
+        (tmp_path / template).write_text("TOKEN=\n")
+        from koda.services.tool_dispatcher import _handle_file_edit, _handle_file_read
+
+        ctx = _make_ctx(str(tmp_path))
+        with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+            read = await _handle_file_read({"path": template}, ctx)
+            edit = await _handle_file_edit(
+                {"path": template, "old_string": "TOKEN=\n", "new_string": "TOKEN=\nNEW_SETTING=\n"}, ctx
+            )
+        assert read.success, read.output
+        assert "TOKEN=" in read.output
+        assert edit.success, edit.output
+        assert (tmp_path / template).read_text() == "TOKEN=\nNEW_SETTING=\n"
+
+    @pytest.mark.asyncio
     async def test_grep_searches_env_example_but_not_env(self, tmp_path):
         (tmp_path / ".env.example").write_text("TOKEN=placeholder\n")
         (tmp_path / ".env").write_text("TOKEN=canary-secret\n")

@@ -799,7 +799,8 @@ FILEOPS_BLOCKED_CREDENTIAL_PATHS: tuple[str, ...] = (
 # <entry>.example or <entry>.backupx. The copies of a file whose extension is blocked
 # (FILEOPS_BLOCKED_EXTENSIONS) are refused as that file is, since their own extension is
 # the copy's suffix: Claude Code's control.key.tmp.a1b2c3d4 and key.pem.tmp.4242, or
-# prod.env.backup.
+# prod.env.backup. A name whose final extension is a template suffix is a committed template,
+# not a copy, also with a copy suffix before it (.env.backup.example, prod.env.backup.dist).
 FILEOPS_CREDENTIAL_COPY_SUFFIXES: tuple[str, ...] = (".backup", ".corrupted", ".tmp")
 # Credential files that a CLI names with a fixed prefix and a further suffix, refused by
 # that name wherever they sit: a file whose name is one of these, or one of these followed

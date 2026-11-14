@@ -712,6 +712,41 @@ class TestCredentialStoresAreSecretFiles:
             assert resolve_work_path(path, str(home), **options).path == home / path, path
 
     @pytest.mark.parametrize(
+        "template",
+        [
+            ".env.backup.example",
+            ".env.tmp.sample",
+            ".env.corrupted.template",
+            "prod.env.backup.dist",
+            "deploy/prod.ENV.tmp.Example",
+            "certs/server.key.backup.example",
+        ],
+    )
+    @pytest.mark.parametrize(
+        "options",
+        [{}, {"deny_sensitive_dirs": False}, {"deny_sensitive_dirs": False, "deny_sensitive_work_dir": True}],
+        ids=["the file tools", "the file commands", "browser_upload"],
+    )
+    def test_a_template_named_like_a_copy_stays_readable(self, tmp_path, options, template):
+        """A name whose final extension is a template suffix is a committed template, even with a copy suffix before it.
+
+        ``.env.backup.example`` holds the copy suffix ``.backup`` followed by a dot, but its
+        final extension says it is the template, as ``.env.example`` is. The copy check
+        must not take that exemption away: file_read, file_edit and /cat read it, while the
+        copy itself (``.env.backup``, ``prod.env.backup``) stays refused.
+        """
+        work = tmp_path.resolve() / "work"
+        (work / template).parent.mkdir(parents=True, exist_ok=True)
+        (work / template).write_text("TOKEN=\n")
+        copy = os.path.join(os.path.dirname(template), os.path.splitext(os.path.basename(template))[0])
+        (work / copy).write_text("TOKEN=canary\n")
+
+        assert files_module.blocked_file_suffix(os.path.basename(template)) is None
+        assert resolve_work_path(template, str(work), **options).path == work / template
+        assert files_module.blocked_file_suffix(os.path.basename(copy)) is not None
+        assert resolve_work_path(copy, str(work), **options).reason == "path_blocked_file"
+
+    @pytest.mark.parametrize(
         ("env", "stores"),
         [
             (
