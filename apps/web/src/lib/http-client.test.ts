@@ -45,6 +45,30 @@ describe("requestJson", () => {
     expect(error.retryAfterSeconds).toBeNull();
   });
 
+  it("keeps a rejected sign-in (401) on the form instead of forcing a sign-out", async () => {
+    // The control plane answers bad credentials with 401 (D-135); only a 401 from a
+    // session-guarded route means the session ended.
+    const forcedSignOuts: Event[] = [];
+    const listener = (event: Event) => forcedSignOuts.push(event);
+    window.addEventListener("koda:force-sign-out", listener);
+    try {
+      fetchMock.mockImplementation(
+        async () => new Response(JSON.stringify({ error: "Invalid credentials." }), { status: 401 }),
+      );
+
+      const error = await rejection();
+
+      expect(error.status).toBe(401);
+      expect(error.message).toBe("Invalid credentials.");
+      expect(forcedSignOuts).toHaveLength(0);
+
+      await requestJson("/api/control-plane/agents").catch(() => undefined);
+      expect(forcedSignOuts).toHaveLength(1);
+    } finally {
+      window.removeEventListener("koda:force-sign-out", listener);
+    }
+  });
+
   it("keeps the wait a throttled response asks for", async () => {
     fetchMock.mockResolvedValue(
       new Response(JSON.stringify({ error: "Too many attempts. Try again later." }), {

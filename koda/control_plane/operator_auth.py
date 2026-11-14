@@ -55,6 +55,14 @@ _OPERATOR_ONLY_AUTH_STATUS_FIELDS: tuple[str, ...] = ("recovery_available",)
 _SETUP_ONLY_AUTH_STATUS_FIELDS: tuple[str, ...] = ("bootstrap_file_path", "loopback_trust_enabled")
 
 
+class AuthError(Exception):
+    """Rejected credentials: the control-plane API answers with 401 and the message (D-135).
+
+    Every bad credential raises the same message, so the answer never tells which accounts exist.
+    A malformed request (a missing field) stays a ``ValueError``, which the API answers with 400.
+    """
+
+
 @dataclass(slots=True)
 class OperatorAuthContext:
     auth_kind: str
@@ -936,18 +944,18 @@ class OperatorAuthService:
         )
         if row is None:
             self._set_login_failure(None, identifier=normalized)
-            raise ValueError("Invalid credentials.")
+            raise AuthError("Invalid credentials.")
         if row.get("disabled"):
             emit_security("security.operator_login_failed", identifier=normalized, reason="disabled")
-            raise ValueError("Invalid credentials.")
+            raise AuthError("Invalid credentials.")
         if row.get("locked_until") and not _is_expired(row.get("locked_until")):
             emit_security("security.operator_login_failed", identifier=normalized, reason="locked")
-            raise ValueError("Invalid credentials.")
+            raise AuthError("Invalid credentials.")
         try:
             _password_hasher().verify(str(row["password_hash"]), password)
         except (VerifyMismatchError, VerificationError, InvalidHashError) as exc:
             self._set_login_failure(row, identifier=normalized)
-            raise ValueError("Invalid credentials.") from exc
+            raise AuthError("Invalid credentials.") from exc
         execute(
             """
             UPDATE cp_operator_users

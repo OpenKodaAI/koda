@@ -418,15 +418,15 @@ def test_login_lockout_applies_after_repeated_failures(
     monkeypatch.setattr(operator_auth_mod, "CONTROL_PLANE_OPERATOR_LOGIN_MAX_FAILURES", 2)
     monkeypatch.setattr(operator_auth_mod, "CONTROL_PLANE_OPERATOR_LOGIN_LOCKOUT_SECONDS", 60)
 
-    with pytest.raises(ValueError, match="Invalid credentials"):
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
         service.login(identifier="owner", password="wrong")
 
-    with pytest.raises(ValueError, match="Invalid credentials"):
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
         service.login(identifier="owner", password="wrong")
 
     # After lockout, even the correct password returns the same generic error,
     # never "temporarily locked" — avoid leaking lock state to the caller.
-    with pytest.raises(ValueError, match="Invalid credentials"):
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
         service.login(identifier="owner", password=STRONG_PASSWORD)
 
 
@@ -435,8 +435,95 @@ def test_login_never_reveals_account_disabled(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
     control_plane_db.execute("UPDATE cp_operator_users SET disabled = 1 WHERE id = ?", (payload["operator"]["id"],))
-    with pytest.raises(ValueError, match="Invalid credentials"):
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
         service.login(identifier="owner", password=STRONG_PASSWORD)
+
+
+@pytest.mark.postgres
+def test_login_rejects_an_unknown_identifier_like_a_wrong_password(operator_db: Path) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    _create_owner(service)
+
+    for identifier, password in (("nobody@example.com", STRONG_PASSWORD), ("owner", "wrong-password-XX")):
+        with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
+            service.login(identifier=identifier, password=password)
+
+
+@pytest.mark.parametrize(("identifier", "password"), [("", STRONG_PASSWORD), ("  ", STRONG_PASSWORD), ("owner", "")])
+def test_login_without_an_identifier_or_password_is_a_malformed_request(identifier: str, password: str) -> None:
+    """A missing field stays a 400, not an auth failure: no credential was checked (D-135)."""
+    service = operator_auth_mod.OperatorAuthService()
+
+    with pytest.raises(ValueError, match=r"^Identifier and password are required\.$") as caught:
+        service.login(identifier=identifier, password=password)
+
+    assert not isinstance(caught.value, operator_auth_mod.AuthError)
+
+
+async def test_error_middleware_answers_rejected_credentials_with_401() -> None:
+    """D-135: an AuthError is a 401, so the auth-failure rate-limit bucket (401/403) counts it."""
+
+    async def rejected(_request: web.Request) -> web.Response:
+        raise operator_auth_mod.AuthError("Invalid credentials.")
+
+    async def malformed(_request: web.Request) -> web.Response:
+        raise ValueError("Identifier and password are required.")
+
+    app = web.Application(middlewares=[control_plane_api.control_plane_error_middleware])
+    app.router.add_post("/rejected", rejected)
+    app.router.add_post("/malformed", malformed)
+
+    async with TestClient(TestServer(app)) as client:
+        unauthorized = await client.post("/rejected")
+        bad_request = await client.post("/malformed")
+
+        assert unauthorized.status == 401
+        assert await unauthorized.json() == {"error": "Invalid credentials."}
+        assert bad_request.status == 400
+        assert await bad_request.json() == {"error": "Identifier and password are required."}
+
+
+@pytest.mark.postgres
+async def test_failed_logins_answer_401_on_the_supervisor_stack_and_spend_the_auth_failure_bucket(
+    operator_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-135 end to end on the :8090 middleware stack, with the real service and Argon2 hashes.
+
+    A wrong password and an unknown identifier answer the same 401, and the stricter
+    auth-failure bucket counts both: with a budget of 2, the third failure is a 429.
+    """
+    from koda.control_plane import rate_limit
+    from koda.control_plane.supervisor import ControlPlaneSupervisor
+
+    service = operator_auth_mod.OperatorAuthService()
+    _create_owner(service)
+    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
+    monkeypatch.setattr(rate_limit, "CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", 2)
+    audit: list[dict[str, Any]] = []
+    monkeypatch.setattr(rate_limit, "emit_security", lambda event, **fields: audit.append({"event": event, **fields}))
+    monkeypatch.setattr("koda.control_plane.supervisor.get_control_plane_manager", lambda: object())
+    app = ControlPlaneSupervisor().build_app()
+    attempts = [
+        {"identifier": "owner", "password": "wrong-password-XX"},
+        {"identifier": "nobody@example.com", "password": STRONG_PASSWORD},
+        {"identifier": "owner", "password": "wrong-password-XX"},
+    ]
+
+    rate_limit.clear_limiters()
+    try:
+        async with TestClient(TestServer(app)) as client:
+            responses = [await client.post("/api/control-plane/auth/login", json=attempt) for attempt in attempts]
+            statuses = [response.status for response in responses]
+            bodies = [await response.json() for response in responses]
+    finally:
+        rate_limit.clear_limiters()
+
+    assert statuses == [401, 401, 429]
+    assert bodies[:2] == [{"error": "Invalid credentials."}] * 2
+    assert int(responses[2].headers["Retry-After"]) >= 1
+    failures = [entry for entry in audit if entry["event"] == "security.control_plane_auth_failure"]
+    assert [(entry["path"], entry["status"]) for entry in failures] == [("/api/control-plane/auth/login", 401)] * 3
 
 
 @pytest.mark.postgres
@@ -486,7 +573,7 @@ def test_recovery_code_resets_password_and_invalidates_all(
             new_password=STRONG_PASSWORD,
         )
     # Old password no longer works.
-    with pytest.raises(ValueError, match="Invalid credentials"):
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
         service.login(identifier="owner", password=STRONG_PASSWORD)
     # New password does.
     logged_in = service.login(identifier="owner", password=ANOTHER_STRONG_PASSWORD)
@@ -595,7 +682,8 @@ async def test_password_recover_route_accepts_lowercase_compact_code(
             "/api/control-plane/auth/login",
             json={"identifier": "owner", "password": STRONG_PASSWORD},
         )
-        assert stale.status == 400
+        assert stale.status == 401
+        assert await stale.json() == {"error": "Invalid credentials."}
         fresh = await client.post(
             "/api/control-plane/auth/login",
             json={"identifier": "owner", "password": ANOTHER_STRONG_PASSWORD},

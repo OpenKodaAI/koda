@@ -338,8 +338,14 @@ it up, the next request is allowed after the window divided by the budget:
 
 Plus the per-address general bucket (`CONTROL_PLANE_RATE_LIMIT`, default 120/min) and
 the stricter auth-failure bucket (`CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT`, default 5/min
-triggered on any 401/403). A value below 1 refuses every request that bucket covers, with
-`Retry-After: 60`, and the control plane logs `control_plane_rate_limit_refuses_every_request`
+triggered on any 401/403). A rejected sign-in is a `401` whatever the reason (`AuthError` in
+`koda/control_plane/operator_auth.py`), so failed logins spend this bucket as well as the
+`POST /auth/login` budget above; a login request without an identifier or a password is a
+`400` and does not. This bucket is charged after the request has been answered, and once it
+is empty it turns the next 401 or 403 into a `429`. That request has still been handled, so
+what limits password guesses before the password is checked is the `POST /auth/login` budget
+and the per-account lockout below. A value below 1 refuses every request that bucket covers,
+with `Retry-After: 60`, and the control plane logs `control_plane_rate_limit_refuses_every_request`
 at startup. An exhausted bucket returns `429` with `Retry-After` set to the
 whole seconds, rounded up, until the bucket that refused the request takes the next one:
 `Retry-After: 30` for login after a burst, `360` for recovery, `120` for setup. A bucket
@@ -429,7 +435,10 @@ message would reveal that the account exists.
   locked account fails before any password hash is checked, so it answers faster than a
   wrong password for an existing account.
 - Responses use a single generic error (`"Invalid credentials."`, or equivalent) without
-  leaking whether the identifier exists. The i18n layer binds every failure mode (wrong
+  leaking whether the identifier exists. A rejected sign-in answers
+  `401 {"error": "Invalid credentials."}` for a wrong password, an unknown identifier and a
+  locked or disabled account alike, and the dashboard's login route answers with the same
+  status and message. The i18n layer binds every failure mode (wrong
   password, unknown user, locked account, invalid recovery code) to the same message in
   every language. Two answers get their own message, because neither depends on the account:
   the per-client `429`, which shows the wait since it is the same for every identifier (see

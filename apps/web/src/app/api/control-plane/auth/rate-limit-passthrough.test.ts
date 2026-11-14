@@ -36,8 +36,8 @@ const ROUTES: RouteCase[] = [
     path: "login",
     body: { identifier: "owner@example.com", password: "a-strong-password-123" },
     load: () => import("./login/route"),
-    // A locked account answers exactly like a wrong password.
-    rejection: { status: 400, error: "Invalid credentials." },
+    // A locked account answers exactly like a wrong password: 401 (D-135).
+    rejection: { status: 401, error: "Invalid credentials." },
     rejectedCopy: "Invalid credentials.",
   },
   {

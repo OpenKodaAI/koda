@@ -158,10 +158,26 @@ describe("POST /api/control-plane/auth/login", () => {
     expect(response.cookies.get(WEB_OPERATOR_SESSION_COOKIE)?.httpOnly).toBe(true);
   });
 
+  it("passes a rejected sign-in through as a 401 with the generic copy and no session", async () => {
+    // The control plane answers every bad credential (wrong password, unknown
+    // identifier, locked or disabled account) with one 401 (D-135).
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("WEB_OPERATOR_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    upstreamFetch.mockResolvedValue(new Response(JSON.stringify({ error: "Invalid credentials." }), { status: 401 }));
+    const { POST } = await import("./route");
+
+    const response = await POST(loginRequest());
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "Invalid credentials." });
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("set-cookie")).toBeNull();
+  });
+
   it("forwards the browser address so the control plane rate limits each client separately", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("WEB_OPERATOR_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
-    upstreamFetch.mockResolvedValue(new Response(JSON.stringify({ error: "Invalid credentials." }), { status: 400 }));
+    upstreamFetch.mockResolvedValue(new Response(JSON.stringify({ error: "Invalid credentials." }), { status: 401 }));
     const { POST } = await import("./route");
 
     // A spoofed entry to the left of the address the edge proxy appended is ignored.

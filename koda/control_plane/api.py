@@ -39,7 +39,7 @@ from .dashboard_service import (
 )
 from .manager import GeneralPayloadValidationError, get_control_plane_manager
 from .onboarding import load_control_plane_openapi_spec, render_setup_page
-from .operator_auth import OperatorAuthContext, OperatorAuthService, get_operator_auth_service
+from .operator_auth import AuthError, OperatorAuthContext, OperatorAuthService, get_operator_auth_service
 from .settings import (
     AGENT_SECTIONS,
     DOCUMENT_KINDS,
@@ -384,6 +384,8 @@ async def control_plane_error_middleware(
 ) -> web.StreamResponse:
     try:
         return await handler(request)
+    except AuthError as exc:
+        return web.json_response({"error": str(exc)}, status=401)
     except KeyError:
         return web.json_response({"error": "agent or asset not found"}, status=404)
     except ValueError as exc:
