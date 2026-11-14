@@ -2735,7 +2735,7 @@ async def test_cancel_task_without_environment_discards_a_queued_task(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", ["completed", "failed", "cancelled"])
+@pytest.mark.parametrize("status", ["completed", "failed", "cancelled", "needs_review"])
 async def test_cancel_task_without_environment_leaves_a_finished_task_unchanged(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

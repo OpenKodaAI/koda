@@ -80,7 +80,9 @@ from koda.state.history_store import create_task
 
 log = get_logger(__name__)
 
-_TERMINAL_TASK_STATUSES = frozenset({"completed", "failed", "cancelled"})
+# Task statuses that can still have work to stop. Matches the active set the
+# history store uses for leases, recovery and the queue janitor.
+_ACTIVE_TASK_STATUSES = frozenset({"queued", "running", "retrying"})
 
 _WORKSPACE_SEARCH_IGNORED_DIRS = {
     ".git",
@@ -2710,9 +2712,10 @@ class RuntimeController:
         )
 
         task_status = str(task.get("status") or "")
-        if env is None and task_status in _TERMINAL_TASK_STATUSES and not is_task_active_in_process(task_id):
-            # A light task that already finished has nothing left to stop: keep
-            # its recorded outcome instead of rewriting it as cancelled.
+        if env is None and task_status not in _ACTIVE_TASK_STATUSES and not is_task_active_in_process(task_id):
+            # A light task that already finished (completed, failed, cancelled,
+            # needs_review, ...) has nothing left to stop: keep its recorded
+            # outcome instead of rewriting it as cancelled.
             return {
                 "ok": False,
                 "action": "not_running",
