@@ -13,11 +13,14 @@ The routing follows the auth model in docs/install/vps.md ("Reverse Proxy"):
   settings charge rate limits to the real client;
 - every request reaches the upstream with a ``Host``: the browser's, port included, or the server
   name when the client sent none;
-- every request may carry a body as large as the largest upload the app accepts (a 12 MiB photo
-  in a multipart form), where nginx's default ``client_max_body_size`` of 1m would refuse it.
+- the photo upload routes take a body as large as the largest photo the app accepts (12 MiB in a
+  multipart form), where nginx's default ``client_max_body_size`` of 1m would refuse it; every
+  other route, the sign-in and setup routes included, keeps that default, so a client without a
+  session cannot push large bodies at the dashboard.
 
-The config is parsed and routed by a small model of nginx: exact and longest-prefix ``location``
-matching, ``if`` with ``return``, ``error_page ... = @named``, ``map`` without regexes, and the
+The config is parsed and routed by a small model of nginx: exact, longest-prefix and regex
+``location`` matching in nginx's order, ``if`` with ``return``, ``error_page ... = @named``,
+``map`` without regexes, ``client_max_body_size`` as each location inherits it, and the
 variables the config uses. Anything outside that model fails the test instead of being skipped,
 so a change to the config either stays inside it or extends it. The runtime proof is
 ``scripts/proxy_smoke.py``: ``scripts/docker_smoke.sh`` (the CI docker-smoke jobs) loads this
@@ -145,10 +148,9 @@ def _parse(tokens: list[tuple[str, str]]) -> tuple[Directive, ...]:
 
 # Directives the model understands in the `server` block and inside a `location`; anything else
 # fails the test.
-# client_max_body_size is understood in the server block only, so one limit covers every location
-# (the named API location included).
 _SERVER_DIRECTIVES = {"client_max_body_size", "error_page", "listen", "location", "proxy_set_header", "server_name"}
 _LOCATION_DIRECTIVES = {
+    "client_max_body_size",
     "error_page",
     "if",
     "proxy_http_version",
@@ -175,9 +177,10 @@ _VARIABLE = re.compile(r"\$(\w+)")
 
 @dataclass(frozen=True)
 class Location:
-    label: str  # how it is declared: "/api/", "= /exact", "@named"
+    label: str  # how it is declared: "/api/", "= /exact", "~ ^/regex$", "@named"
     prefix: str | None  # the matched path for exact and prefix locations
     block: tuple[Directive, ...]
+    pattern: re.Pattern[str] | None = None  # for regex locations
 
     def all(self, name: str) -> list[Directive]:
         return [directive for directive in self.block if directive.name == name]
@@ -202,7 +205,16 @@ class Route:
     target: str  # the request URI sent upstream
     http_version: str
     headers: dict[str, str]  # lower-case names, as sent upstream
-    body_limit: int  # the largest request body nginx accepts, in bytes (client_max_body_size)
+    # client_max_body_size, in bytes, where nginx checks it. A declared Content-Length is checked
+    # once the location is selected, before any `error_page ... = @named` jump; a chunked (or
+    # HTTP/2) body is checked while it is read, in the location that proxies it.
+    content_length_limit: int
+    read_limit: int
+
+    @property
+    def body_limit(self) -> int:
+        """The largest request body nginx passes on this route, however the client sends it."""
+        return min(self.content_length_limit, self.read_limit)
 
 
 class NginxModel:
@@ -239,6 +251,7 @@ class NginxModel:
 
         self.exact: dict[str, Location] = {}
         self.prefixes: dict[str, Location] = {}
+        self.regexes: list[Location] = []  # in config order, as nginx tries them
         self.named: dict[str, Location] = {}
         for directive in self.server:
             if directive.name != "location":
@@ -257,11 +270,15 @@ class NginxModel:
             elif len(directive.args) == 1 and not directive.args[0].startswith(("~", "^~")):
                 path = directive.args[0]
                 self.prefixes[path] = Location(path, path, directive.block)
+            elif len(directive.args) == 2 and directive.args[0] in ("~", "~*"):
+                flags = re.IGNORECASE if directive.args[0] == "~*" else 0
+                label = " ".join(directive.args)
+                self.regexes.append(Location(label, None, directive.block, re.compile(directive.args[1], flags)))
             else:
-                raise AssertionError(f"location {directive.args} is outside the model (regex or ^~)")
+                raise AssertionError(f"location {directive.args} is outside the model (^~)")
 
     def locations(self) -> list[Location]:
-        return [*self.prefixes.values(), *self.exact.values(), *self.named.values()]
+        return [*self.prefixes.values(), *self.exact.values(), *self.regexes, *self.named.values()]
 
     # -- variables ---------------------------------------------------------
 
@@ -294,10 +311,17 @@ class NginxModel:
     # -- phases ------------------------------------------------------------
 
     def select(self, path: str) -> Location:
-        if path in self.exact:
-            return self.exact[path]
-        matches = [prefix for prefix in self.prefixes if path.startswith(prefix)]
+        """nginx's order: an exact match; else the first regex, in config order, that matches;
+        else the longest prefix (no `^~`, which would skip the regexes)."""
+        uri = path.split("?", 1)[0]
+        if uri in self.exact:
+            return self.exact[uri]
+        matches = [prefix for prefix in self.prefixes if uri.startswith(prefix)]
         assert matches, f"no location matches {path}"
+        for location in self.regexes:
+            assert location.pattern is not None
+            if location.pattern.search(uri):
+                return location
         return self.prefixes[max(matches, key=len)]
 
     def condition(self, args: tuple[str, ...], request: Request, location: Location) -> bool:
@@ -343,10 +367,14 @@ class NginxModel:
                 return self.named[target]
         raise AssertionError(f"{location.label} returns a bare {status}")
 
-    def body_limit(self) -> int:
-        limits = [d for d in self.server if d.name == "client_max_body_size"]
-        assert len(limits) <= 1, "client_max_body_size is set more than once"
-        return _size(limits[0].args[0] if limits else _NGINX_DEFAULT_BODY_LIMIT)
+    def body_limit(self, location: Location) -> int:
+        """client_max_body_size in *location*: its own, else the server's, else nginx's default."""
+        for scope in (location.block, self.server):
+            limits = [d for d in scope if d.name == "client_max_body_size"]
+            assert len(limits) <= 1, "client_max_body_size is set more than once in one block"
+            if limits:
+                return _size(limits[0].args[0])
+        return _size(_NGINX_DEFAULT_BODY_LIMIT)
 
     def upstream(self, location: Location) -> tuple[str, str | None]:
         url = location.one("proxy_pass").args[0]
@@ -359,6 +387,7 @@ class NginxModel:
         defaults = {"Host": host} if host is not None else {}
         request = Request(path, {name.lower(): value for name, value in {**defaults, **(headers or {})}.items()})
         location = self.select(path)
+        content_length_limit = self.body_limit(location)
         status = self.rewrite(location, request)
         if status is not None:
             location = self.error_page(location, status)
@@ -384,7 +413,8 @@ class NginxModel:
             target=target,
             http_version=versions[-1].args[0] if versions else "1.0",
             headers={field: value for field, value in expanded.items() if value},
-            body_limit=self.body_limit(),
+            content_length_limit=content_length_limit,
+            read_limit=self.body_limit(location),
         )
 
 
@@ -476,17 +506,21 @@ def test_api_token_calls_and_the_openapi_document_reach_the_api(
 
 def test_only_bearer_requests_and_the_openapi_document_can_reach_the_api(nginx: NginxModel) -> None:
     to_api = {location.label for location in nginx.locations() if nginx.upstream(location)[0] == API}
-    assert to_api == {"= /openapi/control-plane.json", "@koda_control_plane_api"}
+    assert to_api == {"= /openapi/control-plane.json", "@koda_control_plane_api", "@koda_control_plane_api_upload"}
 
-    # The named location is entered only from /api/control-plane/, when the request carries a
-    # bearer token; every other location proxies to the dashboard.
-    entered_from = [
-        location.label
+    # The named locations are entered only from /api/control-plane/ and from the photo upload
+    # location under it, when the request carries a bearer token; every other location proxies
+    # to the dashboard.
+    entered_from = {
+        (location.label, directive.args[-1])
         for location in nginx.locations()
         for directive in location.all("error_page")
-        if directive.args[-1] == "@koda_control_plane_api"
-    ]
-    assert entered_from == ["/api/control-plane/"]
+        if directive.args[-1].startswith("@")
+    }
+    assert entered_from == {
+        ("/api/control-plane/", "@koda_control_plane_api"),
+        (f"~ {PHOTO_UPLOAD_LOCATION}", "@koda_control_plane_api_upload"),
+    }
     assert nginx.route("/api/control-plane/agents", {}).upstream == DASHBOARD
     assert nginx.route("/api/control-plane/agents", BEARER).upstream == API
     for location in nginx.locations():
@@ -576,36 +610,52 @@ def test_every_route_sends_a_host_when_the_client_sent_none(
     assert routed.headers["x-forwarded-for"] == CLIENT
 
 
-# The uploads the app accepts, from the dashboard (session cookie) and from API-token clients.
-UPLOAD_ROUTES: list[tuple[str, dict[str, str]]] = [
+# The photo upload routes, from the dashboard (session cookie) and from API-token clients: the only
+# routes that accept a body over nginx's default of 1m.
+PHOTO_UPLOAD_ROUTES: list[tuple[str, dict[str, str]]] = [
     ("/api/control-plane/auth/profile/photo", SESSION_COOKIE),
     ("/api/control-plane/auth/profile/photo", BEARER),
     ("/api/control-plane/dashboard/squads/threads/thread-1/photo", SESSION_COOKIE),
     ("/api/control-plane/dashboard/squads/threads/thread-1/photo", BEARER),
+]
+# The location that gives them the larger limit.
+PHOTO_UPLOAD_LOCATION = "^/api/control-plane/(auth/profile/photo|dashboard/squads/threads/[^/]+/photo)$"
+# Other uploads, all within nginx's default limit.
+SMALL_UPLOAD_ROUTES: list[tuple[str, dict[str, str]]] = [
     ("/api/control-plane/providers/supertonic/voices/import", SESSION_COOKIE),
     ("/api/control-plane/providers/supertonic/voices/import", BEARER),
+]
+# Paths next to the photo routes, which must not get the larger limit; none needs a session.
+NEAR_PHOTO_PATHS = [
+    "/api/control-plane/auth/profile/photo/",
+    "/api/control-plane/auth/profile/photo/extra",
+    "/api/control-plane/auth/profile/photos",
+    "/api/control-plane/auth/profile",
+    "/api/control-plane/dashboard/squads/threads/thread-1/photo/x",
+    "/api/control-plane/dashboard/squads/threads/a/b/photo",
+    "/api/control-plane/dashboard/squads/threads//photo",
+    "/api/runtime/auth/profile/photo",
+    "/x/api/control-plane/auth/profile/photo",
+]
+DEFAULT_LIMIT_ROUTES: list[tuple[str, dict[str, str]]] = [
+    *ALL_ROUTES,
+    *SMALL_UPLOAD_ROUTES,
+    *[(path, headers) for path in NEAR_PHOTO_PATHS for headers in ({}, SESSION_COOKIE, BEARER)],
 ]
 # Room for what a multipart form adds around the file: boundaries, part headers, other fields.
 MULTIPART_FRAMING_BYTES = 64 * 1024
 
 
-def largest_upload_bytes() -> int:
-    """The largest file any upload route accepts (the handlers read multipart bodies unbounded)."""
+def largest_photo_bytes() -> int:
+    """The largest photo the photo routes accept (their handlers read the multipart body unbounded)."""
     from koda.control_plane import operator_profile_photos
-    from koda.services import supertonic_manager
     from koda.squads import room_photos
 
-    return max(
-        operator_profile_photos.MAX_INPUT_BYTES,
-        room_photos.MAX_INPUT_BYTES,
-        supertonic_manager._MAX_CUSTOM_VOICE_BYTES,
-    )
+    return max(operator_profile_photos.MAX_INPUT_BYTES, room_photos.MAX_INPUT_BYTES)
 
 
-@pytest.mark.parametrize(
-    "route", [*ALL_ROUTES, *UPLOAD_ROUTES], ids=[_route_id(r) for r in [*ALL_ROUTES, *UPLOAD_ROUTES]]
-)
-def test_every_route_accepts_the_largest_upload_the_app_accepts(
+@pytest.mark.parametrize("route", PHOTO_UPLOAD_ROUTES, ids=[_route_id(route) for route in PHOTO_UPLOAD_ROUTES])
+def test_photo_upload_routes_accept_the_largest_photo_the_app_accepts(
     nginx: NginxModel, route: tuple[str, dict[str, str]]
 ) -> None:
     """nginx answers 413 to a body over client_max_body_size before any upstream sees it.
@@ -613,21 +663,73 @@ def test_every_route_accepts_the_largest_upload_the_app_accepts(
     Its default is 1m, but a profile or room photo may be 12 MiB (``MAX_INPUT_BYTES`` in
     koda/control_plane/operator_profile_photos.py and koda/squads/room_photos.py), sent as
     multipart/form-data. The limit leaves room for the multipart framing around such a file and
-    stays within 1 MiB above it, so it follows the app's own limit.
+    stays within 1 MiB above it, so it follows the app's own limit. It holds where nginx checks a
+    declared Content-Length and, after an API token's jump to the named location, where it reads a
+    chunked body.
     """
     path, headers = route
-    largest = largest_upload_bytes()
+    largest = largest_photo_bytes()
 
     routed = nginx.route(path, headers)
 
-    assert routed.body_limit >= largest + MULTIPART_FRAMING_BYTES
-    assert routed.body_limit <= largest + 1024 * 1024
+    assert routed.location.label in {f"~ {PHOTO_UPLOAD_LOCATION}", "@koda_control_plane_api_upload"}
+    assert routed.content_length_limit >= largest + MULTIPART_FRAMING_BYTES
+    assert routed.read_limit >= largest + MULTIPART_FRAMING_BYTES
+    assert max(routed.content_length_limit, routed.read_limit) <= largest + 1024 * 1024
+
+
+@pytest.mark.parametrize("route", DEFAULT_LIMIT_ROUTES, ids=[_route_id(route) for route in DEFAULT_LIMIT_ROUTES])
+def test_every_other_route_keeps_nginx_default_body_limit(nginx: NginxModel, route: tuple[str, dict[str, str]]) -> None:
+    """Only the photo routes need more than 1m, and only for an API token's raw upload.
+
+    A larger limit anywhere else reaches the dashboard before any authentication: the sign-in, setup
+    and runtime routes, and every page. The dashboard's Next.js proxy buffers each body ahead of
+    its route handlers and rate limiter, so a client without a session could make it hold about
+    10 MiB per request where nginx answered 413 at 1 MiB.
+    """
+    path, headers = route
+
+    routed = nginx.route(path, headers)
+
+    assert routed.content_length_limit == routed.read_limit == _size(_NGINX_DEFAULT_BODY_LIMIT)
+
+
+def test_other_uploads_fit_nginx_default_body_limit() -> None:
+    """A Supertonic voice is at most 1,000,000 bytes, sent as a form with its model id and name.
+
+    16 KiB is ample for that form's boundaries, part headers and two short text fields.
+    """
+    from koda.services import supertonic_manager
+
+    assert _size(_NGINX_DEFAULT_BODY_LIMIT) >= supertonic_manager._MAX_CUSTOM_VOICE_BYTES + 16 * 1024
+
+
+def test_the_photo_upload_location_covers_the_photo_routes_the_api_registers(nginx: NginxModel) -> None:
+    """The routes that take a photo are the ones the larger limit covers, and no others."""
+    from aiohttp import web
+
+    from koda.control_plane import api
+
+    app = web.Application()
+    api.setup_control_plane_routes(app)
+    registered = set()
+    for registered_route in app.router.routes():
+        info = registered_route.resource.get_info() if registered_route.resource is not None else {}
+        template = str(info.get("path") or info.get("formatter") or "")
+        if registered_route.method == "POST" and template.endswith("/photo"):
+            registered.add(template.replace("{thread_id}", "thread-1"))
+
+    assert registered == {path for path, _ in PHOTO_UPLOAD_ROUTES}
+    for path in registered:
+        assert nginx.select(path).label == f"~ {PHOTO_UPLOAD_LOCATION}", path
 
 
 def test_upload_routes_reach_the_upstream_that_serves_them(nginx: NginxModel) -> None:
-    for path, headers in UPLOAD_ROUTES:
+    for path, headers in [*PHOTO_UPLOAD_ROUTES, *SMALL_UPLOAD_ROUTES]:
         expected = API if "authorization" in {name.lower() for name in headers} else DASHBOARD
-        assert nginx.route(path, headers).upstream == expected, (path, headers)
+        routed = nginx.route(path, headers)
+        assert routed.upstream == expected, (path, headers)
+        assert routed.target == path
 
 
 @pytest.mark.parametrize(

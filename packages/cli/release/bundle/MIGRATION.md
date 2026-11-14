@@ -42,8 +42,10 @@
   `Authorization: Bearer` (API tokens) and `/openapi/control-plane.json` to the API. It also passes
   the browser's `Host` with its port (`$http_host`), so sign-in works behind a non-default port,
   sends the `server_name` for a request without a `Host` (an HTTP/1.0 health check), keeps idle
-  runtime event streams open, and accepts request bodies of up to 13 MiB
-  (`client_max_body_size 13m;`, where nginx's default of 1 MiB refused photo uploads over 1 MiB).
+  runtime event streams open, and accepts request bodies of up to 13 MiB on the two photo upload
+  routes (`/api/control-plane/auth/profile/photo` and
+  `/api/control-plane/dashboard/squads/threads/<id>/photo`), where nginx's default of 1 MiB
+  refused photo uploads over 1 MiB. Every other route keeps that default.
   `koda update` does not change a copy installed in nginx:
   replace that copy with the new template, keeping your `server_name` and TLS settings, then run
   `nginx -t` and reload nginx.
