@@ -102,7 +102,13 @@ from koda.utils.command_helpers import (
     set_provider_model,
     sync_user_data_with_runtime_settings,
 )
-from koda.utils.files import file_command_path, list_directory, resolve_work_path
+from koda.utils.files import (
+    NO_WORK_DIR_MESSAGE,
+    file_command_path,
+    file_command_work_dir,
+    list_directory,
+    resolve_work_path,
+)
 from koda.utils.formatting import escape_html
 from koda.utils.messaging import send_long_message
 from koda.utils.rate_limiter import acquire_rate_limit
@@ -1195,7 +1201,10 @@ async def cmd_file(update: Update, context: BotContext) -> None:
         await update.message.reply_text("Usage: /file <path>")
         return
 
-    work_dir = context.user_data["work_dir"]
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
+        return
     resolution = resolve_work_path(args, work_dir, deny_sensitive_dirs=False)
     if resolution.path is None:
         await update.message.reply_text(resolution.error or "Access denied.")
@@ -1232,7 +1241,10 @@ async def cmd_file(update: Update, context: BotContext) -> None:
 async def cmd_ls(update: Update, context: BotContext) -> None:
     """List directory contents within work_dir."""
     requested = " ".join(context.args) if context.args else ""
-    work_dir = context.user_data["work_dir"]
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
+        return
 
     listing, success = list_directory(file_command_path("ls", context.args), work_dir)
 

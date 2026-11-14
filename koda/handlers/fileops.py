@@ -5,7 +5,7 @@ from telegram.ext import ContextTypes
 
 from koda.utils.approval import with_approval
 from koda.utils.command_helpers import authorized
-from koda.utils.files import file_command_path, resolve_work_path
+from koda.utils.files import NO_WORK_DIR_MESSAGE, file_command_path, file_command_work_dir, resolve_work_path
 from koda.utils.messaging import send_long_message
 
 
@@ -20,7 +20,10 @@ async def cmd_write(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     path_arg = file_command_path("write", args)
     content = " ".join(args[1:])
-    work_dir = context.user_data["work_dir"]
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
+        return
 
     from koda.utils.files import safe_write
 
@@ -39,7 +42,10 @@ async def cmd_edit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     path_arg = file_command_path("edit", args)
     content = " ".join(args[1:])
-    work_dir = context.user_data["work_dir"]
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
+        return
 
     resolution = resolve_work_path(path_arg, work_dir, deny_sensitive_dirs=False)
     if resolution.path is None:
@@ -68,7 +74,10 @@ async def cmd_rm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Usage: /rm <path>")
         return
 
-    work_dir = context.user_data["work_dir"]
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
+        return
 
     from koda.utils.files import safe_delete
 
@@ -85,7 +94,10 @@ async def cmd_mkdir(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Usage: /mkdir <path>")
         return
 
-    work_dir = context.user_data["work_dir"]
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
+        return
     resolution = resolve_work_path(path_arg, work_dir, deny_sensitive_dirs=False)
     if resolution.path is None:
         await update.message.reply_text(resolution.error or "Access denied.")
@@ -112,7 +124,10 @@ async def cmd_cat(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("Usage: /cat <path>")
         return
 
-    work_dir = context.user_data["work_dir"]
+    work_dir = file_command_work_dir(context.user_data)
+    if work_dir is None:
+        await update.message.reply_text(NO_WORK_DIR_MESSAGE)
+        return
 
     from koda.utils.files import safe_read
 

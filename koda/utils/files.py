@@ -2,9 +2,10 @@
 
 import os
 import re
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from koda.config import FILEOPS_BLOCKED_CREDENTIAL_PATHS, FILEOPS_BLOCKED_EXTENSIONS
 from koda.logging_config import get_logger
@@ -163,6 +164,26 @@ def file_command_path(command: str, args: Sequence[str] | None) -> str:
     if command == "ls" and not joined.strip():
         return "."
     return joined
+
+
+NO_WORK_DIR_MESSAGE = "No working directory is set. Use /setdir first."
+"""What a file command replies when :func:`file_command_work_dir` finds no work dir."""
+
+
+def file_command_work_dir(user_data: Mapping[str, Any]) -> str | None:
+    """Return the work dir the file commands resolve their path in, exactly as stored, or None.
+
+    The handlers, the approval gate (:func:`koda.utils.approval.with_approval`) and the
+    re-check when a confirmation is approved all read it here, so the grant checks the
+    path the handler acts on. The value is not stripped: ``/setdir`` and
+    ``agent_set_workdir`` store the validated directory as it is, and a directory whose
+    name ends in a space is not the one without it. None when no work dir is set (missing,
+    not a string, or blank); the handlers then refuse to run.
+    """
+    work_dir = user_data.get("work_dir")
+    if not isinstance(work_dir, str) or not work_dir.strip():
+        return None
+    return work_dir
 
 
 def resolve_work_path(

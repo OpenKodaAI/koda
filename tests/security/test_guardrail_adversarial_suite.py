@@ -1001,6 +1001,103 @@ async def test_an_approved_rm_does_not_follow_the_work_dir_to_its_parent(
     assert "Not run" in mock_update.message.reply_text.call_args.args[0]
 
 
+def _work_dir_with_a_trailing_space(tmp_path: Path) -> Path:
+    """``<work>/src`` and ``<work>/src `` (its name ends in a space), each holding a ``foo.txt``."""
+    work = (tmp_path / "work").resolve()
+    for name, content in (("src", "granted"), ("src ", "outside-the-grant")):
+        (work / name).mkdir(parents=True)
+        (work / name / "foo.txt").write_text(content, encoding="utf-8")
+    return work
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("command", ["rm", "cat"])
+async def test_a_work_dir_whose_name_ends_in_a_space_is_the_one_the_grant_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any, command: str
+) -> None:
+    """The gate, the approval pin and the handler resolve the path in the same work dir.
+
+    validate_work_dir accepts ``<work>/src `` and agent_set_workdir stores it as it is. The
+    grant covers ``<work>/src`` only, so a command in ``<work>/src `` is outside it: the gate
+    must not check ``<work>/src/foo.txt`` while the handler acts on ``<work>/src /foo.txt``.
+    """
+    from koda.handlers.fileops import cmd_cat, cmd_rm
+    from koda.utils.approval import dispatch_approved_operation
+    from koda.utils.workdir import validate_work_dir
+
+    work = _work_dir_with_a_trailing_space(tmp_path)
+    validation = validate_work_dir(str(work / "src "))
+    assert validation.ok
+    assert validation.path == f"{work}/src "
+    monkeypatch.chdir(tmp_path)
+    mock_context.user_data["work_dir"] = validation.path
+    mock_context.args = ["foo.txt"]
+    with (
+        patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", _grant(work / "src")),
+        patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send,
+    ):
+        await {"rm": cmd_rm, "cat": cmd_cat}[command](mock_update, mock_context)
+        if "_pending_op_id" in mock_context.user_data:
+            await dispatch_approved_operation(str(mock_context.user_data["_pending_op_id"]))
+
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+    assert (work / "src" / "foo.txt").read_text(encoding="utf-8") == "granted"
+    assert (work / "src " / "foo.txt").read_text(encoding="utf-8") == "outside-the-grant"
+    assert not any("outside-the-grant" in text for text in shown), shown
+    assert "outside the granted scope" in shown[-1], shown
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("work_dir", ["", "   "])
+async def test_a_file_command_without_a_work_dir_never_reads_the_process_cwd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any, work_dir: str
+) -> None:
+    from koda.handlers.fileops import cmd_cat
+
+    (tmp_path / "foo.txt").write_text("canary-cwd", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    mock_context.user_data["work_dir"] = work_dir
+    mock_context.args = ["foo.txt"]
+    with (
+        patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", {}),
+        patch("koda.handlers.fileops.send_long_message", new_callable=AsyncMock) as send,
+    ):
+        await cmd_cat(mock_update, mock_context)
+
+    shown = [call.args[1] for call in send.call_args_list]
+    shown += [call.args[0] for call in mock_update.message.reply_text.call_args_list]
+    assert not any("canary-cwd" in text for text in shown), shown
+    assert shown == ["No working directory is set. Use /setdir first."]
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+async def test_an_approved_rm_in_a_work_dir_whose_name_ends_in_a_space_deletes_the_file_it_showed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_update: Any, mock_context: Any
+) -> None:
+    from koda.handlers.fileops import cmd_rm
+    from koda.utils.approval import dispatch_approved_operation
+
+    work = _work_dir_with_a_trailing_space(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    mock_context.user_data["work_dir"] = f"{work}/src "
+    mock_context.args = ["foo.txt"]
+    with patch("koda.utils.approval.AGENT_RESOURCE_ACCESS_POLICY", {}):
+        op_id = await _request_confirmation(cmd_rm, mock_update, mock_context)
+        assert f"path: {work}/src /foo.txt" in mock_update.message.reply_text.call_args.args[0]
+        await dispatch_approved_operation(op_id)
+
+    assert not (work / "src " / "foo.txt").exists()
+    assert (work / "src" / "foo.txt").read_text(encoding="utf-8") == "granted"
+    assert mock_update.message.reply_text.call_args.args[0] == "Deleted: foo.txt"
+
+
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio

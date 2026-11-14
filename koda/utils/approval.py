@@ -51,7 +51,7 @@ from koda.state.pending_approvals import (
 )
 from koda.telegram_types import BotContext, MessageUpdate
 from koda.utils.command_helpers import ensure_canonical_session_id, require_message, require_user_data, require_user_id
-from koda.utils.files import FILE_COMMANDS, file_command_path, resolve_work_path
+from koda.utils.files import FILE_COMMANDS, file_command_path, file_command_work_dir, resolve_work_path
 from koda.utils.formatting import escape_html
 
 log = get_logger(__name__)
@@ -850,7 +850,7 @@ def _approved_file_target_refusal(target: _ApprovedFileTarget, user_data: dict[s
     the same parsed path: it must still pass the path policy, resolve to the path the
     confirmation was shown for, and be allowed by the integration grant.
     """
-    work_dir = str(user_data.get("work_dir") or "").strip() or None
+    work_dir = file_command_work_dir(user_data)
     resolution = _resolve_operational_command(
         target.command, target.raw_args, work_dir=work_dir, file_path=target.path_arg
     )
@@ -1268,7 +1268,7 @@ def with_approval(
                 resolution = _resolve_operational_command(
                     policy_command_name,
                     policy_raw_args,
-                    work_dir=str(user_data.get("work_dir") or "").strip() or None,
+                    work_dir=file_command_work_dir(user_data),
                     file_path=file_path,
                 )
                 policy_params = _policy_params_for_manual_command(
@@ -1296,7 +1296,7 @@ def with_approval(
                 if resolution:
                     allowed, deny_message = _evaluate_operational_grant(
                         resolution,
-                        work_dir=str(user_data.get("work_dir") or "").strip() or None,
+                        work_dir=file_command_work_dir(user_data),
                     )
                     if not allowed:
                         user_id = None
