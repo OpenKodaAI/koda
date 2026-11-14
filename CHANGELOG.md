@@ -3,7 +3,8 @@
 All notable changes to Koda are recorded here: the `@openkodaai/koda` npm package, the
 container images and the release bundle they install. The format follows
 [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/). Version numbers match
-`pyproject.toml` and the npm package.
+`pyproject.toml` and the release tag. A release that was not published everywhere says
+so in its section.
 
 An entry ends with the plan task or defect it comes from, when there is one (for
 example `M1-E1-T3` or `D-004`; see `docs/engineering/MASTER_PLAN.md` and
@@ -33,11 +34,14 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   never the API. (M1-E1-T1)
 - Unedited `.env.example` placeholders (`replace-with-…`) no longer authenticate.
   `CONTROL_PLANE_API_TOKEN`, `RUNTIME_LOCAL_UI_TOKEN` and `WEB_OPERATOR_SESSION_SECRET`
-  with a placeholder value count as unset, and the control plane logs why at startup.
-  The dashboard checks its session secret before a login or owner registration reaches
-  the control plane, so a misconfiguration cannot use up the setup code or lose the
-  one-time recovery codes. `scripts/generate_env_secrets.py` writes random values to
-  `.env` with mode 0600. (D-007)
+  with a placeholder value count as unset. For the two tokens, the control plane logs
+  why at startup (`control_plane_api_token_placeholder_ignored`,
+  `runtime_local_ui_token_placeholder_ignored`). The dashboard checks its session
+  secret before a login or owner registration reaches the control plane, and logs the
+  reason (`[web-operator-session]`) on the first attempt, so a misconfiguration cannot
+  use up the setup code or lose the one-time recovery codes.
+  `scripts/generate_env_secrets.py` writes random values to `.env` with mode 0600.
+  (D-007)
 - `POSTGRES_PASSWORD` and the `S3_*` keys left at their `.env.example` placeholders are
   reported, not yet refused. The supervisor logs `storage_secret_placeholder_in_use` at
   every start. `scripts/doctor.py` fails its `storage_secrets_not_placeholders` check
@@ -143,11 +147,10 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   `/openapi/control-plane.json` go to the control-plane API. It passes the browser's
   `Host` with its port, so sign-in works behind a non-default port. A request without
   a `Host`, such as an HTTP/1.0 health check, gets the `server_name`. It keeps idle
-  relay and event-stream connections open for an hour and appends the client to
-  `X-Forwarded-For`. Every request keeps nginx's 1 MiB body limit except API-token
-  photo uploads, which accept 13 MiB (a 12 MiB photo plus its multipart framing).
-  Replace any installed copy, keeping your
-  `server_name` and TLS settings, then run `nginx -t` and reload nginx. (M1-E1-T16)
+  relay and event-stream connections open for an hour. Every request keeps nginx's
+  1 MiB body limit except API-token photo uploads, which accept 13 MiB (a 12 MiB photo
+  plus its multipart framing). Replace any installed copy, keeping your `server_name`
+  and TLS settings, then run `nginx -t` and reload nginx. (M1-E1-T16)
 - `POST /api/runtime/schedules` queues a validation run for the new job and returns
   `validation_run_id` and a `message`. An idempotent replay returns the same shape.
   Before, the job stayed waiting for validation and nothing was queued. (D-016)
@@ -216,6 +219,11 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 
 ## [1.0.18] - 2026-05-20
 
+Publishing 1.0.18 did not finish. The container images are on GHCR under the `1.0.18`
+tag, but the npm publish failed: npm's newest version is 1.0.17, so
+`npx @openkodaai/koda@1.0.18` finds no such version. The GitHub release for v1.0.18,
+which carries the release bundle, is still a draft.
+
 This tag also added two third-party JavaScript bundles and another project's
 `CHANGELOG.md` to the repository root by mistake. Neither was part of the npm package
 or the images. Both are removed under [Unreleased].
@@ -226,7 +234,9 @@ or the images. Both are removed under [Unreleased].
   tasks, a coordinator and delegation. The dashboard's Sessions page gains rooms, with
   agent mentions, a room photo and room settings. Telegram gains `/squad_bind`,
   `/squad_unbind`, `/squad_status`, `/squad_thread_new` and `/squad_thread_close`.
-  Five squad agent templates ship as seeds. See `docs/squads/`.
+  Five squad agent templates ship as seeds. Squads are off by default: they need
+  `SQUADS_ENABLED=true`, `INTER_AGENT_ENABLED=true` and
+  `INTER_AGENT_BUS_BACKEND=postgres`. See `docs/squads/`.
 - OpenRouter as an OpenAI-compatible provider, and Supertonic local text-to-speech.
 - Workspace directory import in the control plane.
 - An Evaluations page in the dashboard, and operator profile photos.

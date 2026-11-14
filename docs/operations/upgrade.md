@@ -145,9 +145,9 @@ docker compose up -d
 **Important:** rolling back a migration is a one-way door for any
 new column / table the new code wrote rows into. Forward-only
 migration design (additive ALTERs, never DROP COLUMN in the same
-release that introduces the column) keeps rollback safe. If a
-release notes called out a destructive migration, follow the
-release-specific rollback in `docs/release-notes/<version>.md`.
+release that introduces the column) keeps rollback safe. If the
+release's section in [`CHANGELOG.md`](../../CHANGELOG.md) calls out a
+destructive migration, follow the rollback steps it gives.
 
 ## Provider CLI versions
 

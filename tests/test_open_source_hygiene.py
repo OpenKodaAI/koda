@@ -7,6 +7,8 @@ import subprocess
 import tomllib
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -186,8 +188,27 @@ def _markdown_headings(text: str) -> list[tuple[int, int, str]]:
     return headings
 
 
+def _is_changelog(path: Path) -> bool:
+    """CHANGELOG.md in any directory and any case; not other files that mention changelogs."""
+    return path.suffix.lower() == ".md" and path.stem.lower() == "changelog"
+
+
 def _tracked_changelogs() -> list[Path]:
-    return [path for path in _tracked_repo_files() if path.name.lower().startswith("changelog")]
+    return [path for path in _tracked_repo_files() if _is_changelog(path)]
+
+
+def _changelog_title_violations(rel: str, text: str) -> list[str]:
+    violations: list[str] = []
+    first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    if first_line != CHANGELOG_TITLE:
+        violations.append(f"{rel}:1: starts with {first_line!r}, not {CHANGELOG_TITLE!r}")
+    for number, level, heading in _markdown_headings(text):
+        if level == 1 and f"# {heading}" != CHANGELOG_TITLE:
+            violations.append(f"{rel}:{number}: foreign title {heading!r}")
+    preamble = text.split("\n## ", 1)[0]
+    if "koda" not in preamble.lower():
+        violations.append(f"{rel}: the text above the first release does not name Koda")
+    return violations
 
 
 def _version_key(version: str) -> tuple[int, ...]:
@@ -207,20 +228,46 @@ def test_tracked_changelogs_carry_no_foreign_title() -> None:
     """A changelog is Koda's own: titled `# Changelog`, with no other product's heading (D-084)."""
     changelogs = _tracked_changelogs()
     assert CHANGELOG in changelogs, "CHANGELOG.md must be tracked at the repository root"
-    violations: list[str] = []
-    for path in changelogs:
-        rel = path.relative_to(ROOT).as_posix()
-        text = path.read_text(encoding="utf-8")
-        first_line = next((line.strip() for line in text.splitlines() if line.strip()), "")
-        if first_line != CHANGELOG_TITLE:
-            violations.append(f"{rel}:1: starts with {first_line!r}, not {CHANGELOG_TITLE!r}")
-        for number, level, heading in _markdown_headings(text):
-            if level == 1 and f"# {heading}" != CHANGELOG_TITLE:
-                violations.append(f"{rel}:{number}: foreign title {heading!r}")
-        preamble = text.split("\n## ", 1)[0]
-        if "Koda" not in preamble:
-            violations.append(f"{rel}: the text above the first release does not name Koda")
+    violations = [
+        violation
+        for path in changelogs
+        for violation in _changelog_title_violations(
+            path.relative_to(ROOT).as_posix(), path.read_text(encoding="utf-8")
+        )
+    ]
     assert not violations, "Changelogs must be Koda's own:\n" + "\n".join(violations)
+
+
+@pytest.mark.parametrize(
+    ("rel", "expected"),
+    [
+        ("CHANGELOG.md", True),
+        ("packages/cli/CHANGELOG.md", True),
+        ("docs/changelog.md", True),
+        ("scripts/changelog_check.py", False),
+        ("docs/reference/changelog-policy.md", False),
+        ("apps/web/src/lib/changelog.ts", False),
+    ],
+)
+def test_changelog_title_check_covers_markdown_changelogs_only(rel: str, expected: bool) -> None:
+    assert _is_changelog(Path(rel)) is expected
+
+
+FOREIGN_CHANGELOG_PROBES = {
+    "foreign-title": "# @googleworkspace/cli\n\n## 0.22.0\n\n- Add a command.\n",
+    "second-title": "# Changelog\n\nAll notable changes to Koda.\n\n# @googleworkspace/cli\n",
+    "no-product": "# Changelog\n\nAll notable changes to this project.\n\n## [1.0.0] - 2026-01-01\n",
+}
+
+
+@pytest.mark.parametrize("text", FOREIGN_CHANGELOG_PROBES.values(), ids=FOREIGN_CHANGELOG_PROBES.keys())
+def test_changelog_title_check_flags_foreign_changelogs(text: str) -> None:
+    assert _changelog_title_violations("CHANGELOG.md", text)
+
+
+def test_changelog_title_check_accepts_a_package_changelog() -> None:
+    text = "# Changelog\n\nAll notable changes to @openkodaai/koda.\n\n## [1.0.0] - 2026-01-01\n"
+    assert _changelog_title_violations("packages/cli/CHANGELOG.md", text) == []
 
 
 def test_changelog_follows_keep_a_changelog() -> None:
