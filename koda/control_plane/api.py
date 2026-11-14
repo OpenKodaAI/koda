@@ -1538,11 +1538,12 @@ async def post_dashboard_squad_thread_message_route(request: web.Request) -> web
                         {"messageId": message_id, "fromAgent": from_agent, "coordination": coordination_payload}
                     )
                 if execution.coordinator_query:
-                    # ask_clarification or decline: the coordinator answers the user itself (D-015).
+                    # ask_clarification or decline: the coordinator answers the user itself, so the
+                    # turn is routed to it, not delegated (D-015).
                     await record_squad_routing_decision(
                         store,
                         thread_id=thread_id,
-                        source="coordinator_engine",
+                        source="coordinator",
                         targets=[coordinator_id],
                         parent_message_id=f"msg-{message_id}",
                         metadata={"mode": execution.decision.mode},
@@ -1555,7 +1556,7 @@ async def post_dashboard_squad_thread_message_route(request: web.Request) -> web
                         parent_message_id=f"msg-{message_id}",
                         metadata={
                             "from_user": from_agent,
-                            "source": "coordinator_engine",
+                            "source": "coordinator",
                             "delivery_intent": "execution",
                         },
                         application=request.app.get("telegram_application"),

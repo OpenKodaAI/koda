@@ -660,11 +660,12 @@ async def _notify_squad_targets(
                     )
                     return
                 if execution.coordinator_query:
-                    # ask_clarification or decline: the coordinator answers the user itself (D-015).
+                    # ask_clarification or decline: the coordinator answers the user itself, so the
+                    # turn is routed to it, not delegated (D-015).
                     await record_squad_routing_decision(
                         thread_store,
                         thread_id=thread.id,
-                        source="coordinator_engine",
+                        source="coordinator",
                         targets=[coordinator_id],
                         parent_message_id=parent_message_id,
                         metadata={"mode": execution.decision.mode, "member_profiles": member_profiles},
@@ -677,7 +678,7 @@ async def _notify_squad_targets(
                         parent_message_id=parent_message_id,
                         metadata={
                             "from_user": sender_handle,
-                            "source": "coordinator_engine",
+                            "source": "coordinator",
                             "delivery_intent": "execution",
                         },
                         application=getattr(bot_context, "application", None) if bot_context is not None else None,

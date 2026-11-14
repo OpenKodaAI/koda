@@ -514,68 +514,115 @@ async def test_engine_handoff_mode_persists_visible_handoff_event_and_tasks() ->
 
 
 class _NoTaskPlanner:
-    """Planner that picks a mode and creates no task (D-015)."""
+    """Planner that picks a mode and, by default, creates no task (D-015)."""
 
-    def __init__(self, mode: str, *, selected_agents: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        mode: str,
+        *,
+        selected_agents: list[str] | None = None,
+        tasks: list[CoordinationTask] | None = None,
+    ) -> None:
         self._mode = mode
         self._selected_agents = selected_agents or []
+        self._tasks = tasks or []
 
     async def plan(self, planner_input: CoordinationPlannerInput) -> CoordinationDecision:
         return CoordinationDecision(
             mode=cast(Any, self._mode),
             confidence=0.7,
             reasoning_summary=f"planner chose {self._mode}",
+            tasks=list(self._tasks),
             selected_agents=list(self._selected_agents),
             needs_user_clarification=self._mode == "ask_clarification",
         )
 
 
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    ("mode", "selected", "expects_coordinator_query"),
-    [
-        ("ask_clarification", [], True),
-        ("decline", [], True),
-        ("handoff", ["FE"], False),
-    ],
-)
-async def test_engine_without_tasks_hands_the_turn_back_to_the_caller(
-    mode: str, selected: list[str], expects_coordinator_query: bool
-) -> None:
+def _no_task_engine(planner: _NoTaskPlanner) -> tuple[SquadCoordinatorEngine, AsyncMock, AsyncMock]:
     thread_store = AsyncMock()
     thread_store.post_thread_message = AsyncMock(return_value=10)
     thread_store.notify_event = AsyncMock()
     task_store = AsyncMock()
-    dispatch = AsyncMock()
-    engine = SquadCoordinatorEngine(
-        thread_store=thread_store,
-        task_store=task_store,
-        planner=_NoTaskPlanner(mode, selected_agents=selected),
+    task_store.create_task = AsyncMock(
+        return_value=_task_descriptor("00000000-0000-0000-0000-000000000401", agent_id="FE", kind="specialist")
     )
+    engine = SquadCoordinatorEngine(thread_store=thread_store, task_store=task_store, planner=planner)
+    return engine, thread_store, task_store
 
-    execution = await engine.coordinate_user_input(
+
+async def _coordinate(engine: SquadCoordinatorEngine, dispatch: AsyncMock) -> Any:
+    return await engine.coordinate_user_input(
         text="Faça aquilo",
         thread=_thread(),
-        participants=[_participant("PM", "coordinator"), _participant("FE")],
+        participants=[_participant("PM", "coordinator"), _participant("FE"), _participant("QA")],
         coordinator_agent_id="PM",
         capability_hints={},
-        semantic_result=_semantic_result("FE"),
+        semantic_result=_semantic_result("FE", "QA"),
         dispatch=dispatch,
         parent_message_id="msg-99",
     )
 
+
+def _posted_event_types(thread_store: AsyncMock) -> list[Any]:
+    return [call.kwargs["metadata"].get("event_type") for call in thread_store.post_thread_message.await_args_list]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["ask_clarification", "decline"])
+@pytest.mark.parametrize("with_tasks", [False, True], ids=["no_tasks", "with_tasks"])
+async def test_engine_clarification_and_decline_run_no_task_and_ask_the_coordinator(
+    mode: str, with_tasks: bool
+) -> None:
+    task = CoordinationTask(title="Build", agent_id="FE", kind="frontend", objective="Build it")
+    tasks = [task] if with_tasks else []
+    engine, thread_store, task_store = _no_task_engine(_NoTaskPlanner(mode, tasks=tasks))
+    dispatch = AsyncMock()
+
+    execution = await _coordinate(engine, dispatch)
+
     # coordinated=True makes the Telegram and web handlers return without any reply.
     assert execution.coordinated is False
     assert execution.decision.mode == mode
+    assert execution.decision.tasks == []
     dispatch.assert_not_awaited()
     task_store.create_task.assert_not_awaited()
-    posted_types = [
-        call.kwargs["metadata"].get("event_type") for call in thread_store.post_thread_message.await_args_list
+    assert "handoff_event" not in _posted_event_types(thread_store)
+    assert execution.coordinator_query is not None
+    assert "Faça aquilo" in execution.coordinator_query
+    assert f"planner chose {mode}" in execution.coordinator_query
+
+
+@pytest.mark.asyncio
+async def test_engine_task_less_handoff_dispatches_a_task_to_each_destination() -> None:
+    engine, thread_store, task_store = _no_task_engine(_NoTaskPlanner("handoff", selected_agents=["FE", "PM"]))
+    dispatch = AsyncMock(return_value=1001)
+
+    execution = await _coordinate(engine, dispatch)
+
+    # The planner's destination gets a real task, so the handoff is tracked and synthesised.
+    assert execution.coordinated is True
+    assert execution.dispatched_agents == ["FE"]
+    assert [call.kwargs["assigned_agent_id"] for call in task_store.create_task.await_args_list] == ["FE"]
+    assert [call.args[0].agent_id for call in dispatch.await_args_list] == ["FE"]
+    assert "Faça aquilo" in dispatch.await_args.args[0].content
+    handoff_calls = [
+        call.kwargs
+        for call in thread_store.post_thread_message.await_args_list
+        if call.kwargs["metadata"].get("event_type") == "handoff_event"
     ]
-    assert "handoff_event" not in posted_types
-    if expects_coordinator_query:
-        assert execution.coordinator_query is not None
-        assert "Faça aquilo" in execution.coordinator_query
-        assert f"planner chose {mode}" in execution.coordinator_query
-    else:
-        assert execution.coordinator_query is None
+    assert [call["metadata"]["payload"]["destination_agent_ids"] for call in handoff_calls] == [["FE"]]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("selected", [[], ["PM"], ["UX"]], ids=["none", "coordinator_only", "non_participant"])
+async def test_engine_handoff_without_any_destination_falls_back_to_routing(selected: list[str]) -> None:
+    engine, thread_store, task_store = _no_task_engine(_NoTaskPlanner("handoff", selected_agents=selected))
+    dispatch = AsyncMock()
+
+    execution = await _coordinate(engine, dispatch)
+
+    assert execution.coordinated is False
+    assert execution.coordinator_query is None
+    dispatch.assert_not_awaited()
+    task_store.create_task.assert_not_awaited()
+    assert "handoff_event" not in _posted_event_types(thread_store)

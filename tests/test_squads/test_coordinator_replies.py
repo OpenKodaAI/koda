@@ -2,10 +2,10 @@
 
 When the supervisor planner chooses ``ask_clarification``, ``decline`` or a
 task-less ``handoff``, the Telegram and web handlers must still wake an agent
-so the user gets a reply. These tests run the real coordinator engine and the
-real thread and task stores on Postgres; only the agent turn itself
-(``dispatch_squad_turn``) and the routing inputs that need a control plane or
-an embedding model are stubbed.
+so the user gets a reply. These tests run the real coordinator engine, the
+real ``dispatch_squad_turn`` and the real thread and task stores on Postgres;
+only the local queue enqueue (``enqueue_squad_agent_task``) and the routing
+inputs that need a control plane or an embedding model are stubbed.
 """
 
 from __future__ import annotations
@@ -116,7 +116,7 @@ def _semantic_result() -> SemanticRoutingResult:
 @pytest.fixture
 def routing_stubs(stores: tuple[SquadThreadStore, SquadTaskStore]) -> Iterator[Any]:
     threads, tasks = stores
-    dispatch = AsyncMock(return_value=SimpleNamespace(enqueued_task_id=1, message_id=None, to_dict=lambda: {}))
+    enqueue = AsyncMock(return_value=1)
     summaries = [
         CapabilitySummary(agent_id="PM", display_name="PM", role="Coordinator", is_coordinator=True),
         CapabilitySummary(agent_id="FE", display_name="Frontend", role="Interface"),
@@ -153,8 +153,8 @@ def routing_stubs(stores: tuple[SquadThreadStore, SquadTaskStore]) -> Iterator[A
                 return_value=SimpleNamespace(triage_user_input=AsyncMock(return_value=triage)),
             )
         )
-        stack.enter_context(patch("koda.squads.dispatch_squad_turn", dispatch))
-        yield SimpleNamespace(dispatch=dispatch, stack=stack)
+        stack.enter_context(patch("koda.services.queue_manager.enqueue_squad_agent_task", enqueue))
+        yield SimpleNamespace(enqueue=enqueue, application=SimpleNamespace(bot=None), stack=stack)
 
 
 def _use_planner(stubs: Any, mode: str, selected: list[str]) -> None:
@@ -166,22 +166,28 @@ def _use_planner(stubs: Any, mode: str, selected: list[str]) -> None:
     )
 
 
-async def _assert_user_gets_a_reply(threads: SquadThreadStore, thread_id: str, dispatch: AsyncMock, mode: str) -> None:
-    calls = [call.kwargs for call in dispatch.await_args_list]
-    assert calls, "no agent was woken, so the user gets no reply"
+async def _assert_user_gets_a_reply(threads: SquadThreadStore, thread_id: str, enqueue: AsyncMock, mode: str) -> None:
+    calls = [call.kwargs for call in enqueue.await_args_list]
+    assert calls, "no agent turn was queued, so the user gets no reply"
     history = await threads.thread_history(thread_id=thread_id, limit=50)
-    event_types = [(row.get("metadata") or {}).get("event_type") for row in history]
-    assert "coordination_decision" in event_types
-    assert "handoff_event" not in event_types
+    events = {(row.get("metadata") or {}).get("event_type"): row.get("metadata") or {} for row in history}
+    assert "coordination_decision" in events
     if mode == "handoff":
-        # A handoff with no task falls back to normal routing, which wakes the ranked specialists.
-        assert [call["target_agent_id"] for call in calls] == ["FE", "QA"]
-        assert all(call["query_text"] == USER_TEXT for call in calls)
+        # Only the planner's destination is woken, through a real task, so the handoff is tracked.
+        assert [call["executing_agent_id"] for call in calls] == ["FE"]
+        assert calls[0]["squad_task_id"]
+        assert USER_TEXT in calls[0]["query_text"]
+        assert events["handoff_event"]["payload"]["destination_agent_ids"] == ["FE"]
     else:
+        assert "handoff_event" not in events
         assert len(calls) == 1
-        assert calls[0]["target_agent_id"] == "PM"
+        assert calls[0]["executing_agent_id"] == "PM"
+        assert calls[0]["squad_task_id"] is None
         assert USER_TEXT in calls[0]["query_text"]
         assert f"planner chose {mode}" in calls[0]["query_text"]
+        # The coordinator is routed the turn; nothing was delegated.
+        assert events["routing_decision"]["payload"]["targets"] == ["PM"]
+        assert events["routing_decision"]["delivery_status"] == "routed"
 
 
 @pytest.mark.postgres
@@ -208,9 +214,10 @@ async def test_telegram_room_message_gets_a_reply_when_coordinator_dispatches_no
         user_id=42,
         parent_message_id=f"msg-{user_msg_id}",
         channel="telegram",
+        bot_context=cast(Any, SimpleNamespace(application=routing_stubs.application, bot=None)),
     )
 
-    await _assert_user_gets_a_reply(threads, thread.id, routing_stubs.dispatch, mode)
+    await _assert_user_gets_a_reply(threads, thread.id, routing_stubs.enqueue, mode)
 
 
 class _JsonRequest:
@@ -259,10 +266,11 @@ async def test_web_room_message_gets_a_reply_when_coordinator_dispatches_no_task
     stack.enter_context(patch("koda.squads.sync_thread_participants_from_squad", AsyncMock(return_value=None)))
     stack.enter_context(patch("koda.control_plane.api._watch_dashboard_squad_delivery_synthesis", AsyncMock()))
 
-    response = await control_plane_api.post_dashboard_squad_thread_message_route(
-        cast(Any, _JsonRequest(thread_id=thread.id, payload={"content": USER_TEXT}))
-    )
+    request = _JsonRequest(thread_id=thread.id, payload={"content": USER_TEXT})
+    request.app["telegram_application"] = routing_stubs.application
+
+    response = await control_plane_api.post_dashboard_squad_thread_message_route(cast(Any, request))
 
     assert response.status == 200
     assert json.loads(cast(Any, response).text)["messageId"]
-    await _assert_user_gets_a_reply(threads, thread.id, routing_stubs.dispatch, mode)
+    await _assert_user_gets_a_reply(threads, thread.id, routing_stubs.enqueue, mode)

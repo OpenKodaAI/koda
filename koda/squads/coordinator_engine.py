@@ -13,7 +13,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 
 from koda.config import (
@@ -670,6 +670,20 @@ class SquadCoordinatorEngine:
         decision = await self._planner.plan(planner_input)
         if decision.mode == "answer_self":
             return CoordinationExecution(coordinated=False, decision=decision)
+        if decision.mode in _COORDINATOR_REPLY_INSTRUCTIONS:
+            # ask_clarification and decline run no task: the coordinator answers the user (D-015).
+            decision = replace(decision, tasks=[])
+        elif decision.mode == "handoff" and not decision.tasks:
+            # A task-less handoff still goes to the planner's destinations, as real tasks (D-015).
+            decision = replace(
+                decision,
+                tasks=_handoff_tasks(
+                    decision,
+                    summaries=summaries,
+                    participant_ids=participant_ids,
+                    coordinator_agent_id=coordinator_agent_id,
+                ),
+            )
         self._policy.validate(
             decision,
             thread=thread,
@@ -684,7 +698,7 @@ class SquadCoordinatorEngine:
             parent_message_id=parent_message_id,
         )
         if not decision.tasks:
-            # ask_clarification, decline or a task-less handoff: nothing is
+            # ask_clarification, decline or a handoff with no destination: nothing is
             # dispatched here, so the caller must still route the turn (D-015).
             return CoordinationExecution(
                 coordinated=False,
@@ -928,6 +942,25 @@ def _handoff_destinations(decision: CoordinationDecision, *, coordinator_agent_i
         seen.add(normalized)
         out.append(normalized)
     return out
+
+
+def _handoff_tasks(
+    decision: CoordinationDecision,
+    *,
+    summaries: list[CapabilitySummary],
+    participant_ids: list[str],
+    coordinator_agent_id: str,
+) -> list[CoordinationTask]:
+    summary_by_agent = {summary.agent_id: summary for summary in summaries}
+    destinations = [
+        agent_id
+        for agent_id in dict.fromkeys(str(agent or "").strip() for agent in decision.selected_agents)
+        if agent_id and agent_id != coordinator_agent_id and agent_id in participant_ids
+    ]
+    return [
+        _fallback_task_for_agent(agent_id=agent_id, summary=summary_by_agent.get(agent_id), proposal=None, index=index)
+        for index, agent_id in enumerate(destinations, start=1)
+    ]
 
 
 def _handoff_context_refs(decision: CoordinationDecision) -> list[str]:
