@@ -1413,6 +1413,13 @@ async def _runtime_browser_ws(request: web.Request) -> web.WebSocketResponse:
     return ws
 
 
+def _task_not_running_response(result: dict[str, Any]) -> web.Response:
+    """Answer 409 when a cancel or interrupt found nothing left to stop."""
+    payload = dict(result)
+    payload["error"] = f"task is not running (status: {result.get('status')})"
+    return web.json_response(payload, status=409)
+
+
 async def _runtime_cancel(request: web.Request) -> web.Response:
     auth = _authorize_mutation(request)
     if auth:
@@ -1424,6 +1431,8 @@ async def _runtime_cancel(request: web.Request) -> web.Response:
     result = await get_runtime_controller().cancel_task(task_id=task_id, actor="runtime_api")
     if result is None:
         return web.json_response({"error": "task not found"}, status=404)
+    if result.get("action") == "not_running":
+        return _task_not_running_response(result)
     return web.json_response(result)
 
 
@@ -1442,6 +1451,8 @@ async def _runtime_interrupt(request: web.Request) -> web.Response:
     )
     if result is None:
         return web.json_response({"error": "task not found"}, status=404)
+    if result.get("action") == "not_running":
+        return _task_not_running_response(result)
     if result.get("action") == "cancelled":
         result["action"] = "interrupted"
     return web.json_response(result)
