@@ -6,8 +6,10 @@ multi-supervisor deployments; cluster mode adds a drain step.
 
 ## Pre-flight (always)
 
-1. **Read the changelog.** Schema migrations and removed env vars
-   are called out in `docs/release-notes/<version>.md`.
+1. **Read the changelog.** [`CHANGELOG.md`](../../CHANGELOG.md) has a
+   section for each version since 1.0.18. Read every section between
+   your installed version and the new one: schema migrations, removed
+   settings and changed defaults are called out there.
 2. **Take a backup.** See [backup-restore.md](backup-restore.md).
 3. **Pull the new image** but do not restart yet.
 
