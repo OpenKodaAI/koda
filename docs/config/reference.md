@@ -22,6 +22,10 @@ Control Plane
   (OAuth relay); native runs fall back to `CONTROL_PLANE_PORT`
 - `WEB_PUBLISH_ADDRESS` — address the dashboard is published on (default `127.0.0.1`); change it
   only for a TLS-terminating proxy on another host, never for plain-HTTP access
+- `CONTROL_PLANE_TRUSTED_PROXIES` — peers whose `X-Forwarded-For` the API rate limiter
+  believes (comma-separated IPs, CIDRs or hostnames; default `127.0.0.1,::1,web`, which covers
+  the dashboard). Add a reverse proxy only if it forwards straight to the API; see
+  [Authentication](../security/authentication.md#which-address-a-request-is-charged-to)
 - `CONTROL_PLANE_API_TOKEN`
 - `WEB_OPERATOR_SESSION_SECRET`
 - `CONTROL_PLANE_MASTER_KEY_FILE`

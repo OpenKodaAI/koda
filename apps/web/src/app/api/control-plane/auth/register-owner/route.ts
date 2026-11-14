@@ -43,6 +43,8 @@ export async function POST(request: NextRequest) {
       await request.json().catch(() => ({})),
       "Invalid registration payload.",
     );
+    // Deliberately no X-Forwarded-For: the control plane's dev-only loopback
+    // trust (ALLOW_LOOPBACK_BOOTSTRAP) requires a request with no proxy hop.
     const upstream = await upstreamFetch(
       `${CONTROL_PLANE_BASE_URL.replace(/\/$/, "")}/api/control-plane/auth/register-owner`,
       {

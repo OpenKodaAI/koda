@@ -135,26 +135,52 @@ one of them is compromised the whole sheet has to be rotated.
 
 ## Rate limits (bucket budgets)
 
-Per-IP, enforced in `koda/control_plane/rate_limit.py`:
+Per client address, enforced in `koda/control_plane/rate_limit.py`:
 
-| Endpoint                                            | Budget              |
-| --------------------------------------------------- | ------------------- |
-| `POST /auth/login`                                  | 5 requests / 5 min  |
-| `POST /auth/password/recover`                       | 5 requests / hour   |
-| `POST /auth/password/change`                        | 10 requests / hour  |
-| `PATCH /auth/profile`                               | 60 requests / hour  |
-| `POST /auth/register-owner`                         | 3 requests / hour   |
-| `POST /auth/recovery-codes/regenerate`              | 3 requests / hour   |
-| `POST /auth/bootstrap/exchange`                     | 10 requests / hour  |
-| `POST /auth/bootstrap/codes`                        | 3 requests / hour   |
+| Endpoint                                            | Budget               |
+| --------------------------------------------------- | -------------------- |
+| `POST /auth/login`                                  | 10 requests / 5 min  |
+| `POST /auth/password/recover`                       | 10 requests / hour   |
+| `POST /auth/password/change`                        | 20 requests / hour   |
+| `PATCH /auth/profile`                               | 60 requests / hour   |
+| `POST /auth/register-owner`                         | 30 requests / hour   |
+| `POST /auth/recovery-codes/regenerate`              | 10 requests / hour   |
+| `POST /auth/bootstrap/exchange`                     | 30 requests / hour   |
+| `POST /auth/bootstrap/codes`                        | 10 requests / hour   |
 
-Plus the pre-existing per-IP general bucket (`CONTROL_PLANE_RATE_LIMIT`, default 120/min) and
+Plus the per-address general bucket (`CONTROL_PLANE_RATE_LIMIT`, default 120/min) and
 the stricter auth-failure bucket (`CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT`, default 5/min
-triggered on any 401/403).
+triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
+
+### Which address a request is charged to
+
+- By default a request is charged to its TCP peer. `X-Forwarded-For` is read only when the
+  peer is a trusted proxy (`CONTROL_PLANE_TRUSTED_PROXIES`, default `127.0.0.1,::1,web`:
+  loopback, where a native dashboard runs, and `web`, the dashboard's Docker Compose service,
+  matched by its resolved address). The header is then read from the right, skipping trusted
+  hops, and the first untrusted address is the client. Entries further left are
+  client-supplied and never select a bucket, so a direct caller cannot rotate the header to
+  get a fresh budget.
+- The dashboard BFF forwards the browser's address on every control-plane call
+  (`apps/web/src/lib/client-ip.ts`: the rightmost `X-Forwarded-For` entry Next.js sees, which
+  Next.js fills with the socket address or the edge proxy appends). Each browser therefore
+  has its own budget; one client's failed logins do not lock other clients out. The Next.js
+  proxy (`apps/web/src/proxy.ts`) keys its own per-client window (120/min) the same way.
+- Exception: `POST /auth/register-owner` from the dashboard sends no `X-Forwarded-For`,
+  because the dev-only loopback trust requires a request with no proxy hop. Its bucket is
+  shared by every browser, which only matters before the owner exists.
+- A reverse proxy that forwards straight to the API (not through the dashboard) must be added
+  to `CONTROL_PLANE_TRUSTED_PROXIES` with the address the API sees for it. With Docker Compose
+  that is the bridge-network gateway, not `127.0.0.1`. Until then all of its clients share
+  the proxy's bucket. Trust only addresses you control: a trusted peer can claim any client
+  address. The same holds for anything that can reach the dashboard port directly, which is
+  why Compose publishes it on loopback only.
 
 Account-level lockout remains on top of the rate limits: after
 `CONTROL_PLANE_OPERATOR_LOGIN_MAX_FAILURES` failed attempts, the row locks for
-`CONTROL_PLANE_OPERATOR_LOGIN_LOCKOUT_SECONDS`.
+`CONTROL_PLANE_OPERATOR_LOGIN_LOCKOUT_SECONDS`. This lockout is per account, not per client,
+so anyone who knows the identifier can still trigger it; the per-client buckets only stop one
+client from spending everyone else's budget.
 
 ## Side-channel mitigations
 

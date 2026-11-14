@@ -2,12 +2,23 @@
 
 Uses aiolimiter with an LRU dict for per-IP limiters, mirroring the pattern
 in ``koda/utils/rate_limiter.py``.
+
+Buckets are keyed by the TCP peer address. Only when the peer is a trusted
+proxy (``CONTROL_PLANE_TRUSTED_PROXIES``: loopback and the dashboard by
+default) is ``X-Forwarded-For`` read, from the right, skipping trusted hops;
+the first untrusted address is the client. Entries further left are
+client-supplied, so rotating them never yields a fresh bucket.
 """
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
+import socket
+import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
+from functools import lru_cache
 
 from aiohttp import web
 from aiolimiter import AsyncLimiter
@@ -15,9 +26,21 @@ from aiolimiter import AsyncLimiter
 from koda.logging_config import get_logger
 from koda.services.audit import emit_security
 
-from .settings import CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT, CONTROL_PLANE_RATE_LIMIT
+from .settings import (
+    CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT,
+    CONTROL_PLANE_RATE_LIMIT,
+    CONTROL_PLANE_TRUSTED_PROXIES,
+)
 
 log = get_logger(__name__)
+
+_IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
+_IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
+
+# Trusted-proxy hostnames (the `web` Compose service) are re-resolved at most
+# this often, so a restarted dashboard container is trusted again quickly.
+_TRUSTED_HOSTNAME_TTL_SECONDS = 10.0
+_resolved_trusted_hostnames: dict[str, tuple[float, frozenset[_IPAddress]]] = {}
 
 _MAX_CACHED_LIMITERS = 256
 
@@ -89,12 +112,72 @@ def _get_endpoint_limiter(endpoint: str, ip: str) -> AsyncLimiter | None:
     return _endpoint_limiters[key]
 
 
-def _client_ip(request: web.Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return str(forwarded.split(",")[0]).strip()
-    peer = request.remote
-    return str(peer) if peer else "unknown"
+def _parse_ip(value: object) -> _IPAddress | None:
+    try:
+        address = ipaddress.ip_address(str(value or "").strip())
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped is not None:
+        return address.ipv4_mapped
+    return address
+
+
+@lru_cache(maxsize=4)
+def _trusted_proxy_rules(entries: tuple[str, ...]) -> tuple[tuple[_IPNetwork, ...], tuple[str, ...]]:
+    """Split the configured entries into IP networks and hostnames."""
+    networks: list[_IPNetwork] = []
+    hostnames: list[str] = []
+    for entry in entries:
+        try:
+            networks.append(ipaddress.ip_network(entry, strict=False))
+        except ValueError:
+            hostnames.append(entry.lower())
+    return tuple(networks), tuple(hostnames)
+
+
+async def _resolve_trusted_hostname(hostname: str) -> frozenset[_IPAddress]:
+    now = time.monotonic()
+    cached = _resolved_trusted_hostnames.get(hostname)
+    if cached is not None and now - cached[0] < _TRUSTED_HOSTNAME_TTL_SECONDS:
+        return cached[1]
+    try:
+        infos = await asyncio.get_running_loop().getaddrinfo(hostname, None, type=socket.SOCK_STREAM)
+    except (OSError, UnicodeError, ValueError):
+        infos = []
+    resolved = frozenset(address for info in infos if (address := _parse_ip(info[4][0])) is not None)
+    _resolved_trusted_hostnames[hostname] = (now, resolved)
+    return resolved
+
+
+async def _is_trusted_proxy(address: _IPAddress) -> bool:
+    networks, hostnames = _trusted_proxy_rules(CONTROL_PLANE_TRUSTED_PROXIES)
+    if any(address in network for network in networks):
+        return True
+    for hostname in hostnames:
+        if address in await _resolve_trusted_hostname(hostname):
+            return True
+    return False
+
+
+async def _client_ip(request: web.Request) -> str:
+    """Return the address whose buckets this request spends."""
+    peer = _parse_ip(request.remote)
+    if peer is None:
+        return str(request.remote or "unknown")
+    forwarded = ",".join(request.headers.getall("X-Forwarded-For", ()))
+    hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+    if not hops or not await _is_trusted_proxy(peer):
+        return str(peer)
+    client = peer
+    for hop in reversed(hops):
+        address = _parse_ip(hop)
+        if address is None:
+            # Unparseable hop: stop at the last address a trusted hop vouched for.
+            break
+        client = address
+        if not await _is_trusted_proxy(address):
+            break
+    return str(client)
 
 
 def _too_many_requests() -> web.Response:
@@ -115,7 +198,7 @@ async def control_plane_rate_limit_middleware(
     if "/connection/login/" in request.path:
         return await handler(request)
 
-    ip = _client_ip(request)
+    ip = await _client_ip(request)
 
     # Dedicated sensitive-endpoint limiter runs FIRST so auth spam does not
     # eat the user's general per-IP quota for the rest of the dashboard.
@@ -165,3 +248,4 @@ def clear_limiters() -> None:
     _ip_limiters.clear()
     _auth_failure_limiters.clear()
     _endpoint_limiters.clear()
+    _resolved_trusted_hostnames.clear()

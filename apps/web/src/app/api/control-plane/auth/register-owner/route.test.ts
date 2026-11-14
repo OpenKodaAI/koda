@@ -12,10 +12,10 @@ vi.mock("@/lib/request-origin", () => ({
   isTrustedDashboardRequest: () => true,
 }));
 
-function registerRequest(): NextRequest {
+function registerRequest(headers: Record<string, string> = {}): NextRequest {
   return new NextRequest("http://127.0.0.1:3000/api/control-plane/auth/register-owner", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify({ email: "owner@example.com", password: "a-strong-password-123", bootstrap_code: "CODE" }),
   });
 }
@@ -55,5 +55,19 @@ describe("POST /api/control-plane/auth/register-owner", () => {
     expect(response.status).toBe(201);
     expect(upstreamFetch).toHaveBeenCalledTimes(1);
     expect(response.headers.get("set-cookie")).toBeTruthy();
+  });
+
+  it("does not add a proxy hop, which would disable the dev-only loopback trust", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("WEB_OPERATOR_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    upstreamFetch.mockResolvedValue(
+      new Response(JSON.stringify({ session_token: "session-token", recovery_codes: ["code-1"] }), { status: 201 }),
+    );
+    const { POST } = await import("./route");
+
+    await POST(registerRequest({ "X-Forwarded-For": "127.0.0.1" }));
+
+    const init = upstreamFetch.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect(new Headers(init?.headers).has("X-Forwarded-For")).toBe(false);
   });
 });

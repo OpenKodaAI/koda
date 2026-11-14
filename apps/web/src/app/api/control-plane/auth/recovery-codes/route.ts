@@ -1,11 +1,12 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { jsonErrorResponse, upstreamFetch } from "@/lib/api-utils";
+import { forwardedClientIpHeaders } from "@/lib/client-ip";
 import { getWebOperatorTokenFromCookie } from "@/lib/web-operator-session";
 
 const CONTROL_PLANE_BASE_URL = process.env.CONTROL_PLANE_BASE_URL || "http://127.0.0.1:8090";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   const token = await getWebOperatorTokenFromCookie();
   if (!token) {
     return NextResponse.json(
@@ -18,7 +19,10 @@ export async function GET() {
       `${CONTROL_PLANE_BASE_URL.replace(/\/$/, "")}/api/control-plane/auth/recovery-codes`,
       {
         method: "GET",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...forwardedClientIpHeaders(request.headers),
+        },
         cache: "no-store",
       },
       { label: "Recovery codes service" },

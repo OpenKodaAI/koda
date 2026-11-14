@@ -36,6 +36,9 @@ Every item below is verifiable. The matching checks live in
 - [ ] Web port `:3000` is reverse-proxied behind TLS (Caddy, Traefik,
       nginx, cloud LB). Self-signed certs are acceptable for VPS
       deploys; managed certs (Let's Encrypt) for public deploys.
+- [ ] `CONTROL_PLANE_TRUSTED_PROXIES` lists only the dashboard and
+      proxies you run (default `127.0.0.1,::1,web`). A trusted peer can
+      claim any client address for rate limiting.
 - [ ] Sidecar gRPC ports (`50061`–`50067`) are loopback / private
       network only — never publicly exposed.
 - [ ] If running multi-host: `GRPC_TLS_ENABLED=true` for sidecar

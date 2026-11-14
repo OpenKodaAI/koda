@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientIpFromHeaders } from "@/lib/client-ip";
 import { isMutationMethod, isTrustedDashboardRequest } from "@/lib/request-origin";
 import { unsealWebOperatorToken } from "@/lib/web-operator-session";
 import {
@@ -184,18 +185,8 @@ function isRateLimited(ip: string): boolean {
   return false;
 }
 
-const TRUSTED_PROXY_IPS = new Set(
-  (process.env.TRUSTED_PROXY_IPS || "127.0.0.1,::1,::ffff:127.0.0.1").split(",").map((s) => s.trim()),
-);
-
 function clientIp(request: NextRequest): string {
-  const directIp = (request as NextRequest & { ip?: string }).ip || "unknown";
-  const forwardedFor = request.headers?.get?.("x-forwarded-for");
-  // Only trust x-forwarded-for when request arrives through a known proxy
-  if (forwardedFor && TRUSTED_PROXY_IPS.has(directIp)) {
-    return forwardedFor.split(",")[0]?.trim() || directIp;
-  }
-  return directIp;
+  return clientIpFromHeaders(request.headers) ?? "unknown";
 }
 
 /* ---------- responses ---------- */
