@@ -296,6 +296,54 @@ class TestValidateGitArgs:
         assert _validate_git_args(["HEAD;id"]) == "Blocked: argument contains disallowed characters."
 
 
+class TestRunGitValidatesArgs:
+    """``_run_git`` itself runs the argument check, so the backstop holds even past the handlers' dash check."""
+
+    @pytest.mark.security
+    @pytest.mark.guardrail
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("subcommand", "args", "output"),
+        [
+            (
+                "push",
+                ["--end-of-options", "--receive-pack=touch /tmp/pwned"],
+                "Blocked: git option '--receive-pack' is not allowed.",
+            ),
+            (
+                "pull",
+                ["--end-of-options", "--upload-pack=touch /tmp/pwned"],
+                "Blocked: git option '--upload-pack' is not allowed.",
+            ),
+            ("push", ["--exec=touch /tmp/pwned", "origin"], "Blocked: git option '--exec' is not allowed."),
+            ("diff", ["--output=/tmp/pwned"], "Blocked: git option '--output' is not allowed."),
+            ("diff", ["--end-of-options", "HEAD;id"], "Blocked: argument contains disallowed characters."),
+        ],
+    )
+    async def test_rejected_arguments_never_reach_git(self, subcommand, args, output):
+        with patch("koda.services.cli_runner.run_cli_command_detailed", new_callable=AsyncMock) as mock_run:
+            mock_run.return_value = FakeCliResult(text="ran")
+            result = await tool_dispatcher._run_git(subcommand, args, _make_ctx())
+        assert not result.success
+        assert result.tool == f"git_{subcommand}"
+        assert result.output == output
+        mock_run.assert_not_called()
+
+    @pytest.mark.security
+    @pytest.mark.guardrail
+    @pytest.mark.asyncio
+    async def test_handler_value_with_shell_metacharacter_never_reaches_git(self):
+        with (
+            patch("koda.services.tool_dispatcher.GIT_ENABLED", True),
+            patch("koda.services.cli_runner.run_cli_command_detailed", new_callable=AsyncMock) as mock_run,
+        ):
+            mock_run.return_value = FakeCliResult(text="ran")
+            result = await tool_dispatcher._handle_git_diff({"ref": "HEAD;id"}, _make_ctx())
+        assert not result.success
+        assert result.output == "Blocked: argument contains disallowed characters."
+        mock_run.assert_not_called()
+
+
 _OPTION_INJECTION_PROBES = [
     ("_handle_git_diff", {"ref": "--output=/tmp/pwned"}, "ref"),
     ("_handle_git_diff", {"ref": "-R"}, "ref"),
