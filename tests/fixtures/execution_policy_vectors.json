@@ -1,11 +1,12 @@
 {
   "schema_version": 1,
-  "description": "Execution-policy parity vectors (ADR-002 AG-06, ADR-008 step 1). Each vector is one tool call evaluated against one policy. tests/test_execution_policy_vectors.py runs every vector through the runtime engine, the way an agent worker calls it, and through the control-plane simulate route (POST /api/control-plane/agents/{agent_id}/execution-policy/evaluate); both must return the expected decision, reason_code and rule_id, and the same approval scope and preview. The file is also the shared input for the ADR-008 offline replay (M5-E3-T2). Rule semantics: among the rules that match a call, the most restrictive decision wins (deny > require_approval > allow_with_preview > allow), then the highest priority, then the lowest name; patterns are fnmatch globs compared case-insensitively; a path selector also covers everything below the path, and the call's path is compared as written and lexically normalized (. .. and repeated / resolved): a deny rule matches when either form matches, ignoring case, and any other rule only when both forms match, with case; every listed effect tag must be present; a selector the engine cannot evaluate (unknown key, empty value, ^regex) is skipped in a deny rule and makes any other rule not match.",
+  "description": "Execution-policy parity vectors (ADR-002 AG-06, ADR-008 step 1). Each vector is one tool call evaluated against one policy. tests/test_execution_policy_vectors.py runs every vector through the runtime engine, the way an agent worker calls it, and through the control-plane simulate route (POST /api/control-plane/agents/{agent_id}/execution-policy/evaluate); both must return the expected decision, reason_code and rule_id, and the same approval scope and preview. The file is also the shared input for the ADR-008 offline replay (M5-E3-T2). Rule semantics: among the rules that match a call, the most restrictive decision wins (deny > require_approval > allow_with_preview > allow), then the highest priority, then the lowest name; patterns are fnmatch globs compared case-insensitively; a path selector also covers everything below the path, and a call with a path is evaluated against the whole rule set once per spelling of the path (lexically normalized, with . .. and repeated / resolved, and as written; each with case and ignoring case), the most restrictive outcome winning, the no-match fallback included, so no spelling steps around a deny, require_approval or allow_with_preview path rule and an allow path rule covers a call only when it covers every spelling; every listed effect tag must be present; a selector the engine cannot evaluate (unknown key, empty value, mapping value, non-boolean value on a boolean selector, ^regex) is skipped in a deny rule and makes any other rule not match. agent.env is the agent's worker environment: the simulator evaluates with the feature flags a worker started with it computes.",
   "agent_id": "AGENT_VECTORS",
   "agent_defaults": {
     "tool_policy": {},
     "autonomy_policy": {},
     "mcp_tool_policies": {},
+    "env": {},
     "resource_access_policy": {
       "integration_grants": {
         "fileops": {"allow_actions": ["fileops.*"]},
@@ -463,7 +464,7 @@
     },
     {
       "id": "path-deny-catches-dot-dot-segments",
-      "description": "A deny rule's path selector also matches the lexically normalized path, so .. segments cannot step around it.",
+      "description": "The rule set is also evaluated against the lexically normalized path, so .. segments cannot step around a deny path rule.",
       "policy": {
         "version": 1,
         "rules": [
@@ -476,7 +477,7 @@
     },
     {
       "id": "path-deny-catches-repeated-slashes",
-      "description": "Repeated slashes are collapsed before a deny rule's path selector is compared.",
+      "description": "The rule set is also evaluated with repeated slashes collapsed, so they cannot step around a deny path rule.",
       "policy": {
         "version": 1,
         "rules": [
@@ -489,7 +490,7 @@
     },
     {
       "id": "path-deny-ignores-case",
-      "description": "A deny rule's path selector ignores case, so it also covers case-insensitive filesystems.",
+      "description": "The rule set is also evaluated ignoring case, so a deny path rule also covers case-insensitive filesystems.",
       "policy": {
         "version": 1,
         "rules": [
@@ -515,7 +516,7 @@
     },
     {
       "id": "path-allow-does-not-follow-dot-dot-out-of-its-directory",
-      "description": "An allow rule's path selector must match both the path as written and its normalized form, so /srv/app/../../etc is outside /srv/app.",
+      "description": "An allow path rule covers a call only when it covers every spelling of the path; the normalized /etc/cron.d/job is outside /srv/app, so the no-match fallback decides.",
       "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
       "policy": {
         "version": 1,
@@ -528,7 +529,7 @@
     },
     {
       "id": "path-allow-is-case-sensitive",
-      "description": "An allow rule's path selector is compared case-sensitively, so /srv/app does not cover /SRV/APP on a case-sensitive filesystem.",
+      "description": "An allow path rule covers a call only when it covers every spelling, including the case-sensitive one, so /srv/app does not cover /SRV/APP on a case-sensitive filesystem.",
       "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
       "policy": {
         "version": 1,
@@ -538,6 +539,193 @@
       },
       "action": {"tool_id": "file_write", "params": {"path": "/SRV/APP/notes.txt", "content": "x"}},
       "expected": {"decision": "deny", "reason_code": "secure_default_block", "rule_id": null}
+    },
+    {
+      "id": "path-approval-catches-dot-dot-segments-beside-a-broader-allow",
+      "description": "A require_approval path rule beside a broader allow: .. segments cannot step around it, because the normalized path is also evaluated and the most restrictive outcome wins.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "approve-prod", "match": {"tool_id": "file_write", "path": "/srv/prod"}, "decision": "require_approval"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/app/../prod/config.yml", "content": "x"}},
+      "expected": {"decision": "require_approval", "reason_code": "rule_match", "rule_id": "approve-prod"}
+    },
+    {
+      "id": "path-approval-catches-repeated-slashes-beside-a-broader-allow",
+      "description": "A require_approval path rule beside a broader allow: repeated slashes cannot step around it.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "approve-prod", "match": {"tool_id": "file_write", "path": "/srv/prod"}, "decision": "require_approval"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv//prod/config.yml", "content": "x"}},
+      "expected": {"decision": "require_approval", "reason_code": "rule_match", "rule_id": "approve-prod"}
+    },
+    {
+      "id": "path-approval-catches-dot-segments-beside-a-broader-allow",
+      "description": "A require_approval path rule beside a broader allow: ./ segments cannot step around it.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "approve-prod", "match": {"tool_id": "file_write", "path": "/srv/prod"}, "decision": "require_approval"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/./prod/config.yml", "content": "x"}},
+      "expected": {"decision": "require_approval", "reason_code": "rule_match", "rule_id": "approve-prod"}
+    },
+    {
+      "id": "path-approval-ignores-case-beside-a-broader-allow",
+      "description": "A require_approval path rule beside a broader allow also covers another case of the path, as on a case-insensitive filesystem.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "approve-prod", "match": {"tool_id": "file_write", "path": "/srv/prod"}, "decision": "require_approval"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/SRV/PROD/config.yml", "content": "x"}},
+      "expected": {"decision": "require_approval", "reason_code": "rule_match", "rule_id": "approve-prod"}
+    },
+    {
+      "id": "path-approval-on-reads-catches-dot-dot-segments",
+      "description": "A require_approval path rule on reads beside a broader read allow: /srv/app/../../etc/passwd is /etc/passwd.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-reads", "match": {"tool_id": "file_read"}, "decision": "allow"},
+          {"name": "gate-etc", "match": {"path": "/etc"}, "decision": "require_approval"}
+        ]
+      },
+      "action": {"tool_id": "file_read", "params": {"path": "/srv/app/../../etc/passwd"}},
+      "expected": {"decision": "require_approval", "reason_code": "rule_match", "rule_id": "gate-etc"}
+    },
+    {
+      "id": "path-preview-catches-dot-dot-segments-beside-a-broader-allow",
+      "description": "An allow_with_preview path rule beside a broader allow: .. segments cannot skip the preview.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "preview-prod", "match": {"tool_id": "file_write", "path": "/srv/prod"}, "decision": "allow_with_preview"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/app/../prod/config.yml", "content": "x"}},
+      "expected": {"decision": "allow_with_preview", "reason_code": "rule_match", "rule_id": "preview-prod"}
+    },
+    {
+      "id": "path-preview-catches-repeated-slashes-beside-a-broader-allow",
+      "description": "An allow_with_preview path rule on reads beside a broader read allow: repeated slashes cannot skip the preview.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-reads", "match": {"tool_id": "file_read"}, "decision": "allow"},
+          {"name": "preview-etc", "match": {"path": "/etc"}, "decision": "allow_with_preview"}
+        ]
+      },
+      "action": {"tool_id": "file_read", "params": {"path": "//etc//passwd"}},
+      "expected": {"decision": "allow_with_preview", "reason_code": "rule_match", "rule_id": "preview-etc"}
+    },
+    {
+      "id": "path-preview-ignores-case-beside-a-broader-allow",
+      "description": "An allow_with_preview path rule beside a broader allow also covers another case of the path.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "preview-prod", "match": {"tool_id": "file_write", "path": "/srv/prod"}, "decision": "allow_with_preview"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/Srv/Prod/config.yml", "content": "x"}},
+      "expected": {"decision": "allow_with_preview", "reason_code": "rule_match", "rule_id": "preview-prod"}
+    },
+    {
+      "id": "path-rule-matching-only-the-written-spelling-cannot-turn-a-block-into-approval",
+      "description": "A require_approval path rule that covers the path as written but not its normalized form: the normalized /srv/other/config.yml matches no rule, the no-match fallback blocks it, and the most restrictive outcome wins.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "approve-prod", "match": {"tool_id": "file_write", "path": "/srv/prod"}, "decision": "require_approval"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/prod/../other/config.yml", "content": "x"}},
+      "expected": {"decision": "deny", "reason_code": "secure_default_block", "rule_id": null}
+    },
+    {
+      "id": "non-boolean-value-in-deny-rule-is-skipped",
+      "description": "A deny rule skips a boolean selector whose stored value is not true or false (a typo such as ture), so it can only match more calls.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-search", "priority": 100, "match": {"tool_id": "web_search"}, "decision": "allow"},
+          {"name": "deny-search", "match": {"tool_id": "web_search", "private_network": "ture"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "web_search", "params": {"query": "koda"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-search"}
+    },
+    {
+      "id": "mapping-value-in-deny-rule-is-skipped",
+      "description": "A deny rule skips a selector whose stored value is a mapping, so it can only match more calls.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-search", "priority": 100, "match": {"tool_id": "web_search"}, "decision": "allow"},
+          {"name": "deny-search", "match": {"tool_id": {"is": "web_search"}}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "web_search", "params": {"query": "koda"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-search"}
+    },
+    {
+      "id": "non-boolean-value-in-allow-rule-never-matches",
+      "description": "An allow rule with a boolean selector whose stored value is not true or false never matches; the secure default applies.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-create-issue", "match": {"tool_id": "mcp_github__create_issue", "external_side_effect": 1}, "decision": "allow"}
+        ]
+      },
+      "action": {"tool_id": "mcp_github__create_issue", "params": {"title": "Parity"}},
+      "expected": {"decision": "deny", "reason_code": "secure_default_block", "rule_id": null}
+    },
+    {
+      "id": "legacy-branch-uses-the-workers-feature-flags",
+      "description": "With no rules, the agent's tool policy is filtered by its worker's feature flags. The agent's environment turns the browser off, so browser_click is outside its tools, whatever the control-plane process's own flags are.",
+      "agent": {
+        "env": {"BROWSER_ENABLED": "false", "RUNTIME_BROWSER_LIVE_ENABLED": "false"},
+        "tool_policy": {"allowed_tool_ids": ["browser_click"]},
+        "autonomy_policy": {"default_approval_mode": "guarded"},
+        "resource_access_policy": {"integration_grants": {"browser": {"allow_actions": ["*"]}}}
+      },
+      "policy": {},
+      "action": {"tool_id": "browser_click", "params": {"selector": "#go"}},
+      "expected": {"decision": "deny", "reason_code": "tool_not_enabled", "rule_id": null}
+    },
+    {
+      "id": "legacy-branch-with-the-browser-on-in-the-workers-environment",
+      "description": "The same agent with the browser on in its worker's environment: browser_click is one of its tools, and the guarded legacy policy asks for approval.",
+      "agent": {
+        "env": {"BROWSER_ENABLED": "true"},
+        "tool_policy": {"allowed_tool_ids": ["browser_click"]},
+        "autonomy_policy": {"default_approval_mode": "guarded"},
+        "resource_access_policy": {"integration_grants": {"browser": {"allow_actions": ["*"]}}}
+      },
+      "policy": {},
+      "action": {"tool_id": "browser_click", "params": {"selector": "#go"}},
+      "expected": {"decision": "require_approval", "reason_code": "legacy_human_factor", "rule_id": null}
     }
   ]
 }

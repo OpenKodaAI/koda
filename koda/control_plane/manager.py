@@ -72,6 +72,7 @@ from koda.services.embedding_catalog import (
 from koda.services.embedding_catalog import (
     model_disk_bytes as _embedding_model_disk_bytes,
 )
+from koda.services.execution_policy import feature_flags_from_env, validate_execution_policy
 from koda.services.kokoro_manager import (
     KOKORO_DEFAULT_LANGUAGE_ID,
     KOKORO_DEFAULT_VOICE_ID,
@@ -1238,6 +1239,26 @@ def _stringify_env_value(value: Any) -> str:
     if isinstance(value, (int, float, str)):
         return str(value)
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+# Feature-flag settings the supervisor copies from its own environment onto every worker, over the
+# snapshot's value: the flag settings among supervisor._SYSTEM_ENV_KEYS (a test keeps the two equal).
+_SUPERVISOR_FORCED_FEATURE_FLAG_KEYS: tuple[str, ...] = ("INTER_AGENT_ENABLED",)
+
+
+def _worker_feature_flags(snapshot: dict[str, Any]) -> dict[str, bool]:
+    """Return the execution feature flags that the agent's worker computes from its environment.
+
+    A worker's environment is the snapshot's env, with the settings the supervisor
+    forces from its own environment. The flags of the control-plane process itself
+    can differ: operator settings such as ``shell_enabled`` reach workers only
+    through their env.
+    """
+    env = {key: _stringify_env_value(value) for key, value in _safe_json_object(snapshot.get("env")).items()}
+    for key in _SUPERVISOR_FORCED_FEATURE_FLAG_KEYS:
+        if key in os.environ:
+            env[key] = os.environ[key]
+    return feature_flags_from_env(env)
 
 
 def _typed_env_value(value: str | None, kind: str) -> Any:
@@ -3671,6 +3692,13 @@ class ControlPlaneManager:
         agent_row = fetch_one("SELECT * FROM cp_agent_definitions WHERE id = ?", (_normalize_agent_id(agent_id),))
         if agent_row is not None:
             agent_spec = self._resolve_hierarchical_spec(agent_spec, agent_row)
+        # Validate the execution policy as stored, not as normalized: normalizing drops a rule
+        # it cannot apply (no selectors, an unknown decision), and that must be an error.
+        stored_execution_policy = _safe_json_object(
+            _safe_json_object(_safe_json_object(snapshot.get("sections")).get("runtime")).get("execution_policy")
+        )
+        if stored_execution_policy:
+            agent_spec = {**agent_spec, "execution_policy": stored_execution_policy}
         feature_flags, available_models, enabled_providers = self._validation_inputs(snapshot)
         validation = validate_agent_spec(
             agent_spec,
@@ -8235,6 +8263,15 @@ class ControlPlaneManager:
         normalized, _ = self._require_agent_row(agent_id)
         current_snapshot = self.build_draft_snapshot(normalized)
         current_spec = self.get_agent_spec(normalized, snapshot=current_snapshot)
+        if "execution_policy" in payload:
+            # The policy is stored normalized, and normalizing drops a rule it cannot apply
+            # (no selectors, an unknown decision), so a changed policy is validated as written.
+            # An unchanged one is left to publish validation, so other edits still save.
+            written_policy = _safe_json_object(payload.get("execution_policy"))
+            if written_policy != _safe_json_object(current_spec.get("execution_policy")):
+                policy_errors, _ = validate_execution_policy(written_policy)
+                if policy_errors:
+                    raise ValueError("; ".join(policy_errors))
 
         updated_spec = dict(current_spec)
         for key in (
@@ -8675,7 +8712,13 @@ class ControlPlaneManager:
         )
         catalog = self._execution_policy_catalog(normalized, snapshot=snapshot)
         action = _safe_json_object(payload.get("action") or payload.get("envelope") or payload)
-        evaluation = simulate_execution_policy(policy, action, agent_id=normalized, agent_spec=agent_spec)
+        evaluation = simulate_execution_policy(
+            policy,
+            action,
+            agent_id=normalized,
+            agent_spec=agent_spec,
+            feature_flags=_worker_feature_flags(snapshot),
+        )
         return {
             "agent_id": normalized,
             "policy": policy,

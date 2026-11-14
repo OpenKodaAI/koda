@@ -4,10 +4,14 @@ Every vector in ``tests/fixtures/execution_policy_vectors.json`` is evaluated tw
 
 * by the runtime engine, called the way an agent worker calls it (policy inputs
   passed explicitly, the autonomy policy and ``AGENT_ID`` taken from the worker's
-  environment, ``known_tool`` from the dispatcher);
+  environment, ``known_tool`` from the dispatcher), in a worker whose environment
+  is the vector's ``agent.env``, so its feature flags are those koda.config
+  computes from it (``test_feature_flags_from_env_matches_koda_config`` proves
+  the derivation);
 * by the control-plane simulate route, through the aiohttp handler and the real
   ``ControlPlaneManager.evaluate_execution_policy`` with the agent's draft spec
-  stubbed, in a process whose own ``AGENT_ID`` and autonomy env are unset.
+  and snapshot env stubbed, in a process whose own ``AGENT_ID`` and autonomy env
+  are unset.
 
 Both must return the vector's expected decision, reason code and rule id, and
 the same approval scope, preview and matched selector.
@@ -26,7 +30,7 @@ import pytest
 from koda.agent_contract import DISPATCHER_TOOL_IDS
 from koda.control_plane import api as control_plane_api
 from koda.control_plane.execution_policy import build_policy_catalog
-from koda.control_plane.manager import ControlPlaneManager
+from koda.control_plane.manager import ControlPlaneManager, _worker_feature_flags
 from koda.knowledge.task_policy_defaults import default_execution_policy
 from koda.services import execution_policy as runtime_policy
 from koda.services.tool_dispatcher import _TOOL_HANDLERS, is_known_tool
@@ -72,9 +76,11 @@ def _runtime_evaluation(vector: dict[str, Any], monkeypatch: pytest.MonkeyPatch)
     action = vector["action"]
     task_kind = action.get("task_kind", "general")
     monkeypatch.setenv("AGENT_AUTONOMY_POLICY_JSON", json.dumps(agent["autonomy_policy"]))
+    worker_flags = _worker_feature_flags({"env": agent["env"]})
     try:
         with (
             patch.object(runtime_policy, "AGENT_ID", _AGENT_ID),
+            patch.object(runtime_policy, "_configured_feature_flags", return_value=worker_flags),
             patch("koda.control_plane.manager.get_control_plane_manager", return_value=_control_plane_store(agent)),
         ):
             return runtime_policy.evaluate_execution_policy(
@@ -106,7 +112,7 @@ async def _simulate_route_payload(
         "execution_policy": {} if policy_in_request else vector["policy"],
     }
     manager = MagicMock()
-    manager.build_draft_snapshot.return_value = {"env": {}}
+    manager.build_draft_snapshot.return_value = {"env": dict(agent["env"])}
     manager._validation_inputs.return_value = ({}, {}, [])
     manager.get_agent_spec.return_value = agent_spec
     manager._execution_policy_catalog.return_value = build_policy_catalog()
@@ -227,3 +233,44 @@ async def test_simulate_route_equals_the_runtime_engine_for_every_dispatcher_too
                 mismatches.append((tool_id, policy_name, runtime, route))
 
     assert mismatches == []
+
+
+def _vector(vector_id: str) -> dict[str, Any]:
+    return next(item for item in _VECTORS if item["id"] == vector_id)
+
+
+@pytest.mark.asyncio
+async def test_simulate_route_uses_the_agents_worker_flags_not_its_own_process_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The control-plane process has the browser off; the agent's worker environment turns it on."""
+    vector = _vector("legacy-branch-with-the-browser-on-in-the-workers-environment")
+
+    with patch.object(runtime_policy, "BROWSER_FEATURES_ENABLED", False):
+        assert runtime_policy._configured_feature_flags()["browser"] is False
+        route = _route_summary((await _simulate_route_payload(vector, monkeypatch))["evaluation"])
+
+    assert _expected(route) == vector["expected"]
+    assert _expected(route) == {"decision": "require_approval", "reason_code": "legacy_human_factor", "rule_id": None}
+
+
+def test_worker_feature_flags_take_the_settings_the_supervisor_forces(monkeypatch: pytest.MonkeyPatch) -> None:
+    from koda.control_plane import supervisor
+    from koda.control_plane.manager import _SUPERVISOR_FORCED_FEATURE_FLAG_KEYS
+
+    # The supervisor copies these from its own environment onto every worker, over the snapshot's
+    # value, and copies no other flag setting from its environment.
+    assert (
+        set(_SUPERVISOR_FORCED_FEATURE_FLAG_KEYS) == runtime_policy.FEATURE_FLAG_ENV_KEYS & supervisor._SYSTEM_ENV_KEYS
+    )
+    assert runtime_policy.FEATURE_FLAG_ENV_KEYS.isdisjoint(supervisor._SAFE_RUNTIME_PARENT_ENV_KEYS)
+
+    snapshot = {"env": {"INTER_AGENT_ENABLED": "false", "SHELL_ENABLED": False}}
+    monkeypatch.setenv("INTER_AGENT_ENABLED", "true")
+    monkeypatch.setenv("SHELL_ENABLED", "true")
+    forced = _worker_feature_flags(snapshot)
+    monkeypatch.delenv("INTER_AGENT_ENABLED")
+    from_snapshot = _worker_feature_flags(snapshot)
+
+    assert (forced["inter_agent"], forced["shell"]) == (True, False)
+    assert (from_snapshot["inter_agent"], from_snapshot["shell"]) == (False, False)

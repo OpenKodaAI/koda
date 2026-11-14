@@ -697,12 +697,16 @@ def simulate_execution_policy(
     *,
     agent_id: str,
     agent_spec: dict[str, Any],
+    feature_flags: dict[str, bool] | None = None,
 ) -> dict[str, Any]:
     """Evaluate one tool call with the runtime engine, as the agent's worker would.
 
     ``action`` is ``{"tool_id", "params", "task_kind"}``; the runtime derives the
     action envelope from the tool id and its params. The agent's tool, resource
-    access and autonomy policies are the inputs its worker receives; the task
+    access and autonomy policies are the inputs its worker receives;
+    ``feature_flags`` are its worker's (the control plane derives them from the
+    agent's environment with
+    :func:`koda.services.execution_policy.feature_flags_from_env`); the task
     policy is the task kind's default (per-turn runbook and reliability
     adjustments are not simulated). A tool is known exactly when the worker's
     dispatcher has a handler for it or it is an MCP tool
@@ -728,6 +732,7 @@ def simulate_execution_policy(
         execution_policy=_safe_object(policy),
         known_tool=is_known_dispatcher_tool(tool_id),
         agent_id=agent_id,
+        feature_flags=feature_flags,
     )
     return evaluation.to_dict()
 

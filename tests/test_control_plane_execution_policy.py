@@ -251,3 +251,98 @@ def test_agent_spec_validation_rejects_regex_execution_policy_patterns() -> None
     )
 
     assert any(error.startswith("execution_policy.rules[0].match.tool_id") for error in report["errors"])
+
+
+def _put_agent_spec_manager(current_policy: dict[str, object]) -> MagicMock:
+    manager = MagicMock()
+    manager._require_agent_row.return_value = ("AGENT_A", {})
+    manager.get_agent_spec.return_value = {"execution_policy": current_policy}
+    manager.get_section.return_value = {"data": {}}
+    manager.get_document.return_value = None
+    return manager
+
+
+def test_put_agent_spec_rejects_a_written_policy_whose_rules_the_normalizer_would_drop() -> None:
+    from koda.control_plane.manager import ControlPlaneManager
+
+    for written in (
+        {"version": 1, "rules": [{"name": "deny-shell", "match": {"tool_id": "shell"}, "decision": "dney"}]},
+        {"version": 1, "rules": [{"name": "deny-shell", "selectors": {"tool_id": "shell"}, "action": "dney"}]},
+        {"version": 1, "rules": [{"name": "deny-all", "match": {}, "decision": "deny"}]},
+        {"version": 1, "rules": [{"name": "d", "match": {"tool_id": "web_search", "private_network": "ture"}}]},
+    ):
+        manager = _put_agent_spec_manager({})
+
+        with pytest.raises(ValueError, match=r"execution_policy\.rules\[0\]"):
+            ControlPlaneManager.put_agent_spec(manager, "agent_a", {"execution_policy": written})
+
+        manager.put_section.assert_not_called()
+
+
+def test_put_execution_policy_rejects_an_invalid_policy_before_storing_it() -> None:
+    from koda.control_plane.manager import ControlPlaneManager
+
+    manager = _put_agent_spec_manager({})
+    manager.put_agent_spec.side_effect = lambda agent_id, payload: ControlPlaneManager.put_agent_spec(
+        manager, agent_id, payload
+    )
+    policy = {"version": 1, "rules": [{"name": "deny-shell", "match": {"tool_id": "shell"}, "decision": "dney"}]}
+
+    with pytest.raises(ValueError, match=r"execution_policy\.rules\[0\]\.decision is invalid: dney"):
+        ControlPlaneManager.put_execution_policy(manager, "agent_a", {"policy": policy})
+
+    manager.put_section.assert_not_called()
+
+
+def test_put_agent_spec_stores_a_valid_policy_and_saves_other_edits_beside_an_unchanged_one() -> None:
+    from koda.control_plane.manager import ControlPlaneManager
+
+    valid = {"version": 1, "rules": [{"name": "deny-shell", "match": {"tool_id": "shell_execute"}, "decision": "deny"}]}
+    manager = _put_agent_spec_manager({})
+    ControlPlaneManager.put_agent_spec(manager, "agent_a", {"execution_policy": valid})
+    runtime_writes = [call for call in manager.put_section.call_args_list if call.args[1] == "runtime"]
+    assert runtime_writes[0].args[2]["data"]["execution_policy"]["rules"][0]["name"] == "deny-shell"
+
+    # A stored policy with an error the normalizer keeps (an unknown selector) is reported at publish;
+    # sending it back unchanged must not block an unrelated edit.
+    stored = {
+        "version": 1,
+        "rules": [{"name": "typo", "priority": 0, "match": {"tool_ids": "shell_execute"}, "decision": "deny"}],
+    }
+    manager = _put_agent_spec_manager(stored)
+    ControlPlaneManager.put_agent_spec(
+        manager,
+        "agent_a",
+        {"execution_policy": json.loads(json.dumps(stored)), "mission_profile": {"goal": "ship"}},
+    )
+    assert any(call.args[1] == "identity" for call in manager.put_section.call_args_list)
+
+
+def test_publish_validation_reports_a_stored_rule_that_the_normalizer_drops() -> None:
+    from koda.control_plane.agent_spec import build_agent_spec_from_snapshot
+    from koda.control_plane.manager import ControlPlaneManager
+
+    # Stored through the runtime section route, which keeps the policy as written.
+    stored = {
+        "version": 1,
+        "rules": [
+            {"name": "allow-search", "match": {"tool_id": "web_search"}, "decision": "allow"},
+            {"name": "deny-shell", "match": {"tool_id": "shell_execute"}, "decision": "dney"},
+        ],
+    }
+    snapshot = {"agent": {"id": "AGENT_A"}, "sections": {"runtime": {"execution_policy": stored}}, "env": {}}
+    manager = MagicMock()
+    manager.get_agent_spec.return_value = build_agent_spec_from_snapshot(snapshot)
+    manager._validation_inputs.return_value = ({}, {}, [])
+    manager._provider_catalog_from_env.return_value = {}
+    assert [rule["name"] for rule in manager.get_agent_spec.return_value["execution_policy"]["rules"]] == [
+        "allow-search"
+    ]
+
+    with patch("koda.control_plane.manager.fetch_one", return_value=None):
+        report = ControlPlaneManager._build_validation_report(manager, snapshot)
+
+    assert (
+        "execution_policy.rules[1].decision is invalid: dney. "
+        "Expected one of: allow, allow_with_preview, deny, require_approval"
+    ) in report["errors"]

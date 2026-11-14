@@ -485,3 +485,166 @@ def test_allowlist_resolver_matches_tool_and_integration_patterns_like_the_evalu
         assert tool_id not in unevaluable
         assert tool_id not in deny_only
     assert "file_write" in allowlist({"name": "literal", "match": {"tool_id": "file_write"}, "decision": "allow"})
+
+
+def test_validation_rejects_rules_the_normalizer_would_drop() -> None:
+    # Each of these rules is dropped by the normalizer, so without an error it would vanish from the
+    # stored policy and a broader allow would decide the calls it was written to deny.
+    policy = {
+        "version": 1,
+        "rules": [
+            {"name": "decision-typo", "match": {"tool_id": "shell_execute"}, "decision": "dney"},
+            {"name": "legacy-action-typo", "selectors": {"tool_id": "shell_execute"}, "action": "denyy"},
+            {"name": "empty-match", "match": {}, "decision": "deny"},
+            {"name": "empty-selectors", "selectors": {}, "decision": "deny"},
+            {"name": "legacy-action-ok", "selectors": {"tool_id": "web_search"}, "action": "deny"},
+        ],
+    }
+
+    errors, warnings = validate_execution_policy(policy)
+
+    assert errors == [
+        "execution_policy.rules[0].decision is invalid: dney. "
+        "Expected one of: allow, allow_with_preview, deny, require_approval",
+        "execution_policy.rules[1].action is invalid: denyy. "
+        "Expected one of: allow, allow_with_preview, deny, require_approval",
+        "execution_policy.rules[2].match is empty; a rule needs at least one selector.",
+        "execution_policy.rules[3].match is empty; a rule needs at least one selector.",
+    ]
+    assert warnings == []
+    assert [rule["name"] for rule in normalize_execution_policy(policy)["rules"]] == ["legacy-action-ok"]
+
+
+def test_validation_rejects_non_boolean_values_on_boolean_selectors() -> None:
+    def errors_for(value: object) -> list[str]:
+        rule = {"name": "d", "match": {"tool_id": "web_search", "private_network": value}, "decision": "deny"}
+        return validate_execution_policy({"version": 1, "rules": [rule]})[0]
+
+    for invalid in ("ture", "maybe", 0, 1, ["yes"], [True, "nope"]):
+        assert errors_for(invalid) == ["execution_policy.rules[0].match.private_network must be true or false."], (
+            invalid
+        )
+    for valid in (True, False, "true", "FALSE", "yes", "off", [True, False]):
+        assert errors_for(valid) == [], valid
+
+
+def test_validation_rejects_mapping_and_nested_selector_values() -> None:
+    def errors_for(key: str, value: object) -> list[str]:
+        rule = {"name": "d", "match": {key: value}, "decision": "deny"}
+        return validate_execution_policy({"version": 1, "rules": [rule]})[0]
+
+    expected = "must be a pattern or a list of patterns, not a mapping or a nested list."
+    assert errors_for("tool_id", {"is": "web_search"}) == [f"execution_policy.rules[0].match.tool_id {expected}"]
+    assert errors_for("tool_id", ["web_search", {"is": "fetch_url"}]) == [
+        f"execution_policy.rules[0].match.tool_id {expected}"
+    ]
+    assert errors_for("effect_tags", [["destructive_change"]]) == [
+        f"execution_policy.rules[0].match.effect_tags {expected}"
+    ]
+    assert errors_for("tool_id", ["web_search", "fetch_*"]) == []
+
+
+def test_deny_rule_with_an_unevaluable_selector_value_fails_closed_and_is_not_allowlisted() -> None:
+    allow_search = {"name": "allow-search", "priority": 100, "match": {"tool_id": "web_search"}, "decision": "allow"}
+    for bad_selector in ({"private_network": "ture"}, {"external_side_effect": 0}, {"tool_id": {"is": "web_search"}}):
+        deny_search = {"name": "deny-search", "match": {"tool_id": "web_search", **bad_selector}, "decision": "deny"}
+        policy = {"version": 1, "rules": [allow_search, deny_search]}
+
+        evaluation = evaluate_execution_policy("web_search", {"query": "koda"}, execution_policy=policy)
+
+        assert (evaluation.decision, evaluation.rule_id) == ("deny", "deny-search"), bad_selector
+
+    allow_with_typo = {"name": "a", "match": {"tool_id": "file_write", "bulk_operation": "nah"}, "decision": "allow"}
+    allowlist = resolve_execution_policy_allowed_tool_ids(
+        execution_policy={"version": 1, "rules": [allow_with_typo]},
+        feature_flags={"fileops": True},
+    )
+    assert "file_write" not in allowlist
+
+
+def test_feature_flags_from_env_matches_koda_config() -> None:
+    """The simulator's flag derivation equals what koda.config computes in a fresh process with that env."""
+    import json
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from koda.services.execution_policy import FEATURE_FLAG_ENV_KEYS, feature_flags_from_env
+
+    defaults = feature_flags_from_env({})
+    cases: list[dict[str, str]] = [{}]
+    cases.extend({key: "false"} for key in sorted(FEATURE_FLAG_ENV_KEYS))
+    cases.extend({key: "TRUE"} for key in sorted(FEATURE_FLAG_ENV_KEYS))
+    cases.append(dict.fromkeys(FEATURE_FLAG_ENV_KEYS, "true"))
+    cases.append(dict.fromkeys(FEATURE_FLAG_ENV_KEYS, "no"))
+    script = """
+import importlib, json, os, sys
+import dotenv
+dotenv.load_dotenv = lambda *args, **kwargs: False  # a developer's .env must not leak into the comparison
+import koda.config
+import koda.services.execution_policy as runtime_policy
+results = []
+for case in json.loads(sys.argv[1]):
+    for key in json.loads(sys.argv[2]):
+        os.environ.pop(key, None)
+    os.environ.update(case)
+    importlib.reload(koda.config)
+    importlib.reload(runtime_policy)
+    results.append(runtime_policy._configured_feature_flags())
+print(json.dumps(results))
+"""
+    env = {
+        key: value
+        for key, value in os.environ.items()
+        if key not in FEATURE_FLAG_ENV_KEYS and key != "AGENT_ID" and not key.endswith(tuple(FEATURE_FLAG_ENV_KEYS))
+    }
+    completed = subprocess.run(
+        [sys.executable, "-c", script, json.dumps(cases), json.dumps(sorted(FEATURE_FLAG_ENV_KEYS))],
+        capture_output=True,
+        text=True,
+        check=True,
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        timeout=120,
+    )
+
+    computed_by_config = json.loads(completed.stdout.strip().splitlines()[-1])
+    assert computed_by_config == [feature_flags_from_env(case) for case in cases]
+    assert defaults["shell"] and defaults["fileops"] and defaults["git"] and defaults["browser"]
+    assert not defaults["plugins"] and not defaults["inter_agent"]
+
+
+def test_no_spelling_of_a_path_steps_around_a_restrictive_path_rule_beside_a_broader_allow() -> None:
+    spellings = (
+        "/srv/prod/config.yml",
+        "/srv//prod/config.yml",
+        "//srv/prod/config.yml",
+        "/srv/prod//config.yml",
+        "/srv/./prod/config.yml",
+        "/srv/prod/./config.yml",
+        "/srv/app/../prod/config.yml",
+        "/srv/app/../../srv/prod/config.yml",
+        "/srv/Prod/../prod/config.yml",
+        "/SRV/PROD/config.yml",
+        "/srv/prod",
+        "/srv/prod/",
+    )
+    for restrictive in ("deny", "require_approval", "allow_with_preview"):
+        policy = {
+            "version": 1,
+            "rules": [
+                {"name": "allow-file-writes", "priority": 100, "match": {"tool_id": "file_write"}, "decision": "allow"},
+                {"name": "gate-prod", "match": {"tool_id": "file_write", "path": "/srv/prod"}, "decision": restrictive},
+            ],
+        }
+        for spelling in spellings:
+            evaluation = evaluate_execution_policy(
+                "file_write",
+                {"path": spelling, "content": "x"},
+                resource_access_policy={"integration_grants": {"fileops": {"allow_actions": ["fileops.*"]}}},
+                execution_policy=policy,
+                known_tool=True,
+            )
+
+            assert (evaluation.decision, evaluation.rule_id) == (restrictive, "gate-prod"), (restrictive, spelling)

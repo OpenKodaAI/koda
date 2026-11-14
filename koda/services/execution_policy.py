@@ -15,21 +15,27 @@ Rule semantics:
 * Selector values are fnmatch patterns (``*``, ``?``, ``[seq]``), compared
   case-insensitively. An ``effect_tags`` selector needs every listed pattern to
   match a tag.
-* A ``path`` selector also covers everything below the path. The call's path is
-  compared as written and in its lexically normalized form (``.``, ``..`` and
-  repeated ``/`` resolved). A deny rule matches when either form matches,
-  ignoring case; any other rule matches only when both forms match, with case.
-  Symlinks and relative paths are not resolved here.
+* A ``path`` selector also covers everything below the path. A call with a path
+  is evaluated against the whole rule set once for each spelling of that path:
+  lexically normalized (``.``, ``..`` and repeated ``/`` resolved) and as
+  written, each compared with case and ignoring case. The most restrictive
+  outcome wins, counting the no-match fallback as an outcome. So no spelling
+  steps around a deny, require_approval or allow_with_preview path rule, and an
+  allow path rule covers a call only when it covers every spelling. Symlinks
+  and relative paths are not resolved here.
 * Validation rejects every selector the engine cannot evaluate (an unknown key,
-  an empty value, a ``^regex`` pattern) and duplicate rule names. If one is
-  stored anyway, it never widens access: a deny rule skips it, so it can only
-  match more calls, and any other rule does not match.
+  an empty value, a mapping value, a non-boolean value on a boolean selector, a
+  ``^regex`` pattern), a rule with no selectors or an unknown decision (which
+  the normalizer would drop), and duplicate rule names. If such a selector is
+  stored anyway, a deny rule skips it, so it matches more calls, and any other
+  rule does not match.
 """
 
 from __future__ import annotations
 
 import posixpath
 import re
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatchcase
 from typing import Any, cast
@@ -91,6 +97,7 @@ EXECUTION_POLICY_SELECTOR_KEYS = frozenset(
     }
 )
 _BOOLEAN_SELECTOR_KEYS = frozenset({"private_network", "uses_secrets", "bulk_operation", "external_side_effect"})
+_BOOLEAN_PATTERNS = frozenset({"true", "false"})
 _PREVIEW_EFFECT_TAGS = frozenset(
     {
         "external_communication",
@@ -170,6 +177,37 @@ def _configured_feature_flags() -> dict[str, bool]:
         "plugins": PLUGIN_SYSTEM_ENABLED,
         "workflows": WORKFLOW_ENABLED,
         "inter_agent": INTER_AGENT_ENABLED,
+    }
+
+
+# The koda.config settings behind each feature flag above, with their defaults. A flag is on when any
+# of its settings is "true", as BROWSER_FEATURES_ENABLED is BROWSER_ENABLED or RUNTIME_BROWSER_LIVE_ENABLED.
+_FEATURE_FLAG_SETTINGS: dict[str, tuple[tuple[str, str], ...]] = {
+    "browser": (("BROWSER_ENABLED", "false"), ("RUNTIME_BROWSER_LIVE_ENABLED", "true")),
+    "browser_network": (("BROWSER_NETWORK_INTERCEPTION_ENABLED", "false"),),
+    "browser_session": (("BROWSER_SESSION_PERSISTENCE_ENABLED", "false"),),
+    "snapshots": (("SNAPSHOT_ENABLED", "false"),),
+    "webhooks": (("WEBHOOK_ENABLED", "false"),),
+    "fileops": (("FILEOPS_ENABLED", "true"),),
+    "shell": (("SHELL_ENABLED", "true"),),
+    "git": (("GIT_ENABLED", "true"),),
+    "plugins": (("PLUGIN_SYSTEM_ENABLED", "false"),),
+    "workflows": (("WORKFLOW_ENABLED", "false"),),
+    "inter_agent": (("INTER_AGENT_ENABLED", "false"),),
+}
+FEATURE_FLAG_ENV_KEYS = frozenset(key for settings in _FEATURE_FLAG_SETTINGS.values() for key, _default in settings)
+
+
+def feature_flags_from_env(env: Mapping[str, str]) -> dict[str, bool]:
+    """Return the feature flags koda.config computes in a process whose environment is ``env``.
+
+    The control-plane simulator evaluates with the flags of the agent's worker, derived
+    this way from the worker's environment, not with the flags of its own process.
+    Each setting is read by its plain name.
+    """
+    return {
+        flag: any(str(env.get(key, default)).lower() == "true" for key, default in settings)
+        for flag, settings in _FEATURE_FLAG_SETTINGS.items()
     }
 
 
@@ -370,16 +408,20 @@ def _selector_errors(index: int, match: dict[str, Any]) -> list[str]:
     for raw_key, value in match.items():
         key = _trimmed(raw_key)
         path = f"execution_policy.rules[{index}].match.{key or repr(raw_key)}"
-        patterns = _normalize_match_values(_normalize_selector_value(value, key=key), fold_case=False)
-        problem = _unevaluable_selector(key, patterns)
+        problem = _unevaluable_selector(key, value)
         if problem == "unknown_key":
             errors.append(
                 f"{path} is not a supported selector. "
                 f"Expected one of: {', '.join(sorted(EXECUTION_POLICY_SELECTOR_KEYS))}"
             )
+        elif problem == "not_scalar":
+            errors.append(f"{path} must be a pattern or a list of patterns, not a mapping or a nested list.")
         elif problem == "empty":
             errors.append(f"{path} is empty; a selector needs at least one pattern.")
+        elif problem == "not_boolean":
+            errors.append(f"{path} must be true or false.")
         elif problem == "regex":
+            patterns = _normalize_match_values(_normalize_selector_value(value, key=key), fold_case=False)
             regex_patterns = [pattern for pattern in patterns if pattern.startswith("^")]
             errors.append(
                 f"{path} uses a regular expression ({', '.join(regex_patterns)}); "
@@ -392,9 +434,12 @@ def validate_execution_policy(policy: dict[str, Any] | None) -> tuple[list[str],
     """Return ``(errors, warnings)`` for an execution-policy document.
 
     Besides the document's shape, validation rejects every selector the engine
-    cannot evaluate (an unknown key, an empty value, a ``^regex`` pattern) and
-    duplicate rule names. A deny rule skips a selector it cannot evaluate, so
-    such a rule would deny every call; and a rule's name is its audit ``rule_id``.
+    cannot evaluate (an unknown key, an empty value, a mapping value, a
+    non-boolean value on a boolean selector, a ``^regex`` pattern), every rule
+    the normalizer would drop (no selectors, or an unknown ``decision`` or legacy
+    ``action``), and duplicate rule names. A deny rule skips a selector it cannot
+    evaluate, so such a rule would deny every call; a dropped rule would vanish
+    without an error; and a rule's name is its audit ``rule_id``.
     """
     raw = _safe_json_object(policy)
     if not raw:
@@ -427,16 +472,21 @@ def validate_execution_policy(policy: dict[str, Any] | None) -> tuple[list[str],
         else:
             first_index_by_name[name] = index
 
-        decision = _trimmed(rule.get("decision")).lower()
+        # Read exactly as _normalize_rule reads it, legacy ``action`` included.
+        decision = _trimmed(rule.get("decision") or rule.get("action")).lower()
         if decision and decision not in EXECUTION_POLICY_DECISIONS:
+            decision_key = "decision" if rule.get("decision") else "action"
             errors.append(
-                f"execution_policy.rules[{index}].decision is invalid: {decision}. "
+                f"execution_policy.rules[{index}].{decision_key} is invalid: {decision}. "
                 f"Expected one of: {', '.join(sorted(EXECUTION_POLICY_DECISIONS))}"
             )
 
         match = _rule_selectors(rule)
         if not isinstance(match, dict):
             errors.append(f"execution_policy.rules[{index}].match must be a mapping.")
+            continue
+        if not match:
+            errors.append(f"execution_policy.rules[{index}].match is empty; a rule needs at least one selector.")
             continue
 
         errors.extend(_selector_errors(index, match))
@@ -494,16 +544,25 @@ def _normalize_match_values(value: Any, *, fold_case: bool = True) -> tuple[str,
     return tuple(pattern.lower() if fold_case else pattern for pattern in patterns if pattern)
 
 
-def _unevaluable_selector(key: str, patterns: tuple[str, ...]) -> str | None:
-    """Return why the engine cannot evaluate a selector (``unknown_key``, ``empty``, ``regex``), or ``None``.
+def _unevaluable_selector(key: str, value: Any) -> str | None:
+    """Return why the engine cannot evaluate a selector, or ``None``.
 
-    Validation rejects each of these; the engine treats one that is stored anyway
-    as described in :func:`_rule_matches`.
+    The reasons are ``unknown_key``; ``not_scalar`` (a mapping, or a list that
+    holds a mapping or a list); ``empty``; ``not_boolean`` (a boolean selector
+    whose value is not true or false); and ``regex``. ``value`` is the selector's
+    value as written or as normalized. Validation rejects each of these; the
+    engine treats one that is stored anyway as described in :func:`_rule_matches`.
     """
     if key not in EXECUTION_POLICY_SELECTOR_KEYS:
         return "unknown_key"
+    items = value if isinstance(value, (list, tuple, set, frozenset)) else (value,)
+    if any(isinstance(item, (Mapping, list, tuple, set, frozenset)) for item in items):
+        return "not_scalar"
+    patterns = _normalize_match_values(_normalize_selector_value(value, key=key))
     if not patterns:
         return "empty"
+    if key in _BOOLEAN_SELECTOR_KEYS and not set(patterns) <= _BOOLEAN_PATTERNS:
+        return "not_boolean"
     if any(pattern.startswith("^") for pattern in patterns):
         return "regex"
     return None
@@ -515,13 +574,23 @@ def _value_matches(value: Any, patterns: tuple[str, ...]) -> bool:
     return bool(normalized_value) and any(fnmatchcase(normalized_value, pattern) for pattern in patterns)
 
 
-def _path_forms(value: Any) -> tuple[str, ...]:
-    """Return a path as written and, when it differs, its lexical normalization (``.``, ``..``, ``//`` resolved)."""
+PathVariant = tuple[str, bool]
+
+
+def _path_variants(value: Any) -> tuple[PathVariant, ...]:
+    """Return the ``(path, ignore_case)`` spellings of a call's path that the rule set is evaluated against.
+
+    The path lexically normalized (``.``, ``..`` and repeated ``/`` resolved,
+    which is the file the tools act on, symlinks aside) and as written, each
+    compared with case and ignoring case. The normalized, case-sensitive
+    spelling comes first.
+    """
     written = str(value or "").strip()
     if not written:
         return ()
     normalized = posixpath.normpath(re.sub(r"/{2,}", "/", written))
-    return (written,) if normalized == written else (written, normalized)
+    forms = (normalized,) if normalized == written else (normalized, written)
+    return tuple((form, ignore_case) for ignore_case in (False, True) for form in forms)
 
 
 def _path_pattern_matches(path: str, pattern: str) -> bool:
@@ -530,19 +599,14 @@ def _path_pattern_matches(path: str, pattern: str) -> bool:
     return fnmatchcase(path, base) or fnmatchcase(path, base.rstrip("/") + "/*")
 
 
-def _path_matches(value: Any, patterns: tuple[str, ...], *, deny: bool) -> bool:
-    """Match a path selector so that a deny rule only ever matches more, and any other rule less.
-
-    A deny rule matches when the path as written or its normalized form matches,
-    ignoring case. Any other rule matches only when both forms match, with case.
-    """
-    forms = _path_forms(value)
-    if not forms:
+def _path_matches(path_variant: PathVariant | None, patterns: tuple[str, ...]) -> bool:
+    """Return whether one spelling of the call's path matches a path selector's patterns."""
+    if path_variant is None:
         return False
-    if deny:
-        lowered = tuple(pattern.lower() for pattern in patterns)
-        return any(_path_pattern_matches(form.lower(), pattern) for form in forms for pattern in lowered)
-    return all(any(_path_pattern_matches(form, pattern) for pattern in patterns) for form in forms)
+    path, ignore_case = path_variant
+    if ignore_case:
+        path, patterns = path.lower(), tuple(pattern.lower() for pattern in patterns)
+    return any(_path_pattern_matches(path, pattern) for pattern in patterns)
 
 
 def _effect_tags_match(effect_tags: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
@@ -550,9 +614,16 @@ def _effect_tags_match(effect_tags: tuple[str, ...], patterns: tuple[str, ...]) 
     return all(any(fnmatchcase(tag, pattern) for tag in tags) for pattern in patterns)
 
 
-def _selector_matches(key: str, value: Any, *, envelope: ActionEnvelope, task_kind: str, deny: bool) -> bool:
+def _selector_matches(
+    key: str,
+    value: Any,
+    *,
+    envelope: ActionEnvelope,
+    task_kind: str,
+    path_variant: PathVariant | None,
+) -> bool:
     if key == "path":
-        return _path_matches(envelope.path, _normalize_match_values(value, fold_case=False), deny=deny)
+        return _path_matches(path_variant, _normalize_match_values(value, fold_case=False))
     patterns = _normalize_match_values(value)
     if key == "effect_tags":
         return _effect_tags_match(envelope.effect_tags, patterns)
@@ -561,16 +632,22 @@ def _selector_matches(key: str, value: Any, *, envelope: ActionEnvelope, task_ki
     return _value_matches(getattr(envelope, key), patterns)
 
 
-def _rule_matches(rule: dict[str, Any], *, envelope: ActionEnvelope, task_kind: str) -> bool:
+def _rule_matches(
+    rule: dict[str, Any],
+    *,
+    envelope: ActionEnvelope,
+    task_kind: str,
+    path_variant: PathVariant | None,
+) -> bool:
     is_deny = rule.get("decision") == "deny"
     for key, value in _safe_json_object(rule.get("match")).items():
-        if _unevaluable_selector(key, _normalize_match_values(value)) is not None:
-            # The engine cannot evaluate this selector. It must never widen access:
-            # a deny rule skips it (matching more calls); any other rule does not match.
+        if _unevaluable_selector(key, value) is not None:
+            # The engine cannot evaluate this selector. A deny rule skips it
+            # (matching more calls); any other rule does not match.
             if is_deny:
                 continue
             return False
-        if not _selector_matches(key, value, envelope=envelope, task_kind=task_kind, deny=is_deny):
+        if not _selector_matches(key, value, envelope=envelope, task_kind=task_kind, path_variant=path_variant):
             return False
     return True
 
@@ -580,20 +657,38 @@ def _find_matching_rule(
     *,
     envelope: ActionEnvelope,
     task_kind: str,
+    fallback_decision: str,
 ) -> dict[str, Any] | None:
-    """Return the matching rule with the most restrictive decision.
+    """Return the rule that decides a call, or ``None`` when the no-match fallback decides it.
 
-    Rules arrive ordered by priority, then name (``normalize_execution_policy``),
-    so ties within one decision go to the highest priority.
+    Among the rules that match, the most restrictive decision wins. Rules arrive
+    ordered by priority, then name (``normalize_execution_policy``), so ties
+    within one decision go to the highest priority.
+
+    A call with a path is evaluated once per spelling of the path
+    (:func:`_path_variants`), and the most restrictive outcome wins, where a
+    spelling that no rule matches yields ``fallback_decision``. Whether a path
+    rule matches one spelling and not another can therefore only make the
+    outcome stricter. At equal decisions a rule wins over the fallback, then the
+    earlier spelling.
     """
-    rules = [rule for rule in policy.get("rules") or [] if _rule_matches(rule, envelope=envelope, task_kind=task_kind)]
-    if not rules:
-        return None
-    for decision in _RULE_DECISION_ORDER:
-        for rule in rules:
-            if rule.get("decision") == decision:
-                return cast(dict[str, Any], rule)
-    return None
+    rules = policy.get("rules") or []
+    best: tuple[tuple[int, int], dict[str, Any] | None] | None = None
+    for path_variant in _path_variants(envelope.path) or (None,):
+        matching = [
+            rule
+            for rule in rules
+            if _rule_matches(rule, envelope=envelope, task_kind=task_kind, path_variant=path_variant)
+        ]
+        decided_by = next(
+            (rule for decision in _RULE_DECISION_ORDER for rule in matching if rule.get("decision") == decision),
+            None,
+        )
+        decision = fallback_decision if decided_by is None else str(decided_by["decision"])
+        outcome = (_RULE_DECISION_ORDER.index(decision), 1 if decided_by is None else 0)
+        if best is None or outcome < best[0]:
+            best = (outcome, cast(dict[str, Any] | None, decided_by))
+    return None if best is None else best[1]
 
 
 def _build_preview_text(envelope: ActionEnvelope, params: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
@@ -673,7 +768,7 @@ def resolve_execution_policy_allowed_tool_ids(
             if str(rule.get("decision") or "").strip().lower() == "deny":
                 continue
             match = _safe_json_object(rule.get("match"))
-            if any(_unevaluable_selector(key, _normalize_match_values(value)) for key, value in match.items()):
+            if any(_unevaluable_selector(key, value) for key, value in match.items()):
                 continue  # The evaluator never matches this rule.
             tool_patterns = _normalize_match_values(match.get("tool_id"))
             integration_patterns = _normalize_match_values(match.get("integration_id"))
@@ -1019,12 +1114,14 @@ def evaluate_execution_policy(
     legacy_mcp_policy: str | None = None,
     known_tool: bool = True,
     agent_id: str | None = None,
+    feature_flags: dict[str, bool] | None = None,
 ) -> PolicyEvaluation:
     """Evaluate one tool/action through the central policy gate.
 
     ``agent_id`` names the agent whose control-plane rows (legacy MCP tool policy
     and MCP risk class) are consulted; it defaults to this worker's ``AGENT_ID``.
-    The control-plane simulate route passes it to evaluate on an agent's behalf.
+    ``feature_flags`` default to this process's (:func:`_configured_feature_flags`).
+    The control-plane simulate route passes both to evaluate on an agent's behalf.
     """
     payload = params or {}
     resolved_agent_id = agent_id or AGENT_ID or "default"
@@ -1032,7 +1129,7 @@ def evaluate_execution_policy(
     resolved_tool_policy = _configured_tool_policy(tool_policy)
     resolved_resource_policy = _configured_resource_access_policy(resource_access_policy)
     resolved_execution_policy = _configured_execution_policy(execution_policy)
-    feature_flags = _configured_feature_flags()
+    resolved_feature_flags = _configured_feature_flags() if feature_flags is None else dict(feature_flags)
     envelope, grant_decision = resolve_action_envelope(tool_id, payload, resolved_resource_policy)
 
     if not known_tool:
@@ -1044,11 +1141,17 @@ def evaluate_execution_policy(
             audit_payload={"tool_id": tool_id, "agent_id": resolved_agent_id},
         )
 
-    matched_rule = _find_matching_rule(resolved_execution_policy, envelope=envelope, task_kind=task_kind)
-    if matched_rule is not None:
-        base = _explicit_rule_decision(rule=matched_rule, envelope=envelope, params=payload)
-    elif resolved_execution_policy.get("rules"):
-        if envelope.access_level == "read" and is_tool_allowed_by_secure_default(tool_id):
+    if resolved_execution_policy.get("rules"):
+        safe_read = envelope.access_level == "read" and is_tool_allowed_by_secure_default(tool_id)
+        matched_rule = _find_matching_rule(
+            resolved_execution_policy,
+            envelope=envelope,
+            task_kind=task_kind,
+            fallback_decision="allow" if safe_read else "deny",
+        )
+        if matched_rule is not None:
+            base = _explicit_rule_decision(rule=matched_rule, envelope=envelope, params=payload)
+        elif safe_read:
             base = PolicyEvaluation(
                 decision="allow",
                 reason_code="secure_default_read",
@@ -1069,7 +1172,7 @@ def evaluate_execution_policy(
             grant_decision=grant_decision,
             effective_policy=resolved_effective_policy,
             tool_policy=resolved_tool_policy,
-            feature_flags=feature_flags,
+            feature_flags=resolved_feature_flags,
             legacy_mcp_policy=legacy_mcp_policy,
             agent_id=resolved_agent_id,
         )
