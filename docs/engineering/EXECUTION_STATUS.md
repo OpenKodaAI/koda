@@ -26,6 +26,7 @@ Learned from waves 2A–5 and the ADR-002 rounds. Every workflow script follows 
 6. **Disk discipline.** Agents never copy the repository, build a second Rust target, or create extra venvs in the scratchpad. They run tests in the task worktree and compare with the base through `git show`/`git diff`. Budget about 2 GB per worktree that runs the full pytest (debug guard plus release bot-gateway). The orchestrator removes merged worktrees and finished agents' scratch.
 7. **Never stop and resume a running workflow to change its prompts.** Resume reuses only the unchanged prefix of agent calls, so completed agents after the first changed call run again. Prompt changes apply to the next workflow.
 8. **Lane balance.** Capacity allowing, from WAVE-6 on each wave includes, besides the security lane, at least one agent-journey task (M3: squads, memory, governed tools) and one design or UX task (M8: design system, accessibility).
+9. **Gates per task, full gates per integration.** A task runs the gates its change touches (web-only tasks: web gates plus browser evidence, no pytest); the integration branch runs every CLAUDE.md gate once before the merge.
 
 ## Environment facts
 
@@ -39,6 +40,7 @@ Learned from waves 2A–5 and the ADR-002 rounds. Every workflow script follows 
 - Until a worktree includes 6d050b5 (D-230), its full `pytest` run still empties the real `~/.claude` (this container's `/root/.claude` holds the agent harness's own state). Agent prompts for older branches must run tests with `HOME` pointing at a scratch directory. Integration branches merge main first.
 - Shared test guard retired (2026-11-14 17:00). The harness stopped the shared guard on 127.0.0.1:50300 at its 2 h background limit, and a command that already ran with the longest allowed timeout is not restarted. From now on, agent prompts must not set `KODA_TEST_SECURITY_GUARD_TARGET`. Each pytest session starts its own guard on a private Unix socket (the default, through `cargo run`, about 1.5 GB of `rust/target` per worktree on first use). Workflows that were already running still pass the variable; if a run fails with the shared guard unreachable, it is rerun without it.
 - Postgres here allows 100 connections. Parallel waves can exhaust them (`TooManyConnectionsError: sorry, too many clients already`); a failure with that error is capacity, not a defect. Rerun when load drops, and do not restart Postgres while agents run tests.
+- Disk budget per worktree (2026-11-14 22:00): since M0-E2-T2 (56a87a6) every full pytest also builds `koda-bot-gateway` in release (~0.5 GB) besides the debug guard (~1-1.5 GB), so the hard-linked prebuilt binary no longer saves the build. Non-Rust waves share one `CARGO_TARGET_DIR` (`../koda-wt/.shared-target-w6`; the fixtures find binaries through cargo itself), which saves ~1.5 GB per worktree. Reviewers that copied the repository and built inside the copy pushed free disk to 1.6 GB on 2026-11-14 at 22:05. Rule 6 now applies to reviewer prompts too, and the orchestrator deletes a finished agent's scratch as soon as the agent-done monitor reports it.
 - Orphaned processes (2026-11-14 18:55): five session guards from killed pytest runs and a reviewer's `node server.mjs` were still running, some for 9 h with deleted binaries held open (D-254). After each wave the orchestrator checks for `koda-security-service` and `node server.mjs` processes whose parent is init and whose sockets and ports nobody uses, stops them, and removes merged worktrees and finished review scratch dirs. This freed 7 GB on 2026-11-14 (6.9 → 14 GB free).
 - Outbound web access is restricted: reference-product research relies on search results; anything not verifiable is marked as such.
 
@@ -79,12 +81,15 @@ Learned from waves 2A–5 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-- WAVE-2A integration (`integrate/wave-2a`, worktree `../koda-wt/int-w2a`): all gates passed at 1b4e72f (the hygiene failure was a cold guard build; rerun with a longer startup timeout). The pre-merge review (`wf_7421780a-c99`) checks the last integration commits, and its fix round is running. If it lands fixes, the full Python suite is rerun before the merge into the session branch.
-- WAVE-4 integration (`wf_78629268-8d9`, `integrate/wave-4`, worktree `../koda-wt/int-w4`): D-231, M1-E1-T6 and M1-E1-T7 merged cleanly. The M1-E1-T18 merge conflicts with M1-E1-T7 on the auth screens, `http-client`, i18n, the auth doc and the operator-auth tests. The integrator resolves it while keeping both behaviours, fixes the review minors, and replays J-14 for M1-E1-T7. Two-lens review rounds follow.
-- WAVE-5 (`wf_94cba2c7-f62`, worktrees `../koda-wt/<id>` from 3763c8c): M1-E7-T2 (Python advisories P1–P5), M1-E7-T3 with M1-E7-T11 (Node advisories N1–N4, then WebSocket relay limits), M1-E7-T6 (foreign root bundles and changelog) and D-254 (orphaned test guards). None of their files are touched by the in-flight waves.
-- Next, in the auth lane after WAVE-4 merges: M1-E1-T4 (logging redaction), then M1-E1-T5 → M1-E1-T13 (operator_auth.py serialization), M1-E1-T14 and M1-E1-T15, then M1-E1-T8. M1-E7-T10 follows M1-E7-T2, and M1-E7-T4/T5/T9 follow when CPU and disk allow.
-- M1-E2-T1 (ADR-002 revision, worktree `../koda-wt/ADR-002-r2`, `wf_6e70aafd-475`): revision round 8 is running after round 7's findings (kernel StartTask path, pid namespace, grant consumption). The seven operator questions (OQ-1..OQ-7) go to the operator for §13 approval once the ADR is approved.
-- AGENT-AUTONOMY backlog (ADR-002): AG-04 and AG-05 done; AG-02 implemented (image build and CI run pending); AG-06 is in WAVE-2A; AG-01, AG-03 and AG-07..AG-09 follow the ADR revision.
+(2026-11-14 22:40 UTC. The progress tracker mirrors this list for the operator.)
+
+- WAVE-2A integration (`integrate/wave-2a`, `wf_1fa2157a-37f`): final round 3 of the credential-store coverage. Round 2: correctness approved; security asked for changes (minors only: Claude's project `.mcp.json` and Codex profile configs hold MCP secrets). After round 3, any remaining minor goes to TECHNICAL_DEBT; the permanent fix is ADR-002 confinement (AG-13/AG-14). Then the full gates, the merge and the records.
+- WAVE-5 (`wf_94cba2c7-f62`, resumed with the no-rework rules): M1-E7-T2 Python advisories, confirm reviews of round 2; M1-E7-T3 with M1-E7-T11 (Node advisories, relay limits), round 2; M1-E7-T6 (foreign files) and D-254 (orphaned guards), reviews.
+- WAVE-6 (`wf_1fd3a503-f5d` Python, `wf_71bac8b0-c06` web; base 669fe6b): M3-E6-T2 + M3-E6-T3 (squads), M3-E4-T6 + M3-E1-T5 (memory scanner, scheduler lease), M8-E1-T1..T3 (accessibility), M8-E5-T2 + M8-E2-T1 (one error and empty state, mobile nav). Two rounds at most each.
+- WAVE-7 (`wf_d9f147a2-300` auth, `wf_23e36b0c-5e3` core; base 06cde4d): M1-E1-T4 + T14 + T15; M1-E1-T5 then M1-E1-T13; M2-E5-T1 + M2-E2-T4; M4-E1-T6 + M4-E1-T9.
+- REF-OPENBOT (`wf_5b8818b4-313`, branch `task/REF-OPENBOT`): openbot.run as the operator-named reference for design, chat and agents. Visual, product, positioning and architecture sweeps, a Koda mapping, then REFERENCE_RESEARCH §3.8 and plan deltas, with a skeptic verify. Patterns only (PolyForm Noncommercial).
+- Awaiting the operator: ADR-002 OQ-1..OQ-12 (§13 sign-off), sent 2026-11-14 22:20 with recommendations.
+- Merged today after the last full record: ADR-002 (d21c2b3, M1-E2-T1 done) and WAVE-4 (06cde4d: M1-E1-T6, T7, T18 done; D-231..D-233 fixed).
 
 ## Pending findings for the plan (verified by the orchestrator)
 
