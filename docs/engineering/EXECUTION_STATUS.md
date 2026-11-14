@@ -64,7 +64,7 @@ iteration.
 
 ## Blocked tasks
 
-- PUSH — `git push` to `OpenKodaAI/koda` returns 403 (Claude GitHub App not installed / account not linked for the org). Commits stay local on `claude/dreamy-cerf-mhvbwn` until the operator fixes access at https://claude.ai/connect-github; container reclaim would lose unpushed work.
+_None._ (GitHub push access restored 2026-11-14; branch `claude/dreamy-cerf-mhvbwn` pushed.)
 
 ## Discovered regressions
 
