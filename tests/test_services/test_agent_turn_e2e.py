@@ -33,7 +33,7 @@ import pytest
 
 from tests.fakes.provider import ProviderCall, ProviderTurn, StubProvider
 from tests.fakes.telegram import FakeApplication, FakeBot, fake_text_update
-from tests.postgres_fixtures import reset_squad_runtime_tables, stop_primary_bridge
+from tests.postgres_fixtures import close_shared_postgres_backends, reset_squad_runtime_tables, stop_primary_bridge
 
 pytestmark = [pytest.mark.postgres]
 
@@ -75,10 +75,9 @@ async def _drain_background_work() -> None:
 @pytest.fixture
 async def agent_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[str]:
     """The migrated test database, with the tables these scenarios read emptied."""
-    from koda.knowledge.v2 import common as common_mod
     from koda.services.runtime import controller as controller_mod
 
-    common_mod._SHARED_POSTGRES_BACKENDS.clear()
+    close_shared_postgres_backends()
     # The process-wide runtime controller is built on first use against the
     # test database, and dropped afterwards so later tests do not inherit it.
     monkeypatch.setattr(controller_mod, "_runtime_controller", None)
