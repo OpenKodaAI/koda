@@ -55,6 +55,22 @@ def _materialize_due_runs(now: datetime | None = None) -> int:
         due = jobs._parse_dt(job.get("next_run_at"))
         created_this_cycle = 0
         skipped_outside_window = 0
+        # Every automatic run carries the policy snapshot it was materialized under;
+        # _dispatch_run blocks runs without one. Execution enforces the job's stored
+        # snapshot, so keep it aligned with the snapshot embedded in these runs.
+        snapshot, snapshot_json, snapshot_hash = jobs._policy_snapshot_payload(job)
+        if (
+            str(job.get("policy_snapshot_hash") or "") != snapshot_hash
+            or str(job.get("policy_snapshot_json") or "") != snapshot_json
+        ):
+            jobs._touch_job(int(job["id"]), policy_snapshot_json=snapshot_json, policy_snapshot_hash=snapshot_hash)
+        run_metadata_json = jobs._stable_dumps_json(
+            {
+                "policy_snapshot": snapshot,
+                "policy_snapshot_json": snapshot_json,
+                "policy_snapshot_hash": snapshot_hash,
+            }
+        )
         while due and due < cutoff:
             skipped_outside_window += 1
             due = jobs.compute_next_run(
@@ -76,7 +92,7 @@ def _materialize_due_runs(now: datetime | None = None) -> int:
                     scheduled_job_id, scheduled_for, trigger_reason, status, attempt, max_attempts,
                     next_attempt_at, verification_status, notification_status, metadata_json, trace_id,
                     created_at, updated_at
-                ) VALUES (?, ?, ?, ?, 0, ?, ?, 'pending', 'pending', '{}', ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, 0, ?, ?, 'pending', 'pending', ?, ?, ?, ?)
                 ON CONFLICT (scheduled_job_id, scheduled_for, trigger_reason) DO NOTHING
                 """,
                 (
@@ -86,6 +102,7 @@ def _materialize_due_runs(now: datetime | None = None) -> int:
                     jobs.RUN_STATUS_QUEUED,
                     jobs.SCHEDULER_RUN_MAX_ATTEMPTS,
                     jobs._iso(due),
+                    run_metadata_json,
                     trace_id,
                     jobs._iso(now),
                     jobs._iso(now),

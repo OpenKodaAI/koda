@@ -11,6 +11,7 @@ import {
   Pencil,
   Play,
   RotateCcw,
+  ShieldCheck,
   X,
   type LucideIcon,
 } from "lucide-react";
@@ -66,7 +67,9 @@ function getLifecycleAction(job: CronJob): {
     case "failed_open":
       return { action: "resume", labelKey: "schedules.table.lifecycle.resume", disabled: false, icon: RotateCcw };
     case "validation_pending":
-      return { action: null, labelKey: "schedules.table.lifecycle.validationPending", disabled: true, icon: Clock };
+      // Jobs blocked back into validation have no other way out; the backend answers
+      // "Validation already pending." while a validation run is still in flight.
+      return { action: "validate", labelKey: "schedules.table.lifecycle.validate", disabled: false, icon: ShieldCheck };
     default:
       return {
         action: job.enabled === 1 ? "pause" : "resume",

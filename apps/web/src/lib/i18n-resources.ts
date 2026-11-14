@@ -16936,6 +16936,7 @@ const scheduleTableUiLabels = {
       pause: "Pause",
       resume: "Resume",
       activate: "Activate",
+      validate: "Validate",
       validationPending: "Validation pending",
     },
     statuses: {
@@ -16949,6 +16950,7 @@ const scheduleTableUiLabels = {
       pause: "Pausar",
       resume: "Retomar",
       activate: "Ativar",
+      validate: "Validar",
       validationPending: "Validação pendente",
     },
     statuses: {
@@ -16962,6 +16964,7 @@ const scheduleTableUiLabels = {
       pause: "Pausar",
       resume: "Reanudar",
       activate: "Activar",
+      validate: "Validar",
       validationPending: "Validación pendiente",
     },
     statuses: {
@@ -16975,6 +16978,7 @@ const scheduleTableUiLabels = {
       pause: "Mettre en pause",
       resume: "Reprendre",
       activate: "Activer",
+      validate: "Valider",
       validationPending: "Validation en attente",
     },
     statuses: {
@@ -16988,6 +16992,7 @@ const scheduleTableUiLabels = {
       pause: "Pausieren",
       resume: "Fortsetzen",
       activate: "Aktivieren",
+      validate: "Validieren",
       validationPending: "Validierung ausstehend",
     },
     statuses: {

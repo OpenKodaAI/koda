@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import patch
 
-from koda.services import scheduled_job_dispatcher
+from koda.services import scheduled_job_dispatcher, scheduled_job_runtime, scheduled_jobs
 
 
 class _JobsStub:
@@ -31,6 +32,7 @@ class _JobsStub:
     def __init__(self, now: datetime) -> None:
         self._now = now
         self.events: list[dict[str, Any]] = []
+        self.touched_jobs: list[tuple[int, dict[str, Any]]] = []
 
     def _utcnow(self) -> datetime:
         return self._now
@@ -55,6 +57,15 @@ class _JobsStub:
     def _record_scheduler_event(self, **kwargs: Any) -> None:
         self.events.append(dict(kwargs))
 
+    def _policy_snapshot_payload(self, _job: dict[str, Any]) -> tuple[dict[str, Any], str, str]:
+        return {"allowed_tool_ids": ["read"]}, '{"allowed_tool_ids":["read"]}', "snapshot-hash"
+
+    def _stable_dumps_json(self, value: Any) -> str:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+    def _touch_job(self, job_id: int, **updates: Any) -> None:
+        self.touched_jobs.append((job_id, dict(updates)))
+
 
 class _MaterializeStore:
     def __init__(self, job_rows: list[dict[str, Any]]) -> None:
@@ -71,7 +82,7 @@ class _MaterializeStore:
         self.executed.append((query, params))
         if "INSERT INTO scheduled_job_runs" in query:
             key = (int(params[0]), str(params[1]), str(params[2]))
-            self.lookup[key] = {"id": 901, "trace_id": params[6]}
+            self.lookup[key] = {"id": 901, "trace_id": params[7]}
             return 1
         return 1
 
@@ -141,7 +152,7 @@ def test_materialize_due_runs_assigns_trace_id_and_emits_history() -> None:
         (query, params) for query, params in store.executed if "INSERT INTO scheduled_job_runs" in query
     )
     assert "trace_id" in insert_query
-    assert insert_params[6] == "schedrun_trace_token"
+    assert insert_params[7] == "schedrun_trace_token"
     assert jobs.events == [
         {
             "scheduled_job_id": 17,
@@ -157,6 +168,96 @@ def test_materialize_due_runs_assigns_trace_id_and_emits_history() -> None:
             },
         }
     ]
+
+
+def _due_job_row(now: datetime, **overrides: Any) -> dict[str, Any]:
+    row: dict[str, Any] = {
+        "id": 17,
+        "user_id": 111,
+        "chat_id": 222,
+        "job_type": "reminder",
+        "status": "active",
+        "trigger_type": "interval",
+        "schedule_expr": "3600",
+        "timezone": "UTC",
+        "payload_json": json.dumps({"text": "Stretch break"}),
+        "next_run_at": (now - timedelta(minutes=1)).isoformat(),
+        "policy_snapshot_json": "{}",
+        "policy_snapshot_hash": "",
+    }
+    row.update(overrides)
+    return row
+
+
+def _inserted_run_metadata(store: _MaterializeStore) -> dict[str, Any]:
+    _query, params = next(
+        (query, params) for query, params in store.executed if "INSERT INTO scheduled_job_runs" in query
+    )
+    metadata = json.loads(params[6])
+    assert isinstance(metadata, dict)
+    return metadata
+
+
+def test_materialize_due_runs_embeds_policy_snapshot_and_refreshes_stale_job_snapshot() -> None:
+    now = datetime(2026, 3, 30, 12, 0, tzinfo=UTC)
+    jobs = _JobsStub(now)
+    store = _MaterializeStore([_due_job_row(now)])
+
+    with (
+        patch("koda.services.scheduled_job_dispatcher._jobs", return_value=jobs),
+        patch("koda.services.scheduled_job_dispatcher._store", return_value=store),
+    ):
+        assert scheduled_job_dispatcher._materialize_due_runs(now) == 1
+
+    assert _inserted_run_metadata(store) == {
+        "policy_snapshot": {"allowed_tool_ids": ["read"]},
+        "policy_snapshot_json": '{"allowed_tool_ids":["read"]}',
+        "policy_snapshot_hash": "snapshot-hash",
+    }
+    assert jobs.touched_jobs == [
+        (17, {"policy_snapshot_json": '{"allowed_tool_ids":["read"]}', "policy_snapshot_hash": "snapshot-hash"})
+    ]
+
+
+def test_materialize_due_runs_keeps_current_job_snapshot_untouched() -> None:
+    now = datetime(2026, 3, 30, 12, 0, tzinfo=UTC)
+    jobs = _JobsStub(now)
+    store = _MaterializeStore(
+        [
+            _due_job_row(
+                now,
+                policy_snapshot_json='{"allowed_tool_ids":["read"]}',
+                policy_snapshot_hash="snapshot-hash",
+            )
+        ]
+    )
+
+    with (
+        patch("koda.services.scheduled_job_dispatcher._jobs", return_value=jobs),
+        patch("koda.services.scheduled_job_dispatcher._store", return_value=store),
+    ):
+        assert scheduled_job_dispatcher._materialize_due_runs(now) == 1
+
+    assert _inserted_run_metadata(store)["policy_snapshot_hash"] == "snapshot-hash"
+    assert jobs.touched_jobs == []
+
+
+def test_materialized_automatic_run_passes_dispatch_policy_snapshot_gate() -> None:
+    """Regression: automatic runs used to be inserted with metadata '{}' and always blocked at dispatch."""
+    now = scheduled_jobs._utcnow()
+    store = _MaterializeStore([_due_job_row(now)])
+
+    with (
+        patch("koda.services.scheduled_job_dispatcher._store", return_value=store),
+        patch("koda.services.scheduled_jobs._record_scheduler_event"),
+        patch("koda.services.scheduled_jobs._touch_job"),
+    ):
+        assert scheduled_job_dispatcher._materialize_due_runs() == 1
+
+    job = scheduled_jobs._normalize_job(store.job_rows[0])
+    assert job is not None
+    run = {"id": 901, "job": job, "metadata": _inserted_run_metadata(store)}
+    assert scheduled_job_runtime._policy_snapshot_drift_reason(run) is None
 
 
 def test_recover_expired_leases_refreshes_live_runtime_task() -> None:

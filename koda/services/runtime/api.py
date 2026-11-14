@@ -501,15 +501,38 @@ async def _runtime_schedule_create(request: web.Request) -> web.Response:
         log.exception("runtime_schedule_create_failed")
         return web.json_response({"error": str(exc) or "create failed"}, status=500)
 
-    if auto_activate:
-        try:
-            scheduled_jobs.activate_job(job_id, user_id)
-        except Exception:
-            log.exception("runtime_schedule_auto_activate_failed", extra={"job_id": job_id})
+    # A new job can only be activated after a dry-run validation passes, so queue one now.
+    # With auto_activate the passing validation activates the job; otherwise it stays
+    # "validated" until it is activated explicitly.
+    validation_run_id: int | None
+    try:
+        validation_run_id, validation_message = scheduled_jobs.queue_validation_run(
+            job_id,
+            user_id=user_id,
+            activate_on_success=auto_activate,
+        )
+    except Exception:
+        # The job already exists; report the failure instead of a 500 so a retry does not duplicate it.
+        log.exception("runtime_schedule_validation_queue_failed", job_id=job_id)
+        validation_run_id, validation_message = None, "Validation could not be queued."
+    if validation_run_id is None:
+        log.warning("runtime_schedule_validation_not_queued", job_id=job_id, reason=validation_message)
+        message = f"Job created, but validation was not queued: {validation_message}"
+    else:
+        message = f"Job created. {validation_message}"
 
     _idempotency_remember(user_id, idempotency_key, job_id)
     detail = _schedule_detail_payload(job_id) or {}
-    return web.json_response({"ok": True, "idempotent_replay": False, **detail}, status=201)
+    return web.json_response(
+        {
+            "ok": True,
+            "idempotent_replay": False,
+            "message": message,
+            "validation_run_id": validation_run_id,
+            **detail,
+        },
+        status=201,
+    )
 
 
 async def _runtime_schedule_action(request: web.Request) -> web.Response:

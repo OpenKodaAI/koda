@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { CronTable, type CronTableRow } from "@/components/schedules/cron-table";
 
@@ -50,5 +50,23 @@ describe("CronTable", () => {
     const row = screen.getAllByRole("row")[1];
     expect(row).toBeTruthy();
     expect(row).not.toHaveClass("animate-in");
+  });
+
+  it("offers a validate action for routines waiting on validation", () => {
+    const onLifecycleAction = vi.fn();
+    const pendingRow: CronTableRow = {
+      ...rows[0],
+      job: { ...rows[0].job, status: "validation_pending", enabled: 0, next_run_at: null },
+    };
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <CronTable rows={[pendingRow]} onLifecycleAction={onLifecycleAction} />
+      </I18nProvider>,
+    );
+
+    const [validateButton] = screen.getAllByRole("button", { name: "Validate" });
+    expect(validateButton).toBeEnabled();
+    fireEvent.click(validateButton);
+    expect(onLifecycleAction).toHaveBeenCalledWith(pendingRow.job, "validate");
   });
 });

@@ -104,6 +104,8 @@ Write/control routes:
 - `POST /api/runtime/tasks/{task_id}/workspace/rename`
 - `POST /api/runtime/processes/{process_id}/terminate`
 
+`POST /api/runtime/schedules` creates the job in `validation_pending` and queues a dry-run validation run, returned as `validation_run_id` with a `message`. When `auto_activate` is true (the default) a passing validation activates the job; otherwise the job stays `validated` until the `activate` or `resume` action is called. A failed validation leaves the job `failed_open`. `run` is rejected until the job has been validated.
+
 WebSocket routes:
 
 - `GET /ws/runtime`

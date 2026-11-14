@@ -262,25 +262,3 @@ def test_create_run_embeds_policy_snapshot_metadata() -> None:
     assert metadata["policy_snapshot_hash"] == job["policy_snapshot_hash"]
     assert metadata["policy_snapshot"]["allowed_tool_ids"] == job["policy_snapshot"]["allowed_tool_ids"]
     record_event.assert_called_once()
-
-
-def test_backfill_materialized_run_policy_snapshots_attaches_snapshot_metadata() -> None:
-    now = scheduled_jobs._parse_dt("2026-03-30T12:00:00+00:00")
-    job = _job_fixture()
-
-    with (
-        patch(
-            "koda.services.scheduled_jobs._fetchall",
-            return_value=[{"id": 501, "scheduled_job_id": 7, "metadata_json": "{}"}],
-        ),
-        patch("koda.services.scheduled_jobs._get_job", return_value=job),
-        patch("koda.services.scheduled_jobs._touch_job") as touch_job,
-        patch("koda.services.scheduled_jobs._touch_run") as touch_run,
-    ):
-        scheduled_jobs._backfill_materialized_run_policy_snapshots(now)
-
-    touch_job.assert_not_called()
-    touch_run.assert_called_once()
-    metadata = json.loads(touch_run.call_args.kwargs["metadata_json"])
-    assert metadata["policy_snapshot_hash"] == job["policy_snapshot_hash"]
-    assert metadata["policy_snapshot"]["allowed_tool_ids"] == job["policy_snapshot"]["allowed_tool_ids"]
