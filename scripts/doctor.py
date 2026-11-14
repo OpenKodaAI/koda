@@ -21,7 +21,10 @@ def load_env_file(path: Path) -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip("'").strip('"')
+        # Docker Compose reads `export KEY=value` as KEY, so doctor must too.
+        parts = key.split(None, 1)
+        key = parts[1] if len(parts) == 2 and parts[0] == "export" else key.strip()
+        values[key] = value.strip().strip("'").strip('"')
     return values
 
 
@@ -112,7 +115,9 @@ def check_storage_secrets(env: dict[str, str]) -> dict[str, Any]:
         check["user_action"] = (
             f"{', '.join(placeholder_keys)} still use the public .env.example placeholder. Replace them with "
             f"`{PLACEHOLDER_SECRET_ROTATION_COMMAND}`. On an install that has already started, Postgres keeps "
-            f"the old password: follow {PLACEHOLDER_SECRET_ROTATION_DOC} to apply the new one before restarting."
+            f"the old password: follow {PLACEHOLDER_SECRET_ROTATION_DOC} to apply the new one before restarting. "
+            "The command only rewrites values that start with the placeholder: a placeholder password inside "
+            "KNOWLEDGE_V2_POSTGRES_DSN must be edited by hand."
         )
     return check
 
@@ -430,8 +435,8 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main() -> int:
-    args = _build_parser().parse_args()
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
     env_values = load_env_file(args.env_file)
     payload = run_doctor(
         env=env_values,
