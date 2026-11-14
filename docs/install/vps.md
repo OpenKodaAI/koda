@@ -53,11 +53,19 @@ sessions) but not the control-plane API, so API-token clients and `/openapi/cont
 need a proxy on the Koda host. Plain-HTTP access from other machines does not work: production
 operator session cookies are `Secure`, so browsers only keep them on HTTPS (or `localhost`).
 
-The API rate limits per client address and believes `X-Forwarded-For` only from
-`CONTROL_PLANE_TRUSTED_PROXIES` (the dashboard by default). Browser traffic through the
-dashboard needs nothing extra. If your proxy also forwards `/api/control-plane/*` straight to
-the API, add the address the API sees for it (with Compose, the bridge-network gateway) or all
-of its clients share one budget; see
+Login and recovery are rate limited per client address. A proxy on the Koda host needs
+nothing extra for browser traffic. It reaches the dashboard from the Docker gateway, whose
+`X-Forwarded-For` the dashboard believes (`WEB_TRUSTED_PROXIES=gateway` in Compose), and the
+API believes the dashboard (`CONTROL_PLANE_TRUSTED_PROXIES=web`). If your proxy also forwards
+`/api/control-plane/*` straight to the API, as the bundled `proxy/nginx.conf` does, set
+`CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`, or all of its clients share one budget. A proxy
+on another host needs its address added: `WEB_TRUSTED_PROXIES=gateway,<proxy-ip>`.
+
+When `WEB_PUBLISH_ADDRESS` publishes the dashboard beyond loopback, firewall its port so only
+your proxy can reach it. A client that connects directly is charged to its own address, but
+Docker hides that address behind the gateway when its userland proxy carries the connection
+(Docker Desktop, rootless Docker, an IPv6 host address on an IPv4-only network), and the
+gateway is trusted to name any client. See
 [Authentication](../security/authentication.md#which-address-a-request-is-charged-to).
 
 ## Tailscale And External Hosting Layers

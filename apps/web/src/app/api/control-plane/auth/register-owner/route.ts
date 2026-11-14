@@ -6,6 +6,7 @@ import {
   parseSchemaOrThrow,
   upstreamFetch,
 } from "@/lib/api-utils";
+import { clientIpFromHeaders, isLoopbackAddress } from "@/lib/client-ip";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
   assertWebOperatorSessionSecretConfigured,
@@ -43,13 +44,18 @@ export async function POST(request: NextRequest) {
       await request.json().catch(() => ({})),
       "Invalid registration payload.",
     );
-    // Deliberately no X-Forwarded-For: the control plane's dev-only loopback
-    // trust (ALLOW_LOOPBACK_BOOTSTRAP) requires a request with no proxy hop.
+    // The control plane's dev-only loopback trust (ALLOW_LOOPBACK_BOOTSTRAP)
+    // requires a request with no proxy hop, so a browser on loopback is sent
+    // without one. Every other browser gets its own rate-limit bucket.
+    const clientIp = clientIpFromHeaders(request.headers);
     const upstream = await upstreamFetch(
       `${CONTROL_PLANE_BASE_URL.replace(/\/$/, "")}/api/control-plane/auth/register-owner`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(clientIp && !isLoopbackAddress(clientIp) ? { "X-Forwarded-For": clientIp } : {}),
+        },
         body: JSON.stringify(payload),
         cache: "no-store",
       },

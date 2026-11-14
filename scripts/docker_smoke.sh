@@ -71,6 +71,34 @@ wait_for_url() {
   return 1
 }
 
+# The API believes X-Forwarded-For from the dashboard only when the address the
+# dashboard connects from is one that `web` resolves to inside `app`. Both
+# containers sit on two networks, so check that the two agree; if they did not,
+# every browser would silently share one rate-limit bucket.
+verify_dashboard_is_trusted_by_api() {
+  local source resolved
+  source="$(compose exec -T web node -e '
+    const socket = require("node:net").connect(8090, "app", () => {
+      console.log(socket.localAddress.replace(/^::ffff:/, ""));
+      socket.end();
+    });
+    socket.on("error", () => process.exit(1));
+  ')"
+  resolved="$(compose exec -T app python -c '
+import socket
+print(" ".join(sorted({info[4][0] for info in socket.getaddrinfo("web", None)})))
+')"
+  case " ${resolved} " in
+    *" ${source} "*)
+      echo "[docker-smoke] API trusts the dashboard's address ${source}"
+      ;;
+    *)
+      echo "[docker-smoke] dashboard connects from ${source:-?} but app resolves web to ${resolved:-nothing}" >&2
+      return 1
+      ;;
+  esac
+}
+
 main() {
   trap 'status=$?; if [ "${status}" -ne 0 ]; then capture_diagnostics; fi; exit "${status}"' EXIT
 
@@ -94,6 +122,7 @@ main() {
   probe_url "http://127.0.0.1:3000/setup"
   probe_url "http://127.0.0.1:3000/control-plane"
   probe_url "http://127.0.0.1:8090/openapi/control-plane.json"
+  verify_dashboard_is_trusted_by_api
 
   echo "[docker-smoke] stack passed endpoint verification"
 }

@@ -4,21 +4,26 @@ Uses aiolimiter with an LRU dict for per-IP limiters, mirroring the pattern
 in ``koda/utils/rate_limiter.py``.
 
 Buckets are keyed by the TCP peer address. Only when the peer is a trusted
-proxy (``CONTROL_PLANE_TRUSTED_PROXIES``: loopback and the dashboard by
-default) is ``X-Forwarded-For`` read, from the right, skipping trusted hops;
-the first untrusted address is the client. Entries further left are
-client-supplied, so rotating them never yields a fresh bucket.
+proxy (``CONTROL_PLANE_TRUSTED_PROXIES``: loopback by default, the dashboard's
+``web`` service in Docker Compose) is ``X-Forwarded-For`` read, from the right,
+skipping trusted hops; the first untrusted address is the client. Entries
+further left are client-supplied, so rotating them never yields a fresh
+bucket. IPv6 clients are keyed by their /64, the block a single subscriber
+normally gets, so rotating source addresses inside it does not either.
 """
 
 from __future__ import annotations
 
 import asyncio
 import ipaddress
+import re
 import socket
+import struct
 import time
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from functools import lru_cache
+from pathlib import Path
 
 from aiohttp import web
 from aiolimiter import AsyncLimiter
@@ -42,7 +47,19 @@ _IPNetwork = ipaddress.IPv4Network | ipaddress.IPv6Network
 _TRUSTED_HOSTNAME_TTL_SECONDS = 10.0
 _resolved_trusted_hostnames: dict[str, tuple[float, frozenset[_IPAddress]]] = {}
 
+# `gateway` in CONTROL_PLANE_TRUSTED_PROXIES: this host's IPv4 default gateway.
+# Inside a Docker container that is the address Docker's port proxy connects
+# from, so a reverse proxy on the Docker host reaches the API from it.
+_GATEWAY_KEYWORD = "gateway"
+_ROUTE_TABLE = Path("/proc/net/route")
+_RTF_GATEWAY = 0x2
+_HOSTNAME_LABEL = re.compile(r"[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?")
+
 _MAX_CACHED_LIMITERS = 256
+# Sensitive-endpoint buckets get their own, larger LRU per endpoint, so a
+# client cycling through many addresses cannot evict its own (or anyone
+# else's) login or recovery bucket and start over.
+_MAX_CACHED_ENDPOINT_LIMITERS = 4096
 
 # Per-IP general-purpose rate limiters with LRU eviction.
 _ip_limiters: OrderedDict[str, AsyncLimiter] = OrderedDict()
@@ -50,9 +67,9 @@ _ip_limiters: OrderedDict[str, AsyncLimiter] = OrderedDict()
 # Per-IP auth-failure rate limiters (stricter).
 _auth_failure_limiters: OrderedDict[str, AsyncLimiter] = OrderedDict()
 
-# Per-(endpoint,IP) strict limiters for sensitive auth paths.
-# Key: f"{endpoint}:{ip}". Configured once at module load.
-_endpoint_limiters: OrderedDict[str, AsyncLimiter] = OrderedDict()
+# Per-(endpoint,IP) strict limiters for sensitive auth paths: one LRU per
+# endpoint, keyed by client address.
+_endpoint_limiters: dict[str, OrderedDict[str, AsyncLimiter]] = {}
 
 # (max_burst, window_seconds) — deliberately tight on sensitive paths.
 #
@@ -102,14 +119,14 @@ def _get_endpoint_limiter(endpoint: str, ip: str) -> AsyncLimiter | None:
     if budget is None:
         return None
     max_burst, window = budget
-    key = f"{endpoint}:{ip}"
-    if key in _endpoint_limiters:
-        _endpoint_limiters.move_to_end(key)
-        return _endpoint_limiters[key]
-    if len(_endpoint_limiters) >= _MAX_CACHED_LIMITERS:
-        _endpoint_limiters.popitem(last=False)
-    _endpoint_limiters[key] = AsyncLimiter(max_burst, window)
-    return _endpoint_limiters[key]
+    limiters = _endpoint_limiters.setdefault(endpoint, OrderedDict())
+    if ip in limiters:
+        limiters.move_to_end(ip)
+        return limiters[ip]
+    if len(limiters) >= _MAX_CACHED_ENDPOINT_LIMITERS:
+        limiters.popitem(last=False)
+    limiters[ip] = AsyncLimiter(max_burst, window)
+    return limiters[ip]
 
 
 def _parse_ip(value: object) -> _IPAddress | None:
@@ -122,17 +139,92 @@ def _parse_ip(value: object) -> _IPAddress | None:
     return address
 
 
+def _rate_limit_key(ip: str) -> str:
+    """Bucket key for a client address: IPv6 clients share one per /64."""
+    address = _parse_ip(ip)
+    if isinstance(address, ipaddress.IPv6Address):
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return ip
+
+
+def _default_gateway() -> ipaddress.IPv4Address | None:
+    """IPv4 default gateway from the kernel route table, or None (no route, not Linux)."""
+    try:
+        lines = _ROUTE_TABLE.read_text(encoding="ascii").splitlines()[1:]
+    except (OSError, UnicodeError):
+        return None
+    for line in lines:
+        fields = line.split()
+        if len(fields) < 4 or fields[1] != "00000000":
+            continue
+        try:
+            gateway, flags = int(fields[2], 16), int(fields[3], 16)
+        except ValueError:
+            continue
+        if flags & _RTF_GATEWAY and gateway:
+            # The kernel prints the address as a host-order word.
+            return ipaddress.IPv4Address(struct.pack("=I", gateway))
+    return None
+
+
+def _is_hostname(entry: str) -> bool:
+    labels = entry.rstrip(".").split(".")
+    # All-numeric names are mistyped IPv4 addresses, not hostnames.
+    if all(label.isdigit() for label in labels):
+        return False
+    return len(entry) <= 253 and all(_HOSTNAME_LABEL.fullmatch(label) for label in labels)
+
+
 @lru_cache(maxsize=4)
 def _trusted_proxy_rules(entries: tuple[str, ...]) -> tuple[tuple[_IPNetwork, ...], tuple[str, ...]]:
-    """Split the configured entries into IP networks and hostnames."""
+    """Split the configured entries into IP networks and hostnames.
+
+    Entries that cannot be used are logged and dropped, never trusted.
+    """
     networks: list[_IPNetwork] = []
     hostnames: list[str] = []
     for entry in entries:
+        lowered = entry.lower()
+        if lowered == _GATEWAY_KEYWORD:
+            gateway = _default_gateway()
+            if gateway is None:
+                log.warning(
+                    "control_plane_trusted_proxy_ignored",
+                    entry=entry,
+                    reason="no IPv4 default gateway in /proc/net/route",
+                )
+            else:
+                networks.append(ipaddress.ip_network(gateway))
+            continue
         try:
             networks.append(ipaddress.ip_network(entry, strict=False))
+            continue
         except ValueError:
-            hostnames.append(entry.lower())
+            pass
+        if _is_hostname(lowered):
+            hostnames.append(lowered)
+        else:
+            log.warning(
+                "control_plane_trusted_proxy_ignored",
+                entry=entry,
+                reason="not an IP address, a CIDR, a hostname or `gateway`",
+            )
     return tuple(networks), tuple(hostnames)
+
+
+def check_trusted_proxies() -> None:
+    """Parse CONTROL_PLANE_TRUSTED_PROXIES at startup so unusable entries are logged.
+
+    Hostnames are not resolved here: under Docker Compose the dashboard starts
+    after the API, so `web` does not resolve yet. A hostname that still does not
+    resolve when a request needs it is logged then.
+    """
+    networks, hostnames = _trusted_proxy_rules(CONTROL_PLANE_TRUSTED_PROXIES)
+    log.info(
+        "control_plane_trusted_proxies",
+        networks=[str(network) for network in networks],
+        hostnames=list(hostnames),
+    )
 
 
 async def _resolve_trusted_hostname(hostname: str) -> frozenset[_IPAddress]:
@@ -145,6 +237,9 @@ async def _resolve_trusted_hostname(hostname: str) -> frozenset[_IPAddress]:
     except (OSError, UnicodeError, ValueError):
         infos = []
     resolved = frozenset(address for info in infos if (address := _parse_ip(info[4][0])) is not None)
+    if not resolved and (cached is None or cached[1]):
+        # Logged when the name stops resolving, not on every refresh.
+        log.warning("control_plane_trusted_proxy_unresolved", hostname=hostname)
     _resolved_trusted_hostnames[hostname] = (now, resolved)
     return resolved
 
@@ -198,7 +293,7 @@ async def control_plane_rate_limit_middleware(
     if "/connection/login/" in request.path:
         return await handler(request)
 
-    ip = await _client_ip(request)
+    ip = _rate_limit_key(await _client_ip(request))
 
     # Dedicated sensitive-endpoint limiter runs FIRST so auth spam does not
     # eat the user's general per-IP quota for the rest of the dashboard.
@@ -249,3 +344,4 @@ def clear_limiters() -> None:
     _auth_failure_limiters.clear()
     _endpoint_limiters.clear()
     _resolved_trusted_hostnames.clear()
+    _trusted_proxy_rules.cache_clear()

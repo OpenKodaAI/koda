@@ -149,6 +149,23 @@ describe("web proxy auth gate", () => {
     expect(apiRequest("192.0.2.10").status).toBe(200);
   });
 
+  it("charges every address of an IPv6 /64 to one window", () => {
+    const apiRequest = (forwardedFor: string) =>
+      proxy({
+        nextUrl: new URL("http://localhost/api/control-plane/auth/status"),
+        method: "GET",
+        cookies: { get: () => undefined },
+        headers: {
+          get: (name: string) => (name.toLowerCase() === "x-forwarded-for" ? forwardedFor : null),
+        },
+      } as never);
+
+    // A client rotating through its own /64 gets no fresh window per address.
+    const rotating = Array.from({ length: 130 }, (_, n) => apiRequest(`2001:db8:5:6::${n.toString(16)}`).status);
+    expect(rotating).toContain(429);
+    expect(apiRequest("2001:db8:5:7::1").status).toBe(200);
+  });
+
   it("keeps the proxy matcher locked to the protected API surfaces", () => {
     expect(config.matcher).toEqual([
       "/((?!_next/static|_next/image|_next/webpack-hmr|favicon.ico|apple-icon.png|robots.txt|sitemap.xml).*)",

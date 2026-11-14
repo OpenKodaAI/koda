@@ -155,26 +155,45 @@ triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After`.
 ### Which address a request is charged to
 
 - By default a request is charged to its TCP peer. `X-Forwarded-For` is read only when the
-  peer is a trusted proxy (`CONTROL_PLANE_TRUSTED_PROXIES`, default `127.0.0.1,::1,web`:
-  loopback, where a native dashboard runs, and `web`, the dashboard's Docker Compose service,
-  matched by its resolved address). The header is then read from the right, skipping trusted
-  hops, and the first untrusted address is the client. Entries further left are
-  client-supplied and never select a bucket, so a direct caller cannot rotate the header to
-  get a fresh budget.
-- The dashboard BFF forwards the browser's address on every control-plane call
-  (`apps/web/src/lib/client-ip.ts`: the rightmost `X-Forwarded-For` entry Next.js sees, which
-  Next.js fills with the socket address or the edge proxy appends). Each browser therefore
-  has its own budget; one client's failed logins do not lock other clients out. The Next.js
-  proxy (`apps/web/src/proxy.ts`) keys its own per-client window (120/min) the same way.
-- Exception: `POST /auth/register-owner` from the dashboard sends no `X-Forwarded-For`,
-  because the dev-only loopback trust requires a request with no proxy hop. Its bucket is
-  shared by every browser, which only matters before the owner exists.
-- A reverse proxy that forwards straight to the API (not through the dashboard) must be added
-  to `CONTROL_PLANE_TRUSTED_PROXIES` with the address the API sees for it. With Docker Compose
-  that is the bridge-network gateway, not `127.0.0.1`. Until then all of its clients share
-  the proxy's bucket. Trust only addresses you control: a trusted peer can claim any client
-  address. The same holds for anything that can reach the dashboard port directly, which is
-  why Compose publishes it on loopback only.
+  peer is a trusted proxy (`CONTROL_PLANE_TRUSTED_PROXIES`: loopback by default, where a
+  native dashboard runs; Docker Compose sets `web`, the dashboard's service, matched by its
+  resolved address). The header is then read from the right, skipping trusted hops, and the
+  first untrusted address is the client. Entries further left are client-supplied and never
+  select a bucket, so a direct caller cannot rotate the header to get a fresh budget.
+- The dashboard server decides the browser's address before Next.js runs
+  (`apps/web/server.mjs`, `apps/web/src/lib/forwarded-for.mjs`). Next.js only fills an
+  *absent* `X-Forwarded-For`, so the server replaces the header on every request with one
+  address: the TCP peer, or, when the peer is a trusted proxy (loopback, plus
+  `WEB_TRUSTED_PROXIES`, which Compose sets to `gateway`), the first untrusted hop from the
+  right. A client that reaches the dashboard port directly is charged to its own address
+  whatever header it sends.
+- The dashboard BFF forwards that address on every control-plane call
+  (`apps/web/src/lib/client-ip.ts`). Each browser therefore has its own budget; one client's
+  failed logins do not lock other clients out. The Next.js proxy (`apps/web/src/proxy.ts`)
+  keys its own per-client window (120/min) the same way.
+- IPv6 clients are charged per /64, both in the API and in the dashboard, so rotating source
+  addresses inside one subscriber's block does not buy a fresh budget. Each sensitive
+  endpoint keeps its own bucket cache (4096 clients), so cycling through many addresses on
+  one endpoint does not evict buckets on another.
+- Exception: `POST /auth/register-owner` from a browser on loopback is forwarded without
+  `X-Forwarded-For`, because the dev-only loopback trust requires a request with no proxy
+  hop. Requests from any other browser carry its address like every other auth call.
+- `gateway` (in either setting) is the container's IPv4 default gateway, which is where
+  Docker's port proxy connects from: a reverse proxy on the Docker host reaches the
+  dashboard, and the API, from that address. A reverse proxy that forwards
+  `/api/control-plane/*` straight to the API, such as the bundled `proxy/nginx.conf`, needs
+  `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`; until then all of its clients share one
+  bucket. A proxy on another host (`WEB_PUBLISH_ADDRESS`) is trusted by its IP:
+  `WEB_TRUSTED_PROXIES=gateway,203.0.113.5`.
+- Trust only peers you control: a trusted peer can claim any client address. Docker hides
+  the real client behind the gateway whenever its userland proxy carries the connection
+  (Docker Desktop, rootless Docker, or an IPv6 host address on an IPv4-only network), so
+  when the dashboard is published beyond loopback (`WEB_PUBLISH_ADDRESS`), firewall its port
+  so only your proxy can reach it.
+- The API trusts `web` by the address Docker DNS returns for it, which must be the address
+  the dashboard connects from. In the source `docker-compose.yml` both containers share two
+  networks; `scripts/docker_smoke.sh` checks that the two addresses match. If they ever
+  differ, every browser falls back to one shared bucket (the safe direction).
 
 Account-level lockout remains on top of the rate limits: after
 `CONTROL_PLANE_OPERATOR_LOGIN_MAX_FAILURES` failed attempts, the row locks for

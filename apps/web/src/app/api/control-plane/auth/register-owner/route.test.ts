@@ -57,7 +57,28 @@ describe("POST /api/control-plane/auth/register-owner", () => {
     expect(response.headers.get("set-cookie")).toBeTruthy();
   });
 
-  it("does not add a proxy hop, which would disable the dev-only loopback trust", async () => {
+  function forwardedForSentUpstream(): string | null {
+    const init = upstreamFetch.mock.calls[0]?.[1] as RequestInit | undefined;
+    return new Headers(init?.headers).get("X-Forwarded-For");
+  }
+
+  it.each(["127.0.0.1", "::1", "::ffff:127.0.0.1"])(
+    "adds no proxy hop for a browser on loopback (%s), which keeps the dev-only loopback trust working",
+    async (loopback) => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("WEB_OPERATOR_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+      upstreamFetch.mockResolvedValue(
+        new Response(JSON.stringify({ session_token: "session-token", recovery_codes: ["code-1"] }), { status: 201 }),
+      );
+      const { POST } = await import("./route");
+
+      await POST(registerRequest({ "X-Forwarded-For": loopback }));
+
+      expect(forwardedForSentUpstream()).toBeNull();
+    },
+  );
+
+  it("forwards a remote browser's address so setup attempts are rate limited per client", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("WEB_OPERATOR_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
     upstreamFetch.mockResolvedValue(
@@ -65,9 +86,8 @@ describe("POST /api/control-plane/auth/register-owner", () => {
     );
     const { POST } = await import("./route");
 
-    await POST(registerRequest({ "X-Forwarded-For": "127.0.0.1" }));
+    await POST(registerRequest({ "X-Forwarded-For": "198.51.100.7" }));
 
-    const init = upstreamFetch.mock.calls[0]?.[1] as RequestInit | undefined;
-    expect(new Headers(init?.headers).has("X-Forwarded-For")).toBe(false);
+    expect(forwardedForSentUpstream()).toBe("198.51.100.7");
   });
 });

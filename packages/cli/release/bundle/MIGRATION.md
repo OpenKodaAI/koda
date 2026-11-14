@@ -27,6 +27,13 @@
   operator session cookies are `Secure`). The control-plane API is not published beyond loopback.
 - `CONTROL_PLANE_PORT` now only selects the published host port; the container always listens on
   8090 internally, so non-default ports work end to end.
+- Login, recovery and setup are now rate limited per client address. `X-Forwarded-For` is believed
+  only from trusted peers: the API trusts the dashboard (`CONTROL_PLANE_TRUSTED_PROXIES=web`) and
+  the dashboard trusts the Docker gateway a proxy on this host connects from
+  (`WEB_TRUSTED_PROXIES=gateway`). If your proxy forwards `/api/control-plane/*` straight to the
+  API, as `proxy/nginx.conf` does, set `CONTROL_PLANE_TRUSTED_PROXIES=web,gateway`. With
+  `WEB_PUBLISH_ADDRESS`, add your proxy's IP to `WEB_TRUSTED_PROXIES` and firewall the dashboard
+  port so only the proxy reaches it.
 
 ## Update Behavior
 

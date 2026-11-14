@@ -106,12 +106,13 @@ CONTROL_PLANE_AUTO_IMPORT: bool = os.environ.get("CONTROL_PLANE_AUTO_IMPORT", "f
 
 CONTROL_PLANE_RATE_LIMIT: int = int(os.environ.get("CONTROL_PLANE_RATE_LIMIT", "120"))
 CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT: int = int(os.environ.get("CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", "5"))
-# Peers whose `X-Forwarded-For` the rate limiter believes (comma-separated IPs, CIDRs or
-# hostnames). Default: loopback, where a native dashboard runs, and `web`, the dashboard's
-# Docker Compose service. Requests from any other peer are bucketed by the peer address.
+# Peers whose `X-Forwarded-For` the rate limiter believes (comma-separated IPs, CIDRs,
+# hostnames, or `gateway` for the container's Docker gateway). Default: loopback, where a
+# native dashboard runs; Docker Compose sets `web`, the dashboard's service. Requests from any
+# other peer are bucketed by the peer address.
 CONTROL_PLANE_TRUSTED_PROXIES: tuple[str, ...] = tuple(
     entry.strip()
-    for entry in os.environ.get("CONTROL_PLANE_TRUSTED_PROXIES", "127.0.0.1,::1,web").split(",")
+    for entry in os.environ.get("CONTROL_PLANE_TRUSTED_PROXIES", "127.0.0.1,::1").split(",")
     if entry.strip()
 )
 

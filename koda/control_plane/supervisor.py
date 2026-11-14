@@ -31,7 +31,7 @@ from .api import (
 from .cluster import ClusterClient, ClusterConfig
 from .lifecycle_events import consume_lifecycle_signal, get_lifecycle_event
 from .manager import RuntimeSnapshot, get_control_plane_manager
-from .rate_limit import control_plane_rate_limit_middleware
+from .rate_limit import check_trusted_proxies, control_plane_rate_limit_middleware
 from .runtime_kernel_link import (
     AgentWorkerSpec,
     AgentWorkerState,
@@ -676,6 +676,7 @@ def _warn_about_placeholder_secrets() -> None:
 
 async def run_supervisor() -> None:
     _warn_about_placeholder_secrets()
+    check_trusted_proxies()
     supervisor = ControlPlaneSupervisor()
     await supervisor.start()
     stop_event = asyncio.Event()

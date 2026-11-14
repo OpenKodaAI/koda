@@ -3,18 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import socket
+import struct
+import subprocess
+import sys
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+import yaml
 from multidict import CIMultiDict
 
+from koda.control_plane import rate_limit
 from koda.control_plane.rate_limit import (
     _auth_failure_limiters,
     _client_ip,
+    _endpoint_limiters,
     _get_auth_failure_limiter,
+    _get_endpoint_limiter,
     _get_ip_limiter,
     _ip_limiters,
+    _trusted_proxy_rules,
+    check_trusted_proxies,
     clear_limiters,
     control_plane_rate_limit_middleware,
 )
@@ -391,3 +402,166 @@ async def test_real_loopback_proxy_gets_per_client_login_buckets() -> None:
     assert attacker[:10] == [400] * 10
     assert attacker[10] == 429
     assert owner.status == 400
+
+
+# --- defaults, configuration checks and bucket keys ---------------------------
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_default_trusts_only_loopback() -> None:
+    """Natively only loopback is trusted; Docker Compose adds `web` itself."""
+    env = {key: value for key, value in os.environ.items() if key != "CONTROL_PLANE_TRUSTED_PROXIES"}
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from koda.control_plane.settings import CONTROL_PLANE_TRUSTED_PROXIES as v; print(','.join(v))",
+        ],
+        env=env,
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout.strip() == "127.0.0.1,::1"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [ROOT / "docker-compose.yml", ROOT / "packages" / "cli" / "release" / "bundle" / "docker-compose.release.yml"],
+    ids=lambda path: path.name,
+)
+def test_compose_trusts_the_dashboard_service_and_docker_gateway(path: Path) -> None:
+    services = yaml.safe_load(path.read_text(encoding="utf-8"))["services"]
+    assert services["app"]["environment"]["CONTROL_PLANE_TRUSTED_PROXIES"] == "${CONTROL_PLANE_TRUSTED_PROXIES:-web}"
+    assert services["web"]["environment"]["WEB_TRUSTED_PROXIES"] == "${WEB_TRUSTED_PROXIES:-gateway}"
+
+
+def test_unusable_trusted_proxy_entries_are_logged_and_dropped() -> None:
+    entries = ("10.0.0.0/33", "10.0.0.256", "not a host", "::1/129", "web", "proxy.internal", "10.0.0.0/8")
+    with patch.object(rate_limit, "log") as log:
+        networks, hostnames = _trusted_proxy_rules(entries)
+
+    assert [str(network) for network in networks] == ["10.0.0.0/8"]
+    assert hostnames == ("web", "proxy.internal")
+    ignored = [call.kwargs["entry"] for call in log.warning.call_args_list]
+    assert ignored == ["10.0.0.0/33", "10.0.0.256", "not a host", "::1/129"]
+
+
+def test_check_trusted_proxies_reports_bad_entries_at_startup() -> None:
+    with (
+        patch.object(rate_limit, "CONTROL_PLANE_TRUSTED_PROXIES", ("10.0.0.0/33", "web")),
+        patch.object(rate_limit, "log") as log,
+    ):
+        check_trusted_proxies()
+
+    assert log.warning.call_args.kwargs["entry"] == "10.0.0.0/33"
+    assert log.info.call_args.kwargs == {"networks": [], "hostnames": ["web"]}
+
+
+ROUTE_TABLE = (
+    "Iface\tDestination\tGateway \tFlags\tRefCnt\tUse\tMetric\tMask\t\tMTU\tWindow\tIRTT\n"
+    "eth0\t000012AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0\n"
+    "eth0\t00000000\t{gateway}\t0003\t0\t0\t0\t00000000\t0\t0\t0\n"
+)
+
+
+@pytest.mark.asyncio
+async def test_gateway_keyword_trusts_the_docker_gateway(tmp_path: Path) -> None:
+    """A reverse proxy on the Docker host reaches the API from the container's gateway."""
+    gateway_word = struct.unpack("=I", bytes([172, 18, 0, 1]))[0]
+    route_table = tmp_path / "route"
+    route_table.write_text(ROUTE_TABLE.format(gateway=f"{gateway_word:08X}"), encoding="ascii")
+
+    with (
+        patch.object(rate_limit, "_ROUTE_TABLE", route_table),
+        patch.object(rate_limit, "CONTROL_PLANE_TRUSTED_PROXIES", ("web", "gateway")),
+        patch.object(asyncio.get_running_loop(), "getaddrinfo", AsyncMock(return_value=[])),
+    ):
+        via_host_proxy = await _client_ip(_make_request(ip="172.18.0.1", forwarded_for="198.51.100.4"))
+        other_peer = await _client_ip(_make_request(ip="172.18.0.7", forwarded_for="198.51.100.4"))
+
+    assert via_host_proxy == "198.51.100.4"
+    assert other_peer == "172.18.0.7"
+
+
+def test_gateway_keyword_without_a_default_route_trusts_nothing(tmp_path: Path) -> None:
+    route_table = tmp_path / "route"
+    route_table.write_text(ROUTE_TABLE.splitlines()[0] + "\n", encoding="ascii")
+
+    with patch.object(rate_limit, "_ROUTE_TABLE", route_table), patch.object(rate_limit, "log") as log:
+        assert _trusted_proxy_rules(("gateway",)) == ((), ())
+    assert log.warning.call_args.kwargs["entry"] == "gateway"
+
+
+@pytest.mark.asyncio
+async def test_unresolvable_trusted_hostname_is_logged_once() -> None:
+    loop = asyncio.get_running_loop()
+    getaddrinfo = AsyncMock(side_effect=socket.gaierror("no such host"))
+
+    with (
+        patch.object(rate_limit, "CONTROL_PLANE_TRUSTED_PROXIES", ("web",)),
+        patch.object(rate_limit, "_TRUSTED_HOSTNAME_TTL_SECONDS", 0.0),
+        patch.object(loop, "getaddrinfo", getaddrinfo),
+        patch.object(rate_limit, "log") as log,
+    ):
+        for _ in range(3):
+            await _client_ip(_make_request(ip="172.18.0.3", forwarded_for="198.51.100.4"))
+
+    assert getaddrinfo.await_count == 3
+    warnings = [call for call in log.warning.call_args_list if call.args == ("control_plane_trusted_proxy_unresolved",)]
+    assert len(warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_ipv6_clients_share_a_bucket_per_64() -> None:
+    """Rotating source addresses inside one /64 does not mint fresh login buckets."""
+    handler = AsyncMock(return_value=_ok_response())
+
+    with patch("koda.control_plane.rate_limit.emit_security"):
+        rotating = [
+            (
+                await control_plane_rate_limit_middleware(
+                    _make_request(ip=f"2001:db8:1:2::{n:x}", path=LOGIN_PATH),
+                    handler,
+                )
+            ).status
+            for n in range(1, 13)
+        ]
+        neighbour = await control_plane_rate_limit_middleware(
+            _make_request(ip="2001:db8:1:3::1", path=LOGIN_PATH),
+            handler,
+        )
+        forwarded = await control_plane_rate_limit_middleware(
+            _make_request(ip="127.0.0.1", path=LOGIN_PATH, forwarded_for="2001:db8:1:2:ffff::1"),
+            handler,
+        )
+
+    assert rotating[:10] == [200] * 10
+    assert set(rotating[10:]) == {429}
+    assert neighbour.status == 200
+    assert forwarded.status == 429
+
+
+def test_sensitive_buckets_have_their_own_lru_per_endpoint() -> None:
+    """Flooding one endpoint from many addresses cannot evict another endpoint's buckets."""
+    recover = "/api/control-plane/auth/password/recover"
+    with patch.object(rate_limit, "_MAX_CACHED_ENDPOINT_LIMITERS", 3):
+        victim = _get_endpoint_limiter(recover, "192.0.2.10")
+        for n in range(10):
+            _get_endpoint_limiter(LOGIN_PATH, f"198.51.100.{n}")
+
+        assert _get_endpoint_limiter(recover, "192.0.2.10") is victim
+        assert len(_endpoint_limiters[LOGIN_PATH]) == 3
+        assert "198.51.100.0" not in _endpoint_limiters[LOGIN_PATH]
+
+
+def test_sensitive_buckets_outlast_the_general_lru() -> None:
+    """More clients than the general LRU holds still keep their own login bucket."""
+    first = _get_endpoint_limiter(LOGIN_PATH, "198.51.100.0")
+    for n in range(1, rate_limit._MAX_CACHED_LIMITERS + 10):
+        _get_endpoint_limiter(LOGIN_PATH, f"10.{n // 256}.{n % 256}.1")
+
+    assert _get_endpoint_limiter(LOGIN_PATH, "198.51.100.0") is first

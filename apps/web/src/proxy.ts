@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { clientIpFromHeaders } from "@/lib/client-ip";
+import { clientIpFromHeaders, rateLimitKey } from "@/lib/client-ip";
 import { isMutationMethod, isTrustedDashboardRequest } from "@/lib/request-origin";
 import { unsealWebOperatorToken } from "@/lib/web-operator-session";
 import {
@@ -185,8 +185,10 @@ function isRateLimited(ip: string): boolean {
   return false;
 }
 
-function clientIp(request: NextRequest): string {
-  return clientIpFromHeaders(request.headers) ?? "unknown";
+/** Rate-limit key of the client behind the request (an IPv6 client's /64). */
+function clientKey(request: NextRequest): string {
+  const ip = clientIpFromHeaders(request.headers);
+  return ip ? rateLimitKey(ip) : "unknown";
 }
 
 /* ---------- responses ---------- */
@@ -269,7 +271,7 @@ function isPublicControlPlanePath(pathname: string): boolean {
 }
 
 function apiProxyGate(request: NextRequest): NextResponse {
-  const ip = clientIp(request);
+  const ip = clientKey(request);
   if (isLoginSessionPath(request.nextUrl.pathname)) {
     if (isLoginRateLimited(ip)) {
       return rateLimitedResponse();

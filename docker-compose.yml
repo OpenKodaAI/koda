@@ -38,6 +38,8 @@ services:
       # rely on it); CONTROL_PLANE_PORT only selects the published host port.
       CONTROL_PLANE_PORT: "8090"
       CONTROL_PLANE_PUBLIC_PORT: "${CONTROL_PLANE_PORT:-8090}"
+      # Believe X-Forwarded-For only from the dashboard (rate limiting per client).
+      CONTROL_PLANE_TRUSTED_PROXIES: "${CONTROL_PLANE_TRUSTED_PROXIES:-web}"
       SECURITY_GRPC_TARGET: "security:50065"
       MEMORY_GRPC_TARGET: "memory:50063"
       ARTIFACT_GRPC_TARGET: "artifact:50064"
@@ -117,6 +119,9 @@ services:
       PORT: "3000"
       CONTROL_PLANE_BASE_URL: "http://app:8090"
       WEB_OPERATOR_SESSION_SECRET: "${WEB_OPERATOR_SESSION_SECRET:?Set WEB_OPERATOR_SESSION_SECRET in .env}"
+      # Believe X-Forwarded-For only from loopback and the Docker gateway, where
+      # a reverse proxy on this host connects from; other peers are the client.
+      WEB_TRUSTED_PROXIES: "${WEB_TRUSTED_PROXIES:-gateway}"
     ports:
       # Dashboard: loopback by default. WEB_PUBLISH_ADDRESS opens it on another
       # interface only for a TLS-terminating proxy on another host.

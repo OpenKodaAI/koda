@@ -1,12 +1,17 @@
 import http from "node:http";
 import next from "next";
 import { WebSocket, WebSocketServer } from "ws";
+import { parseTrustedProxies, rewriteForwardedFor } from "./src/lib/forwarded-for.mjs";
 
 const dev = process.env.NODE_ENV !== "production";
 const host = process.env.HOST ?? "0.0.0.0";
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
 const relayPathPrefix = "/api/runtime/relay/";
 const runtimeRelayStoreKey = Symbol.for("koda.web.runtime-relay-store");
+// Peers whose x-forwarded-for is believed (loopback always). Every request's
+// header is rewritten to the resolved client before Next.js sees it, so a
+// client that reaches this port directly cannot choose its rate-limit bucket.
+const trustedProxies = parseTrustedProxies(process.env.WEB_TRUSTED_PROXIES);
 
 function getRuntimeRelayStore() {
   if (!globalThis[runtimeRelayStoreKey]) {
@@ -128,6 +133,7 @@ relayWss.on("connection", (client, request) => {
 });
 
 const server = http.createServer((request, response) => {
+  rewriteForwardedFor(request, trustedProxies.isTrusted);
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
   if (url.pathname === "/api/health") {
     response.writeHead(200, {
@@ -142,6 +148,7 @@ const server = http.createServer((request, response) => {
 });
 
 server.on("upgrade", (request, socket, head) => {
+  rewriteForwardedFor(request, trustedProxies.isTrusted);
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "localhost"}`);
 
   if (url.pathname.startsWith(relayPathPrefix)) {
@@ -163,6 +170,12 @@ server.listen(port, host, () => {
   console.log(
     `> Runtime control plane server ready on http://${host}:${port} (${dev ? "dev" : "prod"})`
   );
+  console.log(`> Trusting x-forwarded-for from ${trustedProxies.trusted.join(", ")}`);
+  if (trustedProxies.ignored.length > 0) {
+    console.warn(
+      `> Ignoring WEB_TRUSTED_PROXIES entries (not an IP, a CIDR or an available gateway): ${trustedProxies.ignored.join(", ")}`
+    );
+  }
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
