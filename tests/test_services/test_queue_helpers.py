@@ -2631,3 +2631,44 @@ class TestRunFallbackProgressCleanup:
                 await asyncio.wait_for(run, timeout=10)
 
         assert run.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_cancelling_the_run_during_its_cleanup_still_propagates(self):
+        """A /cancel that lands after the provider answered, while the finally block still deletes the
+        progress message, must cancel the run. That CancelledError is the run's own, not the indicator's,
+        so the cleanup handler re-raises it instead of returning the provider's result."""
+        deleting = asyncio.Event()
+
+        async def _slow_delete():
+            deleting.set()
+            await asyncio.sleep(60)
+
+        progress_msg = MagicMock()
+        progress_msg.delete = AsyncMock(side_effect=_slow_delete)
+        sent = asyncio.Event()
+
+        async def _send_message(**_kwargs):
+            sent.set()
+            return progress_msg
+
+        context = MagicMock()
+        context.bot = AsyncMock()
+        context.bot.send_message = AsyncMock(side_effect=_send_message)
+
+        async def _run_llm(**_kwargs):
+            await sent.wait()
+            await asyncio.sleep(0)
+            return self._llm_result()
+
+        with patch("koda.services.queue_manager.run_llm", new=_run_llm):
+            run = asyncio.create_task(
+                _run_fallback(self._ctx(), QueueItem(chat_id=111, query_text="hello"), 111, 111, context)
+            )
+            # The provider has answered; the finally block is awaiting progress_msg.delete().
+            await asyncio.wait_for(deleting.wait(), timeout=10)
+            run.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(run, timeout=10)
+
+        assert run.cancelled()
+        progress_msg.delete.assert_awaited_once()
