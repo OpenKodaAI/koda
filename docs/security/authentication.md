@@ -428,12 +428,18 @@ message would reveal that the account exists.
 
 ## Side-channel mitigations
 
-- Planned, not yet in place (timing floor pending M1-E1-T13): every auth-failure path pads
-  to a 300 ms floor (`_FAILURE_TIMING_FLOOR_SECONDS`) so the caller cannot distinguish
-  `user not found` from `wrong password` from `invalid recovery code` by response time.
-  Today the constant is `0.0` and nothing applies it: a login for an unknown identifier or a
-  locked account fails before any password hash is checked, so it answers faster than a
-  wrong password for an existing account.
+- Every rejected sign-in takes the same time, so the response time does not tell which
+  accounts exist. A login for an unknown identifier, or for a locked or disabled account,
+  checks the password against a dummy Argon2 hash, the work a wrong password does. The login
+  route then answers no rejected sign-in sooner than 300 ms after it received it
+  (`_FAILURE_TIMING_FLOOR_SECONDS` in `koda/control_plane/operator_auth.py`), and it waits
+  without blocking the control plane's other requests. On a host so busy that one Argon2 check
+  takes longer than 300 ms, rejections answer later, and a wrong password for an existing
+  account then takes a little longer than an unknown identifier: the time it takes to record
+  the failed attempt.
+  Only `POST /auth/login` is padded: the recovery route (`POST /auth/password/recover`) is
+  not, so there an unknown identifier and a wrong recovery code can still take different
+  times.
 - Responses use a single generic error (`"Invalid credentials."`, or equivalent) without
   leaking whether the identifier exists. A rejected sign-in answers
   `401 {"error": "Invalid credentials."}` for a wrong password, an unknown identifier and a

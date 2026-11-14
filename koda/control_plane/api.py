@@ -8,6 +8,7 @@ import functools
 import hashlib
 import json
 import mimetypes
+import time
 import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
@@ -39,7 +40,13 @@ from .dashboard_service import (
 )
 from .manager import GeneralPayloadValidationError, get_control_plane_manager
 from .onboarding import load_control_plane_openapi_spec, render_setup_page
-from .operator_auth import AuthError, OperatorAuthContext, OperatorAuthService, get_operator_auth_service
+from .operator_auth import (
+    AuthError,
+    OperatorAuthContext,
+    OperatorAuthService,
+    get_operator_auth_service,
+    pad_failed_login,
+)
 from .settings import (
     AGENT_SECTIONS,
     DOCUMENT_KINDS,
@@ -725,13 +732,18 @@ async def auth_recovery_codes_regenerate(request: web.Request) -> web.Response:
 
 
 async def auth_login(request: web.Request) -> web.Response:
+    started = time.monotonic()
     payload = await _json_payload(request)
-    return web.json_response(
-        _auth_service().login(
+    try:
+        session = _auth_service().login(
             identifier=str(payload.get("identifier") or ""),
             password=str(payload.get("password") or ""),
         )
-    )
+    except AuthError:
+        # Every rejected sign-in takes the same time, whichever check rejected it (D-136).
+        await pad_failed_login(started)
+        raise
+    return web.json_response(session)
 
 
 async def auth_logout(request: web.Request) -> web.Response:

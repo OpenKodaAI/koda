@@ -32,7 +32,7 @@ function isInsecureTransportRefusal(error: unknown): boolean {
  * The auth contract (see `apps/web/CLAUDE.md`) folds every 4xx auth failure —
  * wrong password, unknown user, locked account, expired session — into ONE
  * generic message, so the message never tells a caller which accounts exist
- * (response time still can until the timing floor lands, M1-E1-T13). Two cases get
+ * (the control plane also pads every rejected sign-in to 300 ms, D-136). Two cases get
  * their own message: the per-client rate limit (429), which is the same for
  * every identifier and says how long to wait (ADR-038), and infrastructure
  * failures (5xx, no response, network error), so the operator can tell it

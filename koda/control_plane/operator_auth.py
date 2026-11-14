@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import re
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -46,7 +49,9 @@ from .settings import (
 
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _BOOTSTRAP_INSERT_ATTEMPTS = 5
-_FAILURE_TIMING_FLOOR_SECONDS = 0.0
+# A rejected sign-in answers no sooner than this after the login route received it, so the
+# response time does not tell which accounts exist (D-136). The route waits with `pad_failed_login`.
+_FAILURE_TIMING_FLOOR_SECONDS = 0.3
 _DISPLAY_NAME_MAX_LENGTH = 80
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 # Public auth status fields a caller without an operator credential never gets.
@@ -145,6 +150,28 @@ def _normalize_bootstrap_code(value: Any) -> str:
 @lru_cache(maxsize=1)
 def _password_hasher() -> PasswordHasher:
     return PasswordHasher()
+
+
+@lru_cache(maxsize=1)
+def _dummy_password_hash() -> str:
+    """An Argon2 hash of a random secret, for sign-ins that have no stored hash to check (D-136)."""
+    return _password_hasher().hash(secrets.token_urlsafe(32))
+
+
+def _check_dummy_password(password: str) -> None:
+    """Do a wrong password's Argon2 work for a sign-in rejected before its stored hash is checked."""
+    with contextlib.suppress(VerificationError, InvalidHashError):
+        _password_hasher().verify(_dummy_password_hash(), password)
+
+
+async def pad_failed_login(started: float) -> None:
+    """Wait until ``_FAILURE_TIMING_FLOOR_SECONDS`` have passed since ``started`` (``time.monotonic()``).
+
+    The login route awaits this before it answers a rejected sign-in, so every rejection takes
+    the same time and the event loop keeps serving other requests meanwhile.
+    """
+    while (remaining := _FAILURE_TIMING_FLOOR_SECONDS - (time.monotonic() - started)) > 0:
+        await asyncio.sleep(remaining)
 
 
 def _normalize_username(value: Any) -> str:
@@ -933,6 +960,8 @@ class OperatorAuthService:
         normalized = str(identifier or "").strip()
         if not normalized or not password:
             raise ValueError("Identifier and password are required.")
+        # Made on the first sign-in of any kind, so no single rejection path pays for it (D-136).
+        _dummy_password_hash()
         row = fetch_one(
             """
             SELECT * FROM cp_operator_users
@@ -943,12 +972,15 @@ class OperatorAuthService:
             (normalized, normalized),
         )
         if row is None:
+            _check_dummy_password(password)
             self._set_login_failure(None, identifier=normalized)
             raise AuthError("Invalid credentials.")
         if row.get("disabled"):
+            _check_dummy_password(password)
             emit_security("security.operator_login_failed", identifier=normalized, reason="disabled")
             raise AuthError("Invalid credentials.")
         if row.get("locked_until") and not _is_expired(row.get("locked_until")):
+            _check_dummy_password(password)
             emit_security("security.operator_login_failed", identifier=normalized, reason="locked")
             raise AuthError("Invalid credentials.")
         try:
