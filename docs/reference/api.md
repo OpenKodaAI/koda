@@ -120,7 +120,9 @@ Automatic (scheduled and catch-up) runs follow the agent's current policy rather
 `payload.read_only` and `payload.allowed_paths` are stored with the job but are not enforced yet: a run is not stopped from writing and is not limited to those paths. `read_only: true` only pins `safety_mode` to `dry_run_required`, which is already the default. The dashboard routine editor labels both settings "Not enforced yet", does not set them on new routines, and leaves the values an existing routine stores unchanged when it is edited.
 
 `POST /api/runtime/tasks/{task_id}/cancel` and `/interrupt` stop a task that is queued, running, or
-retrying and return `action: "cancelled"` (or `"interrupted"`) with its `final_phase`. A task without a
+retrying and return `action: "cancelled"` (or `"interrupted"`) with its `final_phase`. A stopped task
+delivers no response and starts no further provider run (no streaming fallback, provider fallback, or
+retry), also when its provider exits while the runtime kernel is still stopping it. A task without a
 runtime environment that has already finished (for example completed, failed, cancelled, or
 `needs_review`) is left as it is: the route answers `409` with `error`, `action: "not_running"`,
 `ok: false`, its `status`, and its unchanged `final_phase`.
