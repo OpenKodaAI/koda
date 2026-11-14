@@ -166,5 +166,15 @@ describe("the auth screens rule in apps/web/CLAUDE.md", () => {
     }
     // The session routes behind /settings/account do not pass the 429 through.
     expect(rule).toContain("`/settings/account` does not show the wait yet");
+    // Login and recovery fold every other failure into their own copy; setup passes the control
+    // plane's setup error through, so the rule must not say all three keep a generic copy.
+    const byPath = new Map(ROUTES.map((route) => [route.path, route]));
+    const setup = byPath.get("register-owner")!;
+    const recovery = byPath.get("password/recover")!;
+    expect(setup.rejectedCopy).toBe(setup.rejection.error);
+    expect(recovery.rejectedCopy).not.toBe(recovery.rejection.error);
+    expect(rule).not.toContain("and keep every other upstream failure on their generic copy");
+    expect(rule).toContain("Login and recovery keep every other upstream failure on their generic copy");
+    expect(rule).toContain("`auth/register-owner` passes the control plane's own setup error text through");
   });
 });

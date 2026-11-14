@@ -329,7 +329,9 @@ it up, the next request is allowed after the window divided by the budget:
 
 Plus the per-address general bucket (`CONTROL_PLANE_RATE_LIMIT`, default 120/min) and
 the stricter auth-failure bucket (`CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT`, default 5/min
-triggered on any 401/403). An exhausted bucket returns `429` with `Retry-After` set to the
+triggered on any 401/403). A value below 1 refuses every request that bucket covers, with
+`Retry-After: 60`, and the control plane logs `control_plane_rate_limit_refuses_every_request`
+at startup. An exhausted bucket returns `429` with `Retry-After` set to the
 whole seconds, rounded up, until the bucket that refused the request takes the next one:
 `Retry-After: 30` for login after a burst, `360` for recovery, `120` for setup. A bucket
 does not draw from a request it refuses, so retrying early does not extend its wait. The

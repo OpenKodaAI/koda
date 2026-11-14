@@ -1121,7 +1121,11 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 
 @pytest.mark.parametrize(
     "path",
-    [_REPO_ROOT / "docs" / "security" / "authentication.md", _REPO_ROOT / "apps" / "web" / "CLAUDE.md"],
+    [
+        _REPO_ROOT / "docs" / "security" / "authentication.md",
+        _REPO_ROOT / "apps" / "web" / "CLAUDE.md",
+        _REPO_ROOT / "docs" / "install" / "vps.md",
+    ],
     ids=lambda path: f"{path.parent.name}/{path.name}",
 )
 def test_docs_mark_the_login_timing_floor_as_pending(path: Path) -> None:
@@ -1137,3 +1141,4 @@ def test_docs_mark_the_login_timing_floor_as_pending(path: Path) -> None:
     assert "timing floor pending M1-E1-T13" in text
     assert "All auth-failure paths pad" not in text
     assert "neutralize timing" not in text
+    assert "deliberately slowed" not in text

@@ -312,6 +312,73 @@ async def test_retry_after_is_never_zero() -> None:
     assert answer.headers["Retry-After"] == "1"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, -1])
+@pytest.mark.parametrize(
+    ("setting", "handler_response"),
+    [("CONTROL_PLANE_RATE_LIMIT", _ok_response), ("CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", _unauthorized_response)],
+    ids=["general", "auth-failure"],
+)
+async def test_a_limit_below_one_refuses_with_the_window_as_retry_after(
+    setting: str, handler_response: Callable[[], MagicMock], limit: int
+) -> None:
+    """A bucket that never frees capacity still answers 429, and asks for one window, not a crash.
+
+    Both settings are read with a bare int(), so 0 or a negative value reaches the bucket.
+    """
+    request = _make_request()
+    handler = AsyncMock(return_value=handler_response())
+
+    with patch(f"koda.control_plane.rate_limit.{setting}", limit), patch("koda.control_plane.rate_limit.emit_security"):
+        answer = await control_plane_rate_limit_middleware(request, handler)
+
+    assert (answer.status, answer.headers["Retry-After"]) == (429, "60")
+
+
+@pytest.mark.parametrize(
+    ("general", "auth_failure", "refusing"),
+    [
+        (120, 5, []),
+        (0, 5, ["CONTROL_PLANE_RATE_LIMIT"]),
+        (120, -1, ["CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT"]),
+        (0, 0, ["CONTROL_PLANE_RATE_LIMIT", "CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT"]),
+    ],
+    ids=["defaults", "general-zero", "auth-failure-negative", "both-zero"],
+)
+def test_check_rate_limits_warns_when_a_limit_refuses_every_request(
+    general: int, auth_failure: int, refusing: list[str]
+) -> None:
+    with (
+        patch.object(rate_limit, "CONTROL_PLANE_RATE_LIMIT", general),
+        patch.object(rate_limit, "CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", auth_failure),
+        patch.object(rate_limit, "log") as log,
+    ):
+        rate_limit.check_rate_limits()
+
+    warned = [call.kwargs["setting"] for call in log.warning.call_args_list]
+    assert warned == refusing
+    assert all(call.args == ("control_plane_rate_limit_refuses_every_request",) for call in log.warning.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_the_supervisor_checks_the_rate_limits_at_startup() -> None:
+    from koda.control_plane import supervisor
+
+    class _Stop(Exception):
+        pass
+
+    with (
+        patch.object(supervisor, "_warn_about_placeholder_secrets"),
+        patch.object(supervisor, "check_trusted_proxies"),
+        patch.object(supervisor, "check_rate_limits") as checked,
+        patch.object(supervisor, "ControlPlaneSupervisor", side_effect=_Stop),
+        pytest.raises(_Stop),
+    ):
+        await supervisor.run_supervisor()
+
+    checked.assert_called_once_with()
+
+
 def _per(seconds: int) -> str:
     if seconds == 3600:
         return "hour"

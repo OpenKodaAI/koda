@@ -76,7 +76,13 @@ class _Bucket(AsyncLimiter):
         with the same arithmetic. aiolimiter exposes no public level, so this reads its
         `_level`; the Retry-After tests in `tests/test_control_plane_rate_limit.py` fail if
         an upgrade changes it.
+
+        A bucket with `max_rate` below 1 never has capacity (CONTROL_PLANE_RATE_LIMIT and
+        CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT are plain integers, so 0 or a negative value
+        reaches here). It answers one `time_period` instead of dividing by that rate.
         """
+        if self.max_rate <= 0:
+            return float(self.time_period)
         self._leak()
         excess = self._level + amount - self.max_rate
         return max(0.0, excess * self.time_period / self.max_rate)
@@ -246,6 +252,22 @@ def check_trusted_proxies() -> None:
         networks=[str(network) for network in networks],
         hostnames=list(hostnames),
     )
+
+
+def check_rate_limits() -> None:
+    """Log at startup each per-client limit that refuses every request it covers.
+
+    A value below 1 for CONTROL_PLANE_RATE_LIMIT refuses every API request, and for
+    CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT turns every 401/403 into a 429, each with
+    `Retry-After` set to the 60 s window. That fails closed, so it is allowed, but it is
+    almost never what an operator meant.
+    """
+    for setting, value in (
+        ("CONTROL_PLANE_RATE_LIMIT", CONTROL_PLANE_RATE_LIMIT),
+        ("CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT),
+    ):
+        if value < 1:
+            log.warning("control_plane_rate_limit_refuses_every_request", setting=setting, value=value)
 
 
 async def _resolve_trusted_hostname(hostname: str) -> frozenset[_IPAddress]:
