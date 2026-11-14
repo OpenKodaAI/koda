@@ -292,9 +292,9 @@ def _parse_extraction_result(
                 },
                 surface="memory.extraction",
             )
-        except MemorySafetyError:
-            log.warning("memory_extraction_safety_blocked")
-            return []
+        except MemorySafetyError as exc:
+            log.warning("memory_extraction_safety_blocked", categories=exc.result.blocked_categories)
+            continue
 
         type_str = str(item.get("type", "fact")).lower()
         try:

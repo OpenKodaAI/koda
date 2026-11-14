@@ -12,13 +12,23 @@ from koda.services.runtime.redaction import redact_value
 _ZERO_WIDTH_OR_BIDI = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
+# A standalone `.env` file name (`.env`, `.env.local`), not an identifier member such as `process.env`.
+_DOTENV_FILE = r"(?<!\w)\.env(?:\.\w+)?(?!\w)"
+
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "prompt_injection",
         re.compile(
             r"\b(ignore|disregard|override|forget)\b.{0,80}\b(previous|prior|system|developer|instruction|policy|rules?)\b"
             r"|\breveal\b.{0,80}\b(system prompt|developer message|hidden instructions?)\b"
-            r"|\byou are now\b.{0,80}\b(system|developer|admin)\b",
+            r"|\byou are now\b.{0,80}\b(system|developer|admin)\b"
+            # PT-BR equivalents of the three English patterns above.
+            r"|\b(ignore|ignora|ignorar|desconsidere|desconsiderar|despreze|desprezar|esque[cç]a|esquecer)\b.{0,80}"
+            r"\b(anteriores?|instru[cç](?:[oõ]es|[aã]o)|sistema|desenvolvedor|pol[ií]ticas?|regras?)\b"
+            r"|\b(revele|revelar|mostre|mostrar|exiba|exibir)\b.{0,80}"
+            r"\b(prompt do sistema|mensagem do desenvolvedor|instru[cç](?:[oõ]es|[aã]o) ocultas?)\b"
+            r"|\b(voc[eê] agora [eé]|agora voc[eê] [eé]|a partir de agora,? voc[eê] [eé])\b.{0,80}"
+            r"\b(sistema|desenvolvedor|admin(?:istrador)?)\b",
             re.IGNORECASE | re.DOTALL,
         ),
     ),
@@ -26,15 +36,17 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "exfiltration",
         re.compile(
             r"\b(curl|wget|nc|netcat|scp|rsync)\b.{0,120}\b(http|https|ftp|ssh)://"
-            r"|\b(post|upload|exfiltrate|send)\b.{0,120}\b(secret|token|credential|\.env|ssh key|api key)\b",
+            r"|\b(post|upload|exfiltrate|send)\b.{0,120}"
+            r"(\b(secret|token|credential|ssh key|api key)\b|" + _DOTENV_FILE + ")",
             re.IGNORECASE | re.DOTALL,
         ),
     ),
     (
         "secret_path",
         re.compile(
-            r"(\b(cat|less|more|open|read|print|tail|head)\b.{0,80})?"
-            r"(/etc/passwd|/etc/shadow|~/.ssh/|\.ssh/id_(rsa|ed25519)|\.env(\.\w+)?|\.aws/credentials|\.kube/config)",
+            r"/etc/passwd|/etc/shadow|~/.ssh/|\.ssh/id_(rsa|ed25519)|\.aws/credentials|\.kube/config"
+            # `.env` only behind a path separator or a read verb, so `process.env.X` stays allowed.
+            r"|[/\\]" + _DOTENV_FILE + r"|\b(cat|less|more|open|read|print|tail|head)\b.{0,80}" + _DOTENV_FILE,
             re.IGNORECASE | re.DOTALL,
         ),
     ),
