@@ -418,3 +418,10 @@ Defects found:
   - D-237: loopback is a trusted proxy on native installs.
 
 Outcome: M1-E1-T2, M1-E1-T3, M3-E7-T1 and M1-E8-T3 move to `done`. F-SET-04 becomes `complete_verified`. FEATURE_MATRIX J-07 and J-15 move from fails to works.
+
+## Started-early regression tests — M1-E1-T2
+
+M1-E1-T2 finished before its dependencies M1-E1-T1 and M0-E3-T1, so the M0-E1-T4 plan lint requires a real-path regression test.
+- **regression test** `tests/test_control_plane_rate_limit.py::test_untrusted_peer_cannot_rotate_x_forwarded_for`: the real control-plane rate-limit middleware, with spoofed `X-Forwarded-For` from an untrusted peer.
+- **regression test** `tests/test_control_plane_rate_limit.py::test_real_loopback_proxy_gets_per_client_login_buckets`: the real middleware behind a loopback proxy.
+- LIVE-REPLAY-1 J-15 ran the same path end to end through the production dashboard and API.
