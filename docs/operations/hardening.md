@@ -12,6 +12,10 @@ Every item below is verifiable. The matching checks live in
 
 - [ ] `STATE_ROOT_DIR` permissions are `0700` (owner-only).
 - [ ] `${STATE_ROOT_DIR}/control_plane/.master.key` is `0600`.
+- [ ] The master key is backed up off-host, apart from the Postgres
+      dumps it decrypts. Once Postgres has recorded its fingerprint, the
+      control plane refuses to start without it or with a different key
+      (see [backup-restore.md](backup-restore.md#master-key-recovery)).
 - [ ] `.env` file is `0600` and excluded from git via `.gitignore`.
 - [ ] `POSTGRES_PASSWORD`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` are not `.env.example`
       placeholders (the basic doctor check `storage_secrets_not_placeholders`; rotation steps in
@@ -158,38 +162,57 @@ fairness:
 
 ## Master key rotation
 
-The master key (`.master.key`) encrypts every secret in
-`cp_secret_values`. Rotate annually or after a suspected compromise.
+The master key (`.master.key`) encrypts every secret the control plane
+stores: `cp_secret_values`, MCP connection env values and OAuth tokens,
+and provider login sessions. Rotate annually or after a suspected
+compromise.
+
+Postgres records a fingerprint of the key in `cp_master_key_fingerprint`
+(an HMAC of a fixed label under the key, never the key). At startup the
+control plane refuses a key that does not match it, unless the previous
+key does: that is a rotation, and the control plane then records the new
+key's fingerprint. Replacing the key file without step 2 below therefore
+stops the control plane at startup instead of leaving secrets
+undecryptable.
 
 ```bash
-# 1. Generate new key
-openssl rand 32 > /tmp/new-master.key
+# 1. Back up the current key off-host (see backup-restore.md).
 
-# 2. Move the OLD key to the previous-key slot
-docker compose exec app cp \
-    "${STATE_ROOT_DIR}/control_plane/.master.key" \
-    "${STATE_ROOT_DIR}/control_plane/.master-previous.key"
+# 2. Keep the current key as the previous key
+docker compose exec app sh -c \
+    'cd "$STATE_ROOT_DIR/control_plane" && cp -p .master.key .master-previous.key'
 
-# 3. Place the new key
-docker compose exec app cp /tmp/new-master.key \
-    "${STATE_ROOT_DIR}/control_plane/.master.key"
+# 3. Write the new key in place. It must be a Fernet key (32 url-safe
+#    base64-encoded bytes); raw `openssl rand` output is refused at startup.
+docker compose exec app sh -c 'cd "$STATE_ROOT_DIR/control_plane" && umask 077 &&
+    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" > .master.key.new &&
+    mv .master.key.new .master.key'
 
-# 4. Set CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE in .env so the
-#    decrypt path can still read pre-rotation rows
+# 4. Set CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE in .env so the decrypt
+#    path can still read pre-rotation rows and startup accepts the new key
 echo 'CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE=/var/lib/koda/state/control_plane/.master-previous.key' >> .env
 
-# 5. Restart and re-encrypt every secret on next write
-docker compose restart app
+# 5. Recreate the app so it reads .env. Startup records the new key's
+#    fingerprint (audit event security.master_key_fingerprint_recorded,
+#    reason "rotation"); each secret is re-encrypted on its next write.
+docker compose up -d --force-recreate app
 
 # 6. After the next batch update touched every secret, remove the
-#    previous-key reference and the file
-unset CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE  # remove from .env
-docker compose exec app rm "${STATE_ROOT_DIR}/control_plane/.master-previous.key"
-docker compose restart app
+#    CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE line from .env, then:
+docker compose exec app sh -c 'rm "$STATE_ROOT_DIR/control_plane/.master-previous.key"'
+docker compose up -d --force-recreate app
 ```
 
-This is a one-way operation; back up `.master.key` before rotation.
-Rotation that loses both files makes every secret unrecoverable.
+To undo a rotation before step 6, swap the two files back (old key as
+`.master.key`, new key as `.master-previous.key`) and recreate the app.
+The new key, now the previous key, matches the recorded fingerprint, so
+startup records the old key's fingerprint again, and secrets already
+re-encrypted with the new key still decrypt through the fallback.
+
+This is a one-way operation once step 6 is done; back up `.master.key`
+before rotation. Rotation that loses both files makes every secret
+unrecoverable. In cluster mode every control-plane replica must use the
+same key file: a replica with another key refuses to start.
 
 ## Provider tokens
 

@@ -29,6 +29,7 @@ from .api import (
     setup_control_plane_routes,
 )
 from .cluster import ClusterClient, ClusterConfig
+from .crypto import ensure_master_key
 from .lifecycle_events import consume_lifecycle_signal, get_lifecycle_event
 from .manager import RuntimeSnapshot, get_control_plane_manager
 from .rate_limit import check_trusted_proxies, control_plane_rate_limit_middleware
@@ -217,6 +218,9 @@ class ControlPlaneSupervisor:
         from koda.observability import init_tracing
 
         init_tracing("koda-supervisor")
+        # Fail closed on the master key before anything can read or write a
+        # secret: this is the only place a key is ever created (AG-05).
+        ensure_master_key()
         self._manager.ensure_seeded()
         await self._link.start()
 

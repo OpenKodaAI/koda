@@ -52,6 +52,26 @@ Wait for `/health` to report `healthy`:
 curl -fs http://127.0.0.1:8090/health | jq .status
 ```
 
+### Master key check on start
+
+Before it serves anything, the control plane checks the master key against
+the fingerprint Postgres records in `cp_master_key_fingerprint` (migration
+`048_control_plane_master_key_fingerprint`). On the first start after an
+upgrade from a release without that table, it checks that the key it finds,
+or the previous key during a rotation, decrypts at least one of the newest
+stored encrypted values. It then records the key's fingerprint (audit event
+`security.master_key_fingerprint_recorded`, `reason=upgrade`); it re-encrypts
+and deletes nothing. The app refuses to start, logging
+`koda control plane refused to start:` with the fix, in three cases: the key
+file is missing while encrypted secrets exist; on that first start, the key
+decrypts none of them (releases before this check created a new key
+whenever the file was missing); or, on later starts, the key differs from
+the recorded one. See [backup-restore.md](backup-restore.md#master-key-recovery).
+
+Releases from before this check ignore the table, so rolling back needs no
+extra step. Keep the key file in place either way: those releases create a
+new key when the file is missing.
+
 ## Step 2 (cluster) — blue/green drain
 
 For a multi-supervisor deployment (`KODA_CLUSTER_MODE=cluster`):
