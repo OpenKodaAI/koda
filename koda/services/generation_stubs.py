@@ -23,11 +23,13 @@ from urllib import request as urllib_request
 
 from koda.config import resolve_functional_default
 from koda.logging_config import get_logger
+from koda.services.http_client import guarded_urlopen
 
 FunctionalSlot = Literal["image", "video", "music"]
 
 OPENAI_IMAGES_GENERATIONS_URL = "https://api.openai.com/v1/images/generations"
 OPENAI_IMAGE_TIMEOUT_SECONDS = 180
+_MAX_IMAGE_DOWNLOAD_BYTES = 64 * 1024 * 1024
 
 _OPENAI_IMAGE_PROVIDERS = {"codex", "openai"}
 _SAFE_FILENAME_RE = re.compile(r"[^A-Za-z0-9_.-]+")
@@ -206,11 +208,18 @@ def _post_openai_images(payload: dict[str, Any], api_key: str) -> dict[str, Any]
 
 
 def _download_image_url(url: str) -> tuple[bytes, str]:
+    """Download an image URL from the images API response through the SSRF guard.
+
+    The URL comes from a third-party response, so it only reaches public
+    addresses (validated at connect time) and redirects stay on its origin.
+    """
     if not url.startswith("https://"):
         raise ImageGenerationError("OpenAI image API returned a non-HTTPS image URL.")
     request = urllib_request.Request(url, method="GET")
     try:
-        with urllib_request.urlopen(request, timeout=OPENAI_IMAGE_TIMEOUT_SECONDS) as response:
+        with guarded_urlopen(
+            request, timeout=OPENAI_IMAGE_TIMEOUT_SECONDS, max_size=_MAX_IMAGE_DOWNLOAD_BYTES
+        ) as response:
             content_type = str(response.headers.get("Content-Type") or "")
             return response.read(), content_type
     except urllib_error.URLError as exc:

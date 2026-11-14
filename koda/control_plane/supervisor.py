@@ -92,6 +92,9 @@ _SYSTEM_ENV_KEYS = frozenset(
         "STATE_ROOT_DIR",
         "ARTIFACT_STORE_DIR",
         "PLAYWRIGHT_BROWSERS_PATH",
+        # The host's private-network grant for MCP HTTP servers: workers run the
+        # MCP transport, so they must see the same grant the control plane does.
+        "MCP_ALLOWED_PRIVATE_NETWORKS",
     }
 )
 

@@ -67,6 +67,44 @@ Security notes:
 - `RUNTIME_KERNEL_SOCKET`
 - `PLAYWRIGHT_BROWSERS_PATH`
 
+### Outbound Network
+
+These outbound requests go through the SSRF guard in `koda/services/http_client.py`: agent
+web tools, link previews and artifact downloads, MCP HTTP servers, generated-image
+downloads, OpenAI-compatible providers and their key checks, Ollama chat, the local Ollama
+connection check and the Ollama model catalog, and the agent runtime API. On each of them
+the guard speaks http and https only and does not use the `*_proxy` environment variables.
+Unless a private-network grant applies, it reaches public unicast addresses only, and
+connects only to the addresses it checked. Endpoints the operator configures
+(`OLLAMA_BASE_URL`, a provider base URL other than the vendor's, the runtime API) hold such
+a grant and may be on a private network; MCP servers get one only through
+`MCP_ALLOWED_PRIVATE_NETWORKS` below. Redirects depend on the path:
+
+- MCP HTTP servers, generated-image downloads, those Ollama calls, the runtime API and the
+  key check of an OpenAI-compatible provider follow no redirect to another origin, so a
+  configured private endpoint's redirects never leave it.
+- Agent web tools, link previews and artifact downloads check every redirect hop again and
+  may follow it to another public origin.
+- An OpenAI-compatible provider's vendor endpoint follows no redirect; a base URL the
+  operator set follows redirects (see the
+  [guardrail test matrix](../security/guardrail-test-matrix.md)).
+
+Not covered yet, and still using Python's `urllib` (which honours `*_proxy` and follows
+redirects): MCP OAuth discovery, registration and token requests, the local llama.cpp and
+MLX runtime supervisor, and requests to fixed vendor hosts such as the API-key checks for
+Claude, Codex, Gemini, ElevenLabs and Ollama Cloud.
+
+- `MCP_ALLOWED_PRIVATE_NETWORKS` — private networks remote (HTTP) MCP servers may be
+  reached on, as comma-separated CIDRs. A host is refused if any of its DNS answers is
+  neither public nor in the list, and a Tailscale tailnet gives every node an IPv4 and an
+  IPv6 address, so a tailnet needs both ranges, `100.64.0.0/10,fd7a:115c:a1e0::/48`, or
+  better each server's own `/32` and `/128`. Unset, MCP servers must be on public addresses.
+  Loopback, link-local, unspecified and multicast addresses and the cloud metadata addresses
+  `100.100.100.200` and `fd00:ec2::254` are never granted, whatever the list covers; any
+  other address in the list is, so keep it narrow. Entries that are not CIDRs are logged and
+  ignored. Set it in the host's `.env`: the control plane checks registrations against it
+  and passes it on to every agent worker
+
 ### Postgres
 
 - `KNOWLEDGE_V2_POSTGRES_DSN`

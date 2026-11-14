@@ -943,7 +943,12 @@ def _verify_openai_compatible_api_key(
             checked_via="api_key",
             details={},
         )
-    effective_base = base_url.strip() or str(profile.get("default_base_url") or "").strip()
+    vendor_base = str(profile.get("default_base_url") or "").strip()
+    effective_base = base_url.strip() or vendor_base
+    # As in the runtime adapter, a base URL the operator set instead of the
+    # vendor endpoint may be a private host (a self-hosted gateway): a
+    # private-network grant for that origin. The vendor endpoint gets none.
+    operator_override = effective_base.rstrip("/") != vendor_base.rstrip("/")
     if not effective_base:
         return ProviderVerificationResult(
             provider_id=cast(ProviderId, provider_id),
@@ -960,10 +965,14 @@ def _verify_openai_compatible_api_key(
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
 
-    def _get_json(path: str) -> tuple[int, Any]:
+    def _get_json(path: str, *, follow_redirects: bool = True) -> tuple[int, Any]:
+        from koda.services.http_client import guarded_urlopen
+
         verify_url = effective_base.rstrip("/") + path
         request = urllib_request.Request(verify_url, headers=headers, method="GET")
-        with urllib_request.urlopen(request, timeout=10) as response:
+        with guarded_urlopen(
+            request, timeout=10, allow_private=operator_override, follow_redirects=follow_redirects
+        ) as response:
             status = response.status
             body = response.read().decode("utf-8", "replace")
         if not body:
@@ -1017,7 +1026,9 @@ def _verify_openai_compatible_api_key(
     if profile.get("probe") == "models" and profile.get("models_path"):
         status, payload = _get_json(str(profile["models_path"]))
     else:
-        status, payload = _get_json(str(profile.get("health_path", "/")))
+        # The health probe only asks whether the host answers. A redirect says
+        # so already; it is not followed, so the key never leaves this origin.
+        status, payload = _get_json(str(profile.get("health_path", "/")), follow_redirects=False)
     verified = status < 400
     if profile.get("probe") == "health":
         verified = status < 500
@@ -1286,13 +1297,17 @@ def verify_provider_local_connection(
             details={},
         )
 
+    from koda.services.http_client import guarded_urlopen
+
     resolved_base_url = base_url.strip() or provider_default_base_url("ollama", "local")
     try:
         request = urllib_request.Request(
             ollama_api_url(resolved_base_url, "tags", auth_mode="local"),
             headers={"User-Agent": "koda/control-plane"},
         )
-        with urllib_request.urlopen(request, timeout=10) as response:
+        # The configured (or default local) Ollama server: a private-network
+        # grant for that origin only, since the guard refuses cross-origin redirects.
+        with guarded_urlopen(request, timeout=10, allow_private=True) as response:
             payload = json.loads(response.read().decode("utf-8"))
         return ProviderVerificationResult(
             provider_id="ollama",
@@ -1327,6 +1342,7 @@ def verify_provider_local_connection(
             "[errno -3]",  # temporary failure in name resolution
             "name or service not known",
             "nodename nor servname",
+            "could not resolve hostname",  # the SSRF guard's own DNS lookup
             "timed out",
             "timeout",
             "no route to host",

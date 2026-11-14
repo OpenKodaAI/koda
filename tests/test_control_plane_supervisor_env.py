@@ -52,6 +52,15 @@ def test_supervisor_propagates_grpc_sidecar_targets() -> None:
     assert "os.environ.get" in build_spec_src
 
 
+def test_supervisor_forwards_the_mcp_private_network_grant() -> None:
+    """Agent workers run the MCP HTTP transport. A grant set in the host's ``.env``
+    (``MCP_ALLOWED_PRIVATE_NETWORKS``, e.g. a Tailscale tailnet) must reach them,
+    or registration accepts a server that every agent then refuses (M1-E3-T8)."""
+    from koda.control_plane import supervisor as supervisor_mod
+
+    assert "MCP_ALLOWED_PRIVATE_NETWORKS" in supervisor_mod._SYSTEM_ENV_KEYS
+
+
 def test_security_guard_fallback_warning_is_gated_by_target_env(monkeypatch) -> None:
     """In dev where the Rust security sidecar isn't deployed, falling back to
     the minimal-safe-env is the nominal path — don't spam WARNING on every

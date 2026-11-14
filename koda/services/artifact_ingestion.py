@@ -40,6 +40,10 @@ _WHITESPACE_RE = re.compile(r"\s+")
 _SECTION_RE = re.compile(r"^\s{0,3}(#+|\d+\.)\s+.+$", re.MULTILINE)
 _VIDEO_URL_HINTS = ("og:video", "twitter:player", "videoobject", "application/ld+json")
 _VIDEO_URL_EXTENSIONS = {".mp4", ".mov", ".webm", ".mkv", ".avi", ".m4v", ".mpeg", ".mpg", ".ogv"}
+_VIMEO_HOSTS = frozenset({"vimeo.com", "www.vimeo.com"})
+_VIMEO_VIDEO_PATH = re.compile(r"/(?:channels/[\w-]+/|groups/[\w-]+/videos/)?(\d+)(?:/([0-9a-f]+))?/?")
+_DAILYMOTION_HOSTS = frozenset({"dailymotion.com", "www.dailymotion.com"})
+_DAILYMOTION_VIDEO_PATH = re.compile(r"/video/([A-Za-z0-9]+)/?")
 _CACHE_SCOPE_KEYS = (
     "agent_id",
     "user_id",
@@ -659,10 +663,9 @@ async def _extract_url_artifact(ref: ArtifactRef) -> ExtractedArtifact:
                 video_extracted.warnings.append("video extracted from linked public video page")
                 return video_extracted
 
-        if _can_use_ytdlp_for_url(metadata.final_url):
-            video_extracted = await _extract_video_via_ytdlp(ref, metadata.final_url)
-            if video_extracted is not None:
-                return video_extracted
+        video_extracted = await _extract_video_via_ytdlp(ref, metadata.final_url)
+        if video_extracted is not None:
+            return video_extracted
 
         excerpt = _normalize_text(body)[:_DEFAULT_TEXT_LIMIT]
         evidence = _build_evidence_chunks(excerpt, ref.label or url, max_chunks=4)
@@ -802,7 +805,10 @@ def _extract_video_bytes(
 
 
 async def _extract_video_via_ytdlp(ref: ArtifactRef, url: str) -> ExtractedArtifact | None:
-    probe = await _probe_video_with_ytdlp(url)
+    watch_url = _ytdlp_watch_url(url)
+    if watch_url is None:
+        return None
+    probe = await _probe_video_with_ytdlp(watch_url)
     if probe is None:
         return None
 
@@ -815,7 +821,7 @@ async def _extract_video_via_ytdlp(ref: ArtifactRef, url: str) -> ExtractedArtif
         if duration > MAX_VIDEO_DURATION:
             truncated_to_seconds = MAX_VIDEO_DURATION
 
-    payload = await _download_video_with_ytdlp(url, truncate_seconds=truncated_to_seconds)
+    payload = await _download_video_with_ytdlp(watch_url, truncate_seconds=truncated_to_seconds)
     if isinstance(payload, str):
         return ExtractedArtifact(
             ref=replace(ref, kind=ArtifactKind.VIDEO, url=url),
@@ -1500,10 +1506,29 @@ def _extract_direct_video_url(html: str, base_url: str) -> str | None:
     return None
 
 
-def _can_use_ytdlp_for_url(url: str) -> bool:
-    from koda.utils.url_detector import LinkType, classify_url
+def _ytdlp_watch_url(url: str) -> str | None:
+    """Return the only URL yt-dlp may be given for *url*, or None.
 
-    return classify_url(url) == LinkType.VIDEO
+    yt-dlp resolves DNS and follows redirects by itself, outside the SSRF guard
+    in :mod:`koda.services.http_client`, so, as in the link analyzer, it never
+    receives the fetched URL: only a watch URL rebuilt from a validated video ID
+    on the platform's own host (YouTube, Vimeo or Dailymotion).
+    """
+    from koda.utils.url_detector import extract_youtube_id
+
+    youtube_id = extract_youtube_id(url)
+    if youtube_id:
+        return f"https://www.youtube.com/watch?v={youtube_id}"
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return None
+    host = (parsed.hostname or "").lower()
+    if host in _VIMEO_HOSTS and (vimeo := _VIMEO_VIDEO_PATH.fullmatch(parsed.path)):
+        video_id, unlisted_hash = vimeo.groups()
+        return f"https://vimeo.com/{video_id}" + (f"/{unlisted_hash}" if unlisted_hash else "")
+    if host in _DAILYMOTION_HOSTS and (dailymotion := _DAILYMOTION_VIDEO_PATH.fullmatch(parsed.path)):
+        return f"https://www.dailymotion.com/video/{dailymotion.group(1)}"
+    return None
 
 
 async def _probe_video_with_ytdlp(url: str) -> dict[str, Any] | None:
