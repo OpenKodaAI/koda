@@ -1,0 +1,66 @@
+{
+ "rows": [
+  {
+   "seq": "0",
+   "phase": "Fase 0",
+   "name": "Descoberta completa do repositório",
+   "status": "done",
+   "note": "Inventário, auditoria de arquitetura, matriz de 332 funcionalidades, dívida técnica e baseline de testes"
+  },
+  {
+   "seq": "1",
+   "phase": "Fase 1",
+   "name": "Arquitetura-alvo e consolidação",
+   "status": "done",
+   "note": "Plano M0–M10, decisões (ADRs) e riscos"
+  },
+  {
+   "seq": "2",
+   "phase": "Fase 2",
+   "name": "Experiência e design system",
+   "status": "in_progress",
+   "note": "Primeira onda de acessibilidade e estados de UI (M8) começou na onda 6"
+  },
+  {
+   "seq": "3",
+   "phase": "Fase 3",
+   "name": "Plataforma de agentes",
+   "status": "in_progress",
+   "note": "Jornadas (M3) em parte; arquitetura (M5) e funcionalidades (M6) ainda não começaram"
+  },
+  {
+   "seq": "4",
+   "phase": "Fase 4",
+   "name": "Segurança, infraestrutura e dados",
+   "status": "in_progress",
+   "note": "Segurança (M1) é a frente principal; dados (M2) e confiabilidade (M7) ainda não começaram"
+  },
+  {
+   "seq": "5",
+   "phase": "Fase 5",
+   "name": "Plano de execução granular",
+   "status": "done",
+   "note": "Cerca de 344 tarefas com dependências, critérios de pronto e evidência exigida"
+  },
+  {
+   "seq": "6",
+   "phase": "Loop",
+   "name": "Ciclo contínuo de execução (§10)",
+   "status": "in_progress",
+   "note": "Ondas de tarefas com testes, revisão independente e registro de evidências"
+  },
+  {
+   "seq": "7",
+   "phase": "Final",
+   "name": "Entregáveis finais (§16)",
+   "status": "not_started",
+   "note": "Relatório final, prontidão de release e riscos remanescentes"
+  }
+ ],
+ "meta": [
+  {
+   "label": "Fonte",
+   "value": "docs/engineering/MISSION.md (fases) e docs/engineering/EXECUTION_STATUS.md"
+  }
+ ]
+}
