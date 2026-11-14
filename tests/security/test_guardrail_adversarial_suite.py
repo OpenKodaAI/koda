@@ -9,7 +9,7 @@ import signal
 import time
 import urllib.request
 from collections.abc import Iterator
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -254,12 +254,13 @@ async def test_background_shell_fails_closed_without_execution_approval(
     ],
     ids=["no-rules", "deny-writes-rule"],
 )
-async def test_background_shell_is_held_by_the_policy_that_holds_shell_execute(
+async def test_background_shell_is_held_by_the_integration_grant_gate_that_holds_shell_execute(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     background_shell: BackgroundProcessManager,
     execution_policy: dict[str, Any],
 ) -> None:
+    """Without an integration grant, both tools stop at the grant gate, before any execution-policy rule."""
     kernel = _kernel_double()
     _install_kernel(monkeypatch, kernel)
     monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", execution_policy)
@@ -274,8 +275,118 @@ async def test_background_shell_is_held_by_the_policy_that_holds_shell_execute(
     assert results["shell_bg"].success is False
     for key in ("policy_blocked", "approval_required", "policy_reason_code"):
         assert results["shell_bg"].metadata.get(key) == results["shell_execute"].metadata.get(key), key
+    for tool, result in results.items():
+        assert result.metadata.get("policy_reason_code") == "explicit_integration_grant_required", tool
     kernel.execute_command.assert_not_awaited()
     assert background_shell._processes == {}
+
+
+_SHELL_TOOLS = ("shell_execute", "shell_bg")
+
+
+@pytest.fixture
+def shell_tools_granted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Grant both shell tools at the integration-grant gate, the same way, so the execution policy decides.
+
+    A resource_access_policy cannot grant them today: their integration ids are not in the
+    integration catalog, so normalize_integration_grants drops such a grant.
+    """
+    from koda import agent_contract
+
+    real_evaluate = agent_contract.evaluate_integration_grant
+
+    def evaluate(tool_id: str, params: dict[str, Any] | None, resource_access_policy: dict[str, Any] | None) -> Any:
+        decision = real_evaluate(tool_id, params, resource_access_policy)
+        if tool_id in _SHELL_TOOLS:
+            return replace(decision, allowed=True, reason="test_operator_grant")
+        return decision
+
+    monkeypatch.setattr("koda.agent_contract.evaluate_integration_grant", evaluate)
+    monkeypatch.setattr("koda.services.tool_dispatcher.evaluate_integration_grant", evaluate)
+
+
+def _shell_rule_policy(decision: str) -> dict[str, Any]:
+    return {
+        "version": 1,
+        "rules": [{"id": f"{decision}-shell", "decision": decision, "selectors": {"tool_id": list(_SHELL_TOOLS)}}],
+    }
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize("decision", ["deny", "require_approval"])
+async def test_background_shell_is_held_by_the_execution_policy_rule_that_holds_shell_execute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    background_shell: BackgroundProcessManager,
+    shell_tools_granted: None,
+    decision: str,
+) -> None:
+    kernel = _kernel_double()
+    _install_kernel(monkeypatch, kernel)
+    monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", _shell_rule_policy(decision))
+    ctx = _shell_ctx(tmp_path)
+
+    results = {
+        tool: await execute_tool(AgentToolCall(tool=tool, params={"command": "ls"}, raw_match=""), ctx)
+        for tool in _SHELL_TOOLS
+    }
+
+    for tool, result in results.items():
+        assert result.success is False, tool
+        # The rule decided, not the integration-grant gate.
+        assert result.metadata.get("policy_rule_id") == f"{decision}-shell", tool
+        assert result.metadata.get("grant_decision") == "allowed", tool
+    for key in ("policy_blocked", "approval_required", "policy_reason_code", "policy_rule_id"):
+        assert results["shell_bg"].metadata.get(key) == results["shell_execute"].metadata.get(key), key
+    assert results["shell_bg"].metadata.get("policy_blocked" if decision == "deny" else "approval_required") is True
+    assert results["shell_bg"].output.replace("shell_bg", "<tool>") == results["shell_execute"].output.replace(
+        "shell_execute", "<tool>"
+    )
+    kernel.execute_command.assert_not_awaited()
+    assert background_shell._processes == {}
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+async def test_background_shell_allowed_by_policy_reaches_the_approval_gate_of_shell_execute(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    background_shell: BackgroundProcessManager,
+    shell_tools_granted: None,
+) -> None:
+    kernel = _kernel_double()
+    _install_kernel(monkeypatch, kernel)
+    monkeypatch.setattr("koda.services.execution_policy.AGENT_EXECUTION_POLICY", _shell_rule_policy("allow"))
+    ctx = _shell_ctx(tmp_path)
+
+    async def run_both() -> dict[str, Any]:
+        return {
+            tool: await execute_tool(AgentToolCall(tool=tool, params={"command": "ls"}, raw_match=""), ctx)
+            for tool in _SHELL_TOOLS
+        }
+
+    token = _execution_approved.set(False)
+    try:
+        unapproved = await run_both()
+    finally:
+        _execution_approved.reset(token)
+
+    # The policy let both through to the handler, where the same approval check refuses both.
+    for tool, result in unapproved.items():
+        assert (result.success, result.output) == (False, "Error: command execution not approved."), tool
+    kernel.execute_command.assert_not_awaited()
+    assert background_shell._processes == {}
+
+    approved = await run_both()
+
+    assert approved["shell_execute"].success is True, approved["shell_execute"].output
+    assert approved["shell_bg"].success is True, approved["shell_bg"].output
+    ((_handle_id, bg),) = background_shell._processes.items()
+    await _wait_until_finished(bg)
+    assert [call.kwargs["command"] for call in kernel.execute_command.await_args_list] == ["ls", "ls"]
 
 
 @pytest.mark.security
@@ -332,7 +443,9 @@ class _ProcessGroupKernel:
     """Runtime-kernel double whose ExecuteCommand really runs the command in a new process group.
 
     Like the Rust kernel (``commands::tests::dropping_execute_shell_command_kills_its_process_group``),
-    it SIGKILLs the whole group when the call is cancelled.
+    it SIGKILLs the whole group when the call is cancelled. This proves the Python half: a kill
+    cancels the kernel call. ``tests/integration/test_runtime_kernel_shell_live.py`` runs the same
+    kill against the real kernel binary.
     """
 
     def __init__(self) -> None:

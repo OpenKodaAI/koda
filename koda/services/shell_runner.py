@@ -56,7 +56,7 @@ async def execute_in_runtime_kernel(
     """Run a command that already passed :func:`guard_shell_command` through the kernel's ExecuteCommand.
 
     The command runs in its own process group. Cancelling this call cancels the
-    RPC, and the kernel then kills the whole group.
+    RPC, and the kernel then kills every process still in that group.
     """
     proc_env = build_tool_subprocess_env(env_overrides=env)
     runtime_kernel = get_runtime_controller().runtime_kernel

@@ -3,7 +3,9 @@
 Background commands take the same path as ``shell_execute``: the approval gate
 and command guard in :mod:`koda.services.shell_runner`, then the runtime
 kernel's ExecuteCommand. Killing a handle cancels that call, and the kernel
-then kills the command's whole process group.
+then kills every process still in the command's process group. A process that
+leaves the group (``setsid``, a daemonizing fork) is not covered: the command
+guard is a guard, not a sandbox.
 """
 
 from __future__ import annotations
@@ -124,7 +126,7 @@ class BackgroundProcessManager:
         task = bg._collection_task
         if task is not None and not task.done():
             bg.killed = True
-            # Cancelling the ExecuteCommand call makes the runtime kernel kill the whole process group.
+            # Cancelling the ExecuteCommand call makes the runtime kernel kill the command's process group.
             task.cancel()
             await asyncio.wait({task})
         return None

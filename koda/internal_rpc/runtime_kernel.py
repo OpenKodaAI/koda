@@ -28,6 +28,22 @@ def _stringify_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]
     return {str(key): str(value) for key, value in dict(metadata or {}).items()}
 
 
+# Seconds the ExecuteCommand deadline allows beyond the command's own timeout. A command that
+# outlives its timeout gets SIGTERM, then SIGKILL after a 2 s grace period (commands.rs in
+# koda-runtime-kernel); the rest covers collecting its output and sending the reply.
+EXECUTE_COMMAND_DEADLINE_GRACE_SECONDS = 5
+
+
+def is_deadline_exceeded(exc: BaseException) -> bool:
+    """True when ``exc`` is a gRPC call that ran out its deadline."""
+    import grpc
+
+    if not isinstance(exc, grpc.RpcError):
+        return False
+    code = getattr(exc, "code", None)
+    return callable(code) and code() is grpc.StatusCode.DEADLINE_EXCEEDED
+
+
 RUNTIME_KERNEL_CAPABILITY_DEFAULTS: tuple[str, ...] = (
     "workspace-provisioning",
     "workspace-cleanup",
@@ -532,27 +548,57 @@ class GrpcRuntimeKernelClient:
                 "ready": bool(health.get("ready", False)),
                 "authoritative": bool(health.get("authoritative", False)),
             }
-        response = await self._breaker.run(self._stub.ExecuteCommand, 
-            self._build_request(
-                self._runtime_pb2.ExecuteCommandRequest,
-                _rpc_task_id=None,
-                _rpc_agent_id=agent_id,
-                agent_id=(agent_id or config.AGENT_ID or "").strip(),
-                runtime_env_id=runtime_env_id,
-                command=command,
-                argv=list(argv or []),
-                working_directory=working_directory,
-                environment_overrides=dict(environment_overrides or {}),
-                stdin_payload=bytes(stdin_payload or b""),
-                timeout_seconds=max(0, int(timeout_seconds)),
-                allow_network=allow_network,
-                purpose=purpose,
-                env_labels=_stringify_metadata(env_labels),
-                start_new_session=start_new_session,
-            ),
-            timeout=max(1, int(timeout_seconds or config.INTERNAL_RPC_DEADLINE_MS / 1000)),
-            metadata=self._rpc_metadata(),
-        )
+        # The kernel enforces at least one second; the deadline leaves it room to stop the command
+        # and answer, so a command timeout comes back as the kernel's own timed_out result.
+        command_budget_seconds = max(1, int(timeout_seconds))
+        try:
+            response = await self._breaker.run_allowing(
+                is_deadline_exceeded,
+                self._stub.ExecuteCommand,
+                self._build_request(
+                    self._runtime_pb2.ExecuteCommandRequest,
+                    _rpc_task_id=None,
+                    _rpc_agent_id=agent_id,
+                    agent_id=(agent_id or config.AGENT_ID or "").strip(),
+                    runtime_env_id=runtime_env_id,
+                    command=command,
+                    argv=list(argv or []),
+                    working_directory=working_directory,
+                    environment_overrides=dict(environment_overrides or {}),
+                    stdin_payload=bytes(stdin_payload or b""),
+                    timeout_seconds=max(0, int(timeout_seconds)),
+                    allow_network=allow_network,
+                    purpose=purpose,
+                    env_labels=_stringify_metadata(env_labels),
+                    start_new_session=start_new_session,
+                ),
+                timeout=command_budget_seconds + EXECUTE_COMMAND_DEADLINE_GRACE_SECONDS,
+                metadata=self._rpc_metadata(),
+            )
+        except Exception as exc:
+            if not is_deadline_exceeded(exc):
+                raise
+            # The command outlived its budget and the grace period, for instance because a process
+            # it started still holds its output open. The kernel drops the call and kills the
+            # command's process group. This is the command timing out, not the kernel failing, so
+            # it stays off the circuit breaker and is reported like any other timeout.
+            return {
+                "forwarded": True,
+                "command": command,
+                "argv": list(argv or []),
+                "working_directory": working_directory,
+                "stdout": "",
+                "stderr": "",
+                "exit_code": 124,
+                "timed_out": True,
+                "killed": True,
+                "deadline_exceeded": True,
+                "started_at_ms": 0,
+                "finished_at_ms": 0,
+                "allow_network": allow_network,
+                "purpose": purpose,
+                "runtime_env_id": runtime_env_id,
+            }
         return {
             "forwarded": True,
             "command": getattr(response, "command", command),

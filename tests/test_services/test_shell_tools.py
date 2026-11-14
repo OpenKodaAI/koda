@@ -253,18 +253,28 @@ class TestBackgroundProcessManagerKernelPath:
     async def test_kernel_timeout_is_reported(self, use_kernel, tmp_path):
         from koda.services.shell_tools import BackgroundProcessManager
 
-        use_kernel(
+        kernel = use_kernel(
             _kernel(
-                {"forwarded": True, "stdout": "", "stderr": "", "exit_code": 124, "timed_out": True, "killed": True}
+                {
+                    "forwarded": True,
+                    "stdout": "starting\n",
+                    "stderr": "",
+                    "exit_code": 124,
+                    "timed_out": True,
+                    "killed": True,
+                }
             )
         )
         mgr = BackgroundProcessManager()
 
-        handle_id, _ = await mgr.start("sleep 100", str(tmp_path), 111, timeout=1)
+        handle_id, _ = await mgr.start("echo starting; sleep 100", str(tmp_path), 111, timeout=1)
         bg = await _finish(mgr, handle_id)
 
         assert bg.timed_out is True
         assert bg.exit_code == -1
+        # The kernel enforced the timeout, and what the command printed before it was stopped is kept.
+        assert kernel.execute_command.await_args.kwargs["timeout_seconds"] == 1
+        assert bg.stdout_buf == "starting\n"
 
     @pytest.mark.asyncio
     async def test_output_is_capped(self, use_kernel, tmp_path):
@@ -361,6 +371,174 @@ class TestBackgroundProcessManagerKernelPath:
         )
 
         assert mgr.cleanup_finished(max_age=0) == 0
+
+
+def _deadline_exceeded():
+    import grpc
+    import grpc.aio
+
+    return grpc.aio.AioRpcError(
+        code=grpc.StatusCode.DEADLINE_EXCEEDED,
+        initial_metadata=grpc.aio.Metadata(),
+        trailing_metadata=grpc.aio.Metadata(),
+        details="Deadline Exceeded",
+        debug_error_string="UNKNOWN:Deadline Exceeded {grpc_status:4}",
+    )
+
+
+class _KernelTimingStub:
+    """ExecuteCommand timed like the Rust kernel, against the caller's gRPC deadline.
+
+    The kernel answers a command that outlives its timeout ``answers_after`` seconds
+    later: almost at once when the command obeys SIGTERM, after its 2 s grace period
+    and SIGKILL when it ignores SIGTERM. If the caller's deadline comes first, grpc
+    raises DEADLINE_EXCEEDED instead. With ``holds_output_open`` a process the command
+    started keeps its output pipe open, so the kernel never answers in time.
+    """
+
+    def __init__(self, *, answers_after: float = 0.05, holds_output_open: bool = False) -> None:
+        self.answers_after = answers_after
+        self.holds_output_open = holds_output_open
+        self.deadlines: list[float] = []
+
+    async def ExecuteCommand(self, request, *, timeout, metadata):
+        if request.command == "echo still-works":
+            return self._response(request, stdout="still-works\n", exit_code=0, timed_out=False)
+        self.deadlines.append(timeout)
+        if self.holds_output_open or timeout < request.timeout_seconds + self.answers_after:
+            raise _deadline_exceeded()
+        return self._response(request, stdout="partial\n", exit_code=124, timed_out=True)
+
+    @staticmethod
+    def _response(request, *, stdout, exit_code, timed_out):
+        return SimpleNamespace(
+            command=request.command,
+            argv=[],
+            working_directory=request.working_directory,
+            stdout=stdout,
+            stderr="",
+            exit_code=exit_code,
+            timed_out=timed_out,
+            killed=timed_out,
+            started_at_ms=1,
+            finished_at_ms=2,
+        )
+
+
+class TestBackgroundTimeoutsThroughRuntimeKernelClient:
+    """shell_bg and shell_execute timeouts through the real gRPC client and its circuit breaker."""
+
+    @pytest.fixture
+    def kernel_client(self, monkeypatch, tmp_path):
+        from koda.internal_rpc.runtime_kernel import GrpcRuntimeKernelClient
+
+        def install(stub):
+            client = GrpcRuntimeKernelClient(runtime_root=tmp_path, store=MagicMock(), mode="rust")
+            client._stub = stub
+            client._runtime_pb2 = SimpleNamespace(ExecuteCommandRequest=lambda **kwargs: SimpleNamespace(**kwargs))
+            client._metadata_pb2 = SimpleNamespace(RequestMetadata=lambda **kwargs: SimpleNamespace(**kwargs))
+            monkeypatch.setattr(client, "health", lambda: {"cutover_allowed": True})
+            monkeypatch.setattr(
+                "koda.services.shell_runner.get_runtime_controller",
+                lambda: SimpleNamespace(runtime_kernel=client),
+            )
+            return client
+
+        return install
+
+    @pytest.fixture
+    def manager(self, monkeypatch):
+        from koda.services.shell_tools import BackgroundProcessManager
+
+        mgr = BackgroundProcessManager()
+        monkeypatch.setattr("koda.services.shell_tools.bg_process_manager", mgr)
+        monkeypatch.setattr("koda.services.tool_dispatcher.SHELL_ENABLED", True)
+        return mgr
+
+    @staticmethod
+    async def _run_background(mgr, ctx, command, timeout):
+        from koda.services.tool_dispatcher import _handle_shell_bg
+
+        before = set(mgr._processes)
+        started = await _handle_shell_bg({"command": command, "timeout": timeout}, ctx)
+        assert started.success is True, started.output
+        (handle_id,) = set(mgr._processes) - before
+        await _finish(mgr, handle_id)
+        return handle_id
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("answers_after", [0.05, 2.05], ids=["obeys-sigterm", "ignores-sigterm"])
+    async def test_kernel_timeouts_come_back_as_timeouts(self, kernel_client, manager, tmp_path, answers_after):
+        from koda import config
+        from koda.internal_rpc.circuit_breaker import State
+        from koda.services.shell_runner import run_shell_command
+        from koda.services.tool_dispatcher import _handle_shell_output, _handle_shell_status
+
+        stub = _KernelTimingStub(answers_after=answers_after)
+        client = kernel_client(stub)
+        ctx = _make_ctx(work_dir=str(tmp_path))
+
+        handles = [
+            await self._run_background(manager, ctx, "sleep 20", timeout=2)
+            for _ in range(max(1, config.INTERNAL_RPC_BREAKER_THRESHOLD))
+        ]
+
+        for handle_id in handles:
+            status = await _handle_shell_status({"handle_id": handle_id}, ctx)
+            assert "Status: timed_out" in status.output
+            assert "Exit code: -1" in status.output
+            output = await _handle_shell_output({"handle_id": handle_id}, ctx)
+            assert output.output == "Exit -1:\npartial"
+        # The deadline leaves the kernel room to stop the command and answer.
+        assert all(deadline >= 2 + answers_after for deadline in stub.deadlines)
+        assert client._breaker.state is State.CLOSED
+        assert await run_shell_command("echo still-works", str(tmp_path), timeout=5) == "Exit 0:\nstill-works"
+
+    @pytest.mark.asyncio
+    async def test_deadline_exceeded_is_a_timeout_that_stays_off_the_breaker(self, kernel_client, manager, tmp_path):
+        from koda import config
+        from koda.internal_rpc.circuit_breaker import State
+        from koda.services.shell_runner import run_shell_command
+        from koda.services.tool_dispatcher import _handle_shell_output, _handle_shell_status
+
+        client = kernel_client(_KernelTimingStub(holds_output_open=True))
+        ctx = _make_ctx(work_dir=str(tmp_path))
+
+        for _ in range(max(1, config.INTERNAL_RPC_BREAKER_THRESHOLD)):
+            handle_id = await self._run_background(manager, ctx, "sleep 30 & echo started", timeout=2)
+            status = await _handle_shell_status({"handle_id": handle_id}, ctx)
+            assert "Status: timed_out" in status.output
+            output = await _handle_shell_output({"handle_id": handle_id}, ctx)
+            assert output.output == "Exit -1:\n(no output)"
+            assert await run_shell_command("sleep 30 & echo started", str(tmp_path), timeout=2) == "Timeout after 2s."
+
+        assert client._breaker.state is State.CLOSED
+        assert await run_shell_command("echo still-works", str(tmp_path), timeout=5) == "Exit 0:\nstill-works"
+
+    @pytest.mark.asyncio
+    async def test_other_kernel_errors_still_count_on_the_breaker(self, kernel_client, manager, tmp_path):
+        import grpc
+        import grpc.aio
+
+        from koda import config
+        from koda.internal_rpc.circuit_breaker import State
+
+        unavailable = AsyncMock(
+            side_effect=grpc.aio.AioRpcError(
+                code=grpc.StatusCode.UNAVAILABLE,
+                initial_metadata=grpc.aio.Metadata(),
+                trailing_metadata=grpc.aio.Metadata(),
+                details="connection refused",
+            )
+        )
+        client = kernel_client(SimpleNamespace(ExecuteCommand=unavailable))
+        ctx = _make_ctx(work_dir=str(tmp_path))
+
+        for _ in range(max(1, config.INTERNAL_RPC_BREAKER_THRESHOLD)):
+            handle_id = await self._run_background(manager, ctx, "echo ok", timeout=2)
+            assert manager.get(handle_id).timed_out is False
+
+        assert client._breaker.state is State.OPEN
 
 
 class TestShellPrompt:
