@@ -647,11 +647,18 @@ def _profile_headers(profile: ProviderHttpProfile, api_key: str, env: dict[str, 
 
 
 def _looks_like_override(profile: ProviderHttpProfile, env: dict[str, str]) -> bool:
+    """True when the operator configured a base URL other than the vendor endpoint.
+
+    Compared with the hard-coded vendor default, not ``profile.base_url``: the
+    profile builders read the same variable from the process env, so a ``.env``
+    override would otherwise compare equal to itself.
+    """
     base_url_env = PROVIDER_BASE_URL_ENV_KEYS.get(cast(Any, profile.provider_id))
     if not base_url_env:
         return False
     override = str(env.get(base_url_env) or os.environ.get(base_url_env) or "").strip()
-    return bool(override) and override != profile.base_url
+    vendor_default = _VENDOR_BASE_URLS.get(profile.provider_id, profile.base_url)
+    return bool(override) and override.rstrip("/") != vendor_default.rstrip("/")
 
 
 def _allows_private_base_url(profile: ProviderHttpProfile, env: dict[str, str]) -> bool:
@@ -1071,7 +1078,22 @@ def _record_metrics(provider_id: str, model: str, elapsed: float, *, streaming: 
 #
 # Each builder reads its env-var override (and timeout config) on first lookup
 # rather than at import time. Adding a new OpenAI-compatible provider means
-# adding one builder + one registry entry — no new module file required.
+# adding one builder + one registry entry (and its vendor endpoint in
+# ``_VENDOR_BASE_URLS``) — no new module file required.
+
+# Vendor endpoints used when no base-URL override is configured.  Any other
+# configured value, from the control plane or the process env, is an operator
+# override (see ``_looks_like_override``).
+_VENDOR_BASE_URLS: dict[str, str] = {
+    "deepseek": "https://api.deepseek.com",
+    "groq": "https://api.groq.com/openai",
+    "kimi": "https://api.moonshot.ai",
+    "mistral": "https://api.mistral.ai",
+    "openrouter": "https://openrouter.ai/api/v1",
+    "perplexity": "https://api.perplexity.ai",
+    "qwen": "https://dashscope-intl.aliyuncs.com",
+    "xai": "https://api.x.ai",
+}
 
 
 def _build_deepseek_profile() -> ProviderHttpProfile:
@@ -1079,7 +1101,7 @@ def _build_deepseek_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="deepseek",
-        base_url=os.environ.get("DEEPSEEK_API_BASE_URL") or "https://api.deepseek.com",
+        base_url=os.environ.get("DEEPSEEK_API_BASE_URL") or _VENDOR_BASE_URLS["deepseek"],
         chat_path="/v1/chat/completions",
         models_path="/v1/models",
         first_chunk_timeout_seconds=float(DEEPSEEK_FIRST_CHUNK_TIMEOUT),
@@ -1092,7 +1114,7 @@ def _build_groq_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="groq",
-        base_url=os.environ.get("GROQ_API_BASE_URL") or "https://api.groq.com/openai",
+        base_url=os.environ.get("GROQ_API_BASE_URL") or _VENDOR_BASE_URLS["groq"],
         chat_path="/v1/chat/completions",
         models_path="/v1/models",
         first_chunk_timeout_seconds=float(GROQ_FIRST_CHUNK_TIMEOUT),
@@ -1111,7 +1133,7 @@ def _build_kimi_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="kimi",
-        base_url=os.environ.get("KIMI_API_BASE_URL") or "https://api.moonshot.ai",
+        base_url=os.environ.get("KIMI_API_BASE_URL") or _VENDOR_BASE_URLS["kimi"],
         chat_path="/v1/chat/completions",
         models_path="/v1/models",
         first_chunk_timeout_seconds=float(KIMI_FIRST_CHUNK_TIMEOUT),
@@ -1137,7 +1159,7 @@ def _build_mistral_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="mistral",
-        base_url=os.environ.get("MISTRAL_API_BASE_URL") or "https://api.mistral.ai",
+        base_url=os.environ.get("MISTRAL_API_BASE_URL") or _VENDOR_BASE_URLS["mistral"],
         chat_path="/v1/chat/completions",
         models_path="/v1/models",
         first_chunk_timeout_seconds=float(MISTRAL_FIRST_CHUNK_TIMEOUT),
@@ -1159,7 +1181,7 @@ def _build_perplexity_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="perplexity",
-        base_url=os.environ.get("PERPLEXITY_API_BASE_URL") or "https://api.perplexity.ai",
+        base_url=os.environ.get("PERPLEXITY_API_BASE_URL") or _VENDOR_BASE_URLS["perplexity"],
         chat_path="/chat/completions",
         models_path=None,
         capability_probe="health_only",
@@ -1174,7 +1196,7 @@ def _build_qwen_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="qwen",
-        base_url=os.environ.get("QWEN_API_BASE_URL") or "https://dashscope-intl.aliyuncs.com",
+        base_url=os.environ.get("QWEN_API_BASE_URL") or _VENDOR_BASE_URLS["qwen"],
         chat_path="/compatible-mode/v1/chat/completions",
         models_path="/compatible-mode/v1/models",
         first_chunk_timeout_seconds=float(QWEN_FIRST_CHUNK_TIMEOUT),
@@ -1201,7 +1223,7 @@ def _build_xai_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="xai",
-        base_url=os.environ.get("XAI_API_BASE_URL") or "https://api.x.ai",
+        base_url=os.environ.get("XAI_API_BASE_URL") or _VENDOR_BASE_URLS["xai"],
         chat_path="/v1/chat/completions",
         models_path="/v1/models",
         first_chunk_timeout_seconds=float(XAI_FIRST_CHUNK_TIMEOUT),
@@ -1228,7 +1250,7 @@ def _build_openrouter_profile() -> ProviderHttpProfile:
 
     return ProviderHttpProfile(
         provider_id="openrouter",
-        base_url=os.environ.get("OPENROUTER_API_BASE_URL") or "https://openrouter.ai/api/v1",
+        base_url=os.environ.get("OPENROUTER_API_BASE_URL") or _VENDOR_BASE_URLS["openrouter"],
         chat_path="/chat/completions",
         models_path="/models",
         capability_probe="health_only",

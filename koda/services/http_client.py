@@ -8,11 +8,13 @@ import re
 import socket
 from dataclasses import dataclass
 from typing import cast
-from urllib.parse import quote_plus, urljoin, urlparse
+from urllib.parse import quote_plus, urljoin
 
 import aiohttp
 from aiohttp.abc import AbstractResolver, ResolveResult
+from aiohttp.helpers import is_ip_address
 from aiohttp.resolver import ThreadedResolver
+from yarl import URL
 
 from koda.logging_config import get_logger
 
@@ -36,7 +38,8 @@ class _PublicOnlyResolver(AbstractResolver):
     them here pins every connection to validated IPs: a DNS answer that changes
     between :func:`_check_url_safety` and connect (DNS rebinding) cannot reach a
     private destination.  aiohttp skips the resolver for IP-literal hosts; those
-    cannot change and are covered by :func:`_check_url_safety`.
+    cannot change and are covered by :func:`_check_url_safety`, which reads the
+    host from the URL exactly as aiohttp does (``yarl.URL(url).raw_host``).
     """
 
     def __init__(self) -> None:
@@ -157,15 +160,31 @@ def _is_private_ip(ip_str: str) -> bool:
 
 
 def _check_url_safety(url: str, *, allow_private: bool = False) -> str | None:
-    """Validate URL for SSRF. Returns error message or None if safe."""
-    parsed = urlparse(url)
+    """Validate URL for SSRF. Returns error message or None if safe.
+
+    The host is the one aiohttp connects to: :class:`yarl.URL` parses the URL
+    and IDNA-encodes the host with UTS-46.  ``urlparse`` plus the stdlib IDNA
+    2003 codec can read a different host from the same URL (UTS-46 maps some
+    code points to ASCII digits or to nothing), so checking that host could
+    pass a name that aiohttp then treats as a private IP literal.
+    """
+    try:
+        parsed = URL(url)
+    except ValueError:  # includes UnicodeError from IDNA encoding
+        return "Invalid URL."
 
     if parsed.scheme not in ("http", "https"):
         return "Only http and https URLs are allowed."
 
-    hostname = parsed.hostname
+    hostname = parsed.raw_host
     if not hostname:
         return "Invalid URL: no hostname."
+
+    # aiohttp connects to anything it considers an IP literal without asking a
+    # resolver, so judge the literal itself; one ipaddress cannot parse is blocked.
+    if not allow_private and is_ip_address(hostname) and _is_private_ip(hostname):
+        log.warning("ssrf_blocked", url=url, ip=hostname)
+        return _SSRF_BLOCKED_MESSAGE
 
     # Resolve hostname to check IP
     try:
@@ -185,7 +204,7 @@ def _check_url_safety(url: str, *, allow_private: bool = False) -> str | None:
                 if _is_private_ip(ip_str):
                     log.warning("ssrf_blocked", url=url, ip=ip_str)
                     return _SSRF_BLOCKED_MESSAGE
-    except socket.gaierror:
+    except (socket.gaierror, UnicodeError):
         return f"Could not resolve hostname: {hostname}"
 
     return None
