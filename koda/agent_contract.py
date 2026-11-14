@@ -2012,11 +2012,13 @@ also match these calls below their paths (koda.services.execution_policy).
 
 
 def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> tuple[str, ...]:
-    """Return the paths execution-policy ``path`` rules evaluate for one call, exactly as the tool receives them.
+    """Return the paths execution-policy ``path`` rules evaluate for one call, exactly as the params give them.
 
-    They are not trimmed or normalized: the tools expand ``~`` and resolve a
-    relative path against the worker's working directory, and the engine must see
-    what the tool sees. They are a ``file_*`` tool's ``path``, ``source`` and
+    They are not trimmed or normalized here. In the worker the dispatcher has
+    already replaced a file tool's paths with the absolute, symlink-resolved paths
+    its handler acts on (``koda.services.tool_dispatcher._file_tool_policy_params``);
+    other callers, such as the simulate route, pass params as written, and the
+    engine fails closed on a path it cannot place. They are a ``file_*`` tool's ``path``, ``source`` and
     ``destination`` (so a ``file_move`` yields its source and its destination); the
     working directory, returned as the relative path ``.``, for ``file_list``,
     ``file_search`` and ``file_grep`` without a ``path``; the ``path`` of an

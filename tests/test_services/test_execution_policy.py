@@ -975,7 +975,8 @@ def _file_operation_examples() -> list[tuple[str, dict[str, object]]]:
 
 
 def test_the_tool_prompts_own_file_examples_are_gated_by_an_unrelated_restrictive_path_rule() -> None:
-    """The prompt teaches relative paths, which the engine cannot place, so one restrictive path rule gates them."""
+    """As written (the simulate route's view), the prompt's relative paths cannot be placed, so one restrictive path
+    rule gates them. The worker resolves them first; see the next test."""
     allow_file_tools = {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"}
     deny_etc = {"name": "deny-etc", "match": {"path": "/etc"}, "decision": "deny"}
     examples = _file_operation_examples()
@@ -999,12 +1000,86 @@ def test_the_tool_prompts_own_file_examples_are_gated_by_an_unrelated_restrictiv
     assert (absolute.decision, absolute.rule_id) == ("allow", "allow-file-tools")
 
 
-def test_the_upgrade_notes_say_the_tool_prompts_relative_paths_are_gated_until_the_safe_path_resolver() -> None:
+async def test_the_worker_evaluates_the_tool_prompts_own_file_examples_where_they_land(tmp_path, monkeypatch) -> None:
+    """In the worker the dispatcher hands the engine each file tool path resolved under the work dir.
+
+    So the prompt's relative examples are not gated by a restrictive path rule elsewhere: the
+    engine receives absolute, symlink-resolved paths under the work dir (the work dir itself
+    for a listing or search without a ``path``), while ``agent_set_workdir``'s path is passed
+    as written.
+    """
+    import os
+    from unittest.mock import AsyncMock
+
+    from koda.services import tool_dispatcher
+    from koda.services.tool_dispatcher import AgentToolCall, ToolContext, execute_tool
+
+    allow_file_tools = {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"}
+    deny_etc = {"name": "deny-etc", "match": {"path": "/etc"}, "decision": "deny"}
+    work = tmp_path.resolve() / "work"
+    (work / "src").mkdir(parents=True)
+    monkeypatch.setenv("HOME", str(tmp_path.resolve()))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "koda.services.execution_policy.AGENT_EXECUTION_POLICY", {"version": 1, "rules": [allow_file_tools, deny_etc]}
+    )
+    examples = [*_file_operation_examples(), ("file_read", {"path": "~/notes.txt"})]
+    seen: list[tuple[str, dict[str, object], tuple[str, str | None]]] = []
+    real_evaluate = tool_dispatcher.evaluate_execution_policy
+
+    def spy(tool_id: str, params: dict[str, object], **kwargs: object) -> PolicyEvaluation:
+        evaluation = real_evaluate(tool_id, params, **kwargs)
+        seen.append((tool_id, dict(params), (evaluation.decision, evaluation.rule_id)))
+        return evaluation
+
+    ctx = ToolContext(
+        user_id=111,
+        chat_id=111,
+        work_dir=str(work),
+        user_data={"work_dir": str(work)},
+        agent=AsyncMock(),
+        agent_mode="autonomous",
+    )
+    with (
+        patch.object(tool_dispatcher, "evaluate_execution_policy", spy),
+        patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", _FILEOPS_GRANT),
+        patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["file_*"]}),
+        patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+        patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+    ):
+        for tool_id, params in examples:
+            await execute_tool(AgentToolCall(tool_id, dict(params), ""), ctx)
+        await execute_tool(AgentToolCall("agent_set_workdir", {"path": "src"}, ""), ctx)
+
+    for (tool_id, params), (seen_tool, seen_params, decision) in zip(examples, seen, strict=False):
+        assert seen_tool == tool_id
+        # Not gated by the unrelated deny (the overlays may still ask for a preview of a delete).
+        assert decision[0] != "deny" and decision[1] != "deny-etc", (tool_id, params, decision)
+        for key in ("path", "source", "destination"):
+            if isinstance(params.get(key), str):
+                expected = os.path.realpath(os.path.join(work, os.path.expanduser(str(params[key]))))
+                assert seen_params[key] == expected, (tool_id, key)
+        if tool_id in {"file_list", "file_search", "file_grep"} and "path" not in params:
+            assert seen_params["path"] == str(work)
+    assert seen[-1][:2] == ("agent_set_workdir", {"path": "src"})
+    assert len(seen) == len(examples) + 1
+
+
+def test_the_upgrade_notes_say_the_worker_resolves_the_tool_prompts_relative_paths() -> None:
     from pathlib import Path
 
     upgrade = (Path(__file__).resolve().parents[2] / "docs/operations/upgrade.md").read_text(encoding="utf-8")
     flat = " ".join(_section(upgrade, "### Execution-policy rules", "## Step 1").split())
 
     assert "give file tools absolute paths" not in flat
-    for required in ("tool prompt", "relative paths", '{"path": "src/main.py"}', "M1-E4-T13"):
+    assert "until relative paths are resolved" not in flat
+    for required in (
+        "tool prompt",
+        "relative paths",
+        '{"path": "src/main.py"}',
+        "M1-E4-T13",
+        "_file_tool_policy_params",
+        "`agent_set_workdir`'s `path`",
+        "the simulator can show a stricter decision than the worker makes",
+    ):
         assert required in flat, required

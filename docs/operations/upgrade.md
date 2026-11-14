@@ -91,22 +91,31 @@ existing rules are validated and simulated:
   counts when the call's path is at, above or below the segments before
   the wildcard, and one that starts with `*` always counts. An `allow`
   path rule still has to cover the call's path itself.
-- **A path that is not absolute fails closed.** The worker's tools
-  expand `~` and resolve a relative path against the agent's working
-  directory, which the rule engine does not know. So a path that starts
-  with `~`, a relative path such as `notes.txt` or `../secrets/key.pem`,
-  and a file listing or search of the working directory without a
-  `path` now count as matching every `deny`, `require_approval` and
-  `allow_with_preview` path rule, and no `allow` path rule. A call that
-  such a rule's other selectors match and that gives a relative or `~`
-  path is therefore denied, or needs approval or a preview, even when it
-  would land outside that rule's directory. The agent's own tool prompt
-  teaches relative paths (`{"path": "src/main.py"}`,
-  `{"path": "output.txt"}`, and `file_list` with `{}`), so once rules
-  reach workers, one restrictive path rule beside an allow for the file
-  tools gates nearly every file call an agent makes, until relative
-  paths are resolved under the work dir (M1-E4-T13). Check such a rule
-  with the simulator before you rely on it.
+- **The worker resolves a file tool's relative paths before the rules
+  see them.** In the worker, each file tool's `path`, `source` and
+  `destination` reaches the rules as the absolute, symlink-resolved path
+  it names under the agent's working directory (`~` expanded with the
+  worker's `HOME`), and a file listing or search without a `path` is
+  checked against the working directory, resolved (M1-E4-T13,
+  `koda/services/tool_dispatcher.py::_file_tool_policy_params`). The
+  relative paths the agent's own tool prompt teaches
+  (`{"path": "src/main.py"}`, `{"path": "output.txt"}`, and `file_list`
+  with `{}`) are therefore evaluated where they land. A value that is not
+  a non-blank string, or cannot be resolved, reaches the rules as
+  written, and the tool then refuses it. An operator file command's path
+  is resolved the same way under the operator's work dir.
+- **A path that cannot be placed fails closed.** The rule engine does
+  not know a working directory or `HOME`, so a path that starts with
+  `~`, a relative path such as `notes.txt` or `../secrets/key.pem`, and
+  a file listing or search without a `path` count as matching every
+  `deny`, `require_approval` and `allow_with_preview` path rule, and no
+  `allow` path rule, wherever they reach the engine unresolved: in the
+  worker that is only `agent_set_workdir`'s `path`, which is passed as
+  written; in the simulator, which evaluates the params as you send
+  them, it is every such path. So for a relative or `~` file-tool path
+  the simulator can show a stricter decision than the worker makes,
+  never a looser one. To see the worker's decision, send the absolute
+  path the call resolves to.
 - **A restrictive rule written through a symlinked directory applies to
   the resolved path.** The worker gives the rules a file tool's path
   symlink-resolved, so a rule for `/srv/app/config/secrets`, where

@@ -42,10 +42,14 @@ Rule semantics:
   below a rule's path in a call such as ``<rule path>/../other``: when the
   rule's path is a symlink, the tool's realpath resolves the link before the
   ``..``. A path that is not absolute (``~``-prefixed, relative, the working
-  directory, or with leading whitespace) cannot be placed, because the tools
-  expand ``~`` and resolve relative paths in the worker: every deny,
-  require_approval and allow_with_preview path rule counts as matching it, and
-  no allow path rule does. The decision is the most restrictive over all of
+  directory, or with leading whitespace) cannot be placed, because the engine
+  knows neither a working directory nor a HOME: every deny, require_approval
+  and allow_with_preview path rule counts as matching it, and no allow path
+  rule does. In the worker the dispatcher hands the engine each file tool's
+  paths, and the working directory of a call without a ``path``, resolved
+  under the work dir (``tool_dispatcher._file_tool_policy_params``), so there
+  this applies to ``agent_set_workdir``'s path; the simulate route evaluates
+  params as sent and applies it to every relative or ``~`` path. The decision is the most restrictive over all of
   these evaluations, counting the no-match fallback as an outcome, and the
   deciding rule is the highest-priority, then lowest-name rule with that
   decision that matched any of them. So no ``.``, ``..``, repeated ``/`` or
