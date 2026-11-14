@@ -2727,15 +2727,8 @@ async def _check_shell_available(tool: str) -> AgentToolResult | None:
     return None
 
 
-async def _handle_shell_execute(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_shell_available("shell_execute")
-    if err:
-        return err
-    command = params.get("command", "")
-    if not command:
-        return AgentToolResult(tool="shell_execute", success=False, output="Missing required param: 'command'.")
-
-    # Token-level command blocking (defense-in-depth)
+def _blocked_shell_token(tool: str, command: str, ctx: ToolContext) -> AgentToolResult | None:
+    """Token-level command blocking (defense-in-depth), shared by shell_execute and shell_bg."""
     from koda.config import BLOCKED_COMMAND_TOKENS
 
     try:
@@ -2745,9 +2738,9 @@ async def _handle_shell_execute(params: dict, ctx: ToolContext) -> AgentToolResu
         for token in tokens:
             base = token.rsplit("/", 1)[-1]  # handle absolute paths like /usr/bin/sudo
             if base.lower() in BLOCKED_COMMAND_TOKENS:
-                _audit_blocked("shell_execute", f"blocked_command_token:{base}", user_id=ctx.user_id)
+                _audit_blocked(tool, f"blocked_command_token:{base}", user_id=ctx.user_id)
                 return AgentToolResult(
-                    tool="shell_execute",
+                    tool=tool,
                     success=False,
                     output=f"Command blocked: '{base}' is not allowed.",
                     metadata={"category": "shell", "blocked": True},
@@ -2756,6 +2749,19 @@ async def _handle_shell_execute(params: dict, ctx: ToolContext) -> AgentToolResu
         # shlex parse error on malformed input — regex check still applies.
         # Log for operator visibility so potential evasion attempts are detectable.
         log.warning("shell_token_check_shlex_error", command=command[:200], user_id=ctx.user_id)
+    return None
+
+
+async def _handle_shell_execute(params: dict, ctx: ToolContext) -> AgentToolResult:
+    err = await _check_shell_available("shell_execute")
+    if err:
+        return err
+    command = params.get("command", "")
+    if not command:
+        return AgentToolResult(tool="shell_execute", success=False, output="Missing required param: 'command'.")
+    blocked = _blocked_shell_token("shell_execute", command, ctx)
+    if blocked:
+        return blocked
 
     timeout = int(params.get("timeout", SHELL_TIMEOUT))
     timeout = min(max(1, timeout), 300)  # cap at 5 minutes
@@ -2773,10 +2779,14 @@ async def _handle_shell_bg(params: dict, ctx: ToolContext) -> AgentToolResult:
     command = params.get("command", "")
     if not command:
         return AgentToolResult(tool="shell_bg", success=False, output="Missing required param: 'command'.")
+    blocked = _blocked_shell_token("shell_bg", command, ctx)
+    if blocked:
+        return blocked
     timeout = int(params.get("timeout", SHELL_TIMEOUT))
     timeout = min(max(1, timeout), 600)
     from koda.services.shell_tools import bg_process_manager
 
+    # Same approval gate, command guard and runtime-kernel path as shell_execute.
     handle_id, error = await bg_process_manager.start(command, ctx.work_dir, ctx.user_id, timeout=timeout)
     if error:
         return AgentToolResult(tool="shell_bg", success=False, output=error)
