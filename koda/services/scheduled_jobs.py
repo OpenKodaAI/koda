@@ -1757,47 +1757,6 @@ def create_shell_command_job(
     )
 
 
-def _backfill_materialized_run_policy_snapshots(now: datetime | None = None) -> None:
-    marker = _iso(now or _utcnow())
-    rows = _fetchall(
-        """
-        SELECT id, scheduled_job_id, metadata_json
-        FROM scheduled_job_runs
-        WHERE created_at = ? AND metadata_json = ?
-        """,
-        (marker, "{}"),
-    )
-    for row in rows:
-        job_id = int(row["scheduled_job_id"])
-        job = _get_job(job_id)
-        if job is None:
-            continue
-        snapshot, snapshot_json, snapshot_hash = _policy_snapshot_payload(job)
-        if (
-            str(job.get("policy_snapshot_hash") or "") != snapshot_hash
-            or str(job.get("policy_snapshot_json") or "") != snapshot_json
-        ):
-            _touch_job(job_id, policy_snapshot_json=snapshot_json, policy_snapshot_hash=snapshot_hash)
-        metadata = _loads_json(row.get("metadata_json"), {})
-        metadata.setdefault("policy_snapshot", snapshot)
-        metadata.setdefault("policy_snapshot_json", snapshot_json)
-        metadata.setdefault("policy_snapshot_hash", snapshot_hash)
-        _touch_run(int(row["id"]), metadata_json=_stable_dumps_json(metadata))
-
-
-_ORIGINAL_MATERIALIZE_DUE_RUNS = _dispatcher_impl._materialize_due_runs
-
-
-def _materialize_due_runs(now: datetime | None = None) -> int:
-    materialized = _ORIGINAL_MATERIALIZE_DUE_RUNS(now)
-    with contextlib.suppress(Exception):
-        _backfill_materialized_run_policy_snapshots(now)
-    return materialized
-
-
-_dispatcher_impl._materialize_due_runs = _materialize_due_runs
-
-
 _claim_due_runs = _dispatcher_impl._claim_due_runs
 _materialize_due_runs = _dispatcher_impl._materialize_due_runs
 _release_run = _dispatcher_impl._release_run

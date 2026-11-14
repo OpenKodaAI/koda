@@ -99,16 +99,17 @@ class RuntimeScheduleCreateTests(AioHTTPTestCase):
         assert status == 422
         assert payload["field"] == "schedule_expr"
 
-    async def test_create_calls_create_job_and_optionally_activates(self) -> None:
+    async def test_create_calls_create_job_and_queues_auto_activating_validation(self) -> None:
         with (
             patch(
                 "koda.services.scheduled_jobs.create_job",
                 return_value=42,
             ) as create_mock,
             patch(
-                "koda.services.scheduled_jobs.activate_job",
-                return_value=(True, "activated"),
-            ) as activate_mock,
+                "koda.services.scheduled_jobs.queue_validation_run",
+                return_value=(314, "Validation queued. The job will activate automatically if validation passes."),
+            ) as validation_mock,
+            patch("koda.services.scheduled_jobs.activate_job") as activate_mock,
         ):
             status, payload = await self._post(
                 {
@@ -138,7 +139,53 @@ class RuntimeScheduleCreateTests(AioHTTPTestCase):
         assert kwargs["payload"]["connectors"] == ["gmail"]
         assert kwargs["payload"]["read_only"] is True
         assert kwargs["payload"]["allowed_paths"] == ["/repo"]
-        activate_mock.assert_called_once()
+        # A freshly created job is validation_pending, which activate_job always rejects;
+        # the create path must queue the validation that activates the job when it passes.
+        activate_mock.assert_not_called()
+        validation_mock.assert_called_once_with(42, user_id=kwargs["user_id"], activate_on_success=True)
+        assert payload["validation_run_id"] == 314
+        assert payload["message"].startswith("Job created. Validation queued.")
+
+    async def test_create_without_auto_activate_queues_validation_only(self) -> None:
+        with (
+            patch("koda.services.scheduled_jobs.create_job", return_value=43),
+            patch(
+                "koda.services.scheduled_jobs.queue_validation_run",
+                return_value=(315, "Validation queued."),
+            ) as validation_mock,
+        ):
+            status, payload = await self._post(
+                {
+                    "trigger_type": "cron",
+                    "schedule_expr": "0 9 * * *",
+                    "timezone": "UTC",
+                    "payload": {"query": "x"},
+                    "auto_activate": False,
+                }
+            )
+        assert status == 201
+        assert validation_mock.call_args.kwargs["activate_on_success"] is False
+        assert payload["validation_run_id"] == 315
+
+    async def test_create_reports_validation_that_could_not_be_queued(self) -> None:
+        with (
+            patch("koda.services.scheduled_jobs.create_job", return_value=44),
+            patch(
+                "koda.services.scheduled_jobs.queue_validation_run",
+                return_value=(None, "Validation already pending."),
+            ),
+        ):
+            status, payload = await self._post(
+                {
+                    "trigger_type": "cron",
+                    "schedule_expr": "0 9 * * *",
+                    "timezone": "UTC",
+                    "payload": {"query": "x"},
+                }
+            )
+        assert status == 201
+        assert payload["validation_run_id"] is None
+        assert payload["message"] == "Job created, but validation was not queued: Validation already pending."
 
     async def test_create_idempotent_returns_existing_job(self) -> None:
         with (
@@ -147,11 +194,11 @@ class RuntimeScheduleCreateTests(AioHTTPTestCase):
                 return_value=77,
             ) as create_mock,
             patch(
-                "koda.services.scheduled_jobs.activate_job",
-                return_value=(True, "ok"),
-            ),
+                "koda.services.scheduled_jobs.queue_validation_run",
+                return_value=(501, "Validation queued."),
+            ) as validation_mock,
         ):
-            status1, _ = await self._post(
+            status1, payload1 = await self._post(
                 {
                     "trigger_type": "cron",
                     "schedule_expr": "0 9 * * *",
@@ -176,6 +223,34 @@ class RuntimeScheduleCreateTests(AioHTTPTestCase):
         assert status2 == 200
         assert payload2["idempotent_replay"] is True
         assert create_mock.call_count == 1
+        assert validation_mock.call_count == 1
+        # The replay answers like the first call: same validation run and message.
+        assert payload2["validation_run_id"] == payload1["validation_run_id"] == 501
+        assert payload2["message"] == payload1["message"] == "Job created. Validation queued."
+
+    async def test_create_idempotent_replay_keeps_validation_not_queued_warning(self) -> None:
+        body = {
+            "trigger_type": "cron",
+            "schedule_expr": "0 9 * * *",
+            "timezone": "UTC",
+            "payload": {"query": "x"},
+        }
+        with (
+            patch("koda.services.scheduled_jobs.create_job", return_value=78),
+            patch(
+                "koda.services.scheduled_jobs.queue_validation_run",
+                side_effect=RuntimeError("scheduler store unavailable"),
+            ),
+        ):
+            status1, payload1 = await self._post(body, idem="warn-key")
+            status2, payload2 = await self._post(body, idem="warn-key")
+
+        assert (status1, status2) == (201, 200)
+        assert payload2["idempotent_replay"] is True
+        assert payload1["validation_run_id"] is None
+        assert payload2["validation_run_id"] is None
+        assert payload2["message"] == payload1["message"]
+        assert payload2["message"] == "Job created, but validation was not queued: Validation could not be queued."
 
     async def test_create_value_error_maps_to_field(self) -> None:
         with patch(

@@ -3596,6 +3596,43 @@ class KnowledgeV2PostgresBackend:
                            (agent_id, sensitivity, memory_status, is_active)""",
                 ),
             ),
+            _Migration(
+                "047_scheduler_events_and_dispatch_columns",
+                (
+                    # The scheduler records every job/run transition in
+                    # scheduled_job_events, leases runs with a dispatch token
+                    # and heartbeat, and tracks the last validation on the
+                    # job. Without these objects create_job, run claiming and
+                    # validation all fail, so no scheduled job ever runs.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."scheduled_job_events" (
+                            id BIGSERIAL PRIMARY KEY,
+                            scheduled_job_id BIGINT NOT NULL REFERENCES "{schema}"."scheduled_jobs"(id) ON DELETE CASCADE,
+                            scheduled_run_id BIGINT,
+                            trace_id TEXT,
+                            event_type TEXT NOT NULL,
+                            actor_type TEXT NOT NULL DEFAULT 'system',
+                            actor_id TEXT,
+                            source TEXT,
+                            status_from TEXT,
+                            status_to TEXT,
+                            reason TEXT,
+                            details_json TEXT NOT NULL DEFAULT '{{}}',
+                            created_at TEXT NOT NULL
+                        )""",
+                    f"""CREATE INDEX IF NOT EXISTS idx_scheduled_job_events_job
+                           ON "{schema}"."scheduled_job_events" (scheduled_job_id, id DESC)""",
+                    f"""ALTER TABLE "{schema}"."scheduled_jobs"
+                           ADD COLUMN IF NOT EXISTS last_validated_at TEXT""",
+                    f"""ALTER TABLE "{schema}"."scheduled_jobs"
+                           ADD COLUMN IF NOT EXISTS last_validation_run_id BIGINT""",
+                    f"""ALTER TABLE "{schema}"."scheduled_job_runs"
+                           ADD COLUMN IF NOT EXISTS lease_heartbeat_at TEXT""",
+                    f"""ALTER TABLE "{schema}"."scheduled_job_runs"
+                           ADD COLUMN IF NOT EXISTS dispatch_token TEXT""",
+                    f"""ALTER TABLE "{schema}"."scheduled_job_runs"
+                           ADD COLUMN IF NOT EXISTS dispatched_at TEXT""",
+                ),
+            ),
         )
 
     async def upsert_skill_package_lock(self, agent_id: str, lock: dict[str, Any]) -> None:
