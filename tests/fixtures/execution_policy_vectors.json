@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Execution-policy parity vectors (ADR-002 AG-06, ADR-008 step 1). Each vector is one tool call evaluated against one policy. tests/test_execution_policy_vectors.py runs every vector through the runtime engine, the way an agent worker calls it, and through the control-plane simulate route (POST /api/control-plane/agents/{agent_id}/execution-policy/evaluate); both must return the expected decision, reason_code and rule_id, and the same approval scope and preview. The file is also the shared input for the ADR-008 offline replay (M5-E3-T2). Rule semantics: among the rules that match a call, the most restrictive decision wins (deny > require_approval > allow_with_preview > allow), then the highest priority, then the lowest name; patterns are fnmatch globs compared case-insensitively; a path selector also covers everything below the path; every listed effect tag must be present; a selector the engine cannot evaluate (unknown key, empty value, ^regex) is skipped in a deny rule and makes any other rule not match.",
+  "description": "Execution-policy parity vectors (ADR-002 AG-06, ADR-008 step 1). Each vector is one tool call evaluated against one policy. tests/test_execution_policy_vectors.py runs every vector through the runtime engine, the way an agent worker calls it, and through the control-plane simulate route (POST /api/control-plane/agents/{agent_id}/execution-policy/evaluate); both must return the expected decision, reason_code and rule_id, and the same approval scope and preview. The file is also the shared input for the ADR-008 offline replay (M5-E3-T2). Rule semantics: among the rules that match a call, the most restrictive decision wins (deny > require_approval > allow_with_preview > allow), then the highest priority, then the lowest name; patterns are fnmatch globs compared case-insensitively; a path selector also covers everything below the path, and the call's path is compared as written and lexically normalized (. .. and repeated / resolved): a deny rule matches when either form matches, ignoring case, and any other rule only when both forms match, with case; every listed effect tag must be present; a selector the engine cannot evaluate (unknown key, empty value, ^regex) is skipped in a deny rule and makes any other rule not match.",
   "agent_id": "AGENT_VECTORS",
   "agent_defaults": {
     "tool_policy": {},
@@ -437,6 +437,107 @@
       },
       "action": {"tool_id": "totally_unknown_tool", "params": {}},
       "expected": {"decision": "deny", "reason_code": "unknown_action", "rule_id": null}
+    },
+    {
+      "id": "dispatcher-tool-outside-the-catalog-is-known",
+      "description": "job_update has a dispatcher handler but is not in the core catalog. The worker treats it as known, so the simulator does too, and the allow rule applies.",
+      "agent": {
+        "autonomy_policy": {"default_approval_mode": "guarded"},
+        "resource_access_policy": {"integration_grants": {"scheduler": {"allow_actions": ["*"]}}}
+      },
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-job-update", "match": {"tool_id": "job_update"}, "decision": "allow"}
+        ]
+      },
+      "action": {"tool_id": "job_update", "params": {"job_id": 1}},
+      "expected": {"decision": "allow", "reason_code": "rule_match", "rule_id": "allow-job-update"}
+    },
+    {
+      "id": "dispatcher-squad-tool-gets-the-workers-reason",
+      "description": "squad_task_list has a dispatcher handler but is not in the core catalog. Without a grant it is denied for the worker's reason, not as unknown_action.",
+      "policy": {},
+      "action": {"tool_id": "squad_task_list", "params": {}},
+      "expected": {"decision": "deny", "reason_code": "explicit_integration_grant_required", "rule_id": null}
+    },
+    {
+      "id": "path-deny-catches-dot-dot-segments",
+      "description": "A deny rule's path selector also matches the lexically normalized path, so .. segments cannot step around it.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-reads", "match": {"tool_id": "file_read"}, "decision": "allow"},
+          {"name": "deny-etc", "match": {"path": "/etc"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_read", "params": {"path": "/srv/app/../../etc/passwd"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-etc"}
+    },
+    {
+      "id": "path-deny-catches-repeated-slashes",
+      "description": "Repeated slashes are collapsed before a deny rule's path selector is compared.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-reads", "match": {"tool_id": "file_read"}, "decision": "allow"},
+          {"name": "deny-etc", "match": {"path": "/etc"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_read", "params": {"path": "//etc//passwd"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-etc"}
+    },
+    {
+      "id": "path-deny-ignores-case",
+      "description": "A deny rule's path selector ignores case, so it also covers case-insensitive filesystems.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-reads", "match": {"tool_id": "file_read"}, "decision": "allow"},
+          {"name": "deny-etc", "match": {"path": "/etc"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_read", "params": {"path": "/ETC/passwd"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-etc"}
+    },
+    {
+      "id": "path-allow-covers-a-normalized-path-below-it",
+      "description": "An allow rule's path selector matches a path below it, written with ./ and repeated slashes.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-app-writes", "match": {"tool_id": "file_write", "path": "/srv/app"}, "decision": "allow"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/app/./docs//notes.txt", "content": "x"}},
+      "expected": {"decision": "allow", "reason_code": "rule_match", "rule_id": "allow-app-writes"}
+    },
+    {
+      "id": "path-allow-does-not-follow-dot-dot-out-of-its-directory",
+      "description": "An allow rule's path selector must match both the path as written and its normalized form, so /srv/app/../../etc is outside /srv/app.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-app-writes", "match": {"tool_id": "file_write", "path": "/srv/app"}, "decision": "allow"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/app/../../etc/cron.d/job", "content": "x"}},
+      "expected": {"decision": "deny", "reason_code": "secure_default_block", "rule_id": null}
+    },
+    {
+      "id": "path-allow-is-case-sensitive",
+      "description": "An allow rule's path selector is compared case-sensitively, so /srv/app does not cover /SRV/APP on a case-sensitive filesystem.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-app-writes", "match": {"tool_id": "file_write", "path": "/srv/app"}, "decision": "allow"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/SRV/APP/notes.txt", "content": "x"}},
+      "expected": {"decision": "deny", "reason_code": "secure_default_block", "rule_id": null}
     }
   ]
 }

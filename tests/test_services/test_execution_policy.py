@@ -372,3 +372,116 @@ def test_explicit_rule_approval_scope_defaults_to_once_with_rule_ttl() -> None:
     assert evaluation.approval_scope is not None
     assert (evaluation.approval_scope.kind, evaluation.approval_scope.ttl_seconds) == ("once", 600)
     assert evaluation.approval_scope.max_uses == 1
+
+
+def test_validation_rejects_unknown_selector_keys_with_their_path() -> None:
+    # A deny rule skips a selector the engine cannot evaluate, so this typo would deny every call.
+    policy = {
+        "version": 1,
+        "rules": [
+            {"name": "deny-shell", "match": {"tool_ids": "shell_execute"}, "decision": "deny"},
+            {"name": "allow-search", "priority": 100, "match": {"tool_id": "web_search"}, "decision": "allow"},
+        ],
+    }
+
+    errors, warnings = validate_execution_policy(policy)
+
+    assert len(errors) == 1
+    assert errors[0].startswith("execution_policy.rules[0].match.tool_ids is not a supported selector")
+    assert "tool_id" in errors[0]
+    assert warnings == []
+
+
+def test_validation_rejects_empty_selector_values_with_their_path() -> None:
+    errors, _warnings = validate_execution_policy(
+        {
+            "version": 1,
+            "rules": [
+                {"name": "a", "match": {"tool_id": ""}, "decision": "deny"},
+                {"name": "b", "match": {"tool_id": []}, "decision": "deny"},
+                {"name": "c", "match": {"tool_id": None}, "decision": "deny"},
+                {"name": "d", "match": {"tool_id": "web_search", "effect_tags": ["  "]}, "decision": "allow"},
+                {"name": "e", "match": {"tool_id": "web_search", "private_network": ""}, "decision": "deny"},
+            ],
+        }
+    )
+
+    assert [error.split(" ", 1)[0] for error in errors] == [
+        "execution_policy.rules[0].match.tool_id",
+        "execution_policy.rules[1].match.tool_id",
+        "execution_policy.rules[2].match.tool_id",
+        "execution_policy.rules[3].match.effect_tags",
+        "execution_policy.rules[4].match.private_network",
+    ]
+    assert all("is empty" in error for error in errors)
+
+
+def test_publish_validation_reports_a_deny_rule_that_would_deny_every_call() -> None:
+    from koda.control_plane.agent_spec import validate_agent_spec
+
+    policy = {"version": 1, "rules": [{"name": "d", "match": {"tool_id": []}, "decision": "deny"}]}
+
+    report = validate_agent_spec({"execution_policy": policy})
+
+    assert (
+        "execution_policy.rules[0].match.tool_id is empty; a selector needs at least one pattern." in (report["errors"])
+    )
+
+
+def test_validation_rejects_duplicate_rule_names_after_defaulting() -> None:
+    errors, _warnings = validate_execution_policy(
+        {
+            "version": 1,
+            "rules": [
+                {"name": "r", "match": {"tool_id": "file_read"}, "decision": "allow"},
+                {"name": "r", "match": {"tool_id": "file_list"}, "decision": "allow"},
+                {"match": {"tool_id": "file_info"}, "decision": "allow"},
+                {"name": "rule_2", "match": {"tool_id": "file_grep"}, "decision": "allow"},
+                {"id": "legacy", "selectors": {"tool_id": "web_search"}, "decision": "allow"},
+                {"rule_id": "legacy", "selectors": {"tool_id": "fetch_url"}, "decision": "allow"},
+            ],
+        }
+    )
+
+    assert errors == [
+        "execution_policy.rules[1].name duplicates rules[0]: r. Rule names are audit rule ids and must be unique.",
+        "execution_policy.rules[3].name duplicates rules[2]: rule_2. Rule names are audit rule ids and must be unique.",
+        "execution_policy.rules[5].name duplicates rules[4]: legacy. Rule names are audit rule ids and must be unique.",
+    ]
+
+
+def test_allowlist_resolver_matches_tool_and_integration_patterns_like_the_evaluator() -> None:
+    flags = {"fileops": True}
+
+    def allowlist(*rules: dict[str, object]) -> list[str]:
+        return resolve_execution_policy_allowed_tool_ids(
+            execution_policy={"version": 1, "rules": list(rules)},
+            feature_flags=flags,
+        )
+
+    wildcard = allowlist({"name": "allow-files", "match": {"tool_id": "file_*"}, "decision": "allow"})
+    by_integration = allowlist({"name": "allow-fileops", "match": {"integration_id": "fileops"}, "decision": "allow"})
+    both_selectors = allowlist(
+        {"name": "web-files", "match": {"tool_id": "file_*", "integration_id": "web"}, "decision": "allow"}
+    )
+    unevaluable = allowlist({"name": "typo", "match": {"tool_id": "file_*", "team": "core"}, "decision": "allow"})
+    deny_only = allowlist({"name": "deny-files", "match": {"tool_id": "file_*"}, "decision": "deny"})
+
+    for tool_id in ("file_write", "file_edit", "file_move"):
+        evaluation = evaluate_execution_policy(
+            tool_id,
+            {"path": "notes.txt"},
+            resource_access_policy={"integration_grants": {"fileops": {"allow_actions": ["fileops.*"]}}},
+            execution_policy={
+                "version": 1,
+                "rules": [{"name": "allow-files", "match": {"tool_id": "file_*"}, "decision": "allow"}],
+            },
+            known_tool=True,
+        )
+        assert evaluation.rule_id == "allow-files"
+        assert tool_id in wildcard
+        assert tool_id in by_integration
+        assert tool_id not in both_selectors
+        assert tool_id not in unevaluable
+        assert tool_id not in deny_only
+    assert "file_write" in allowlist({"name": "literal", "match": {"tool_id": "file_write"}, "decision": "allow"})

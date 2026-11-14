@@ -616,6 +616,53 @@ _CORE_TOOL_DEFINITIONS: tuple[CoreToolDefinition, ...] = (
 CORE_TOOL_CATALOG: dict[str, CoreToolDefinition] = {definition.id: definition for definition in _CORE_TOOL_DEFINITIONS}
 CORE_TOOL_IDS: tuple[str, ...] = tuple(CORE_TOOL_CATALOG)
 
+# Tools the worker's dispatcher handles that the core catalog does not list.
+_DISPATCHER_ONLY_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "image_generate",
+        "job_update",
+        "request_skill",
+        "squad_artifact_list",
+        "squad_capabilities",
+        "squad_context",
+        "squad_coordinator_demote",
+        "squad_coordinator_elect",
+        "squad_coordinator_get",
+        "squad_dashboard_overview",
+        "squad_inbox_drain",
+        "squad_post",
+        "squad_router_tick",
+        "squad_task_claim",
+        "squad_task_complete",
+        "squad_task_create",
+        "squad_task_escalate",
+        "squad_task_list",
+        "squad_task_update",
+        "squad_telegram_bind",
+        "squad_telegram_binding_get",
+        "squad_telegram_post",
+        "squad_telegram_unbind",
+        "squad_thread_create",
+        "squad_thread_history",
+        "squad_thread_overview",
+    }
+)
+# Every tool id with a handler in ``koda.services.tool_dispatcher._TOOL_HANDLERS``;
+# tests/test_execution_policy_vectors.py keeps the two equal.
+DISPATCHER_TOOL_IDS: frozenset[str] = frozenset(CORE_TOOL_CATALOG) | _DISPATCHER_ONLY_TOOL_IDS
+
+
+def is_known_dispatcher_tool(tool_id: str) -> bool:
+    """Return whether ``tool_id`` is a known tool without consulting a plugin registry.
+
+    A tool is known when the worker's dispatcher has a handler for it or it is an
+    MCP tool (``mcp_<server>__<tool>``). The worker's ``is_known_tool`` also accepts
+    the tools in its plugin registry. The control-plane simulator cannot see that
+    registry, so it uses this predicate alone and reports plugin tools as unknown.
+    """
+    return tool_id in DISPATCHER_TOOL_IDS or tool_id.startswith("mcp_")
+
+
 _CORE_PROVIDER_DEFINITIONS: tuple[CoreProviderDefinition, ...] = (
     CoreProviderDefinition(
         id="claude",

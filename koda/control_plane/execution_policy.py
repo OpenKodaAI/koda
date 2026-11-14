@@ -8,8 +8,8 @@ from typing import Any
 
 from koda.agent_contract import (
     CORE_INTEGRATION_CATALOG,
-    CORE_TOOL_CATALOG,
     build_action_envelope,
+    is_known_dispatcher_tool,
     normalize_string_list,
     resolve_feature_filtered_tools,
 )
@@ -704,8 +704,13 @@ def simulate_execution_policy(
     action envelope from the tool id and its params. The agent's tool, resource
     access and autonomy policies are the inputs its worker receives; the task
     policy is the task kind's default (per-turn runbook and reliability
-    adjustments are not simulated). A tool outside the core catalog that is not
-    an MCP tool is unknown and denied.
+    adjustments are not simulated). A tool is known exactly when the worker's
+    dispatcher has a handler for it or it is an MCP tool
+    (:func:`koda.agent_contract.is_known_dispatcher_tool`, which the worker's
+    ``is_known_tool`` also uses); any other tool is denied as ``unknown_action``.
+    The one gap is plugin tools: the control plane cannot see a worker's plugin
+    registry, so it reports them as unknown, while a worker that has loaded the
+    plugin evaluates them.
     """
     raw = _safe_object(action)
     tool_id = _trimmed(raw.get("tool_id"))
@@ -721,7 +726,7 @@ def simulate_execution_policy(
         tool_policy=_safe_object(agent_spec.get("tool_policy")),
         resource_access_policy=_safe_object(agent_spec.get("resource_access_policy")),
         execution_policy=_safe_object(policy),
-        known_tool=tool_id in CORE_TOOL_CATALOG or tool_id.startswith("mcp_"),
+        known_tool=is_known_dispatcher_tool(tool_id),
         agent_id=agent_id,
     )
     return evaluation.to_dict()

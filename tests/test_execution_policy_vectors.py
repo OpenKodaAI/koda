@@ -23,12 +23,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from koda.agent_contract import DISPATCHER_TOOL_IDS
 from koda.control_plane import api as control_plane_api
 from koda.control_plane.execution_policy import build_policy_catalog
 from koda.control_plane.manager import ControlPlaneManager
 from koda.knowledge.task_policy_defaults import default_execution_policy
 from koda.services import execution_policy as runtime_policy
-from koda.services.tool_dispatcher import is_known_tool
+from koda.services.tool_dispatcher import _TOOL_HANDLERS, is_known_tool
 
 _VECTORS_PATH = Path(__file__).parent / "fixtures" / "execution_policy_vectors.json"
 _DOCUMENT: dict[str, Any] = json.loads(_VECTORS_PATH.read_text(encoding="utf-8"))
@@ -198,3 +199,31 @@ async def test_simulate_route_evaluates_a_draft_policy_sent_with_the_request(mon
     assert payload["action"] == vector["action"]
     assert payload["evaluation"]["envelope"]["tool_id"] == "mcp_github__delete_repo"
     assert payload["evaluation"]["envelope"]["access_level"] == "destructive"
+
+
+def test_known_dispatcher_tools_are_the_dispatchers_handlers() -> None:
+    """The simulator's known-tool set is the worker's handler set (plugin tools aside)."""
+    assert frozenset(_TOOL_HANDLERS) == DISPATCHER_TOOL_IDS
+
+
+@pytest.mark.asyncio
+async def test_simulate_route_equals_the_runtime_engine_for_every_dispatcher_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policies = {
+        "no-rules": {},
+        "allow-everything": {
+            "version": 1,
+            "rules": [{"name": "allow-all", "match": {"tool_id": "*"}, "decision": "allow"}],
+        },
+    }
+    mismatches: list[tuple[str, str, dict[str, Any], dict[str, Any]]] = []
+    for tool_id in sorted(DISPATCHER_TOOL_IDS):
+        for policy_name, policy in policies.items():
+            vector = {"policy": policy, "action": {"tool_id": tool_id, "params": {}}}
+            runtime = _runtime_summary(_runtime_evaluation(vector, monkeypatch))
+            route = _route_summary((await _simulate_route_payload(vector, monkeypatch))["evaluation"])
+            if route != runtime or route["reason_code"] == "unknown_action":
+                mismatches.append((tool_id, policy_name, runtime, route))
+
+    assert mismatches == []

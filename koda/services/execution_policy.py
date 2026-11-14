@@ -13,15 +13,23 @@ Rule semantics:
   (deny > require_approval > allow_with_preview > allow); ties go to the
   highest priority, then the lowest name.
 * Selector values are fnmatch patterns (``*``, ``?``, ``[seq]``), compared
-  case-insensitively. A ``path`` selector also covers everything below the
-  path. An ``effect_tags`` selector needs every listed pattern to match a tag.
-* A selector the engine cannot evaluate (an unknown key, an empty value, or a
-  ``^regex`` pattern, which validation rejects) never widens access: a deny rule
-  skips it, so it can only match more calls, and any other rule does not match.
+  case-insensitively. An ``effect_tags`` selector needs every listed pattern to
+  match a tag.
+* A ``path`` selector also covers everything below the path. The call's path is
+  compared as written and in its lexically normalized form (``.``, ``..`` and
+  repeated ``/`` resolved). A deny rule matches when either form matches,
+  ignoring case; any other rule matches only when both forms match, with case.
+  Symlinks and relative paths are not resolved here.
+* Validation rejects every selector the engine cannot evaluate (an unknown key,
+  an empty value, a ``^regex`` pattern) and duplicate rule names. If one is
+  stored anyway, it never widens access: a deny rule skips it, so it can only
+  match more calls, and any other rule does not match.
 """
 
 from __future__ import annotations
 
+import posixpath
+import re
 from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatchcase
 from typing import Any, cast
@@ -35,6 +43,7 @@ from koda.agent_contract import (
     resolve_action_envelope,
     resolve_allowed_tool_ids,
     resolve_feature_filtered_tools,
+    resolve_integration_action,
 )
 from koda.config import (
     AGENT_EXECUTION_POLICY,
@@ -270,6 +279,11 @@ def _rule_selectors(rule: dict[str, Any]) -> Any:
     return rule.get("selectors") if match is None else match
 
 
+def _rule_name(index: int, rule: dict[str, Any]) -> str:
+    """Return a rule's name (its audit ``rule_id``): ``name``, legacy ``id``/``rule_id``, or ``rule_<index>``."""
+    return _trimmed(rule.get("name") or rule.get("id") or rule.get("rule_id")) or f"rule_{index}"
+
+
 def _normalize_rule(index: int, rule: dict[str, Any]) -> dict[str, Any] | None:
     """Return one rule in the canonical shape, or ``None`` when it can never apply.
 
@@ -287,7 +301,7 @@ def _normalize_rule(index: int, rule: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     normalized: dict[str, Any] = {
-        "name": _trimmed(rule.get("name") or rule.get("id") or rule.get("rule_id")) or f"rule_{index}",
+        "name": _rule_name(index, rule),
         "priority": _as_int(rule.get("priority")) or 0,
         "match": match,
         "decision": decision,
@@ -350,12 +364,38 @@ def normalize_execution_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     return _compact_mapping(raw)
 
 
-def _selector_items(value: Any) -> list[Any]:
-    return list(value) if isinstance(value, (list, tuple, set, frozenset)) else [value]
+def _selector_errors(index: int, match: dict[str, Any]) -> list[str]:
+    """Return an error for each selector of rule ``index`` that the engine cannot evaluate."""
+    errors: list[str] = []
+    for raw_key, value in match.items():
+        key = _trimmed(raw_key)
+        path = f"execution_policy.rules[{index}].match.{key or repr(raw_key)}"
+        patterns = _normalize_match_values(_normalize_selector_value(value, key=key), fold_case=False)
+        problem = _unevaluable_selector(key, patterns)
+        if problem == "unknown_key":
+            errors.append(
+                f"{path} is not a supported selector. "
+                f"Expected one of: {', '.join(sorted(EXECUTION_POLICY_SELECTOR_KEYS))}"
+            )
+        elif problem == "empty":
+            errors.append(f"{path} is empty; a selector needs at least one pattern.")
+        elif problem == "regex":
+            regex_patterns = [pattern for pattern in patterns if pattern.startswith("^")]
+            errors.append(
+                f"{path} uses a regular expression ({', '.join(regex_patterns)}); "
+                "only fnmatch patterns (*, ?, [seq]) are supported."
+            )
+    return errors
 
 
 def validate_execution_policy(policy: dict[str, Any] | None) -> tuple[list[str], list[str]]:
-    """Return ``(errors, warnings)`` for an execution-policy document."""
+    """Return ``(errors, warnings)`` for an execution-policy document.
+
+    Besides the document's shape, validation rejects every selector the engine
+    cannot evaluate (an unknown key, an empty value, a ``^regex`` pattern) and
+    duplicate rule names. A deny rule skips a selector it cannot evaluate, so
+    such a rule would deny every call; and a rule's name is its audit ``rule_id``.
+    """
     raw = _safe_json_object(policy)
     if not raw:
         return [], []
@@ -372,10 +412,20 @@ def validate_execution_policy(policy: dict[str, Any] | None) -> tuple[list[str],
         errors.append("execution_policy.rules must be a list.")
         return errors, warnings
 
+    first_index_by_name: dict[str, int] = {}
     for index, rule in enumerate(rules or []):
         if not isinstance(rule, dict):
             errors.append(f"execution_policy.rules[{index}] must be a mapping.")
             continue
+
+        name = _rule_name(index, rule)
+        if name in first_index_by_name:
+            errors.append(
+                f"execution_policy.rules[{index}].name duplicates rules[{first_index_by_name[name]}]: {name}. "
+                "Rule names are audit rule ids and must be unique."
+            )
+        else:
+            first_index_by_name[name] = index
 
         decision = _trimmed(rule.get("decision")).lower()
         if decision and decision not in EXECUTION_POLICY_DECISIONS:
@@ -389,19 +439,7 @@ def validate_execution_policy(policy: dict[str, Any] | None) -> tuple[list[str],
             errors.append(f"execution_policy.rules[{index}].match must be a mapping.")
             continue
 
-        unknown_selectors = sorted(str(key) for key in match if str(key).strip() not in EXECUTION_POLICY_SELECTOR_KEYS)
-        if unknown_selectors:
-            warnings.append(
-                f"execution_policy.rules[{index}].match contains unsupported selectors: " + ", ".join(unknown_selectors)
-            )
-
-        for key, value in match.items():
-            regex_patterns = [str(item).strip() for item in _selector_items(value) if str(item).strip().startswith("^")]
-            if regex_patterns:
-                errors.append(
-                    f"execution_policy.rules[{index}].match.{str(key).strip()} uses a regular expression "
-                    f"({', '.join(regex_patterns)}); only fnmatch patterns (*, ?, [seq]) are supported."
-                )
+        errors.extend(_selector_errors(index, match))
 
         for key in ("preview_fields",):
             value = rule.get(key)
@@ -449,10 +487,26 @@ def _configured_effective_policy(
     return default_execution_policy(task_kind)
 
 
-def _normalize_match_values(value: Any) -> tuple[str, ...]:
-    """Return a selector's patterns, trimmed and lower-cased, without empty ones."""
+def _normalize_match_values(value: Any, *, fold_case: bool = True) -> tuple[str, ...]:
+    """Return a selector's patterns, trimmed (and lower-cased unless ``fold_case`` is false), without empty ones."""
     items = value if isinstance(value, (list, tuple, set, frozenset)) else () if value is None else (value,)
-    return tuple(str(item).strip().lower() for item in items if str(item).strip())
+    patterns = (str(item).strip() for item in items)
+    return tuple(pattern.lower() if fold_case else pattern for pattern in patterns if pattern)
+
+
+def _unevaluable_selector(key: str, patterns: tuple[str, ...]) -> str | None:
+    """Return why the engine cannot evaluate a selector (``unknown_key``, ``empty``, ``regex``), or ``None``.
+
+    Validation rejects each of these; the engine treats one that is stored anyway
+    as described in :func:`_rule_matches`.
+    """
+    if key not in EXECUTION_POLICY_SELECTOR_KEYS:
+        return "unknown_key"
+    if not patterns:
+        return "empty"
+    if any(pattern.startswith("^") for pattern in patterns):
+        return "regex"
+    return None
 
 
 def _value_matches(value: Any, patterns: tuple[str, ...]) -> bool:
@@ -461,12 +515,34 @@ def _value_matches(value: Any, patterns: tuple[str, ...]) -> bool:
     return bool(normalized_value) and any(fnmatchcase(normalized_value, pattern) for pattern in patterns)
 
 
-def _path_matches(value: str | None, patterns: tuple[str, ...]) -> bool:
-    normalized_value = str(value or "").strip().lower()
-    return bool(normalized_value) and any(
-        fnmatchcase(normalized_value, pattern) or fnmatchcase(normalized_value, pattern.rstrip("/") + "/*")
-        for pattern in patterns
-    )
+def _path_forms(value: Any) -> tuple[str, ...]:
+    """Return a path as written and, when it differs, its lexical normalization (``.``, ``..``, ``//`` resolved)."""
+    written = str(value or "").strip()
+    if not written:
+        return ()
+    normalized = posixpath.normpath(re.sub(r"/{2,}", "/", written))
+    return (written,) if normalized == written else (written, normalized)
+
+
+def _path_pattern_matches(path: str, pattern: str) -> bool:
+    """Return whether ``path`` is ``pattern`` or lies below it (fnmatch)."""
+    base = pattern.rstrip("/") or "/"
+    return fnmatchcase(path, base) or fnmatchcase(path, base.rstrip("/") + "/*")
+
+
+def _path_matches(value: Any, patterns: tuple[str, ...], *, deny: bool) -> bool:
+    """Match a path selector so that a deny rule only ever matches more, and any other rule less.
+
+    A deny rule matches when the path as written or its normalized form matches,
+    ignoring case. Any other rule matches only when both forms match, with case.
+    """
+    forms = _path_forms(value)
+    if not forms:
+        return False
+    if deny:
+        lowered = tuple(pattern.lower() for pattern in patterns)
+        return any(_path_pattern_matches(form.lower(), pattern) for form in forms for pattern in lowered)
+    return all(any(_path_pattern_matches(form, pattern) for pattern in patterns) for form in forms)
 
 
 def _effect_tags_match(effect_tags: tuple[str, ...], patterns: tuple[str, ...]) -> bool:
@@ -474,11 +550,12 @@ def _effect_tags_match(effect_tags: tuple[str, ...], patterns: tuple[str, ...]) 
     return all(any(fnmatchcase(tag, pattern) for tag in tags) for pattern in patterns)
 
 
-def _selector_matches(key: str, patterns: tuple[str, ...], *, envelope: ActionEnvelope, task_kind: str) -> bool:
+def _selector_matches(key: str, value: Any, *, envelope: ActionEnvelope, task_kind: str, deny: bool) -> bool:
+    if key == "path":
+        return _path_matches(envelope.path, _normalize_match_values(value, fold_case=False), deny=deny)
+    patterns = _normalize_match_values(value)
     if key == "effect_tags":
         return _effect_tags_match(envelope.effect_tags, patterns)
-    if key == "path":
-        return _path_matches(envelope.path, patterns)
     if key == "task_kind":
         return _value_matches(task_kind, patterns)
     return _value_matches(getattr(envelope, key), patterns)
@@ -487,14 +564,13 @@ def _selector_matches(key: str, patterns: tuple[str, ...], *, envelope: ActionEn
 def _rule_matches(rule: dict[str, Any], *, envelope: ActionEnvelope, task_kind: str) -> bool:
     is_deny = rule.get("decision") == "deny"
     for key, value in _safe_json_object(rule.get("match")).items():
-        patterns = _normalize_match_values(value)
-        if key not in EXECUTION_POLICY_SELECTOR_KEYS or not patterns or any(item.startswith("^") for item in patterns):
+        if _unevaluable_selector(key, _normalize_match_values(value)) is not None:
             # The engine cannot evaluate this selector. It must never widen access:
             # a deny rule skips it (matching more calls); any other rule does not match.
             if is_deny:
                 continue
             return False
-        if not _selector_matches(key, patterns, envelope=envelope, task_kind=task_kind):
+        if not _selector_matches(key, value, envelope=envelope, task_kind=task_kind, deny=is_deny):
             return False
     return True
 
@@ -571,7 +647,14 @@ def resolve_execution_policy_allowed_tool_ids(
     execution_policy: dict[str, Any] | None = None,
     feature_flags: dict[str, bool] | None = None,
 ) -> list[str]:
-    """Return the effective prompt/runtime tool allowlist for one agent."""
+    """Return the effective prompt/runtime tool allowlist for one agent.
+
+    With execution-policy rules, the allowlist is the secure default plus every
+    available tool that a non-deny rule can match: the rule's ``tool_id`` and
+    ``integration_id`` patterns (fnmatch, as the evaluator applies them) match the
+    tool's id and integration, and the rule has no selector the evaluator cannot
+    evaluate. Other selectors depend on the call, so the evaluator decides them.
+    """
     flags = feature_flags or _configured_feature_flags()
     available_tool_ids = {
         str(item["id"]) for item in resolve_feature_filtered_tools(flags) if bool(item.get("available"))
@@ -579,14 +662,29 @@ def resolve_execution_policy_allowed_tool_ids(
     resolved_execution_policy = _configured_execution_policy(execution_policy)
     if resolved_execution_policy.get("rules"):
         allowed: set[str] = {tool_id for tool_id in available_tool_ids if is_tool_allowed_by_secure_default(tool_id)}
+        integration_ids: dict[str, str] = {}
+
+        def integration_of(tool_id: str) -> str:
+            if tool_id not in integration_ids:
+                integration_ids[tool_id] = resolve_integration_action(tool_id, {}).integration_id
+            return integration_ids[tool_id]
+
         for rule in resolved_execution_policy.get("rules") or []:
             if str(rule.get("decision") or "").strip().lower() == "deny":
                 continue
-            selectors = _safe_json_object(rule.get("match"))
-            for field_name in ("tool_id", "integration_id"):
-                for candidate in _normalize_match_values(selectors.get(field_name)):
-                    if candidate in available_tool_ids:
-                        allowed.add(candidate)
+            match = _safe_json_object(rule.get("match"))
+            if any(_unevaluable_selector(key, _normalize_match_values(value)) for key, value in match.items()):
+                continue  # The evaluator never matches this rule.
+            tool_patterns = _normalize_match_values(match.get("tool_id"))
+            integration_patterns = _normalize_match_values(match.get("integration_id"))
+            if not tool_patterns and not integration_patterns:
+                continue
+            allowed.update(
+                tool_id
+                for tool_id in available_tool_ids
+                if (not tool_patterns or _value_matches(tool_id, tool_patterns))
+                and (not integration_patterns or _value_matches(integration_of(tool_id), integration_patterns))
+            )
         return sorted(allowed)
     return resolve_allowed_tool_ids(_configured_tool_policy(tool_policy), feature_flags=flags)
 

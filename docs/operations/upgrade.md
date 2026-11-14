@@ -15,6 +15,42 @@ multi-supervisor deployments; cluster mode adds a drain step.
    docker compose pull
    ```
 
+### Execution-policy rules
+
+Agent execution-policy rules (`execution_policy.rules`) now follow the
+worker's rule engine everywhere: in publish validation, in the
+control-plane simulator (`POST /api/control-plane/agents/{agent_id}/execution-policy/evaluate`)
+and in the worker. Workers do not receive these rules yet, so this
+release does not change what agents can run. It does change how
+existing rules are validated and simulated:
+
+- **Publish rejects rules the engine cannot evaluate.** A `^regex`
+  pattern, an unknown selector key (for example a misspelt `tool_ids`),
+  an empty selector value and two rules with the same name are now
+  validation errors. An agent with any of them cannot be published, for
+  any change, until the rule is fixed. Each error names the rule and the
+  selector, for example
+  `execution_policy.rules[0].match.tool_ids is not a supported selector`.
+  Rewrite a regex as an fnmatch pattern: `^mcp_.*__delete_.*$` becomes
+  `mcp_*__delete_*`.
+- **The most restrictive matching rule wins.** The simulator used to
+  take the first match by priority. Now a matching `deny` beats every
+  `require_approval`, `allow_with_preview` and `allow` rule, whatever
+  their priority.
+- **An `effect_tags` list needs every listed tag.** The simulator used to
+  match a rule when any listed tag was present. Now, as in the worker,
+  every listed tag must be present, so a deny rule that lists several
+  tags matches fewer calls. To deny a call that has any of the tags,
+  write one rule per tag.
+- **A `path` selector covers the path and everything below it.** The
+  simulator used to match only that exact path. A deny rule also matches
+  the normalized path (`..` and repeated `/` resolved) and ignores case;
+  an allow rule matches only when the path as written and its normalized
+  form are both inside it, with case.
+
+After the upgrade, send the calls you care about to the simulator to see
+what each agent's rules now decide.
+
 ## Step 1 — schema migration gate
 
 ```bash
