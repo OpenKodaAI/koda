@@ -11,6 +11,7 @@ import pytest
 from aiohttp import web
 
 from koda.services.openai_compatible_runner import (
+    OPENAI_COMPATIBLE_PROVIDERS,
     _append_citations_footer,
     _build_chat_payload,
     _build_citations_footer,
@@ -26,6 +27,7 @@ from koda.services.openai_compatible_runner import (
     clear_openai_compatible_capability_cache,
     get_provider_profile,
 )
+from koda.services.provider_auth import PROVIDER_BASE_URL_ENV_KEYS
 from koda.services.provider_http_profile import ProviderHttpProfile
 from koda.services.provider_runtime import ProviderCapabilities
 
@@ -657,7 +659,7 @@ def _completion(text: str) -> dict:
     return {"choices": [{"message": {"role": "assistant", "content": text}}], "usage": {}}
 
 
-async def _start_provider_server(*, redirect_chat: bool = False):
+async def _start_provider_server(*, redirect_chat: bool = False, redirect_models: bool = False):
     """Loopback stand-in for a provider; records every path it serves."""
     from aiohttp import web
 
@@ -665,6 +667,8 @@ async def _start_provider_server(*, redirect_chat: bool = False):
 
     async def models(request):
         hits.append(request.path)
+        if redirect_models:
+            raise web.HTTPTemporaryRedirect("/internal")
         return web.json_response({"data": []})
 
     async def chat(request):
@@ -677,10 +681,16 @@ async def _start_provider_server(*, redirect_chat: bool = False):
         hits.append(request.path)
         return web.json_response(_completion("internal-secret"))
 
+    async def internal_page(request):
+        hits.append(request.path)
+        # A probe that reached this would copy the body into ProviderCapabilities.errors.
+        return web.Response(status=404, text="internal-secret")
+
     app = web.Application()
     app.router.add_get("/v1/models", models)
     app.router.add_post("/v1/chat/completions", chat)
     app.router.add_post("/internal", internal)
+    app.router.add_get("/internal", internal_page)
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", 0)
@@ -814,3 +824,77 @@ class TestProviderRequestsStayOnPublicAddresses:
         assert chunks == []
         assert collector["error"] is True
         assert "HTTP 307" in collector["error_message"]
+
+    @pytest.mark.asyncio
+    async def test_capability_probe_does_not_follow_unchecked_redirects(self):
+        from koda.services.openai_compatible_runner import _probe_capabilities
+
+        runner, port, hits = await _start_provider_server(redirect_models=True)
+        try:
+            with (
+                _no_provider_env(),
+                _loopback_counts_as_public(),
+                _provider_dns(precheck_ip="127.0.0.1", connect_ip="127.0.0.1"),
+            ):
+                capability = await _probe_capabilities(_local_provider_profile(port), "new_turn")
+        finally:
+            await runner.cleanup()
+
+        assert hits == ["/v1/models"]
+        assert not any("internal-secret" in message for message in [*capability.errors, *capability.warnings])
+
+
+class TestProcessEnvBaseUrlIsAnOperatorOverride:
+    """A base URL from ``.env`` or the process env counts as an override, like a control-plane one.
+
+    The profile builders read the same variable into ``profile.base_url``, so the
+    override has to be judged against the vendor default, not against the profile.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _fresh_profiles(self):
+        from koda.services.openai_compatible_runner import reset_provider_profile_cache
+
+        reset_provider_profile_cache()
+        yield
+        reset_provider_profile_cache()
+
+    @pytest.mark.parametrize("provider_id", sorted(OPENAI_COMPATIBLE_PROVIDERS))
+    def test_process_env_base_url_may_point_at_private_hosts(self, provider_id, monkeypatch):
+        from koda.services.openai_compatible_runner import _allows_private_base_url
+
+        monkeypatch.setenv(PROVIDER_BASE_URL_ENV_KEYS[provider_id], "http://100.100.1.1:8000")
+        profile = get_provider_profile(provider_id)
+
+        assert profile.base_url == "http://100.100.1.1:8000"
+        assert _allows_private_base_url(profile, {}) is True
+
+    @pytest.mark.parametrize("provider_id", sorted(OPENAI_COMPATIBLE_PROVIDERS))
+    def test_vendor_default_base_url_stays_guarded(self, provider_id, monkeypatch):
+        from koda.services.openai_compatible_runner import _allows_private_base_url, reset_provider_profile_cache
+
+        env_key = PROVIDER_BASE_URL_ENV_KEYS[provider_id]
+        monkeypatch.delenv(env_key, raising=False)
+        vendor_default = get_provider_profile(provider_id).base_url
+        assert _allows_private_base_url(get_provider_profile(provider_id), {}) is False
+
+        for configured in (vendor_default, vendor_default + "/"):
+            monkeypatch.setenv(env_key, configured)
+            reset_provider_profile_cache()
+            assert _allows_private_base_url(get_provider_profile(provider_id), {}) is False
+
+    @pytest.mark.asyncio
+    async def test_probe_reaches_process_env_base_url_on_a_private_host(self, monkeypatch):
+        from koda.services.openai_compatible_runner import _probe_capabilities
+
+        runner, port, hits = await _start_provider_server()
+        monkeypatch.setenv("DEEPSEEK_API_BASE_URL", f"http://127.0.0.1:{port}")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
+        try:
+            capability = await _probe_capabilities(get_provider_profile("deepseek"), "new_turn")
+        finally:
+            await runner.cleanup()
+
+        assert capability.errors == []
+        assert capability.can_execute is True
+        assert hits == ["/v1/models"]
