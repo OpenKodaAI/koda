@@ -570,7 +570,7 @@ async def test_the_bundled_proxy_passes_the_largest_upload_in_a_real_nginx(nginx
     photo limit before nginx checks a declared length, and nginx reads a chunked body in that same
     location. Every request the dashboard gets answers 413 over 1 MiB before any upstream sees it,
     the photo routes without a token included: a client without a session cannot push large bodies
-    at the dashboard, which buffers them (up to 10 MiB in next 16.2.6) before any check. The
+    at the dashboard, which buffers them (up to 10 MiB in next 16.4.6) before any check. The
     dashboard's own photo upload, a cropped 512-pixel JPEG, fits within 1 MiB
     (tests/test_release_proxy_routing.py), and a client cannot ask for the upload location itself.
     """
