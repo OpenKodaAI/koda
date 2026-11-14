@@ -125,9 +125,11 @@ their stronger password checks.
   (`_normalize_recovery_code` in `koda/control_plane/operator_auth.py`).
   `abcd efgh jklm`, `ABCDEFGHJKLM` and ` abcd-efgh-jklm ` all match the issued
   `ABCD-EFGH-JKLM`; a code with a missing, wrong or non-ASCII look-alike character (for
-  example `ſ` in place of `S`) still fails with the generic error. The `/forgot-password`
-  screen shows the field in uppercase and submits it upper-cased so the input matches the
-  printed code, but correctness does not depend on the client.
+  example `ſ` in place of `S`) still fails with the generic error, through the
+  `/forgot-password` screen and direct API calls alike. The screen only displays the field
+  in uppercase (CSS) so the input looks like the printed code; it submits the value
+  trimmed but otherwise as typed, with no client-side case mapping, so the control plane
+  is the only canonicalizer.
 - Each code can be used exactly once, enforced by `consumed_at` and `generation` matching
   against `cp_operator_users.recovery_generation`.
 - After a successful `POST /api/control-plane/auth/password/recover`:
