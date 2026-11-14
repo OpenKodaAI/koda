@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import re
+import unicodedata
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -12,8 +13,30 @@ from koda.services.runtime.redaction import redact_value
 _ZERO_WIDTH_OR_BIDI = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
-# A standalone `.env` file name (`.env`, `.env.local`), not an identifier member such as `process.env`.
-_DOTENV_FILE = r"(?<!\w)\.env(?:\.\w+)?(?!\w)"
+# A `.env` file name (`.env`, `.env.local`, `.envrc`), not an identifier member such as `process.env`
+# nor a template that holds no secrets (`.env.example`, `docs/.env.md`).
+_DOTENV_FILE = r"(?<!\w)\.env(?:rc)?(?!\.(?:example|sample|template|dist|md)\b)(?:\.\w+)?(?!\w)"
+# Up to 80 characters that do not cross a clause break (`, `, `; `, `. ` and so on).
+_SAME_CLAUSE = r"(?:(?![.!?;,](?:\s|$)).){0,80}?"
+# Shell commands that print a file: only their own arguments (at most two) may sit before `.env`.
+_DOTENV_SHELL_READ = r"\b(?:cat|less|more|head|tail|grep|source|type)\b(?:\s+\S+){0,2}?\s+"
+# Verbs that read or send a file, in English and PT-BR imperative forms.
+_DOTENV_READ_OR_SEND_VERBS = (
+    r"\b(?:open|read|print|show|display|dump|share|email|include|paste|send|post|upload|exfiltrate|leak|reveal"
+    r"|expose|leiam?|abram?|mostrem?|exibam?|imprimam?|envie|enviem|mandem?|compartilhem?|incluam?|colem?"
+    r"|postem?|revelem?|exponham?)\b"
+)
+# A secret-ish word, also inside an identifier such as `SECRET_TOKEN`.
+_SECRET_WORD = r"(?<![^\W_])(?:secret|token|credential|ssh key|api key)(?![^\W_])"
+# PT-BR instruction targets: instructions on their own only after "todas as" / "suas", and rules or
+# policies only with a qualifier that points at the agent's own instructions.
+_PT_INSTRUCTIONS = r"(?:instru[cç](?:[oõ]es|[aã]o)|orienta[cç][oõ]es|diretrizes)"
+_PT_INSTRUCTION_TARGET = (
+    r"(?:\b(?:todas as|suas|tuas)\s+" + _PT_INSTRUCTIONS + r"\b"
+    r"|\b(?:" + _PT_INSTRUCTIONS + r"|regras?|pol[ií]ticas?)\s+"
+    r"(?:anteriores|acima|originais|iniciais|ocultas|d[oe] sistema|do desenvolvedor)\b"
+    r"|\b(?:prompt|mensagem) d[oe] (?:sistema|desenvolvedor)\b|\bsystem prompt\b)"
+)
 
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
@@ -22,13 +45,14 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"\b(ignore|disregard|override|forget)\b.{0,80}\b(previous|prior|system|developer|instruction|policy|rules?)\b"
             r"|\breveal\b.{0,80}\b(system prompt|developer message|hidden instructions?)\b"
             r"|\byou are now\b.{0,80}\b(system|developer|admin)\b"
-            # PT-BR equivalents of the three English patterns above.
-            r"|\b(ignore|ignora|ignorar|desconsidere|desconsiderar|despreze|desprezar|esque[cç]a|esquecer)\b.{0,80}"
-            r"\b(anteriores?|instru[cç](?:[oõ]es|[aã]o)|sistema|desenvolvedor|pol[ií]ticas?|regras?)\b"
-            r"|\b(revele|revelar|mostre|mostrar|exiba|exibir)\b.{0,80}"
-            r"\b(prompt do sistema|mensagem do desenvolvedor|instru[cç](?:[oõ]es|[aã]o) ocultas?)\b"
-            r"|\b(voc[eê] agora [eé]|agora voc[eê] [eé]|a partir de agora,? voc[eê] [eé])\b.{0,80}"
-            r"\b(sistema|desenvolvedor|admin(?:istrador)?)\b",
+            # PT-BR: imperative ignore/override, reveal, and role takeover. Descriptive or infinitive
+            # forms ("o linter ignora", "ignorar linhas") are ordinary notes, not instructions.
+            r"|\b(?:ignorem?|desconsiderem?|desprezem?|esque[cç]am?|sobrescrevam?|anulem?)\b.{0,80}?"
+            + _PT_INSTRUCTION_TARGET
+            + r"|\b(?:revelem?|mostrem?|exibam?)\b.{0,80}?"
+            r"\b(?:prompt d[oe] sistema|system prompt|mensagem do desenvolvedor|instru[cç](?:[oõ]es|[aã]o) ocultas?)\b"
+            r"|\b(?:voc[eê] agora [eé]|agora voc[eê] [eé]|(?:a partir de agora|de agora em diante),? voc[eê] [eé])"
+            r"\s+(?:(?:o|a|um|uma|seu|sua)\s+)?(?:administrador|admin|desenvolvedor|sistema|root)\b",
             re.IGNORECASE | re.DOTALL,
         ),
     ),
@@ -36,17 +60,24 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         "exfiltration",
         re.compile(
             r"\b(curl|wget|nc|netcat|scp|rsync)\b.{0,120}\b(http|https|ftp|ssh)://"
-            r"|\b(post|upload|exfiltrate|send)\b.{0,120}"
-            r"(\b(secret|token|credential|ssh key|api key)\b|" + _DOTENV_FILE + ")",
+            r"|\b(post|upload|exfiltrate|send)\b.{0,120}(" + _SECRET_WORD + "|" + _DOTENV_FILE + ")",
             re.IGNORECASE | re.DOTALL,
         ),
     ),
     (
         "secret_path",
         re.compile(
-            r"/etc/passwd|/etc/shadow|~/.ssh/|\.ssh/id_(rsa|ed25519)|\.aws/credentials|\.kube/config"
-            # `.env` only behind a path separator or a read verb, so `process.env.X` stays allowed.
-            r"|[/\\]" + _DOTENV_FILE + r"|\b(cat|less|more|open|read|print|tail|head)\b.{0,80}" + _DOTENV_FILE,
+            "|".join(
+                (
+                    r"/etc/passwd|/etc/shadow|~/.ssh/|\.ssh/id_(rsa|ed25519)|\.aws/credentials|\.kube/config",
+                    # `.env` only behind a path separator, a shell read, a read or send verb in the same
+                    # clause, or before "paste" ("copie o .env e cole aqui"), so `process.env.X` stays allowed.
+                    r"[/\\]" + _DOTENV_FILE,
+                    _DOTENV_SHELL_READ + _DOTENV_FILE,
+                    _DOTENV_READ_OR_SEND_VERBS + _SAME_CLAUSE + _DOTENV_FILE,
+                    _DOTENV_FILE + _SAME_CLAUSE + r"\b(?:paste|colem?)\b",
+                )
+            ),
             re.IGNORECASE | re.DOTALL,
         ),
     ),
@@ -127,12 +158,19 @@ class MemorySafetyError(ValueError):
 
 
 def _stringify(value: Any) -> str:
+    """Join a payload's keys and text with real newlines.
+
+    JSON would turn a newline into the two characters backslash-n, so the word before a line-initial
+    `.env` or verb would end in `n` and every word-boundary anchor would miss it.
+    """
     if isinstance(value, str):
         return value
-    try:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-    except TypeError:
-        return str(value)
+    if isinstance(value, Mapping):
+        items = sorted(value.items(), key=lambda pair: str(pair[0]))
+        return "\n".join(f"{key}\n{_stringify(item)}" for key, item in items)
+    if isinstance(value, (list, tuple)):
+        return "\n".join(_stringify(item) for item in value)
+    return "" if value is None else str(value)
 
 
 def _redacted_preview(text: str, *, limit: int = 240) -> str:
@@ -156,7 +194,8 @@ def _redacted_preview(text: str, *, limit: int = 240) -> str:
 def scan_memory_text(value: Any, *, surface: str = "memory") -> MemorySafetyResult:
     """Scan user/model-authored durable text before persistence."""
 
-    text = _stringify(value)
+    # NFC, so a decomposed accent (`e` + U+0301) matches the precomposed letters in the patterns.
+    text = unicodedata.normalize("NFC", _stringify(value))
     findings: list[MemorySafetyFinding] = []
     if _ZERO_WIDTH_OR_BIDI.search(text) or _CONTROL_CHARS.search(text):
         findings.append(

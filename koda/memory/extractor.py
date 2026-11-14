@@ -287,6 +287,7 @@ def _parse_extraction_result(
                     "content": content,
                     "subject": item.get("subject"),
                     "claim_kind": item.get("claim_kind"),
+                    "decision_source": item.get("decision_source"),
                     "retention_reason": item.get("retention_reason"),
                     "evidence_refs": item.get("evidence_refs"),
                 },
