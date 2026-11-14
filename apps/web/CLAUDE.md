@@ -91,8 +91,8 @@ Modal/drawer/popover open and close must never feel abrupt. Pair the glass-blur 
 | `app-drawer-anim-right` | Right-side drawers. |
 | `app-drawer-anim-left` | Left-side drawers. |
 | `app-floating-anim` | Inline-portaled floating menus (e.g. `CommandBar` inline dropdown). Subtle fade + 4px lift + 0.98 scale, faster (160ms) than modals. |
-| Radix data-state animations | `Drawer`, `Popover`, `Tooltip`, `Select`, `CommandBarModal` (already wired via `data-[state=open]:animate-in`). |
-| Framer Motion | `agent-switcher`, `language-switcher`, `settings-warning-indicator`, `agent-catalog`'s `WorkspaceSelectorDropdown` / `CreatePopover`, `tour-coachmark` — these have bespoke choreography, leave them. |
+| Radix data-state animations | `Drawer`, `Popover`, `Tooltip`, `Select`, `LanguageSwitcher` (Radix Select), `CommandBarModal` (already wired via `data-[state=open]:animate-in`). |
+| Framer Motion | `agent-switcher`, `settings-warning-indicator`, `agent-catalog`'s `WorkspaceSelectorDropdown` / `CreatePopover`, `tour-coachmark` — these have bespoke choreography, leave them. |
 
 Pattern:
 

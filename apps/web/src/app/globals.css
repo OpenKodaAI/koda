@@ -1100,10 +1100,8 @@ button[aria-label="Open Next Dev Tools"] {
   transform: translateY(-0.01em);
 }
 
+/* Positioned by Radix Select (popper); z-index is copied to its wrapper. */
 .language-switcher__menu {
-  position: absolute;
-  top: calc(100% + 0.55rem);
-  right: 0;
   z-index: 80;
   width: min(11rem, calc(100vw - 1.5rem));
   overflow: hidden;
@@ -1128,6 +1126,7 @@ button[aria-label="Open Next Dev Tools"] {
   padding: 0.62rem 0.72rem;
   text-align: left;
   color: var(--text-secondary);
+  cursor: pointer;
   transition:
     background-color 140ms ease,
     color 140ms ease;
@@ -1142,13 +1141,16 @@ button[aria-label="Open Next Dev Tools"] {
 
 .language-switcher__option:hover,
 .language-switcher__option:focus-visible,
+.language-switcher__option[data-highlighted],
 .language-switcher__option--active {
   background: var(--surface-hover);
   color: var(--text-primary);
 }
 
+/* Keep the global focus ring, drawn inside the option so the menu edge
+   does not clip it. */
 .language-switcher__option:focus-visible {
-  outline: none;
+  outline-offset: -2px;
 }
 
 .language-switcher__option-label {
@@ -7973,6 +7975,7 @@ input[type="range"]::-moz-range-thumb {
 
 :where(html.dark, html[data-theme="dark"]) .language-switcher__option:hover,
 :where(html.dark, html[data-theme="dark"]) .language-switcher__option:focus-visible,
+:where(html.dark, html[data-theme="dark"]) .language-switcher__option[data-highlighted],
 :where(html.dark, html[data-theme="dark"]) .language-switcher__option--active {
   background: rgba(255, 255, 255, 0.045);
 }
