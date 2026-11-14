@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { clientIpFromHeaders, rateLimitKey } from "@/lib/client-ip";
+import { insecureCookieTransport, secureCookiesEnabled } from "@/lib/cookie-transport";
 import { isPublicControlPlaneApiPath } from "@/lib/public-control-plane-paths";
 import { isMutationMethod, isTrustedDashboardRequest } from "@/lib/request-origin";
 import { unsealWebOperatorToken } from "@/lib/web-operator-session";
@@ -17,14 +18,6 @@ const SETUP_PATH = "/setup";
 const LOGIN_PATH = "/login";
 const FORGOT_PATH = "/forgot-password";
 const AUTH_PATHS: ReadonlyArray<string> = [LOGIN_PATH, FORGOT_PATH, SETUP_PATH];
-
-const ALLOW_INSECURE_COOKIES =
-  process.env.NODE_ENV !== "production" &&
-  String(process.env.ALLOW_INSECURE_COOKIES).trim().toLowerCase() === "true";
-const SECURE_COOKIES =
-  !ALLOW_INSECURE_COOKIES &&
-  (process.env.NODE_ENV === "production" ||
-    String(process.env.SECURE_COOKIES).trim().toLowerCase() === "true");
 
 function isPublicAssetPath(pathname: string): boolean {
   return (
@@ -54,7 +47,7 @@ function clearSessionCookie(response: NextResponse): void {
     sameSite: "strict",
     path: "/",
     maxAge: 0,
-    secure: SECURE_COOKIES,
+    secure: secureCookiesEnabled(),
   });
 }
 
@@ -116,8 +109,12 @@ function pageAuthGate(request: NextRequest): NextResponse {
     return response;
   }
 
+  // Over plain HTTP from a non-loopback host the Secure owner hint never comes
+  // back, so it cannot tell /setup from /login. Send the operator to /login,
+  // which explains that HTTPS is required instead of redirecting again (J-14).
+  const insecureTransport = insecureCookieTransport(request.headers, request.nextUrl) !== null;
   const target = request.nextUrl.clone();
-  target.pathname = hasOwnerHint ? LOGIN_PATH : SETUP_PATH;
+  target.pathname = hasOwnerHint || insecureTransport ? LOGIN_PATH : SETUP_PATH;
   target.search = "";
 
   const safeNext = buildSafeNext(pathname, search);

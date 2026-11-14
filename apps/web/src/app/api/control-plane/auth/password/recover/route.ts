@@ -6,7 +6,9 @@ import {
   parseSchemaOrThrow,
   upstreamFetch,
 } from "@/lib/api-utils";
+import { rateLimitedAuthResponse } from "@/lib/auth-rate-limited-response";
 import { forwardedClientIpHeaders } from "@/lib/client-ip";
+import { insecureCookieTransport, insecureCookieTransportResponse } from "@/lib/cookie-transport";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 
 const CONTROL_PLANE_BASE_URL = process.env.CONTROL_PLANE_BASE_URL || "http://127.0.0.1:8090";
@@ -25,6 +27,14 @@ export async function POST(request: NextRequest) {
       { error: "Cross-site dashboard mutations are blocked." },
       { status: 403, headers: { "Cache-Control": "no-store" } },
     );
+  }
+  // Over plain HTTP from a non-loopback host the recovery code and the new
+  // password would cross the network in clear text, and the reset would end on
+  // a /login that cannot sign in from this browser. Refuse before the control
+  // plane consumes the code and revokes every session (J-14).
+  const insecureTransport = insecureCookieTransport(request.headers, request.nextUrl);
+  if (insecureTransport) {
+    return insecureCookieTransportResponse(insecureTransport);
   }
   try {
     const payload = parseSchemaOrThrow(
@@ -45,10 +55,14 @@ export async function POST(request: NextRequest) {
       },
       { label: "Recovery service" },
     );
+    // The per-client rate limit keeps its 429 and wait: it is the same for every
+    // identifier, so it reveals nothing about an account (ADR-038).
+    const rateLimited = rateLimitedAuthResponse(upstream);
+    if (rateLimited) return rateLimited;
     if (!upstream.ok) {
       // Generic message — recovery flow is also identifier-bearing and must
-      // stay indistinguishable across "unknown user" / "wrong code" / "rate
-      // limited" (CLAUDE.md auth contract).
+      // stay indistinguishable across "unknown user" / "wrong code" / "locked
+      // account" (CLAUDE.md auth contract).
       return NextResponse.json(
         { error: "Invalid recovery details." },
         { status: upstream.status || 400, headers: { "Cache-Control": "no-store" } },

@@ -6,7 +6,9 @@ import {
   parseSchemaOrThrow,
   upstreamFetch,
 } from "@/lib/api-utils";
+import { rateLimitedAuthResponse } from "@/lib/auth-rate-limited-response";
 import { forwardedClientIpHeaders } from "@/lib/client-ip";
+import { insecureCookieTransport, insecureCookieTransportResponse } from "@/lib/cookie-transport";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
   assertWebOperatorSessionSecretConfigured,
@@ -29,6 +31,13 @@ export async function POST(request: NextRequest) {
       { status: 403, headers: { "Cache-Control": "no-store" } },
     );
   }
+  // Over plain HTTP from a non-loopback host the browser drops the Secure
+  // session cookie, so a sign-in here would start a session nobody can use.
+  // Refuse before the control plane sees the credentials (J-14).
+  const insecureTransport = insecureCookieTransport(request.headers, request.nextUrl);
+  if (insecureTransport) {
+    return insecureCookieTransportResponse(insecureTransport);
+  }
   try {
     assertWebOperatorSessionSecretConfigured();
     const payload = parseSchemaOrThrow(
@@ -50,9 +59,13 @@ export async function POST(request: NextRequest) {
       { label: "Login service" },
     );
     const data = (await upstream.json().catch(() => ({}))) as Record<string, unknown>;
+    // The per-client rate limit keeps its 429 and wait: it is the same for every
+    // identifier, so it reveals nothing about an account (ADR-038).
+    const rateLimited = rateLimitedAuthResponse(upstream);
+    if (rateLimited) return rateLimited;
     if (!upstream.ok || typeof data.session_token !== "string" || !data.session_token.trim()) {
       // Generic message so the response is indistinguishable across
-      // wrong-password / unknown-user / rate-limited (CLAUDE.md auth contract).
+      // wrong-password / unknown-user / locked account (CLAUDE.md auth contract).
       // Upstream networking failures are caught above by `upstreamFetch` and
       // surface as a 503 — they do NOT land here.
       return NextResponse.json(

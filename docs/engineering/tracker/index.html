@@ -1,0 +1,344 @@
+<meta name="dash-one-writer">
+<style>
+.kt { display: flex; flex-direction: column; gap: var(--cds-gap-xl); font-family: var(--font-anthropic-sans); color: var(--color-fg); }
+.kt-head { display: flex; flex-direction: column; gap: var(--cds-gap-sm); }
+.kt-title { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); margin: 0; text-wrap: balance; }
+.kt-lede { margin: 0; font-size: var(--cds-font-size-body); max-width: 68ch; line-height: 1.5; }
+.kt-lede b { font-variant-numeric: tabular-nums; }
+.kt-updated { margin: 0; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+.kt-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--cds-gap-md); }
+.kt-card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); display: flex; flex-direction: column; gap: var(--cds-gap-xs); min-width: 0; }
+.kt-card-label { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); display: flex; align-items: center; gap: var(--cds-gap-xs); }
+.kt-card-value { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.kt-card-note { font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.kt-sec { display: flex; flex-direction: column; gap: var(--cds-gap-sm); min-width: 0; }
+.kt-h2 { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); margin: 0; }
+.kt-sub { margin: 0; color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); max-width: 72ch; }
+.kt-legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-md); margin: 0; padding: 0; list-style: none; font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+.kt-legend li { display: flex; align-items: center; gap: var(--cds-gap-xs); }
+.kt-sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex: none; }
+.kt-sw--done { background: var(--color-ok); }
+.kt-sw--await { background: var(--color-warn); }
+.kt-sw--rem { background: var(--cds-chart-muted); }
+.kt-chart { position: relative; min-height: 488px; }
+.kt-chart svg { display: block; }
+.kt-row-label { fill: var(--color-fg); font-size: var(--cds-font-size-caption); font-family: var(--font-anthropic-sans); }
+.kt-row-value { fill: var(--cds-text-secondary); font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; font-family: var(--font-anthropic-sans); }
+.kt-hit { cursor: default; }
+.kt-tip { position: absolute; z-index: 2; pointer-events: none; max-width: 280px; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); box-shadow: var(--cds-shadow-popover); color: var(--cds-text-secondary); padding: var(--cds-pad-sm); border-radius: var(--cds-radius); font-size: var(--cds-font-size-caption); line-height: 1.4; }
+.kt-scroll { overflow-x: auto; min-width: 0; }
+.kt-table { width: 100%; border-collapse: collapse; font-size: var(--cds-font-size-caption); }
+.kt-table th { text-align: left; font-weight: var(--cds-font-weight-medium); color: var(--color-fg-muted); padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); white-space: nowrap; }
+.kt-table td { padding: var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); vertical-align: top; line-height: 1.45; }
+.kt-table td.kt-num, .kt-table th.kt-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.kt-table td.kt-nowrap { white-space: nowrap; }
+.kt-chip { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: var(--cds-font-size-caption); white-space: nowrap; border: 1px solid var(--color-border-line); }
+.kt-chip--ok { color: var(--color-ok); border-color: var(--color-ok); }
+.kt-chip--warn { color: var(--color-warn); border-color: var(--color-warn); }
+.kt-chip--bad { color: var(--color-bad); border-color: var(--color-bad); }
+.kt-chip--muted { color: var(--color-fg-muted); }
+.kt-state { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+[data-dash-source-state=refreshing] { opacity: .5; }
+</style>
+
+<div class="kt">
+  <header class="kt-head" id="resumo">
+    <h1 class="kt-title">Consolidação do Koda</h1>
+    <p class="kt-lede"><b data-draw="t-done" data-source="totals" data-field="done" data-row="0">—</b> de <b data-draw="t-total" data-source="totals" data-field="total" data-row="0">—</b> tarefas do plano estão concluídas (<b data-draw="t-pct" data-source="totals" data-field="pct_done" data-row="0">—</b>), <b data-draw="t-wip" data-source="totals" data-field="in_progress" data-row="0">—</b> estão em andamento nas ondas atuais e <b data-draw="t-rem" data-source="totals" data-field="remaining" data-row="0">—</b> ainda faltam.</p>
+    <p class="kt-updated">Última atualização: <span data-draw="last-update" data-source="log" data-field="at" data-row="0">—</span> UTC</p>
+  </header>
+
+  <section class="kt-kpis" id="numeros" aria-label="Totais do plano">
+    <div class="kt-card" id="kpi-concluidas">
+      <span class="kt-card-label"><span class="kt-sw kt-sw--done"></span>Concluídas</span>
+      <span class="kt-card-value" data-draw="k-done" data-source="totals" data-field="done" data-row="0">—</span>
+      <span class="kt-card-note">com evidência registrada</span>
+    </div>
+    <div class="kt-card" id="kpi-andamento">
+      <span class="kt-card-label"><span class="kt-sw" data-swatch="wip"></span>Em andamento</span>
+      <span class="kt-card-value" data-draw="k-wip" data-source="totals" data-field="in_progress" data-row="0">—</span>
+      <span class="kt-card-note">nas ondas abertas</span>
+    </div>
+    <div class="kt-card" id="kpi-evidencia">
+      <span class="kt-card-label"><span class="kt-sw kt-sw--await"></span>Aguardando evidência</span>
+      <span class="kt-card-value" data-draw="k-await" data-source="totals" data-field="awaiting_evidence" data-row="0">—</span>
+      <span class="kt-card-note">replay ao vivo ou CI pendente</span>
+    </div>
+    <div class="kt-card" id="kpi-faltam">
+      <span class="kt-card-label"><span class="kt-sw kt-sw--rem"></span>Faltam</span>
+      <span class="kt-card-value" data-draw="k-rem" data-source="totals" data-field="remaining" data-row="0">—</span>
+      <span class="kt-card-note">prontas, pendentes ou bloqueadas</span>
+    </div>
+  </section>
+
+  <section class="kt-sec" id="marcos">
+    <h2 class="kt-h2">Progresso por marco</h2>
+    <p class="kt-sub">Cada barra é um marco do plano, do tamanho do seu número de tarefas. Toque ou passe o cursor numa barra para ver os números.</p>
+    <ul class="kt-legend">
+      <li><span class="kt-sw kt-sw--done"></span>Concluídas</li>
+      <li><span class="kt-sw" data-swatch="wip"></span>Em andamento</li>
+      <li><span class="kt-sw kt-sw--await"></span>Aguardando evidência</li>
+      <li><span class="kt-sw kt-sw--rem"></span>Faltam</li>
+    </ul>
+    <div class="kt-chart" id="grafico-marcos" data-draw="ms-chart" data-source="milestones" data-fetchpriority="high"></div>
+    <div class="kt-scroll">
+      <table class="kt-table" id="tabela-marcos" data-source="milestones" data-row-key="milestone">
+        <thead><tr>
+          <th data-field="milestone">Marco</th>
+          <th data-field="name">Nome</th>
+          <th class="kt-num" data-field="done">Concluídas</th>
+          <th class="kt-num" data-field="in_progress">Em andamento</th>
+          <th class="kt-num" data-field="awaiting_evidence">Aguardando evidência</th>
+          <th class="kt-num" data-field="remaining">Faltam</th>
+          <th class="kt-num" data-field="total">Total</th>
+        </tr></thead>
+        <tbody data-draw="ms-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="kt-sec" id="etapas">
+    <h2 class="kt-h2">Etapas da MISSION</h2>
+    <p class="kt-sub">As fases descritas na MISSION e onde cada uma está.</p>
+    <div class="kt-scroll">
+      <table class="kt-table" id="tabela-etapas" data-source="phases" data-row-key="seq">
+        <thead><tr>
+          <th data-field="phase">Etapa</th>
+          <th data-field="name">Nome</th>
+          <th data-field="status">Situação</th>
+          <th data-field="note">Detalhe</th>
+        </tr></thead>
+        <tbody data-draw="phase-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="kt-sec" id="ondas">
+    <h2 class="kt-h2">Ondas de trabalho</h2>
+    <p class="kt-sub">Cada onda passa por implementação com testes, revisão independente, integração com os gates completos e merge.</p>
+    <div class="kt-scroll">
+      <table class="kt-table" id="tabela-ondas" data-source="waves" data-row-key="wave">
+        <thead><tr>
+          <th data-field="name">Onda</th>
+          <th data-field="scope">Escopo</th>
+          <th data-field="status">Situação</th>
+          <th data-field="ref">Referência</th>
+        </tr></thead>
+        <tbody data-draw="wave-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="kt-sec" id="pendencias">
+    <h2 class="kt-h2">Depende de você ou de infraestrutura</h2>
+    <p class="kt-sub">Itens que o trabalho autônomo não pode decidir ou executar neste ambiente.</p>
+    <div class="kt-scroll">
+      <table class="kt-table" id="tabela-pendencias" data-source="blockers" data-row-key="id">
+        <thead><tr>
+          <th data-field="item">Item</th>
+          <th data-field="kind">Tipo</th>
+          <th data-field="detail">Detalhe</th>
+        </tr></thead>
+        <tbody data-draw="blocker-rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="kt-sec" id="registro">
+    <h2 class="kt-h2">Registro</h2>
+    <p class="kt-sub">Marcos recentes do processo, do mais novo para o mais antigo.</p>
+    <div class="kt-scroll">
+      <table class="kt-table" id="tabela-registro" data-source="log" data-row-key="id">
+        <thead><tr>
+          <th data-field="at">Quando (UTC)</th>
+          <th data-field="event">O que aconteceu</th>
+        </tr></thead>
+        <tbody data-draw="log-rows"></tbody>
+      </table>
+    </div>
+  </section>
+</div>
+
+<script>
+dash.calc('totals', {
+  inputs: ['milestones'],
+  title: 'Totais do plano',
+  description: 'Soma das tarefas de todos os marcos M0 a M10, e a parte concluída em porcentagem',
+  fn: (milestones) => {
+    const sum = (k) => milestones.reduce((a, r) => a + Number(r[k] || 0), 0);
+    const total = sum('total');
+    const done = sum('done');
+    return [{
+      total,
+      done,
+      in_progress: sum('in_progress'),
+      awaiting_evidence: sum('awaiting_evidence'),
+      remaining: sum('remaining'),
+      pct_done: total ? Math.round((done / total) * 100) : 0,
+    }];
+  },
+});
+</script>
+
+<script>
+window.ktFmt = (v) => (v == null || v === '' ? '—' : Number(v).toLocaleString('pt-BR'));
+window.ktCell = (name, source, field, format) => {
+  dash.draw(name, (el) => {
+    const d = dash.data(source);
+    el.classList.toggle('dash-skeleton', d.status === 'loading');
+    const row = d.status === 'ok' && Array.isArray(d.data) ? d.data[0] : null;
+    el.textContent = row ? format(row[field]) : '—';
+  });
+};
+ktCell('t-done', 'totals', 'done', ktFmt);
+ktCell('t-total', 'totals', 'total', ktFmt);
+ktCell('t-pct', 'totals', 'pct_done', (v) => `${ktFmt(v)}%`);
+ktCell('t-wip', 'totals', 'in_progress', ktFmt);
+ktCell('t-rem', 'totals', 'remaining', ktFmt);
+ktCell('k-done', 'totals', 'done', ktFmt);
+ktCell('k-wip', 'totals', 'in_progress', ktFmt);
+ktCell('k-await', 'totals', 'awaiting_evidence', ktFmt);
+ktCell('k-rem', 'totals', 'remaining', ktFmt);
+ktCell('last-update', 'log', 'at', (v) => (v == null ? '—' : String(v)));
+document.querySelectorAll('[data-swatch="wip"]').forEach((s) => { s.style.background = dash.colors[0]; });
+</script>
+
+<script>
+dash.draw('ms-chart', (el) => {
+  const d = dash.data('milestones');
+  if (d.status !== 'ok') {
+    const p = document.createElement('p');
+    p.className = 'kt-state';
+    p.textContent = d.status === 'error' ? 'Falha ao carregar' : '—';
+    el.replaceChildren(p);
+    return;
+  }
+  const keys = ['done', 'in_progress', 'awaiting_evidence', 'remaining'];
+  const rows = d.data.map((r) => {
+    const o = { milestone: String(r.milestone), name: String(r.name), total: Number(r.total) };
+    keys.forEach((k) => { o[k] = Number(r[k] || 0); });
+    return o;
+  });
+  const fill = { done: 'var(--color-ok)', in_progress: dash.colors[0], awaiting_evidence: 'var(--color-warn)', remaining: 'var(--cds-chart-muted)' };
+  const W = Math.max(260, Math.floor(el.clientWidth || 600));
+  const rowH = 44;
+  const H = rows.length * rowH;
+  const x = d3.scaleLinear().domain([0, d3.max(rows, (r) => r.total) || 1]).range([0, W - 2]);
+  el.replaceChildren();
+  const svg = d3.select(el).append('svg')
+    .attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`)
+    .attr('role', 'img')
+    .attr('aria-label', 'Tarefas por marco: ' + rows.map((r) => `${r.milestone} ${r.name}, ${r.done} de ${r.total} concluídas`).join('; '));
+  const g = svg.selectAll('g.kt-row').data(rows).join('g')
+    .attr('class', 'kt-row')
+    .attr('transform', (r, i) => `translate(0,${i * rowH})`);
+  const values = g.append('text').attr('class', 'kt-row-value')
+    .attr('x', W - 2).attr('y', 14).attr('text-anchor', 'end')
+    .text((r) => `${r.done}/${r.total}`);
+  g.append('text').attr('class', 'kt-row-label').attr('x', 0).attr('y', 14)
+    .text((r) => `${r.milestone} · ${r.name}`)
+    .each(function (r, i) {
+      const valueW = values.nodes()[i].getComputedTextLength();
+      const room = W - valueW - 12;
+      let t = `${r.milestone} · ${r.name}`;
+      while (this.getComputedTextLength() > room && t.length > 4) {
+        t = t.slice(0, -2);
+        this.textContent = t.trimEnd() + '…';
+      }
+    });
+  g.each(function (r) {
+    let acc = 0;
+    const row = d3.select(this);
+    keys.forEach((k) => {
+      const w = x(acc + r[k]) - x(acc);
+      if (w > 0) {
+        row.append('rect').attr('x', x(acc)).attr('y', 22)
+          .attr('width', Math.max(0, w - 1)).attr('height', 14).attr('rx', 2)
+          .style('fill', fill[k]);
+      }
+      acc += r[k];
+    });
+  });
+  const tip = document.createElement('div');
+  tip.className = 'kt-tip';
+  tip.hidden = true;
+  el.append(tip);
+  const show = (ev, r) => {
+    tip.textContent = `${r.milestone} ${r.name}: ${r.done} concluídas, ${r.in_progress} em andamento, ${r.awaiting_evidence} aguardando evidência, ${r.remaining} faltam (de ${r.total}).`;
+    tip.hidden = false;
+    const box = el.getBoundingClientRect();
+    const px = ev.clientX - box.left;
+    const py = ev.clientY - box.top;
+    tip.style.left = Math.max(0, Math.min(px + 12, box.width - tip.offsetWidth - 4)) + 'px';
+    tip.style.top = (py + 16) + 'px';
+  };
+  g.append('rect').attr('class', 'kt-hit')
+    .attr('x', 0).attr('y', 0).attr('width', W).attr('height', rowH)
+    .style('fill', 'transparent')
+    .on('pointerenter', show).on('pointermove', show)
+    .on('pointerdown', show)
+    .on('pointerleave', () => { tip.hidden = true; });
+});
+</script>
+
+<script>
+window.ktChip = (td, label, tone) => {
+  const s = document.createElement('span');
+  s.className = `kt-chip kt-chip--${tone}`;
+  s.textContent = label;
+  td.append(s);
+};
+window.ktTable = (name, source, cols, keyField, render) => {
+  dash.draw(name, (tbody) => {
+    const d = dash.data(source);
+    tbody.replaceChildren();
+    if (d.status !== 'ok') {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = cols.length;
+      td.className = 'kt-state';
+      td.textContent = d.status === 'error' ? 'Falha ao carregar' : '—';
+      tr.append(td);
+      tbody.append(tr);
+      return;
+    }
+    d.data.forEach((r) => {
+      const tr = document.createElement('tr');
+      tr.dataset.key = encodeURIComponent(String(r[keyField]));
+      cols.forEach((c) => {
+        const td = document.createElement('td');
+        if (!(render && render(c, r, td))) td.textContent = r[c] == null ? '' : String(r[c]);
+        tr.append(td);
+      });
+      tbody.append(tr);
+    });
+  });
+};
+const numCols = new Set(['done', 'in_progress', 'awaiting_evidence', 'remaining', 'total']);
+ktTable('ms-rows', 'milestones', ['milestone', 'name', 'done', 'in_progress', 'awaiting_evidence', 'remaining', 'total'], 'milestone', (c, r, td) => {
+  if (c === 'milestone') td.className = 'kt-nowrap';
+  if (numCols.has(c)) { td.className = 'kt-num'; td.textContent = ktFmt(r[c]); return true; }
+  return false;
+});
+const phaseTone = { done: ['Concluída', 'ok'], in_progress: ['Em andamento', 'warn'], not_started: ['Não iniciada', 'muted'] };
+ktTable('phase-rows', 'phases', ['phase', 'name', 'status', 'note'], 'seq', (c, r, td) => {
+  if (c === 'phase') td.className = 'kt-nowrap';
+  if (c === 'status') { const [l, t] = phaseTone[r.status] || [String(r.status), 'muted']; ktChip(td, l, t); return true; }
+  return false;
+});
+const waveTone = { merged: ['Mesclada', 'ok'], final_review: ['Revisão final', 'warn'], in_review: ['Em revisão', 'warn'], implementing: ['Implementando', 'warn'], queued: ['Na fila', 'muted'] };
+ktTable('wave-rows', 'waves', ['name', 'scope', 'status', 'ref'], 'wave', (c, r, td) => {
+  if (c === 'name' || c === 'ref') td.className = 'kt-nowrap';
+  if (c === 'status') { const [l, t] = waveTone[r.status] || [String(r.status), 'muted']; ktChip(td, l, t); return true; }
+  return false;
+});
+const kindTone = { approval: ['Sua aprovação', 'bad'], infra: ['Infraestrutura', 'muted'] };
+ktTable('blocker-rows', 'blockers', ['item', 'kind', 'detail'], 'id', (c, r, td) => {
+  if (c === 'kind') { const [l, t] = kindTone[r.kind] || [String(r.kind), 'muted']; ktChip(td, l, t); return true; }
+  return false;
+});
+ktTable('log-rows', 'log', ['at', 'event'], 'id', (c, r, td) => {
+  if (c === 'at') td.className = 'kt-nowrap';
+  return false;
+});
+</script>

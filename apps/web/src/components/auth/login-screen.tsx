@@ -10,18 +10,33 @@ import { Button } from "@/components/ui/button";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { Input } from "@/components/ui/input";
 import { useAppI18n } from "@/hooks/use-app-i18n";
+import { rateLimitedAuthMessage } from "@/lib/auth-rate-limit-message";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
 import { translate } from "@/lib/i18n";
+import { INSECURE_TRANSPORT_ERROR_CODE } from "@/lib/web-operator-session-constants";
+
+/**
+ * The dashboard refuses to sign in over plain HTTP from a non-loopback host,
+ * where the browser would drop the Secure session cookie. That refusal is
+ * decided from the transport before any credential is read, so naming it
+ * reveals nothing about accounts. It and the per-client rate limit (429) are
+ * the only 4xx answers with their own message.
+ */
+function isInsecureTransportRefusal(error: unknown): boolean {
+  return error instanceof ApiError && error.reason === INSECURE_TRANSPORT_ERROR_CODE;
+}
 
 /**
  * The auth contract (see `apps/web/CLAUDE.md`) folds every 4xx auth failure —
- * wrong password, unknown user, rate-limited, expired session — into ONE
- * generic message so timing/enumeration attacks gain no signal. Only
- * infrastructure failures (5xx, no response, network error) surface as a
- * distinct "service unavailable" message so the operator can tell it isn't
- * their credentials.
+ * wrong password, unknown user, locked account, expired session — into ONE
+ * generic message, so the message never tells a caller which accounts exist
+ * (response time still can until the timing floor lands, M1-E1-T13). Two cases get
+ * their own message: the per-client rate limit (429), which is the same for
+ * every identifier and says how long to wait (ADR-038), and infrastructure
+ * failures (5xx, no response, network error), so the operator can tell it
+ * isn't their credentials.
  */
 function isUpstreamFailure(error: unknown): boolean {
   if (error instanceof ApiError) {
@@ -33,7 +48,7 @@ function isUpstreamFailure(error: unknown): boolean {
 }
 
 export function LoginScreen() {
-  const { t } = useAppI18n();
+  const { t, language } = useAppI18n();
   const router = useRouter();
   const searchParams = useSearchParams();
   const [identifier, setIdentifier] = useState("");
@@ -61,7 +76,12 @@ export function LoginScreen() {
       router.replace(target);
       router.refresh();
     } catch (error) {
-      if (isUpstreamFailure(error)) {
+      const rateLimited = rateLimitedAuthMessage(error, t, language);
+      if (isInsecureTransportRefusal(error)) {
+        setError(t("auth.insecure_transport.form_error"));
+      } else if (rateLimited) {
+        setError(rateLimited);
+      } else if (isUpstreamFailure(error)) {
         setError(
           t("auth.login.service_unavailable", undefined),
         );

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -985,6 +986,105 @@ def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
     assert "rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack" in web_dockerfile
     assert 'CMD ["node", "server.mjs"]' in web_dockerfile
     assert 'CMD ["pnpm", "start"]' not in web_dockerfile
+
+
+def test_web_image_has_no_secure_cookies_build_arg() -> None:
+    """Nothing reads SECURE_COOKIES at build time, so it must not look like a switch (D-085, TD-173).
+
+    Production always marks session cookies Secure; the build arg only set an
+    environment variable in the builder stage, which the runtime never saw.
+    """
+    web_dockerfile = (ROOT / "apps" / "web" / "Dockerfile").read_text(encoding="utf-8")
+    assert "SECURE_COOKIES" not in web_dockerfile
+
+    compose_files = sorted(ROOT.glob("docker-compose*.yml")) + sorted(
+        (ROOT / "packages" / "cli" / "release" / "bundle").glob("*.yml")
+    )
+    assert compose_files
+    for compose_file in compose_files:
+        services = (yaml.safe_load(compose_file.read_text(encoding="utf-8")) or {}).get("services") or {}
+        for name, service in services.items():
+            build = (service or {}).get("build")
+            args = build.get("args") if isinstance(build, dict) else None
+            assert "SECURE_COOKIES" not in (args or {}), f"{compose_file.name}: {name}"
+
+
+def _plain_http_section() -> str:
+    """The "Plain HTTP" section of the auth doc, with its line breaks folded."""
+    text = (ROOT / "docs" / "security" / "authentication.md").read_text(encoding="utf-8")
+    start = text.index("### Plain HTTP")
+    end = text.index("\n## ", start)
+    return " ".join(text[start:end].split())
+
+
+def test_auth_doc_lists_every_dashboard_surface_that_refuses_plain_http() -> None:
+    """The doc names each page and route that refuses plain HTTP from a LAN address (J-14)."""
+    app_dir = ROOT / "apps" / "web" / "src" / "app"
+    routes = sorted(
+        "/" + route.parent.relative_to(app_dir).as_posix()
+        for route in app_dir.rglob("route.ts")
+        if "insecureCookieTransportResponse(" in route.read_text(encoding="utf-8")
+    )
+    pages = sorted(
+        "/" + page.parent.relative_to(app_dir).as_posix()
+        for page in app_dir.rglob("page.tsx")
+        if "<InsecureTransportScreen" in page.read_text(encoding="utf-8")
+    )
+    # Every route that takes a credential or a one-time code before any session exists.
+    assert routes == [
+        "/api/control-plane/auth/login",
+        "/api/control-plane/auth/password/recover",
+        "/api/control-plane/auth/register-owner",
+    ]
+    assert pages == ["/forgot-password", "/login", "/setup"]
+
+    section = _plain_http_section()
+    for route in routes:
+        assert f"`POST {route}`" in section, route
+    for page in pages:
+        assert f"`{page}`" in section, page
+    assert "still works" not in section
+
+
+def test_auth_doc_quotes_the_forwarded_proto_the_bundled_nginx_sends() -> None:
+    """The bundled nginx.conf forwards `$scheme`, which is `http` until its server block terminates TLS."""
+    nginx = (ROOT / "packages" / "cli" / "release" / "bundle" / "proxy" / "nginx.conf").read_text(encoding="utf-8")
+    assert set(re.findall(r"proxy_set_header X-Forwarded-Proto (\S+);", nginx)) == {"$scheme"}
+
+    sentences = [
+        sentence for sentence in re.split(r"(?<=\.)\s", _plain_http_section()) if "proxy/nginx.conf" in sentence
+    ]
+    assert sentences
+    for sentence in sentences:
+        assert "`X-Forwarded-Proto $scheme`" in sentence, sentence
+
+
+def test_auth_doc_states_the_cookie_transport_logging_rule() -> None:
+    """The doc's `[cookie-transport]` bullet matches cookie-transport.ts.
+
+    It states the cap and the interval the code uses, names every header the
+    logged address can come from, and says what happens past the cap.
+    """
+    source = (ROOT / "apps" / "web" / "src" / "lib" / "cookie-transport.ts").read_text(encoding="utf-8")
+    cap_match = re.search(r"INSECURE_TRANSPORT_LOG_MAX_ORIGINS = (\d+);", source)
+    interval_match = re.search(r"INSECURE_TRANSPORT_LOG_INTERVAL_MS = ([\d *]+);", source)
+    assert cap_match and interval_match
+    cap = int(cap_match.group(1))
+    assert math.prod(int(factor) for factor in interval_match.group(1).split("*")) == 60 * 60 * 1000
+    # The browser's Origin on a POST, else the forwarded host, else Host.
+    for header in ("origin", "x-forwarded-host", "host"):
+        assert f'headers.get("{header}")' in source, header
+
+    text = (ROOT / "docs" / "security" / "authentication.md").read_text(encoding="utf-8")
+    start = text.index("### Plain HTTP")
+    items = re.split(r"\n(?:- |\n)", text[start : text.index("\n## ", start)])
+    bullets = [" ".join(item.split()) for item in items if "`[cookie-transport]`" in item]
+    assert len(bullets) == 1, bullets
+    bullet = bullets[0]
+
+    assert f"at most {cap} addresses within an hour" in bullet
+    assert "`Origin`, `X-Forwarded-Host` or `Host` header" in bullet
+    assert f"Past {cap} addresses in that hour the rest are counted but not named" in bullet
 
 
 def test_runtime_dockerfile_exports_locked_python_dependencies() -> None:

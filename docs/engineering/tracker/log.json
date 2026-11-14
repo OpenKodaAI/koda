@@ -1,0 +1,80 @@
+{
+ "rows": [
+  {
+   "id": "L14",
+   "at": "2026-11-14 22:38",
+   "event": "Onda 7 iniciada: autenticação, integridade de dados (M2) e remoção de código morto (M4)"
+  },
+  {
+   "id": "L13",
+   "at": "2026-11-14 22:38",
+   "event": "Onda 4 mesclada (06cde4d): erro explícito para HTTP aberto, mensagem de rate limit, doctor protegendo o token; 6777 testes Python e 1055 web passando"
+  },
+  {
+   "id": "L12",
+   "at": "2026-11-14 22:19",
+   "event": "ADR-002 aprovado e mesclado (d21c2b3): governança das ferramentas nativas dos agentes; M1-E2-T1 concluída; perguntas OQ-1 a OQ-12 enviadas para sua decisão"
+  },
+  {
+   "id": "L11",
+   "at": "2026-11-14 22:12",
+   "event": "Pesquisa do openbot.run iniciada como referência de design, chat e agentes"
+  },
+  {
+   "id": "L10",
+   "at": "2026-11-14 22:05",
+   "event": "Onda 4: rodada 3 revisada pelo orquestrador e aprovada; gates completos em execução"
+  },
+  {
+   "id": "L09",
+   "at": "2026-11-14 21:55",
+   "event": "Página de acompanhamento criada; atualizada a cada iteração do loop"
+  },
+  {
+   "id": "L08",
+   "at": "2026-11-14 21:44",
+   "event": "Onda 6 iniciada: jornadas de agentes (M3) e design e acessibilidade (M8) em paralelo"
+  },
+  {
+   "id": "L07",
+   "at": "2026-11-14 21:41",
+   "event": "Regras contra retrabalho e excesso de engenharia gravadas (669fe6b)"
+  },
+  {
+   "id": "L06",
+   "at": "2026-11-14 20:55",
+   "event": "ADR-002: rodadas finais com escopo restrito; pendências menores viram critérios de aceite com teste"
+  },
+  {
+   "id": "L05",
+   "at": "2026-11-14 19:00",
+   "event": "Onda 5 iniciada; defeito D-254 (processos de teste órfãos) registrado"
+  },
+  {
+   "id": "L04",
+   "at": "2026-11-14 18:52",
+   "event": "Integração da onda 4 iniciada"
+  },
+  {
+   "id": "L03",
+   "at": "2026-11-14 17:57",
+   "event": "Onda 3 mesclada: 9 tarefas, 6360 testes passando (9296448)"
+  },
+  {
+   "id": "L02",
+   "at": "2026-11-14",
+   "event": "Onda 2B mesclada e replay ao vivo 1 concluído (6d050b5)"
+  },
+  {
+   "id": "L01",
+   "at": "2026-11-14",
+   "event": "Lote de defeitos 1 mesclado: 7 defeitos críticos corrigidos (a4a441e)"
+  }
+ ],
+ "meta": [
+  {
+   "label": "Fonte",
+   "value": "git log do branch claude/dreamy-cerf-mhvbwn e EXECUTION_STATUS.md"
+  }
+ ]
+}

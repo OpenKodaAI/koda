@@ -1,4 +1,6 @@
+import type { NextResponse } from "next/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { WEB_OPERATOR_SESSION_COOKIE } from "@/lib/web-operator-session-constants";
 import { config, proxy } from "./proxy";
 
 describe("web proxy auth gate", () => {
@@ -117,6 +119,71 @@ describe("web proxy auth gate", () => {
     );
   });
 
+  function pageRequest(url: string, headers: Record<string, string>, cookies: Record<string, string> = {}) {
+    const nextUrl = new URL(url);
+    return {
+      nextUrl: Object.assign(nextUrl, {
+        clone: () => new URL(nextUrl.toString()),
+      }),
+      method: "GET",
+      cookies: {
+        get: (name: string) => (name in cookies ? { value: cookies[name] } : undefined),
+      },
+      headers: new Headers(headers),
+    } as never;
+  }
+
+  it.each([
+    ["production", true],
+    ["development", false],
+  ] as const)("in %s clears a malformed session cookie with Secure=%s", (nodeEnv, secure) => {
+    vi.stubEnv("NODE_ENV", nodeEnv);
+    vi.stubEnv("SECURE_COOKIES", "");
+    vi.stubEnv("ALLOW_INSECURE_COOKIES", "");
+    const https = { host: "koda.example.com", "x-forwarded-proto": "https" };
+
+    const response = proxy(
+      pageRequest("http://koda.example.com/executions", https, {
+        [WEB_OPERATOR_SESSION_COOKIE]: "not-a-sealed-token",
+      }),
+    ) as NextResponse;
+
+    const cleared = response.cookies.get(WEB_OPERATOR_SESSION_COOKIE);
+    expect(cleared?.value).toBe("");
+    expect(cleared?.maxAge).toBe(0);
+    expect(cleared?.secure).toBe(secure);
+  });
+
+  it("sends a page over plain HTTP from a LAN address to /login once, and /login then renders (J-14)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const lan = { host: "192.168.1.10:3000", "x-forwarded-proto": "http" };
+    // The owner hint cookie is Secure, so over this transport it never comes
+    // back and cannot choose between /setup and /login.
+    const first = proxy(pageRequest("http://192.168.1.10:3000/executions", lan));
+    expect(first.status).toBe(307);
+    expect(first.headers.get("location")).toBe(
+      "http://192.168.1.10:3000/login?next=%2Fexecutions",
+    );
+
+    // No second hop: /login renders and explains, so there is no loop.
+    const second = proxy(pageRequest("http://192.168.1.10:3000/login?next=%2Fexecutions", lan));
+    expect(second.status).toBe(200);
+    expect(second.headers.get("location")).toBeNull();
+
+    // /setup and /forgot-password render their own explanation too.
+    for (const page of ["/setup", "/forgot-password"]) {
+      const direct = proxy(pageRequest(`http://192.168.1.10:3000${page}`, lan));
+      expect(direct.status).toBe(200);
+      expect(direct.headers.get("location")).toBeNull();
+    }
+
+    // Loopback keeps the first-run redirect: browsers keep Secure cookies there.
+    const loopback = proxy(
+      pageRequest("http://127.0.0.1:3000/", { host: "127.0.0.1:3000", "x-forwarded-proto": "http" }),
+    );
+    expect(loopback.headers.get("location")).toBe("http://127.0.0.1:3000/setup?next=%2F");
+  });
+
   it("requires the operator session cookie even in development mode", () => {
     vi.stubEnv("NODE_ENV", "development");
 
@@ -152,6 +219,39 @@ describe("web proxy auth gate", () => {
     } as never);
 
     expect(response.status).toBe(403);
+  });
+
+  it("tells a throttled client to retry when its window takes the next request", () => {
+    // The auth screens read this Retry-After to say how long to wait (ADR-038).
+    const start = Date.now();
+    vi.useFakeTimers({ now: start, toFake: ["Date"] });
+    const apiRequest = () =>
+      proxy({
+        nextUrl: new URL("http://localhost/api/control-plane/auth/status"),
+        method: "GET",
+        cookies: { get: () => undefined },
+        headers: {
+          get: (name: string) => (name.toLowerCase() === "x-forwarded-for" ? "198.51.100.77" : null),
+        },
+      } as never);
+
+    try {
+      const burst = Array.from({ length: 120 }, () => apiRequest().status);
+      const refused = apiRequest();
+      vi.setSystemTime(start + 59_999);
+      const early = apiRequest().status;
+      vi.setSystemTime(start + 60_000);
+      const onTime = apiRequest().status;
+
+      expect(new Set(burst)).toEqual(new Set([200]));
+      expect(refused.status).toBe(429);
+      expect(refused.headers.get("Retry-After")).toBe("60");
+      expect(refused.headers.get("Cache-Control")).toBe("no-store");
+      expect(early).toBe(429);
+      expect(onTime).toBe(200);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("rate limits each client address separately instead of one shared bucket", () => {

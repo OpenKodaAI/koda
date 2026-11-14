@@ -9,6 +9,7 @@ import socket
 import struct
 import subprocess
 import sys
+from collections.abc import Callable
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -200,6 +201,206 @@ async def test_auth_failure_limiter_eviction() -> None:
         assert len(_auth_failure_limiters) == 2
     finally:
         rate_limit._MAX_CACHED_LIMITERS = original_max  # type: ignore[attr-defined]
+
+
+# --- Retry-After --------------------------------------------------------------
+
+
+def _skip_ahead(monkeypatch: pytest.MonkeyPatch) -> Callable[[float], None]:
+    """Let the running loop's clock, which the buckets drain by, jump forward without sleeping."""
+    loop = asyncio.get_running_loop()
+    real_time = loop.time
+    skipped = 0.0
+
+    def time() -> float:
+        return real_time() + skipped
+
+    def advance(seconds: float) -> None:
+        nonlocal skipped
+        skipped += seconds
+
+    monkeypatch.setattr(loop, "time", time)
+    return advance
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "burst", "wait"),
+    [
+        (LOGIN_PATH, 10, 30),  # 10 per 5 minutes
+        ("/api/control-plane/auth/password/recover", 10, 360),  # 10 per hour
+        ("/api/control-plane/auth/register-owner", 30, 120),  # 30 per hour
+    ],
+    ids=["login", "recover", "register-owner"],
+)
+async def test_retry_after_is_when_the_endpoint_bucket_lets_the_next_request_through(
+    monkeypatch: pytest.MonkeyPatch, path: str, burst: int, wait: int
+) -> None:
+    """A client that waits the Retry-After it was given gets through, and not a second earlier."""
+    advance = _skip_ahead(monkeypatch)
+    request = _make_request(path=path)
+    handler = AsyncMock(return_value=_ok_response())
+
+    with patch("koda.control_plane.rate_limit.emit_security"):
+        statuses = [(await control_plane_rate_limit_middleware(request, handler)).status for _ in range(burst)]
+        refused = await control_plane_rate_limit_middleware(request, handler)
+        advance(wait - 1)
+        early = await control_plane_rate_limit_middleware(request, handler)
+        advance(1)
+        on_time = await control_plane_rate_limit_middleware(request, handler)
+
+    assert statuses == [200] * burst
+    assert (refused.status, refused.headers["Retry-After"]) == (429, str(wait))
+    # A refused request spends no capacity, so retrying early only shortens the wait left.
+    assert (early.status, early.headers["Retry-After"]) == (429, "1")
+    assert on_time.status == 200
+
+
+@pytest.mark.asyncio
+async def test_retry_after_is_when_the_general_bucket_lets_the_next_request_through(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    advance = _skip_ahead(monkeypatch)
+    request = _make_request()
+    handler = AsyncMock(return_value=_ok_response())
+
+    with patch("koda.control_plane.rate_limit.CONTROL_PLANE_RATE_LIMIT", 3):  # 3 per minute
+        statuses = [(await control_plane_rate_limit_middleware(request, handler)).status for _ in range(3)]
+        refused = await control_plane_rate_limit_middleware(request, handler)
+        advance(19)
+        early = await control_plane_rate_limit_middleware(request, handler)
+        advance(1)
+        on_time = await control_plane_rate_limit_middleware(request, handler)
+
+    assert statuses == [200, 200, 200]
+    assert (refused.status, refused.headers["Retry-After"]) == (429, "20")
+    assert (early.status, early.headers["Retry-After"]) == (429, "1")
+    assert on_time.status == 200
+
+
+@pytest.mark.asyncio
+async def test_retry_after_is_when_the_auth_failure_bucket_takes_the_next_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    advance = _skip_ahead(monkeypatch)
+    request = _make_request()
+    handler = AsyncMock(return_value=_unauthorized_response())
+
+    with (
+        patch("koda.control_plane.rate_limit.CONTROL_PLANE_RATE_LIMIT", 100),
+        patch("koda.control_plane.rate_limit.CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", 2),  # 2 per minute
+        patch("koda.control_plane.rate_limit.emit_security"),
+    ):
+        statuses = [(await control_plane_rate_limit_middleware(request, handler)).status for _ in range(2)]
+        refused = await control_plane_rate_limit_middleware(request, handler)
+        advance(29)
+        early = await control_plane_rate_limit_middleware(request, handler)
+        advance(1)
+        on_time = await control_plane_rate_limit_middleware(request, handler)
+
+    assert statuses == [401, 401]
+    assert (refused.status, refused.headers["Retry-After"]) == (429, "30")
+    assert (early.status, early.headers["Retry-After"]) == (429, "1")
+    assert on_time.status == 401
+
+
+@pytest.mark.asyncio
+async def test_retry_after_is_never_zero() -> None:
+    """A bucket that frees up between its refusal and the answer still asks for a second."""
+    answer = rate_limit._too_many_requests(_get_ip_limiter("10.0.0.9"))
+
+    assert answer.headers["Retry-After"] == "1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("limit", [0, -1])
+@pytest.mark.parametrize(
+    ("setting", "handler_response"),
+    [("CONTROL_PLANE_RATE_LIMIT", _ok_response), ("CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", _unauthorized_response)],
+    ids=["general", "auth-failure"],
+)
+async def test_a_limit_below_one_refuses_with_the_window_as_retry_after(
+    setting: str, handler_response: Callable[[], MagicMock], limit: int
+) -> None:
+    """A bucket that never frees capacity still answers 429, and asks for one window, not a crash.
+
+    Both settings are read with a bare int(), so 0 or a negative value reaches the bucket.
+    """
+    request = _make_request()
+    handler = AsyncMock(return_value=handler_response())
+
+    with patch(f"koda.control_plane.rate_limit.{setting}", limit), patch("koda.control_plane.rate_limit.emit_security"):
+        answer = await control_plane_rate_limit_middleware(request, handler)
+
+    assert (answer.status, answer.headers["Retry-After"]) == (429, "60")
+
+
+@pytest.mark.parametrize(
+    ("general", "auth_failure", "refusing"),
+    [
+        (120, 5, []),
+        (0, 5, ["CONTROL_PLANE_RATE_LIMIT"]),
+        (120, -1, ["CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT"]),
+        (0, 0, ["CONTROL_PLANE_RATE_LIMIT", "CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT"]),
+    ],
+    ids=["defaults", "general-zero", "auth-failure-negative", "both-zero"],
+)
+def test_check_rate_limits_warns_when_a_limit_refuses_every_request(
+    general: int, auth_failure: int, refusing: list[str]
+) -> None:
+    with (
+        patch.object(rate_limit, "CONTROL_PLANE_RATE_LIMIT", general),
+        patch.object(rate_limit, "CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", auth_failure),
+        patch.object(rate_limit, "log") as log,
+    ):
+        rate_limit.check_rate_limits()
+
+    warned = [call.kwargs["setting"] for call in log.warning.call_args_list]
+    assert warned == refusing
+    assert all(call.args == ("control_plane_rate_limit_refuses_every_request",) for call in log.warning.call_args_list)
+
+
+@pytest.mark.asyncio
+async def test_the_supervisor_checks_the_rate_limits_at_startup() -> None:
+    from koda.control_plane import supervisor
+
+    class _Stop(Exception):
+        pass
+
+    with (
+        patch.object(supervisor, "_warn_about_placeholder_secrets"),
+        patch.object(supervisor, "check_trusted_proxies"),
+        patch.object(supervisor, "check_rate_limits") as checked,
+        patch.object(supervisor, "ControlPlaneSupervisor", side_effect=_Stop),
+        pytest.raises(_Stop),
+    ):
+        await supervisor.run_supervisor()
+
+    checked.assert_called_once_with()
+
+
+def _per(seconds: int) -> str:
+    if seconds == 3600:
+        return "hour"
+    return f"{seconds // 60} min" if seconds % 60 == 0 else f"{seconds} s"
+
+
+def test_auth_doc_lists_each_sensitive_budget_and_the_wait_after_a_burst() -> None:
+    """The auth doc's bucket table matches the code, Retry-After after a full burst included."""
+    row = re.compile(r"^\| `[A-Z]+ (?P<path>/auth/[^`]+)` +\| (?P<budget>[^|]+?) +\| (?P<wait>[^|]+?) +\|$")
+    text = (ROOT / "docs" / "security" / "authentication.md").read_text(encoding="utf-8")
+    documented = {
+        match["path"]: (match["budget"], match["wait"]) for line in text.splitlines() if (match := row.match(line))
+    }
+
+    expected = {
+        endpoint.removeprefix("/api/control-plane"): (
+            f"{burst} requests / {_per(window)}",
+            _per(window // burst),
+        )
+        for endpoint, (burst, window) in rate_limit._SENSITIVE_ENDPOINT_BUDGETS.items()
+    }
+    assert documented == expected
 
 
 # --- client address resolution (trusted proxies) -----------------------------

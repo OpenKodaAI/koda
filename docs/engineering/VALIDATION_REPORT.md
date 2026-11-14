@@ -460,3 +460,52 @@ Gates on `integrate/wave-3` (orchestrator run, own guard per session):
 | Web and Rust | not affected: wave 3 changes nothing under `apps/web` or `rust/` |
 
 The 170 xfails are strict and pin recorded defects, among them the 169 D-241 cases in the runtime matrix and D-033 in the control-plane matrix.
+
+## M1-E2-T1 — ADR-002 approved (rounds 1–12)
+
+Task: finish the native tool governance ADR (`docs/engineering/adr/ADR-agent-native-tool-governance.md`), branch `task/ADR-002-r2`, merged into the session branch with this record.
+
+| Round | SEC | REV | Blocking | Notes |
+|---|---|---|---|---|
+| 1–6 | request changes, then approve with changes | request changes, then approve with changes | 9 → 1 → 2 → 1 | Matrix, opt-in schema, notice and test plan met at revision 4; later rounds closed Gemini startup loading, shared provider homes and spawn lifetime |
+| 7–8 | approve with changes (r8) | approve with changes (r8) | 1 → 0 | Kernel-started spawns bound to the requesting incarnation; AG-15b; OQ-8 |
+| 9–10 | approve with changes; r10 SEC approve with changes | r10 REV request changes | 0 → 1 | r10 introduced a major (the "or under" rule applied to every root) |
+| 11–12 | r11 request changes; r12 approve with changes | r11 request changes; r12 approve with changes | 2 → 0 | Diff-scoped confirm reviews (EXECUTION_STATUS workflow rule 4); minors became implementation obligations (ADR §7.9–§7.11) |
+
+Done-when: items 1–4 (provider-mode matrix with argv, opt-in field schema and audit event, migration notice, test plan with each argv, D-011 and D-012 test) met since revision 4 and re-checked by every round. Item 5: round-12 SEC and REV approving reviews with no critical or major finding (`wf_e04f9e1e-10f`).
+
+Convergence decision (2026-11-14, orchestrator): ten revisions had reached diminishing returns, as each full re-review surfaced new minors. Rounds 11–12 were scoped to the diff and earlier findings; each remaining minor was fixed in place, made an Accept criterion with a named test on the owning AG item, made an operator question, or rejected with a reason. The eight round-12 minors are §7.11; three of them (the Docker `/app` case, the task environment and job work-dir roots, and the refusal of a directory containing the checkout) were also fixed in OQ-12's text before sign-off (fa9016b).
+
+Operator questions for MISSION §13 sign-off: OQ-1..OQ-12 (ADR §9.1), each with a recommendation and its user impact. They gate only the parts the ADR names; the rest of the AG backlog is ungated.
+
+## WAVE-4 — four auth and secret-handling tasks (integrate/wave-4)
+
+Tasks: D-231 (browser auto-provision detection), M1-E1-T6 (secret-handling correctness, with D-232 and D-233), M1-E1-T7 (explicit failure for session cookies over plain HTTP), M1-E1-T18 (account-independent rate-limit message, ADR-038). Each was implemented with fail-before tests and passed two independent review lenses (`wf_3b822fa2-abc`) before integration.
+
+Integration (`wf_78629268-8d9`, branch `integrate/wave-4`):
+- The M1-E1-T18 merge conflicted with M1-E1-T7 on the auth screens, `http-client`, i18n, the auth doc and the operator-auth tests. The resolution keeps both behaviours: the HTTPS-required refusal decided before any credential is read, with Fetch Metadata checked before a rewritten Origin, and the 429 wait message with `Retry-After`.
+- Integration fixes:
+  - 8a0451c: the chat markdown renderer recreated its element map on every render. This was the root cause of the "pre-existing" sessions page flake.
+  - 3e7b0d3: a semantic conflict. M1-E1-T6's empty-key refusal broke 56 tests in the wave-3 runtime auth matrix.
+  - 1ccce94, e8c125a, ca2e14e: doctor probes a native `.env` from this host only. It ignores proxies, never sends the bearer to a redirect, and never sends it over plain HTTP to a host that is not loopback.
+  - The auth-error contract test now scans every module the auth screens import, and checks every field an `ApiError` takes from the response.
+- Reviews:
+  - Round 1: security approved with 1 minor; correctness approved with nits.
+  - Round 2: both lenses approved with nits only.
+  - Round 3 fixed those nits. Its confirm reviews were stopped at 22:05 to protect disk (the reviewers had copied the repository). The orchestrator reviewed ca2e14e and approved it (safe-direction change, docs updated, no default changed).
+- J-14 replay (M1-E1-T7), three runs on the production build, the last on the final code:
+  - Plain HTTP from the host's non-loopback address gives exactly one 307 to `/login`, then the "HTTPS required" screen, with no loop. The page has no password field, sends `Cache-Control: no-store`, and `isSecureContext` is false.
+  - Loopback setup and sign-in work. Sign-in through an Origin-rewriting HTTPS proxy works.
+  - Browser: Chromium 153. Firefox and WebKit cannot be installed in this sandbox (their CDNs are blocked), so the Firefox and Safari replay stays in the out-of-sandbox J-14 checklist.
+- New defects recorded: D-255 (doctor commands in the ops docs), D-256 (plural keys), D-257 (15 unresolved i18n keys, guarded by `KNOWN_UNRESOLVED_KEYS`). Documented limit: behind a proxy that rewrites Origin, a browser that sends no Fetch Metadata is still refused with `INSECURE_TRANSPORT` (authentication.md).
+- Records corrected: ADR-038 no longer claims a backend timing floor. The timing floor is M1-E1-T13 (D-136).
+
+Gates at aa5947f (integrate/wave-4 with the session branch merged in), run by the orchestrator:
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: 732 files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 360 source files.
+- `pytest --cov=koda`: 6777 passed, 19 skipped, 170 xfailed; total coverage 65 %.
+- `pytest -m postgres`: 270 passed, 2 skipped.
+- `pnpm lint:web`: 0 errors, 40 warnings.
+- `pnpm test:web`: 181 files, 1055 tests passed.
+- `pnpm build:web`: ok.

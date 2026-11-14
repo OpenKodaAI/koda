@@ -1114,3 +1114,31 @@ async def test_auth_status_with_an_operator_credential_keeps_the_server_flags(
             assert payload["recovery_available"] is True
             assert payload["loopback_trust_enabled"] is True
             assert payload["bootstrap_file_path"] == str(operator_db)
+
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        _REPO_ROOT / "docs" / "security" / "authentication.md",
+        _REPO_ROOT / "apps" / "web" / "CLAUDE.md",
+        _REPO_ROOT / "docs" / "install" / "vps.md",
+    ],
+    ids=lambda path: f"{path.parent.name}/{path.name}",
+)
+def test_docs_mark_the_login_timing_floor_as_pending(path: Path) -> None:
+    """D-136: nothing pads failed logins to a time floor yet, so no doc may say they take equal time.
+
+    An unknown identifier or a locked account fails before any password hash is checked, so it
+    answers faster than a wrong password. M1-E1-T13 adds the floor, then updates these docs and
+    this test.
+    """
+    assert operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS == 0.0
+    text = " ".join(path.read_text(encoding="utf-8").split())
+
+    assert "timing floor pending M1-E1-T13" in text
+    assert "All auth-failure paths pad" not in text
+    assert "neutralize timing" not in text
+    assert "deliberately slowed" not in text

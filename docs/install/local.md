@@ -119,6 +119,48 @@ It fails while `POSTGRES_PASSWORD` or an `S3_*` secret is still a `replace-with-
 the rotation command (see [Rotating placeholder Postgres and object-storage
 secrets](#rotating-placeholder-postgres-and-object-storage-secrets)).
 
+It reads the storage settings the way Koda receives them. Under Docker Compose the `.env` holds
+`POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` and `S3_*`, and Compose builds the app's Postgres DSN
+and object-storage keys from them. A native install sets `KNOWLEDGE_V2_POSTGRES_DSN` and
+`KNOWLEDGE_V2_S3_*` itself; when `.env` sets `KNOWLEDGE_V2_POSTGRES_DSN`, doctor uses it.
+Compose does not publish Postgres or SeaweedFS on the host. For a Compose `.env`, when this host cannot
+resolve their service names (`postgres`, `seaweedfs`), doctor opens the connection from the app container
+with `docker compose exec app`, in the Compose project of the `--env-file` directory. For a project started
+with `-p`, set `COMPOSE_PROJECT_NAME`. A native install's app connects from this host, so a `.env` that sets
+`KNOWLEDGE_V2_POSTGRES_DSN` is always probed from here: an endpoint left at a Compose service name, such
+as the `.env.example` value `KNOWLEDGE_V2_S3_ENDPOINT_URL=http://seaweedfs:8333`, fails the check even
+while a Compose stack runs from the same checkout.
+When Compose cannot parse the `.env` (an unterminated quote, or a `${` that Compose cannot read as a
+variable), its error repeats the offending value, so doctor reports only that the file could not be
+parsed. Run `docker compose --env-file .env config -q` to see where. A bare `$NAME` in a value is not a
+parse error, and doctor does not report it: Compose replaces it with that variable, or with an empty
+string and only a warning, so `POSTGRES_PASSWORD=P@ss$word` reaches the stack as `P@ss`. Keep `$` out
+of hand-set secrets; `scripts/generate_env_secrets.py` writes hex values, which never contain one.
+Doctor connects to the control plane and the dashboard directly and ignores `http_proxy`, `https_proxy`
+and `no_proxy`, so the break-glass token that `--provider` sends never passes through a proxy. It sends
+that token only to the `--base-url` it was given: when that request answers a redirect, doctor does not
+follow it, and `provider_verification` fails and names the redirect target. Point `--base-url` at the
+control plane itself, not at an address that redirects to a sign-in page. Doctor sends the token over plain
+HTTP only to this host (`127.0.0.0/8`, `[::1]` or `localhost`); for a plain-HTTP `--base-url` on another
+host, such as `http://<vps-ip>:8090`, `provider_verification` fails without sending it, because anyone on
+the path could read it. Run doctor on the control plane's host, reach it through an SSH tunnel
+(`ssh -L 8090:127.0.0.1:8090 <vps>`, then `--base-url http://127.0.0.1:8090`), or give an `https://` URL.
+With `OBJECT_STORAGE_REQUIRED=false`, the object-storage checks are still reported, marked
+`"required": false`, and do not fail doctor. An unset value means `true`. An empty value means `true`
+under Compose (`${OBJECT_STORAGE_REQUIRED:-true}`) and `false` on a native install, as Koda reads its own
+`.env`; doctor reads a `.env` that sets `KNOWLEDGE_V2_POSTGRES_DSN` as a native install's.
+
+Doctor itself needs only the Python standard library. Its sandbox check imports Koda. Under a `python3` that
+is not Koda's environment, such as the system Python, the check is `skipped`: doctor still passes, and
+`--strict` fails. Koda's environment is an interpreter that has Koda installed, or that runs from the
+checkout's `.venv` or from the environment that `VIRTUAL_ENV` or `UV_PROJECT_ENVIRONMENT` names. There, a
+missing dependency is a broken install: the check is `unavailable` and doctor fails. To include the
+sandbox check, run doctor with Koda's environment from the source checkout:
+`uv run python scripts/doctor.py --env-file .env`.
+
+During a token rotation (`CONTROL_PLANE_API_TOKEN=new-token,old-token`), doctor's token check passes while
+one token of the list is not a placeholder, and `--provider` authenticates with the first such token.
+
 ## Manual Startup
 
 Every `replace-with-...` value in `.env.example` must become a random secret before the first
@@ -194,7 +236,14 @@ With an external S3-compatible store, create the new keys there and put them in 
 - API unavailable: check `docker compose ps app`.
 - Degraded `/health`: inspect worker and sidecar status in the JSON payload.
 - Object storage errors: check `seaweedfs` and `seaweedfs-init`.
-- Browser login loops: verify `WEB_OPERATOR_SESSION_SECRET` is stable in `.env`.
+- The dashboard shows "HTTPS required", or sign-in does not stick: session cookies are `Secure`,
+  so a browser keeps them only over HTTPS or on a localhost address. Opening
+  `http://<host-ip>:3000` from another machine cannot keep a session, and `/login`, `/setup` and
+  `/forgot-password` say so instead of showing their forms. Put a TLS-terminating reverse proxy
+  in front (see [VPS install](vps.md)), or reach the dashboard through an SSH tunnel
+  (`ssh -L 3000:127.0.0.1:3000 <host>`, then open `http://localhost:3000`). See
+  [Authentication](../security/authentication.md#plain-http).
+- Signed out after every restart: `WEB_OPERATOR_SESSION_SECRET` changed; keep it stable in `.env`.
 - Runtime worker spawn failures: rebuild `runtime-kernel`; it must contain the Python runtime and shared Koda volumes.
 - `koda install` aborts with `Detected pre-existing Docker volumes ... but no .env`: a
   previous install left its volumes behind without its `.env` (typical after deleting

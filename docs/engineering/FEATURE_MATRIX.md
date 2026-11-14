@@ -56,6 +56,8 @@ Re-check F-PLT-15, F-PLT-17 and F-PLT-19 once they land.
 | 2026-11-14 | F-QA-22 | `missing_required` | `complete_verified` | M0-E3-T1 route matrix merged (WAVE-3). |
 | 2026-11-14 | F-SET-11 | `implemented_unvalidated` | `complete_verified` | Route matrix (M0-E3-T1) and the live public-route checks (LIVE-REPLAY-1). |
 | 2026-11-14 | F-QA-04 | `partial` | `implemented_unvalidated` | M0-E2-T2 merged (WAVE-3); CI run not yet observed. |
+| 2026-11-14 | F-SET-14 | `partial` | `complete_verified` | M1-E1-T7 (WAVE-4): explicit "HTTPS required" on plain HTTP from a non-loopback host, no redirect loop; J-14 replayed in Chromium (Firefox and Safari in the out-of-sandbox checklist). |
+| 2026-11-14 | F-PLT-23 | `partial` | `implemented_unvalidated` | M1-E1-T6 (WAVE-4): doctor reads the documented env shape (POSTGRES_*, S3_*, OBJECT_STORAGE_REQUIRED) and protects the bearer; unit and fake-proxy tests; no packaged-install run yet (D-255). |
 
 ## 2. How to read this matrix
 

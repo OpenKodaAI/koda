@@ -4,6 +4,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:
 
 import { cookies } from "next/headers";
 import type { NextResponse } from "next/server";
+import { secureCookiesEnabled } from "@/lib/cookie-transport";
 import {
   OWNER_EXISTS_HINT_COOKIE,
   OWNER_EXISTS_HINT_MAX_AGE_SECONDS,
@@ -116,16 +117,6 @@ export async function getWebOperatorTokenFromCookie(): Promise<string | null> {
   return unsealWebOperatorToken(sealed);
 }
 
-const ALLOW_INSECURE_COOKIES =
-  process.env.NODE_ENV !== "production" &&
-  String(process.env.ALLOW_INSECURE_COOKIES).trim().toLowerCase() === "true";
-const SECURE_COOKIES =
-  !ALLOW_INSECURE_COOKIES &&
-  (
-    process.env.NODE_ENV === "production" ||
-    String(process.env.SECURE_COOKIES).trim().toLowerCase() === "true"
-  );
-
 export function setWebOperatorSessionCookie(response: NextResponse, token: string): void {
   response.cookies.set({
     name: WEB_OPERATOR_SESSION_COOKIE,
@@ -134,7 +125,7 @@ export function setWebOperatorSessionCookie(response: NextResponse, token: strin
     sameSite: "strict",
     maxAge: WEB_OPERATOR_SESSION_MAX_AGE_SECONDS,
     path: "/",
-    secure: SECURE_COOKIES,
+    secure: secureCookiesEnabled(),
   });
 }
 
@@ -146,7 +137,7 @@ export function clearWebOperatorSessionCookie(response: NextResponse): void {
     sameSite: "strict",
     maxAge: 0,
     path: "/",
-    secure: SECURE_COOKIES,
+    secure: secureCookiesEnabled(),
   });
 }
 
@@ -158,7 +149,7 @@ export function setOwnerExistsHintCookie(response: NextResponse, hasOwner: boole
     sameSite: "lax",
     maxAge: hasOwner ? OWNER_EXISTS_HINT_MAX_AGE_SECONDS : 0,
     path: "/",
-    secure: SECURE_COOKIES,
+    secure: secureCookiesEnabled(),
   });
 }
 
@@ -170,7 +161,7 @@ export function setPendingRecoveryCookie(response: NextResponse, pending: boolea
     sameSite: "strict",
     maxAge: pending ? PENDING_RECOVERY_MAX_AGE_SECONDS : 0,
     path: "/",
-    secure: SECURE_COOKIES,
+    secure: secureCookiesEnabled(),
   });
 }
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import ipaddress
+import math
 import re
 import socket
 import struct
@@ -61,15 +62,41 @@ _MAX_CACHED_LIMITERS = 256
 # else's) login or recovery bucket and start over.
 _MAX_CACHED_ENDPOINT_LIMITERS = 4096
 
+
+class _Bucket(AsyncLimiter):
+    """An aiolimiter leaky bucket that can also say when it next lets a request through."""
+
+    __slots__ = ()
+
+    def seconds_until_capacity(self, amount: float = 1) -> float:
+        """Seconds until `has_capacity(amount)` holds again, or 0.0 when it already does.
+
+        The bucket drains `max_rate` every `time_period` seconds, so the wait is the level
+        above what `amount` needs, drained at that rate. aiolimiter wakes its own waiters
+        with the same arithmetic. aiolimiter exposes no public level, so this reads its
+        `_level`; the Retry-After tests in `tests/test_control_plane_rate_limit.py` fail if
+        an upgrade changes it.
+
+        A bucket with `max_rate` below 1 never has capacity (CONTROL_PLANE_RATE_LIMIT and
+        CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT are plain integers, so 0 or a negative value
+        reaches here). It answers one `time_period` instead of dividing by that rate.
+        """
+        if self.max_rate <= 0:
+            return float(self.time_period)
+        self._leak()
+        excess = self._level + amount - self.max_rate
+        return max(0.0, excess * self.time_period / self.max_rate)
+
+
 # Per-IP general-purpose rate limiters with LRU eviction.
-_ip_limiters: OrderedDict[str, AsyncLimiter] = OrderedDict()
+_ip_limiters: OrderedDict[str, _Bucket] = OrderedDict()
 
 # Per-IP auth-failure rate limiters (stricter).
-_auth_failure_limiters: OrderedDict[str, AsyncLimiter] = OrderedDict()
+_auth_failure_limiters: OrderedDict[str, _Bucket] = OrderedDict()
 
 # Per-(endpoint,IP) strict limiters for sensitive auth paths: one LRU per
 # endpoint, keyed by client address.
-_endpoint_limiters: dict[str, OrderedDict[str, AsyncLimiter]] = {}
+_endpoint_limiters: dict[str, OrderedDict[str, _Bucket]] = {}
 
 # (max_burst, window_seconds) — deliberately tight on sensitive paths.
 #
@@ -91,29 +118,29 @@ _SENSITIVE_ENDPOINT_BUDGETS: dict[str, tuple[int, int]] = {
 }
 
 
-def _get_ip_limiter(ip: str) -> AsyncLimiter:
+def _get_ip_limiter(ip: str) -> _Bucket:
     """Return or create the general rate limiter for *ip*."""
     if ip in _ip_limiters:
         _ip_limiters.move_to_end(ip)
         return _ip_limiters[ip]
     if len(_ip_limiters) >= _MAX_CACHED_LIMITERS:
         _ip_limiters.popitem(last=False)
-    _ip_limiters[ip] = AsyncLimiter(CONTROL_PLANE_RATE_LIMIT, 60)
+    _ip_limiters[ip] = _Bucket(CONTROL_PLANE_RATE_LIMIT, 60)
     return _ip_limiters[ip]
 
 
-def _get_auth_failure_limiter(ip: str) -> AsyncLimiter:
+def _get_auth_failure_limiter(ip: str) -> _Bucket:
     """Return or create the auth-failure rate limiter for *ip*."""
     if ip in _auth_failure_limiters:
         _auth_failure_limiters.move_to_end(ip)
         return _auth_failure_limiters[ip]
     if len(_auth_failure_limiters) >= _MAX_CACHED_LIMITERS:
         _auth_failure_limiters.popitem(last=False)
-    _auth_failure_limiters[ip] = AsyncLimiter(CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT, 60)
+    _auth_failure_limiters[ip] = _Bucket(CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT, 60)
     return _auth_failure_limiters[ip]
 
 
-def _get_endpoint_limiter(endpoint: str, ip: str) -> AsyncLimiter | None:
+def _get_endpoint_limiter(endpoint: str, ip: str) -> _Bucket | None:
     """Return the dedicated limiter for `endpoint` from `ip`, or None if the path is not sensitive."""
     budget = _SENSITIVE_ENDPOINT_BUDGETS.get(endpoint)
     if budget is None:
@@ -125,7 +152,7 @@ def _get_endpoint_limiter(endpoint: str, ip: str) -> AsyncLimiter | None:
         return limiters[ip]
     if len(limiters) >= _MAX_CACHED_ENDPOINT_LIMITERS:
         limiters.popitem(last=False)
-    limiters[ip] = AsyncLimiter(max_burst, window)
+    limiters[ip] = _Bucket(max_burst, window)
     return limiters[ip]
 
 
@@ -227,6 +254,22 @@ def check_trusted_proxies() -> None:
     )
 
 
+def check_rate_limits() -> None:
+    """Log at startup each per-client limit that refuses every request it covers.
+
+    A value below 1 for CONTROL_PLANE_RATE_LIMIT refuses every API request, and for
+    CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT turns every 401/403 into a 429, each with
+    `Retry-After` set to the 60 s window. That fails closed, so it is allowed, but it is
+    almost never what an operator meant.
+    """
+    for setting, value in (
+        ("CONTROL_PLANE_RATE_LIMIT", CONTROL_PLANE_RATE_LIMIT),
+        ("CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT),
+    ):
+        if value < 1:
+            log.warning("control_plane_rate_limit_refuses_every_request", setting=setting, value=value)
+
+
 async def _resolve_trusted_hostname(hostname: str) -> frozenset[_IPAddress]:
     now = time.monotonic()
     cached = _resolved_trusted_hostnames.get(hostname)
@@ -275,11 +318,18 @@ async def _client_ip(request: web.Request) -> str:
     return str(client)
 
 
-def _too_many_requests() -> web.Response:
+def _too_many_requests(bucket: _Bucket) -> web.Response:
+    """A `429` whose `Retry-After` is when `bucket`, which refused the request, takes the next one.
+
+    Whole seconds, rounded up and at least one, so a client that waits as told is not refused
+    by this bucket again. The value follows only this client address's own requests, which
+    every identity failure answers alike, so it says nothing about an account (ADR-038).
+    """
+    retry_after = max(1, math.ceil(bucket.seconds_until_capacity()))
     return web.json_response(
         {"error": "rate limit exceeded"},
         status=429,
-        headers={"Retry-After": "60"},
+        headers={"Retry-After": str(retry_after)},
     )
 
 
@@ -306,14 +356,14 @@ async def control_plane_rate_limit_middleware(
                 path=request.path,
             )
             log.warning("endpoint_rate_limit_exceeded", ip=ip, path=request.path)
-            return _too_many_requests()
+            return _too_many_requests(endpoint_limiter)
         await endpoint_limiter.acquire()
 
     # General rate check — single atomic acquire to avoid TOCTOU race.
     limiter = _get_ip_limiter(ip)
     if not limiter.has_capacity():
         log.warning("rate_limit_exceeded", ip=ip, path=request.path)
-        return _too_many_requests()
+        return _too_many_requests(limiter)
     # has_capacity() is a non-blocking peek; acquire() consumes a token.
     # Both run on the single-threaded asyncio loop, so no interleaving
     # between the check and the acquire within this coroutine step.
@@ -332,7 +382,7 @@ async def control_plane_rate_limit_middleware(
         auth_limiter = _get_auth_failure_limiter(ip)
         if not auth_limiter.has_capacity():
             log.warning("auth_failure_rate_limit_exceeded", ip=ip, path=request.path)
-            return _too_many_requests()
+            return _too_many_requests(auth_limiter)
         await auth_limiter.acquire()
 
     return response

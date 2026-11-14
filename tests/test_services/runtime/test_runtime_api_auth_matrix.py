@@ -26,6 +26,8 @@ check is skipped when the token has no agent scope or the worker has no
 from __future__ import annotations
 
 import base64
+import hashlib
+import hmac
 import json
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime, timedelta
@@ -256,6 +258,18 @@ def _expired_token(*capabilities: str) -> str:
         return _token(*capabilities)
 
 
+def _signed_with_an_empty_key(*capabilities: str) -> str:
+    """A token signed with an empty key, as anyone can compute one.
+
+    RuntimeAccessService refuses an empty key (M1-E1-T6), but HMAC does not, so re-sign a
+    genuine payload by hand.
+    """
+    encoded_payload, _signature = _token(*capabilities).split(".", 1)
+    payload = base64.urlsafe_b64decode(encoded_payload + "=" * (-len(encoded_payload) % 4))
+    signature = base64.urlsafe_b64encode(hmac.new(b"", payload, hashlib.sha256).digest()).decode().rstrip("=")
+    return f"{encoded_payload}.{signature}"
+
+
 def _tampered_token() -> str:
     """A genuine read token whose payload was edited to grant every capability."""
     encoded_payload, signature = _token(READ).split(".", 1)
@@ -309,7 +323,7 @@ def _rejection(case: str, required: str) -> Rejection:
     if case == "worker-without-secret":
         # The worker never signs with an empty key, so a token signed with one is refused too.
         return Rejection(
-            {"X-Runtime-Token": _token(*all_caps, secret="")},
+            {"X-Runtime-Token": _signed_with_an_empty_key(*all_caps)},
             _ERRORS["unconfigured"],
             worker_secret="",
         )

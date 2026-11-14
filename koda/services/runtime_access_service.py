@@ -48,6 +48,10 @@ class RuntimeAccessService:
     """Issue and validate short-lived runtime access scopes."""
 
     def __init__(self, secret: str) -> None:
+        # With an empty key anyone can compute a valid signature, so every
+        # envelope would verify. Refuse it here, not only at the call sites.
+        if not str(secret or "").strip():
+            raise ValueError("RuntimeAccessService needs a non-empty secret")
         self._secret = secret.encode("utf-8")
 
     def issue(

@@ -1,9 +1,16 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
 import { ForgotPasswordScreen } from "@/components/auth/forgot-password-screen";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { ApiError } from "@/lib/errors";
+import {
+  type AppLanguage,
+  LOCALE_COOKIE_KEY,
+  SUPPORTED_LANGUAGES,
+  translateForLanguage,
+} from "@/lib/i18n";
 
 const replaceMock = vi.fn();
 
@@ -27,6 +34,10 @@ import { requestJson } from "@/lib/http-client";
 beforeEach(() => {
   replaceMock.mockClear();
   (requestJson as ReturnType<typeof vi.fn>).mockReset();
+  // The i18n provider persists the active language and applies it on the next mount; reset
+  // it so every test, in any order, renders the language it asks for.
+  window.localStorage.clear();
+  document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
 });
 
 describe("ForgotPasswordScreen", () => {
@@ -39,6 +50,51 @@ describe("ForgotPasswordScreen", () => {
     expect(screen.getByLabelText(/email|usuário|username/i)).toBeInTheDocument();
     expect(screen.getByLabelText(/recovery|recuperação|recuperaci/i)).toBeInTheDocument();
     expect(screen.getAllByLabelText(/password|senha/i).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("says HTTPS is required when the dashboard refuses recovery over plain HTTP", async () => {
+    // The refusal is decided from the transport before the recovery details
+    // are read, so naming it reveals nothing about accounts or codes.
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Recovery needs HTTPS.", 403, { reason: "INSECURE_TRANSPORT" }),
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|username/i), "owner");
+    await user.type(screen.getByLabelText(/recovery/i), "aaaa-bbbb-cccc");
+    const passwordFields = screen.getAllByLabelText(/password/i);
+    await user.type(passwordFields[0], "BrandNewPassw0rd!Now");
+    await user.type(passwordFields[1], "BrandNewPassw0rd!Now");
+    await user.click(screen.getByRole("button", { name: /reset/i }));
+
+    expect(await screen.findByText(/over plain HTTP/i)).toBeInTheDocument();
+    expect(screen.queryByText(/invalid or expired/i)).not.toBeInTheDocument();
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps the generic message for any other refusal", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Invalid recovery details.", 403),
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|username/i), "owner");
+    await user.type(screen.getByLabelText(/recovery/i), "aaaa-bbbb-cccc");
+    const passwordFields = screen.getAllByLabelText(/password/i);
+    await user.type(passwordFields[0], "BrandNewPassw0rd!Now");
+    await user.type(passwordFields[1], "BrandNewPassw0rd!Now");
+    await user.click(screen.getByRole("button", { name: /reset/i }));
+
+    expect(await screen.findByText(/invalid or expired/i)).toBeInTheDocument();
+    expect(screen.queryByText(/over plain HTTP/i)).not.toBeInTheDocument();
   });
 
   it("rejects short passwords before calling the API", async () => {
@@ -168,5 +224,69 @@ describe("ForgotPasswordScreen", () => {
     const busyButton = screen.getByRole("button", { name: /resetting/i });
     expect(busyButton).toHaveAttribute("aria-busy", "true");
     expect(screen.queryByText(/resetting/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("ForgotPasswordScreen rate limiting (ADR-038)", () => {
+  function tr(language: AppLanguage, key: string, options?: Record<string, unknown>) {
+    return translateForLanguage(language, key, options);
+  }
+
+  function minutes(language: AppLanguage, value: number) {
+    return new Intl.NumberFormat(language, { style: "unit", unit: "minute", unitDisplay: "long" }).format(value);
+  }
+
+  async function submitRecovery(language: AppLanguage) {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage={language}>
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    const fields: Array<[string, string]> = [
+      ["auth.forgot.identifier", "owner"],
+      ["auth.forgot.recovery_code", "aaaa-bbbb-cccc"],
+      ["auth.forgot.new_password", "BrandNewPassw0rd!Now"],
+      ["auth.forgot.confirm_password", "BrandNewPassw0rd!Now"],
+    ];
+    for (const [labelKey, value] of fields) {
+      fireEvent.change(screen.getByLabelText(tr(language, labelKey)), { target: { value } });
+    }
+    await user.click(screen.getByRole("button", { name: tr(language, "auth.forgot.submit") }));
+  }
+
+  it.each(SUPPORTED_LANGUAGES)("tells a rate-limited client how long to wait in %s", async (language) => {
+    // The recovery bucket (10 per hour) takes its next request 6 minutes after a burst.
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Too many attempts. Try again later.", 429, { retryAfterSeconds: 360 }),
+    );
+
+    await submitRecovery(language);
+
+    const expected = tr(language, "auth.rate_limited.with_wait", { duration: minutes(language, 6) });
+    expect(expected).not.toBe("auth.rate_limited.with_wait");
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText(tr(language, "auth.forgot.generic_error"))).not.toBeInTheDocument();
+  });
+
+  it("asks to wait a moment when the response names no wait", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("rate limit exceeded", 429),
+    );
+
+    await submitRecovery("en-US");
+
+    expect(await screen.findByText(tr("en-US", "auth.rate_limited.no_wait"))).toBeInTheDocument();
+  });
+
+  it.each(SUPPORTED_LANGUAGES)("keeps an invalid code or locked account on the generic error in %s", async (language) => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Invalid recovery details.", 400),
+    );
+
+    await submitRecovery(language);
+
+    expect(await screen.findByText(tr(language, "auth.forgot.generic_error"))).toBeInTheDocument();
+    expect(screen.queryByText(tr(language, "auth.rate_limited.no_wait"))).not.toBeInTheDocument();
   });
 });
