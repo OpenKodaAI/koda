@@ -59,7 +59,7 @@ export function ForgotPasswordScreen() {
         method: "POST",
         body: JSON.stringify({
           identifier: identifier.trim(),
-          recovery_code: recoveryCode.trim(),
+          recovery_code: recoveryCode.trim().toUpperCase(),
           new_password: newPassword,
         }),
       });
@@ -131,12 +131,16 @@ export function ForgotPasswordScreen() {
               id="forgot-code"
               type="text"
               value={recoveryCode}
-              onChange={(event) => setRecoveryCode(event.target.value.toLowerCase())}
+              // Kept as typed: rewriting a controlled value moves the caret to the
+              // end. `uppercase` shows it in the issued format, submit sends it
+              // upper-cased, and the control plane canonicalizes it either way.
+              onChange={(event) => setRecoveryCode(event.target.value)}
+              autoCapitalize="characters"
               autoCorrect="off"
               spellCheck={false}
               disabled={busy}
               placeholder={translate("generated.account.xxxx_xxxx_xxxx_d457e3cb")}
-              className="auth-input auth-input--mono"
+              className="auth-input auth-input--mono uppercase"
             />
           </label>
           <label className="auth-field" htmlFor="forgot-new-password">

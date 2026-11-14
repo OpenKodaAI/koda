@@ -74,6 +74,51 @@ describe("ForgotPasswordScreen", () => {
     expect(await screen.findByRole("heading", { level: 1 })).toBeInTheDocument();
   });
 
+  it("shows the recovery code in the issued uppercase format and submits it upper-cased", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ ok: true });
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|username/i), "owner");
+    const codeField = screen.getByLabelText(/recovery/i);
+    expect(codeField).toHaveAttribute("placeholder", "XXXX-XXXX-XXXX");
+    expect(codeField).toHaveAttribute("autocapitalize", "characters");
+    expect(codeField).toHaveClass("uppercase");
+    await user.type(codeField, "  abcd-efgh-jklm ");
+    const passwordFields = screen.getAllByLabelText(/password/i);
+    await user.type(passwordFields[0], "BrandNewPassw0rd!Now");
+    await user.type(passwordFields[1], "BrandNewPassw0rd!Now");
+    await user.click(screen.getByRole("button", { name: /reset/i }));
+
+    expect(requestJson).toHaveBeenCalledTimes(1);
+    const [url, init] = (requestJson as ReturnType<typeof vi.fn>).mock.calls[0] as [
+      string,
+      RequestInit,
+    ];
+    expect(url).toBe("/api/control-plane/auth/password/recover");
+    expect(JSON.parse(String(init.body))).toMatchObject({
+      identifier: "owner",
+      recovery_code: "ABCD-EFGH-JKLM",
+    });
+  });
+
+  it("keeps the caret in place when the recovery code is edited mid-string", async () => {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <ForgotPasswordScreen />
+      </I18nProvider>,
+    );
+    const codeField = screen.getByLabelText(/recovery/i) as HTMLInputElement;
+    await user.type(codeField, "ABDE");
+    await user.type(codeField, "c", { initialSelectionStart: 2, initialSelectionEnd: 2 });
+    expect(codeField).toHaveValue("ABcDE");
+    expect(codeField.selectionStart).toBe(3);
+  });
+
   it("uses a spinner-only visual state while resetting", async () => {
     (requestJson as ReturnType<typeof vi.fn>).mockImplementationOnce(
       () => new Promise(() => {}),
