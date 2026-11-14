@@ -15,21 +15,24 @@ against the real stack.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import secrets
 import shutil
 import socket
 import subprocess
 import time
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
-from aiohttp import web
+from aiohttp import HttpVersion11, web
 
 import scripts.proxy_smoke as proxy_smoke
+
+Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCKER_SMOKE = ROOT / "scripts" / "docker_smoke.sh"
@@ -131,6 +134,7 @@ def test_the_checks_cover_browser_login_the_relay_and_api_token_calls() -> None:
         "api-token: GET /api/control-plane/agents",
         "api-token: POST with a body",
         "api: GET /openapi/control-plane.json",
+        "health: HTTP/1.0 request without a Host reaches the dashboard",
     ]
 
 
@@ -197,6 +201,14 @@ def _json(payload: object, status: int = 200) -> web.Response:
 def dashboard_app(stack: Stack) -> web.Application:
     """apps/web: pages, the session-cookie gate, the auth routes and the relay."""
 
+    @web.middleware
+    async def require_host(request: web.Request, handler: Handler) -> web.StreamResponse:
+        # apps/web/src/lib/dashboard-server.mjs serves through Node's http.createServer with
+        # `requireHostHeader` left on: an HTTP/1.1 request without Host gets 400 before any route.
+        if request.version >= HttpVersion11 and "Host" not in request.headers:
+            return web.Response(status=400, headers={"Connection": "close"})
+        return await handler(request)
+
     async def page(request: web.Request) -> web.Response:
         stack.remember("dashboard", request)
         return web.Response(
@@ -251,7 +263,7 @@ def dashboard_app(stack: Stack) -> web.Application:
         await socket_response.close(code=4404, message=b"relay_not_found")
         return socket_response
 
-    app = web.Application()
+    app = web.Application(middlewares=[require_host])
     app.router.add_get("/api/health", health)
     for path in ("/", "/setup", "/login"):
         app.router.add_get(path, page)
@@ -391,16 +403,23 @@ http {{
             process.wait()
 
 
-async def _smoke(binary: str, workdir: Path, template: str) -> tuple[Stack, list[proxy_smoke.Result]]:
+@asynccontextmanager
+async def proxied_stack(binary: str, workdir: Path, template: str) -> AsyncIterator[tuple[Stack, str]]:
+    """Run *template* in a real nginx in front of the stand-ins; yield them and the proxy URL."""
     stack = Stack()
     async with serve(dashboard_app(stack)) as dashboard, serve(api_app(stack)) as api:
         moved = template.replace(proxy_smoke.TEMPLATE_DASHBOARD, f"http://{dashboard}").replace(
             proxy_smoke.TEMPLATE_API, f"http://{api}"
         )
         with running_nginx(binary, workdir, moved) as proxy_url:
-            results = await asyncio.to_thread(
-                proxy_smoke.run_checks, proxy_url, api_token=stack.api_token, bootstrap_code=stack.bootstrap_code
-            )
+            yield stack, proxy_url
+
+
+async def _smoke(binary: str, workdir: Path, template: str) -> tuple[Stack, list[proxy_smoke.Result]]:
+    async with proxied_stack(binary, workdir, template) as (stack, proxy_url):
+        results = await asyncio.to_thread(
+            proxy_smoke.run_checks, proxy_url, api_token=stack.api_token, bootstrap_code=stack.bootstrap_code
+        )
     return stack, results
 
 
@@ -425,6 +444,31 @@ async def test_the_bundled_proxy_passes_the_smoke_in_a_real_nginx(nginx_binary: 
     for _, _, _, headers in stack.seen:
         assert headers["X-Forwarded-For"] == "127.0.0.1"
         assert headers["Host"].startswith("127.0.0.1:")
+
+
+async def test_the_bundled_proxy_serves_requests_without_host_in_a_real_nginx(
+    nginx_binary: str, tmp_path: Path
+) -> None:
+    """An HTTP/1.0 request may carry no Host; HAProxy's default `option httpchk` health check is one.
+
+    nginx proxies it as HTTP/1.1, which the dashboard refuses without a Host. `$http_host` is empty
+    then, so the template falls back to the server name; a browser's Host still keeps its port.
+    """
+    template = TEMPLATE.read_text(encoding="utf-8")
+    async with proxied_stack(nginx_binary, tmp_path, template) as (stack, proxy_url):
+        proxy = proxy_smoke.Proxy(proxy_url)
+        health = await asyncio.to_thread(proxy.raw_request, b"GET /api/health HTTP/1.0\r\n\r\n")
+        page = await asyncio.to_thread(proxy.raw_request, b"GET /login HTTP/1.0\r\n\r\n")
+        browser = await asyncio.to_thread(
+            proxy.raw_request, b"GET /login HTTP/1.1\r\nHost: koda.example.com:8443\r\nConnection: close\r\n\r\n"
+        )
+
+    assert (health.status, json.loads(health.body)) == (200, {"status": "ok"})
+    assert page.status == 200
+    assert browser.status == 200
+    hosts = [headers.get("Host") for upstream, _, path, headers in stack.seen if path == "/login"]
+    # The template's `server_name _;`; an operator's own server_name takes its place.
+    assert hosts == ["_", "koda.example.com:8443"]
 
 
 async def test_the_smoke_rejects_the_previous_template(nginx_binary: str, tmp_path: Path) -> None:

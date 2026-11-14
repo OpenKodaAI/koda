@@ -13,7 +13,10 @@ Proxy") and each one tells the two upstreams apart, so a request that reaches th
   own close code ``4404 relay_not_found``, so the upgrade reached the dashboard's ``server.mjs``;
 - API-token path: ``Authorization: Bearer`` calls reach the API, a GET and a POST whose body the API
   must read (``auth/login`` answers with a ``session_token`` only there), and the API serves
-  ``/openapi/control-plane.json``.
+  ``/openapi/control-plane.json``;
+- a request without a Host (HTTP/1.0 allows it; HAProxy's default ``option httpchk`` health check
+  is one) still gets the dashboard's ``/api/health`` answer: nginx proxies it as HTTP/1.1, which the
+  dashboard's Node server refuses without a Host.
 
 ``render`` writes the template with the ``listen`` address (and, for tests, the upstream addresses)
 replaced. Only the standard library is used, so the script runs on a bare CI runner. Secrets are
@@ -27,6 +30,7 @@ import base64
 import contextlib
 import hashlib
 import http.client
+import io
 import json
 import os
 import re
@@ -141,6 +145,20 @@ class Proxy:
             return Response(response.status, response.msg, response.read())
         finally:
             connection.close()
+
+    def raw_request(self, request: bytes) -> Response:
+        """Send *request* exactly as written (http.client always adds a Host) and read it to the end."""
+        received = b""
+        with socket.create_connection((self.host, self.port), timeout=self.timeout) as sock:
+            sock.sendall(request)
+            while chunk := sock.recv(65536):
+                received += chunk
+        head, _, body = received.partition(b"\r\n\r\n")
+        status_line, _, fields = head.partition(b"\r\n")
+        parts = status_line.decode("latin-1").split(" ", 2)
+        if len(parts) < 2 or not parts[0].startswith("HTTP/") or not parts[1].isdigit():
+            raise CheckFailed(f"not an HTTP response: {status_line[:120]!r}")
+        return Response(int(parts[1]), http.client.parse_headers(io.BytesIO(fields + b"\r\n\r\n")), body)
 
     def websocket_close(self, path: str) -> tuple[int, str]:
         """Open a WebSocket on *path* and return the close code and reason of the first frame the server sends."""
@@ -350,6 +368,16 @@ def _openapi(proxy: Proxy) -> str:
     return "200"
 
 
+def _request_without_host(proxy: Proxy) -> str:
+    response = proxy.raw_request(b"GET /api/health HTTP/1.0\r\n\r\n")
+    payload = response.json()
+    _expect(
+        response.status == 200 and isinstance(payload, dict) and payload.get("status") == "ok",
+        f"expected the dashboard's health answer, got {response.summary()}",
+    )
+    return "200 from the dashboard"
+
+
 def run_checks(proxy_url: str, *, api_token: str, bootstrap_code: str) -> list[Result]:
     proxy = Proxy(proxy_url)
     session = Session()
@@ -367,6 +395,7 @@ def run_checks(proxy_url: str, *, api_token: str, bootstrap_code: str) -> list[R
         ("api-token: GET /api/control-plane/agents", lambda: _api_token_get(proxy, api_token)),
         ("api-token: POST with a body", lambda: _api_token_post(proxy, api_token, session)),
         ("api: GET /openapi/control-plane.json", lambda: _openapi(proxy)),
+        ("health: HTTP/1.0 request without a Host reaches the dashboard", lambda: _request_without_host(proxy)),
     ]
     results: list[Result] = []
     for name, check in checks:

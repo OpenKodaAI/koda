@@ -10,7 +10,9 @@ The routing follows the auth model in docs/install/vps.md ("Reverse Proxy"):
 - only ``/api/control-plane/*`` requests carrying ``Authorization: Bearer`` (API-token clients) and
   ``/openapi/control-plane.json`` go to the API on ``127.0.0.1:8090``;
 - every request adds the address it came from to ``X-Forwarded-For``, so the trusted-proxy
-  settings charge rate limits to the real client.
+  settings charge rate limits to the real client;
+- every request reaches the upstream with a ``Host``: the browser's, port included, or the server
+  name when the client sent none.
 
 The config is parsed and routed by a small model of nginx: exact and longest-prefix ``location``
 matching, ``if`` with ``return``, ``error_page ... = @named``, ``map`` without regexes, and the
@@ -209,7 +211,8 @@ class NginxModel:
             table: dict[str, str] = {}
             for entry in directive.block:
                 assert len(entry.args) == 1 and not entry.name.startswith("~"), f"map entry outside the model: {entry}"
-                table[entry.name] = entry.args[0]
+                # nginx matches a map's string keys ignoring case.
+                table[entry.name.lower()] = entry.args[0]
             self.maps[target.removeprefix("$")] = (source, table)
 
         servers = [directive for directive in top if directive.name == "server"]
@@ -222,6 +225,10 @@ class NginxModel:
                 f"server: {directive.name} is outside the model"
             )
         self.scheme = "https" if any("ssl" in d.args for d in self.server if d.name == "listen") else "http"
+        names = [d for d in self.server if d.name == "server_name"]
+        assert len(names) == 1 and names[0].args, "expected one server_name directive"
+        # The server's first name: what $host is when the request names no host.
+        self.server_name = names[0].args[0]
 
         self.exact: dict[str, Location] = {}
         self.prefixes: dict[str, Location] = {}
@@ -254,10 +261,13 @@ class NginxModel:
     def variable(self, name: str, request: Request, location: Location) -> str:
         if name in self.maps:
             source, table = self.maps[name]
-            key = self.expand(source, request, location)
-            return table.get(key, table.get("default", ""))
+            key = self.expand(source, request, location).lower()
+            # A map's resulting value can itself hold variables.
+            return self.expand(table.get(key, table.get("default", "")), request, location)
         if name == "host":
-            return request.headers["host"].lower().rsplit(":", 1)[0]
+            # The Host header without its port, or the server name when the request has none.
+            host = request.headers.get("host", "")
+            return host.lower().rsplit(":", 1)[0] if host else self.server_name
         if name == "scheme":
             return self.scheme
         if name == "remote_addr":
@@ -332,8 +342,10 @@ class NginxModel:
         assert match, f"proxy_pass {url} is outside the model"
         return match.group(1), match.group(2)
 
-    def route(self, path: str, headers: dict[str, str] | None = None) -> Route:
-        request = Request(path, {name.lower(): value for name, value in {"Host": HOST, **(headers or {})}.items()})
+    def route(self, path: str, headers: dict[str, str] | None = None, *, host: str | None = HOST) -> Route:
+        """Route a request; ``host=None`` sends it without a Host header, as an HTTP/1.0 client may."""
+        defaults = {"Host": host} if host is not None else {}
+        request = Request(path, {name.lower(): value for name, value in {**defaults, **(headers or {})}.items()})
         location = self.select(path)
         status = self.rewrite(location, request)
         if status is not None:
@@ -522,6 +534,26 @@ def test_every_route_passes_the_host_the_browser_sent_with_its_port(
 
     assert routed.headers["host"] == browser_host
     assert f"{routed.headers['x-forwarded-proto']}://{routed.headers['host']}" == f"{nginx.scheme}://{browser_host}"
+
+
+@pytest.mark.parametrize("route", ALL_ROUTES, ids=[_route_id(route) for route in ALL_ROUTES])
+def test_every_route_sends_a_host_when_the_client_sent_none(
+    nginx: NginxModel, route: tuple[str, dict[str, str]]
+) -> None:
+    """An HTTP/1.0 request may carry no Host; HAProxy's default `option httpchk` health check is one.
+
+    nginx proxies it as HTTP/1.1, and the dashboard's Node server (http.createServer in
+    apps/web/src/lib/dashboard-server.mjs, `requireHostHeader` left on) answers an HTTP/1.1 request
+    without Host with 400. `$http_host` is empty then and nginx leaves the header out, so the
+    template must fall back to the server name.
+    """
+    path, headers = route
+
+    routed = nginx.route(path, headers, host=None)
+
+    assert routed.http_version == "1.1"
+    assert routed.headers.get("host") == nginx.server_name
+    assert routed.headers["x-forwarded-for"] == CLIENT
 
 
 @pytest.mark.parametrize(
