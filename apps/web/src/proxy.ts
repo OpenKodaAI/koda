@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientIpFromHeaders, rateLimitKey } from "@/lib/client-ip";
 import { isMutationMethod, isTrustedDashboardRequest } from "@/lib/request-origin";
 import { unsealWebOperatorToken } from "@/lib/web-operator-session";
 import {
@@ -184,18 +185,10 @@ function isRateLimited(ip: string): boolean {
   return false;
 }
 
-const TRUSTED_PROXY_IPS = new Set(
-  (process.env.TRUSTED_PROXY_IPS || "127.0.0.1,::1,::ffff:127.0.0.1").split(",").map((s) => s.trim()),
-);
-
-function clientIp(request: NextRequest): string {
-  const directIp = (request as NextRequest & { ip?: string }).ip || "unknown";
-  const forwardedFor = request.headers?.get?.("x-forwarded-for");
-  // Only trust x-forwarded-for when request arrives through a known proxy
-  if (forwardedFor && TRUSTED_PROXY_IPS.has(directIp)) {
-    return forwardedFor.split(",")[0]?.trim() || directIp;
-  }
-  return directIp;
+/** Rate-limit key of the client behind the request (an IPv6 client's /64). */
+function clientKey(request: NextRequest): string {
+  const ip = clientIpFromHeaders(request.headers);
+  return ip ? rateLimitKey(ip) : "unknown";
 }
 
 /* ---------- responses ---------- */
@@ -278,7 +271,7 @@ function isPublicControlPlanePath(pathname: string): boolean {
 }
 
 function apiProxyGate(request: NextRequest): NextResponse {
-  const ip = clientIp(request);
+  const ip = clientKey(request);
   if (isLoginSessionPath(request.nextUrl.pathname)) {
     if (isLoginRateLimited(ip)) {
       return rateLimitedResponse();

@@ -5,6 +5,53 @@ vi.mock("@/lib/web-operator-session", () => ({
   getWebOperatorTokenFromCookie: vi.fn(async () => "operator-token"),
 }));
 
+const incomingHeaders = vi.hoisted(() => ({ current: null as Headers | null }));
+vi.mock("next/headers", () => ({
+  headers: vi.fn(async () => {
+    if (!incomingHeaders.current) {
+      throw new Error("headers() was called outside a request scope");
+    }
+    return incomingHeaders.current;
+  }),
+}));
+
+describe("control-plane fetch client attribution", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } })),
+    );
+  });
+
+  afterEach(() => {
+    incomingHeaders.current = null;
+    vi.unstubAllGlobals();
+  });
+
+  function sentHeaders(): Headers {
+    const init = vi.mocked(globalThis.fetch).mock.calls[0]?.[1] as RequestInit | undefined;
+    return new Headers(init?.headers);
+  }
+
+  it("forwards the browser address of the request being served", async () => {
+    incomingHeaders.current = new Headers({ "x-forwarded-for": "10.9.9.9, 198.51.100.7" });
+    const { controlPlaneFetch } = await import("@/lib/control-plane");
+
+    await controlPlaneFetch("/api/control-plane/auth/bootstrap/exchange", { method: "POST", body: "{}" });
+
+    expect(sentHeaders().get("X-Forwarded-For")).toBe("198.51.100.7");
+  });
+
+  it("sends no client address outside a request scope", async () => {
+    const { controlPlaneFetch } = await import("@/lib/control-plane");
+
+    await controlPlaneFetch("/api/control-plane/auth/status");
+
+    expect(sentHeaders().has("X-Forwarded-For")).toBe(false);
+  });
+});
+
 describe("control-plane fetch tiers", () => {
   beforeEach(() => {
     vi.resetModules();

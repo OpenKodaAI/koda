@@ -6,6 +6,7 @@ import {
   parseSchemaOrThrow,
   upstreamFetch,
 } from "@/lib/api-utils";
+import { forwardedClientIpHeaders } from "@/lib/client-ip";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import { getWebOperatorTokenFromCookie } from "@/lib/web-operator-session";
 
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          ...forwardedClientIpHeaders(request.headers),
         },
         body: JSON.stringify(payload),
         cache: "no-store",
