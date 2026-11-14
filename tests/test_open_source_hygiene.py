@@ -66,6 +66,10 @@ SECURITY_SCAN_MANIFEST_ALLOWLIST = {
     "apps/web/package.json",
     "package.json",
     "packages/cli/package.json",
+    # Provider CLIs pinned for the images (ADR-002 AG-02): scanned by Snyk --all-projects,
+    # by npm audit in security.yml/release.yml, and by the Trivy image scans.
+    "packages/provider-clis/package-lock.json",
+    "packages/provider-clis/package.json",
     "pnpm-lock.yaml",
     "pyproject.toml",
     "rust/Cargo.lock",

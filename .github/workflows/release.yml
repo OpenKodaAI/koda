@@ -386,6 +386,10 @@ jobs:
             --ignore-vuln PYSEC-2024-277
       - name: Node dependency audit
         run: pnpm audit --audit-level=moderate
+      - name: Provider CLI dependency audit
+        # The provider CLIs ship in the images from their own npm lockfile
+        # (packages/provider-clis), which pnpm audit does not read.
+        run: npm audit --prefix packages/provider-clis --omit=dev --audit-level=moderate
       - name: Install cargo-audit
         run: cargo install --locked cargo-audit
       - name: Rust dependency audit

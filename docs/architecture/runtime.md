@@ -39,6 +39,8 @@ agent worker processes
 
 The runtime-kernel is the OS-level parent for workers. In Docker deployments it includes the Python runtime, Koda package, provider CLIs, shared volumes, and browser/runtime dependencies needed to host those workers.
 
+Both `app` and `runtime-kernel` install the provider CLIs from one lockfile (`packages/provider-clis`) at exact versions. A runner checks the installed CLI against its contract (`koda/services/provider_cli_contract.py`) before the first turn and refuses to build a command line with an option outside it; an unverified CLI makes that provider unavailable. See [Provider CLI versions](../operations/upgrade.md#provider-cli-versions).
+
 ## Runtime Room Data
 
 The dashboard runtime view is built from:

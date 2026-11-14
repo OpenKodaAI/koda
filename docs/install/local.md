@@ -115,6 +115,9 @@ python3 scripts/doctor.py \
 ```
 
 The doctor validates bootstrap files, secrets, storage, control-plane reachability, and dashboard reachability.
+It fails while `POSTGRES_PASSWORD` or an `S3_*` secret is still a `replace-with-...` placeholder and prints
+the rotation command (see [Rotating placeholder Postgres and object-storage
+secrets](#rotating-placeholder-postgres-and-object-storage-secrets)).
 
 ## Manual Startup
 
@@ -146,8 +149,44 @@ docker compose up -d
 
 This rotates `CONTROL_PLANE_API_TOKEN`, `RUNTIME_LOCAL_UI_TOKEN` and `WEB_OPERATOR_SESSION_SECRET`
 (dashboard users sign in again). `POSTGRES_PASSWORD` and the `S3_*` values must keep matching the
-data already on disk: rotate them in Postgres (`ALTER USER ... PASSWORD ...`) and object storage
-first, then update `.env` (or run the generator with `--all` before the first start only).
+data already on disk, so they are rotated separately, as described next.
+
+### Rotating placeholder Postgres and object-storage secrets
+
+Placeholder values for `POSTGRES_PASSWORD`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` still
+work, because the bundled Postgres and SeaweedFS were set up with them. Anyone who can reach those
+services can use the public values. Until you rotate them, Koda still starts, but:
+
+- the control plane logs `storage_secret_placeholder_in_use` (key names only) at every start;
+- the doctor fails its `storage_secrets_not_placeholders` check;
+- the dashboard shows a warning banner that links to this section.
+
+Before the first start, when Postgres has no data yet, generate every value at once:
+
+```bash
+python3 scripts/generate_env_secrets.py --all
+```
+
+On an install that has already started, Postgres keeps the password it was first started with, so
+set the new password inside Postgres before you restart. The commands below use the default
+`POSTGRES_USER` and `POSTGRES_DB` (`koda`); use your own values if you changed them.
+
+```bash
+python3 scripts/generate_env_secrets.py --all   # writes the new values to .env only
+NEW_POSTGRES_PASSWORD="$(sed -n 's/^POSTGRES_PASSWORD=//p' .env)"
+docker compose exec -T postgres \
+  psql -U koda -d koda -c "ALTER USER koda PASSWORD '${NEW_POSTGRES_PASSWORD}'"
+docker compose up -d
+python3 scripts/doctor.py \
+  --env-file .env \
+  --base-url http://127.0.0.1:8090 \
+  --dashboard-url http://127.0.0.1:3000
+```
+
+If the `ALTER USER` command fails, do not restart: the app would no longer reach Postgres. Fix the
+command and run it again first. The bundled SeaweedFS reads the `S3_*` values from its environment
+when its container starts, so `docker compose up -d` applies them and keeps the stored objects.
+With an external S3-compatible store, create the new keys there and put them in `.env` instead.
 
 ## Troubleshooting
 

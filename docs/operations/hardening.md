@@ -12,10 +12,76 @@ Every item below is verifiable. The matching checks live in
 
 - [ ] `STATE_ROOT_DIR` permissions are `0700` (owner-only).
 - [ ] `${STATE_ROOT_DIR}/control_plane/.master.key` is `0600`.
+- [ ] The master key is backed up off-host, apart from the Postgres
+      dumps it decrypts. Once Postgres has recorded its fingerprint, the
+      control plane refuses to start without it or with a different key
+      (see [backup-restore.md](backup-restore.md#master-key-recovery)).
 - [ ] `.env` file is `0600` and excluded from git via `.gitignore`.
+- [ ] `POSTGRES_PASSWORD`, `S3_ACCESS_KEY_ID` and `S3_SECRET_ACCESS_KEY` are not `.env.example`
+      placeholders (the basic doctor check `storage_secrets_not_placeholders`; rotation steps in
+      [`../install/local.md`](../install/local.md#rotating-placeholder-postgres-and-object-storage-secrets)).
 - [ ] `bootstrap.txt` is single-use; delete after first login.
 - [ ] Backups (Postgres dumps, state tarballs) are encrypted at-rest
       via filesystem-level encryption (LUKS / EBS / GCS CMEK).
+
+## Process hygiene (built in)
+
+Nothing to configure. On Linux, each agent worker (`python -m koda`) and
+the runtime kernel (`koda-runtime-kernel`) make themselves non-dumpable
+(`PR_SET_DUMPABLE=0`) and set the core-file limit to 0. The kernel does
+this first thing in `main`. The worker does it in the first statement of
+`koda/__main__.py`, which runs only after Python itself has started (see
+the startup window below). If either step fails, the process refuses to
+start.
+
+- The processes a worker or the kernel starts (provider CLIs, MCP servers,
+  governed shell commands) run as the same user. Once the worker or the
+  kernel has hardened itself, they get `Permission denied` on
+  `/proc/<pid>/environ`, `mem` and `fd` of that process, and cannot attach
+  a debugger to it, so they cannot read the secrets in its environment or
+  memory. Root with `CAP_SYS_PTRACE` still can, so do not add that
+  capability to the `runtime-kernel` container.
+- **Residual: the worker's startup window.** From the moment the kernel
+  starts a worker until `koda/__main__.py` runs, the worker is still
+  dumpable while Python starts up (the interpreter, `site` and `.pth`
+  processing, `koda/__init__.py`). That takes tens of milliseconds. A
+  same-uid process that keeps polling `/proc/*/environ` reliably reads a
+  starting worker's whole environment in that window: the Postgres DSN, the
+  S3 secret, granted secrets and runtime tokens. It does not have to wait
+  for a restart either. Being non-dumpable does not stop signals, so a
+  same-uid process can kill a worker, and the kernel starts it again on the
+  supervisor's next reconcile (every 5 seconds by default). Workers also
+  restart when a new version is published and after a crash. Nothing stops
+  this until ADR-002's L2 confinement runs, under Landlock, every process
+  that shares the worker's uid: a Landlock-confined process cannot read
+  `/proc/<pid>/environ` of a process outside its domain, whether that
+  process is dumpable or not. It takes three tasks to get there, and the
+  window stays open until all of them have shipped:
+  - AG-14: provider CLIs, governed shell and git that the worker starts;
+  - AG-15: the tasks and commands the runtime kernel starts for a worker
+    (`StartTask`, `ExecuteCommand`);
+  - AG-16: MCP stdio servers, yt-dlp, ffmpeg, ffprobe and Playwright
+    chromium (ADR-002's process class U).
+
+  Even then it stays open wherever L2 is not enforced: with
+  `RUNTIME_CONFINEMENT=off`, and for class U processes on a host without
+  Landlock, which ADR-002 still runs, unconfined, with only a health
+  warning. Keeping secrets out of the exec environment altogether is a
+  follow-up: the kernel would pass only non-secret variables and hand the
+  rest to the worker through an inherited file descriptor that the worker
+  reads after it has hardened. The kernel
+  itself has no such window in practice: it is the first process in its
+  container and hardens itself before any worker or command exists.
+- The processes the worker and the kernel start inherit the zero core-file
+  limit and cannot raise it. They are not non-dumpable themselves: once a process runs its
+  own program it is dumpable again, so it is protected only by what is
+  kept out of its environment.
+- Debugging tools such as `py-spy`, `gdb -p` or `cat /proc/<pid>/environ`
+  need root with `CAP_SYS_PTRACE` against these processes, for example
+  `docker compose exec --privileged -u root runtime-kernel ...`.
+- To check a running process: `grep 'core file' /proc/<pid>/limits` shows
+  `0 0`, and `stat -c %U /proc/<pid>/environ` shows `root` even though the
+  process runs as `botuser`.
 
 ## Auth
 
@@ -96,38 +162,67 @@ fairness:
 
 ## Master key rotation
 
-The master key (`.master.key`) encrypts every secret in
-`cp_secret_values`. Rotate annually or after a suspected compromise.
+The master key (`.master.key`) encrypts every secret the control plane
+stores: `cp_secret_values`, MCP connection env values and OAuth tokens,
+and provider login sessions. Rotate annually or after a suspected
+compromise.
+
+The key file must stay mode `0600`. Whenever it reads the key, the
+control plane removes group and other access from a key file that has
+any, such as one written by hand under a `022` umask. It never adds a
+permission: a `0400` key stays `0400`. Some mounts refuse the change
+(a read-only bind mount) or accept it without applying it (some
+network, FUSE or host bind mounts). On those the control plane keeps
+using the key and logs `control_plane_master_key_permissions_too_open`
+with the mode the file still has, once per file and mode. Fix the mode
+on the host when you see that event.
+
+Postgres records a fingerprint of the key in `cp_master_key_fingerprint`
+(an HMAC of a fixed label under the key, never the key). At startup the
+control plane refuses a key that does not match it, unless the previous
+key does: that is a rotation, and the control plane then records the new
+key's fingerprint. Replacing the key file without step 2 below therefore
+stops the control plane at startup instead of leaving secrets
+undecryptable.
 
 ```bash
-# 1. Generate new key
-openssl rand 32 > /tmp/new-master.key
+# 1. Back up the current key off-host (see backup-restore.md).
 
-# 2. Move the OLD key to the previous-key slot
-docker compose exec app cp \
-    "${STATE_ROOT_DIR}/control_plane/.master.key" \
-    "${STATE_ROOT_DIR}/control_plane/.master-previous.key"
+# 2. Keep the current key as the previous key
+docker compose exec app sh -c \
+    'cd "$STATE_ROOT_DIR/control_plane" && cp -p .master.key .master-previous.key'
 
-# 3. Place the new key
-docker compose exec app cp /tmp/new-master.key \
-    "${STATE_ROOT_DIR}/control_plane/.master.key"
+# 3. Write the new key in place. It must be a Fernet key (32 url-safe
+#    base64-encoded bytes); raw `openssl rand` output is refused at startup.
+docker compose exec app sh -c 'cd "$STATE_ROOT_DIR/control_plane" && umask 077 &&
+    python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())" > .master.key.new &&
+    mv .master.key.new .master.key'
 
-# 4. Set CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE in .env so the
-#    decrypt path can still read pre-rotation rows
+# 4. Set CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE in .env so the decrypt
+#    path can still read pre-rotation rows and startup accepts the new key
 echo 'CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE=/var/lib/koda/state/control_plane/.master-previous.key' >> .env
 
-# 5. Restart and re-encrypt every secret on next write
-docker compose restart app
+# 5. Recreate the app so it reads .env. Startup records the new key's
+#    fingerprint (audit event security.master_key_fingerprint_recorded,
+#    reason "rotation"); each secret is re-encrypted on its next write.
+docker compose up -d --force-recreate app
 
 # 6. After the next batch update touched every secret, remove the
-#    previous-key reference and the file
-unset CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE  # remove from .env
-docker compose exec app rm "${STATE_ROOT_DIR}/control_plane/.master-previous.key"
-docker compose restart app
+#    CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE line from .env, then:
+docker compose exec app sh -c 'rm "$STATE_ROOT_DIR/control_plane/.master-previous.key"'
+docker compose up -d --force-recreate app
 ```
 
-This is a one-way operation; back up `.master.key` before rotation.
-Rotation that loses both files makes every secret unrecoverable.
+To undo a rotation before step 6, swap the two files back (old key as
+`.master.key`, new key as `.master-previous.key`) and recreate the app.
+The new key, now the previous key, matches the recorded fingerprint, so
+startup records the old key's fingerprint again, and secrets already
+re-encrypted with the new key still decrypt through the fallback.
+
+This is a one-way operation once step 6 is done; back up `.master.key`
+before rotation. Rotation that loses both files makes every secret
+unrecoverable. In cluster mode every control-plane replica must use the
+same key file: a replica with another key refuses to start.
 
 ## Provider tokens
 

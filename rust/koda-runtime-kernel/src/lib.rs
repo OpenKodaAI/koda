@@ -1,5 +1,6 @@
 pub mod agent_workers;
 pub mod isolation;
+pub mod process_hygiene;
 
 mod browser;
 mod checkpoints;

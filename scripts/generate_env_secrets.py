@@ -27,7 +27,17 @@ import tempfile
 from pathlib import Path
 
 PLACEHOLDER_PREFIX = "replace-with-"
-PLACEHOLDER_LINE = re.compile(r"^(?P<key>[A-Z][A-Z0-9_]*)=(?P<value>replace-with-[A-Za-z0-9-]*)[ \t]*$", re.MULTILINE)
+# A ``KEY=replace-with-...`` line in every form doctor and Koda treat as a
+# placeholder: optional ``export`` prefix, single or double quotes, any letter
+# case and a trailing ``# comment``. The match is rewritten as a plain
+# ``KEY=value`` line, so the rotation steps in docs/install/local.md can read
+# the new value back with ``sed -n 's/^KEY=//p'``.
+PLACEHOLDER_LINE = re.compile(
+    r"^[ \t]*(?:export[ \t]+)?(?P<key>[A-Z][A-Z0-9_]*)[ \t]*=[ \t]*"
+    r"(?:(?P<quote>[\"'])(?i:replace-with-)[^\"'\r\n]*(?P=quote)|(?i:replace-with-)[^\s\"']*)"
+    r"[ \t]*(?:#[^\r\n]*)?(?=\r?$)",
+    re.MULTILINE,
+)
 AUTH_KEYS = frozenset({"CONTROL_PLANE_API_TOKEN", "RUNTIME_LOCAL_UI_TOKEN", "WEB_OPERATOR_SESSION_SECRET"})
 # Object-storage access key ids are conventionally 20 alphanumeric characters.
 SHORT_KEYS = frozenset({"S3_ACCESS_KEY_ID"})

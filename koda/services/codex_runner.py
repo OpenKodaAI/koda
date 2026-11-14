@@ -14,7 +14,6 @@ from typing import Any, cast
 from koda.config import (
     AGENT_ID,
     CODEX_APPROVAL_POLICY,
-    CODEX_BIN,
     CODEX_FIRST_CHUNK_TIMEOUT,
     CODEX_SANDBOX,
     CODEX_SKIP_GIT_REPO_CHECK,
@@ -22,15 +21,19 @@ from koda.config import (
     MODEL_PRICING_USD,
 )
 from koda.logging_config import get_logger
-from koda.services.provider_auth import PROVIDER_API_KEY_ENV_KEYS, PROVIDER_AUTH_MODE_ENV_KEYS
+from koda.services import provider_cli_contract
+from koda.services.provider_auth import (
+    PROVIDER_API_KEY_ENV_KEYS,
+    PROVIDER_AUTH_MODE_ENV_KEYS,
+    provider_executable,
+)
 from koda.services.provider_env import build_llm_subprocess_env
-from koda.services.provider_runtime import ProviderCapabilities, ProviderStatus, TurnMode
+from koda.services.provider_runtime import ProviderCapabilities, TurnMode
 from koda.utils.process_control import terminate_process_tree
 
 log = get_logger(__name__)
 _agent_id_label = AGENT_ID or "default"
 
-_HELP_TIMEOUT = 3.0
 _RETRYABLE_PATTERN = re.compile(
     r"overloaded|rate.limit|too many requests|connection|econnreset|timeout|temporarily unavailable|503|529",
     re.IGNORECASE,
@@ -51,13 +54,15 @@ _RESULT_ERROR_PREFIX_PATTERN = re.compile(
     r"^(failed to |error:|api error:|usage:|\{.*\"type\"\s*:\s*\"error\")",
     re.IGNORECASE | re.DOTALL,
 )
-_CAPABILITY_CACHE: dict[TurnMode, ProviderCapabilities] = {}
+# Same TTL as Claude and Gemini: the CLI contract is re-checked (a stat while the binary is
+# unchanged), so an in-place upgrade or a transient probe failure does not stick for the
+# worker's life.
+_CAPABILITY_CACHE_TTL_SECONDS = 30.0
+_CAPABILITY_CACHE: dict[TurnMode, tuple[float, ProviderCapabilities]] = {}
 _CAPABILITY_LOCK = asyncio.Lock()
 _AUTH_CAPABILITY_CACHE: tuple[float, bool, str] | None = None
-_REQUIRED_HELP_TOKENS: dict[TurnMode, tuple[str, ...]] = {
-    "new_turn": ("--json", "--model", "--cd", "--sandbox"),
-    "resume_turn": ("--json", "--model"),
-}
+# Contract scope (``codex exec`` vs ``codex exec resume``) that each turn mode's argv uses.
+_CONTRACT_SCOPE: dict[TurnMode, str] = {"new_turn": "exec", "resume_turn": "exec_resume"}
 _AUTH_STATUS_TIMEOUT = 3.0
 _AUTH_STATUS_TTL_SECONDS = 30.0
 _PROVIDER_ARTIFACT_SAVED_PATH_KEYS = ("saved_path", "saved_paths")
@@ -90,13 +95,6 @@ _PROVIDER_ARTIFACT_METADATA_KEYS = (
 
 def _configured_auth_mode() -> str:
     return str(os.environ.get(PROVIDER_AUTH_MODE_ENV_KEYS["codex"], "subscription_login")).strip().lower()
-
-
-def _required_help_tokens(turn_mode: TurnMode) -> tuple[str, ...]:
-    tokens = list(_REQUIRED_HELP_TOKENS[turn_mode])
-    if CODEX_SKIP_GIT_REPO_CHECK:
-        tokens.append("--skip-git-repo-check")
-    return tuple(tokens)
 
 
 def _is_retryable_message(message: str) -> bool:
@@ -152,26 +150,9 @@ async def _terminate_process(proc: object) -> None:
     await terminate_process_tree(proc)
 
 
-async def _read_help_text(turn_mode: TurnMode) -> tuple[str, str]:
-    cmd = [CODEX_BIN, "exec", "--help"] if turn_mode == "new_turn" else [CODEX_BIN, "exec", "resume", "--help"]
-    proc = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=build_llm_subprocess_env(provider="codex"),
-    )
-    try:
-        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=_HELP_TIMEOUT)
-    except TimeoutError:
-        await _terminate_process(proc)
-        await proc.wait()
-        raise
-    return stdout.decode(), stderr.decode()
-
-
 async def _read_login_status() -> tuple[int, str, str]:
     proc = await asyncio.create_subprocess_exec(
-        CODEX_BIN,
+        provider_executable("codex"),
         "login",
         "status",
         stdout=asyncio.subprocess.PIPE,
@@ -244,7 +225,7 @@ def _build_new_turn_cmd(
 ) -> list[str]:
     resolved_sandbox = sandbox or CODEX_SANDBOX
     cmd = [
-        CODEX_BIN,
+        provider_executable("codex"),
         "exec",
         "--json",
         "--cd",
@@ -260,6 +241,7 @@ def _build_new_turn_cmd(
     if image_paths:
         cmd.extend(["--image", *image_paths])
     cmd.append("-")
+    provider_cli_contract.validate_args("codex", cmd[1:])
     return cmd
 
 
@@ -271,7 +253,7 @@ def _build_resume_turn_cmd(
     *,
     effort: str | int | None = None,
 ) -> list[str]:
-    cmd = [CODEX_BIN, "exec", "resume", "--json", "--model", model]
+    cmd = [provider_executable("codex"), "exec", "resume", "--json", "--model", model]
     if CODEX_SKIP_GIT_REPO_CHECK:
         cmd.append("--skip-git-repo-check")
     if CODEX_SANDBOX == "danger-full-access":
@@ -280,6 +262,7 @@ def _build_resume_turn_cmd(
     if image_paths:
         cmd.extend(["--image", *image_paths])
     cmd.extend([session_id, "-"])
+    provider_cli_contract.validate_args("codex", cmd[1:])
     return cmd
 
 
@@ -304,116 +287,73 @@ def _build_cmd(
     return _build_new_turn_cmd(model, work_dir, system_prompt, image_paths, sandbox=sandbox, effort=effort)
 
 
-def _capability_from_help(turn_mode: TurnMode, help_text: str) -> ProviderCapabilities:
-    missing = [token for token in _required_help_tokens(turn_mode) if token not in help_text]
+def _capability_from_contract(
+    turn_mode: TurnMode, check: provider_cli_contract.CliContractCheck
+) -> ProviderCapabilities:
+    if not check.scope_ok(_CONTRACT_SCOPE[turn_mode]):
+        return ProviderCapabilities(
+            provider="codex",
+            turn_mode=turn_mode,
+            status="unavailable" if turn_mode == "new_turn" else "degraded",
+            can_execute=False,
+            supports_native_resume=False,
+            errors=[check.error],
+            checked_via="cli_contract",
+        )
     if turn_mode == "new_turn":
-        if missing:
-            return ProviderCapabilities(
-                provider="codex",
-                turn_mode=turn_mode,
-                status="unavailable",
-                can_execute=False,
-                supports_native_resume=False,
-                errors=[f"codex exec is missing required options: {', '.join(missing)}"],
-                checked_via="help",
-            )
         return ProviderCapabilities(
             provider="codex",
             turn_mode=turn_mode,
             status="ready",
             can_execute=True,
             supports_native_resume=False,
-            checked_via="help",
+            checked_via="cli_contract",
         )
-
-    warnings: list[str] = []
-    errors: list[str] = []
-    can_execute = True
-    supports_native_resume = True
-    status: ProviderStatus = "ready"
-
-    if missing:
-        can_execute = False
-        supports_native_resume = False
-        status = "degraded"
-        errors.append(f"codex exec resume is missing required options: {', '.join(missing)}")
-
     if CODEX_SANDBOX != "danger-full-access":
-        can_execute = False
-        supports_native_resume = False
-        status = "degraded"
-        warnings.append(
-            f"codex resume degraded: sandbox '{CODEX_SANDBOX}' is not supported safely by the resume subcommand"
+        return ProviderCapabilities(
+            provider="codex",
+            turn_mode=turn_mode,
+            status="degraded",
+            can_execute=False,
+            supports_native_resume=False,
+            warnings=[
+                f"codex resume degraded: sandbox '{CODEX_SANDBOX}' is not supported safely by the resume subcommand"
+            ],
+            checked_via="cli_contract",
         )
-
-    if "--dangerously-bypass-approvals-and-sandbox" not in help_text:
-        can_execute = False
-        supports_native_resume = False
-        status = "degraded"
-        errors.append("codex exec resume does not expose the danger-full-access execution flag")
-
     return ProviderCapabilities(
         provider="codex",
         turn_mode=turn_mode,
-        status=status,
-        can_execute=can_execute,
-        supports_native_resume=supports_native_resume,
-        warnings=warnings,
-        errors=errors,
-        checked_via="help",
+        status="ready",
+        can_execute=True,
+        supports_native_resume=True,
+        checked_via="cli_contract",
     )
 
 
 async def get_codex_capabilities(turn_mode: TurnMode) -> ProviderCapabilities:
-    """Return cached Codex compatibility information for one turn mode."""
-    cached = _CAPABILITY_CACHE.get(turn_mode)
-    if cached is None:
-        async with _CAPABILITY_LOCK:
-            cached = _CAPABILITY_CACHE.get(turn_mode)
-            if cached is None:
-                try:
-                    stdout_text, stderr_text = await _read_help_text(turn_mode)
-                    help_text = "\n".join(part for part in (stdout_text, stderr_text) if part).strip()
-                    capabilities = _capability_from_help(turn_mode, help_text)
-                except FileNotFoundError:
-                    status: ProviderStatus = "unavailable" if turn_mode == "new_turn" else "degraded"
-                    capabilities = ProviderCapabilities(
-                        provider="codex",
-                        turn_mode=turn_mode,
-                        status=status,
-                        can_execute=False,
-                        supports_native_resume=False,
-                        errors=[f"{CODEX_BIN} not found on PATH"],
-                        checked_via="help",
-                    )
-                except TimeoutError:
-                    status = "unavailable" if turn_mode == "new_turn" else "degraded"
-                    capabilities = ProviderCapabilities(
-                        provider="codex",
-                        turn_mode=turn_mode,
-                        status=status,
-                        can_execute=False,
-                        supports_native_resume=False,
-                        errors=[f"{CODEX_BIN} --help timed out while probing {turn_mode}"],
-                        checked_via="help",
-                    )
-                except Exception as exc:
-                    status = "unavailable" if turn_mode == "new_turn" else "degraded"
-                    capabilities = ProviderCapabilities(
-                        provider="codex",
-                        turn_mode=turn_mode,
-                        status=status,
-                        can_execute=False,
-                        supports_native_resume=False,
-                        errors=[f"failed to probe codex {turn_mode}: {exc}"],
-                        checked_via="help",
-                    )
+    """Return cached Codex compatibility information for one turn mode.
 
-                _CAPABILITY_CACHE[turn_mode] = capabilities
-                cached = capabilities
+    The installed binary must match the pinned CLI contract before anything else runs. The
+    result is reused for ``_CAPABILITY_CACHE_TTL_SECONDS``, then checked again.
+    """
+    entry = _CAPABILITY_CACHE.get(turn_mode)
+    if entry is None or time.monotonic() - entry[0] >= _CAPABILITY_CACHE_TTL_SECONDS:
+        async with _CAPABILITY_LOCK:
+            entry = _CAPABILITY_CACHE.get(turn_mode)
+            if entry is None or time.monotonic() - entry[0] >= _CAPABILITY_CACHE_TTL_SECONDS:
+                check = await provider_cli_contract.verify_provider_cli(
+                    "codex", (provider_executable("codex"),), env=build_llm_subprocess_env(provider="codex")
+                )
+                entry = (time.monotonic(), _capability_from_contract(turn_mode, check))
+                _CAPABILITY_CACHE[turn_mode] = entry
+
+    cached = entry[1].clone()
+    if not cached.can_execute and cached.errors:
+        # The binary is not the verified contract version; do not run anything else on it.
+        return cached
 
     auth_ok, auth_checked_via, auth_error = await _get_codex_auth_status()
-    cached = cached.clone()
     cached.checked_via = f"{cached.checked_via}+{auth_checked_via}"
     if auth_ok:
         return cached
@@ -463,9 +403,9 @@ async def _get_codex_auth_status() -> tuple[bool, str, str]:
             try:
                 returncode, stdout_text, stderr_text = await _read_login_status()
             except FileNotFoundError:
-                result = (False, "login_status", f"{CODEX_BIN} not found on PATH")
+                result = (False, "login_status", f"{provider_executable('codex')} not found on PATH")
             except TimeoutError:
-                result = (False, "login_status", f"{CODEX_BIN} login status timed out")
+                result = (False, "login_status", f"{provider_executable('codex')} login status timed out")
             except Exception as exc:
                 result = (False, "login_status", f"failed to probe codex login status: {exc}")
             else:

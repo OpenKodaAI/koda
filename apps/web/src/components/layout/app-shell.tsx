@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useLocalStorage } from "@/hooks/use-local-storage";
 import { usePathname } from "next/navigation";
 import { CommandBarModal } from "@/components/command-bar/command-bar-modal";
+import { PlaceholderSecretsBanner } from "@/components/layout/placeholder-secrets-banner";
 import { RouteStage } from "@/components/layout/route-stage";
 import { Sidebar } from "@/components/layout/sidebar";
 import { WorkspaceTopbar } from "@/components/layout/workspace-topbar";
@@ -42,6 +43,12 @@ function ShellViewportFrame({
 }) {
   const isGeneralSettingsRoute = pathname.startsWith("/control-plane/system");
   const sessionsTopOffset = isSessionsRoute ? "0px" : "var(--shell-topbar-height)";
+  const isFullBleedRoute =
+    isSessionsRoute ||
+    isControlPlaneSetupRoute ||
+    isControlPlaneCatalogRoute ||
+    isGeneralSettingsRoute ||
+    isControlPlaneAgentRoute;
 
   return (
     <main
@@ -64,19 +71,22 @@ function ShellViewportFrame({
           className={cn(
             "flex flex-col",
             isSessionsRoute
-              ? "h-[100dvh] min-h-[100dvh] overflow-hidden"
+              ? "h-[100dvh] min-h-[100dvh] overflow-hidden [&>.route-stage]:flex-1 [&>.route-stage]:!min-h-0"
               : isControlPlaneSetupRoute
                 ? "min-h-screen"
                 : isControlPlaneCatalogRoute
-                ? "mx-auto w-full min-h-[calc(100vh-var(--shell-topbar-height))] max-w-[1720px] lg:h-[calc(100dvh-var(--shell-topbar-height))] lg:min-h-[calc(100dvh-var(--shell-topbar-height))] lg:overflow-hidden lg:[&>.route-stage]:h-full"
+                ? "mx-auto w-full min-h-[calc(100vh-var(--shell-topbar-height))] max-w-[1720px] lg:h-[calc(100dvh-var(--shell-topbar-height))] lg:min-h-[calc(100dvh-var(--shell-topbar-height))] lg:overflow-hidden lg:[&>.route-stage]:flex-1 lg:[&>.route-stage]:!min-h-0"
                 : isGeneralSettingsRoute
-                ? "mx-auto w-full min-h-[calc(100vh-var(--shell-topbar-height))] max-w-[1720px] lg:h-[calc(100dvh-var(--shell-topbar-height))] lg:min-h-[calc(100dvh-var(--shell-topbar-height))] lg:overflow-hidden lg:[&>.route-stage]:h-full lg:[&>.route-stage]:overflow-hidden"
+                ? "mx-auto w-full min-h-[calc(100vh-var(--shell-topbar-height))] max-w-[1720px] lg:h-[calc(100dvh-var(--shell-topbar-height))] lg:min-h-[calc(100dvh-var(--shell-topbar-height))] lg:overflow-hidden lg:[&>.route-stage]:flex-1 lg:[&>.route-stage]:!min-h-0 lg:[&>.route-stage]:overflow-hidden"
                 : isControlPlaneAgentRoute
-                  ? "w-full min-h-[calc(100vh-var(--shell-topbar-height))] lg:h-[calc(100dvh-var(--shell-topbar-height))] lg:min-h-[calc(100dvh-var(--shell-topbar-height))] lg:overflow-hidden lg:[&>.route-stage]:h-full"
+                  ? "w-full min-h-[calc(100vh-var(--shell-topbar-height))] lg:h-[calc(100dvh-var(--shell-topbar-height))] lg:min-h-[calc(100dvh-var(--shell-topbar-height))] lg:overflow-hidden lg:[&>.route-stage]:flex-1 lg:[&>.route-stage]:!min-h-0"
                 : "mx-auto min-h-[calc(100vh-var(--shell-topbar-height)-2rem)] max-w-[1720px]"
           )}
           style={isSessionsRoute ? ({ "--shell-topbar-height": sessionsTopOffset } as CSSProperties) : undefined}
       >
+        <PlaceholderSecretsBanner
+          className={isFullBleedRoute ? "rounded-none border-x-0 border-t-0" : "mb-4"}
+        />
         <RouteStage>{children}</RouteStage>
       </div>
     </main>

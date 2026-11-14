@@ -6,6 +6,7 @@ import io
 import uuid
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 from aiohttp import web
@@ -812,6 +813,174 @@ async def test_password_recover_route_accepts_lowercase_compact_code(
         )
         assert fresh.status == 200, await fresh.text()
         assert (await fresh.json())["operator"]["username"] == "owner"
+
+
+_OPERATOR_ONBOARDING_STATUS: dict[str, Any] = {
+    "control_plane": {"ready": True},
+    "storage": {"database": {"ready": True}, "object_storage": {"ready": True}},
+    "providers": [{"provider_id": "claude", "verified": True, "connection_status": {"account_label": "team"}}],
+    "agents": [{"id": "ATLAS", "display_name": "Atlas", "status": "active"}],
+    "system": {"owner_email": "owner@example.com", "allowed_user_ids": [123456789]},
+    "steps": {"onboarding_complete": True},
+}
+
+
+def _serve_onboarding_status(monkeypatch: pytest.MonkeyPatch, service: Any) -> tuple[TestServer, MagicMock]:
+    """The onboarding status route behind the real control-plane middlewares."""
+    manager = MagicMock()
+    manager.get_onboarding_status.return_value = dict(_OPERATOR_ONBOARDING_STATUS)
+    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
+    monkeypatch.setattr(control_plane_api, "_manager", lambda: manager)
+    app = web.Application(
+        middlewares=[
+            control_plane_api.control_plane_error_middleware,
+            control_plane_api.control_plane_auth_middleware,
+        ]
+    )
+    app.router.add_get("/api/control-plane/onboarding/status", control_plane_api.onboarding_status)
+    return TestServer(app), manager
+
+
+@pytest.mark.parametrize("owner_exists", [False, True], ids=["before-setup", "after-setup"])
+async def test_onboarding_status_without_a_session_returns_only_the_setup_flags(
+    fake_operator_db: FakeOperatorAuthDb,
+    monkeypatch: pytest.MonkeyPatch,
+    owner_exists: bool,
+) -> None:
+    """Before login the route says whether setup is needed and nothing else (D-050)."""
+    service = operator_auth_mod.OperatorAuthService()
+    if owner_exists:
+        _create_owner(service)
+    ensured: list[dict[str, Any]] = []
+    monkeypatch.setattr(operator_auth_mod, "ensure_bootstrap_file", lambda **kwargs: ensured.append(kwargs))
+    server, manager = _serve_onboarding_status(monkeypatch, service)
+
+    async with TestClient(server) as client:
+        anonymous = await client.get("/api/control-plane/onboarding/status")
+        unknown_token = await client.get(
+            "/api/control-plane/onboarding/status",
+            headers={"Authorization": "Bearer kodas_not-a-live-session"},
+        )
+
+        for response in (anonymous, unknown_token):
+            assert response.status == 200, await response.text()
+            assert await response.json() == {"has_owner": owner_exists, "bootstrap_required": not owner_exists}
+
+    manager.get_onboarding_status.assert_not_called()
+    # `koda auth issue-code` polls this route so the control plane writes the setup-code file.
+    assert ensured == [{"has_owner": owner_exists}, {"has_owner": owner_exists}]
+
+
+async def test_onboarding_status_with_an_operator_credential_returns_the_full_payload(
+    fake_operator_db: FakeOperatorAuthDb,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    session_token = _create_owner(service)["session_token"]
+    server, manager = _serve_onboarding_status(monkeypatch, service)
+
+    async with TestClient(server) as client:
+        for token in (session_token, "legacy-break-glass"):
+            response = await client.get(
+                "/api/control-plane/onboarding/status",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status == 200, await response.text()
+            payload = await response.json()
+            assert payload["agents"] == _OPERATOR_ONBOARDING_STATUS["agents"]
+            assert payload["providers"] == _OPERATOR_ONBOARDING_STATUS["providers"]
+            assert payload["system"] == _OPERATOR_ONBOARDING_STATUS["system"]
+            assert payload["has_owner"] is True
+            assert payload["bootstrap_required"] is False
+            assert payload["session_required"] is True
+
+    assert manager.get_onboarding_status.call_count == 2
+
+
+def _serve_auth_status(monkeypatch: pytest.MonkeyPatch, service: Any) -> TestServer:
+    """The auth status route behind the real control-plane middlewares."""
+    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
+    app = web.Application(
+        middlewares=[
+            control_plane_api.control_plane_error_middleware,
+            control_plane_api.control_plane_auth_middleware,
+        ]
+    )
+    app.router.add_get("/api/control-plane/auth/status", control_plane_api.auth_status)
+    return TestServer(app)
+
+
+_ANONYMOUS_AUTH_STATUS_KEYS = {
+    "has_owner",
+    "bootstrap_required",
+    "auth_mode",
+    "session_required",
+    "onboarding_complete",
+    "authenticated",
+    "session_subject",
+    "operator",
+}
+
+
+@pytest.mark.parametrize("owner_exists", [False, True], ids=["before-setup", "after-setup"])
+async def test_auth_status_without_a_session_names_the_bootstrap_file_only_before_setup(
+    fake_operator_db: FakeOperatorAuthDb,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+    owner_exists: bool,
+) -> None:
+    """The setup screen gets the bootstrap file path; once an owner exists nobody anonymous does (D-050, R-36)."""
+    monkeypatch.setattr(operator_auth_mod, "ALLOW_LOOPBACK_BOOTSTRAP", True)
+    service = operator_auth_mod.OperatorAuthService()
+    if owner_exists:
+        _create_owner(service)
+    server = _serve_auth_status(monkeypatch, service)
+
+    async with TestClient(server) as client:
+        anonymous = await client.get("/api/control-plane/auth/status")
+        unknown_token = await client.get(
+            "/api/control-plane/auth/status",
+            headers={"Authorization": "Bearer kodas_not-a-live-session"},
+        )
+
+        for response in (anonymous, unknown_token):
+            assert response.status == 200, await response.text()
+            payload = await response.json()
+            assert payload["authenticated"] is False
+            assert payload["operator"] is None
+            assert payload["has_owner"] is owner_exists
+            assert payload["bootstrap_required"] is not owner_exists
+            if owner_exists:
+                assert set(payload) == _ANONYMOUS_AUTH_STATUS_KEYS
+            else:
+                assert set(payload) == _ANONYMOUS_AUTH_STATUS_KEYS | {"bootstrap_file_path", "loopback_trust_enabled"}
+                assert payload["bootstrap_file_path"] == str(tmp_path / "bootstrap.txt")
+                assert payload["loopback_trust_enabled"] is True
+
+
+async def test_auth_status_with_an_operator_credential_keeps_the_server_flags(
+    fake_operator_db: FakeOperatorAuthDb,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Any,
+) -> None:
+    monkeypatch.setattr(operator_auth_mod, "ALLOW_LOOPBACK_BOOTSTRAP", True)
+    service = operator_auth_mod.OperatorAuthService()
+    session_token = _create_owner(service)["session_token"]
+    server = _serve_auth_status(monkeypatch, service)
+
+    async with TestClient(server) as client:
+        for token in (session_token, "legacy-break-glass"):
+            response = await client.get(
+                "/api/control-plane/auth/status",
+                headers={"Authorization": f"Bearer {token}"},
+            )
+            assert response.status == 200, await response.text()
+            payload = await response.json()
+            assert payload["authenticated"] is True
+            assert payload["has_owner"] is True
+            assert payload["recovery_available"] is True
+            assert payload["loopback_trust_enabled"] is True
+            assert payload["bootstrap_file_path"] == str(tmp_path / "bootstrap.txt")
 
 
 def test_password_reset_revokes_all_existing_sessions(fake_operator_db: FakeOperatorAuthDb) -> None:

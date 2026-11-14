@@ -131,6 +131,19 @@ def test_resolve_provider_command_raises_file_not_found_when_cli_missing(monkeyp
         provider_auth.resolve_provider_command("claude")
 
 
+def test_missing_gemini_binary_never_falls_back_to_npx(monkeypatch):
+    """ADR-002 AG-02: an unpinned ``npx -y @google/gemini-cli`` must never stand in for the pinned CLI."""
+
+    def fake_which(executable: str, path: str | None = None):
+        return "/usr/bin/npx" if executable == "npx" else None
+
+    monkeypatch.setattr(provider_auth.shutil, "which", fake_which)
+
+    with pytest.raises(FileNotFoundError, match="gemini"):
+        provider_auth.resolve_provider_command("gemini", base_env={"PATH": "/usr/bin"})
+    assert provider_auth.provider_command_present("gemini", base_env={"PATH": "/usr/bin"}) is False
+
+
 def test_start_login_process_raises_file_not_found_when_cli_missing(monkeypatch):
     monkeypatch.setattr(provider_auth.shutil, "which", lambda *a, **kw: None)
 
@@ -572,3 +585,33 @@ def test_runtime_profile_and_verify_profile_share_base_url():
             f"{provider_id}: runtime base_url={runtime.base_url!r} but "
             f"verify default={verify_default!r} — these must match."
         )
+
+
+@pytest.mark.parametrize("provider", ["perplexity", "openrouter", "elevenlabs", "ollama"])
+def test_subscription_login_flows_refuse_providers_without_a_cli_login(monkeypatch, provider):
+    """Review: these used to fall through to the Gemini branch (verify) or fail with KeyError."""
+
+    def _no_spawn(*args, **kwargs):
+        raise AssertionError("no CLI may run for a provider without a subscription login")
+
+    monkeypatch.setattr(provider_auth.subprocess, "run", _no_spawn)
+    monkeypatch.setattr(provider_auth.shutil, "which", lambda executable, path=None: f"/usr/bin/{executable}")
+
+    result = provider_auth.verify_provider_subscription_login(provider)
+    assert result.verified is False
+    assert "does not support subscription login" in result.last_error
+    with pytest.raises(ValueError, match="does not support subscription login"):
+        provider_auth.provider_login_command(provider)
+    assert provider_auth.provider_logout_command(provider) is None
+    assert provider_auth.run_provider_logout(provider) == (False, "logout not supported", False)
+
+
+def test_logout_resolves_only_clis_that_have_a_logout(monkeypatch):
+    monkeypatch.setattr(provider_auth.shutil, "which", lambda executable, path=None: None)
+
+    # Gemini has no logout subcommand: nothing is resolved, so a missing CLI is not an error.
+    assert provider_auth.provider_logout_command("gemini") is None
+    # A missing Claude or Codex CLI is reported, not raised, so a disconnect can still wipe keys.
+    # ``attempted`` stays False: with no CLI there is nothing to log out.
+    assert provider_auth.run_provider_logout("claude") == (False, "claude not found on PATH", False)
+    assert provider_auth.run_provider_logout("codex") == (False, "codex not found on PATH", False)

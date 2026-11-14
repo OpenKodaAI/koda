@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { clientIpFromHeaders, rateLimitKey } from "@/lib/client-ip";
+import { isPublicControlPlaneApiPath } from "@/lib/public-control-plane-paths";
 import { isMutationMethod, isTrustedDashboardRequest } from "@/lib/request-origin";
 import { unsealWebOperatorToken } from "@/lib/web-operator-session";
 import {
@@ -133,14 +134,6 @@ function pageAuthGate(request: NextRequest): NextResponse {
 
 const RATE_LIMIT_MAX_REQUESTS = 120;
 const LOGIN_RATE_LIMIT_MAX = 20;
-const PUBLIC_CONTROL_PLANE_PATHS = new Set([
-  "/api/control-plane/onboarding/status",
-  "/api/control-plane/auth/status",
-  "/api/control-plane/auth/bootstrap/exchange",
-  "/api/control-plane/auth/login",
-  "/api/control-plane/auth/register-owner",
-  "/api/control-plane/auth/password/recover",
-]);
 
 // Separate per-client windows, each with its own eviction schedule and size cap.
 const apiWindow = createSlidingWindowLimiter({ maxRequests: RATE_LIMIT_MAX_REQUESTS });
@@ -197,10 +190,6 @@ function isLoginSessionPath(pathname: string): boolean {
   return /\/api\/control-plane\/providers\/[^/]+\/connection\/login\//.test(pathname);
 }
 
-function isPublicControlPlanePath(pathname: string): boolean {
-  return PUBLIC_CONTROL_PLANE_PATHS.has(pathname);
-}
-
 function apiProxyGate(request: NextRequest): NextResponse {
   const limiter = isLoginSessionPath(request.nextUrl.pathname) ? loginSessionWindow : apiWindow;
   if (limiter.isLimited(clientKey(request))) {
@@ -211,7 +200,7 @@ function apiProxyGate(request: NextRequest): NextResponse {
     return forbiddenMutationResponse();
   }
 
-  if (isPublicControlPlanePath(request.nextUrl.pathname)) {
+  if (isPublicControlPlaneApiPath(request.nextUrl.pathname)) {
     return NextResponse.next();
   }
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import stat
 from pathlib import Path
 
@@ -113,6 +114,57 @@ def test_remaining_placeholders_detects_forms_koda_rejects() -> None:
     )
 
     assert gen.remaining_placeholders(text) == ["QUOTED", "UPPER", "EXPORTED", "COMMENTED"]
+
+
+def test_fill_placeholders_rewrites_every_form_remaining_placeholders_reports() -> None:
+    """doctor tells operators to run this script, so it must clear every form doctor and Koda flag."""
+    text = (
+        "\n".join(
+            [
+                'QUOTED="replace-with-a-random-token"',
+                "SINGLE='replace-with-a-random-token'",
+                "UPPER=REPLACE-WITH-something",
+                "export EXPORTED=replace-with-x",
+                "COMMENTED=replace-with-y # todo",
+                "  INDENTED = replace-with-z",
+                "# IGNORED=replace-with-z",
+                "REAL=0123456789abcdef",
+            ]
+        )
+        + "\n"
+    )
+
+    updated, replaced = gen.fill_placeholders(text)
+
+    assert replaced == ["QUOTED", "SINGLE", "UPPER", "EXPORTED", "COMMENTED", "INDENTED"]
+    assert gen.remaining_placeholders(updated) == []
+    lines = updated.splitlines()
+    # Every rewritten line is plain KEY=value, which the documented `sed -n 's/^KEY=//p'` reads back as is.
+    for line, key in zip(lines[:6], replaced, strict=True):
+        assert re.fullmatch(rf"{key}=[0-9a-f]{{48}}", line), line
+    assert lines[6:] == ["# IGNORED=replace-with-z", "REAL=0123456789abcdef"]
+
+
+def test_fill_placeholders_keeps_crlf_line_endings() -> None:
+    updated, replaced = gen.fill_placeholders('A="replace-with-a" # note\r\nB=keep\r\n')
+
+    assert replaced == ["A"]
+    assert re.fullmatch(r"A=[0-9a-f]{48}\r\nB=keep\r\n", updated)
+
+
+def test_existing_install_with_quoted_auth_placeholder_is_rotated_by_default(workdir: Path) -> None:
+    env = workdir / ".env"
+    env.write_text(
+        'CONTROL_PLANE_API_TOKEN="REPLACE-WITH-a-random-token"\nPOSTGRES_PASSWORD="replace-with-x"\n',
+        encoding="utf-8",
+    )
+
+    assert _run(workdir) == 0
+
+    values = _env_values(env)
+    assert re.fullmatch(r"[0-9a-f]{48}", values["CONTROL_PLANE_API_TOKEN"])
+    # Storage credentials still wait for --all, whatever their quoting.
+    assert values["POSTGRES_PASSWORD"] == '"replace-with-x"'
 
 
 def test_comment_lines_are_left_untouched() -> None:

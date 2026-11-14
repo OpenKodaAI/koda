@@ -39,7 +39,14 @@ Control Plane
   other peer is charged to its own address, whatever header it sends
 - `CONTROL_PLANE_API_TOKEN`
 - `WEB_OPERATOR_SESSION_SECRET`
-- `CONTROL_PLANE_MASTER_KEY_FILE`
+- `CONTROL_PLANE_MASTER_KEY_FILE` — the Fernet key that encrypts stored secrets (default
+  `${STATE_ROOT_DIR}/control_plane/.master.key`). Only the control plane creates it, on a fresh install; Postgres
+  records its fingerprint and the control plane refuses to start without it while secrets exist, or with a different
+  key. See [Master key recovery](../operations/backup-restore.md#master-key-recovery)
+- `CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE` — the key in use before a rotation (default
+  `${STATE_ROOT_DIR}/control_plane/.master-previous.key`, read only when the file exists): secrets still encrypted
+  with it keep decrypting, and startup accepts the new key because this one matches the recorded fingerprint. See
+  [Master key rotation](../operations/hardening.md#master-key-rotation)
 - `CONTROL_PLANE_OPERATOR_PASSWORD_MIN_LENGTH`
 - `CONTROL_PLANE_RECOVERY_CODES_PER_USER`
 

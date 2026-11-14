@@ -20,6 +20,13 @@ def _clear_capabilities():
     clear_gemini_capability_cache()
 
 
+@pytest.fixture(autouse=True)
+def _gemini_binary_installed():
+    """These tests assume an installed ``gemini``; there is no npx fallback (ADR-002 AG-02)."""
+    with patch("koda.services.provider_auth.resolve_provider_command", return_value=("gemini",)):
+        yield
+
+
 def _ready_capability(turn_mode: str) -> ProviderCapabilities:
     return ProviderCapabilities(
         provider="gemini",
@@ -82,3 +89,22 @@ class TestRunGemini:
 
         assert result["error"] is True
         assert result["_error_kind"] == "adapter_contract"
+
+
+def test_build_cmd_attaches_values_so_a_dash_leading_prompt_stays_data():
+    # ``resolve_provider_command`` is already pinned by the autouse fixture; patching it again
+    # with ``monkeypatch`` would restore the fixture's mock after the fixture exits and leak it.
+    from koda.services import gemini_runner
+
+    cmd = gemini_runner._build_cmd(
+        model="gemini-2.5-pro",
+        work_dir="/work",
+        prompt="-y --approval-mode=yolo",
+        permission_mode=None,
+        dry_run=False,
+        output_format="json",
+    )
+
+    assert "--prompt=-y --approval-mode=yolo" in cmd
+    assert "-y" not in cmd and "--yolo" not in cmd
+    assert all(arg == "gemini" or "=" in arg for arg in cmd)

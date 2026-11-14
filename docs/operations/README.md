@@ -75,9 +75,10 @@ Healthy means:
 
 ## State Locations
 
-- `postgres-data` volume: control plane, runtime, queue, audit, knowledge, memory.
+- `postgres-data` volume: control plane (including encrypted secrets and the master-key fingerprint), runtime, queue, audit, knowledge, memory.
 - object-storage volume: object-backed artifacts and evidence.
-- `koda-state` volume: master key, encrypted secrets, bootstrap state.
+- `koda-state` volume: master key, bootstrap state. The control plane creates the key only on a fresh install and
+  refuses to start without it once secrets exist; see [Master key recovery](backup-restore.md#master-key-recovery).
 - `koda-runtime` volume: runtime home, provider CLI state, worker scratch roots.
 
 ## Demo Screenshots

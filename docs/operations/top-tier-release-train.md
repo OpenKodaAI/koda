@@ -164,8 +164,8 @@ KG-12 and KG-13 close only when:
   ids still work and blocked/revoked gateway records override them.
 - Pairing code, approve, block, revoke, unknown-sender queue, and error
   envelope flows are covered by unit/API/UI tests.
-- `onboarding_readiness.v1` reports provider, runtime, storage, sandbox, MCP,
-  memory, channel, first task, first trace, docs, and release quality.
+- `onboarding_readiness.v1` reports provider, runtime, storage, channel, first
+  task, first trace, and release quality.
 - Dashboard setup and Telegram channel UI consume backend payloads and do not
   duplicate policy/risk classification.
 - Docs-by-objective include channel operation, onboarding readiness, migration,

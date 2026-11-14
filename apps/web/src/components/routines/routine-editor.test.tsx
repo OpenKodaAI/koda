@@ -1,9 +1,15 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { RoutineEditor } from "@/components/routines/routine-editor";
 import type { AgentDisplay } from "@/lib/agent-constants";
+import {
+  LOCALE_COOKIE_KEY,
+  SUPPORTED_LANGUAGES,
+  translateForLanguage,
+  type AppLanguage,
+} from "@/lib/i18n";
 import type { CronJob } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({
@@ -60,13 +66,72 @@ beforeAll(() => {
   }
 });
 
+beforeEach(() => {
+  // The i18n provider persists the active language; reset it so each test renders the
+  // language it asks for.
+  window.localStorage.clear();
+  document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
+});
+
 const AGENTS: AgentDisplay[] = [
   { id: "alpha", label: "Alpha", color: "#D97757", colorRgb: "217, 119, 87" },
   { id: "beta", label: "Beta", color: "#6E97D9", colorRgb: "110, 151, 217" },
 ];
 
+// Copy the Permissions tab shipped before M1-E8-T1. Runs ignore `read_only` and
+// `allowed_paths` (D-006), so none of these promises may come back in any locale.
+const FORMER_ENFORCEMENT_PROMISES = [
+  "Block any writes during the run, even if the agent attempts them.",
+  "Empty means no restriction.",
+  "Bloqueia qualquer escrita durante a execução, mesmo que o agente tente.",
+  "Vazio = sem restrição.",
+  "Bloquea cualquier escritura durante la ejecución, aunque el agente lo intente.",
+  "Vacío = sin restricción.",
+  "Bloque toute écriture pendant l'exécution, même si l'agent essaie.",
+  "Vide = sans restriction.",
+  "Blockiert alle Schreibvorgänge während der Ausführung, auch wenn der Agent sie versucht.",
+  "Leer = keine Einschränkung.",
+];
+
+function tr(language: AppLanguage, key: string) {
+  return translateForLanguage(language, key);
+}
+
+function fillBasics(language: AppLanguage = "en-US") {
+  fireEvent.change(screen.getByPlaceholderText(tr(language, "routines.editor.namePlaceholder")), {
+    target: { value: "Nightly audit" },
+  });
+  fireEvent.change(
+    screen.getByPlaceholderText(tr(language, "routines.editor.instructionsPlaceholder")),
+    { target: { value: "Audit the repository." } },
+  );
+}
+
+async function openPermissionsTab(language: AppLanguage = "en-US") {
+  const next = tr(language, "routines.editor.actions.next");
+  fireEvent.click(await screen.findByRole("button", { name: next }));
+  fireEvent.click(await screen.findByRole("button", { name: next }));
+  fireEvent.click(
+    await screen.findByRole("tab", { name: tr(language, "routines.editor.tabs.permissions") }),
+  );
+}
+
+function permissionControls(language: AppLanguage = "en-US") {
+  const readOnlyLabel = tr(language, "routines.editor.permissions.readOnly");
+  const allowedPathsLabel = tr(language, "routines.editor.permissions.allowedPaths");
+  return {
+    readOnly: screen.getByRole("checkbox", {
+      name: (accessibleName) => accessibleName.includes(readOnlyLabel),
+    }),
+    allowedPaths: screen.getByRole("textbox", {
+      name: (accessibleName) => accessibleName.includes(allowedPathsLabel),
+    }),
+  };
+}
+
 function renderEditor(
   overrides: Partial<React.ComponentProps<typeof RoutineEditor>> = {},
+  language: AppLanguage = "en-US",
 ) {
   const onSubmit = vi.fn(() => Promise.resolve());
   const onOpenChange = vi.fn();
@@ -80,7 +145,7 @@ function renderEditor(
   };
 
   const utils = render(
-    <I18nProvider initialLanguage="en-US">
+    <I18nProvider initialLanguage={language}>
       <AgentCatalogProvider initialAgents={AGENTS}>
         <RoutineEditor {...defaults} {...overrides} />
       </AgentCatalogProvider>
@@ -199,5 +264,135 @@ describe("RoutineEditor", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0].timezone).toBe("America/Sao_Paulo");
+  });
+
+  // D-006 interim mitigation (M1-E8-T1): runs ignore read-only and allowed paths, so the
+  // Permissions tab must say so and must not let new routines set them.
+  describe("Permissions tab while read-only and allowed paths are not enforced", () => {
+    function existingJob(payload: Record<string, unknown>): CronJob {
+      return {
+        id: 7,
+        bot_id: "alpha",
+        user_id: 1,
+        chat_id: null,
+        cron_expression: "0 9 * * *",
+        trigger_type: "cron",
+        schedule_expr: "0 9 * * *",
+        timezone: "UTC",
+        summary: "Docs sweep",
+        command: "Sweep the docs",
+        description: "",
+        created_at: null,
+        enabled: 1,
+        status: "active",
+        work_dir: "/repo",
+        payload: { query: "Sweep the docs", ...payload },
+      };
+    }
+
+    it("labels both controls as not enforced and keeps them off for a new routine", async () => {
+      const { onSubmit } = renderEditor();
+      fillBasics();
+      await openPermissionsTab();
+
+      expect(screen.getByText("Runs ignore these settings for now.", { exact: false })).toBeInTheDocument();
+      const { readOnly, allowedPaths } = permissionControls();
+      expect(readOnly).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
+      expect(allowedPaths).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
+      expect(readOnly).toBeDisabled();
+      expect(readOnly).not.toBeChecked();
+      expect(allowedPaths).toBeDisabled();
+      expect(allowedPaths).toHaveValue("");
+
+      fireEvent.click(screen.getByRole("button", { name: /create routine/i }));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0][0].readOnly).toBe(false);
+      expect(onSubmit.mock.calls[0][0].allowedPaths).toEqual([]);
+    });
+
+    it("shows the values an existing routine stores, without letting them change", async () => {
+      renderEditor({
+        mode: "edit",
+        job: existingJob({ read_only: true, allowed_paths: ["/repo/src", "/repo/docs"] }),
+      });
+      await openPermissionsTab();
+
+      const { readOnly, allowedPaths } = permissionControls();
+      expect(readOnly).toBeChecked();
+      expect(readOnly).toBeDisabled();
+      expect(allowedPaths).toHaveValue("/repo/src\n/repo/docs");
+      expect(allowedPaths).toBeDisabled();
+      expect(readOnly).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
+      expect(allowedPaths).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
+    });
+
+    // Routines created before the Permissions tab existed store neither key, and some have no
+    // payload at all. They must open as off and empty, still disabled and labelled.
+    it.each([
+      ["stores no permission keys", existingJob({})],
+      ["has no payload", { ...existingJob({}), payload: undefined }],
+    ])("shows an existing routine that %s as off and empty", async (_case, job) => {
+      renderEditor({ mode: "edit", job });
+      await openPermissionsTab();
+
+      const { readOnly, allowedPaths } = permissionControls();
+      expect(readOnly).not.toBeChecked();
+      expect(readOnly).toBeDisabled();
+      expect(allowedPaths).toHaveValue("");
+      expect(allowedPaths).toBeDisabled();
+      expect(readOnly).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
+      expect(allowedPaths).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
+    });
+
+    // The create API stores the payload as given, so `allowed_paths` may not be a list of
+    // strings. Only string entries of an actual array are shown; anything else shows nothing.
+    it.each([
+      ["a string", "/repo", ""],
+      ["an object", { path: "/repo" }, ""],
+      ["null", null, ""],
+      ["a list with non-string entries", ["/a", 3, null, { path: "/b" }, true, "/c"], "/a\n/c"],
+    ])(
+      "shows only the string paths when an existing routine stores allowed_paths as %s",
+      async (_case, storedPaths, shownPaths) => {
+        renderEditor({
+          mode: "edit",
+          job: existingJob({ read_only: true, allowed_paths: storedPaths }),
+        });
+        await openPermissionsTab();
+
+        const { readOnly, allowedPaths } = permissionControls();
+        expect(allowedPaths).toHaveValue(shownPaths);
+        expect(allowedPaths).toBeDisabled();
+        expect(allowedPaths).toHaveAccessibleName(expect.stringContaining("Not enforced yet"));
+        expect(readOnly).toBeChecked();
+        expect(readOnly).toBeDisabled();
+      },
+    );
+
+    it.each(SUPPORTED_LANGUAGES)(
+      "never promises blocked writes or restricted paths in %s",
+      async (language) => {
+        const notEnforced = tr(language, "routines.editor.permissions.notEnforced");
+        expect(notEnforced).not.toBe("routines.editor.permissions.notEnforced");
+
+        renderEditor({}, language);
+        fillBasics(language);
+        await openPermissionsTab(language);
+
+        const { readOnly, allowedPaths } = permissionControls(language);
+        expect(readOnly).toHaveAccessibleName(expect.stringContaining(notEnforced));
+        expect(allowedPaths).toHaveAccessibleName(expect.stringContaining(notEnforced));
+        expect(readOnly).toBeDisabled();
+        expect(allowedPaths).toBeDisabled();
+        expect(
+          screen.getByText(tr(language, "routines.editor.permissions.notEnforcedDescription")),
+        ).toBeInTheDocument();
+
+        const rendered = document.body.textContent ?? "";
+        for (const promise of FORMER_ENFORCEMENT_PROMISES) {
+          expect(rendered, language).not.toContain(promise);
+        }
+      },
+    );
   });
 });

@@ -62,13 +62,9 @@ def build_onboarding_readiness(
         _provider_check(providers),
         _runtime_check(agents),
         _storage_check(storage),
-        _sandbox_check(),
-        _mcp_check(),
-        _memory_check(),
         _channel_check(channel_gateway, steps),
         _first_task_check(release_quality),
         _first_trace_check(release_quality),
-        _docs_check(),
         _release_quality_check(release_quality),
     ]
     status_value = _rollup_status(checks)
@@ -152,39 +148,6 @@ def _storage_check(storage: dict[str, Any]) -> OnboardingReadinessCheck:
     )
 
 
-def _sandbox_check() -> OnboardingReadinessCheck:
-    return OnboardingReadinessCheck(
-        "sandbox",
-        "Sandbox",
-        "warning",
-        "Sandbox doctor should be reviewed before risky work.",
-        "Open runtime doctor",
-        "/runtime",
-    )
-
-
-def _mcp_check() -> OnboardingReadinessCheck:
-    return OnboardingReadinessCheck(
-        "mcp",
-        "MCP",
-        "warning",
-        "MCP risk grants are optional for first use.",
-        "Open integrations",
-        "/control-plane/system/integrations",
-    )
-
-
-def _memory_check() -> OnboardingReadinessCheck:
-    return OnboardingReadinessCheck(
-        "memory",
-        "Memory",
-        "warning",
-        "Memory and knowledge can be enabled after the first task.",
-        "Open memory settings",
-        "/control-plane/system/memory",
-    )
-
-
 def _channel_check(channel_gateway: dict[str, Any] | None, steps: dict[str, Any]) -> OnboardingReadinessCheck:
     if channel_gateway:
         summary = dict(channel_gateway.get("summary") or {})
@@ -242,17 +205,6 @@ def _first_trace_check(release_quality: dict[str, Any] | None) -> OnboardingRead
         "Open a task trace after the first execution completes.",
         "Open executions",
         "/executions",
-    )
-
-
-def _docs_check() -> OnboardingReadinessCheck:
-    return OnboardingReadinessCheck(
-        "docs",
-        "Docs",
-        "passed",
-        "Phase 6 operator docs are versioned in the repository.",
-        "Open docs",
-        "/docs",
     )
 
 

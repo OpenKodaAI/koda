@@ -216,7 +216,7 @@ Rules:
 
 ## ADR-008 — One execution-policy evaluator
 
-- **Status:** proposed. The authoritative switch, the policy-store migration and the retirement of legacy routes wait on Q-5 and §13 approval.
+- **Status:** proposed. The authoritative switch, the policy-store migration and the retirement of legacy routes wait on Q-5 and §13 approval. Step 1 is amended by ADR-039: one engine with fnmatch for every rule, with the replay safeguard moved to delivery (AG-09, AG-10).
 - **Context:**
   - Two evaluators, `services/execution_policy.py` and `control_plane/execution_policy.py`, give different decisions for the same validated policy (verified).
   - Example: a validated deny `mcp_*__delete_*` is ignored at runtime.
@@ -770,3 +770,22 @@ Rules:
   - Keep the generic message for `429`: no enumeration benefit, worse recovery for real users.
   - Show a lockout message for the per-account limit as well: reveals that the account exists.
 - **Consequences:** clearer feedback on throttling without weakening enumeration resistance.
+
+## ADR-039 — One evaluator semantics: fnmatch for every rule (amends ADR-008 step 1)
+
+- **Status:** accepted (2026-11-14, Principal Architect, under the operator's delegated decision authority). Implemented by ADR-002 AG-06, which absorbs MASTER_PLAN M1-E4-T9; delivery of rules to workers stays gated by AG-09 and AG-10.
+- **Context:**
+  - ADR-008 step 1 kept the runtime matcher for allow rules and added fnmatch only for deny rules, so that an allow rule with an interior wildcard could not start matching more calls.
+  - ADR-002 AG-06 builds one engine that the control plane's validation and simulate route and the runtime both use, with fnmatch for every selector. The independent REV review of ADR-002 (VALIDATION_REPORT "M1-E2-T1 reviews") found that the two decisions contradict each other and that the ADR called AG-06 only "a precedence fix".
+  - No dashboard-authored rule has ever been evaluated by the runtime matcher: `execution_policy` never reaches the worker (ADR-002 C6). The runtime reads only `AGENT_EXECUTION_POLICY_JSON`, which the control plane never sets. The semantics operators validated and simulated against are already fnmatch.
+- **Decision:**
+  - The one engine uses fnmatch for every rule, allow rules included. Precedence is: most restrictive decision first, then priority, then name. A rule's name is its audit `rule_id`.
+  - ADR-008 step 1's safeguard moves to delivery. Before AG-10 delivers rules to workers, AG-09 replays every stored policy, and any `AGENT_EXECUTION_POLICY_JSON` value found on an install, under the legacy runtime matcher and under the engine. A non-empty allow-widening diff needs §13 sign-off with the report attached, as AG-10's gate already says.
+  - M1-E4-T9 is folded into AG-06. Its done-when items are met by AG-06 (one engine, simulate equals runtime, the deny vectors) plus AG-09 (the replay).
+  - ADR-008 steps 2 to 5 are unchanged.
+- **Alternatives considered:**
+  - Keep two matchers (ADR-008 step 1 as written): permanent dual semantics in one engine, for rules that have never run in a worker.
+  - Limit AG-06 to precedence and keep M1-E4-T9 separate: two tasks change the same evaluator in opposite directions.
+- **Consequences:**
+  - An operator who set `AGENT_EXECUTION_POLICY_JSON` by hand with interior-wildcard allow rules sees those rules follow fnmatch after AG-06. `docs/operations/upgrade.md` says so, and AG-09 reports the affected rules.
+  - Dashboard-authored rules keep the meaning they had in validation and simulation once delivered.

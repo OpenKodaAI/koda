@@ -16,6 +16,7 @@ from tenacity import RetryCallState, retry, retry_if_result, stop_after_attempt,
 
 from koda.config import AGENT_ID, CLAUDE_TIMEOUT, FIRST_CHUNK_TIMEOUT, IMAGE_TEMP_DIR, MAX_BUDGET_USD
 from koda.logging_config import get_logger
+from koda.services import provider_cli_contract
 from koda.services.provider_auth import PROVIDER_API_KEY_ENV_KEYS, PROVIDER_AUTH_MODE_ENV_KEYS
 from koda.services.provider_env import build_llm_subprocess_env
 from koda.services.provider_runtime import ProviderCapabilities, TurnMode
@@ -134,6 +135,42 @@ def _cache_claude_capability(capabilities: ProviderCapabilities) -> None:
         cloned = capabilities.clone()
         cloned.turn_mode = turn_mode
         _CAPABILITY_CACHE[turn_mode] = (timestamp, cloned)
+
+
+async def _verify_claude_cli_contract() -> ProviderCapabilities | None:
+    """Fail closed unless the installed ``claude`` is the pinned, contract-verified version."""
+    check = await provider_cli_contract.verify_provider_cli(
+        "claude", ("claude",), env=build_llm_subprocess_env(provider="claude")
+    )
+    if check.ok:
+        return None
+    return ProviderCapabilities(
+        provider="claude",
+        turn_mode="new_turn",
+        status="unavailable",
+        can_execute=False,
+        supports_native_resume=False,
+        errors=[check.error],
+        checked_via="cli_contract",
+    )
+
+
+def _contract_error_result(
+    exc: provider_cli_contract.ProviderCliContractError,
+    session_id: str | None,
+    turn_mode: TurnMode,
+    capabilities: ProviderCapabilities,
+) -> dict:
+    return {
+        "result": str(exc),
+        "session_id": session_id,
+        "cost_usd": 0.0,
+        "error": True,
+        "_retryable": False,
+        "_error_kind": "adapter_contract",
+        "_turn_mode": turn_mode,
+        "_supports_native_resume": capabilities.supports_native_resume,
+    }
 
 
 async def _probe_claude_auth_status() -> ProviderCapabilities:
@@ -279,7 +316,7 @@ async def get_claude_capabilities(turn_mode: TurnMode) -> ProviderCapabilities:
         if cached and now - cached[0] < _CAPABILITY_CACHE_TTL_SECONDS:
             return cached[1].clone()
 
-        capability = await _probe_claude_auth_status()
+        capability = await _verify_claude_cli_contract() or await _probe_claude_auth_status()
         _cache_claude_capability(capability)
         return _CAPABILITY_CACHE[turn_mode][1].clone()
 
@@ -358,6 +395,11 @@ async def run_claude(
         cap = get_model_effort_capability("claude", model)
         if cap and cap["kind"] == "enum" and effort in cap["values"]:
             cmd.extend(["--effort", effort])
+
+    try:
+        provider_cli_contract.validate_args("claude", cmd[1:])
+    except provider_cli_contract.ProviderCliContractError as exc:
+        return _contract_error_result(exc, session_id, turn_mode, capabilities)
 
     from koda.services.resilience import check_breaker, claude_cli_breaker, record_failure, record_success
 
@@ -643,6 +685,7 @@ def _build_cmd(
         if cap and cap["kind"] == "enum" and effort in cap["values"]:
             cmd.extend(["--effort", effort])
 
+    provider_cli_contract.validate_args("claude", cmd[1:])
     return cmd
 
 
@@ -689,17 +732,25 @@ async def run_claude_streaming(
             metadata_collector["retryable"] = False
         return
 
-    cmd = _build_cmd(
-        model,
-        max_budget,
-        session_id,
-        system_prompt,
-        image_paths,
-        permission_mode=permission_mode,
-        max_turns=max_turns,
-        dry_run=dry_run,
-        effort=effort,
-    )
+    try:
+        cmd = _build_cmd(
+            model,
+            max_budget,
+            session_id,
+            system_prompt,
+            image_paths,
+            permission_mode=permission_mode,
+            max_turns=max_turns,
+            dry_run=dry_run,
+            effort=effort,
+        )
+    except provider_cli_contract.ProviderCliContractError as exc:
+        if metadata_collector is not None:
+            metadata_collector["error"] = True
+            metadata_collector["error_message"] = str(exc)
+            metadata_collector["error_kind"] = "adapter_contract"
+            metadata_collector["retryable"] = False
+        return
 
     from koda.services.resilience import check_breaker, claude_cli_breaker, record_failure, record_success
 

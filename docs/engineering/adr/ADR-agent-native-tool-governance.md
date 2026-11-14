@@ -179,7 +179,9 @@ Each runner compiles the effective level from **one table** in `koda/services/pr
 
 **Gemini** (every value is `[I]`; AG-02 and AG-25)
 
-- **Every level:** `gemini --model M --output-format json|stream-json --extensions none`.
+> Implementation note (2026-11-14, AG-02 integration review). gemini-cli parses argv with yargs, which reads a separate value that starts with `-` as an option: the pinned 0.68.0 reads the `-y` in `--prompt -y` as `--yolo` and rejects the call ("Not enough arguments following: prompt"). The contract therefore requires attached values (`--flag=value`), and `validate_args` refuses the separate form. The argv below uses the attached form; the decision is unchanged.
+
+- **Every level:** `gemini --model=M --output-format=json|stream-json --extensions=none`.
   - The env sets `GEMINI_CLI_SYSTEM_SETTINGS_PATH=<task_tmp>/gemini-settings.json`. Koda writes that file with `mcpServers={}`, no `tools.discoveryCommand`, and `tools.exclude` set per level.
   - The prompt and the system instructions go on **stdin**.
   - cwd is the workspace.
@@ -188,9 +190,9 @@ Each runner compiles the effective level from **one table** in `koda/services/pr
 | Level | Settings |
 |---|---|
 | `none` | `tools.core=[]`, only if proven; otherwise the floor is `read_only` |
-| `read_only` | `--approval-mode default`; excludes `write_file`, `replace`, `run_shell_command`, `web_fetch`, `google_web_search`, `save_memory` |
-| `workspace_write` | `--approval-mode auto_edit`; excludes `run_shell_command`, `web_fetch`, `google_web_search`, `save_memory` |
-| `workspace_exec` | `--approval-mode yolo`; excludes `web_fetch`, `google_web_search`, `save_memory` |
+| `read_only` | `--approval-mode=default`; excludes `write_file`, `replace`, `run_shell_command`, `web_fetch`, `google_web_search`, `save_memory` |
+| `workspace_write` | `--approval-mode=auto_edit`; excludes `run_shell_command`, `web_fetch`, `google_web_search`, `save_memory` |
+| `workspace_exec` | `--approval-mode=yolo`; excludes `web_fetch`, `google_web_search`, `save_memory` |
 
 - **Class M** until AG-25 proves the workspace boundary of the file tools. `workspace_exec` is always class M.
 

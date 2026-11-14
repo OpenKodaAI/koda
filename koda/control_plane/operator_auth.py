@@ -49,6 +49,10 @@ _BOOTSTRAP_INSERT_ATTEMPTS = 5
 _FAILURE_TIMING_FLOOR_SECONDS = 0.0
 _DISPLAY_NAME_MAX_LENGTH = 80
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+# Public auth status fields a caller without an operator credential never gets.
+_OPERATOR_ONLY_AUTH_STATUS_FIELDS: tuple[str, ...] = ("recovery_available",)
+# Public auth status fields the setup screen needs, sent before login only while no owner exists.
+_SETUP_ONLY_AUTH_STATUS_FIELDS: tuple[str, ...] = ("bootstrap_file_path", "loopback_trust_enabled")
 
 
 @dataclass(slots=True)
@@ -209,6 +213,16 @@ class OperatorAuthService:
 
     def auth_status(self, context: OperatorAuthContext | None = None) -> dict[str, Any]:
         payload = self.onboarding_payload()
+        if context is None:
+            # The route is public. Whether a break-glass token is configured is
+            # for operators only, and the absolute bootstrap file path and the
+            # loopback flag serve the setup screen: once an owner exists the
+            # file is gone and anonymous callers no longer get either.
+            hidden = _OPERATOR_ONLY_AUTH_STATUS_FIELDS
+            if payload["has_owner"]:
+                hidden += _SETUP_ONLY_AUTH_STATUS_FIELDS
+            for field in hidden:
+                payload.pop(field, None)
         payload.update(
             {
                 "authenticated": context is not None,

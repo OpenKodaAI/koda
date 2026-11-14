@@ -99,6 +99,17 @@ print(" ".join(sorted({info[4][0] for info in socket.getaddrinfo("web", None)}))
   esac
 }
 
+verify_provider_cli_contract() {
+  # ADR-002 AG-02: both images must carry exactly the pinned provider CLIs. The
+  # check runs only --version, --help and a parser probe (no model call) and
+  # exits non-zero, failing the smoke, on any mismatch.
+  local service
+  for service in app runtime-kernel; do
+    compose exec -T "${service}" python -m koda.services.provider_cli_contract
+    echo "[docker-smoke] ${service} provider CLIs match the pinned contract"
+  done
+}
+
 main() {
   trap 'status=$?; if [ "${status}" -ne 0 ]; then capture_diagnostics; fi; exit "${status}"' EXIT
 
@@ -123,6 +134,7 @@ main() {
   probe_url "http://127.0.0.1:3000/control-plane"
   probe_url "http://127.0.0.1:8090/openapi/control-plane.json"
   verify_dashboard_is_trusted_by_api
+  verify_provider_cli_contract
 
   echo "[docker-smoke] stack passed endpoint verification"
 }

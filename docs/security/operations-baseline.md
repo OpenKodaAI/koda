@@ -27,6 +27,13 @@ This checklist is the minimum operational baseline for running Koda with a secur
 - Never place operator or runtime credentials in URLs, screenshots, or shared runbooks.
 - Rotate bootstrap tokens after administrative turnover or suspected exposure.
 - Revoke stale MCP OAuth tokens and unused integration credentials.
+- Back up the control-plane master key off-host, apart from the Postgres dumps it decrypts. Only the control plane
+  creates it, on a fresh install; agent workers and other processes never do. Postgres then records its fingerprint
+  (an HMAC, never the key), and the control plane refuses to start without the key while secrets exist, or with a
+  different key. See [Master key recovery](../operations/backup-restore.md#master-key-recovery).
+- Rotate the master key only through the previous-key procedure in
+  [Master key rotation](../operations/hardening.md#master-key-rotation); replacing the key file alone stops the
+  control plane at startup.
 - Audit logs and traces for secret leakage whenever a new integration or attach surface is introduced.
 
 ## Continuous Verification

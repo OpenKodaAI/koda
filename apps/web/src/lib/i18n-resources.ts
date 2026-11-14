@@ -15753,11 +15753,14 @@ mutableResources["en-US"].translation.routines = {
       },
     },
     permissions: {
+      notEnforced: "Not enforced yet",
+      notEnforcedDescription:
+        "Runs ignore these settings for now. They can't be set on new routines, and values a routine already stores are kept.",
       readOnly: "Read-only mode",
-      readOnlyDescription: "Block any writes during the run, even if the agent attempts them.",
+      readOnlyDescription: "Writes are not blocked yet.",
       allowedPaths: "Allowed paths",
       allowedPathsPlaceholder: "/repo/src\n/repo/docs",
-      allowedPathsHint: "One path per line. Empty means no restriction.",
+      allowedPathsHint: "Paths are not restricted yet.",
     },
     actions: {
       cancel: "Cancel",
@@ -15927,11 +15930,14 @@ mutableResources["pt-BR"].translation.routines = {
       },
     },
     permissions: {
+      notEnforced: "Ainda não aplicado",
+      notEnforcedDescription:
+        "As execuções ignoram estas configurações por enquanto. Elas não podem ser definidas em rotinas novas, e os valores que uma rotina já guarda são mantidos.",
       readOnly: "Modo somente leitura",
-      readOnlyDescription: "Bloqueia qualquer escrita durante a execução, mesmo que o agente tente.",
+      readOnlyDescription: "As escritas ainda não são bloqueadas.",
       allowedPaths: "Caminhos permitidos",
       allowedPathsPlaceholder: "/repo/src\n/repo/docs",
-      allowedPathsHint: "Um caminho por linha. Vazio = sem restrição.",
+      allowedPathsHint: "Os caminhos ainda não são restringidos.",
     },
     actions: {
       cancel: "Cancelar",
@@ -16101,11 +16107,14 @@ mutableResources["es-ES"].translation.routines = {
       },
     },
     permissions: {
+      notEnforced: "Aún no se aplica",
+      notEnforcedDescription:
+        "Las ejecuciones ignoran estos ajustes por ahora. No se pueden definir en rutinas nuevas, y se conservan los valores que una rutina ya guarda.",
       readOnly: "Modo solo lectura",
-      readOnlyDescription: "Bloquea cualquier escritura durante la ejecución, aunque el agente lo intente.",
+      readOnlyDescription: "Las escrituras aún no se bloquean.",
       allowedPaths: "Rutas permitidas",
       allowedPathsPlaceholder: "/repo/src\n/repo/docs",
-      allowedPathsHint: "Una ruta por línea. Vacío = sin restricción.",
+      allowedPathsHint: "Las rutas aún no se restringen.",
     },
     actions: {
       cancel: "Cancelar",
@@ -16275,11 +16284,14 @@ mutableResources["fr-FR"].translation.routines = {
       },
     },
     permissions: {
+      notEnforced: "Pas encore appliqué",
+      notEnforcedDescription:
+        "Les exécutions ignorent ces réglages pour l'instant. Ils ne peuvent pas être définis sur les nouvelles routines, et les valeurs qu'une routine enregistre déjà sont conservées.",
       readOnly: "Mode lecture seule",
-      readOnlyDescription: "Bloque toute écriture pendant l'exécution, même si l'agent essaie.",
+      readOnlyDescription: "Les écritures ne sont pas encore bloquées.",
       allowedPaths: "Chemins autorisés",
       allowedPathsPlaceholder: "/repo/src\n/repo/docs",
-      allowedPathsHint: "Un chemin par ligne. Vide = sans restriction.",
+      allowedPathsHint: "Les chemins ne sont pas encore restreints.",
     },
     actions: {
       cancel: "Annuler",
@@ -16449,11 +16461,14 @@ mutableResources["de-DE"].translation.routines = {
       },
     },
     permissions: {
+      notEnforced: "Noch nicht durchgesetzt",
+      notEnforcedDescription:
+        "Ausführungen ignorieren diese Einstellungen vorerst. Für neue Routinen lassen sie sich nicht festlegen, und Werte, die eine Routine bereits speichert, bleiben erhalten.",
       readOnly: "Schreibgeschützter Modus",
-      readOnlyDescription: "Blockiert alle Schreibvorgänge während der Ausführung, auch wenn der Agent sie versucht.",
+      readOnlyDescription: "Schreibvorgänge werden noch nicht blockiert.",
       allowedPaths: "Erlaubte Pfade",
       allowedPathsPlaceholder: "/repo/src\n/repo/docs",
-      allowedPathsHint: "Ein Pfad pro Zeile. Leer = keine Einschränkung.",
+      allowedPathsHint: "Pfade werden noch nicht eingeschränkt.",
     },
     actions: {
       cancel: "Abbrechen",
@@ -17560,6 +17575,51 @@ for (const [language, labels] of Object.entries(sidebarEvaluationLabels)) {
   sidebar.loading = {
     ...(sidebar.loading ?? {}),
     evaluations: labels.loading,
+  };
+}
+
+const placeholderSecretsBannerLabels: Record<
+  string,
+  { title: string; description: string; action: string }
+> = {
+  "en-US": {
+    title: "Database and object-storage secrets are still placeholders",
+    description:
+      "{{keys}} still use the public example values from .env.example, so anyone who can reach Postgres or object storage can use them. Koda keeps running; rotate them to secure this install.",
+    action: "Rotation steps",
+  },
+  "pt-BR": {
+    title: "Os segredos do banco de dados e do armazenamento de objetos ainda são placeholders",
+    description:
+      "{{keys}} ainda usam os valores públicos de exemplo do .env.example, então qualquer pessoa que alcance o Postgres ou o armazenamento de objetos pode usá-los. O Koda continua funcionando; troque-os para proteger esta instalação.",
+    action: "Passos de rotação",
+  },
+  "es-ES": {
+    title: "Los secretos de la base de datos y del almacenamiento de objetos siguen siendo marcadores de posición",
+    description:
+      "{{keys}} siguen usando los valores públicos de ejemplo de .env.example, así que cualquiera que llegue a Postgres o al almacenamiento de objetos puede usarlos. Koda sigue funcionando; rótalos para proteger esta instalación.",
+    action: "Pasos de rotación",
+  },
+  "fr-FR": {
+    title: "Les secrets de la base de données et du stockage objet sont encore des valeurs d'exemple",
+    description:
+      "{{keys}} utilisent encore les valeurs d'exemple publiques de .env.example : toute personne qui peut joindre Postgres ou le stockage objet peut s'en servir. Koda continue de fonctionner ; changez-les pour sécuriser cette installation.",
+    action: "Étapes de rotation",
+  },
+  "de-DE": {
+    title: "Datenbank- und Objektspeicher-Geheimnisse sind noch Platzhalter",
+    description:
+      "{{keys}} verwenden noch die öffentlichen Beispielwerte aus .env.example, daher kann jeder, der Postgres oder den Objektspeicher erreicht, sie nutzen. Koda läuft weiter; rotiere sie, um diese Installation abzusichern.",
+    action: "Schritte zur Rotation",
+  },
+};
+
+for (const [language, labels] of Object.entries(placeholderSecretsBannerLabels)) {
+  const translation = mutableResources[language]?.translation;
+  if (!translation) continue;
+  translation.securityBanner = {
+    ...(translation.securityBanner ?? {}),
+    placeholderSecrets: labels,
   };
 }
 

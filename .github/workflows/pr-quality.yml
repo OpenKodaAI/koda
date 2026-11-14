@@ -253,6 +253,41 @@ jobs:
         env:
           KODA_SKIP_SECURITY_GUARD_SERVICE: "1"
 
+  provider-cli-contract:
+    # ADR-002 AG-02: install the provider CLIs exactly as both images do (one
+    # lockfile, exact versions) and probe them against
+    # koda/services/provider_cli_contract.py. Only --version, --help and a parser
+    # probe run: no model call and no credentials. A CLI version bump must change
+    # the lockfile and the contract together, or this job fails closed.
+    name: provider-cli-contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6.0.2
+      - uses: actions/setup-node@v6.3.0
+        with:
+          # Same major as the node-base stage of Dockerfile and Dockerfile.runtime-kernel.
+          node-version: "26"
+      - uses: actions/setup-python@v6.2.0
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Install the pinned provider CLIs from the lockfile
+        working-directory: packages/provider-clis
+        run: |
+          npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+          node node_modules/@anthropic-ai/claude-code/install.cjs
+      - name: Probe the pinned CLIs against the contract
+        run: |
+          export PATH="${GITHUB_WORKSPACE}/packages/provider-clis/node_modules/.bin:${PATH}"
+          uv run python -m koda.services.provider_cli_contract
+
   rust-quality:
     name: rust-quality
     runs-on: ubuntu-latest
@@ -285,6 +320,7 @@ jobs:
       - web-quality
       - repo-hygiene
       - rust-quality
+      - provider-cli-contract
     steps:
       - uses: actions/checkout@v6.0.2
       - name: Build primary Docker image

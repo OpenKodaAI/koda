@@ -128,8 +128,19 @@ async def test_auth_profile_photo_routes_cover_upload_get_delete() -> None:
     auth_service.delete_profile_photo.assert_called_once_with(context)
 
 
+_OPERATOR = control_plane_api.OperatorAuthContext(
+    auth_kind="session",
+    subject_type="operator",
+    user_id="usr_1",
+    username="owner",
+    email="owner@example.com",
+    display_name="Owner",
+)
+
+
 @pytest.mark.asyncio
 async def test_onboarding_status_route_proxies_manager_payload() -> None:
+    """Operators get the manager payload merged with the auth flags."""
     manager = MagicMock()
     manager.get_onboarding_status.return_value = {"steps": {"onboarding_complete": False}}
     auth_service = MagicMock()
@@ -144,6 +155,7 @@ async def test_onboarding_status_route_proxies_manager_payload() -> None:
     with (
         patch("koda.control_plane.api._manager", return_value=manager),
         patch("koda.control_plane.api._auth_service", return_value=auth_service),
+        patch("koda.control_plane.api._request_auth_context", return_value=_OPERATOR),
     ):
         response = await control_plane_api.onboarding_status(_Request())
 
@@ -154,6 +166,54 @@ async def test_onboarding_status_route_proxies_manager_payload() -> None:
     assert payload["auth_mode"] == "local_account"
     assert payload["session_required"] is False
     assert payload["recovery_available"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failing_step", ["auth_context", "auth_payload"])
+async def test_onboarding_status_failure_before_login_reveals_nothing(failing_step: str) -> None:
+    """A degraded pre-login answer keeps its 2xx but carries no data or exception text."""
+    secret_error = RuntimeError("could not connect to postgresql://koda:s3cret@db:5432/koda")
+    manager = MagicMock()
+    auth_service = MagicMock()
+    auth_service.onboarding_payload.return_value = {"has_owner": True, "bootstrap_required": False}
+    resolve_context = MagicMock(return_value=None)
+    if failing_step == "auth_context":
+        resolve_context.side_effect = secret_error
+    else:
+        auth_service.onboarding_payload.side_effect = secret_error
+
+    with (
+        patch("koda.control_plane.api._manager", return_value=manager),
+        patch("koda.control_plane.api._auth_service", return_value=auth_service),
+        patch("koda.control_plane.api._request_auth_context", resolve_context),
+    ):
+        response = await control_plane_api.onboarding_status(_Request())
+
+    assert response.status == 200
+    assert json.loads(response.text) == {"status": "degraded", "error": "onboarding_status_failed"}
+    manager.get_onboarding_status.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_onboarding_status_failure_for_an_operator_keeps_the_degraded_payload() -> None:
+    manager = MagicMock()
+    manager.get_onboarding_status.side_effect = RuntimeError("storage probe failed")
+    auth_service = MagicMock()
+    auth_service.onboarding_payload.return_value = {"has_owner": True, "bootstrap_required": False}
+
+    with (
+        patch("koda.control_plane.api._manager", return_value=manager),
+        patch("koda.control_plane.api._auth_service", return_value=auth_service),
+        patch("koda.control_plane.api._request_auth_context", return_value=_OPERATOR),
+    ):
+        response = await control_plane_api.onboarding_status(_Request())
+
+    payload = json.loads(response.text)
+    assert response.status == 200
+    assert payload["status"] == "degraded"
+    assert payload["message"] == "RuntimeError: storage probe failed"
+    assert payload["providers"] == []
+    assert payload["agents"] == []
 
 
 @pytest.mark.asyncio

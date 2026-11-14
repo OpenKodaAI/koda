@@ -73,6 +73,28 @@ describe("web proxy auth gate", () => {
     expect(response.status).toBe(200);
   });
 
+  it("lets the pre-login onboarding status probe through without a session cookie", () => {
+    const response = proxy({
+      nextUrl: new URL("http://localhost/api/control-plane/onboarding/status"),
+      method: "GET",
+      cookies: { get: () => undefined },
+      headers: { get: () => null },
+    } as never);
+
+    expect(response.status).toBe(200);
+  });
+
+  it("keeps onboarding readiness behind the operator session cookie", () => {
+    const response = proxy({
+      nextUrl: new URL("http://localhost/api/control-plane/onboarding/readiness"),
+      method: "GET",
+      cookies: { get: () => undefined },
+      headers: { get: () => null },
+    } as never);
+
+    expect(response.status).toBe(401);
+  });
+
   it("redirects /setup to /login when the owner hint cookie is present", () => {
     const nextUrl = new URL("http://localhost/setup?next=%2Fexecutions");
     const response = proxy({

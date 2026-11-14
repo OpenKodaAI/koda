@@ -104,14 +104,9 @@ class TestCodexCommandBuilders:
 class TestCodexCapabilities:
     @pytest.mark.asyncio
     async def test_resume_degrades_when_configured_sandbox_is_not_supported(self):
-        help_text = (
-            "Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]\n"
-            "--json\n--model\n--dangerously-bypass-approvals-and-sandbox\n"
-        )
-        with (
-            patch("koda.services.codex_runner._read_help_text", new=AsyncMock(return_value=(help_text, ""))),
-            patch("koda.services.codex_runner.CODEX_SANDBOX", "workspace-write"),
-        ):
+        # The CLI contract probe is stubbed as verified (tests/conftest.py); the contract
+        # itself is covered by tests/test_services/test_provider_cli_contract.py.
+        with patch("koda.services.codex_runner.CODEX_SANDBOX", "workspace-write"):
             capabilities = await get_codex_capabilities("resume_turn")
 
         assert capabilities.status == "degraded"
@@ -120,13 +115,9 @@ class TestCodexCapabilities:
 
     @pytest.mark.asyncio
     async def test_new_turn_unavailable_when_login_status_fails(self):
-        help_text = "Usage: codex exec [OPTIONS]\n--json\n--model\n--cd\n--sandbox\n"
-        with (
-            patch("koda.services.codex_runner._read_help_text", new=AsyncMock(return_value=(help_text, ""))),
-            patch(
-                "koda.services.codex_runner._read_login_status",
-                new=AsyncMock(return_value=(1, "", "Not logged in")),
-            ),
+        with patch(
+            "koda.services.codex_runner._read_login_status",
+            new=AsyncMock(return_value=(1, "", "Not logged in")),
         ):
             capabilities = await get_codex_capabilities("new_turn")
 

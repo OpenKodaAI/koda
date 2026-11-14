@@ -562,13 +562,29 @@ async function collectDoctorPayload(installDir) {
     status: onboardingResponse.status,
     has_owner: Boolean(onboardingPayload.has_owner),
     bootstrap_required: Boolean(onboardingPayload.bootstrap_required),
-    bootstrap_file_path: onboardingPayload.bootstrap_file_path || null,
+    bootstrap_file_path: await readBootstrapFilePath(payload.control_plane_url),
   };
   return {
     ok: Object.values(checks).every((item) => item.ok),
     ...payload,
     checks,
   };
+}
+
+// Before login, onboarding/status answers only has_owner and bootstrap_required.
+// The public auth/status still names the setup-code file while no owner exists,
+// which is the only time the file is there.
+async function readBootstrapFilePath(controlPlaneUrl) {
+  try {
+    const response = await fetch(`${controlPlaneUrl}/api/control-plane/auth/status`, { cache: "no-store" });
+    if (!response.ok) {
+      return null;
+    }
+    const authPayload = await response.json().catch(() => ({}));
+    return authPayload.bootstrap_file_path || null;
+  } catch {
+    return null;
+  }
 }
 
 async function doctorCommand(args) {

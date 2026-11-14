@@ -52,6 +52,11 @@ unreachable. A shared guard runs whatever build it was started from, so do not s
 validating changes to `rust/koda-security-*`. `KODA_SECURITY_GUARD_STARTUP_TIMEOUT` (seconds)
 raises the startup wait for cold builds.
 
+Each test also gets its own empty `HOME` (with `CLAUDE_CONFIG_DIR` and `CODEX_HOME` unset), so a
+test never reads or deletes your files. Provider disconnect tests remove CLI login files under
+`~/.claude`, `~/.codex` and `~/.gemini`. Write tests against `os.environ["HOME"]`, never against
+your real home directory.
+
 To run the same local gate from one command:
 
 ```bash

@@ -9,7 +9,6 @@ import os
 import pty
 import re
 import select
-import shlex
 import shutil
 import struct
 import subprocess
@@ -17,10 +16,11 @@ import tempfile
 import termios
 import threading
 import time
+from collections.abc import Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, NamedTuple, cast
 from urllib import error as urllib_error
 from urllib import parse as urllib_parse
 from urllib import request as urllib_request
@@ -308,6 +308,12 @@ def provider_supports_api_key(provider_id: str) -> bool:
     return provider_id.strip().lower() in (*MANAGED_PROVIDER_IDS,)
 
 
+# Providers whose CLI has its own subscription login (claude.ai, ChatGPT, Google account), and
+# the subcommand that logs each one out where the CLI has one (Gemini has none).
+SUBSCRIPTION_LOGIN_PROVIDER_IDS = frozenset({"claude", "codex", "gemini"})
+_LOGOUT_SUBCOMMANDS: dict[str, tuple[str, ...]] = {"claude": ("auth", "logout"), "codex": ("logout",)}
+
+
 def provider_supports_subscription_login(provider_id: str) -> bool:
     # Claude Code ships ``claude setup-token`` for headless environments: it
     # prints the OAuth URL, accepts the authorization code on stdin and writes
@@ -315,7 +321,7 @@ def provider_supports_subscription_login(provider_id: str) -> bool:
     # relays the URL to the UI and forwards the pasted code to stdin, so the
     # browser step still happens against Anthropic directly — Koda only wraps
     # the subprocess stdio, which the CLI is explicitly designed for.
-    return provider_id.strip().lower() in {"claude", "codex", "gemini"}
+    return provider_id.strip().lower() in SUBSCRIPTION_LOGIN_PROVIDER_IDS
 
 
 def provider_supports_local_connection(provider_id: str) -> bool:
@@ -422,41 +428,50 @@ def _provider_command_env(base_env: dict[str, str] | None = None) -> dict[str, s
     return env
 
 
-def resolve_provider_command(provider_id: str, base_env: dict[str, str] | None = None) -> tuple[str, ...]:
-    env = _provider_command_env(base_env)
-    normalized = provider_id.strip().lower()
-    if normalized not in MANAGED_PROVIDER_IDS:
-        raise KeyError(provider_id)
-    if normalized == "elevenlabs":
-        raise KeyError(provider_id)
-    if normalized == "ollama":
-        if shutil.which("ollama", path=env.get("PATH")):
-            return ("ollama",)
-        raise FileNotFoundError("ollama")
-    if normalized == "claude":
-        if shutil.which("claude", path=env.get("PATH")):
-            return ("claude",)
-        raise FileNotFoundError("claude")
-    if normalized == "codex":
-        configured = str(env.get("CODEX_BIN") or "codex").strip()
-        parts = tuple(shlex.split(configured))
-        executable = parts[0] if parts else "codex"
-        if shutil.which(executable, path=env.get("PATH")):
-            return parts or ("codex",)
-        raise FileNotFoundError(executable)
+# Providers Koda runs as a local CLI, and the setting that names the executable when one does.
+_CLI_PROVIDER_IDS = frozenset({"claude", "codex", "gemini", "ollama"})
+_PROVIDER_EXECUTABLE_SETTINGS: dict[str, tuple[str, str]] = {
+    "codex": ("CODEX_BIN", "codex"),
+    "gemini": ("GEMINI_BIN", "gemini"),
+}
 
-    configured = str(env.get("GEMINI_BIN") or "").strip()
-    if configured:
-        parts = tuple(shlex.split(configured))
-        executable = parts[0] if parts else ""
-        if executable and shutil.which(executable, path=env.get("PATH")):
-            return parts
-        raise FileNotFoundError(executable or "gemini")
-    if shutil.which("gemini", path=env.get("PATH")):
-        return ("gemini",)
-    if shutil.which("npx", path=env.get("PATH")):
-        return ("npx", "-y", "@google/gemini-cli")
-    raise FileNotFoundError("gemini")
+
+def provider_executable(provider_id: str, base_env: Mapping[str, str] | None = None) -> str:
+    """The one executable a provider CLI runs as, before any ``PATH`` lookup.
+
+    ``CODEX_BIN`` and ``GEMINI_BIN`` are each one executable path, never a command line: extra
+    tokens would be argv outside the CLI contract, and a runner such as
+    ``npx -y @google/gemini-cli`` would run whatever package version it resolves (ADR-002 AG-02).
+    A non-empty value in ``base_env`` (the control plane's provider environment) wins, then the
+    value ``koda.config`` read from the process environment (which honours the ``{AGENT_ID}_``
+    prefix), then the CLI's own name. Runners, probes and auth flows all resolve the executable
+    here, so they run the same file.
+    """
+    normalized = provider_id.strip().lower()
+    if normalized not in _CLI_PROVIDER_IDS:
+        raise KeyError(provider_id)
+    setting = _PROVIDER_EXECUTABLE_SETTINGS.get(normalized)
+    if setting is None:
+        return normalized
+    variable, default = setting
+    from koda import config
+
+    configured = str(dict(base_env or {}).get(variable) or "").strip()
+    return configured or str(getattr(config, variable, "") or "").strip() or default
+
+
+def resolve_provider_command(provider_id: str, base_env: dict[str, str] | None = None) -> tuple[str, ...]:
+    """The command for a provider CLI, or ``FileNotFoundError`` when its executable is missing.
+
+    Never falls back to an unpinned ``npx`` package (ADR-002 AG-02): a missing binary means the
+    provider is unavailable until the pinned CLI is installed. ``KeyError`` for providers that
+    are not a local CLI.
+    """
+    executable = provider_executable(provider_id, base_env)
+    env = _provider_command_env(base_env)
+    if shutil.which(executable, path=env.get("PATH")):
+        return (executable,)
+    raise FileNotFoundError(executable)
 
 
 def provider_login_command(
@@ -465,6 +480,9 @@ def provider_login_command(
     project_id: str = "",
     base_env: dict[str, str] | None = None,
 ) -> tuple[str, ...]:
+    if provider_id not in SUBSCRIPTION_LOGIN_PROVIDER_IDS:
+        title = PROVIDER_TITLES.get(provider_id, provider_id)
+        raise ValueError(f"{title} does not support subscription login")
     command = resolve_provider_command(provider_id, base_env=base_env)
     if provider_id == "claude":
         # ``setup-token`` is the headless-friendly variant of ``auth login``:
@@ -474,8 +492,6 @@ def provider_login_command(
         return (*command, "setup-token")
     if provider_id == "codex":
         return (*command, "login", "--device-auth")
-    if provider_id in {"elevenlabs", "ollama"}:
-        raise ValueError(f"{PROVIDER_TITLES[provider_id]} does not support subscription login")
     del project_id
     return command
 
@@ -485,16 +501,15 @@ def provider_logout_command(
     *,
     base_env: dict[str, str] | None = None,
 ) -> tuple[str, ...] | None:
-    if provider_id == "ollama":
+    """The CLI command that logs ``provider_id`` out, or ``None`` when there is none.
+
+    Only Claude and Codex have a logout subcommand; Gemini, Ollama and the HTTP providers do not,
+    and nothing is resolved for them. ``FileNotFoundError`` when the CLI is not installed.
+    """
+    subcommand = _LOGOUT_SUBCOMMANDS.get(provider_id)
+    if subcommand is None:
         return None
-    command = resolve_provider_command(provider_id, base_env=base_env)
-    if provider_id == "claude":
-        return (*command, "auth", "logout")
-    if provider_id == "codex":
-        return (*command, "logout")
-    if provider_id == "elevenlabs":
-        return None
-    return None
+    return (*resolve_provider_command(provider_id, base_env=base_env), *subcommand)
 
 
 def build_provider_process_env(
@@ -773,15 +788,34 @@ def parse_login_session_state(session_id: str, handle: _ProviderLoginProcess) ->
     )
 
 
+class ProviderLogoutResult(NamedTuple):
+    """Outcome of a provider CLI logout.
+
+    ``attempted`` is True only when a logout command ran; it is False when the provider's CLI
+    has no logout or is not installed, which leaves nothing to log out locally.
+    """
+
+    performed: bool
+    message: str
+    attempted: bool
+
+
+LOGOUT_NOT_SUPPORTED = "logout not supported"
+
+
 def run_provider_logout(
     provider_id: ProviderId,
     *,
     base_env: dict[str, str] | None = None,
     work_dir: str | None = None,
-) -> tuple[bool, str]:
-    command = provider_logout_command(provider_id, base_env=base_env)
+) -> ProviderLogoutResult:
+    try:
+        command = provider_logout_command(provider_id, base_env=base_env)
+    except FileNotFoundError as exc:
+        # A missing CLI must not stop a disconnect: the caller still wipes stored credentials.
+        return ProviderLogoutResult(False, f"{exc.args[0] if exc.args else provider_id} not found on PATH", False)
     if command is None:
-        return False, "logout not supported"
+        return ProviderLogoutResult(False, LOGOUT_NOT_SUPPORTED, False)
     env = build_provider_process_env(
         provider_id,
         auth_mode="subscription_login",
@@ -799,11 +833,11 @@ def run_provider_logout(
             check=False,
         )
     except FileNotFoundError:
-        return False, f"{command[0]} not found on PATH"
+        return ProviderLogoutResult(False, f"{command[0]} not found on PATH", False)
     except subprocess.TimeoutExpired:
-        return False, f"{provider_id} logout timed out"
+        return ProviderLogoutResult(False, f"{provider_id} logout timed out", True)
     output = strip_ansi(proc.stdout or "").strip()
-    return proc.returncode == 0, output
+    return ProviderLogoutResult(proc.returncode == 0, output, True)
 
 
 _HTTP_OPENAI_COMPATIBLE_VERIFY_PROFILES: dict[str, dict[str, Any]] = {
@@ -1180,11 +1214,16 @@ def _verify_claude_local_cli(
     try:
         cmd = (*resolve_provider_command("claude", base_env=base_env), "auth", "status", "--json")
     except (KeyError, FileNotFoundError):
+        from koda.services.provider_cli_contract import get_contract
+
         return ProviderVerificationResult(
             provider_id="claude",
             auth_mode="local",
             verified=False,
-            last_error="Claude Code CLI not found. Install with: npm install -g @anthropic-ai/claude-code",
+            last_error=(
+                "Claude Code CLI not found. Install the pinned version: npm install -g "
+                f"@anthropic-ai/claude-code@{get_contract('claude').pinned_version}"
+            ),
             checked_via="local_cli",
         )
     env = build_provider_process_env(
@@ -1327,12 +1366,15 @@ def verify_provider_subscription_login(
     base_env: dict[str, str] | None = None,
     work_dir: str | None = None,
 ) -> ProviderVerificationResult:
-    if provider_id in {"elevenlabs", "ollama"}:
+    if provider_id not in SUBSCRIPTION_LOGIN_PROVIDER_IDS:
+        # The branches below are Claude, Codex and Gemini; any other provider would otherwise
+        # fall through to the Gemini probe and run a real model call.
+        title = PROVIDER_TITLES.get(provider_id, provider_id)
         return ProviderVerificationResult(
             provider_id=provider_id,
             auth_mode="subscription_login",
             verified=False,
-            last_error=f"{PROVIDER_TITLES[provider_id]} does not support subscription login in this flow.",
+            last_error=f"{title} does not support subscription login in this flow.",
             checked_via="runtime",
             details={},
         )
@@ -1466,13 +1508,16 @@ def verify_provider_subscription_login(
                 details={"stdout": text},
             )
 
+        from koda.services import provider_cli_contract
+
+        # Attached values, checked against the contract like the runner's command line: yargs
+        # would read a separate value that starts with "-" as an option.
         command = (
             *resolve_provider_command("gemini", base_env=env),
-            "-p",
-            "Reply with OK only.",
-            "--output-format",
-            "json",
+            "--prompt=Reply with OK only.",
+            "--output-format=json",
         )
+        provider_cli_contract.validate_args("gemini", command[1:])
         proc = subprocess.run(
             command,
             capture_output=True,
