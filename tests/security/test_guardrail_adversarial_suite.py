@@ -1790,6 +1790,116 @@ async def test_file_move_still_moves_a_directory_whose_secrets_stay_recognised(
         assert "canary" not in read.output
 
 
+def _move_staging_work_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, staged: str, existing: str) -> Path:
+    """A native HOME work dir, ``CLAUDE_CONFIG_DIR`` unset, with ``staged`` written and ``existing`` created.
+
+    ``staged`` is a file the agent may write, under a name no credential entry matches;
+    ``existing`` is a directory the move goes into, when the move lands inside one.
+    """
+    work = _native_claude_home(tmp_path, monkeypatch) / "other-home"
+    (work / staged).parent.mkdir(parents=True, exist_ok=True)
+    (work / staged).write_text('{"token": "attacker-login"}\n', encoding="utf-8")
+    if existing:
+        (work / existing).mkdir(parents=True, exist_ok=True)
+    return work
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("staged", "source", "existing", "destination", "planted"),
+    [
+        ("auth.json", "auth.json", ".codex", ".codex", ".codex/auth.json"),
+        ("staging/daemon/roster.json", "staging/daemon", ".claude", ".claude", ".claude/daemon/roster.json"),
+        ("config", "config", ".kube", ".kube", ".kube/config"),
+        ("config.json", "config.json", ".docker", ".docker", ".docker/config.json"),
+        ("hosts.yml", "hosts.yml", ".config/gh", ".config/gh", ".config/gh/hosts.yml"),
+        ("staging/gcloud/credentials.db", "staging/gcloud", ".config", ".config", ".config/gcloud/credentials.db"),
+        ("staging/ide/48123.lock", "staging/ide", ".CLAUDE", ".CLAUDE", ".CLAUDE/ide/48123.lock"),
+        ("staging/auth.json", "staging", "", ".codex", ".codex/auth.json"),
+        ("staging/gh/hosts.yml", "staging", "", ".config", ".config/gh/hosts.yml"),
+        ("staging/daemon/roster.json", "staging", "", ".claude", ".claude/daemon/roster.json"),
+        ("staging/.config.json.tmp.a1b2c3d4", "staging", "", ".claude", ".claude/.config.json.tmp.a1b2c3d4"),
+        (
+            "staging/anthropic/credentials/default.json",
+            "staging",
+            "",
+            ".config",
+            ".config/anthropic/credentials/default.json",
+        ),
+        ("staging/auth.json", "staging", "backup", "backup/.codex", "backup/.codex/auth.json"),
+    ],
+)
+async def test_file_move_cannot_plant_a_credential_store_where_it_lands(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    staged: str,
+    source: str,
+    existing: str,
+    destination: str,
+    planted: str,
+) -> None:
+    """A move must not put a file, or a file below a moved dir, at a credential store's name.
+
+    file_write refuses ``.codex/auth.json``, and so does file_move to that full path. But a
+    move into an existing ``.codex`` lands at ``.codex/auth.json`` too, and renaming a
+    staged directory to ``.codex`` or ``.claude`` puts what it holds at
+    ``.codex/auth.json`` or ``.claude/daemon/roster.json``: an attacker-chosen Codex login,
+    or daemon socket tokens, where the CLI reads them, and a planted kubeconfig exec plugin
+    or docker credHelpers entry runs a command the next time that CLI is used. Each landing,
+    and each path below it, is refused where it is a credential store and was not one before.
+    """
+    from koda.services.tool_dispatcher import _handle_file_move, _handle_file_write
+
+    work = _move_staging_work_dir(tmp_path, monkeypatch, staged, existing)
+    ctx = _file_tool_context(work)
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        moved = await _handle_file_move({"source": source, "destination": destination}, ctx)
+        written = await _handle_file_write({"path": planted, "content": "attacker-login"}, ctx)
+
+    assert not written.success, written.output
+    assert not moved.success, moved.output
+    assert "credential store" in moved.output, moved.output
+    assert not (work / planted).exists()
+    assert (work / staged).read_text(encoding="utf-8") == '{"token": "attacker-login"}\n'
+
+
+@pytest.mark.security
+@pytest.mark.guardrail
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("staged", "source", "existing", "destination", "landed"),
+    [
+        ("notes.txt", "notes.txt", ".codex", ".codex", ".codex/notes.txt"),
+        ("staging/README.md", "staging", "", ".kube", ".kube/README.md"),
+        ("staging/daemon-notes/a.txt", "staging/daemon-notes", ".claude", ".claude", ".claude/daemon-notes/a.txt"),
+        ("staging/config.json", "staging", "", "docker-old", "docker-old/config.json"),
+        ("staging/gh/hosts.yml", "staging", "", "cfg", "cfg/gh/hosts.yml"),
+    ],
+)
+async def test_file_move_still_moves_what_lands_at_no_credential_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    staged: str,
+    source: str,
+    existing: str,
+    destination: str,
+    landed: str,
+) -> None:
+    """Into a CLI's config dir, or under a name like one, a move that plants no credential store still works."""
+    from koda.services.tool_dispatcher import _handle_file_move
+
+    work = _move_staging_work_dir(tmp_path, monkeypatch, staged, existing)
+    ctx = _file_tool_context(work)
+    with patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True):
+        moved = await _handle_file_move({"source": source, "destination": destination}, ctx)
+
+    assert moved.success, moved.output
+    assert (work / landed).read_text(encoding="utf-8") == '{"token": "attacker-login"}\n'
+    assert not (work / source).exists()
+
+
 def _work_dir_holding_the_protected_dirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     """A work dir that holds every kind of protected directory, each below a parent the agent can move.
 

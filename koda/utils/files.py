@@ -163,6 +163,32 @@ def _children_named(directory: str, name: str, *, with_copies: bool = False) -> 
         return []
 
 
+def _entry_completions(location: str, directory: str) -> list[str]:
+    """Return the paths below ``directory`` that complete a credential entry ``location`` begins.
+
+    A credential entry with several components is also matched on the names of the
+    directories above the file (``.codex/auth.json``, ``.config/gh/hosts.yml``,
+    ``.config/gcloud/``). For each such entry whose first components ``location`` (absolute
+    and normalised) ends with, this returns the paths below ``directory`` named as the rest
+    of it, and the copies a CLI writes beside such a file
+    (``.claude/.config.json.tmp.a1b2c3d4``). ``directory`` is ``location`` itself, or the
+    directory a move puts at ``location``.
+    """
+    location_parts = [part.lower() for part in location.split(os.sep) if part]
+    found: list[str] = []
+    for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS:
+        entry_parts = [part.lower() for part in entry.split("/") if part]
+        for split in range(1, len(entry_parts)):
+            if location_parts[-split:] != entry_parts[:split]:
+                continue
+            below = [directory]
+            for index, name in enumerate(entry_parts[split:], start=split):
+                with_copies = index == len(entry_parts) - 1 and not entry.endswith("/")
+                below = [child for parent in below for child in _children_named(parent, name, with_copies=with_copies)]
+            found.extend(below)
+    return found
+
+
 def secret_move_refusal(source: str, destination: str) -> str | None:
     """Return why moving ``source`` to ``destination`` would unblock a secret below it, or None.
 
@@ -177,27 +203,46 @@ def secret_move_refusal(source: str, destination: str) -> str | None:
     leave that store under a name the policy does not recognise, and the read tools would
     return it. So each such path below ``source``, and each copy a CLI writes beside such a
     file (``.claude/.config.json.tmp.a1b2c3d4``), must still be refused
-    (:func:`secret_file_refusal`) at its new place.
+    (:func:`secret_file_refusal`) at its new place. The other direction, a move that puts
+    data at a store's name, is :func:`planted_secret_refusal`.
     """
     source = source.rstrip(os.sep) or os.sep
-    source_parts = [part.lower() for part in source.split(os.sep) if part]
-    for entry in FILEOPS_BLOCKED_CREDENTIAL_PATHS:
-        entry_parts = [part.lower() for part in entry.split("/") if part]
-        for split in range(1, len(entry_parts)):
-            if source_parts[-split:] != entry_parts[:split]:
-                continue
-            below = [source]
-            for index, name in enumerate(entry_parts[split:], start=split):
-                with_copies = index == len(entry_parts) - 1 and not entry.endswith("/")
-                below = [
-                    child for directory in below for child in _children_named(directory, name, with_copies=with_copies)
-                ]
-            for path in below:
-                refusal = secret_file_refusal(path)
-                moved = destination.rstrip(os.sep) + path[len(source) :]
-                if refusal is not None and secret_file_refusal(moved) is None:
-                    inner = os.path.relpath(path, os.path.dirname(source))
-                    return f"the move would take '{inner}' out of the name that blocks it ({refusal})"
+    for path in _entry_completions(source, source):
+        refusal = secret_file_refusal(path)
+        moved = destination.rstrip(os.sep) + path[len(source) :]
+        if refusal is not None and secret_file_refusal(moved) is None:
+            inner = os.path.relpath(path, os.path.dirname(source))
+            return f"the move would take '{inner}' out of the name that blocks it ({refusal})"
+    return None
+
+
+def planted_secret_refusal(source: str, destination: str) -> str | None:
+    """Return why moving ``source`` to ``destination`` would put data at a secret file's name, or None.
+
+    Both paths are absolute and resolved, and ``source`` passed :func:`resolve_work_path`.
+    ``destination`` is where ``source`` ends up (:func:`move_landing`): into an existing
+    directory, the path inside it, which :func:`resolve_work_path` never saw. A secret file
+    is unreadable, but the CLI that owns it reads it, so a move must not create one, as
+    ``file_write`` must not: ``auth.json`` moved into an existing ``.codex`` would land at
+    ``.codex/auth.json`` and replace the Codex login, ``staging/daemon`` moved into
+    ``.claude`` would plant ``.claude/daemon/roster.json``, and a kubeconfig exec plugin or
+    a docker ``credHelpers`` entry moved into ``.kube`` or ``.docker`` would run a command
+    the next time that CLI is used. A directory renamed to ``.codex``, ``.claude`` or
+    ``.config`` would do the same with what it holds (:func:`_entry_completions`). So the
+    move is refused when ``destination``, or a path below it, is a secret file
+    (:func:`secret_file_refusal`) and was not one at its place below ``source``. A secret
+    that keeps a refused name where it lands (``.codex`` moved into ``backup/``) still moves,
+    and a file's own extension and name go with it, so those cannot change.
+    """
+    source = source.rstrip(os.sep) or os.sep
+    destination = destination.rstrip(os.sep) or os.sep
+    moves = [(source, destination)]
+    moves += [(path, destination + path[len(source) :]) for path in _entry_completions(destination, source)]
+    for path, moved in moves:
+        refusal = secret_file_refusal(moved)
+        if refusal is not None and secret_file_refusal(path) is None:
+            inner = os.path.relpath(moved, os.path.dirname(destination))
+            return f"the move would put data at '{inner}' ({refusal})"
     return None
 
 
@@ -220,7 +265,8 @@ def protected_move_refusal(source: str, destination: str) -> str | None:
       put the moved data where Koda or a CLI reads that directory from, such as a planted
       bootstrap code or browser session.
 
-    Every other move is left to :func:`secret_move_refusal` and :func:`linked_landing_refusal`.
+    Every other move is left to :func:`secret_move_refusal`, :func:`planted_secret_refusal`
+    and :func:`linked_landing_refusal`.
     """
     moved = protected_dir_within(source)
     if moved is not None:
@@ -237,7 +283,8 @@ def move_landing(source: str, destination: str) -> str:
     Both paths are absolute and resolved. Into an existing destination directory,
     ``shutil.move`` puts the source at its base name inside it; anywhere else, at
     ``destination`` itself. The move checks (:func:`protected_move_refusal`,
-    :func:`secret_move_refusal`, :func:`linked_landing_refusal`) are made on that path.
+    :func:`secret_move_refusal`, :func:`planted_secret_refusal`,
+    :func:`linked_landing_refusal`) are made on that path.
     """
     if os.path.isdir(destination):
         return os.path.join(destination, os.path.basename(source.rstrip(os.sep)))

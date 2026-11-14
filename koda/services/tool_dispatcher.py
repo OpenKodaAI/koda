@@ -46,6 +46,7 @@ from koda.utils.files import (
     blocked_credential_path,
     linked_landing_refusal,
     move_landing,
+    planted_secret_refusal,
     protected_move_refusal,
     resolve_work_path,
     secret_file_refusal,
@@ -2775,6 +2776,10 @@ async def _handle_file_move(params: dict, ctx: ToolContext) -> AgentToolResult:
     if move_refusal is not None:
         _audit_blocked("file_move", "credential_store_rename", user_id=ctx.user_id)
         return AgentToolResult(tool="file_move", success=False, output=f"Access denied: {move_refusal}.")
+    plant_refusal = planted_secret_refusal(resolved_src, landing)
+    if plant_refusal is not None:
+        _audit_blocked("file_move", "credential_store_plant", user_id=ctx.user_id)
+        return AgentToolResult(tool="file_move", success=False, output=f"Access denied: {plant_refusal}.")
     try:
         os.makedirs(os.path.dirname(resolved_dst), exist_ok=True)
         shutil.move(resolved_src, resolved_dst)
