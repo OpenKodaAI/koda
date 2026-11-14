@@ -631,12 +631,12 @@ Owner QA (BE) · Risk low · Gate none · **pending** · Deps M0-E3-T2
 #### M0-E4 — Supply-chain baseline
 
 #### M0-E4-T1 · Dependency advisory triage
-Owner SEC · Risk low · Gate none · **ready** · Deps —
+Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Addresses:** ES "Supply chain" (352 Dependabot alerts: 23 critical, 163 high), F-QA-27, R-03
 - **Files:** no source change; R-03 in `REMAINING_RISKS.md`; refines M1-E7-T2..T4
 - **Do:** export alerts with `gh api`. Run `pip-audit` on `uv export`, `pnpm audit`, and `cargo audit` on both lockfiles. Classify each finding by ecosystem, severity and reachability (runtime, dev or build-only).
 - **Done when:** every critical and high finding has a disposition: upgrade, not reachable (with the reason), or no fix available.
-- **Tests:** none (analysis) · **Evidence:** —
+- **Tests:** none (analysis) · **Evidence:** `docs/engineering/SUPPLY_CHAIN_TRIAGE.md` (workflow `wf_d4d7a684-2ed`, 20 agents: 4 ecosystem analysts, 26 skeptic/feasibility verdicts, 3 claims overturned and corrected); raw data: pip-audit over the full uv lock, `pnpm audit` and `--prod`, RustSec advisory-db matched against both Cargo.lock files (matcher cross-checked 29/29)
 
 ### M1 — Security hardening
 
@@ -1120,26 +1120,26 @@ Owner OPS (SEC) · Risk med · Gate infra: Docker (evidence from CI) · **ready*
 - **Tests:** hygiene test; G; G-CI · **Evidence:** —
 
 #### M1-E7-T2 · Remediate Python advisories
-Owner SEC · Risk med · Gate none · **pending** · Deps M0-E4-T1
+Owner SEC · Risk med · Gate none · **ready** · Deps M0-E4-T1
 - **Addresses:** R-03
 - **Files:** `pyproject.toml`, `uv.lock`
-- **Do:** upgrade reachable critical and high findings first. Record unreachable ones with a reason.
+- **Do:** upgrade reachable critical and high findings first. Record unreachable ones with a reason. Apply SUPPLY_CHAIN_TRIAGE.md §5 batches P1–P5 in order, one commit per batch, each with its listed gates and regression checks.
 - **Done when:** no reachable critical or high Python advisory remains, or each remaining one is risk-accepted in REMAINING_RISKS.md.
 - **Tests:** G, G-PG; `pip-audit` · **Evidence:** —
 
 #### M1-E7-T3 · Remediate Node advisories
-Owner SEC (FE) · Risk med · Gate none · **pending** · Deps M0-E4-T1
+Owner SEC (FE) · Risk med · Gate none · **ready** · Deps M0-E4-T1
 - **Addresses:** R-03
 - **Files:** `package.json` (`pnpm.overrides`), `apps/web/package.json`, `pnpm-lock.yaml`
-- **Do:** same approach as M1-E7-T2.
+- **Do:** same approach as M1-E7-T2. Apply SUPPLY_CHAIN_TRIAGE.md §5 batches N1–N4 in order, one commit per batch, each with its listed gates and regression checks.
 - **Done when:** no reachable critical or high Node advisory remains, or each remaining one is risk-accepted.
 - **Tests:** G; `pnpm audit` · **Evidence:** —
 
 #### M1-E7-T4 · Remediate Rust advisories
-Owner SEC · Risk med · Gate none · **pending** · Deps M0-E4-T1
+Owner SEC · Risk med · Gate none · **ready** · Deps M0-E4-T1
 - **Addresses:** R-03
 - **Files:** `rust/Cargo.toml`, `rust/Cargo.lock`, plus the `koda-command-guard` lockfile unless M4-E2-T1 lands first
-- **Do:** same approach as M1-E7-T2.
+- **Do:** same approach as M1-E7-T2. Apply SUPPLY_CHAIN_TRIAGE.md §5 batches R1–R6 in order, one commit per batch, each with its listed gates and regression checks.
 - **Done when:** no reachable critical or high Rust advisory remains, or each remaining one is risk-accepted.
 - **Tests:** G-RS; `cargo audit` · **Evidence:** —
 
@@ -1187,6 +1187,29 @@ Owner SEC · Risk low · Gate none · **ready** · Deps —
 - **Do:** check the full sha256 and the byte count before the rename, using one verified download helper.
 - **Done when:** a truncated or tampered file is rejected and never reported as downloaded.
 - **Tests:** unit tests with a local server; G · **Evidence:** —
+
+#### M1-E7-T10 · Image and parser hardening from the advisory triage
+Owner SEC (BE) · Risk med · Gate none · **ready** · Deps M1-E7-T2 batch P2
+- **Addresses:** D-224, SUPPLY_CHAIN_TRIAGE.md §5.1 code-level items (Pillow, pypdf), R-03
+- **Files:** the three `Image.open` call sites, the pypdf extraction path in `koda/services/artifact_ingestion.py`, the `/pip` command guard (`BLOCKED_PIP_PATTERN`)
+- **Do:** pass `formats=["JPEG", "PNG", "WEBP", "GIF"]` to `Image.open`; run Pillow and pypdf extraction off the event loop with a timeout; reject `--index-url`/`--extra-index-url` in `/pip`.
+- **Done when:** a TIFF/EPS upload is rejected, a pathological PDF times out without stalling the loop, and `/pip install --index-url …` is blocked.
+- **Tests:** unit tests per item; G · **Evidence:** —
+
+#### M1-E7-T11 · Dashboard WebSocket relay limits
+Owner FE (SEC) · Risk low · Gate none · **ready** · Deps M1-E7-T3 batch N1
+- **Addresses:** SUPPLY_CHAIN_TRIAGE.md §5.2 code-level items (ws GHSA-96hv defence in depth)
+- **Files:** `apps/web/server.mjs` (~78, ~125), `apps/web/next.config.ts`
+- **Do:** set `maxPayload` on both WebSocket servers, validate the relay descriptor and token before `handleUpgrade`, and set `images.unoptimized: true` until M1-E7-T3 batch N2 lands.
+- **Done when:** an oversized frame and an unauthenticated upgrade are rejected before any relay work, and `/_next/image` is not served.
+- **Tests:** server tests; G · **Evidence:** —
+
+#### M1-E7-T12 · Postgres transport security in cluster mode
+Owner OPS (SEC) · Risk med · Gate none · **ready** · Deps M1-E7-T4 batch R3
+- **Addresses:** RUSTSEC-2026-0179/0178 residual (NoTls at `rust/koda-postgres/src/lib.rs:155`, `rust/koda-policy-engine/src/store.rs:133`), `docs/operations/cluster-mode.md`
+- **Do:** support `sslmode=require`/`verify-full` in the Rust Postgres clients and the Python pool, or, if that is not taken, document that multi-host cluster mode requires a private network and enforce it in doctor.
+- **Done when:** a cluster-mode stack connects over TLS (CI), or doctor fails a multi-host DSN without TLS and the docs state the requirement.
+- **Tests:** G-RS; G-PG; doctor test · **Evidence:** —
 
 #### M1-E8 — Interim mitigations (ADR-018 class 2, ADR-037)
 

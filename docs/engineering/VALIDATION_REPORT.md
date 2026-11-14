@@ -183,3 +183,18 @@ stale-build warning for shared guards, engineering-doc references updated.
 | fixture tests with `cargo` removed from `PATH` | 8 skipped + "ALL TESTS SKIPPED" banner with the reason |
 | `ruff check .` / `ruff format --check .` / `mypy koda/ --ignore-missing-imports` | pass / 710 files formatted / no issues in 358 files |
 | `pytest tests/test_public_docs.py tests/test_open_source_hygiene.py tests/test_installation_assets.py tests/test_top_tier_roadmap_assurance.py` | 51 passed |
+
+## M0-E4-T1 — dependency advisory triage
+
+Raw data collected by the orchestrator on 2026-11-14 (scratchpad, not committed):
+
+| Command | Result |
+|---|---|
+| `uv export --locked --no-hashes --all-extras` then `uv run pip-audit -r … --no-deps --disable-pip -f json` | 144 packages audited; 14 vulnerable; 206 records (157 GHSA after alias dedup) |
+| `pnpm audit --json` / `pnpm audit --prod --json` | 5 critical, 41 high, 39 moderate, 8 low / 5, 17, 12, 2 |
+| RustSec advisory-db (`git clone --depth 1`) matched against `rust/Cargo.lock` and `rust/koda-command-guard/Cargo.lock` by a local semver matcher (`cargo-audit` could not be installed in this session) | 29 findings in 17 crates; matcher independently re-checked 29/29 by the Rust analyst |
+| GitHub advisory records for the Python GHSA aliases (sparse clone of `github/advisory-database`) | 157/157 fetched, severity source for Python |
+
+Triage workflow `wf_d4d7a684-2ed` (20 agents): one analyst per slice (Python, Node prod, Node dev, Rust), a skeptic per critical/high non-upgrade claim, a registry feasibility check per slice, and a report writer. 34 verdicts; 3 overturned (urllib3 and postgres-protocol reachable after all; cryptography's full fix needs 50.x). Output: `docs/engineering/SUPPLY_CHAIN_TRIAGE.md`. Orchestrator spot-check: the `--no-dev` claim (D-224) reproduced by diffing `uv export` with and without `--no-dev`.
+
+Limitation: Dependabot's alert list could not be exported (no API access from this session), so its 352 alerts are compared by count only.
