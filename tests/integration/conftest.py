@@ -12,6 +12,8 @@ from typing import NoReturn
 
 import pytest
 
+from tests._owned_process import spawn_owned, stop_owned
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RUST_DIR = REPO_ROOT / "rust"
 
@@ -113,13 +115,14 @@ def wait_for_grpc_ready(target: str, *, timeout_s: float = 15.0) -> None:
 def spawn_rust_binary(cargo_build_release):
     """Yield a callable ``spawn(crate, env) -> Popen`` that launches
     a Rust binary with the given env vars and waits for the gRPC
-    server to be ready. The process is killed at fixture teardown."""
+    server to be ready. The process is stopped at fixture teardown,
+    and exits by itself if the session dies before teardown runs."""
     procs: list[subprocess.Popen] = []
 
     def spawn(crate: str, *, env: dict[str, str], grpc_target: str) -> subprocess.Popen:
         binary = cargo_build_release(crate)
         full_env = {**os.environ, **env}
-        proc = subprocess.Popen(  # noqa: S603 — local test helper
+        proc = spawn_owned(
             [str(binary)],
             env=full_env,
             stdout=subprocess.PIPE,
@@ -132,10 +135,4 @@ def spawn_rust_binary(cargo_build_release):
     yield spawn
 
     for proc in procs:
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=5)
+        stop_owned(proc)
