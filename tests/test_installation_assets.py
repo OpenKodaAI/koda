@@ -987,19 +987,78 @@ def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
     assert 'CMD ["pnpm", "start"]' not in web_dockerfile
 
 
-def test_runtime_dockerfile_exports_locked_python_dependencies() -> None:
-    app_dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+_PYTHON_IMAGE_DOCKERFILES = ("Dockerfile", "Dockerfile.runtime-kernel")
 
-    assert "ENV UV_VERSION=0.10.7" in app_dockerfile
-    assert "pip==26.0 uv==${UV_VERSION}" in app_dockerfile
-    assert "COPY pyproject.toml uv.lock ./" in app_dockerfile
-    assert "uv export" in app_dockerfile
-    assert "--locked" in app_dockerfile
-    assert "--no-emit-project" in app_dockerfile
-    assert "--no-emit-workspace" in app_dockerfile
-    assert "/tmp/runtime-requirements.txt" in app_dockerfile
-    assert "COPY requirements.txt ./" not in app_dockerfile
-    assert "pip install --no-cache-dir -r requirements.txt" not in app_dockerfile
+
+def _runtime_requirements_export(dockerfile_text: str) -> str:
+    start = dockerfile_text.index("RUN uv export")
+    return dockerfile_text[start : dockerfile_text.index("--output-file /tmp/runtime-requirements.txt", start)]
+
+
+@pytest.mark.parametrize("dockerfile", _PYTHON_IMAGE_DOCKERFILES)
+def test_runtime_dockerfile_exports_locked_python_dependencies(dockerfile: str) -> None:
+    text = (ROOT / dockerfile).read_text(encoding="utf-8")
+    export = _runtime_requirements_export(text)
+
+    assert "ENV UV_VERSION=0.10.7" in text
+    assert re.search(r"pip==\S+ uv==\$\{UV_VERSION\}", text)
+    assert "COPY pyproject.toml uv.lock ./" in text
+    assert "--locked" in export
+    assert "--no-emit-project" in export
+    assert "--no-emit-workspace" in export
+    # Runtime dependencies only: the dev group (pytest, ruff, mypy, pip-audit and
+    # its pip, msgpack and cachecontrol) never ships, as security.yml's audit of
+    # the image set assumes.
+    assert "--no-dev" in export
+    assert "--all-groups" not in export
+    assert "--group" not in export
+    assert "COPY requirements.txt ./" not in text
+    assert "pip install --no-cache-dir -r requirements.txt" not in text
+
+
+def test_python_images_pin_the_same_pip() -> None:
+    pins = {
+        dockerfile: re.findall(r"\bpip==(\S+)", (ROOT / dockerfile).read_text(encoding="utf-8"))
+        for dockerfile in _PYTHON_IMAGE_DOCKERFILES
+    }
+
+    assert all(len(found) == 1 for found in pins.values()), pins
+    assert len({found[0] for found in pins.values()}) == 1, pins
+
+
+def _locked_runtime_closure() -> set[str]:
+    """Package names the images install: koda's runtime dependencies in uv.lock, transitively, no groups."""
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    packages = {package["name"]: package for package in lock["package"]}
+    koda = next(package for package in lock["package"] if package.get("source") == {"editable": "."})
+    pending = list(koda.get("dependencies", []))
+    closure: set[str] = set()
+    expanded_extras: set[tuple[str, str]] = set()
+    while pending:
+        dependency = pending.pop()
+        name = dependency["name"]
+        package = packages[name]
+        for extra in dependency.get("extra", []):
+            if (name, extra) not in expanded_extras:
+                expanded_extras.add((name, extra))
+                pending.extend(package.get("optional-dependencies", {}).get(extra, []))
+        if name not in closure:
+            closure.add(name)
+            pending.extend(package.get("dependencies", []))
+    return closure
+
+
+def test_runtime_images_keep_defusedxml_for_untrusted_xml() -> None:
+    """openpyxl (uploaded spreadsheets) and Pillow (XMP) parse XML through defusedxml when it is installed.
+
+    It used to reach the images only through the dev group (pip-audit), so the
+    --no-dev export would have silently dropped it.
+    """
+    closure = _locked_runtime_closure()
+
+    assert {"openpyxl", "pillow", "aiohttp"} <= closure
+    assert "pytest" not in closure
+    assert "defusedxml" in closure
 
 
 def test_embedding_download_client_is_packaged_for_fresh_installs() -> None:

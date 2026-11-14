@@ -753,6 +753,42 @@ class TestArtifactExtraction:
         assert extracted.metadata["sheet_count"] == 2
 
     @pytest.mark.asyncio
+    async def test_extract_spreadsheet_refuses_xml_entity_declarations(self, tmp_path, artifact_cache_dir):
+        """An uploaded workbook's XML is parsed through defusedxml, so a declared entity is never expanded."""
+        import io
+        import zipfile
+
+        from openpyxl import Workbook
+
+        buffer = io.BytesIO()
+        workbook = Workbook()
+        workbook.active["A1"] = "placeholder"
+        workbook.save(buffer)
+        xlsx_path = tmp_path / "entity.xlsx"
+        with zipfile.ZipFile(io.BytesIO(buffer.getvalue())) as source, zipfile.ZipFile(xlsx_path, "w") as target:
+            for item in source.infolist():
+                data = source.read(item.filename)
+                if item.filename == "xl/worksheets/sheet1.xml":
+                    text = data.decode()
+                    text = text.replace("<worksheet", '<!DOCTYPE worksheet [<!ENTITY koda "EXPANDED">]><worksheet', 1)
+                    start = text.index('<c r="A1"')
+                    end = text.index("</c>", start) + len("</c>")
+                    text = text[:start] + '<c r="A1" t="inlineStr"><is><t>&koda;</t></is></c>' + text[end:]
+                    data = text.encode()
+                target.writestr(item, data)
+
+        extracted = await extract_artifact(
+            _ref(
+                xlsx_path,
+                ArtifactKind.SPREADSHEET,
+                mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        )
+
+        assert "EXPANDED" not in (extracted.text_content or "")
+        assert extracted.status == ArtifactStatus.UNRESOLVED
+
+    @pytest.mark.asyncio
     async def test_extract_image_preserves_visual_path_and_ocr(self, tmp_path, artifact_cache_dir):
         from PIL import Image
 

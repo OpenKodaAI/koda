@@ -27,6 +27,10 @@ dependencies = [
     # supertonic 1.x publishes ONNX local TTS wheels for Python <3.14.
     "supertonic>=1.3.1,<2.0; python_version < '3.14'",
     "openpyxl>=3.1.5,<4.0",
+    # openpyxl (uploaded spreadsheets) and Pillow parse XML through defusedxml when
+    # it is installed. It reached the images only through the dev group until the
+    # Dockerfiles exported with --no-dev, so it is declared here.
+    "defusedxml>=0.7.1,<1.0",
     "pillow>=12.2.0,<13.0",
     "pypdf>=6.21.4,<7.0.0",
     "soundfile>=0.13.1,<1.0",

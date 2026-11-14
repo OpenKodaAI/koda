@@ -31,7 +31,7 @@ ENV RUNNING_IN_DOCKER=true
 ENV UV_VERSION=0.10.7
 ENV PLAYWRIGHT_BROWSERS_PATH=/var/lib/koda/playwright-browsers
 
-RUN python -m pip install --no-cache-dir --upgrade pip==26.0 uv==${UV_VERSION}
+RUN python -m pip install --no-cache-dir --upgrade pip==26.3 uv==${UV_VERSION}
 
 # Node.js and the pinned provider CLIs. npm, npx and corepack stay in the node
 # stage: nothing in the runtime image can install or fetch a package.
@@ -60,10 +60,14 @@ RUN useradd -m -s /bin/bash botuser
 
 WORKDIR /app
 
+# Install locked Python dependencies, runtime ones only: --no-dev leaves out the
+# dev group (pytest, ruff, mypy, pip-audit and its pip, msgpack and cachecontrol),
+# which security.yml's audit assumes images lack.
 COPY pyproject.toml uv.lock ./
 RUN uv export \
         --format requirements.txt \
         --locked \
+        --no-dev \
         --no-editable \
         --no-emit-project \
         --no-emit-workspace \
