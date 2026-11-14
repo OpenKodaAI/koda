@@ -85,6 +85,12 @@ token is resolved by `OperatorAuthService.resolve_bearer_token`, which accepts s
 (`cp_operator_sessions`) and the break-glass `CONTROL_PLANE_API_TOKEN(S)`. Anything else
 returns `401`.
 
+During a rotation, `CONTROL_PLANE_API_TOKEN` holds a comma-separated list (`new-token,old-token`)
+and each token in it authenticates on its own. `koda auth issue-code` (and `koda install`, which
+calls it) sends the first token of that list that is not a placeholder, never the whole list.
+`scripts/doctor.py --provider` does the same, its `control_plane_api_token` check passes while one
+such token remains, and `--strict` requires every such token to be at least 32 characters.
+
 Unedited `.env.example` placeholders (values starting with `replace-with-`) never
 authenticate: they are dropped from `CONTROL_PLANE_API_TOKEN(S)` and treated as an unset
 `RUNTIME_LOCAL_UI_TOKEN`, and the supervisor logs `control_plane_api_token_placeholder_ignored`

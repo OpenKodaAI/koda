@@ -155,6 +155,8 @@ def _authorize_sensitive_runtime_access(request: web.Request, *, agent_scope: st
     if not scope_token:
         return web.json_response({"error": "sensitive runtime access requires scoped token"}, status=403)
     token = RUNTIME_LOCAL_UI_TOKEN.strip()
+    if not token:
+        return web.json_response({"error": "runtime UI token is not configured"}, status=403)
     envelope = RuntimeAccessService(token).authorize(
         scope_token,
         agent_scope=agent_scope,
