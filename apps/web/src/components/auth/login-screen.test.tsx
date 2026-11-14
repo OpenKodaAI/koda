@@ -66,6 +66,25 @@ describe("LoginScreen", () => {
     ).toBeInTheDocument();
   });
 
+  it("says HTTPS is required when the dashboard refuses sign-in over plain HTTP", async () => {
+    // The refusal is decided before any credential is checked, so naming it
+    // reveals nothing about accounts.
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Sign-in needs HTTPS.", 403, { reason: "INSECURE_TRANSPORT" }),
+    );
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <LoginScreen />
+      </I18nProvider>,
+    );
+    await user.type(screen.getByLabelText(/email|username/i), "owner");
+    await user.type(screen.getByLabelText(/password/i), "any-password");
+    await user.click(screen.getByRole("button", { name: /sign in/i }));
+    expect(await screen.findByText(/over plain HTTP/i)).toBeInTheDocument();
+    expect(screen.queryByText(/invalid credentials/i)).not.toBeInTheDocument();
+  });
+
   it("shows a service-unavailable message when the upstream is down (503)", async () => {
     (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new ApiError("Login service did not respond within 6000ms", 503),

@@ -1,7 +1,9 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { InsecureTransportScreen } from "@/components/auth/insecure-transport-screen";
 import { SetupScreen } from "@/components/setup/setup-screen";
 import { ControlPlaneRequestError, getControlPlaneAuthStatus } from "@/lib/control-plane";
+import { insecureCookieTransport } from "@/lib/cookie-transport";
 import { isSafeRedirectTarget, safeRedirectTarget } from "@/lib/safe-redirect";
 import {
   OWNER_EXISTS_HINT_COOKIE,
@@ -26,6 +28,15 @@ function loginTarget(nextParam: string | null): string {
 }
 
 export default async function SetupPage({ searchParams }: SetupPageProps) {
+  // Over plain HTTP from a non-loopback host the browser drops the Secure
+  // session cookie: creating the owner here would spend the setup code for a
+  // session that is thrown away. Explain on this page instead of redirecting
+  // to /login and back (J-14).
+  const insecureTransport = insecureCookieTransport(await headers());
+  if (insecureTransport) {
+    return <InsecureTransportScreen origin={insecureTransport.origin} />;
+  }
+
   const params = await searchParams;
   const nextParam = pickNext(params?.next);
   const store = await cookies();

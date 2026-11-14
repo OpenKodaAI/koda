@@ -14,8 +14,15 @@ import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
 import { isSafeRedirectTarget } from "@/lib/safe-redirect";
 import { translate } from "@/lib/i18n";
+import { INSECURE_TRANSPORT_ERROR_CODE } from "@/lib/web-operator-session-constants";
 
 const MIN_LENGTH = 12;
+
+// See LoginScreen: the plain-HTTP refusal is decided from the transport before
+// the recovery details are read, so it is the one 4xx with its own message.
+function isInsecureTransportRefusal(error: unknown): boolean {
+  return error instanceof ApiError && error.reason === INSECURE_TRANSPORT_ERROR_CODE;
+}
 
 // See LoginScreen — every 4xx auth failure is folded into one generic copy.
 // Only infra failures (5xx / network) get a distinct message.
@@ -76,7 +83,9 @@ export function ForgotPasswordScreen() {
         router.replace(loginTarget);
       }, 2000);
     } catch (error) {
-      if (isUpstreamFailure(error)) {
+      if (isInsecureTransportRefusal(error)) {
+        setError(t("auth.insecure_transport.form_error"));
+      } else if (isUpstreamFailure(error)) {
         setError(
           t("auth.forgot.service_unavailable", undefined),
         );

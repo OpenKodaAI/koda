@@ -11,6 +11,7 @@ import { useAppI18n } from "@/hooks/use-app-i18n";
 import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
 import { translate } from "@/lib/i18n";
+import { INSECURE_TRANSPORT_ERROR_CODE } from "@/lib/web-operator-session-constants";
 
 // Mirror LoginScreen / ForgotPasswordScreen: 4xx auth-flow errors fold into
 // one generic message (CLAUDE.md auth contract), only 5xx / network reach
@@ -20,6 +21,13 @@ function isUpstreamFailure(error: unknown): boolean {
     return error.status >= 500 || error.status === 0;
   }
   return true;
+}
+
+// Over plain HTTP from a non-loopback host the register-owner route refuses
+// before the setup code is spent, because the browser would drop the Secure
+// session cookie. Show the translated reason rather than the route's English.
+function isInsecureTransportRefusal(error: unknown): boolean {
+  return error instanceof ApiError && error.reason === INSECURE_TRANSPORT_ERROR_CODE;
 }
 
 export interface StepCreateAccountProps {
@@ -123,7 +131,9 @@ export function StepCreateAccount({
       }
       onRegistered(payload);
     } catch (submitError) {
-      if (isUpstreamFailure(submitError)) {
+      if (isInsecureTransportRefusal(submitError)) {
+        setError(t("auth.insecure_transport.form_error"));
+      } else if (isUpstreamFailure(submitError)) {
         setError(
           t("auth.setup.create_account.errors.service_unavailable", undefined),
         );

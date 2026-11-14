@@ -14,6 +14,17 @@ import { ApiError } from "@/lib/errors";
 import { requestJson } from "@/lib/http-client";
 import { safeRedirectTarget } from "@/lib/safe-redirect";
 import { translate } from "@/lib/i18n";
+import { INSECURE_TRANSPORT_ERROR_CODE } from "@/lib/web-operator-session-constants";
+
+/**
+ * The dashboard refuses to sign in over plain HTTP from a non-loopback host,
+ * where the browser would drop the Secure session cookie. That refusal is
+ * decided from the transport before any credential is read, so naming it
+ * reveals nothing about accounts and it is the one 4xx with its own message.
+ */
+function isInsecureTransportRefusal(error: unknown): boolean {
+  return error instanceof ApiError && error.reason === INSECURE_TRANSPORT_ERROR_CODE;
+}
 
 /**
  * The auth contract (see `apps/web/CLAUDE.md`) folds every 4xx auth failure —
@@ -61,7 +72,9 @@ export function LoginScreen() {
       router.replace(target);
       router.refresh();
     } catch (error) {
-      if (isUpstreamFailure(error)) {
+      if (isInsecureTransportRefusal(error)) {
+        setError(t("auth.insecure_transport.form_error"));
+      } else if (isUpstreamFailure(error)) {
         setError(
           t("auth.login.service_unavailable", undefined),
         );

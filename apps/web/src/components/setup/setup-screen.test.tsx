@@ -24,6 +24,7 @@ vi.mock("@/lib/http-client", async () => {
 });
 
 import { requestJson } from "@/lib/http-client";
+import { ApiError } from "@/lib/errors";
 
 function renderSetup(props = {}) {
   return render(
@@ -112,6 +113,23 @@ describe("SetupScreen (create account step)", () => {
     await user.click(screen.getByRole("button", { name: /create account|criar conta/i }));
     await screen.findByText(/aaaa-bbbb-cccc/);
     expect(screen.getByText(/dddd-eeee-ffff/)).toBeInTheDocument();
+  });
+
+  it("says HTTPS is required when the dashboard refuses owner creation over plain HTTP", async () => {
+    (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError("Sign-in needs HTTPS.", 403, { reason: "INSECURE_TRANSPORT" }),
+    );
+    const user = userEvent.setup();
+    renderSetup();
+    await user.type(screen.getByLabelText(/email/i), "owner@example.com");
+    const passwordFields = screen.getAllByLabelText(/password|senha/i);
+    await user.type(passwordFields[0], "CorrectHorseBattery!9");
+    await user.type(passwordFields[1], "CorrectHorseBattery!9");
+    await user.click(screen.getByRole("button", { name: /create account|criar conta/i }));
+    expect(
+      await screen.findByText(/over plain HTTP/i),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Sign-in needs HTTPS\./)).not.toBeInTheDocument();
   });
 
   it("uses a spinner-only visual state while creating the owner", async () => {

@@ -103,8 +103,6 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-      args:
-        SECURE_COOKIES: "false"
     restart: unless-stopped
     read_only: true
     tmpfs:
