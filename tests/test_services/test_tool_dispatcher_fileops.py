@@ -884,6 +884,95 @@ class TestPathRulesCoverWhatASubtreeToolReads:
         assert "visible" in result.output
 
 
+class TestRestrictivePathRulesWrittenThroughASymlink:
+    """The worker hands the policy the resolved path, so a restrictive rule is also matched in its resolved form.
+
+    ``/srv/app`` links to ``/srv/releases/v42``; a deny rule written for
+    ``/srv/app/config/secrets`` must still decide a read of ``config/secrets/key.txt`` in the
+    work dir ``/srv/app``, whose resolved path is under ``/srv/releases/v42``. An allow rule is
+    not resolved: the agent could repoint a link inside its work dir and widen it.
+    """
+
+    _GRANT = {"integration_grants": {"fileops": {"allow_actions": ["fileops.*"]}}}
+
+    @pytest.fixture
+    def app(self, tmp_path, monkeypatch):
+        real = tmp_path.resolve() / "releases" / "v42"
+        (real / "config" / "secrets").mkdir(parents=True)
+        (real / "config" / "secrets" / "key.txt").write_text("canary-secret\n")
+        (real / "config" / "app.toml").write_text("visible\n")
+        (real / "src").mkdir()
+        app = tmp_path.resolve() / "app"
+        app.symlink_to(real)
+        monkeypatch.chdir(tmp_path)
+        return app
+
+    async def _execute(self, tool: str, params: dict, app, rules: list[dict]):
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        policy = {"version": 1, "rules": rules}
+        with (
+            patch("koda.services.execution_policy.AGENT_EXECUTION_POLICY", policy),
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", self._GRANT),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": [tool]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            return await execute_tool(AgentToolCall(tool, params, ""), _make_ctx(str(app)))
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("decision", ["deny", "require_approval"])
+    @pytest.mark.parametrize(
+        ("tool", "params"),
+        [
+            ("file_read", {"path": "config/secrets/key.txt"}),
+            ("file_read", {"path": "{app}/config/secrets/key.txt"}),
+            ("file_grep", {"pattern": "canary", "path": "config"}),
+        ],
+    )
+    async def test_a_restrictive_rule_decides_the_resolved_path(self, app, decision, tool, params):
+        rules = [
+            {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+            {"name": "gate-secrets", "match": {"path": str(app / "config" / "secrets")}, "decision": decision},
+        ]
+        result = await self._execute(tool, {k: v.format(app=app) for k, v in params.items()}, app, rules)
+
+        assert not result.success, result.output
+        expected = {"deny": "Matched execution-policy rule.", "require_approval": "Human approval required"}
+        assert result.output.startswith(expected[decision]), result.output
+        assert "canary-secret" not in result.output
+
+    @pytest.mark.asyncio
+    async def test_a_read_beside_the_rule_still_runs(self, app):
+        rules = [
+            {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+            {"name": "deny-secrets", "match": {"path": str(app / "config" / "secrets")}, "decision": "deny"},
+        ]
+        result = await self._execute("file_read", {"path": "config/app.toml"}, app, rules)
+
+        assert result.success, result.output
+        assert "visible" in result.output
+
+    def test_an_allow_rule_is_not_resolved(self, app):
+        from koda.knowledge.task_policy_defaults import default_execution_policy
+        from koda.services.execution_policy import evaluate_execution_policy
+
+        (app / "public").symlink_to(app.resolve() / "src")
+        policy = {
+            "version": 1,
+            "rules": [{"name": "allow-public-writes", "match": {"path": str(app / "public")}, "decision": "allow"}],
+        }
+        evaluation = evaluate_execution_policy(
+            "file_write",
+            {"path": str(app.resolve() / "src" / "x.txt"), "content": "x"},
+            effective_policy=default_execution_policy("general"),
+            resource_access_policy=self._GRANT,
+            tool_policy={"allowed_tool_ids": ["file_write"]},
+            execution_policy=policy,
+        )
+        assert evaluation.rule_id != "allow-public-writes"
+
+
 class TestWorkDirUnderASensitiveRoot:
     """The Docker default work dir (HOME=/var/lib/koda/runtime/home) is under /var/lib, a SENSITIVE_DIRS root.
 

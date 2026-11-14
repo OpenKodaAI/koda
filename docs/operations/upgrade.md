@@ -107,6 +107,16 @@ existing rules are validated and simulated:
   tools gates nearly every file call an agent makes, until relative
   paths are resolved under the work dir (M1-E4-T13). Check such a rule
   with the simulator before you rely on it.
+- **A restrictive rule written through a symlinked directory applies to
+  the resolved path.** The worker gives the rules a file tool's path
+  symlink-resolved, so a rule for `/srv/app/config/secrets`, where
+  `/srv/app` links to `/srv/releases/v42`, never saw the agent's calls
+  under `/srv/releases/v42/config/secrets` and did not apply. A `deny`,
+  `require_approval` or `allow_with_preview` rule's path is now also
+  compared with its fixed part (the segments before the first wildcard)
+  symlink-resolved. An `allow` rule's path is still compared as written,
+  so an `allow` rule written through a symlink does not cover the
+  resolved paths: write it with the resolved directory.
 - **Rule path patterns are normalized.** `/srv//prod`, `/srv/./prod`,
   `/srv/x/../prod` and `/srv/prod/` now all mean `/srv/prod`, so such a
   rule matches the calls it names instead of none.

@@ -52,7 +52,12 @@ Rule semantics:
   other-case spelling, ``~`` or relative path, and neither end of a move, steps
   around a deny, require_approval or allow_with_preview path rule, and an allow
   path rule covers a call only when it covers each spelling of each of its
-  paths. Symlinks are not resolved here (the safe-path resolver, M1-E4-T13).
+  paths. A call's path is not symlink-resolved here; in the worker a file
+  tool's path arrives resolved by the safe-path resolver (M1-E4-T13). A deny,
+  require_approval or allow_with_preview rule's path is also compared with its
+  fixed part symlink-resolved (:func:`_resolved_rule_path`), so a restrictive
+  rule written through a symlinked directory still decides a resolved call
+  path; an allow rule's path is compared as written.
 * A rule's ``path`` patterns are normalized as call paths are (repeated ``/``,
   ``.`` and ``..`` resolved). A pattern must be absolute or start with ``*``
   (any depth): ``~`` and relative patterns could never match a call, and
@@ -67,6 +72,7 @@ Rule semantics:
 
 from __future__ import annotations
 
+import os
 import posixpath
 import re
 from collections.abc import Mapping
@@ -747,6 +753,43 @@ def _path_pattern_reaches_below(path: str, pattern: str) -> bool:
     return prefix != root and _within(prefix, root)
 
 
+def _resolved_rule_path(pattern: str) -> str:
+    """Return a normalized absolute ``path`` pattern with its fixed part symlink-resolved.
+
+    The fixed part is the segments before the first segment with a wildcard; the rest is
+    kept as it is. The worker resolves a file tool's path before the policy sees it
+    (``koda.services.tool_dispatcher._file_tool_policy_params``), so a rule written
+    through a symlinked directory, such as ``/srv/app/config/secrets`` with ``/srv/app``
+    linking to ``/srv/releases/v42``, is also compared in its resolved form. The
+    filesystem is read at evaluation time; a pattern that cannot be resolved comes back
+    as written.
+    """
+    segments = pattern.strip("/").split("/")
+    fixed: list[str] = []
+    for segment in segments:
+        if _GLOB_CHARACTERS & set(segment):
+            break
+        fixed.append(segment)
+    rest = segments[len(fixed) :]
+    try:
+        resolved = os.path.realpath("/" + "/".join(fixed))
+    except (OSError, ValueError):
+        return pattern
+    return "/".join([resolved.rstrip("/"), *rest]) if rest else resolved
+
+
+def _restrictive_rule_paths(patterns: tuple[str, ...]) -> tuple[str, ...]:
+    """Return a restrictive rule's path patterns as written and with their fixed part resolved.
+
+    Only deny, require_approval and allow_with_preview rules get the resolved form, which
+    can only make a decision stricter. An allow rule is compared as written: the agent can
+    repoint a link inside its work dir, and resolving an allow rule through it would widen
+    the rule.
+    """
+    resolved = (_resolved_rule_path(pattern) for pattern in patterns if pattern.startswith("/"))
+    return tuple(dict.fromkeys((*patterns, *resolved)))
+
+
 def _path_matches(
     spelling: _PathSpelling | None,
     patterns: tuple[str, ...],
@@ -764,11 +807,15 @@ def _path_matches(
     allow_with_preview rule also matches when its path can lie below the call's path
     (:func:`_path_pattern_reaches_below`), so naming an ancestor of a restrictive rule's
     directory does not step around it; an allow rule must still cover the path itself.
+    A restrictive rule's paths are also compared with their fixed part symlink-resolved
+    (:func:`_restrictive_rule_paths`).
     """
     if spelling is None:
         return False
     if spelling.path is None:
         return decision != "allow"
+    if decision != "allow":
+        patterns = _restrictive_rule_paths(patterns)
     path = spelling.path
     if spelling.ignore_case:
         path, patterns = path.lower(), tuple(pattern.lower() for pattern in patterns)
