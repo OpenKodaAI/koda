@@ -196,7 +196,9 @@ These changes apply with or without rules:
   see the path of `/file` and `/ls` (the work dir for `/ls` alone), which
   they used to skip, so a deny path rule keeps `/file` from sending a file
   it covers, as it keeps `/cat` from showing it, and `/ls` of a directory
-  that holds a gated path is decided by that rule.
+  with a gated path among its direct entries is decided by that rule
+  (see "A path rule covers a listing of the directory that holds it"
+  above; a gated path deeper down does not decide `/ls`).
 - **An `approve scope` grant covers only calls on the same paths.** A
   grant now records every path that path rules evaluate, both ends of a
   `file_move` included, so it no longer covers a move from the same
