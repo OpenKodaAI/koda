@@ -109,7 +109,9 @@ Write/control routes:
 Automatic (scheduled and catch-up) runs follow the agent's current policy rather than the snapshot captured at validation: when the job's stored policy snapshot is stale, the dispatcher refreshes it before materializing runs and records a `job.policy_snapshot_refreshed` event with the previous and new `policy_snapshot_hash`.
 
 `POST /api/runtime/tasks/{task_id}/cancel` and `/interrupt` stop a task that is queued, running, or
-retrying and return `action: "cancelled"` (or `"interrupted"`) with its `final_phase`. A task without a
+retrying and return `action: "cancelled"` (or `"interrupted"`) with its `final_phase`. A stopped task
+delivers no response and starts no further provider run (no streaming fallback, provider fallback, or
+retry), also when its provider exits while the runtime kernel is still stopping it. A task without a
 runtime environment that has already finished (for example completed, failed, cancelled, or
 `needs_review`) is left as it is: the route answers `409` with `error`, `action: "not_running"`,
 `ok: false`, its `status`, and its unchanged `final_phase`.

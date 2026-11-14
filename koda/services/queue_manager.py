@@ -761,6 +761,10 @@ class TaskInfo:
     runtime_classification: str | None = None
     runtime_environment_kind: str | None = None
     runtime_work_dir: str | None = None
+    # Set by cancel_active_task_execution: ``cancel_requested`` before it
+    # signals the provider, ``cancel_signalled`` once that termination returned.
+    cancel_requested: bool = False
+    cancel_signalled: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class _RetryableError(Exception):
@@ -1850,21 +1854,54 @@ def get_task_info(task_id: int) -> TaskInfo | None:
 
 
 async def cancel_active_task_execution(task_id: int, *, reason: str = "Cancelled by scheduler control.") -> bool:
-    """Cancel an active task and terminate its provider process when possible."""
+    """Cancel an active task and terminate its provider process when possible.
+
+    The provider is terminated before the asyncio task is cancelled, so the
+    task's cancel handler finalizes (and checkpoints) only after the provider
+    has stopped. A runtime-kernel termination yields, and the task can see its
+    provider exit before the cancel lands. The task is therefore marked first,
+    and ``_stop_if_cancel_requested`` stops it instead of falling back,
+    switching provider or retrying (D-222).
+    """
     from koda.utils.process_control import terminate_process_tree
 
     task_info = get_task_info(task_id)
+    running_task: asyncio.Task | None = None
+    if task_info is not None and task_info.asyncio_task is not None and not task_info.asyncio_task.done():
+        running_task = task_info.asyncio_task
+        task_info.error_message = reason
+        task_info.cancel_requested = True
     proc = active_processes.get(task_id)
     cancelled = False
-    if proc is not None:
-        with contextlib.suppress(Exception):
-            await terminate_process_tree(proc)
-        cancelled = True
-    if task_info and task_info.asyncio_task and not task_info.asyncio_task.done():
-        task_info.error_message = reason
-        task_info.asyncio_task.cancel()
+    try:
+        if proc is not None:
+            with contextlib.suppress(Exception):
+                await terminate_process_tree(proc)
+            cancelled = True
+    finally:
+        if task_info is not None and task_info.cancel_requested:
+            task_info.cancel_signalled.set()
+    if running_task is not None and not running_task.done():
+        running_task.cancel()
         cancelled = True
     return cancelled
+
+
+async def _stop_if_cancel_requested(task_id: int | None) -> None:
+    """Stop the task when a cancel is terminating its provider (D-222).
+
+    Called when a provider run returns. If ``cancel_active_task_execution``
+    marked the task, the provider exited because it was signalled, so its
+    result must not lead to a streaming fallback, a provider switch, a retry or
+    a delivered response. The task waits until the termination has returned,
+    so its cancel handler still finalizes after the provider stopped, then
+    stops with ``CancelledError``.
+    """
+    task_info = get_task_info(task_id) if task_id is not None else None
+    if task_info is None or not task_info.cancel_requested:
+        return
+    await task_info.cancel_signalled.wait()
+    raise asyncio.CancelledError
 
 
 def is_task_active_in_process(task_id: int) -> bool:
@@ -4260,10 +4297,15 @@ async def _run_with_provider_fallback(
     last_result: RunResult | None = None
 
     async def _execute_attempt(attempt_ctx: QueryContext, attempt_item: QueueItem) -> RunResult:
+        # Every provider run of a task returns through here. A run that ended
+        # because /cancel terminated its provider stops the task before any
+        # streaming fallback, provider fallback, retry or delivery (D-222).
         run_result = await _run_streaming(attempt_ctx, attempt_item, user_id, chat_id, context, task_id=task_id)
+        await _stop_if_cancel_requested(task_id)
         if run_result is None or (not run_result.result and not run_result.stop_reason):
             attempt_ctx.warnings.append("streaming fallback")
             run_result = await _run_fallback(attempt_ctx, attempt_item, user_id, chat_id, context, task_id=task_id)
+            await _stop_if_cancel_requested(task_id)
             run_result.warnings.append("streaming fallback")
 
         for warning in attempt_ctx.warnings:
