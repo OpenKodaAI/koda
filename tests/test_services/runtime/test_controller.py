@@ -142,6 +142,11 @@ class _StoreStub:
                 return dict(row)
         return None
 
+    def upsert_process(self, **fields: Any) -> int:
+        row: dict[str, Any] = {"id": len(self.processes) + 1, "status": "running", **fields}
+        self.processes.append(row)
+        return int(row["id"])
+
     def update_process(self, process_id: int, **fields: Any) -> None:
         for row in self.processes:
             if int(row["id"]) != process_id:
@@ -2845,3 +2850,244 @@ async def test_cancel_task_with_environment_terminates_the_provider_before_the_t
         running.cancel()
         queue_manager.active_processes.pop(task_id, None)
         queue_manager._unregister_task(task_info)
+
+
+@pytest.mark.asyncio
+async def test_cancel_task_with_environment_stops_without_fallback_when_the_provider_exits_during_termination(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """D-222: an env-backed task that sees its provider exit mid-cancel stops instead of falling back.
+
+    The runtime kernel's ``terminate_task`` yields. Here the provider exits as soon as
+    it is signalled and the kernel call returns later, so the task observes the exit
+    before the asyncio cancel lands. It must not start the streaming fallback (a new
+    provider run), and it must still finalize as ``cancelled_retained`` after the
+    termination finished. The real worker, task execution, streaming run and
+    kernel-backed provider process run; only the provider runner, the kernel and the
+    database edges are fakes.
+    """
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    import koda.services.queue_manager as queue_manager
+    import koda.services.runtime as runtime_package
+    from koda.services.runtime.kernel_subprocess import RuntimeKernelProcess, create_runtime_kernel_process
+
+    task_id = 9451
+    user_id = 4255
+    chat_id = 81
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    checkpoint_dir = tmp_path / "runtime" / "tasks" / str(task_id) / "checkpoints" / "kernel-1"
+    checkpoint_dir.mkdir(parents=True)
+    checkpoint_files = {
+        "manifest_path": checkpoint_dir / "manifest.json",
+        "snapshot_path": checkpoint_dir / "snapshot.json",
+        "patch_path": checkpoint_dir / "git.patch",
+        "git_status_path": checkpoint_dir / "git_status.txt",
+    }
+    checkpoint_files["manifest_path"].write_text('{"ok":true}', encoding="utf-8")
+    checkpoint_files["snapshot_path"].write_text('{"task_id":9451}', encoding="utf-8")
+    checkpoint_files["patch_path"].write_text("", encoding="utf-8")
+    checkpoint_files["git_status_path"].write_text("", encoding="utf-8")
+    env = {
+        "id": 61,
+        "task_id": task_id,
+        "status": "active",
+        "current_phase": "executing",
+        "classification": "standard",
+        "environment_kind": "dev_worktree",
+        "workspace_path": str(workspace),
+        "runtime_dir": str(tmp_path / "runtime" / "tasks" / str(task_id)),
+    }
+    store = _StoreStub(
+        env=env,
+        task={"id": task_id, "task_id": task_id, "current_phase": "queued", "status": "queued"},
+    )
+    order: list[str] = []
+
+    class _ProviderExitsDuringTerminationKernel(_KernelStub):
+        def __init__(self) -> None:
+            super().__init__(
+                save_checkpoint_result={
+                    "forwarded": True,
+                    "saved": True,
+                    "checkpoint_id": "kernel-1",
+                    "checkpoint_dir": str(checkpoint_dir),
+                    **{key: str(path) for key, path in checkpoint_files.items()},
+                }
+            )
+            self.started: list[str] = []
+            self.provider_running = asyncio.Event()
+            self.streams: dict[str, asyncio.Queue[bytes | None]] = {
+                "stdout": asyncio.Queue(),
+                "stderr": asyncio.Queue(),
+            }
+
+        async def start_task(self, *, task_id: int, command: str, args: list[str] | None = None, **_: Any) -> Any:
+            self.started.append(command)
+            self.provider_running.set()
+            return {"forwarded": True, "process_id": f"kernel-proc-{len(self.started)}", "pid": 4100, "pgid": 4100}
+
+        async def stream_terminal(self, *, task_id: int, stream: str) -> Any:
+            while (chunk := await self.streams[stream].get()) is not None:
+                yield chunk
+
+        async def terminate_task(self, *, task_id: int, force: bool = False) -> dict[str, Any]:
+            order.append("terminate:start")
+            # The provider exits when it is signalled (its streams close), but the
+            # kernel call returns only after its grace period and group reap.
+            for queue in self.streams.values():
+                queue.put_nowait(None)
+            await asyncio.sleep(0.2)
+            order.append("terminate:done")
+            return {"forwarded": True, "terminated": True}
+
+        async def collect_snapshot(self, *, task_id: int) -> dict[str, Any] | None:
+            return {"task": {"exit_code": -15}}
+
+        async def save_checkpoint(self, **kwargs: Any) -> dict[str, Any]:
+            order.append("checkpoint")
+            return await super().save_checkpoint(**kwargs)
+
+    kernel = _ProviderExitsDuringTerminationKernel()
+    controller = _build_controller(monkeypatch, tmp_path, store=store, kernel=kernel)
+    monkeypatch.setattr(runtime_package, "get_runtime_controller", lambda: controller, raising=False)
+
+    async def _artifact_engine_disabled() -> bool:
+        return False
+
+    monkeypatch.setattr(controller, "_ensure_artifact_engine_started", _artifact_engine_disabled)
+
+    queue: asyncio.Queue[Any] = asyncio.Queue()
+    monkeypatch.setitem(queue_manager._user_queues, user_id, queue)
+    raw_item = queue_manager._build_user_message_raw_item(
+        task_id=task_id,
+        chat_id=chat_id,
+        query_text="long running query",
+        provider="claude",
+        model="claude-sonnet-4-6",
+        work_dir=str(workspace),
+        session_id="canon-1",
+        update=None,
+        image_paths=None,
+        artifact_bundle=None,
+    )
+    raw_item["_runtime_preprovisioned"] = True
+    await queue.put(raw_item)
+    queue_manager._track_queued_task_id(user_id, task_id)
+
+    progress_message = MagicMock()
+    progress_message.edit_text = AsyncMock()
+    progress_message.delete = AsyncMock()
+    context = MagicMock()
+    context.user_data = {"total_cost": 0.0}
+    context.bot.send_message = AsyncMock(return_value=progress_message)
+    context.bot.send_chat_action = AsyncMock()
+    context.bot.delete_message = AsyncMock()
+
+    query_context = queue_manager.QueryContext(
+        provider="claude",
+        work_dir=str(workspace),
+        model="claude-sonnet-4-6",
+        session_id="canon-1",
+        provider_session_id=None,
+        system_prompt="system",
+        agent_mode="autonomous",
+        permission_mode="bypassPermissions",
+        max_turns=5,
+        fallback_chain=["claude"],
+    )
+
+    async def _fake_run_llm_streaming(**kwargs: Any) -> Any:
+        # The CLI runners' shape on an env-backed task: the provider runs in the
+        # runtime kernel and the runner streams its stdout until it exits.
+        assert kwargs["runtime_task_id"] == task_id
+        proc = create_runtime_kernel_process(task_id=task_id, command=["claude", "-p"], cwd=str(workspace))
+        kwargs["process_holder"]["proc"] = proc
+        kwargs["process_holder"]["event"].set()
+        proc.stdin.close()
+        await proc.wait_started()
+        while line := await proc.stdout.readline():
+            yield line.decode()
+        await proc.wait()
+
+    fallback_calls: list[dict[str, Any]] = []
+
+    async def _fake_run_llm(**kwargs: Any) -> dict[str, Any]:
+        # The non-streaming fallback; reaching it means a new provider run started.
+        fallback_calls.append(kwargs)
+        await asyncio.sleep(0)
+        return {"result": "fallback response", "session_id": None, "cost_usd": 0.0, "error": False}
+
+    async def _resolve_provider_context(*, base_ctx: Any, **_kwargs: Any) -> Any:
+        return base_ctx
+
+    update_task_with_lease = MagicMock(return_value=True)
+    try:
+        with (
+            patch.object(queue_manager, "RUNTIME_ENVIRONMENTS_ENABLED", True),
+            patch.object(queue_manager, "acquire_task_lease", MagicMock(return_value=True)),
+            patch.object(queue_manager, "extend_task_lease", MagicMock(return_value=True)),
+            patch.object(queue_manager, "release_task_lease", MagicMock()),
+            patch.object(queue_manager, "update_task_with_lease", update_task_with_lease),
+            patch.object(queue_manager, "_prepare_query_context", AsyncMock(return_value=query_context)),
+            patch.object(queue_manager, "_resolve_provider_context", _resolve_provider_context),
+            patch.object(queue_manager, "run_llm_streaming", _fake_run_llm_streaming),
+            patch.object(queue_manager, "run_llm", _fake_run_llm),
+            patch("koda.utils.command_helpers.init_user_data", MagicMock()),
+            patch("koda.services.audit.emit", MagicMock()),
+        ):
+            worker = asyncio.create_task(queue_manager._process_queue(user_id, context))
+            try:
+                await asyncio.wait_for(kernel.provider_running.wait(), timeout=10)
+                for _ in range(100):
+                    if task_id in queue_manager.active_processes:
+                        break
+                    await asyncio.sleep(0.01)
+                assert isinstance(queue_manager.active_processes[task_id], RuntimeKernelProcess)
+                store.task.update(status="running")
+
+                result = await controller.cancel_task(
+                    task_id=task_id,
+                    actor="telegram_command",
+                    reason="Cancelled by /cancel command.",
+                )
+                await asyncio.wait_for(worker, timeout=10)
+            finally:
+                if not worker.done():
+                    worker.cancel()
+                    with contextlib.suppress(BaseException):
+                        await worker
+
+        assert result == {
+            "ok": True,
+            "action": "cancelled",
+            "task_id": task_id,
+            "env_id": 61,
+            "final_phase": "cancelled_retained",
+        }
+        # No streaming fallback and no second provider process in the kernel.
+        assert fallback_calls == []
+        assert kernel.started == ["claude"]
+        # The cancel handler checkpointed once, after the kernel termination finished.
+        assert order == ["terminate:start", "terminate:done", "checkpoint"]
+        assert store.task["status"] == "cancelled"
+        assert store.task["current_phase"] == "cancelled_retained"
+        assert store.env["current_phase"] == "cancelled_retained"
+        assert store.queue_items[task_id]["status"] == "cancelled"
+        lease_statuses = [call.args[2] for call in update_task_with_lease.call_args_list]
+        assert lease_statuses == ["running", "cancelled"]
+        assert update_task_with_lease.call_args_list[-1].kwargs["error_message"] == "Cancelled by /cancel command."
+        # Only the progress message was sent, and it was removed: no response or failure notice.
+        assert [call.kwargs["text"] for call in context.bot.send_message.await_args_list] == ["Processing…"]
+        progress_message.delete.assert_awaited_once()
+        assert queue_manager.get_task_info(task_id) is None
+        assert task_id not in queue_manager.active_processes
+    finally:
+        queue_manager._cancelled_task_ids.discard(task_id)
+        queue_manager._untrack_queued_task_id(user_id, task_id)
+        queue_manager.active_processes.pop(task_id, None)
+        queue_manager._user_tasks.pop(user_id, None)
+        queue_manager._queue_workers.pop(user_id, None)

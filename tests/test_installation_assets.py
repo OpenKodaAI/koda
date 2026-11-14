@@ -11,6 +11,7 @@ import tarfile
 import tomllib
 from pathlib import Path
 
+import pytest
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -171,6 +172,75 @@ def test_release_compose_carries_bootstrap_and_runtime_tokens_into_app_service()
     web_block = compose_text.split("  web:")[1].split("  security:")[0]
     assert "CONTROL_PLANE_API_TOKEN" not in web_block
     assert "RUNTIME_LOCAL_UI_TOKEN" not in web_block
+
+
+_RELEASE_BUNDLE = ROOT / "packages" / "cli" / "release" / "bundle"
+_COMPOSE_VARIABLE = re.compile(r"\$\{(?P<name>[A-Za-z_][A-Za-z0-9_]*)(?:(?P<op>:?[-?])(?P<arg>[^}]*))?\}")
+
+
+def _compose_interpolate(value: str, env: dict[str, str]) -> str:
+    """Resolve a Compose value as `docker compose --env-file .env` does, for the forms the bundle uses."""
+    assert "$$" not in value and "$" not in _COMPOSE_VARIABLE.sub("", value), f"outside the model: {value}"
+
+    def replace(match: re.Match[str]) -> str:
+        name, op, arg = match.group("name"), match.group("op"), match.group("arg")
+        current = env.get(name)
+        missing = not current if op is None or op.startswith(":") else current is None
+        if not missing:
+            return str(current)
+        if op is None:
+            return ""
+        assert op.endswith("-"), f"{name} is required: {arg}"
+        return arg
+
+    return _COMPOSE_VARIABLE.sub(replace, value)
+
+
+def _release_install_env() -> dict[str, str]:
+    """The install's .env as `koda install` writes it, from the bundle's .env.bootstrap."""
+    env: dict[str, str] = {}
+    for line in (_RELEASE_BUNDLE / ".env.bootstrap").read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            name, _, value = stripped.partition("=")
+            env[name] = value
+    return env
+
+
+@pytest.mark.parametrize("grant", ["100.64.0.0/10,fd7a:115c:a1e0::/48", ""], ids=["set", "unset"])
+def test_release_app_service_passes_the_mcp_private_network_grant_through(grant: str) -> None:
+    """MCP_ALLOWED_PRIVATE_NETWORKS set in the install's .env must reach the control-plane container.
+
+    The release app service lists every variable it passes and has no env_file, and the image holds
+    no .env either (.dockerignore excludes it; koda/config.py reads only the checkout's .env), so a
+    host setting reaches the control plane, and through the supervisor every agent worker, only when
+    the service names it. Unset, the grant stays empty: MCP servers on public addresses only.
+    """
+    compose = yaml.safe_load((_RELEASE_BUNDLE / "docker-compose.release.yml").read_text(encoding="utf-8"))
+    app = compose["services"]["app"]
+    assert "env_file" not in app
+    assert ".env" in (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    install_env = _release_install_env()
+    if grant:
+        install_env["MCP_ALLOWED_PRIVATE_NETWORKS"] = grant
+
+    container_env = {name: _compose_interpolate(str(value), install_env) for name, value in app["environment"].items()}
+
+    assert container_env.get("MCP_ALLOWED_PRIVATE_NETWORKS") == grant
+    # The control plane passes it on to the agent workers, which run the MCP transport.
+    from koda.control_plane import supervisor
+
+    assert "MCP_ALLOWED_PRIVATE_NETWORKS" in supervisor._SYSTEM_ENV_KEYS
+
+
+def test_release_notes_and_bootstrap_env_name_the_mcp_private_network_grant() -> None:
+    """Since M1-E3-T8, MCP servers on 100.64.0.0/10 (Tailscale, CGNAT) are refused unless granted."""
+    notes = " ".join((_RELEASE_BUNDLE / "MIGRATION.md").read_text(encoding="utf-8").split())
+    bootstrap_env = (_RELEASE_BUNDLE / ".env.bootstrap").read_text(encoding="utf-8")
+
+    assert "MCP_ALLOWED_PRIVATE_NETWORKS" in notes
+    assert "`100.64.0.0/10`" in notes
+    assert "# MCP_ALLOWED_PRIVATE_NETWORKS=100.64.0.0/10,fd7a:115c:a1e0::/48" in bootstrap_env.splitlines()
 
 
 def test_release_compose_ships_full_runtime_sidecar_set() -> None:

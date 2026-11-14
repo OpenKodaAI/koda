@@ -938,3 +938,82 @@ class TestArtifactExtraction:
         assert extracted.status == ArtifactStatus.PARTIAL
         assert extracted.ref.kind == ArtifactKind.VIDEO
         assert "could not be fully extracted automatically" in extracted.summary
+
+
+class TestYtDlpOnlySeesCanonicalWatchUrls:
+    """yt-dlp resolves DNS and follows redirects outside the SSRF guard (M1-E3-T8, D-223).
+
+    It must only ever receive a watch URL rebuilt from a validated video ID on the
+    platform's own host, never the fetched URL, as in the link analyzer.
+    """
+
+    @pytest.mark.parametrize(
+        ("url", "expected"),
+        [
+            ("https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            ("https://youtu.be/dQw4w9WgXcQ?si=x", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            ("https://m.youtube.com/shorts/dQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+            ("https://vimeo.com/76979871", "https://vimeo.com/76979871"),
+            ("https://www.vimeo.com/channels/staffpicks/76979871?share=copy", "https://vimeo.com/76979871"),
+            ("https://vimeo.com/76979871/a1b2c3d4e5", "https://vimeo.com/76979871/a1b2c3d4e5"),
+            ("https://www.dailymotion.com/video/x8abcd1", "https://www.dailymotion.com/video/x8abcd1"),
+        ],
+    )
+    def test_known_platform_urls_become_canonical_watch_urls(self, url, expected):
+        from koda.services.artifact_ingestion import _ytdlp_watch_url
+
+        assert _ytdlp_watch_url(url) == expected
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://0.0.0.0:2375/containers/json",
+            "http://[::ffff:127.0.0.1]/watch?v=dQw4w9WgXcQ",
+            "http://100.100.100.200/latest/meta-data/?youtu.be/dQw4w9WgXcQ",
+            "http://[64:ff9b::a9fe:a9fe]/youtube.com/embed/dQw4w9WgXcQ",
+            "https://www.youtube.com/redirect?q=http%3A%2F%2F169.254.169.254%2F",
+            "https://www.youtube.com/attribution_link?u=http://127.0.0.1:2375/",
+            "https://vimeo.com/76979871/../../169.254.169.254",
+            "https://vimeo.com/showcase?url=http://127.0.0.1/",
+            "https://www.dailymotion.com/embed?url=http://127.0.0.1/",
+            "ftp://vimeo.com/76979871",
+        ],
+    )
+    def test_other_urls_never_reach_ytdlp(self, url):
+        from koda.services.artifact_ingestion import _ytdlp_watch_url
+
+        assert _ytdlp_watch_url(url) is None
+
+    @pytest.mark.asyncio
+    async def test_ytdlp_receives_the_canonical_url_not_the_fetched_one(self, tmp_path):
+        from koda.services.artifact_ingestion import _extract_video_via_ytdlp
+
+        fetched = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&next=http://169.254.169.254/latest/meta-data/"
+        ref = ArtifactRef(artifact_id="yt", kind=ArtifactKind.URL, label=fetched, source_type="test", url=fetched)
+        frame_path = tmp_path / "frame.jpg"
+        frame_path.write_bytes(b"frame")
+        with (
+            patch(
+                "koda.services.artifact_ingestion._probe_video_with_ytdlp", return_value={"title": "T", "duration": 5}
+            ) as probe,
+            patch(
+                "koda.services.artifact_ingestion._download_video_with_ytdlp", return_value=(b"video", "v.mp4")
+            ) as download,
+            patch("koda.utils.video.process_video_attachment", return_value=([str(frame_path)], "summary")),
+            patch("koda.services.artifact_ingestion._ocr_image_path", return_value=""),
+        ):
+            extracted = await _extract_video_via_ytdlp(ref, fetched)
+
+        assert extracted is not None
+        probe.assert_awaited_once_with("https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        assert download.await_args.args == ("https://www.youtube.com/watch?v=dQw4w9WgXcQ",)
+
+    @pytest.mark.asyncio
+    async def test_video_page_without_a_canonical_id_skips_ytdlp(self):
+        from koda.services.artifact_ingestion import _extract_video_via_ytdlp
+
+        url = "https://www.youtube.com/redirect?q=http%3A%2F%2F169.254.169.254%2F"
+        ref = ArtifactRef(artifact_id="yt", kind=ArtifactKind.URL, label=url, source_type="test", url=url)
+        with patch("koda.services.artifact_ingestion._probe_video_with_ytdlp") as probe:
+            assert await _extract_video_via_ytdlp(ref, url) is None
+        probe.assert_not_called()

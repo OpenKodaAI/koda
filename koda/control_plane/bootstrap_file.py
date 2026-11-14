@@ -9,8 +9,17 @@ supported (in priority order):
    endpoint accepts requests without a bootstrap code. Default: true in development,
    false in production (enforced in settings.py at boot).
 2. **Env var** — `CONTROL_PLANE_BOOTSTRAP_CODE` seeds the code instead of autogen.
+   The file keeps the seed as configured; `operator_auth` canonicalizes both the
+   stored and the typed code, so only its ASCII letters and digits count. A seed
+   with fewer than 12 of them (a generated code has 12) is still used, but logs a
+   `bootstrap_code_seed_weak` warning when the file is written. The /setup
+   screen's code field takes at most 12 characters from `_BOOTSTRAP_ALPHABET`, so
+   a seed with more, or with any other letter or digit (0, 1, I, O), can only be
+   sent to the API; it logs a `bootstrap_code_seed_not_typeable` warning. The
+   seed itself is never logged: the operator chose it.
 3. **Disk file** — `state/control_plane/bootstrap.txt` (mode 0600) written on first
-   boot if no owner exists. The operator SSHs in and reads it.
+   boot if no owner exists. The operator SSHs in and reads it. A generated code is
+   also logged once, in `bootstrap_file_written`.
 
 The file is deleted automatically after the owner registers.
 """
@@ -35,6 +44,15 @@ log = get_logger(__name__)
 
 _BOOTSTRAP_FILE_PATH: Path = STATE_ROOT_DIR / "control_plane" / "bootstrap.txt"
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+# The /setup screen's code field (apps/web/src/components/setup/bootstrap-code-input.tsx)
+# keeps at most this many characters, from _BOOTSTRAP_ALPHABET only, dropping any other.
+_SETUP_FIELD_CHARACTERS = 12
+# A generated code has 12 letters and digits; a seed with fewer is weaker than the default.
+_SEED_MIN_SIGNIFICANT_CHARACTERS = 12
+_SEED_ADVICE = (
+    f"Give CONTROL_PLANE_BOOTSTRAP_CODE exactly {_SETUP_FIELD_CHARACTERS} characters from {_BOOTSTRAP_ALPHABET} "
+    "(separators are ignored), or unset it to get a generated code."
+)
 
 
 def bootstrap_file_path() -> Path:
@@ -44,6 +62,28 @@ def bootstrap_file_path() -> Path:
 def _generate_code() -> str:
     chunks = ["".join(secrets.choice(_BOOTSTRAP_ALPHABET) for _ in range(4)) for _ in range(3)]
     return "-".join(chunks)
+
+
+def _seed_kept_characters(seed: str) -> str:
+    """Return the characters of a seed that setup-code matching keeps, upper-cased.
+
+    ``operator_auth._normalize_bootstrap_code`` keeps only ASCII letters and
+    digits, on the stored and on the typed side, so separators, punctuation and
+    non-ASCII characters add nothing to a seed's secrecy.
+    """
+    return "".join(ch for ch in seed if ch.isascii() and ch.isalnum()).upper()
+
+
+def _seed_significant_characters(seed: str) -> int:
+    """Count the characters of a seed that setup-code matching keeps."""
+    return len(_seed_kept_characters(seed))
+
+
+def _seed_fits_setup_field(seed: str) -> bool:
+    """True when the /setup code field can take the seed: it keeps only characters
+    from ``_BOOTSTRAP_ALPHABET``, at most ``_SETUP_FIELD_CHARACTERS`` of them."""
+    kept = _seed_kept_characters(seed)
+    return 0 < len(kept) <= _SETUP_FIELD_CHARACTERS and all(ch in _BOOTSTRAP_ALPHABET for ch in kept)
 
 
 def _parse_expires_at(value: str) -> datetime | None:
@@ -110,7 +150,42 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
         os.close(fd)
     with contextlib.suppress(OSError):
         os.chmod(str(_BOOTSTRAP_FILE_PATH), 0o600)
-    log.info("bootstrap_file_written", path=str(_BOOTSTRAP_FILE_PATH), code=code, expires_at=expires_at.isoformat())
+    if CONTROL_PLANE_BOOTSTRAP_CODE_SEED:
+        # The operator chose the seed and knows it: say where the code came from, never the code.
+        log.info(
+            "bootstrap_file_written",
+            path=str(_BOOTSTRAP_FILE_PATH),
+            code_source="CONTROL_PLANE_BOOTSTRAP_CODE",
+            expires_at=expires_at.isoformat(),
+        )
+    else:
+        log.info(
+            "bootstrap_file_written",
+            path=str(_BOOTSTRAP_FILE_PATH),
+            code=code,
+            code_source="generated",
+            expires_at=expires_at.isoformat(),
+        )
+    if CONTROL_PLANE_BOOTSTRAP_CODE_SEED:
+        significant = _seed_significant_characters(CONTROL_PLANE_BOOTSTRAP_CODE_SEED)
+        if significant < _SEED_MIN_SIGNIFICANT_CHARACTERS:
+            log.warning(
+                "bootstrap_code_seed_weak",
+                significant_characters=significant,
+                minimum=_SEED_MIN_SIGNIFICANT_CHARACTERS,
+                hint=f"Setup codes match on ASCII letters and digits only. {_SEED_ADVICE}",
+            )
+        if not _seed_fits_setup_field(CONTROL_PLANE_BOOTSTRAP_CODE_SEED):
+            log.warning(
+                "bootstrap_code_seed_not_typeable",
+                significant_characters=significant,
+                setup_field_characters=_SETUP_FIELD_CHARACTERS,
+                hint=(
+                    f"The /setup code field keeps at most {_SETUP_FIELD_CHARACTERS} characters from "
+                    f"{_BOOTSTRAP_ALPHABET} and drops any other, so this seed works only through the API "
+                    f"(POST /api/control-plane/auth/register-owner). {_SEED_ADVICE}"
+                ),
+            )
     return code
 
 

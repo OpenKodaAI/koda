@@ -1,6 +1,7 @@
 """Tests for queue_manager helper functions."""
 
 import asyncio
+import contextlib
 import re
 from decimal import Decimal
 from pathlib import Path
@@ -36,6 +37,7 @@ from koda.services.queue_manager import (
     _process_queue,
     _recover_provider_error_with_completed_output,
     _resolve_provider_context,
+    _run_fallback,
     _run_result_has_native_tool_calls,
     _run_streaming,
     _run_with_provider_fallback,
@@ -1935,6 +1937,372 @@ class TestCancelActiveTaskExecution:
             active_processes.pop(task_id, None)
             _unregister_task(task_info)
 
+    @pytest.mark.asyncio
+    async def test_provider_exit_during_kernel_termination_does_not_switch_provider(self):
+        """D-222: a provider run that ends because a cancel is terminating it stops the task.
+
+        The runtime kernel's termination yields. The first provider exits as soon as
+        it is signalled and its runner reports a provider-switch error, all before the
+        asyncio cancel lands. The next provider in the chain must not run, and the task
+        must stop only after the termination returned.
+        """
+        from dataclasses import replace
+
+        from koda.services.queue_manager import (
+            _register_task,
+            _unregister_task,
+            active_processes,
+            cancel_active_task_execution,
+            get_task_info,
+        )
+
+        task_id = 7321
+        order: list[str] = []
+        attempts: list[str] = []
+        provider_running = asyncio.Event()
+        provider_signalled = asyncio.Event()
+        ctx = QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            fallback_chain=["claude", "codex"],
+        )
+        item = QueueItem(chat_id=111, query_text="hello")
+        context = MagicMock()
+        context.user_data = {}
+
+        class _KernelProcess:
+            kernel_managed = True
+
+            async def terminate(self) -> None:
+                marked = getattr(get_task_info(task_id), "cancel_requested", False)
+                order.append(f"terminate:start cancel_requested={marked}")
+                provider_signalled.set()
+                await asyncio.sleep(0.05)
+                order.append("terminate:done")
+
+        async def _fake_run_streaming(attempt_ctx, _item, _user_id, _chat_id, _context, task_id=None):
+            attempts.append(attempt_ctx.provider)
+            active_processes[task_id] = _KernelProcess()
+            provider_running.set()
+            try:
+                await provider_signalled.wait()
+            finally:
+                active_processes.pop(task_id, None)
+            order.append("provider:exited")
+            # What a runner reports for a provider killed mid-turn.
+            return RunResult(
+                provider=attempt_ctx.provider,
+                model=attempt_ctx.model,
+                result="CLI error (exit -15): connection reset",
+                session_id="canon-1",
+                provider_session_id=None,
+                cost_usd=0.0,
+                error=True,
+                stop_reason="error",
+                error_kind="provider_runtime",
+                retryable=True,
+            )
+
+        async def _resolve_provider_context(*, base_ctx, provider, **_kwargs):
+            return replace(base_ctx, provider=provider)
+
+        async def _run() -> RunResult:
+            try:
+                return await _run_with_provider_fallback(ctx, item, 7320, 111, context, task_id=task_id)
+            except asyncio.CancelledError:
+                order.append("task:stopped")
+                raise
+
+        task_info = TaskInfo(task_id=task_id, user_id=7320, chat_id=111, query_text="hello")
+        _register_task(task_info)
+        try:
+            with (
+                patch("koda.services.queue_manager._run_streaming", new=_fake_run_streaming),
+                patch("koda.services.queue_manager._run_fallback", new=AsyncMock()) as run_fallback,
+                patch("koda.services.queue_manager._resolve_provider_context", new=_resolve_provider_context),
+                patch("koda.services.queue_manager.build_bootstrap_prompt", return_value="bootstrapped"),
+            ):
+                run = asyncio.create_task(_run())
+                task_info.asyncio_task = run
+                await asyncio.wait_for(provider_running.wait(), timeout=10)
+
+                assert await cancel_active_task_execution(task_id, reason="Cancelled by /cancel command.") is True
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(run, timeout=10)
+
+            assert attempts == ["claude"]
+            run_fallback.assert_not_awaited()
+            assert order == [
+                "terminate:start cancel_requested=True",
+                "provider:exited",
+                "terminate:done",
+                "task:stopped",
+            ]
+            assert task_info.error_message == "Cancelled by /cancel command."
+        finally:
+            active_processes.pop(task_id, None)
+            _unregister_task(task_info)
+
+    @pytest.mark.asyncio
+    async def test_provider_exit_in_non_streaming_fallback_during_kernel_termination_does_not_switch_provider(self):
+        """D-222: a non-streaming fallback run that ends because a cancel is terminating it stops the task.
+
+        The streaming run returns nothing on its own, before any cancel, so the
+        non-streaming fallback starts a kernel-backed provider run. /cancel then
+        terminates it: the provider exits as soon as it is signalled and its runner
+        reports a retryable error while the kernel call is still terminating it, so the
+        asyncio cancel has not landed yet. The next provider in the chain must not run,
+        and the task must stop only after the termination returned.
+        """
+        from dataclasses import replace
+
+        from koda.services.queue_manager import (
+            _register_task,
+            _unregister_task,
+            active_processes,
+            cancel_active_task_execution,
+            get_task_info,
+        )
+
+        task_id = 7322
+        order: list[str] = []
+        runs: list[str] = []
+        provider_running = asyncio.Event()
+        provider_signalled = asyncio.Event()
+        ctx = QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            fallback_chain=["claude", "codex"],
+        )
+        item = QueueItem(chat_id=111, query_text="hello")
+        context = MagicMock()
+        context.user_data = {}
+
+        class _KernelProcess:
+            kernel_managed = True
+
+            async def terminate(self) -> None:
+                marked = getattr(get_task_info(task_id), "cancel_requested", False)
+                order.append(f"terminate:start cancel_requested={marked}")
+                provider_signalled.set()
+                await asyncio.sleep(0.05)
+                order.append("terminate:done")
+
+        async def _fake_run_streaming(attempt_ctx, _item, _user_id, _chat_id, _context, task_id=None):
+            # Streaming produced no result on its own; no cancel has been requested yet.
+            runs.append(f"streaming:{attempt_ctx.provider}")
+            return None
+
+        async def _fake_run_fallback(attempt_ctx, _item, _user_id, _chat_id, _context, task_id=None):
+            runs.append(f"fallback:{attempt_ctx.provider}")
+            active_processes[task_id] = _KernelProcess()
+            provider_running.set()
+            try:
+                await provider_signalled.wait()
+            finally:
+                active_processes.pop(task_id, None)
+            order.append("provider:exited")
+            # What a runner reports for a provider killed mid-turn.
+            return RunResult(
+                provider=attempt_ctx.provider,
+                model=attempt_ctx.model,
+                result="CLI error (exit -15): connection reset",
+                session_id="canon-1",
+                provider_session_id=None,
+                cost_usd=0.0,
+                error=True,
+                stop_reason="error",
+                error_kind="provider_runtime",
+                retryable=True,
+            )
+
+        async def _resolve_provider_context(*, base_ctx, provider, **_kwargs):
+            return replace(base_ctx, provider=provider)
+
+        async def _run() -> RunResult:
+            try:
+                return await _run_with_provider_fallback(ctx, item, 7320, 111, context, task_id=task_id)
+            except asyncio.CancelledError:
+                order.append("task:stopped")
+                raise
+
+        task_info = TaskInfo(task_id=task_id, user_id=7320, chat_id=111, query_text="hello")
+        _register_task(task_info)
+        try:
+            with (
+                patch("koda.services.queue_manager._run_streaming", new=_fake_run_streaming),
+                patch("koda.services.queue_manager._run_fallback", new=_fake_run_fallback),
+                patch("koda.services.queue_manager._resolve_provider_context", new=_resolve_provider_context),
+                patch("koda.services.queue_manager.build_bootstrap_prompt", return_value="bootstrapped"),
+            ):
+                run = asyncio.create_task(_run())
+                task_info.asyncio_task = run
+                await asyncio.wait_for(provider_running.wait(), timeout=10)
+
+                assert await cancel_active_task_execution(task_id, reason="Cancelled by /cancel command.") is True
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(run, timeout=10)
+
+            # The cancelled fallback run of claude was the last provider run: codex never started.
+            assert runs == ["streaming:claude", "fallback:claude"]
+            assert order == [
+                "terminate:start cancel_requested=True",
+                "provider:exited",
+                "terminate:done",
+                "task:stopped",
+            ]
+            assert task_info.error_message == "Cancelled by /cancel command."
+        finally:
+            active_processes.pop(task_id, None)
+            _unregister_task(task_info)
+
+    @pytest.mark.asyncio
+    async def test_task_parked_on_a_cancel_stops_when_the_cancel_itself_is_cancelled(self):
+        """D-222: a task waiting for a cancel's termination is released if that cancel is cancelled.
+
+        The provider exits as soon as it is signalled, so the task parks in
+        ``_stop_if_cancel_requested`` until the kernel termination returns. The caller of
+        ``cancel_active_task_execution`` (a scheduler job or a child-run timeout path) is
+        then cancelled while the kernel call is still terminating, so the asyncio cancel of
+        the task is never sent. The task must still stop with ``CancelledError`` instead of
+        waiting forever and holding the user's queue worker, and the next provider in the
+        chain must not run.
+        """
+        from dataclasses import replace
+
+        from koda.services.queue_manager import (
+            _register_task,
+            _unregister_task,
+            active_processes,
+            cancel_active_task_execution,
+        )
+
+        task_id = 7323
+        order: list[str] = []
+        attempts: list[str] = []
+        provider_running = asyncio.Event()
+        provider_signalled = asyncio.Event()
+        provider_exited = asyncio.Event()
+        ctx = QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            fallback_chain=["claude", "codex"],
+        )
+        item = QueueItem(chat_id=111, query_text="hello")
+        context = MagicMock()
+        context.user_data = {}
+
+        class _KernelProcess:
+            kernel_managed = True
+
+            async def terminate(self) -> None:
+                order.append("terminate:start")
+                provider_signalled.set()
+                # The kernel's grace period and group reap; the canceller is cancelled meanwhile.
+                await asyncio.sleep(5)
+                order.append("terminate:done")
+
+        async def _fake_run_streaming(attempt_ctx, _item, _user_id, _chat_id, _context, task_id=None):
+            attempts.append(attempt_ctx.provider)
+            active_processes[task_id] = _KernelProcess()
+            provider_running.set()
+            try:
+                await provider_signalled.wait()
+            finally:
+                active_processes.pop(task_id, None)
+            order.append("provider:exited")
+            provider_exited.set()
+            # What a runner reports for a provider killed mid-turn.
+            return RunResult(
+                provider=attempt_ctx.provider,
+                model=attempt_ctx.model,
+                result="CLI error (exit -15): connection reset",
+                session_id="canon-1",
+                provider_session_id=None,
+                cost_usd=0.0,
+                error=True,
+                stop_reason="error",
+                error_kind="provider_runtime",
+                retryable=True,
+            )
+
+        async def _resolve_provider_context(*, base_ctx, provider, **_kwargs):
+            return replace(base_ctx, provider=provider)
+
+        async def _run() -> RunResult:
+            try:
+                return await _run_with_provider_fallback(ctx, item, 7320, 111, context, task_id=task_id)
+            except asyncio.CancelledError:
+                order.append("task:stopped")
+                raise
+
+        task_info = TaskInfo(task_id=task_id, user_id=7320, chat_id=111, query_text="hello")
+        _register_task(task_info)
+        run: asyncio.Task | None = None
+        canceller: asyncio.Task | None = None
+        try:
+            with (
+                patch("koda.services.queue_manager._run_streaming", new=_fake_run_streaming),
+                patch("koda.services.queue_manager._run_fallback", new=AsyncMock()) as run_fallback,
+                patch("koda.services.queue_manager._resolve_provider_context", new=_resolve_provider_context),
+                patch("koda.services.queue_manager.build_bootstrap_prompt", return_value="bootstrapped"),
+            ):
+                run = asyncio.create_task(_run())
+                task_info.asyncio_task = run
+                await asyncio.wait_for(provider_running.wait(), timeout=10)
+
+                canceller = asyncio.create_task(
+                    cancel_active_task_execution(task_id, reason="Cancelled by /cancel command.")
+                )
+                # The provider exited and the task is now parked on the cancel, while the
+                # kernel call is still terminating.
+                await asyncio.wait_for(provider_exited.wait(), timeout=10)
+                await asyncio.sleep(0)
+                assert not run.done()
+                assert order == ["terminate:start", "provider:exited"]
+
+                canceller.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await canceller
+
+                done, _pending = await asyncio.wait({run}, timeout=2)
+                assert run in done, "the task stayed parked on a cancel whose caller was cancelled"
+
+            assert run.cancelled() is True
+            assert attempts == ["claude"]
+            run_fallback.assert_not_awaited()
+            assert order == ["terminate:start", "provider:exited", "task:stopped"]
+            assert task_info.error_message == "Cancelled by /cancel command."
+        finally:
+            for pending_task in (canceller, run):
+                if pending_task is not None and not pending_task.done():
+                    pending_task.cancel()
+                    with contextlib.suppress(BaseException):
+                        await pending_task
+            active_processes.pop(task_id, None)
+            _unregister_task(task_info)
+
 
 class TestIsTaskActiveInProcess:
     def test_reports_queued_running_and_provider_tasks(self):
@@ -2138,3 +2506,169 @@ class TestQueueOrdering:
             _queue_workers.pop(user_id, None)
             _user_tasks.pop(user_id, None)
             _user_queues.pop(user_id, None)
+
+
+class TestRunFallbackProgressCleanup:
+    """``_run_fallback`` cancels its progress indicator when the provider run ends.
+
+    The indicator can end cancelled before its own handler runs: when it never got a step,
+    or while it still sends the first "Processing..." message. That is the cleanup of this
+    run, not a cancel of it, so the provider's result must still be returned. Only a cancel
+    of the run itself propagates.
+    """
+
+    @staticmethod
+    def _ctx() -> QueryContext:
+        return QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+        )
+
+    @staticmethod
+    def _llm_result() -> dict:
+        return {"result": "the answer", "session_id": "prov-1", "cost_usd": 0.01, "_stop_reason": "completed"}
+
+    @pytest.mark.asyncio
+    async def test_result_is_returned_when_the_provider_answers_before_the_indicator_starts(self):
+        context = MagicMock()
+        context.bot = AsyncMock()
+        # Returns without yielding to the event loop, so the indicator never gets a step.
+        run_llm = AsyncMock(return_value=self._llm_result())
+
+        with patch("koda.services.queue_manager.run_llm", new=run_llm):
+            result = await _run_fallback(self._ctx(), QueueItem(chat_id=111, query_text="hello"), 111, 111, context)
+
+        run_llm.assert_awaited_once()
+        assert result.result == "the answer"
+        assert result.error is False
+        context.bot.send_message.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_result_is_returned_when_the_provider_answers_while_the_first_message_is_sent(self):
+        sending = asyncio.Event()
+
+        async def _slow_send_message(**_kwargs):
+            sending.set()
+            await asyncio.sleep(60)
+
+        context = MagicMock()
+        context.bot = AsyncMock()
+        context.bot.send_message = AsyncMock(side_effect=_slow_send_message)
+
+        async def _run_llm(**_kwargs):
+            await sending.wait()
+            return self._llm_result()
+
+        with patch("koda.services.queue_manager.run_llm", new=_run_llm):
+            result = await asyncio.wait_for(
+                _run_fallback(self._ctx(), QueueItem(chat_id=111, query_text="hello"), 111, 111, context),
+                timeout=10,
+            )
+
+        assert result.result == "the answer"
+        context.bot.send_message.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_progress_message_is_deleted_after_the_result(self):
+        progress_msg = MagicMock()
+        progress_msg.delete = AsyncMock()
+        sent = asyncio.Event()
+
+        async def _send_message(**_kwargs):
+            sent.set()
+            return progress_msg
+
+        context = MagicMock()
+        context.bot = AsyncMock()
+        context.bot.send_message = AsyncMock(side_effect=_send_message)
+
+        async def _run_llm(**_kwargs):
+            await sent.wait()
+            await asyncio.sleep(0)
+            return self._llm_result()
+
+        with patch("koda.services.queue_manager.run_llm", new=_run_llm):
+            result = await _run_fallback(self._ctx(), QueueItem(chat_id=111, query_text="hello"), 111, 111, context)
+
+        assert result.result == "the answer"
+        progress_msg.delete.assert_awaited_once()
+
+    @pytest.mark.parametrize("indicator_started", [False, True])
+    @pytest.mark.asyncio
+    async def test_cancelling_the_run_still_propagates(self, indicator_started: bool):
+        sending = asyncio.Event()
+        provider_running = asyncio.Event()
+
+        async def _slow_send_message(**_kwargs):
+            sending.set()
+            await asyncio.sleep(60)
+
+        context = MagicMock()
+        context.bot = AsyncMock()
+        context.bot.send_message = AsyncMock(side_effect=_slow_send_message)
+
+        async def _run_llm(**_kwargs):
+            provider_running.set()
+            await asyncio.sleep(60)
+            return self._llm_result()
+
+        with patch("koda.services.queue_manager.run_llm", new=_run_llm):
+            run = asyncio.create_task(
+                _run_fallback(self._ctx(), QueueItem(chat_id=111, query_text="hello"), 111, 111, context)
+            )
+            await asyncio.wait_for(provider_running.wait(), timeout=10)
+            if indicator_started:
+                await asyncio.wait_for(sending.wait(), timeout=10)
+            run.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(run, timeout=10)
+
+        assert run.cancelled()
+
+    @pytest.mark.asyncio
+    async def test_cancelling_the_run_during_its_cleanup_still_propagates(self):
+        """A /cancel that lands after the provider answered, while the finally block still deletes the
+        progress message, must cancel the run. That CancelledError is the run's own, not the indicator's,
+        so the cleanup handler re-raises it instead of returning the provider's result."""
+        deleting = asyncio.Event()
+
+        async def _slow_delete():
+            deleting.set()
+            await asyncio.sleep(60)
+
+        progress_msg = MagicMock()
+        progress_msg.delete = AsyncMock(side_effect=_slow_delete)
+        sent = asyncio.Event()
+
+        async def _send_message(**_kwargs):
+            sent.set()
+            return progress_msg
+
+        context = MagicMock()
+        context.bot = AsyncMock()
+        context.bot.send_message = AsyncMock(side_effect=_send_message)
+
+        async def _run_llm(**_kwargs):
+            await sent.wait()
+            await asyncio.sleep(0)
+            return self._llm_result()
+
+        with patch("koda.services.queue_manager.run_llm", new=_run_llm):
+            run = asyncio.create_task(
+                _run_fallback(self._ctx(), QueueItem(chat_id=111, query_text="hello"), 111, 111, context)
+            )
+            # The provider has answered; the finally block is awaiting progress_msg.delete().
+            await asyncio.wait_for(deleting.wait(), timeout=10)
+            run.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(run, timeout=10)
+
+        assert run.cancelled()
+        progress_msg.delete.assert_awaited_once()

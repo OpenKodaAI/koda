@@ -10,6 +10,8 @@ from decimal import Decimal
 
 import pytest
 
+from tests.postgres_fixtures import reset_squad_runtime_tables
+
 
 def _schema() -> str:
     return (os.environ.get("KNOWLEDGE_V2_POSTGRES_SCHEMA") or "knowledge_v2").strip() or "knowledge_v2"
@@ -22,7 +24,7 @@ async def conn(migrated_postgres: str) -> AsyncIterator[object]:
     schema = _schema()
     raw = await asyncpg.connect(migrated_postgres)
     try:
-        await raw.execute(f'TRUNCATE TABLE "{schema}"."squad_threads" CASCADE')
+        await reset_squad_runtime_tables(raw, schema)
         await raw.execute(f'TRUNCATE TABLE "{schema}"."query_history" RESTART IDENTITY CASCADE')
         yield raw
     finally:
