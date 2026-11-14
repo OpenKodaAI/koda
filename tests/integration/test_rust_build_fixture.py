@@ -180,6 +180,25 @@ def test_binary_comes_from_the_build_not_from_a_guessed_path(
     assert cargo_build_release(crate) == elsewhere
 
 
+def test_cargo_target_dir_reaches_the_build(
+    cargo_build_release: Build,
+    rust_dir: Path,
+    fake_cargo: InstallCargo,
+    crate: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CONTRIBUTING.md says a CARGO_TARGET_DIR in the environment is honoured."""
+    _set_ci(monkeypatch, "1")
+    target_dir = tmp_path / "shared-target"
+    (target_dir / "release").mkdir(parents=True)
+    monkeypatch.setenv("CARGO_TARGET_DIR", str(target_dir))
+    binary = target_dir / "release" / crate
+    fake_cargo(f'[ "$CARGO_TARGET_DIR" = "{target_dir}" ] || exit 3\n' + _report_artifact(crate, binary, write="fresh"))
+
+    assert cargo_build_release(crate) == binary
+
+
 def test_successful_build_without_the_binary_fails_under_ci(
     cargo_build_release: Build, rust_dir: Path, fake_cargo: InstallCargo, crate: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -55,7 +55,12 @@ raises the startup wait for cold builds.
 The cross-language tests in `tests/integration` run `cargo build --release -p <crate>` once per
 session, even when a binary already exists (the build is incremental, so an up-to-date crate
 takes seconds), and run the binary that build produced, never an older one. When `cargo` is
-missing or the build fails, those tests are skipped locally and fail under `CI`.
+missing or the build fails, those tests are skipped locally and fail under `CI`. In a checkout
+with no earlier release build, the first run compiles the crate and its dependencies from
+scratch (for `koda-bot-gateway`, about 530 MB of release output and a few minutes on 4 CPUs).
+Copying or hard-linking a prebuilt binary into `rust/target/release` does not avoid that build:
+cargo has no record of it, so it rebuilds and replaces the file. The tests run the executable
+cargo reports, so a `CARGO_TARGET_DIR` set in the environment is honoured.
 
 To run the same local gate from one command:
 
