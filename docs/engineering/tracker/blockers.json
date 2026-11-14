@@ -2,9 +2,9 @@
  "rows": [
   {
    "id": "B1",
-   "item": "Perguntas do operador do ADR-002 (OQ-1 a OQ-10)",
+   "item": "Perguntas do operador do ADR-002 (OQ-1 a OQ-12)",
    "kind": "approval",
-   "detail": "Mudanças de permissão que afetam usuários (MISSION §13); chegam com recomendação quando o ADR fechar"
+   "detail": "Prontas para sua decisão, cada uma com recomendação e impacto; travam só as partes que o ADR nomeia"
   },
   {
    "id": "B2",

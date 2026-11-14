@@ -40,7 +40,7 @@
    "name": "Onda 4",
    "scope": "Autenticação e doctor: erro explícito em HTTP, mensagem de rate limit, segredos (D-231, M1-E1-T6, T7, T18)",
    "status": "final_review",
-   "ref": "integrate/wave-4"
+   "ref": "integrate/wave-4 (gates finais)"
   },
   {
    "wave": "W5",
@@ -60,8 +60,15 @@
    "wave": "ADR",
    "name": "ADR-002",
    "scope": "Governança das ferramentas nativas dos agentes (Claude, Codex, Gemini)",
-   "status": "final_review",
-   "ref": "task/ADR-002-r2"
+   "status": "merged",
+   "ref": "d21c2b3"
+  },
+  {
+   "wave": "REF",
+   "name": "Referência openbot.run",
+   "scope": "Estudo visual e de experiência (chat, agentes, canais, delegação), comparação com o Koda e ajustes no plano",
+   "status": "implementing",
+   "ref": "task/REF-OPENBOT"
   },
   {
    "wave": "W7",

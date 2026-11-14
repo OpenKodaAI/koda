@@ -1,6 +1,21 @@
 {
  "rows": [
   {
+   "id": "L12",
+   "at": "2026-11-14 22:19",
+   "event": "ADR-002 aprovado e mesclado (d21c2b3): governança das ferramentas nativas dos agentes; M1-E2-T1 concluída; perguntas OQ-1 a OQ-12 enviadas para sua decisão"
+  },
+  {
+   "id": "L11",
+   "at": "2026-11-14 22:12",
+   "event": "Pesquisa do openbot.run iniciada como referência de design, chat e agentes"
+  },
+  {
+   "id": "L10",
+   "at": "2026-11-14 22:05",
+   "event": "Onda 4: rodada 3 revisada pelo orquestrador e aprovada; gates completos em execução"
+  },
+  {
    "id": "L09",
    "at": "2026-11-14 21:55",
    "event": "Página de acompanhamento criada; atualizada a cada iteração do loop"
