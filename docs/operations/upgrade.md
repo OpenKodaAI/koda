@@ -28,14 +28,17 @@ existing rules are validated and simulated:
   pattern, an unknown selector key (for example a misspelt `tool_ids`),
   an empty selector value, a mapping value, a value other than true or
   false on a boolean selector (for example `private_network: "ture"`),
-  a rule with no selectors or an unknown `decision` or legacy `action`
-  (for example `dney`), and two rules with the same name are now
-  validation errors. A rule with no selectors or an unknown decision
-  used to disappear silently; publish now validates the policy as stored
-  and reports it. An agent with any of these cannot be published, for
-  any change, until the rule is fixed. Saving a changed policy through
-  the agent spec or the execution-policy route is refused with the same
-  errors; saving other changes beside an unchanged policy still works.
+  a `path` pattern that is neither absolute nor starts with `*` (for
+  example `~/prod` or `srv/prod`) or has `..` after a wildcard segment
+  (for example `/srv/*/../prod`), a rule with no selectors or an unknown
+  `decision` or legacy `action` (for example `dney`), and two rules with
+  the same name are now validation errors. A rule with no selectors or an
+  unknown decision used to disappear silently; publish now validates the
+  policy as stored and reports it. An agent with any of these cannot be
+  published, for any change, until the rule is fixed. Saving a changed
+  policy through the agent spec or the execution-policy route is refused
+  with the same errors; saving other changes beside an unchanged policy
+  still works.
   Each error names the rule and the selector, for example
   `execution_policy.rules[0].match.tool_ids is not a supported selector`.
   Rewrite a regex as an fnmatch pattern: `^mcp_.*__delete_.*$` becomes
@@ -50,19 +53,41 @@ existing rules are validated and simulated:
   tags matches fewer calls. To deny a call that has any of the tags,
   write one rule per tag.
 - **A `path` selector covers the path and everything below it.** The
-  simulator used to match only that exact path. A call with a path is now
-  evaluated once for each spelling of the path (normalized, with `.`,
-  `..` and repeated `/` resolved, and as written; each with and without
-  case), and the most restrictive outcome wins. A `deny`,
-  `require_approval` or `allow_with_preview` path rule therefore also
-  covers `..`, `//` and other-case spellings of its path, and an `allow`
-  path rule covers a call only when every spelling is inside it, with
-  case.
+  simulator used to match only that exact path. Path rules are now
+  evaluated against every path a call acts on: both the `source` and
+  the `destination` of a `file_move`, and the working directory for
+  `file_list`, `file_search` and `file_grep` called without a `path`.
+  An absolute path is evaluated once for each of its spellings
+  (normalized, with `.`, `..` and repeated `/` resolved, and as written;
+  each with and without case), and the most restrictive outcome wins. A
+  `deny`, `require_approval` or `allow_with_preview` path rule therefore
+  also covers `..`, `//` and other-case spellings of its path, and an
+  `allow` path rule covers a call only when every spelling of every
+  path is inside it, with case. When two rules with the winning decision
+  match different spellings, the higher priority (then the lower name)
+  decides, as for any other tie.
+- **A path that is not absolute fails closed.** The worker's tools
+  expand `~` and resolve a relative path against the agent's working
+  directory, which the rule engine does not know. So a path that starts
+  with `~`, a relative path such as `notes.txt` or `../secrets/key.pem`,
+  and a file listing or search of the working directory without a
+  `path` now count as matching every `deny`, `require_approval` and
+  `allow_with_preview` path rule, and no `allow` path rule. A call that
+  such a rule's other selectors match and that gives a relative or `~`
+  path is therefore denied, or needs approval or a preview, even when it
+  would land outside that rule's directory: give file tools absolute
+  paths.
+- **Rule path patterns are normalized.** `/srv//prod`, `/srv/./prod`,
+  `/srv/x/../prod` and `/srv/prod/` now all mean `/srv/prod`, so such a
+  rule matches the calls it names instead of none.
 - **The simulator uses the agent's feature flags.** For an agent with no
   rules, the simulator filters its tool policy with the feature flags of
-  the agent's worker (from the agent's environment, for example the
-  `shell_enabled` and `browser_enabled` settings), not with the
-  control-plane process's own.
+  the agent's worker, not with the control-plane process's own. It
+  computes them as the worker does from the environment the supervisor
+  gives it: the agent's environment (for example the `shell_enabled` and
+  `browser_enabled` settings), where an agent-scoped `<AGENT_ID>_<KEY>`
+  entry comes first, and the supervisor's own `INTER_AGENT_ENABLED` only
+  when the agent's environment does not set it.
 
 After the upgrade, send the calls you care about to the simulator to see
 what each agent's rules now decide.

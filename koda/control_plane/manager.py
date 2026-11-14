@@ -1241,24 +1241,39 @@ def _stringify_env_value(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
 
 
+def _agent_scoped_env(agent_id: str, env: dict[str, str]) -> dict[str, str]:
+    """Return a worker's process env: each key upper-cased, as ``KEY`` and as ``<agent_id>_KEY``."""
+    scoped: dict[str, str] = {}
+    for key, value in env.items():
+        normalized_key = key.strip().upper()
+        scoped[normalized_key] = value
+        scoped[f"{agent_id}_{normalized_key}"] = value
+    return scoped
+
+
 # Feature-flag settings the supervisor copies from its own environment onto every worker, over the
-# snapshot's value: the flag settings among supervisor._SYSTEM_ENV_KEYS (a test keeps the two equal).
+# plain ``KEY`` only: the flag settings among supervisor._SYSTEM_ENV_KEYS (a test keeps the two equal).
 _SUPERVISOR_FORCED_FEATURE_FLAG_KEYS: tuple[str, ...] = ("INTER_AGENT_ENABLED",)
 
 
-def _worker_feature_flags(snapshot: dict[str, Any]) -> dict[str, bool]:
+def _worker_feature_flags(agent_id: str, snapshot: dict[str, Any]) -> dict[str, bool]:
     """Return the execution feature flags that the agent's worker computes from its environment.
 
-    A worker's environment is the snapshot's env, with the settings the supervisor
-    forces from its own environment. The flags of the control-plane process itself
-    can differ: operator settings such as ``shell_enabled`` reach workers only
-    through their env.
+    The worker's environment is built as the runtime snapshot and the supervisor
+    build it: the snapshot's env scoped by :func:`_agent_scoped_env`, the plain
+    ``KEY`` of each setting the supervisor forces set from the supervisor's own
+    environment, and ``AGENT_ID``. koda.config reads ``<AGENT_ID>_KEY`` first, so a
+    value the snapshot sets wins over the supervisor's. The flags of the
+    control-plane process itself can differ: operator settings such as
+    ``shell_enabled`` reach workers only through their env.
     """
     env = {key: _stringify_env_value(value) for key, value in _safe_json_object(snapshot.get("env")).items()}
+    worker_env = _agent_scoped_env(agent_id, env)
     for key in _SUPERVISOR_FORCED_FEATURE_FLAG_KEYS:
         if key in os.environ:
-            env[key] = os.environ[key]
-    return feature_flags_from_env(env)
+            worker_env[key] = os.environ[key]
+    worker_env["AGENT_ID"] = agent_id
+    return feature_flags_from_env(worker_env)
 
 
 def _typed_env_value(value: str | None, kind: str) -> Any:
@@ -8717,7 +8732,7 @@ class ControlPlaneManager:
             action,
             agent_id=normalized,
             agent_spec=agent_spec,
-            feature_flags=_worker_feature_flags(snapshot),
+            feature_flags=_worker_feature_flags(normalized, snapshot),
         )
         return {
             "agent_id": normalized,
@@ -13435,12 +13450,7 @@ class ControlPlaneManager:
         return int(row["version"] or 1) if row else 1
 
     def _scoped_env(self, agent_id: str, env: dict[str, str]) -> dict[str, str]:
-        scoped: dict[str, str] = {}
-        for key, value in env.items():
-            normalized_key = key.strip().upper()
-            scoped[normalized_key] = value
-            scoped[f"{agent_id}_{normalized_key}"] = value
-        return scoped
+        return _agent_scoped_env(agent_id, env)
 
     def _load_legacy_env(self) -> dict[str, str]:
         env_path = ROOT_DIR / ".env"

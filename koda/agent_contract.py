@@ -1938,6 +1938,38 @@ def _infer_mcp_access_level(tool_name: str) -> str:
     return _action_level_from_tokens(action_token, read_actions=_MCP_READ_ACTION_TOKENS)
 
 
+# The tools that act on the working directory when the call gives no ``path``
+# (``params.get("path", ctx.work_dir)`` in koda.services.tool_dispatcher).
+_WORK_DIR_DEFAULT_PATH_TOOLS = frozenset({"file_list", "file_search", "file_grep"})
+
+
+def resolve_action_paths(tool_id: str, params: dict[str, Any] | None = None) -> tuple[str, ...]:
+    """Return every filesystem path a tool call acts on, exactly as the tool receives it.
+
+    The execution-policy engine evaluates ``path`` rules against each of these, so
+    they are not trimmed or normalized: the tools expand ``~`` and resolve a relative
+    path against the worker's working directory, and the engine must see what the
+    tool sees. A file tool's ``path``, ``source`` and ``destination`` params all
+    count, so a ``file_move`` yields its source and its destination. ``file_list``,
+    ``file_search`` and ``file_grep`` act on the working directory when the call has
+    no ``path``, which is returned as the relative path ``.``. Only the tools whose
+    resolution carries a path (:func:`resolve_integration_action`) have paths here.
+    """
+    tool = str(tool_id or "").strip()
+    payload = params or {}
+    keys: tuple[str, ...]
+    if tool in {"write", "edit", "rm", "mkdir", "cat"} or tool.startswith("agent_"):
+        keys = ("path",)
+    elif tool.startswith("file_"):
+        keys = ("path", "source", "destination")
+    else:
+        return ()
+    paths = tuple(str(payload[key]) for key in keys if payload.get(key) not in (None, ""))
+    if tool in _WORK_DIR_DEFAULT_PATH_TOOLS and "path" not in payload:
+        return (".", *paths)
+    return paths
+
+
 def resolve_integration_action(tool_id: str, params: dict[str, Any] | None = None) -> IntegrationActionResolution:
     """Resolve one tool invocation to a typed integration/action envelope."""
     tool = str(tool_id or "").strip()

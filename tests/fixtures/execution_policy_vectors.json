@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "description": "Execution-policy parity vectors (ADR-002 AG-06, ADR-008 step 1). Each vector is one tool call evaluated against one policy. tests/test_execution_policy_vectors.py runs every vector through the runtime engine, the way an agent worker calls it, and through the control-plane simulate route (POST /api/control-plane/agents/{agent_id}/execution-policy/evaluate); both must return the expected decision, reason_code and rule_id, and the same approval scope and preview. The file is also the shared input for the ADR-008 offline replay (M5-E3-T2). Rule semantics: among the rules that match a call, the most restrictive decision wins (deny > require_approval > allow_with_preview > allow), then the highest priority, then the lowest name; patterns are fnmatch globs compared case-insensitively; a path selector also covers everything below the path, and a call with a path is evaluated against the whole rule set once per spelling of the path (lexically normalized, with . .. and repeated / resolved, and as written; each with case and ignoring case), the most restrictive outcome winning, the no-match fallback included, so no spelling steps around a deny, require_approval or allow_with_preview path rule and an allow path rule covers a call only when it covers every spelling; every listed effect tag must be present; a selector the engine cannot evaluate (unknown key, empty value, mapping value, non-boolean value on a boolean selector, ^regex) is skipped in a deny rule and makes any other rule not match. agent.env is the agent's worker environment: the simulator evaluates with the feature flags a worker started with it computes.",
+  "description": "Execution-policy parity vectors (ADR-002 AG-06, ADR-008 step 1). Each vector is one tool call evaluated against one policy. tests/test_execution_policy_vectors.py runs every vector through the runtime engine, the way an agent worker calls it, and through the control-plane simulate route (POST /api/control-plane/agents/{agent_id}/execution-policy/evaluate); both must return the expected decision, reason_code and rule_id, and the same approval scope and preview. The file is also the shared input for the ADR-008 offline replay (M5-E3-T2). Rule semantics: among the rules that match a call, the most restrictive decision wins (deny > require_approval > allow_with_preview > allow), then the highest priority, then the lowest name; patterns are fnmatch globs compared case-insensitively; a path selector also covers everything below the path; path rules are evaluated against every path the call acts on (a file tool's path, source and destination, and the working directory for file_list, file_search and file_grep without a path), an absolute path once per spelling (lexically normalized, with . .. and repeated / resolved, and as written; each with case and ignoring case), while a path that is not absolute (~, relative, the working directory) counts as matching every deny, require_approval and allow_with_preview path rule and no allow path rule; the decision is the most restrictive outcome over all of these, the no-match fallback included, and the deciding rule is the highest priority, then lowest name, rule with that decision that matched any of them; rule path patterns are normalized like call paths and must be absolute or start with *; every listed effect tag must be present; a selector the engine cannot evaluate (unknown key, empty value, mapping value, non-boolean value on a boolean selector, ^regex, a path pattern that cannot be normalized) is skipped in a deny rule and makes any other rule not match. agent.env is the agent's snapshot environment: the simulator evaluates with the feature flags a worker started with it computes.",
   "agent_id": "AGENT_VECTORS",
   "agent_defaults": {
     "tool_policy": {},
@@ -726,6 +726,183 @@
       "policy": {},
       "action": {"tool_id": "browser_click", "params": {"selector": "#go"}},
       "expected": {"decision": "require_approval", "reason_code": "legacy_human_factor", "rule_id": null}
+    },
+    {
+      "id": "path-deny-catches-a-tilde-path-beside-a-broader-allow",
+      "description": "A deny path rule beside a broader allow: a ~ path cannot step around it. The tools expand ~ with the worker's HOME, which the engine does not know, so every deny, require_approval and allow_with_preview path rule counts as matching a path that is not absolute after normalization.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "gate-secrets", "match": {"tool_id": "file_write", "path": "/srv/work/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "~/work/secrets/key.pem", "content": "x"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "gate-secrets"}
+    },
+    {
+      "id": "path-approval-catches-a-tilde-path-beside-a-broader-allow",
+      "description": "A require_approval path rule beside a broader allow: a ~ path cannot step around it, because a path that is not absolute after normalization counts as matching every restrictive path rule.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "gate-secrets", "match": {"tool_id": "file_write", "path": "/srv/work/secrets"}, "decision": "require_approval"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "~/work/secrets/key.pem", "content": "x"}},
+      "expected": {"decision": "require_approval", "reason_code": "rule_match", "rule_id": "gate-secrets"}
+    },
+    {
+      "id": "path-preview-catches-a-tilde-path-beside-a-broader-allow",
+      "description": "An allow_with_preview path rule beside a broader allow: a ~ path cannot step around it, because a path that is not absolute after normalization counts as matching every restrictive path rule.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "gate-secrets", "match": {"tool_id": "file_write", "path": "/srv/work/secrets"}, "decision": "allow_with_preview"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "~/work/secrets/key.pem", "content": "x"}},
+      "expected": {"decision": "allow_with_preview", "reason_code": "rule_match", "rule_id": "gate-secrets"}
+    },
+    {
+      "id": "path-deny-catches-a-relative-path-beside-a-broader-allow",
+      "description": "A relative path is resolved against the worker's working directory, which the engine does not know, so it counts as matching every restrictive path rule.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-reads", "match": {"tool_id": "file_read"}, "decision": "allow"},
+          {"name": "deny-secrets", "match": {"path": "/srv/work/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_read", "params": {"path": "secrets/key.pem"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-secrets"}
+    },
+    {
+      "id": "path-allow-does-not-cover-a-tilde-path",
+      "description": "No allow path rule matches a path that is not absolute after normalization, so the secure default decides a ~ path.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-work-writes", "match": {"tool_id": "file_write", "path": "/srv/work"}, "decision": "allow"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "~/work/notes.txt", "content": "x"}},
+      "expected": {"decision": "deny", "reason_code": "secure_default_block", "rule_id": null}
+    },
+    {
+      "id": "path-tie-break-takes-the-higher-priority-rule-that-matches-only-ignoring-case",
+      "description": "The most restrictive decision is taken over every spelling of the path, then the deciding rule is the highest priority (then lowest name) of every rule with that decision that matched any spelling. approve-prod-once matches only the case-folded spelling and still decides, with its single-use scope.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "approve-prod-once", "priority": 100, "match": {"path": "/srv/prod"}, "decision": "require_approval", "approval_scope_kind": "once"},
+          {"name": "approve-writes-scope", "match": {"tool_id": "file_write"}, "decision": "require_approval", "approval_scope_kind": "scope", "approval_ttl_seconds": 3600}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/SRV/PROD/config.yml", "content": "x"}},
+      "expected": {"decision": "require_approval", "reason_code": "rule_match", "rule_id": "approve-prod-once"}
+    },
+    {
+      "id": "path-pattern-with-repeated-slashes-is-normalized",
+      "description": "A rule's path pattern is normalized as call paths are, so /srv//prod denies /srv/prod.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "priority": 100, "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "deny-prod", "match": {"path": "/srv//prod"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/prod/config.yml", "content": "x"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-prod"}
+    },
+    {
+      "id": "path-pattern-with-dot-dot-is-normalized",
+      "description": "A rule's path pattern is normalized as call paths are, so /srv/x/../prod denies /srv/prod.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "priority": 100, "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "deny-prod", "match": {"path": "/srv/x/../prod"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/prod/config.yml", "content": "x"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-prod"}
+    },
+    {
+      "id": "relative-path-pattern-in-deny-rule-is-skipped",
+      "description": "Validation rejects a path pattern that is not absolute; stored anyway, a deny rule skips it like any selector the engine cannot evaluate, so it denies more calls rather than none.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-writes", "priority": 100, "match": {"tool_id": "file_write"}, "decision": "allow"},
+          {"name": "deny-prod", "match": {"tool_id": "file_write", "path": "srv/prod"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/other/config.yml", "content": "x"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-prod"}
+    },
+    {
+      "id": "tilde-path-pattern-in-allow-rule-never-matches",
+      "description": "Validation rejects a ~ path pattern; stored anyway, an allow rule with it never matches, and the secure default applies.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-home-writes", "match": {"tool_id": "file_write", "path": "~/work"}, "decision": "allow"}
+        ]
+      },
+      "action": {"tool_id": "file_write", "params": {"path": "/srv/work/notes.txt", "content": "x"}},
+      "expected": {"decision": "deny", "reason_code": "secure_default_block", "rule_id": null}
+    },
+    {
+      "id": "path-deny-covers-a-move-destination",
+      "description": "Path rules are evaluated against every path a call acts on: file_move's source and its destination.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-etc", "match": {"path": "/etc"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_move", "params": {"source": "/srv/app/job", "destination": "/etc/cron.d/job"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-etc"}
+    },
+    {
+      "id": "path-allow-must-cover-a-move-destination",
+      "description": "An allow path rule covers a file_move only when it covers both the source and the destination.",
+      "agent": {"autonomy_policy": {"default_approval_mode": "guarded"}},
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-app-moves", "match": {"tool_id": "file_move", "path": "/srv/app"}, "decision": "allow"}
+        ]
+      },
+      "action": {"tool_id": "file_move", "params": {"source": "/srv/app/job", "destination": "/tmp/job"}},
+      "expected": {"decision": "deny", "reason_code": "secure_default_block", "rule_id": null}
+    },
+    {
+      "id": "path-deny-covers-a-grep-of-the-working-directory",
+      "description": "file_list, file_search and file_grep act on the working directory when no path is given; the engine cannot place it, so it counts as matching every restrictive path rule.",
+      "policy": {
+        "version": 1,
+        "rules": [
+          {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"},
+          {"name": "deny-secrets", "match": {"path": "/srv/work/secrets"}, "decision": "deny"}
+        ]
+      },
+      "action": {"tool_id": "file_grep", "params": {"pattern": "PRIVATE KEY"}},
+      "expected": {"decision": "deny", "reason_code": "rule_match", "rule_id": "deny-secrets"}
     }
   ]
 }

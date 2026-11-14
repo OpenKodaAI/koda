@@ -15,20 +15,35 @@ Rule semantics:
 * Selector values are fnmatch patterns (``*``, ``?``, ``[seq]``), compared
   case-insensitively. An ``effect_tags`` selector needs every listed pattern to
   match a tag.
-* A ``path`` selector also covers everything below the path. A call with a path
-  is evaluated against the whole rule set once for each spelling of that path:
-  lexically normalized (``.``, ``..`` and repeated ``/`` resolved) and as
-  written, each compared with case and ignoring case. The most restrictive
-  outcome wins, counting the no-match fallback as an outcome. So no spelling
-  steps around a deny, require_approval or allow_with_preview path rule, and an
-  allow path rule covers a call only when it covers every spelling. Symlinks
-  and relative paths are not resolved here.
+* A ``path`` selector also covers everything below the path. Path rules are
+  evaluated against every path the call acts on, exactly as the tool receives
+  it (:func:`koda.agent_contract.resolve_action_paths`): both ends of a
+  ``file_move``, and the working directory for ``file_list``, ``file_search``
+  and ``file_grep`` without a ``path``. An absolute path is evaluated once for
+  each of its spellings: lexically normalized (``.``, ``..`` and repeated ``/``
+  resolved) and as written, each compared with case and ignoring case. A path
+  that is not absolute (``~``-prefixed, relative, the working directory, or with
+  leading whitespace) cannot be placed, because the tools expand ``~`` and
+  resolve relative paths in the worker: every deny, require_approval and
+  allow_with_preview path rule counts as matching it, and no allow path rule
+  does. The decision is the most restrictive over all of these evaluations,
+  counting the no-match fallback as an outcome, and the deciding rule is the
+  highest-priority, then lowest-name rule with that decision that matched any
+  of them. So no ``.``, ``..``, repeated ``/`` or other-case spelling, ``~`` or
+  relative path, and neither end of a move, steps around a deny,
+  require_approval or allow_with_preview path rule, and an allow path rule
+  covers a call only when it covers every spelling of every path. Symlinks are
+  not resolved here (the safe-path resolver, M1-E4-T13).
+* A rule's ``path`` patterns are normalized as call paths are (repeated ``/``,
+  ``.`` and ``..`` resolved). A pattern must be absolute or start with ``*``
+  (any depth): ``~`` and relative patterns could never match a call, and
+  ``..`` cannot follow a segment with a wildcard.
 * Validation rejects every selector the engine cannot evaluate (an unknown key,
   an empty value, a mapping value, a non-boolean value on a boolean selector, a
-  ``^regex`` pattern), a rule with no selectors or an unknown decision (which
-  the normalizer would drop), and duplicate rule names. If such a selector is
-  stored anyway, a deny rule skips it, so it matches more calls, and any other
-  rule does not match.
+  ``^regex`` pattern, a path pattern that cannot be normalized), a rule with no
+  selectors or an unknown decision (which the normalizer would drop), and
+  duplicate rule names. If such a selector is stored anyway, a deny rule skips
+  it, so it matches more calls, and any other rule does not match.
 """
 
 from __future__ import annotations
@@ -38,7 +53,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from fnmatch import fnmatchcase
-from typing import Any, cast
+from typing import Any
 
 from koda.agent_contract import (
     CORE_TOOL_CATALOG,
@@ -47,6 +62,7 @@ from koda.agent_contract import (
     is_tool_allowed_by_secure_default,
     normalize_string_list,
     resolve_action_envelope,
+    resolve_action_paths,
     resolve_allowed_tool_ids,
     resolve_feature_filtered_tools,
     resolve_integration_action,
@@ -98,6 +114,7 @@ EXECUTION_POLICY_SELECTOR_KEYS = frozenset(
 )
 _BOOLEAN_SELECTOR_KEYS = frozenset({"private_network", "uses_secrets", "bulk_operation", "external_side_effect"})
 _BOOLEAN_PATTERNS = frozenset({"true", "false"})
+_GLOB_CHARACTERS = frozenset("*?[")
 _PREVIEW_EFFECT_TAGS = frozenset(
     {
         "external_communication",
@@ -203,10 +220,18 @@ def feature_flags_from_env(env: Mapping[str, str]) -> dict[str, bool]:
 
     The control-plane simulator evaluates with the flags of the agent's worker, derived
     this way from the worker's environment, not with the flags of its own process.
-    Each setting is read by its plain name.
+    Each setting is read as koda.config's ``_env`` reads it: ``<AGENT_ID>_<KEY>`` when
+    ``env`` has an ``AGENT_ID`` and that key, else ``<KEY>``, else the default.
     """
+    agent_id = env.get("AGENT_ID")
+
+    def setting(key: str, default: str) -> str:
+        if agent_id and f"{agent_id}_{key}" in env:
+            return str(env[f"{agent_id}_{key}"])
+        return str(env.get(key, default))
+
     return {
-        flag: any(str(env.get(key, default)).lower() == "true" for key, default in settings)
+        flag: any(setting(key, default).lower() == "true" for key, default in settings)
         for flag, settings in _FEATURE_FLAG_SETTINGS.items()
     }
 
@@ -291,7 +316,39 @@ def _compact_mapping(value: dict[str, Any]) -> dict[str, Any]:
     return {key: item for key, item in value.items() if item not in (None, "", [], {}, ())}
 
 
+def _normalize_path_pattern(pattern: str) -> tuple[str, str | None]:
+    """Return a ``path`` selector pattern normalized as call paths are, and why it cannot be.
+
+    Repeated ``/`` collapse and ``.`` and ``..`` segments resolve, as for a call's
+    path (:func:`_normalized_call_path`), so the pattern compares with the
+    normalized call path. A pattern must be absolute or start with ``*``, which
+    matches at any depth: ``~`` is not expanded and a relative pattern is not
+    resolved, so neither could match a call. A ``..`` segment cannot follow a
+    segment with a wildcard, which can stand for several segments. A pattern that
+    cannot be normalized comes back as written, with the reason.
+    """
+    if pattern.startswith("~"):
+        return pattern, "~ is not expanded"
+    if not pattern.startswith(("/", "*")):
+        return pattern, "a relative path is not resolved"
+    segments: list[str] = []
+    for segment in pattern.split("/"):
+        if segment in ("", "."):
+            continue
+        if segment != "..":
+            segments.append(segment)
+        elif segments and _GLOB_CHARACTERS & set(segments[-1]):
+            return pattern, ".. cannot follow a segment with a wildcard"
+        elif segments:
+            segments.pop()
+        # A ``..`` at the root stays at the root, as posixpath.normpath has it.
+    normalized = "/".join(segments)
+    return ("/" + normalized if pattern.startswith("/") else normalized), None
+
+
 def _normalize_selector_value(value: Any, *, key: str) -> Any:
+    if key == "path" and isinstance(value, str):
+        return _normalize_path_pattern(value.strip())[0]
     if key == "effect_tags":
         return [item.lower() for item in normalize_string_list(value)]
     if key in _BOOLEAN_SELECTOR_KEYS:
@@ -359,6 +416,11 @@ def _normalize_rule(index: int, rule: dict[str, Any]) -> dict[str, Any] | None:
     return _compact_mapping(normalized)
 
 
+def _rule_order(rule: dict[str, Any]) -> tuple[int, str]:
+    """Return a rule's place among rules with the same decision: highest priority, then lowest name."""
+    return -int(rule.get("priority", 0) or 0), str(rule.get("name") or "")
+
+
 def normalize_execution_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
     """Return the canonical execution-policy document.
 
@@ -390,7 +452,7 @@ def normalize_execution_policy(policy: dict[str, Any] | None) -> dict[str, Any]:
         if isinstance(item, dict) and (rule := _normalize_rule(index, item)) is not None
     ]
     if normalized_rules:
-        normalized_rules.sort(key=lambda item: (-int(item.get("priority", 0) or 0), str(item.get("name") or "")))
+        normalized_rules.sort(key=_rule_order)
         raw["rules"] = normalized_rules
     elif "rules" in raw:
         raw["rules"] = []
@@ -427,6 +489,15 @@ def _selector_errors(index: int, match: dict[str, Any]) -> list[str]:
                 f"{path} uses a regular expression ({', '.join(regex_patterns)}); "
                 "only fnmatch patterns (*, ?, [seq]) are supported."
             )
+        elif problem == "path_pattern":
+            patterns = _normalize_match_values(_normalize_selector_value(value, key=key), fold_case=False)
+            problems = [
+                f"{pattern} ({reason})" for pattern in patterns if (reason := _normalize_path_pattern(pattern)[1])
+            ]
+            errors.append(
+                f"{path} cannot be normalized: {'; '.join(problems)}. "
+                "A path pattern must be an absolute path, or start with * to match at any depth."
+            )
     return errors
 
 
@@ -435,7 +506,8 @@ def validate_execution_policy(policy: dict[str, Any] | None) -> tuple[list[str],
 
     Besides the document's shape, validation rejects every selector the engine
     cannot evaluate (an unknown key, an empty value, a mapping value, a
-    non-boolean value on a boolean selector, a ``^regex`` pattern), every rule
+    non-boolean value on a boolean selector, a ``^regex`` pattern, a ``path``
+    pattern that cannot be normalized, see :func:`_normalize_path_pattern`), every rule
     the normalizer would drop (no selectors, or an unknown ``decision`` or legacy
     ``action``), and duplicate rule names. A deny rule skips a selector it cannot
     evaluate, so such a rule would deny every call; a dropped rule would vanish
@@ -549,7 +621,8 @@ def _unevaluable_selector(key: str, value: Any) -> str | None:
 
     The reasons are ``unknown_key``; ``not_scalar`` (a mapping, or a list that
     holds a mapping or a list); ``empty``; ``not_boolean`` (a boolean selector
-    whose value is not true or false); and ``regex``. ``value`` is the selector's
+    whose value is not true or false); ``regex``; and ``path_pattern`` (a ``path``
+    pattern that cannot be normalized). ``value`` is the selector's
     value as written or as normalized. Validation rejects each of these; the
     engine treats one that is stored anyway as described in :func:`_rule_matches`.
     """
@@ -565,6 +638,8 @@ def _unevaluable_selector(key: str, value: Any) -> str | None:
         return "not_boolean"
     if any(pattern.startswith("^") for pattern in patterns):
         return "regex"
+    if key == "path" and any(_normalize_path_pattern(pattern)[1] for pattern in patterns):
+        return "path_pattern"
     return None
 
 
@@ -574,23 +649,46 @@ def _value_matches(value: Any, patterns: tuple[str, ...]) -> bool:
     return bool(normalized_value) and any(fnmatchcase(normalized_value, pattern) for pattern in patterns)
 
 
-PathVariant = tuple[str, bool]
+@dataclass(frozen=True, slots=True)
+class _PathSpelling:
+    """One spelling of a path a call acts on, as a ``path`` selector compares it.
 
-
-def _path_variants(value: Any) -> tuple[PathVariant, ...]:
-    """Return the ``(path, ignore_case)`` spellings of a call's path that the rule set is evaluated against.
-
-    The path lexically normalized (``.``, ``..`` and repeated ``/`` resolved,
-    which is the file the tools act on, symlinks aside) and as written, each
-    compared with case and ignoring case. The normalized, case-sensitive
-    spelling comes first.
+    ``path`` is ``None`` for a path the engine cannot place (see :func:`_path_spellings`).
     """
-    written = str(value or "").strip()
-    if not written:
-        return ()
-    normalized = posixpath.normpath(re.sub(r"/{2,}", "/", written))
-    forms = (normalized,) if normalized == written else (normalized, written)
-    return tuple((form, ignore_case) for ignore_case in (False, True) for form in forms)
+
+    path: str | None
+    ignore_case: bool = False
+
+
+# A path that is not absolute: the worker's tools place it (``~`` expansion, the working directory).
+_UNPLACED_PATH = _PathSpelling(None)
+
+
+def _normalized_call_path(path: str) -> str:
+    """Return an absolute path lexically normalized: repeated ``/``, ``.`` and ``..`` resolved."""
+    return posixpath.normpath(re.sub(r"/{2,}", "/", path))
+
+
+def _path_spellings(paths: tuple[str, ...]) -> tuple[_PathSpelling, ...]:
+    """Return the spellings of a call's paths that the rule set is evaluated against.
+
+    For each absolute path: the path lexically normalized (the file the tools act
+    on, symlinks aside) and as written, each compared with case and ignoring case.
+    A path that is not absolute after normalization (``~``-prefixed, relative, or
+    with leading whitespace) cannot be placed here: the tools expand ``~`` with the
+    worker's HOME and resolve a relative path against its working directory. It is
+    one :data:`_UNPLACED_PATH` spelling, which every restrictive path rule matches
+    and no allow path rule does (:func:`_path_matches`).
+    """
+    spellings: list[_PathSpelling] = []
+    for written in paths:
+        if not written.startswith("/"):
+            spellings.append(_UNPLACED_PATH)
+            continue
+        normalized = _normalized_call_path(written)
+        forms = (normalized,) if normalized == written else (normalized, written)
+        spellings.extend(_PathSpelling(form, ignore_case) for ignore_case in (False, True) for form in forms)
+    return tuple(dict.fromkeys(spellings))
 
 
 def _path_pattern_matches(path: str, pattern: str) -> bool:
@@ -599,12 +697,19 @@ def _path_pattern_matches(path: str, pattern: str) -> bool:
     return fnmatchcase(path, base) or fnmatchcase(path, base.rstrip("/") + "/*")
 
 
-def _path_matches(path_variant: PathVariant | None, patterns: tuple[str, ...]) -> bool:
-    """Return whether one spelling of the call's path matches a path selector's patterns."""
-    if path_variant is None:
+def _path_matches(spelling: _PathSpelling | None, patterns: tuple[str, ...], *, decision: str) -> bool:
+    """Return whether one spelling of a call's path matches a ``path`` selector of a rule with ``decision``.
+
+    A call without a path matches no path selector. A path the engine cannot place
+    matches the path selector of every deny, require_approval and allow_with_preview
+    rule, and of no allow rule, so it fails closed whatever the worker resolves it to.
+    """
+    if spelling is None:
         return False
-    path, ignore_case = path_variant
-    if ignore_case:
+    if spelling.path is None:
+        return decision != "allow"
+    path = spelling.path
+    if spelling.ignore_case:
         path, patterns = path.lower(), tuple(pattern.lower() for pattern in patterns)
     return any(_path_pattern_matches(path, pattern) for pattern in patterns)
 
@@ -618,12 +723,13 @@ def _selector_matches(
     key: str,
     value: Any,
     *,
+    decision: str,
     envelope: ActionEnvelope,
     task_kind: str,
-    path_variant: PathVariant | None,
+    path_spelling: _PathSpelling | None,
 ) -> bool:
     if key == "path":
-        return _path_matches(path_variant, _normalize_match_values(value, fold_case=False))
+        return _path_matches(path_spelling, _normalize_match_values(value, fold_case=False), decision=decision)
     patterns = _normalize_match_values(value)
     if key == "effect_tags":
         return _effect_tags_match(envelope.effect_tags, patterns)
@@ -637,17 +743,19 @@ def _rule_matches(
     *,
     envelope: ActionEnvelope,
     task_kind: str,
-    path_variant: PathVariant | None,
+    path_spelling: _PathSpelling | None,
 ) -> bool:
-    is_deny = rule.get("decision") == "deny"
+    decision = str(rule.get("decision") or "")
     for key, value in _safe_json_object(rule.get("match")).items():
         if _unevaluable_selector(key, value) is not None:
             # The engine cannot evaluate this selector. A deny rule skips it
             # (matching more calls); any other rule does not match.
-            if is_deny:
+            if decision == "deny":
                 continue
             return False
-        if not _selector_matches(key, value, envelope=envelope, task_kind=task_kind, path_variant=path_variant):
+        if not _selector_matches(
+            key, value, decision=decision, envelope=envelope, task_kind=task_kind, path_spelling=path_spelling
+        ):
             return False
     return True
 
@@ -656,39 +764,38 @@ def _find_matching_rule(
     policy: dict[str, Any],
     *,
     envelope: ActionEnvelope,
+    call_paths: tuple[str, ...],
     task_kind: str,
     fallback_decision: str,
 ) -> dict[str, Any] | None:
     """Return the rule that decides a call, or ``None`` when the no-match fallback decides it.
 
-    Among the rules that match, the most restrictive decision wins. Rules arrive
-    ordered by priority, then name (``normalize_execution_policy``), so ties
-    within one decision go to the highest priority.
-
-    A call with a path is evaluated once per spelling of the path
-    (:func:`_path_variants`), and the most restrictive outcome wins, where a
-    spelling that no rule matches yields ``fallback_decision``. Whether a path
-    rule matches one spelling and not another can therefore only make the
-    outcome stricter. At equal decisions a rule wins over the fallback, then the
-    earlier spelling.
+    The rule set is evaluated once per spelling of each path the call acts on
+    (:func:`_path_spellings`), or once for a call without a path. The decision is
+    the most restrictive outcome of those evaluations, where an evaluation that no
+    rule matches yields ``fallback_decision``; whether a path rule matches one
+    spelling and not another can therefore only make the outcome stricter. The
+    deciding rule is then the highest-priority, then lowest-name rule with that
+    decision that matched any spelling, and a rule wins over the fallback at an
+    equal decision.
     """
     rules = policy.get("rules") or []
-    best: tuple[tuple[int, int], dict[str, Any] | None] | None = None
-    for path_variant in _path_variants(envelope.path) or (None,):
-        matching = [
-            rule
-            for rule in rules
-            if _rule_matches(rule, envelope=envelope, task_kind=task_kind, path_variant=path_variant)
-        ]
-        decided_by = next(
-            (rule for decision in _RULE_DECISION_ORDER for rule in matching if rule.get("decision") == decision),
-            None,
-        )
-        decision = fallback_decision if decided_by is None else str(decided_by["decision"])
-        outcome = (_RULE_DECISION_ORDER.index(decision), 1 if decided_by is None else 0)
-        if best is None or outcome < best[0]:
-            best = (outcome, cast(dict[str, Any] | None, decided_by))
-    return None if best is None else best[1]
+    matched: dict[int, dict[str, Any]] = {}
+    fallback_reached = False
+    for path_spelling in _path_spellings(call_paths) or (None,):
+        matching = {
+            index: rule
+            for index, rule in enumerate(rules)
+            if _rule_matches(rule, envelope=envelope, task_kind=task_kind, path_spelling=path_spelling)
+        }
+        fallback_reached = fallback_reached or not matching
+        matched.update(matching)
+    outcomes = {str(rule.get("decision")) for rule in matched.values()} | (
+        {fallback_decision} if fallback_reached else set()
+    )
+    decision = next(item for item in _RULE_DECISION_ORDER if item in outcomes)
+    deciding = [rule for rule in matched.values() if rule.get("decision") == decision]
+    return min(deciding, key=_rule_order) if deciding else None
 
 
 def _build_preview_text(envelope: ActionEnvelope, params: dict[str, Any]) -> tuple[str, tuple[str, ...]]:
@@ -1146,6 +1253,7 @@ def evaluate_execution_policy(
         matched_rule = _find_matching_rule(
             resolved_execution_policy,
             envelope=envelope,
+            call_paths=resolve_action_paths(tool_id, payload),
             task_kind=task_kind,
             fallback_decision="allow" if safe_read else "deny",
         )

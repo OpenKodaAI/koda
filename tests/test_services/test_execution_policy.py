@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock, patch
 
 from koda.services.execution_policy import (
+    PolicyEvaluation,
     evaluate_execution_policy,
     normalize_execution_policy,
     resolve_execution_policy_allowed_tool_ids,
@@ -578,16 +579,27 @@ def test_feature_flags_from_env_matches_koda_config() -> None:
     cases.extend({key: "TRUE"} for key in sorted(FEATURE_FLAG_ENV_KEYS))
     cases.append(dict.fromkeys(FEATURE_FLAG_ENV_KEYS, "true"))
     cases.append(dict.fromkeys(FEATURE_FLAG_ENV_KEYS, "no"))
+    # koda.config reads ``<AGENT_ID>_<KEY>`` before ``<KEY>``; a worker's environment carries both.
+    cases.extend(
+        {"AGENT_ID": "AGENT_A", f"AGENT_A_{key}": "false", key: "true"} for key in sorted(FEATURE_FLAG_ENV_KEYS)
+    )
+    cases.extend(
+        {"AGENT_ID": "AGENT_A", f"AGENT_A_{key}": "true", key: "false"} for key in sorted(FEATURE_FLAG_ENV_KEYS)
+    )
+    cases.append({"AGENT_ID": "AGENT_A", "AGENT_B_SHELL_ENABLED": "false", "AGENT_B_INTER_AGENT_ENABLED": "true"})
+    cases.append({"AGENT_ID": "", "_SHELL_ENABLED": "false"})
     script = """
 import importlib, json, os, sys
 import dotenv
 dotenv.load_dotenv = lambda *args, **kwargs: False  # a developer's .env must not leak into the comparison
 import koda.config
 import koda.services.execution_policy as runtime_policy
+flag_keys = tuple(json.loads(sys.argv[2]))
 results = []
 for case in json.loads(sys.argv[1]):
-    for key in json.loads(sys.argv[2]):
-        os.environ.pop(key, None)
+    for key in list(os.environ):
+        if key == "AGENT_ID" or key.endswith(flag_keys):
+            os.environ.pop(key)
     os.environ.update(case)
     importlib.reload(koda.config)
     importlib.reload(runtime_policy)
@@ -629,6 +641,17 @@ def test_no_spelling_of_a_path_steps_around_a_restrictive_path_rule_beside_a_bro
         "/SRV/PROD/config.yml",
         "/srv/prod",
         "/srv/prod/",
+        # Paths the engine cannot place: the tools expand ``~`` and resolve a relative path (or one with
+        # leading whitespace) against the working directory, so each could be /srv/prod/config.yml.
+        "~/prod/config.yml",
+        "~/srv/prod/config.yml",
+        "~",
+        "~koda/prod/config.yml",
+        "prod/config.yml",
+        "./prod/config.yml",
+        "../prod/config.yml",
+        "config.yml",
+        " /srv/prod/config.yml",
     )
     for restrictive in ("deny", "require_approval", "allow_with_preview"):
         policy = {
@@ -648,3 +671,202 @@ def test_no_spelling_of_a_path_steps_around_a_restrictive_path_rule_beside_a_bro
             )
 
             assert (evaluation.decision, evaluation.rule_id) == (restrictive, "gate-prod"), (restrictive, spelling)
+
+
+_FILEOPS_GRANT = {"integration_grants": {"fileops": {"allow_actions": ["fileops.*"]}}}
+
+
+def _evaluate_file_call(tool_id: str, params: dict[str, object], *rules: dict[str, object]) -> PolicyEvaluation:
+    return evaluate_execution_policy(
+        tool_id,
+        params,
+        resource_access_policy=_FILEOPS_GRANT,
+        execution_policy={"version": 1, "rules": list(rules)},
+        known_tool=True,
+    )
+
+
+def test_an_allow_path_rule_does_not_cover_a_path_the_engine_cannot_place() -> None:
+    allow_app = {
+        "name": "allow-app-writes",
+        "match": {"tool_id": "file_write", "path": "/srv/app"},
+        "decision": "allow",
+    }
+
+    inside = _evaluate_file_call("file_write", {"path": "/srv/app/notes.txt", "content": "x"}, allow_app)
+    assert (inside.decision, inside.rule_id) == ("allow", "allow-app-writes")
+    # ``~`` and relative paths could be anywhere; ``/srv/app `` (trailing space) is a sibling of /srv/app.
+    for spelling in (
+        "~/notes.txt",
+        "~/srv/app/notes.txt",
+        "notes.txt",
+        "./notes.txt",
+        " /srv/app/notes.txt",
+        "/srv/app ",
+    ):
+        evaluation = _evaluate_file_call("file_write", {"path": spelling, "content": "x"}, allow_app)
+
+        assert (evaluation.decision, evaluation.reason_code, evaluation.rule_id) == (
+            "deny",
+            "secure_default_block",
+            None,
+        ), spelling
+
+
+def test_the_deciding_rule_is_chosen_by_priority_and_name_over_every_spelling() -> None:
+    # The higher-priority rule matches only the case-folded spelling of these paths; it still decides,
+    # so the approver gets its single-use scope and audit records it.
+    approve_prod_once = {
+        "name": "approve-prod-once",
+        "priority": 100,
+        "match": {"path": "/srv/prod"},
+        "decision": "require_approval",
+        "approval_scope_kind": "once",
+    }
+    approve_writes_scope = {
+        "name": "approve-writes-scope",
+        "match": {"tool_id": "file_write"},
+        "decision": "require_approval",
+        "approval_scope_kind": "scope",
+        "approval_ttl_seconds": 3600,
+    }
+    for spelling in ("/srv/prod/config.yml", "/SRV/PROD/config.yml", "/srv/x/../PROD/config.yml", "/Srv/prod/a"):
+        evaluation = _evaluate_file_call(
+            "file_write", {"path": spelling, "content": "x"}, approve_prod_once, approve_writes_scope
+        )
+
+        assert evaluation.rule_id == "approve-prod-once", spelling
+        assert evaluation.approval_scope is not None
+        assert (
+            evaluation.approval_scope.kind,
+            evaluation.approval_scope.ttl_seconds,
+            evaluation.approval_scope.max_uses,
+        ) == ("once", 600, 1), spelling
+
+    # At equal priority the lowest name decides, whichever spelling it matched.
+    b_gate = {"name": "b-gate", "match": {"tool_id": "file_write"}, "decision": "require_approval"}
+    a_gate = {"name": "a-gate", "match": {"path": "/srv/prod"}, "decision": "require_approval"}
+    evaluation = _evaluate_file_call("file_write", {"path": "/SRV/PROD/config.yml", "content": "x"}, b_gate, a_gate)
+    assert evaluation.rule_id == "a-gate"
+
+
+def test_path_patterns_are_normalized_like_call_paths() -> None:
+    written = ["/srv//prod", "/srv/./prod", "/srv/x/../prod", "/srv/prod/", "//srv/prod", " /srv/prod/. "]
+    normalized = normalize_execution_policy(
+        {
+            "version": 1,
+            "rules": [
+                {"name": "deny-prod", "match": {"path": written}, "decision": "deny"},
+                {
+                    "name": "deny-globs",
+                    "match": {"path": ["/srv/*//secrets/", "*.pem", "*/x/../keys"]},
+                    "decision": "deny",
+                },
+            ],
+        }
+    )
+
+    match_by_name = {rule["name"]: rule["match"] for rule in normalized["rules"]}
+    assert match_by_name["deny-prod"] == {"path": ["/srv/prod"] * len(written)}
+    assert match_by_name["deny-globs"] == {"path": ["/srv/*/secrets", "*.pem", "*/keys"]}
+    assert normalize_execution_policy(normalized) == normalized
+    allow_writes = {"name": "allow-writes", "priority": 100, "match": {"tool_id": "file_write"}, "decision": "allow"}
+    for pattern in written:
+        deny_prod = {"name": "deny-prod", "match": {"path": pattern}, "decision": "deny"}
+        assert validate_execution_policy({"version": 1, "rules": [allow_writes, deny_prod]}) == ([], [])
+
+        evaluation = _evaluate_file_call(
+            "file_write", {"path": "/srv/prod/config.yml", "content": "x"}, allow_writes, deny_prod
+        )
+
+        assert (evaluation.decision, evaluation.rule_id) == ("deny", "deny-prod"), pattern
+
+
+def test_validation_rejects_path_patterns_that_cannot_be_normalized() -> None:
+    def errors_for(*patterns: str) -> list[str]:
+        rule = {"name": "deny-prod", "match": {"path": list(patterns)}, "decision": "deny"}
+        return validate_execution_policy({"version": 1, "rules": [rule]})[0]
+
+    suffix = "A path pattern must be an absolute path, or start with * to match at any depth."
+    path = "execution_policy.rules[0].match.path cannot be normalized:"
+    assert errors_for("~/prod") == [f"{path} ~/prod (~ is not expanded). {suffix}"]
+    assert errors_for("~") == [f"{path} ~ (~ is not expanded). {suffix}"]
+    assert errors_for("~koda/prod") == [f"{path} ~koda/prod (~ is not expanded). {suffix}"]
+    for relative in ("srv/prod", "./srv/prod", "../srv/prod", "prod*", "?srv/prod", "[/]srv/prod"):
+        assert errors_for(relative) == [f"{path} {relative} (a relative path is not resolved). {suffix}"], relative
+    for after_wildcard in ("/srv/*/../prod", "*/../prod", "/srv/a*/../prod", "/srv/[ab]/../prod"):
+        assert errors_for(after_wildcard) == [
+            f"{path} {after_wildcard} (.. cannot follow a segment with a wildcard). {suffix}"
+        ], after_wildcard
+    assert errors_for("/srv/prod", "srv/prod", "~/prod") == [
+        f"{path} srv/prod (a relative path is not resolved); ~/prod (~ is not expanded). {suffix}"
+    ]
+    for valid in (
+        "/",
+        "/srv/prod",
+        "/srv//prod",
+        "/srv/x/../prod",
+        "/../srv",
+        "/srv/*/secrets",
+        "*.pem",
+        "*/secrets/*",
+    ):
+        assert errors_for(valid) == [], valid
+
+
+def test_a_stored_path_pattern_that_cannot_be_normalized_fails_closed() -> None:
+    allow_writes = {"name": "allow-writes", "priority": 100, "match": {"tool_id": "file_write"}, "decision": "allow"}
+    call = {"path": "/srv/other/config.yml", "content": "x"}
+    for pattern in ("~/prod", "srv/prod", "/srv/*/../prod"):
+        deny_prod = {"name": "deny-prod", "match": {"tool_id": "file_write", "path": pattern}, "decision": "deny"}
+        allow_prod = {"name": "allow-prod", "match": {"tool_id": "file_write", "path": pattern}, "decision": "allow"}
+
+        denied = _evaluate_file_call("file_write", call, allow_writes, deny_prod)
+        not_allowed = _evaluate_file_call("file_write", call, allow_prod)
+
+        assert (denied.decision, denied.rule_id) == ("deny", "deny-prod"), pattern
+        assert (not_allowed.decision, not_allowed.reason_code) == ("deny", "secure_default_block"), pattern
+        allowlist = resolve_execution_policy_allowed_tool_ids(
+            execution_policy={"version": 1, "rules": [allow_prod]}, feature_flags={"fileops": True}
+        )
+        assert "file_write" not in allowlist, pattern
+
+
+def test_path_rules_cover_every_path_a_call_acts_on() -> None:
+    allow_file_tools = {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"}
+    for restrictive in ("deny", "require_approval", "allow_with_preview"):
+        gate_etc = {"name": "gate-etc", "match": {"path": "/etc"}, "decision": restrictive}
+        into_etc = _evaluate_file_call(
+            "file_move", {"source": "/srv/app/job", "destination": "/etc/cron.d/job"}, allow_file_tools, gate_etc
+        )
+        out_of_etc = _evaluate_file_call(
+            "file_move", {"source": "/etc/cron.d/job", "destination": "/srv/app/job"}, allow_file_tools, gate_etc
+        )
+        assert (into_etc.decision, into_etc.rule_id) == (restrictive, "gate-etc")
+        assert (out_of_etc.decision, out_of_etc.rule_id) == (restrictive, "gate-etc")
+
+    allow_app_moves = {
+        "name": "allow-app-moves",
+        "match": {"tool_id": "file_move", "path": "/srv/app"},
+        "decision": "allow",
+    }
+    inside = _evaluate_file_call("file_move", {"source": "/srv/app/a", "destination": "/srv/app/b"}, allow_app_moves)
+    assert (inside.decision, inside.rule_id) == ("allow", "allow-app-moves")
+    for source, destination in (("/srv/app/a", "/tmp/b"), ("/tmp/a", "/srv/app/b"), ("/srv/app/a", "~/b")):
+        outside = _evaluate_file_call("file_move", {"source": source, "destination": destination}, allow_app_moves)
+        assert (outside.decision, outside.reason_code) == ("deny", "secure_default_block"), (source, destination)
+
+
+def test_a_file_tool_without_a_path_acts_on_the_working_directory_which_the_engine_cannot_place() -> None:
+    allow_file_tools = {"name": "allow-file-tools", "match": {"tool_id": "file_*"}, "decision": "allow"}
+    deny_secrets = {"name": "deny-secrets", "match": {"path": "/srv/work/secrets"}, "decision": "deny"}
+    for tool_id, params in (
+        ("file_list", {}),
+        ("file_search", {"pattern": "*.pem"}),
+        ("file_grep", {"pattern": "KEY"}),
+    ):
+        no_path = _evaluate_file_call(tool_id, params, allow_file_tools, deny_secrets)
+        elsewhere = _evaluate_file_call(tool_id, {**params, "path": "/srv/work/docs"}, allow_file_tools, deny_secrets)
+
+        assert (no_path.decision, no_path.rule_id) == ("deny", "deny-secrets"), tool_id
+        assert (elsewhere.decision, elsewhere.rule_id) == ("allow", "allow-file-tools"), tool_id
