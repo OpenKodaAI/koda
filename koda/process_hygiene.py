@@ -24,8 +24,13 @@ It fails closed: when either setting cannot be applied it raises
 It cannot cover Python's own startup (the interpreter, ``site`` and ``.pth``
 processing, ``koda/__init__.py``), which runs before the entrypoint. Until then
 the worker is dumpable and a same-uid process can read its environment. The
-"startup window" residual in ``docs/operations/hardening.md`` describes it;
-ADR-002's L2 confinement (AG-14) closes it.
+"startup window" residual in ``docs/operations/hardening.md`` describes it. Only
+ADR-002's L2 confinement closes it, once AG-14 (provider CLIs, governed shell and
+git that the worker starts), AG-15 (the kernel's ``StartTask`` and
+``ExecuteCommand`` children) and AG-16 (MCP stdio servers, media tools and
+chromium) have all shipped. It stays open under ``RUNTIME_CONFINEMENT=off``, and
+for class U processes (MCP stdio servers, media tools, chromium) on a host
+without L2, which still run unconfined with only a health warning.
 """
 
 from __future__ import annotations

@@ -45,13 +45,24 @@ start.
   same-uid process can kill a worker, and the kernel starts it again on the
   supervisor's next reconcile (every 5 seconds by default). Workers also
   restart when a new version is published and after a crash. Nothing stops
-  this until ADR-002's L2 confinement (AG-14) runs provider CLIs, MCP
-  servers and governed shell under Landlock: a Landlock-confined process
-  cannot read `/proc/<pid>/environ` of a process outside its domain,
-  whether that process is dumpable or not. Keeping secrets out of the exec
-  environment altogether is a follow-up: the kernel would pass only
-  non-secret variables and hand the rest to the worker through an inherited
-  file descriptor that the worker reads after it has hardened. The kernel
+  this until ADR-002's L2 confinement runs, under Landlock, every process
+  that shares the worker's uid: a Landlock-confined process cannot read
+  `/proc/<pid>/environ` of a process outside its domain, whether that
+  process is dumpable or not. It takes three tasks to get there, and the
+  window stays open until all of them have shipped:
+  - AG-14: provider CLIs, governed shell and git that the worker starts;
+  - AG-15: the tasks and commands the runtime kernel starts for a worker
+    (`StartTask`, `ExecuteCommand`);
+  - AG-16: MCP stdio servers, yt-dlp, ffmpeg, ffprobe and Playwright
+    chromium (ADR-002's process class U).
+
+  Even then it stays open wherever L2 is not enforced: with
+  `RUNTIME_CONFINEMENT=off`, and for class U processes on a host without
+  Landlock, which ADR-002 still runs, unconfined, with only a health
+  warning. Keeping secrets out of the exec environment altogether is a
+  follow-up: the kernel would pass only non-secret variables and hand the
+  rest to the worker through an inherited file descriptor that the worker
+  reads after it has hardened. The kernel
   itself has no such window in practice: it is the first process in its
   container and hardens itself before any worker or command exists.
 - The processes the worker and the kernel start inherit the zero core-file

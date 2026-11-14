@@ -64,16 +64,35 @@ def test_entrypoint_hardens_before_any_other_statement() -> None:
     assert not second.value.args and not second.value.keywords
 
 
+# What closes the startup window (ADR-002 §2.4 and §7). Landlock (L2) has to confine
+# every same-uid child that can run model-directed or operator-installed code, and
+# three tasks move those children onto the helper. A place that names only one of
+# them would let the residual be closed while the others still run unconfined.
+_STARTUP_WINDOW_CLOSERS = {
+    "AG-14": "provider CLIs, governed shell and git started by the worker",
+    "AG-15": "the commands and tasks the kernel starts (StartTask, ExecuteCommand)",
+    "AG-16": "MCP stdio servers, media tools and chromium",
+}
+# Where L2 is not enforced the window never closes.
+_STARTUP_WINDOW_STAYS_OPEN = {
+    "class U": "for class U processes, which run unconfined with only a health warning when L2 is missing",
+    "RUNTIME_CONFINEMENT=off": "under RUNTIME_CONFINEMENT=off",
+}
+
+
 @pytest.mark.security
 def test_security_docs_record_the_worker_startup_window() -> None:
     """Python starts up (``site``, ``.pth`` files, ``koda/__init__.py``) before the
     entrypoint's first statement runs, and until then a same-uid process can read
-    the worker's environment. Only ADR-002's L2 confinement (AG-14) closes that, so
-    the docs that describe the guarantee must state the residual."""
+    the worker's environment. Only ADR-002's L2 confinement closes that, once AG-14,
+    AG-15 and AG-16 have all moved the worker's and the kernel's children onto the
+    helper, and never for class U without L2 or with ``RUNTIME_CONFINEMENT=off``.
+    The docs that describe the guarantee must state the residual and all of that."""
     docs = ROOT_DIR / "docs"
     hardening = (docs / "operations" / "hardening.md").read_text(encoding="utf-8")
     matrix = (docs / "security" / "guardrail-test-matrix.md").read_text(encoding="utf-8")
     threat_model = (docs / "security" / "threat-model.md").read_text(encoding="utf-8")
+    hygiene_module = (ROOT_DIR / "koda" / "process_hygiene.py").read_text(encoding="utf-8")
 
     places = {
         "hardening.md, Process hygiene": hardening.split("\n## Process hygiene", 1)[1].split("\n## ", 1)[0],
@@ -81,10 +100,17 @@ def test_security_docs_record_the_worker_startup_window() -> None:
             line for line in matrix.splitlines() if line.startswith("| Worker and runtime-kernel processes |")
         ),
         "threat-model.md, residuals": threat_model.split("\n## Residual High-Risk Areas", 1)[1],
+        "koda/process_hygiene.py, module docstring": ast.get_docstring(ast.parse(hygiene_module)) or "",
     }
     for place, text in places.items():
         assert "startup window" in text, f"{place} does not record the worker's startup window"
         assert "AG-14" in text, f"{place} does not say which task closes the startup window"
+        # Markdown and docstrings wrap lines; match these markers across line breaks.
+        flat = " ".join(text.split())
+        for task, what in _STARTUP_WINDOW_CLOSERS.items():
+            assert task in flat, f"{place} does not name {task} ({what}) among the tasks that close the startup window"
+        for marker, condition in _STARTUP_WINDOW_STAYS_OPEN.items():
+            assert marker in flat, f"{place} does not say that the startup window stays open {condition}"
 
 
 # --------------------------------------------------------------------------- #
