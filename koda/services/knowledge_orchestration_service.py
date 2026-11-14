@@ -140,12 +140,8 @@ class KnowledgeOrchestrationService:
                 return dict(item)
             return {"value": str(item)}
 
-        if hasattr(self._storage, "persist_answer_trace_deferred"):
-            persist_answer_trace = self._storage.persist_answer_trace_deferred
-        else:
-            persist_answer_trace = self._storage.persist_answer_trace
         try:
-            answer_trace_id = persist_answer_trace(
+            answer_trace_id = self._storage.persist_answer_trace_deferred(
                 task_id=task_id,
                 grounded_answer=grounded_answer,
                 judgement=judgement,

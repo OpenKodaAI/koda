@@ -7,7 +7,6 @@ import hashlib
 import sys
 from collections.abc import Coroutine
 from datetime import datetime
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -27,10 +26,8 @@ from koda.knowledge.semantic_judge import KnowledgeSemanticJudgeService
 from koda.knowledge.storage_v2 import KnowledgeStorageV2
 from koda.knowledge.types import (
     AnswerJudgement,
-    ArtifactDerivative,
     AuthoritativeEvidence,
     CitationRequirement,
-    EvidenceModality,
     GroundedAnswer,
     KnowledgeEntry,
     KnowledgeHit,
@@ -44,9 +41,7 @@ from koda.knowledge.types import (
     RetrievalTraceHit,
     TraceRole,
 )
-from koda.knowledge.v2.artifact_store import ArtifactStore
 from koda.knowledge.v2.common import clear_shared_postgres_backends
-from koda.knowledge.v2.document_store import KnowledgeDocumentStore
 from koda.knowledge.v2.postgres_backend import KnowledgeV2PostgresBackend
 
 
@@ -191,39 +186,6 @@ def test_graph_materializer_extracts_canonical_entities_from_entries():
     assert any(key.startswith("mentions:entry:canonical_policy:policy-graph-1:issue:SIM-410") for key in relation_keys)
 
 
-def test_knowledge_manager_ignores_prompt_assets_during_workspace_scan(tmp_path: Path):
-    manager = KnowledgeManager("AGENT_A")
-    docs_dir = tmp_path / "docs"
-    prompts_dir = tmp_path / "prompts"
-    docs_dir.mkdir()
-    prompts_dir.mkdir()
-    allowed_doc = docs_dir / "ops.md"
-    prompt_asset = prompts_dir / "agent_a.md"
-    allowed_doc.write_text("# Ops\nCanonical deployment notes.", encoding="utf-8")
-    prompt_asset.write_text("# Prompt\nAgent behavior asset.", encoding="utf-8")
-
-    files = manager._iter_source_files(tmp_path, ["docs/**/*.md", "prompts/*.md"], 8)
-
-    assert allowed_doc in files
-    assert prompt_asset not in files
-
-
-def test_knowledge_manager_skips_inline_pack_seed_when_external_storage_is_enabled(monkeypatch: pytest.MonkeyPatch):
-    manager = KnowledgeManager("AGENT_A")
-    inline_pack = """
-pack_id = "legacy-pack"
-
-[[entries]]
-id = "seed-1"
-title = "Legacy"
-content = "Should not be loaded when primary or external storage is active."
-"""
-    monkeypatch.setenv("KNOWLEDGE_PACK_TOML", inline_pack)
-
-    with patch.object(manager._storage_v2, "external_read_enabled", return_value=True):
-        assert manager._load_pack_entries() == []
-
-
 def test_knowledge_repository_prefers_primary_trace_reads_in_primary_mode():
     repository = KnowledgeRepository("AGENT_A")
     repository._postgres = SimpleNamespace(  # type: ignore[assignment]
@@ -329,31 +291,6 @@ def test_answer_and_judge_services_block_unsafe_write_without_citations():
     assert judgement.safe_response
 
 
-def test_storage_v2_persists_remote_payloads_in_primary_mode(tmp_path: Path):
-    store_root = tmp_path / "knowledge_v2"
-    repository = KnowledgeRepository("AGENT_A")
-    storage = KnowledgeStorageV2(repository, "AGENT_A", storage_mode="primary", object_store_root=str(store_root))
-    storage._postgres = SimpleNamespace(  # type: ignore[assignment]
-        enabled=True,
-        bootstrapped=True,
-        persist_retrieval_bundle=AsyncMock(return_value=None),
-    )
-    storage._documents._postgres = storage._postgres  # type: ignore[assignment]
-    storage._embeddings._postgres = storage._postgres  # type: ignore[assignment]
-    storage._traces._postgres = storage._postgres  # type: ignore[assignment]
-    storage._graph._postgres = storage._postgres  # type: ignore[assignment]
-    storage._artifacts._postgres = storage._postgres  # type: ignore[assignment]
-    storage._traces.schedule = lambda coro: coro.close()  # type: ignore[method-assign]
-    storage.persist_retrieval_bundle(
-        task_id=77,
-        payload={"strategy": "langgraph_current", "winning_sources": ["policy:deploy"]},
-    )
-
-    persisted = store_root / "AGENT_A" / "retrieval_bundles" / "77.json"
-    storage._postgres.persist_retrieval_bundle.assert_called_once()
-    assert not persisted.exists()
-
-
 def test_answer_service_marks_primary_backend_unavailable_explicitly():
     resolution = KnowledgeResolution(
         context="",
@@ -450,7 +387,6 @@ def test_knowledge_manager_propagates_retrieval_engine_hint_into_answer_plan():
             strategy=RetrievalStrategy.LANGGRAPH_CURRENT,
             experiment_plan=experiment_plan,
             trace_role=TraceRole.PRIMARY,
-            hits=delegated_bundle.selected_hits,
             max_results=1,
             persist_trace=False,
         )
@@ -551,7 +487,6 @@ def test_knowledge_manager_preserves_authoritative_remote_bundle_without_python_
             strategy=RetrievalStrategy.LANGGRAPH_CURRENT,
             experiment_plan=experiment_plan,
             trace_role=TraceRole.PRIMARY,
-            hits=delegated_bundle.selected_hits,
             max_results=2,
             persist_trace=False,
         )
@@ -624,7 +559,6 @@ async def test_knowledge_manager_resolve_uses_remote_bundle_inputs():
     )
 
     with (
-        patch.object(manager, "_get_model", AsyncMock(return_value=object())),
         patch.object(manager._experiment_service, "plan", return_value=experiment_plan),
         patch.object(manager._storage_v2, "primary_read_enabled", return_value=True),
         patch.object(manager._storage_v2, "external_read_enabled", return_value=True),
@@ -695,138 +629,6 @@ def test_knowledge_manager_disables_python_fallback_for_rust_forced_engine():
     assert manager.retrieval_engine_health()["primary"]["selection_reason"] == "rust-default"
 
 
-def test_artifact_store_prefers_ingest_job_when_worker_enabled(tmp_path: Path):
-    store = ArtifactStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
-    store._postgres = SimpleNamespace(
-        enabled=True,
-        bootstrapped=True,
-        enqueue_ingest_job=AsyncMock(return_value=None),
-        upsert_artifact_derivatives=AsyncMock(return_value=None),
-    )
-    store.schedule = MagicMock(side_effect=lambda coro: getattr(coro, "close", lambda: None)())
-    derivatives = [
-        ArtifactDerivative(
-            derivative_key="deriv-1",
-            artifact_id="artifact-1",
-            modality=EvidenceModality.OCR,
-            label="OCR chunk",
-            extracted_text="deploy approval present",
-            confidence=0.92,
-            source_path="/tmp/source.png",
-        )
-    ]
-
-    with (
-        patch("koda.knowledge.v2.artifact_store.KNOWLEDGE_V2_INGEST_WORKER_ENABLED", True),
-        patch("koda.knowledge.v2.artifact_store.schedule_ingest_worker_drain") as schedule_drain,
-    ):
-        store.persist_derivatives(task_id=44, derivatives=derivatives)
-
-    store._postgres.enqueue_ingest_job.assert_called_once()
-    store._postgres.upsert_artifact_derivatives.assert_not_called()
-    schedule_drain.assert_called_once()
-    assert not (tmp_path / "AGENT_A" / "artifact_derivatives" / "44.json").exists()
-
-
-def test_artifact_store_skips_primary_write_until_backend_bootstrapped(tmp_path: Path):
-    store = ArtifactStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
-    store._postgres = SimpleNamespace(
-        enabled=True,
-        bootstrapped=False,
-        enqueue_ingest_job=AsyncMock(return_value=None),
-        upsert_artifact_derivatives=AsyncMock(return_value=None),
-    )
-    store.schedule = MagicMock(side_effect=lambda coro: getattr(coro, "close", lambda: None)())
-    derivatives = [
-        ArtifactDerivative(
-            derivative_key="deriv-1",
-            artifact_id="artifact-1",
-            modality=EvidenceModality.OCR,
-            label="OCR chunk",
-            extracted_text="deploy approval present",
-            confidence=0.92,
-            source_path="/tmp/source.png",
-        )
-    ]
-
-    with (
-        patch("koda.knowledge.v2.artifact_store.KNOWLEDGE_V2_INGEST_WORKER_ENABLED", True),
-        patch("koda.knowledge.v2.artifact_store.schedule_ingest_worker_drain") as schedule_drain,
-    ):
-        store.persist_derivatives(task_id=44, derivatives=derivatives)
-
-    store._postgres.enqueue_ingest_job.assert_not_called()
-    store._postgres.upsert_artifact_derivatives.assert_not_called()
-    schedule_drain.assert_not_called()
-
-
-def test_storage_v2_persists_retrieval_trace_synchronously_in_primary_mode(tmp_path: Path):
-    repository = KnowledgeRepository("AGENT_A")
-    storage = KnowledgeStorageV2(
-        repository,
-        "AGENT_A",
-        storage_mode="primary",
-        object_store_root=str(tmp_path / "knowledge_v2"),
-    )
-
-    trace = SimpleNamespace(
-        agent_id="AGENT_A",
-        task_id=501,
-        query="deploy policy",
-        strategy=SimpleNamespace(value="langgraph_current"),
-        route="primary",
-        project_key="billing",
-        environment="prod",
-        team="agent_a",
-        graph_hops=1,
-        grounding_score=0.9,
-        required_citation_count=1,
-        conflict_reasons=(),
-        evidence_modalities=(),
-        winning_sources=("policy:deploy",),
-        explanation="primary trace",
-        experiment_key="exp-1",
-        trace_role=SimpleNamespace(value="primary"),
-        paired_trace_id=None,
-        hits=[
-            SimpleNamespace(
-                hit_id="hit-1",
-                title="Deploy Policy",
-                layer="canonical_policy",
-                source_label="policy:deploy",
-                similarity=0.92,
-                freshness="fresh",
-                selected=True,
-                rank_before=1,
-                rank_after=1,
-                graph_hops=1,
-                graph_score=0.4,
-                reasons=("authoritative",),
-                exclusion_reason="",
-                evidence_modalities=(),
-                supporting_evidence_keys=(),
-            )
-        ],
-        to_dict=lambda: {"query": "deploy policy"},
-    )
-
-    fake_backend = SimpleNamespace(
-        enabled=True,
-        bootstrapped=True,
-        persist_retrieval_trace=AsyncMock(return_value=88),
-    )
-    storage._postgres = fake_backend  # type: ignore[assignment]
-    storage._documents._postgres = fake_backend  # type: ignore[assignment]
-    storage._embeddings._postgres = fake_backend  # type: ignore[assignment]
-    storage._traces._postgres = fake_backend  # type: ignore[assignment]
-    storage._graph._postgres = fake_backend  # type: ignore[assignment]
-    storage._artifacts._postgres = fake_backend  # type: ignore[assignment]
-
-    trace_id = storage.persist_retrieval_trace(trace=trace, sampled=True)
-
-    assert trace_id == 88
-
-
 def test_retrieval_v2_respects_allowed_source_labels():
     class _Engine:
         engine_name = "rust_grpc"
@@ -878,36 +680,19 @@ def test_retrieval_v2_respects_allowed_source_labels():
 
 
 @pytest.mark.asyncio
-async def test_storage_v2_deferred_answer_trace_stays_remote_only_in_primary_mode(tmp_path: Path):
+async def test_storage_v2_deferred_answer_trace_stays_remote_only_in_primary_mode():
     repository = KnowledgeRepository("AGENT_A")
-    storage = KnowledgeStorageV2(
-        repository,
-        "AGENT_A",
-        storage_mode="primary",
-        object_store_root=str(tmp_path / "knowledge_v2"),
-    )
+    storage = KnowledgeStorageV2(repository, "AGENT_A", storage_mode="primary")
     persist_answer_trace = AsyncMock(return_value=321)
     fake_backend = SimpleNamespace(enabled=True, persist_answer_trace=persist_answer_trace)
     storage._postgres = fake_backend  # type: ignore[assignment]
-    storage._documents._postgres = fake_backend  # type: ignore[assignment]
-    storage._embeddings._postgres = fake_backend  # type: ignore[assignment]
-    storage._traces._postgres = fake_backend  # type: ignore[assignment]
-    storage._graph._postgres = fake_backend  # type: ignore[assignment]
-    storage._artifacts._postgres = fake_backend  # type: ignore[assignment]
 
     scheduled: list[asyncio.Task[object]] = []
 
     def _schedule(coro: object) -> None:
         scheduled.append(asyncio.create_task(cast(Coroutine[Any, Any, object], coro)))
 
-    with (
-        patch.object(storage._traces, "schedule", side_effect=_schedule),
-        patch.object(
-            storage._traces,
-            "write_local_payload",
-            side_effect=AssertionError("local payload should not be written in primary mode"),
-        ),
-    ):
+    with patch.object(storage, "_schedule", side_effect=_schedule):
         result = storage.persist_answer_trace_deferred(
             task_id=88,
             grounded_answer=GroundedAnswer(
@@ -1060,37 +845,30 @@ async def test_ingest_queue_health_reports_degraded_when_poisoned_jobs_exist():
     assert "poisoned_jobs" in health["degraded_reasons"]
 
 
-def test_v2_stores_reuse_shared_postgres_backend(tmp_path: Path):
+def test_v2_storages_reuse_shared_postgres_backend():
     clear_shared_postgres_backends()
-    with patch("koda.knowledge.v2.common.KNOWLEDGE_V2_POSTGRES_DSN", "postgres://shared"):
-        documents = KnowledgeDocumentStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
-        artifacts = ArtifactStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
-    assert documents._postgres is artifacts._postgres
+    with patch("koda.knowledge.storage_v2.KNOWLEDGE_V2_POSTGRES_DSN", "postgres://shared"):
+        first = KnowledgeStorageV2(KnowledgeRepository("AGENT_A"), "AGENT_A", storage_mode="primary")
+        second = KnowledgeStorageV2(KnowledgeRepository("AGENT_A"), "AGENT_A", storage_mode="primary")
+    assert first._postgres is second._postgres
     clear_shared_postgres_backends()
 
 
 @pytest.mark.asyncio
-async def test_storage_primary_health_summary_includes_queue_and_object_store(tmp_path: Path):
+async def test_storage_primary_health_summary_includes_queue_and_object_store():
     clear_shared_postgres_backends()
-    storage = KnowledgeStorageV2(
-        KnowledgeRepository("AGENT_A"),
-        "AGENT_A",
-        storage_mode="primary",
-        object_store_root=str(tmp_path),
-    )
-    storage.external_read_enabled = lambda: True  # type: ignore[method-assign]
-    storage.primary_read_enabled = lambda: True  # type: ignore[method-assign]
-    storage._documents.backend_lifecycle.health = AsyncMock(  # type: ignore[method-assign]
-        return_value={"enabled": True, "ready": True, "pool_active": True}
-    )
-    storage._documents.object_store_health = MagicMock(  # type: ignore[method-assign]
-        return_value={"enabled": True, "ready": True, "mode": "local"}
-    )
-    storage.ingest_queue_health = AsyncMock(  # type: ignore[method-assign]
-        return_value={"enabled": True, "ready": True, "queue_depth": 2}
+    storage = KnowledgeStorageV2(KnowledgeRepository("AGENT_A"), "AGENT_A", storage_mode="primary")
+    storage._postgres = SimpleNamespace(  # type: ignore[assignment]
+        enabled=True,
+        health=AsyncMock(return_value={"enabled": True, "ready": True, "pool_active": True}),
+        ingest_queue_health=AsyncMock(return_value={"enabled": True, "ready": True, "queue_depth": 2}),
     )
 
-    summary = await storage.primary_health_summary()
+    with patch(
+        "koda.knowledge.storage_v2.object_store_health",
+        return_value={"enabled": True, "ready": True, "mode": "s3"},
+    ):
+        summary = await storage.primary_health_summary()
 
     assert summary["primary_backend"]["ready"] is True
     assert summary["object_store"]["ready"] is True
@@ -1098,7 +876,9 @@ async def test_storage_primary_health_summary_includes_queue_and_object_store(tm
     clear_shared_postgres_backends()
 
 
-def test_object_store_health_requires_s3_probe_when_bucket_is_enabled(tmp_path: Path):
+def test_object_store_health_requires_s3_probe_when_bucket_is_enabled():
+    from koda.knowledge.v2 import common
+
     clear_shared_postgres_backends()
     fake_client = SimpleNamespace(head_bucket=MagicMock(return_value=None))
     fake_boto3 = SimpleNamespace(client=MagicMock(return_value=fake_client))
@@ -1107,8 +887,7 @@ def test_object_store_health_requires_s3_probe_when_bucket_is_enabled(tmp_path: 
         patch("koda.knowledge.v2.common.KNOWLEDGE_V2_S3_ENDPOINT_URL", "https://s3.example.test"),
         patch.dict(sys.modules, {"boto3": fake_boto3}),
     ):
-        store = KnowledgeDocumentStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
-        health = store.object_store_health()
+        health = common.object_store_health("primary")
 
     assert health["enabled"] is True
     assert health["mode"] == "s3"
@@ -1119,15 +898,15 @@ def test_object_store_health_requires_s3_probe_when_bucket_is_enabled(tmp_path: 
     clear_shared_postgres_backends()
 
 
-def test_object_store_health_is_not_ready_without_any_sink_in_primary(tmp_path: Path):
+def test_object_store_health_is_not_ready_without_any_sink_in_primary():
+    from koda.knowledge.v2 import common
+
     clear_shared_postgres_backends()
     with (
         patch("koda.knowledge.v2.common.KNOWLEDGE_V2_S3_BUCKET", ""),
         patch("koda.knowledge.v2.common.KNOWLEDGE_V2_S3_ENDPOINT_URL", ""),
     ):
-        store = KnowledgeDocumentStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
-
-        health = store.object_store_health()
+        health = common.object_store_health("primary")
 
     assert health["enabled"] is False
     assert health["mode"] == "disabled"
@@ -1291,15 +1070,9 @@ def test_orchestration_service_surfaces_deferred_answer_trace_failure():
 
 
 @pytest.mark.asyncio
-async def test_storage_v2_primary_reads_answer_trace_from_backend(tmp_path: Path):
-    store_root = tmp_path / "knowledge_v2"
+async def test_storage_v2_primary_reads_answer_trace_from_backend():
     repository = KnowledgeRepository("AGENT_A")
-    storage = KnowledgeStorageV2(
-        repository,
-        "AGENT_A",
-        storage_mode="primary",
-        object_store_root=str(store_root),
-    )
+    storage = KnowledgeStorageV2(repository, "AGENT_A", storage_mode="primary")
 
     class _FakeBackend:
         enabled = True
@@ -1316,11 +1089,6 @@ async def test_storage_v2_primary_reads_answer_trace_from_backend(tmp_path: Path
 
     fake = _FakeBackend()
     storage._postgres = fake  # type: ignore[assignment]
-    storage._documents._postgres = fake  # type: ignore[assignment]
-    storage._embeddings._postgres = fake  # type: ignore[assignment]
-    storage._traces._postgres = fake  # type: ignore[assignment]
-    storage._graph._postgres = fake  # type: ignore[assignment]
-    storage._artifacts._postgres = fake  # type: ignore[assignment]
 
     answer_trace = await storage.get_latest_answer_trace_async(321)
 
@@ -1330,91 +1098,14 @@ async def test_storage_v2_primary_reads_answer_trace_from_backend(tmp_path: Path
 
 
 @pytest.mark.asyncio
-async def test_storage_v2_primary_reads_fail_closed_when_backend_not_bootstrapped(tmp_path: Path):
-    store_root = tmp_path / "knowledge_v2"
+async def test_storage_v2_primary_reads_fail_closed_when_backend_not_bootstrapped():
     repository = KnowledgeRepository("AGENT_A")
-    storage = KnowledgeStorageV2(
-        repository,
-        "AGENT_A",
-        storage_mode="primary",
-        object_store_root=str(store_root),
-    )
+    storage = KnowledgeStorageV2(repository, "AGENT_A", storage_mode="primary")
     fake = SimpleNamespace(enabled=True, bootstrapped=False)
     storage._postgres = fake  # type: ignore[assignment]
-    storage._documents._postgres = fake  # type: ignore[assignment]
-    storage._embeddings._postgres = fake  # type: ignore[assignment]
-    storage._traces._postgres = fake  # type: ignore[assignment]
-    storage._graph._postgres = fake  # type: ignore[assignment]
-    storage._artifacts._postgres = fake  # type: ignore[assignment]
 
     with pytest.raises(RuntimeError, match="knowledge_primary_backend_unavailable"):
         await storage.get_latest_answer_trace_async(321)
-
-
-@pytest.mark.asyncio
-async def test_storage_v2_primary_trace_persist_fails_closed_when_backend_not_bootstrapped(tmp_path: Path):
-    store_root = tmp_path / "knowledge_v2"
-    repository = KnowledgeRepository("AGENT_A")
-    storage = KnowledgeStorageV2(
-        repository,
-        "AGENT_A",
-        storage_mode="primary",
-        object_store_root=str(store_root),
-    )
-    fake_backend = SimpleNamespace(
-        enabled=True,
-        bootstrapped=False,
-        persist_retrieval_trace=AsyncMock(return_value=88),
-    )
-    storage._postgres = fake_backend  # type: ignore[assignment]
-    storage._documents._postgres = fake_backend  # type: ignore[assignment]
-    storage._embeddings._postgres = fake_backend  # type: ignore[assignment]
-    storage._traces._postgres = fake_backend  # type: ignore[assignment]
-    storage._graph._postgres = fake_backend  # type: ignore[assignment]
-    storage._artifacts._postgres = fake_backend  # type: ignore[assignment]
-    trace = SimpleNamespace(
-        agent_id="AGENT_A",
-        task_id=321,
-        query="deploy policy",
-        strategy=SimpleNamespace(value="langgraph_current"),
-        route="knowledge",
-        project_key="billing",
-        environment="prod",
-        team="agent_a",
-        graph_hops=1,
-        grounding_score=0.9,
-        required_citation_count=1,
-        conflict_reasons=(),
-        evidence_modalities=(),
-        winning_sources=("policy:deploy",),
-        explanation="primary trace",
-        experiment_key="exp-1",
-        trace_role=SimpleNamespace(value="primary"),
-        paired_trace_id=None,
-        hits=[
-            SimpleNamespace(
-                hit_id="hit-1",
-                title="Deploy Policy",
-                layer="canonical_policy",
-                source_label="policy:deploy",
-                similarity=0.92,
-                freshness="fresh",
-                selected=True,
-                rank_before=1,
-                rank_after=1,
-                graph_hops=1,
-                graph_score=0.4,
-                reasons=("authoritative",),
-                exclusion_reason="",
-                evidence_modalities=(),
-                supporting_evidence_keys=(),
-            )
-        ],
-        to_dict=lambda: {"query": "deploy policy"},
-    )
-
-    with pytest.raises(RuntimeError, match="knowledge_primary_backend_unavailable"):
-        storage.persist_retrieval_trace(trace=trace, sampled=True)
 
 
 @pytest.mark.asyncio
@@ -1643,52 +1334,6 @@ async def test_postgres_backend_gets_retrieval_trace_by_id_directly(monkeypatch:
 
 
 @pytest.mark.asyncio
-async def test_document_store_passes_logical_object_key_to_primary_backend(tmp_path: Path):
-    captured: dict[str, object] = {}
-    store = KnowledgeDocumentStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
-
-    async def _upsert_documents(entries: list[KnowledgeEntry], *, object_key: str) -> None:
-        captured["entries"] = entries
-        captured["object_key"] = object_key
-
-    store._postgres = SimpleNamespace(enabled=True, upsert_documents=_upsert_documents)
-    store.persist_entries(
-        [
-            KnowledgeEntry(
-                id="policy-1",
-                title="Deploy Policy",
-                content="Canonical deploy policy content.",
-                layer=KnowledgeLayer.CANONICAL_POLICY,
-                scope=KnowledgeScope.OPERATIONAL_POLICY,
-                source_label="policy:deploy",
-                source_path="/tmp/policy.md",
-                updated_at=datetime(2026, 3, 25),
-            )
-        ]
-    )
-    await asyncio.sleep(0)
-
-    assert captured["object_key"] == store.build_object_key("knowledge_documents", scope="latest")
-
-
-def test_v2_store_support_returns_logical_object_key_for_local_payload(tmp_path: Path):
-    store = KnowledgeDocumentStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
-
-    object_key = store.write_local_payload("knowledge_documents", scope="latest", payload={"items": []})
-
-    assert object_key == store.build_object_key("knowledge_documents", scope="latest")
-
-
-def test_v2_store_support_returns_logical_object_key_without_local_mirror(tmp_path: Path):
-    store = KnowledgeDocumentStore(agent_id="AGENT_A", storage_mode="primary", object_store_root=str(tmp_path))
-
-    object_key = store.write_local_payload("knowledge_documents", scope="latest", payload={"items": []})
-
-    assert object_key == store.build_object_key("knowledge_documents", scope="latest")
-    assert not (tmp_path / "AGENT_A" / "knowledge_documents" / "latest.json").exists()
-
-
-@pytest.mark.asyncio
 async def test_knowledge_runtime_supervisor_reports_worker_health():
     storage = SimpleNamespace(
         external_read_enabled=lambda: True,
@@ -1735,3 +1380,115 @@ async def test_knowledge_runtime_supervisor_fails_closed_when_primary_backend_do
     assert health["started"] is False
     assert health["ready"] is False
     storage.start_primary_backend.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resolve_completes_when_the_deferred_trace_write_fails():
+    """Characterises today's fire-and-forget knowledge write (TD-086, M4-E1-T6).
+
+    In PRIMARY mode the retrieval trace is written by a detached task. When
+    that write fails, the turn still gets its resolution, the trace id stays
+    ``None``, and the failure exists only on the detached task: nothing
+    awaits it, so nothing reports it. M7-E1-T7 changes this to a visible
+    error; until then this test pins the current behaviour.
+    """
+
+    class _RetrievalService:
+        engine_name = "rust_grpc"
+
+        def query(self, **_kwargs: object) -> RetrievalBundle:
+            return RetrievalBundle(
+                normalized_query="deploy",
+                query_intent="operational_execution",
+                route="grpc",
+                strategy=RetrievalStrategy.LANGGRAPH_CURRENT,
+                selected_hits=[
+                    _hit(
+                        entry_id="policy-1",
+                        title="Deploy Policy",
+                        layer=KnowledgeLayer.CANONICAL_POLICY,
+                        source_label="policy:deploy",
+                        content="Deploy requires approval.",
+                        similarity=0.93,
+                    )
+                ],
+                effective_engine="rust_grpc",
+                fallback_used=False,
+            )
+
+    write_error = RuntimeError("knowledge primary write failed")
+    failing_write = AsyncMock(side_effect=write_error)
+    manager = KnowledgeManager("AGENT_A", retrieval_service=_RetrievalService())  # type: ignore[arg-type]
+    manager._initialized = True
+    manager._storage_v2._postgres = SimpleNamespace(  # type: ignore[assignment]
+        enabled=True,
+        bootstrapped=True,
+        persist_retrieval_trace=failing_write,
+    )
+    experiment_plan = KnowledgeExperimentPlan(
+        experiment_key="",
+        primary_strategy=RetrievalStrategy.LANGGRAPH_CURRENT,
+        persist_primary_trace=True,
+    )
+    query_context = KnowledgeQueryContext(
+        query="deploy",
+        task_id=4242,
+        agent_id="AGENT_A",
+        task_kind="deploy",
+        retrieval_strategy=RetrievalStrategy.LANGGRAPH_CURRENT,
+    )
+    tasks_before = asyncio.all_tasks()
+
+    with (
+        patch.object(manager._experiment_service, "plan", return_value=experiment_plan),
+        patch.object(manager._storage_v2, "primary_read_enabled", return_value=True),
+        patch.object(manager._storage_v2, "external_read_enabled", return_value=True),
+        patch.object(manager, "_load_guardrails", return_value=[]),
+    ):
+        resolution = await manager.resolve(query_context)
+
+    detached = list(asyncio.all_tasks() - tasks_before)
+    outcomes = await asyncio.gather(*detached, return_exceptions=True)
+
+    assert [hit.entry.id for hit in resolution.hits] == ["policy-1"]
+    assert resolution.trace is not None
+    assert resolution.trace_id is None
+    assert resolution.trace.trace_id is None
+    failing_write.assert_awaited_once()
+    assert failing_write.await_args.kwargs["trace"] is resolution.trace
+    assert outcomes == [write_error]
+
+
+def test_dead_knowledge_paths_are_removed():
+    """M4-E1-T6: the local/OFF retrieval path, the store wrappers and the
+    uncalled evaluation helpers are gone."""
+    import importlib.util
+
+    from koda.knowledge import evaluation, manager, storage_v2
+    from koda.knowledge.v2 import common
+
+    for module in ("artifact", "document", "embedding", "evaluation", "graph", "trace"):
+        assert importlib.util.find_spec(f"koda.knowledge.v2.{module}_store") is None, module
+    assert not hasattr(common, "V2StoreSupport")
+    assert not hasattr(common, "KnowledgeBackendLifecycle")
+    for name in (
+        "_load_pack_entries",
+        "_load_workspace_entries",
+        "_load_approved_runbook_entries",
+        "_load_observed_pattern_entries",
+        "_get_model",
+        "_embed_batch",
+        "_build_artifact_graph_relations",
+    ):
+        assert not hasattr(manager.KnowledgeManager, name), name
+    for name in ("persist_entries", "persist_artifact_derivatives", "persist_retrieval_bundle"):
+        assert not hasattr(storage_v2.KnowledgeStorageV2, name), name
+    for name in (
+        "citation_coverage_from_response",
+        "evaluate_runtime_answer",
+        "score_resolution_against_case",
+        "compare_replay_results",
+        "build_benchmark_summary",
+        "replay_case",
+    ):
+        assert not hasattr(evaluation, name), name

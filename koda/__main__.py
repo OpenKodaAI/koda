@@ -732,7 +732,7 @@ def main() -> None:
                 from koda.knowledge import get_knowledge_manager
 
                 km = get_knowledge_manager()
-                await km.initialize(memory_store=memory_store)
+                await km.initialize()
                 from koda.knowledge.runtime_supervisor import get_knowledge_runtime_supervisor
 
                 await get_knowledge_runtime_supervisor(agent_id).start()

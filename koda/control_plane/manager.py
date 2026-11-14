@@ -38,7 +38,7 @@ from koda.knowledge.config import (
     KNOWLEDGE_V2_POSTGRES_DSN,
     KNOWLEDGE_V2_POSTGRES_SCHEMA,
 )
-from koda.knowledge.v2.common import V2StoreSupport, get_shared_postgres_backend
+from koda.knowledge.v2.common import get_shared_postgres_backend, object_store_health
 from koda.logging_config import get_logger
 from koda.provider_models import (
     MODEL_FUNCTION_IDS,
@@ -5601,11 +5601,7 @@ class ControlPlaneManager:
         }
 
     def _object_storage_health_payload(self) -> dict[str, Any]:
-        support = V2StoreSupport(
-            agent_id="CONTROL_PLANE",
-            storage_mode=self._merged_global_env().get("KNOWLEDGE_V2_STORAGE_MODE", "primary"),
-        )
-        return dict(support.object_store_health())
+        return object_store_health(self._merged_global_env().get("KNOWLEDGE_V2_STORAGE_MODE", "primary"))
 
     def get_onboarding_status(self) -> dict[str, Any]:
         self.ensure_seeded()
