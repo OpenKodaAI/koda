@@ -752,6 +752,76 @@ class TestGrantRootsWrittenThroughASymlink:
         assert decision.reason == "path_not_granted"
 
 
+class TestGrantChecksTheCanonicalCallPath:
+    """``allowed_paths`` compares the call path in the form the file layer acts on, whoever passes it.
+
+    The worker hands the grant resolved paths, but the execution-policy simulator and any
+    other caller pass a path as written. ``/srv/allowed/../etc/x`` starts with
+    ``/srv/allowed/`` and lands in ``/srv/etc``; a link inside the grant root lands where it
+    points; a path that is not absolute cannot be placed.
+    """
+
+    @pytest.fixture
+    def roots(self, tmp_path):
+        root = tmp_path.resolve()
+        (root / "allowed" / "sub").mkdir(parents=True)
+        (root / "other").mkdir()
+        (root / "allowed" / "link").symlink_to(root / "other")
+        return root
+
+    @pytest.mark.parametrize(
+        ("path", "covered"),
+        [
+            ("{root}/allowed/sub/x", True),
+            ("{root}/allowed/./sub//x", True),
+            ("{root}/allowed/sub/../x", True),
+            ("{root}/allowed/../other/x", False),
+            ("{root}/allowed/sub/../../other/x", False),
+            ("{root}/allowed/link/x", False),
+            ("allowed/sub/x", False),
+            (" {root}/allowed/sub/x", False),
+        ],
+    )
+    def test_the_call_path_is_compared_where_it_lands(self, roots, path, covered):
+        from koda.agent_contract import path_in_allowed_paths
+
+        assert path_in_allowed_paths(path.format(root=roots), [str(roots / "allowed")]) is covered
+        assert path_in_allowed_paths(path.format(root=roots), ["allowed"]) is False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("path", ["{root}/allowed/../other/x", "{root}/allowed/link/x"])
+    async def test_the_simulator_and_the_worker_refuse_a_path_that_leaves_the_grant(self, roots, path):
+        from koda.knowledge.task_policy_defaults import default_execution_policy
+        from koda.services.execution_policy import evaluate_execution_policy
+        from koda.services.tool_dispatcher import AgentToolCall, execute_tool
+
+        (roots / "other" / "x").write_text("canary-other\n")
+        grant = {"integration_grants": {"fileops": {"enabled": True, "allowed_paths": [str(roots / "allowed")]}}}
+        params = {"path": path.format(root=roots)}
+        # The simulate route evaluates the params as the operator wrote them.
+        evaluation = evaluate_execution_policy(
+            "file_read",
+            params,
+            task_kind="general",
+            effective_policy=default_execution_policy("general"),
+            resource_access_policy=grant,
+            tool_policy={"allowed_tool_ids": ["file_read"]},
+            known_tool=True,
+        )
+        with (
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", grant),
+            patch("koda.services.execution_policy.AGENT_TOOL_POLICY", {"allowed_tool_ids": ["file_read"]}),
+            patch("koda.services.execution_policy.FILEOPS_ENABLED", True),
+            patch("koda.services.tool_dispatcher.FILEOPS_ENABLED", True),
+        ):
+            worker = await execute_tool(AgentToolCall("file_read", params, ""), _make_ctx(str(roots)))
+
+        assert (evaluation.decision, evaluation.reason_code) == ("deny", "path_not_granted")
+        assert not worker.success
+        assert "outside the granted scope" in worker.output
+        assert "canary-other" not in worker.output
+
+
 class TestWorkDirUnderASensitiveRoot:
     """The Docker default work dir (HOME=/var/lib/koda/runtime/home) is under /var/lib, a SENSITIVE_DIRS root.
 

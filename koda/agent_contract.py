@@ -1667,39 +1667,44 @@ def _domain_allowed(host: str | None, allowed_domains: list[str]) -> bool:
     return False
 
 
-def _canonical_allowed_path(entry: str) -> str:
-    """Return a grant's ``allowed_paths`` entry in the form the file layer gives the call path.
+def canonical_grant_path(path: str) -> str | None:
+    """Return ``path`` in the form the file layer acts on it, or None when it cannot be placed.
 
-    The file commands and the file tools hand the grant an absolute, symlink-resolved path
-    (:func:`koda.utils.files.work_path_location`), so an absolute entry (``~`` expanded) is
-    resolved the same way: a grant root written through a symlink, such as a symlinked
-    project dir or macOS ``/tmp`` (``/private/tmp``), still covers the paths below it. A
-    relative entry is compared as written; resolving it would join it with the process CWD.
+    ``~`` is expanded, then an absolute path is lexically normalized and symlink-resolved
+    (``os.path.realpath``), as :func:`koda.utils.files.work_path_location` gives the file
+    tools and the file commands their path. A path that is not absolute after ``~``
+    expansion (a relative path, or one with leading whitespace) cannot be placed:
+    resolving it here would join it with the process CWD, not the caller's work dir.
     """
-    expanded = os.path.expanduser(entry)
+    expanded = os.path.expanduser(path)
     if not os.path.isabs(expanded):
-        return entry
+        return None
     try:
         return os.path.realpath(expanded)
     except (OSError, ValueError):
-        return entry
+        return None
 
 
 def path_in_allowed_paths(path: str | None, allowed_paths: list[str]) -> bool:
     """Return whether ``path`` is one of ``allowed_paths`` or below one, by path component.
 
     The one ``allowed_paths`` check for integration grants, shared by the policy gate
-    (:func:`evaluate_integration_grant`) and the Telegram command approval layer.
+    (:func:`evaluate_integration_grant`) and the Telegram command approval layer. Both
+    sides are compared in canonical form (:func:`canonical_grant_path`), whoever passes the
+    path: the worker hands the grant resolved paths, but the execution-policy simulator
+    evaluates a path as the operator wrote it. So ``<root>/../etc/x`` and a link inside
+    the grant root are compared where they land, an entry written through a symlink (a
+    symlinked project dir, macOS ``/tmp``) still covers the paths below it, and a call
+    path or an entry that is not absolute covers nothing.
     """
-    normalized_path = str(path or "").strip()
-    if not normalized_path:
+    call_path = canonical_grant_path(str(path or ""))
+    if call_path is None:
         return False
     for allowed in allowed_paths:
-        candidate = str(allowed or "").strip()
-        if not candidate:
+        candidate = canonical_grant_path(str(allowed or "").strip())
+        if candidate is None:
             continue
-        candidate = _canonical_allowed_path(candidate)
-        if normalized_path == candidate or normalized_path.startswith(candidate.rstrip("/") + "/"):
+        if call_path == candidate or call_path.startswith(candidate.rstrip("/") + "/"):
             return True
     return False
 

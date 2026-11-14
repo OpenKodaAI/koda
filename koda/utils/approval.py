@@ -21,6 +21,7 @@ from telegram.constants import ParseMode
 from koda.agent_contract import (
     FILE_COMMAND_ACCESS_LEVELS,
     ActionEnvelope,
+    canonical_grant_path,
     normalize_integration_grants,
     path_in_allowed_paths,
     resolve_integration_action,
@@ -875,7 +876,10 @@ def _resource_policy_for_operational_resolution(
     if resolution is None:
         return {}
     grant: dict[str, Any] = {"allow_actions": [resolution.action_id]}
-    if resolution.path:
+    # Scope the grant to the command's own path. A path that cannot be placed (a relative
+    # path without a work dir) is left to the execution-policy path rules, which fail
+    # closed on it; the handler then refuses to run without a work dir.
+    if resolution.path and canonical_grant_path(resolution.path) is not None:
         grant["allowed_paths"] = [resolution.path]
     return {"integration_grants": {resolution.integration_id: grant}}
 
