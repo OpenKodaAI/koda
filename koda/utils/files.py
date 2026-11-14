@@ -132,10 +132,11 @@ def resolve_work_path(path_str: str, work_dir: str, *, deny_sensitive_dirs: bool
     - ``~`` is expanded, a relative path is joined with ``work_dir`` (never the process
       CWD), and symlinks are resolved (:func:`work_path_location`);
     - the result must be ``work_dir`` or inside it (``path_outside_workdir``);
-    - it must not be inside a sensitive system directory (``path_sensitive_dir``, see
-      :func:`koda.utils.workdir.sensitive_dir_for`), except the ones the operator's
-      ``DEFAULT_WORK_DIR`` is configured under when ``work_dir`` is ``DEFAULT_WORK_DIR``:
-      the Docker default ``HOME`` under ``/var/lib`` and the paths inside it stay usable;
+    - it must not be inside a sensitive system directory or the control-plane state
+      directory (``path_sensitive_dir``, see :func:`koda.utils.workdir.sensitive_dir_for`),
+      except the sensitive directories one of Koda's runtime roots is configured under,
+      when ``work_dir`` is that runtime root or below it: the Docker default ``HOME`` under
+      ``/var/lib`` and the paths inside it stay usable;
     - neither the requested path nor the path it resolves to may be a secret file
       (``path_blocked_file``, see :func:`secret_file_refusal`): a blocked extension, a
       ``.env`` dotfile, or a CLI credential store such as ``.ssh/`` or ``.netrc``.

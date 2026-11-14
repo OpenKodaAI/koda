@@ -258,9 +258,10 @@ class TestCommandHelpersApplyTheFilePolicy:
 class TestWorkDirInsideSensitiveDirectory:
     """The default Docker work dir (HOME=/var/lib/koda/runtime/home) sits under /var/lib, a SENSITIVE_DIRS root.
 
-    It is the operator's DEFAULT_WORK_DIR, the one work dir that may sit under a sensitive
-    root. It and the paths inside it are allowed on both surfaces; a sensitive root that does
-    not contain it as configured stays denied, and the secret-file policy applies everywhere.
+    It is the operator's DEFAULT_WORK_DIR, one of Koda's runtime roots, which may sit under a
+    sensitive root (koda/utils/workdir.py::runtime_roots). It and the paths inside it are
+    allowed on both surfaces; a sensitive root that does not contain it as configured stays
+    denied, and the secret-file policy applies everywhere.
     """
 
     @pytest.fixture
@@ -331,10 +332,10 @@ class TestWorkDirInsideSensitiveDirectory:
         assert resolve_work_path("x.txt", str(work)).path == work / "x.txt"
         assert resolve_work_path("x.txt", str(alias / "koda")).path == work / "x.txt"
 
-    def test_only_the_configured_default_work_dir_is_waived(self, docker_layout, monkeypatch):
-        """Every other work dir is validated, so one under a sensitive root gets no waiver."""
+    def test_a_work_dir_outside_the_runtime_roots_gets_no_waiver(self, docker_layout, monkeypatch):
+        """Only Koda's runtime roots and the dirs below them are waived; any other work dir is validated."""
         work, _ = docker_layout
-        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(work.parent))
+        monkeypatch.setattr("koda.utils.workdir.DEFAULT_WORK_DIR", str(work.parent / "other"))
         resolution = resolve_work_path("notes.txt", str(work))
         assert resolution.path is None
         assert resolution.reason == "path_sensitive_dir"
