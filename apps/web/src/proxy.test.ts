@@ -117,6 +117,41 @@ describe("web proxy auth gate", () => {
     );
   });
 
+  function pageRequest(url: string, headers: Record<string, string>) {
+    const nextUrl = new URL(url);
+    return {
+      nextUrl: Object.assign(nextUrl, {
+        clone: () => new URL(nextUrl.toString()),
+      }),
+      method: "GET",
+      cookies: { get: () => undefined },
+      headers: new Headers(headers),
+    } as never;
+  }
+
+  it("sends a page over plain HTTP from a LAN address to /login once, and /login then renders (J-14)", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    const lan = { host: "192.168.1.10:3000", "x-forwarded-proto": "http" };
+    // The owner hint cookie is Secure, so over this transport it never comes
+    // back and cannot choose between /setup and /login.
+    const first = proxy(pageRequest("http://192.168.1.10:3000/executions", lan));
+    expect(first.status).toBe(307);
+    expect(first.headers.get("location")).toBe(
+      "http://192.168.1.10:3000/login?next=%2Fexecutions",
+    );
+
+    // No second hop: /login renders and explains, so there is no loop.
+    const second = proxy(pageRequest("http://192.168.1.10:3000/login?next=%2Fexecutions", lan));
+    expect(second.status).toBe(200);
+    expect(second.headers.get("location")).toBeNull();
+
+    // Loopback keeps the first-run redirect: browsers keep Secure cookies there.
+    const loopback = proxy(
+      pageRequest("http://127.0.0.1:3000/", { host: "127.0.0.1:3000", "x-forwarded-proto": "http" }),
+    );
+    expect(loopback.headers.get("location")).toBe("http://127.0.0.1:3000/setup?next=%2F");
+  });
+
   it("requires the operator session cookie even in development mode", () => {
     vi.stubEnv("NODE_ENV", "development");
 

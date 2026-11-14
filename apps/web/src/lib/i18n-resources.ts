@@ -692,6 +692,14 @@ export const resources = {
             codes_remaining: "{{count}} recovery codes remaining",
           },
         },
+        insecure_transport: {
+          title: "HTTPS required",
+          subtitle: "This dashboard was opened over plain HTTP at {{origin}}.",
+          reason: "Its sign-in cookies are marked Secure, so this browser will not keep them over this connection and no sign-in here could last.",
+          fix_proxy: "Serve the dashboard over HTTPS through a reverse proxy such as Caddy, Traefik, nginx or tailscale serve.",
+          fix_localhost: "Or open it on the host itself at a localhost address, for example through an SSH tunnel.",
+          form_error: "This browser will not keep the session cookie over plain HTTP. Open the dashboard over HTTPS or at a localhost address.",
+        },
         session_expired: "Your session has expired. Sign in again to continue.",
         account_menu: {
           trigger_label: "Open account menu",
@@ -1387,6 +1395,14 @@ export const resources = {
             regenerate_codes: "Regenerar códigos de recuperação",
             codes_remaining: "{{count}} códigos de recuperação restantes",
           },
+        },
+        insecure_transport: {
+          title: "HTTPS obrigatório",
+          subtitle: "Este painel foi aberto por HTTP simples em {{origin}}.",
+          reason: "Os cookies de acesso são marcados como Secure, então este navegador não os guarda nesta conexão e nenhum login aqui se mantém.",
+          fix_proxy: "Sirva o painel por HTTPS através de um proxy reverso, como Caddy, Traefik, nginx ou tailscale serve.",
+          fix_localhost: "Ou abra-o no próprio host por um endereço localhost, por exemplo através de um túnel SSH.",
+          form_error: "Este navegador não guarda o cookie de sessão por HTTP simples. Abra o painel por HTTPS ou por um endereço localhost.",
         },
         session_expired: "Sua sessão expirou. Entre novamente para continuar.",
         account_menu: {
@@ -2084,6 +2100,14 @@ export const resources = {
             regenerate_codes: "Regenerar códigos de recuperación",
             codes_remaining: "{{count}} códigos de recuperación restantes",
           },
+        },
+        insecure_transport: {
+          title: "Se requiere HTTPS",
+          subtitle: "Este panel se abrió por HTTP sin cifrar en {{origin}}.",
+          reason: "Sus cookies de acceso están marcadas como Secure, así que este navegador no las conserva en esta conexión y ningún inicio de sesión aquí puede durar.",
+          fix_proxy: "Sirve el panel por HTTPS a través de un proxy inverso como Caddy, Traefik, nginx o tailscale serve.",
+          fix_localhost: "O ábrelo en el propio host con una dirección localhost, por ejemplo a través de un túnel SSH.",
+          form_error: "Este navegador no conserva la cookie de sesión por HTTP sin cifrar. Abre el panel por HTTPS o con una dirección localhost.",
         },
         session_expired: "Tu sesión ha caducado. Inicia sesión de nuevo para continuar.",
         account_menu: {
@@ -2786,6 +2810,14 @@ export const resources = {
             codes_remaining: "{{count}} codes de récupération restants",
           },
         },
+        insecure_transport: {
+          title: "HTTPS requis",
+          subtitle: "Ce tableau de bord a été ouvert en HTTP non chiffré sur {{origin}}.",
+          reason: "Ses cookies de connexion sont marqués Secure : ce navigateur ne les conserve pas sur cette connexion et aucune connexion ici ne peut durer.",
+          fix_proxy: "Servez le tableau de bord en HTTPS via un proxy inverse comme Caddy, Traefik, nginx ou tailscale serve.",
+          fix_localhost: "Ou ouvrez-le sur l'hôte lui-même avec une adresse localhost, par exemple via un tunnel SSH.",
+          form_error: "Ce navigateur ne conserve pas le cookie de session en HTTP non chiffré. Ouvrez le tableau de bord en HTTPS ou avec une adresse localhost.",
+        },
         session_expired: "Votre session a expiré. Connectez-vous à nouveau pour continuer.",
         account_menu: {
           trigger_label: "Ouvrir le menu du compte",
@@ -3486,6 +3518,14 @@ export const resources = {
             regenerate_codes: "Wiederherstellungscodes neu generieren",
             codes_remaining: "{{count}} Wiederherstellungscodes verbleibend",
           },
+        },
+        insecure_transport: {
+          title: "HTTPS erforderlich",
+          subtitle: "Dieses Dashboard wurde über unverschlüsseltes HTTP unter {{origin}} geöffnet.",
+          reason: "Seine Anmelde-Cookies sind als Secure markiert, daher speichert dieser Browser sie über diese Verbindung nicht und keine Anmeldung hier kann bestehen bleiben.",
+          fix_proxy: "Stellen Sie das Dashboard über HTTPS hinter einem Reverse Proxy wie Caddy, Traefik, nginx oder tailscale serve bereit.",
+          fix_localhost: "Oder öffnen Sie es auf dem Host selbst über eine localhost-Adresse, zum Beispiel über einen SSH-Tunnel.",
+          form_error: "Dieser Browser speichert das Sitzungs-Cookie über unverschlüsseltes HTTP nicht. Öffnen Sie das Dashboard über HTTPS oder über eine localhost-Adresse.",
         },
         session_expired: "Ihre Sitzung ist abgelaufen. Bitte melden Sie sich erneut an.",
         account_menu: {

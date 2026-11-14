@@ -12,8 +12,11 @@ vi.mock("@/lib/request-origin", () => ({
   isTrustedDashboardRequest: () => true,
 }));
 
-function registerRequest(headers: Record<string, string> = {}): NextRequest {
-  return new NextRequest("http://127.0.0.1:3000/api/control-plane/auth/register-owner", {
+function registerRequest(
+  headers: Record<string, string> = {},
+  url = "http://127.0.0.1:3000/api/control-plane/auth/register-owner",
+): NextRequest {
+  return new NextRequest(url, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...headers },
     body: JSON.stringify({ email: "owner@example.com", password: "a-strong-password-123", bootstrap_code: "CODE" }),
@@ -40,6 +43,30 @@ describe("POST /api/control-plane/auth/register-owner", () => {
     // Owner creation consumes the setup code and issues one-time recovery codes,
     // so it must never happen when the session cookie cannot be sealed.
     expect(upstreamFetch).not.toHaveBeenCalled();
+  });
+
+  it("refuses plain HTTP from a LAN address before the setup code is spent (J-14)", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("WEB_OPERATOR_SESSION_SECRET", "0123456789abcdef0123456789abcdef");
+    upstreamFetch.mockResolvedValue(
+      new Response(JSON.stringify({ session_token: "session-token", recovery_codes: ["code-1"] }), { status: 201 }),
+    );
+    const { POST } = await import("./route");
+
+    const response = await POST(
+      registerRequest(
+        { Origin: "http://192.168.1.10:3000", "X-Forwarded-Proto": "http" },
+        "http://192.168.1.10:3000/api/control-plane/auth/register-owner",
+      ),
+    );
+    const body = (await response.json()) as { error?: { code?: string } };
+
+    // Registering would consume the setup code and show one-time recovery
+    // codes for a session the browser then throws away.
+    expect(response.status).toBe(403);
+    expect(body.error?.code).toBe("INSECURE_TRANSPORT");
+    expect(upstreamFetch).not.toHaveBeenCalled();
+    expect(response.headers.get("set-cookie")).toBeNull();
   });
 
   it("registers the owner and sets the session cookie when the secret is configured", async () => {

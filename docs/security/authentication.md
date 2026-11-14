@@ -156,9 +156,41 @@ every field and the operator's profile.
 - TTL: `CONTROL_PLANE_OPERATOR_SESSION_TTL_SECONDS` (default: 7 days).
 - Transport: session token is sealed into the `koda_operator_session` cookie with AES-256-GCM
   using `WEB_OPERATOR_SESSION_SECRET`. Cookie flags: `HttpOnly; Secure; SameSite=Strict`.
+  The dashboard's production build always sets `Secure` on its cookies; there is no switch
+  for it (`ALLOW_INSECURE_COOKIES` only works in development). See
+  [Plain HTTP](#plain-http) for what happens when the browser cannot keep them.
 - Revocation: logout revokes the current session. Password _change_ revokes every other
   session for the same user and keeps the initiating session alive. Password _reset_ via
   recovery code revokes **all** sessions for the user.
+
+### Plain HTTP
+
+A browser keeps a `Secure` cookie only on a secure context: an `https://` page, or a loopback
+host (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`). Over plain HTTP from any other
+address, such as `http://192.168.1.10:3000` on a LAN or a tailnet IP, it drops the session
+cookie without an error, so a sign-in the control plane accepted would leave no session. The
+dashboard therefore fails explicitly there instead of bouncing the operator back to `/setup`:
+
+- `/login` and `/setup` show an "HTTPS required" screen in place of their forms, naming the
+  address that was used and the two ways in: HTTPS through a reverse proxy, or a localhost
+  address on the host (for example through an SSH tunnel). Any other page sends a signed-out
+  visitor to `/login` once, not to `/setup`, because the owner hint cookie cannot be stored
+  either.
+- `POST /api/control-plane/auth/login` and `POST /api/control-plane/auth/register-owner`
+  answer `403` with `error.code: "INSECURE_TRANSPORT"` before they contact the control
+  plane. Owner registration therefore never spends the setup code or issues recovery codes
+  for a session the browser would throw away. The refusal depends only on the transport, never
+  on the credentials, so the screens show their own message for it and every credential
+  failure keeps the single generic message. Password recovery sets no cookie and still works.
+- The web container logs a `[cookie-transport]` warning naming the address, once per process.
+
+The dashboard decides from the request, and refuses only when it is sure: the browser's
+`Origin` header when it sent one; otherwise no refusal when the request carries Fetch Metadata
+headers (`Sec-Fetch-Site`, `Sec-Fetch-Mode`), which browsers send only to HTTPS and loopback
+pages; otherwise the scheme and host from `X-Forwarded-Proto` and `X-Forwarded-Host` (or
+`Host`), which Next.js fills from the socket when no proxy set them. A TLS-terminating proxy
+should send `X-Forwarded-Proto: https`, as the bundled `proxy/nginx.conf`, Caddy and Traefik
+do; without it an older browser that sends no Fetch Metadata would be refused.
 
 ## Profile data
 

@@ -917,6 +917,27 @@ def test_runtime_dockerfiles_strip_unused_node_package_managers() -> None:
     assert 'CMD ["pnpm", "start"]' not in web_dockerfile
 
 
+def test_web_image_has_no_secure_cookies_build_arg() -> None:
+    """Nothing reads SECURE_COOKIES at build time, so it must not look like a switch (D-085, TD-173).
+
+    Production always marks session cookies Secure; the build arg only set an
+    environment variable in the builder stage, which the runtime never saw.
+    """
+    web_dockerfile = (ROOT / "apps" / "web" / "Dockerfile").read_text(encoding="utf-8")
+    assert "SECURE_COOKIES" not in web_dockerfile
+
+    compose_files = sorted(ROOT.glob("docker-compose*.yml")) + sorted(
+        (ROOT / "packages" / "cli" / "release" / "bundle").glob("*.yml")
+    )
+    assert compose_files
+    for compose_file in compose_files:
+        services = (yaml.safe_load(compose_file.read_text(encoding="utf-8")) or {}).get("services") or {}
+        for name, service in services.items():
+            build = (service or {}).get("build")
+            args = build.get("args") if isinstance(build, dict) else None
+            assert "SECURE_COOKIES" not in (args or {}), f"{compose_file.name}: {name}"
+
+
 def test_runtime_dockerfile_exports_locked_python_dependencies() -> None:
     app_dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
 

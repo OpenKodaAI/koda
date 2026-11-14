@@ -108,7 +108,8 @@ Koda is intentionally decoupled from the outer delivery layer. A VPS provider pa
 - preserve the persistent volumes
 - route HTTPS traffic to the dashboard on the host's loopback (for example
   `tailscale serve --bg --https=443 http://127.0.0.1:3000`; publishing plain HTTP on the tailnet IP
-  does not work because session cookies are `Secure`)
+  does not work because session cookies are `Secure`, and the dashboard shows "HTTPS required"
+  there instead of a sign-in form)
 - keep bootstrap secrets available to the containers
 
 Providers, agents, secrets, and integrations remain part of the Koda product layer, not the hosting layer.

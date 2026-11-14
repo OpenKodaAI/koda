@@ -7,6 +7,7 @@ import {
   upstreamFetch,
 } from "@/lib/api-utils";
 import { clientIpFromHeaders, isLoopbackAddress } from "@/lib/client-ip";
+import { insecureCookieTransport, insecureCookieTransportResponse } from "@/lib/cookie-transport";
 import { isTrustedDashboardRequest } from "@/lib/request-origin";
 import {
   assertWebOperatorSessionSecretConfigured,
@@ -36,6 +37,13 @@ export async function POST(request: NextRequest) {
       { error: "Cross-site dashboard mutations are blocked." },
       { status: 403, headers: { "Cache-Control": "no-store" } },
     );
+  }
+  // Over plain HTTP from a non-loopback host the browser drops the Secure
+  // session cookie. Refuse before the control plane spends the setup code and
+  // issues recovery codes for a session the browser throws away (J-14).
+  const insecureTransport = insecureCookieTransport(request.headers, request.nextUrl);
+  if (insecureTransport) {
+    return insecureCookieTransportResponse(insecureTransport);
   }
   try {
     assertWebOperatorSessionSecretConfigured();

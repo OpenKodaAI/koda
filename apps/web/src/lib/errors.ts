@@ -13,6 +13,7 @@ type AppErrorOptions = {
   cause?: unknown;
   retryable?: boolean;
   exposeMessage?: boolean;
+  reason?: string;
 };
 
 export class AppError extends Error {
@@ -21,6 +22,8 @@ export class AppError extends Error {
   cause?: unknown;
   retryable: boolean;
   exposeMessage: boolean;
+  /** Machine-readable `error.code` the route put in its response body, if any. */
+  reason?: string;
 
   constructor(message: string, options: AppErrorOptions = {}) {
     super(message);
@@ -30,6 +33,7 @@ export class AppError extends Error {
     this.cause = options.cause;
     this.retryable = options.retryable ?? false;
     this.exposeMessage = options.exposeMessage ?? false;
+    this.reason = options.reason;
   }
 }
 
