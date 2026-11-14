@@ -1,7 +1,7 @@
 import next from "next";
-import { createDashboardServer, parseRequestUrl } from "./src/lib/dashboard-server.mjs";
+import { createDashboardServer } from "./src/lib/dashboard-server.mjs";
 import { parseTrustedProxies } from "./src/lib/forwarded-for.mjs";
-import { RELAY_PATH_PREFIX, createRuntimeRelay } from "./src/lib/runtime-relay-server.mjs";
+import { createRuntimeRelay, createUpgradeRouter } from "./src/lib/runtime-relay-server.mjs";
 
 const dev = process.env.NODE_ENV !== "production";
 const host = process.env.HOST ?? "0.0.0.0";
@@ -39,38 +39,17 @@ const handle = app.getRequestHandler();
 
 await app.prepare();
 
-const upgradeHandler =
-  typeof app.getUpgradeHandler === "function"
-    ? app.getUpgradeHandler()
-    : null;
+// Next.js serves one upgrade here, the dev server's HMR socket: this app has
+// no rewrites, so in production it would accept none.
+const nextUpgrade = dev ? app.getUpgradeHandler() : null;
 
-// Checks the relay descriptor and session token before the WebSocket
+// Checks the relay descriptor and session cookie before the WebSocket
 // handshake, and bounds frames in both directions (runtime-relay-server.mjs).
 const runtimeRelay = createRuntimeRelay({ store: getRuntimeRelayStore() });
 
-function handleUpgrade(request, socket, head) {
-  const url = parseRequestUrl(request);
-  if (!url) {
-    socket.destroy();
-    return;
-  }
-
-  if (url.pathname.startsWith(RELAY_PATH_PREFIX)) {
-    runtimeRelay.handleUpgrade(request, socket, head, url);
-    return;
-  }
-
-  if (upgradeHandler) {
-    upgradeHandler(request, socket, head);
-    return;
-  }
-
-  socket.destroy();
-}
-
 const server = createDashboardServer({
   handle,
-  upgrade: handleUpgrade,
+  upgrade: createUpgradeRouter({ relay: runtimeRelay, nextUpgrade }),
   isTrusted: trustedProxies.isTrusted,
 });
 

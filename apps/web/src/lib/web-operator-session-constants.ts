@@ -1,4 +1,5 @@
-export const WEB_OPERATOR_SESSION_COOKIE = "koda_operator_session";
+// Defined with the sealing code, which server.mjs also loads.
+export { WEB_OPERATOR_SESSION_COOKIE } from "./web-operator-session-seal.mjs";
 export const WEB_OPERATOR_SESSION_MAX_AGE_SECONDS = 60 * 60 * 8;
 
 /**

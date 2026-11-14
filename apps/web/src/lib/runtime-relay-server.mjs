@@ -1,27 +1,32 @@
 /**
  * The runtime relay: a WebSocket at `/api/runtime/relay/<id>` that the
  * dashboard bridges to a worker's terminal, browser snapshot or noVNC socket.
- * server.mjs routes relay-path upgrades here. The relay descriptor (written by
- * `runtime-relay.ts` when an operator attaches) and the session token are
- * checked before the WebSocket handshake, so a request that is not
- * authorised gets a plain HTTP refusal: no WebSocket, no frame parsing and no
- * upstream connection.
+ * server.mjs hands every upgrade to `createUpgradeRouter`, which routes
+ * relay-path upgrades here. The relay descriptor (written by `runtime-relay.ts`
+ * when an operator attaches) and the session cookie are checked before the
+ * WebSocket handshake, so a request that is not authorised gets a plain HTTP
+ * refusal: no WebSocket, no frame parsing and no upstream connection.
  */
 
 import { createHash, timingSafeEqual } from "node:crypto";
 import { STATUS_CODES } from "node:http";
 import { WebSocket, WebSocketServer } from "ws";
+import { parseRequestUrl } from "./dashboard-server.mjs";
+import { WEB_OPERATOR_SESSION_COOKIE, unsealWebOperatorToken } from "./web-operator-session-seal.mjs";
 
 export const RELAY_PATH_PREFIX = "/api/runtime/relay/";
 
 /**
- * Largest message a browser may send through the relay. Clients send
- * terminal input and resize events, noVNC key, pointer and clipboard events,
- * and browser-view control messages, all far below this. ws checks the length
- * in the frame header, so a larger frame closes the connection with 1009
- * before its payload is read. ws's default is 100 MiB.
+ * Largest message a browser may send through the relay: 4 MiB, the inbound
+ * limit of the runtime's aiohttp terminal endpoint (aiohttp's default
+ * max_msg_size), so the relay refuses no message the runtime would take.
+ * xterm hands over a whole paste as one input message. Clients otherwise send
+ * resize events, noVNC key, pointer and clipboard events, and browser-view
+ * control messages, all far smaller. ws checks the length in the frame header,
+ * so a larger frame closes the connection with 1009 before its payload is
+ * read. ws's default is 100 MiB.
  */
-export const RELAY_CLIENT_MAX_PAYLOAD_BYTES = 1024 * 1024;
+export const RELAY_CLIENT_MAX_PAYLOAD_BYTES = 4 * 1024 * 1024;
 
 /**
  * Largest message the relay accepts from the runtime. Terminal output and
@@ -70,6 +75,29 @@ export function readRelayDescriptor(store, relayId) {
 }
 
 /**
+ * The operator session token in the request's session cookie, or null when
+ * the cookie is missing or was not sealed under the current key. This is the
+ * cookie the browser sends with the handshake. The token is never taken from
+ * the URL, where it would reach access logs.
+ * @param {import("node:http").IncomingMessage} request
+ * @returns {string | null}
+ */
+function sessionToken(request) {
+  const header = request.headers.cookie;
+  if (typeof header !== "string") return null;
+  for (const pair of header.split(";")) {
+    const separator = pair.indexOf("=");
+    if (separator === -1 || pair.slice(0, separator).trim() !== WEB_OPERATOR_SESSION_COOKIE) continue;
+    try {
+      return unsealWebOperatorToken(decodeURIComponent(pair.slice(separator + 1).trim()));
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+/**
  * Whether `token` is the session token whose sha256 the descriptor holds,
  * compared in constant time. A descriptor without a hash admits nobody.
  * @param {RelayDescriptor} descriptor
@@ -85,16 +113,18 @@ function tokenMatches(descriptor, token) {
 
 /**
  * Decides an upgrade before any WebSocket work: 404 for an unknown or expired
- * relay, 401 for a missing or wrong token.
+ * relay, 401 unless the session cookie holds the token of the operator who
+ * attached.
  * @param {RelayStore} store
- * @param {URL} url the request target, as server.mjs parsed it
+ * @param {import("node:http").IncomingMessage} request
+ * @param {URL} url the request target, as the upgrade router parsed it
  * @returns {{ descriptor: RelayDescriptor } | { status: 401 | 404 }}
  */
-export function authorizeRelayUpgrade(store, url) {
+export function authorizeRelayUpgrade(store, request, url) {
   const relayId = url.pathname.slice(RELAY_PATH_PREFIX.length);
   const descriptor = relayId ? readRelayDescriptor(store, relayId) : null;
   if (!descriptor?.upstreamUrl) return { status: 404 };
-  if (!tokenMatches(descriptor, url.searchParams.get("token"))) return { status: 401 };
+  if (!tokenMatches(descriptor, sessionToken(request))) return { status: 401 };
   return { descriptor };
 }
 
@@ -184,10 +214,10 @@ export function createRuntimeRelay({ store }) {
      * @param {import("node:http").IncomingMessage} request
      * @param {import("node:stream").Duplex} socket
      * @param {Buffer} head
-     * @param {URL} url the request target, as server.mjs parsed it
+     * @param {URL} url the request target, as the upgrade router parsed it
      */
     handleUpgrade(request, socket, head, url) {
-      const decision = authorizeRelayUpgrade(store, url);
+      const decision = authorizeRelayUpgrade(store, request, url);
       if ("status" in decision) {
         refuseUpgrade(socket, decision.status);
         return;
@@ -202,5 +232,36 @@ export function createRuntimeRelay({ store }) {
     closeAll(code, reason) {
       wss.clients.forEach((client) => closeSocket(client, code, reason));
     },
+  };
+}
+
+/**
+ * The dashboard's upgrade handler (server.mjs). Relay paths go to the relay.
+ * `/_next/` paths go to `nextUpgrade` when server.mjs passes one: Next.js's
+ * dev HMR socket. Every other upgrade gets 404 at once. This app has no
+ * rewrites, so Next.js accepts no other upgrade, and it leaves one it does not
+ * match open without an answer.
+ * @param {{
+ *   relay: ReturnType<typeof createRuntimeRelay>,
+ *   nextUpgrade?: ((request: import("node:http").IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) => unknown) | null,
+ * }} options
+ * @returns {(request: import("node:http").IncomingMessage, socket: import("node:stream").Duplex, head: Buffer) => void}
+ */
+export function createUpgradeRouter({ relay, nextUpgrade = null }) {
+  return (request, socket, head) => {
+    const url = parseRequestUrl(request);
+    if (!url) {
+      socket.destroy();
+      return;
+    }
+    if (url.pathname.startsWith(RELAY_PATH_PREFIX)) {
+      relay.handleUpgrade(request, socket, head, url);
+      return;
+    }
+    if (nextUpgrade && url.pathname.startsWith("/_next/")) {
+      void nextUpgrade(request, socket, head);
+      return;
+    }
+    refuseUpgrade(socket, 404);
   };
 }

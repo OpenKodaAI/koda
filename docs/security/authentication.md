@@ -200,6 +200,10 @@ every field and the operator's profile.
 - TTL: `CONTROL_PLANE_OPERATOR_SESSION_TTL_SECONDS` (default: 7 days).
 - Transport: session token is sealed into the `koda_operator_session` cookie with AES-256-GCM
   using `WEB_OPERATOR_SESSION_SECRET`. Cookie flags: `HttpOnly; Secure; SameSite=Strict`.
+- Runtime relays: the terminal, browser-snapshot and noVNC WebSockets at
+  `/api/runtime/relay/<id>` read the same cookie on the upgrade, before the handshake
+  (`apps/web/src/lib/runtime-relay-server.mjs`). A relay admits only the session that attached
+  it, and the token is never taken from the URL.
 - Revocation: logout revokes the current session. Password _change_ revokes every other
   session for the same user and keeps the initiating session alive. Password _reset_ via
   recovery code revokes **all** sessions for the user.
