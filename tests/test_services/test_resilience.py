@@ -18,15 +18,19 @@ from koda.services.resilience import (
 )
 
 
+def _close_shared_breakers() -> None:
+    for breaker in ALL_BREAKERS.values():
+        with suppress(Exception):
+            breaker.close()
+    # Drop recovery timing too, so fake-clock timings never leak between tests.
+    resilience._gates.clear()
+
+
 @pytest.fixture(autouse=True)
 def _reset_shared_breakers():
-    for breaker in ALL_BREAKERS.values():
-        with suppress(Exception):
-            breaker.close()
+    _close_shared_breakers()
     yield
-    for breaker in ALL_BREAKERS.values():
-        with suppress(Exception):
-            breaker.close()
+    _close_shared_breakers()
 
 
 class _FakeClock:
@@ -207,6 +211,58 @@ class TestHalfOpenRecovery:
         assert check_breaker(breaker) is None
         record_success(breaker)
         assert breaker.current_state == "closed"
+
+    def test_reopened_breaker_gets_a_fresh_timeout(self, clock):
+        breaker = _tripped_breaker("test_reopen_direct")
+
+        clock.advance(60)
+        # Closed and re-opened directly with no check in between: the earlier
+        # episode's timing must not let the new episode probe immediately.
+        breaker.close()
+        breaker.open()
+        assert check_breaker(breaker) is not None
+        assert breaker.current_state == "open"
+
+        clock.advance(59)
+        assert check_breaker(breaker) is not None
+        clock.advance(1)
+        assert check_breaker(breaker) is None
+        assert breaker.current_state == "half-open"
+
+    def test_reopened_after_probe_rejects_until_new_timeout(self, clock):
+        breaker = _tripped_breaker("test_reopen_after_probe")
+
+        clock.advance(60)
+        assert check_breaker(breaker) is None  # probe admitted
+        breaker.close()
+        breaker.open()  # tripped again without record_failure
+        assert check_breaker(breaker) is not None
+        clock.advance(60)
+        assert check_breaker(breaker) is None
+
+
+class TestStateChangeAudit:
+    def test_each_transition_emits_its_own_event(self, clock):
+        breaker = pybreaker.CircuitBreaker(
+            fail_max=1, reset_timeout=60, name="test_audit_events", listeners=[resilience._listener]
+        )
+        with patch("koda.services.audit.emit_task_lifecycle") as emit:
+            record_failure(breaker)  # closed -> open
+            clock.advance(60)
+            assert check_breaker(breaker) is None  # open -> half-open
+            record_failure(breaker)  # half-open -> open
+            clock.advance(60)
+            assert check_breaker(breaker) is None  # open -> half-open
+            record_success(breaker)  # half-open -> closed
+
+        events = [(c.args[0], c.kwargs["old_state"], c.kwargs["new_state"]) for c in emit.call_args_list]
+        assert events == [
+            ("system.circuit_opened", "closed", "open"),
+            ("system.circuit_half_open", "open", "half-open"),
+            ("system.circuit_opened", "half-open", "open"),
+            ("system.circuit_half_open", "open", "half-open"),
+            ("system.circuit_closed", "half-open", "closed"),
+        ]
 
 
 class TestCallSiteRecovery:

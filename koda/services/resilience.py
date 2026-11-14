@@ -1,20 +1,25 @@
 """Circuit breakers for external dependencies.
 
 Uses pybreaker with a Prometheus listener to track state changes
-and emit audit events on circuit open/close.
+and emit audit events when a circuit opens, half-opens or closes.
 
 Integration pattern (every call site in this codebase):
     Call `check_breaker()` before the guarded call and return early when it
     reports an error. A caller it admits must then report the outcome with
-    `record_success()` or `record_failure()`.
+    `record_success()` or `record_failure()`. The one exception today is
+    `browser_breaker`: the browser tools only check it and never record an
+    outcome, so it never opens.
 
 Recovery contract: once a breaker opens, `check_breaker()` rejects calls until
 `reset_timeout` seconds have passed, then moves the breaker to half-open and
-admits exactly one caller as the recovery probe. Other callers stay rejected
-while the probe is in flight. The probe's `record_success()` closes the
-breaker; its `record_failure()` re-opens it for another `reset_timeout`. A
-probe that never reports an outcome frees the slot after `reset_timeout`, so
-one lost caller cannot latch the breaker half-open.
+admits one caller as the recovery probe. The probe holds the slot for
+`reset_timeout` seconds. The probe's `record_success()` closes the breaker;
+its `record_failure()` re-opens it for another `reset_timeout`. A probe that
+has not reported within `reset_timeout`, whether lost or still running, frees
+the slot and the next caller becomes another probe. One lost caller therefore
+cannot latch the breaker half-open, but a dependency whose calls outlast
+`reset_timeout` (the CLI runners) admits one extra probe per `reset_timeout`
+while the first is still running.
 """
 
 import contextlib
@@ -60,6 +65,13 @@ from koda.logging_config import get_logger
 log = get_logger(__name__)
 _agent_id_label = AGENT_ID or "default"
 
+# Audit event per koda_circuit_breaker_state gauge value.
+_AUDIT_EVENT_BY_STATE = {
+    0: "system.circuit_closed",
+    1: "system.circuit_half_open",
+    2: "system.circuit_opened",
+}
+
 
 class _MetricsListener(pybreaker.CircuitBreakerListener):
     """Update Prometheus gauge and emit audit on circuit state changes."""
@@ -80,9 +92,8 @@ class _MetricsListener(pybreaker.CircuitBreakerListener):
 
         from koda.services.audit import emit_task_lifecycle
 
-        event_type = "system.circuit_opened" if val == 2 else "system.circuit_closed"
         emit_task_lifecycle(
-            event_type,
+            _AUDIT_EVENT_BY_STATE.get(val, "system.circuit_state_changed"),
             dependency=cb.name,
             old_state=str(old_state.name) if old_state else "unknown",
             new_state=str(new_state.name) if new_state else "unknown",
@@ -205,8 +216,16 @@ _clock: Callable[[], float] = time.monotonic
 
 @dataclass
 class _RecoveryGate:
-    opened_at: float | None = None
-    probe_started_at: float | None = None
+    """Timing for one open or half-open episode of a breaker.
+
+    pybreaker creates a new state object on every transition, so ``episode``
+    (a weak reference to that object) tells whether this timing still belongs
+    to the breaker's current state. ``started_at`` is when the breaker opened
+    (open episode) or when the current probe was admitted (half-open episode).
+    """
+
+    episode: weakref.ReferenceType[Any]
+    started_at: float
 
 
 _gates: weakref.WeakKeyDictionary[Any, _RecoveryGate] = weakref.WeakKeyDictionary()
@@ -215,6 +234,17 @@ _gates_lock = threading.RLock()
 
 def _unavailable(breaker: pybreaker.CircuitBreaker) -> str:
     return f"{breaker.name} temporarily unavailable (circuit breaker open)."
+
+
+def _current_gate(breaker: pybreaker.CircuitBreaker) -> _RecoveryGate | None:
+    gate = _gates.get(breaker)
+    if gate is None or gate.episode() is not breaker.state:
+        return None  # no timing yet, or left over from an earlier episode
+    return gate
+
+
+def _start_episode(breaker: pybreaker.CircuitBreaker, now: float) -> None:
+    _gates[breaker] = _RecoveryGate(episode=weakref.ref(breaker.state), started_at=now)
 
 
 def check_breaker(breaker: pybreaker.CircuitBreaker) -> str | None:
@@ -226,20 +256,20 @@ def check_breaker(breaker: pybreaker.CircuitBreaker) -> str | None:
     with _gates_lock:
         state = str(breaker.current_state)
         if state not in (_STATE_OPEN, _STATE_HALF_OPEN):
-            _gates.pop(breaker, None)  # drop timing left behind by a direct breaker.close()
             return None
         now = _clock()
-        gate = _gates.setdefault(breaker, _RecoveryGate())
+        gate = _current_gate(breaker)
         if state == _STATE_OPEN:
-            if gate.opened_at is None:
+            if gate is None:
                 # Opened outside record_failure (e.g. breaker.open()): start timing now.
-                gate.opened_at = now
-            if now - gate.opened_at < breaker.reset_timeout:
+                _start_episode(breaker, now)
+                return _unavailable(breaker)
+            if now - gate.started_at < breaker.reset_timeout:
                 return _unavailable(breaker)
             breaker.half_open()
-        elif gate.probe_started_at is not None and now - gate.probe_started_at < breaker.reset_timeout:
-            return _unavailable(breaker)
-        gate.probe_started_at = now
+        elif gate is not None and now - gate.started_at < breaker.reset_timeout:
+            return _unavailable(breaker)  # a probe holds the slot
+        _start_episode(breaker, now)  # this caller is the probe
         return None
 
 
@@ -269,7 +299,7 @@ def record_failure(breaker: pybreaker.CircuitBreaker) -> None:
         with contextlib.suppress(Exception):
             breaker.call(_always_fail)
         if str(breaker.current_state) == _STATE_OPEN:
-            _gates[breaker] = _RecoveryGate(opened_at=_clock())
+            _start_episode(breaker, _clock())
 
 
 def _always_fail() -> None:
