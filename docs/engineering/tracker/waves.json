@@ -32,8 +32,8 @@
    "wave": "W2A",
    "name": "Onda 2A",
    "scope": "Governança de ferramentas e arquivos de credencial (M1-E4-T1, T9, T10, T13, M0-E3-T2, M0-E1-T4)",
-   "status": "final_review",
-   "ref": "integrate/wave-2a"
+   "status": "merged",
+   "ref": "dae8c39"
   },
   {
    "wave": "W4",
@@ -52,7 +52,7 @@
   {
    "wave": "W6",
    "name": "Onda 6",
-   "scope": "Squads, memória e agendador, acessibilidade, estados de erro e navegação mobile (M3, M8)",
+   "scope": "Squads, memória e agendador, acessibilidade, estados de erro e navegação mobile (M3, M8). Onda 6b corrige a causa raiz do deadlock das squads (M3-E6-T1) e o despacho entre agentes do agendador (D-259)",
    "status": "implementing",
    "ref": "task/M3-*, task/M8-*"
   },
@@ -67,8 +67,8 @@
    "wave": "REF",
    "name": "Referência openbot.run",
    "scope": "Estudo visual e de experiência (chat, agentes, canais, delegação), comparação com o Koda e ajustes no plano",
-   "status": "implementing",
-   "ref": "task/REF-OPENBOT"
+   "status": "merged",
+   "ref": "cee7b41"
   },
   {
    "wave": "W7",

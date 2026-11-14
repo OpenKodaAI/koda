@@ -1,6 +1,21 @@
 {
  "rows": [
   {
+   "id": "L17",
+   "at": "2026-11-14 23:59",
+   "event": "Onda 2A mesclada (dae8c39): governança de git e shell em background, um único resolvedor de caminhos seguros, credenciais dos CLIs protegidas; 8198 testes Python, gates Rust e web passando"
+  },
+  {
+   "id": "L16",
+   "at": "2026-11-14 23:55",
+   "event": "Onda 6b iniciada: causa raiz do deadlock das squads (M3-E6-T1) e despacho de jobs agendados entre agentes (D-259)"
+  },
+  {
+   "id": "L15",
+   "at": "2026-11-14 23:50",
+   "event": "Pesquisa do openbot.run mesclada (cee7b41): seção de referência, 2 tarefas novas e 7 tarefas ajustadas no plano"
+  },
+  {
    "id": "L14",
    "at": "2026-11-14 22:38",
    "event": "Onda 7 iniciada: autenticação, integridade de dados (M2) e remoção de código morto (M4)"

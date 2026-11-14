@@ -2,9 +2,9 @@
  "rows": [
   {
    "id": "B1",
-   "item": "Perguntas do operador do ADR-002 (OQ-1 a OQ-12)",
+   "item": "Decisões do operador: ADR-002 (OQ-1 a OQ-12) e plano (Q-25 a Q-27)",
    "kind": "approval",
-   "detail": "Prontas para sua decisão, cada uma com recomendação e impacto; travam só as partes que o ADR nomeia"
+   "detail": "Cada uma com recomendação e impacto: governança dos agentes, failover que pergunta antes, perguntas estruturadas, configs MCP de projeto"
   },
   {
    "id": "B2",

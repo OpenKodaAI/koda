@@ -4,8 +4,8 @@
    "milestone": "M0",
    "name": "Base de testes e rede de segurança",
    "total": 25,
-   "done": 8,
-   "in_progress": 2,
+   "done": 10,
+   "in_progress": 0,
    "awaiting_evidence": 0,
    "remaining": 15
   },
@@ -13,9 +13,9 @@
    "milestone": "M1",
    "name": "Segurança",
    "total": 68,
-   "done": 11,
-   "in_progress": 13,
-   "awaiting_evidence": 2,
+   "done": 14,
+   "in_progress": 9,
+   "awaiting_evidence": 3,
    "remaining": 42
   },
   {
@@ -32,9 +32,9 @@
    "name": "Jornadas críticas quebradas",
    "total": 43,
    "done": 4,
-   "in_progress": 4,
+   "in_progress": 5,
    "awaiting_evidence": 3,
-   "remaining": 32
+   "remaining": 31
   },
   {
    "milestone": "M4",
