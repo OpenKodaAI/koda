@@ -429,6 +429,40 @@ async def test_concurrent_operator_pauses_post_one_pause_event() -> None:
     store.notify_event.assert_awaited_once()
 
 
+async def _patch_room(store: AsyncMock, payload: dict[str, object]) -> web.Response:
+    request = _JsonRequest(match_info={"thread_id": "thread-1"}, payload=payload)
+    with (
+        patch("koda.control_plane.api._authorize_request", return_value=None),
+        patch("koda.squads.threads.get_squad_thread_store", return_value=store),
+    ):
+        return await control_plane_api.patch_dashboard_room_route(request)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["budget_auto_paused", "budget_alert_80_sent", "photo_hash", "telegram_title_key"])
+async def test_a_room_patch_refuses_metadata_the_server_owns(key: str) -> None:
+    store = _room_store(status="paused")
+
+    response = await _patch_room(store, {"title": "Room", "metadata": {key: False}})
+
+    # A client cannot clear the budget sweep's flags, or any other key the server keeps, so the
+    # whole patch is refused and nothing changes.
+    assert response.status == 400
+    assert key in json.loads(response.text)["error"]
+    store.update_thread.assert_not_awaited()
+    store.transition_thread_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_room_patch_sets_the_metadata_a_client_may_set() -> None:
+    store = _room_store(status="open")
+
+    response = await _patch_room(store, {"metadata": {"photo_url": "https://example.com/room.png"}})
+
+    assert response.status == 200
+    assert store.update_thread.await_args.kwargs["metadata_patch"] == {"photo_url": "https://example.com/room.png"}
+
+
 @pytest.mark.asyncio
 async def test_a_post_to_an_open_room_at_its_budget_cap_is_refused_with_the_reason() -> None:
     from decimal import Decimal

@@ -142,6 +142,10 @@ class SquadRouter:
             expired = []
         if expired and self._thread_store is not None:
             for claim in expired:
+                if claim.refused:
+                    # A worker refused the turn of a paused, spent or unreadable thread; no worker
+                    # went silent, so no claim_expired (a pause is explained by its own event).
+                    continue
                 try:
                     await self._emit_revert_event(claim)
                 except Exception:
@@ -404,14 +408,21 @@ class SquadRouter:
             return 0, 0
         pool = await self._thread_store._ensure_pool()  # noqa: SLF001
         schema = self._thread_store._schema  # noqa: SLF001
+        # Only the rooms the sweep still acts on: those not yet alerted at 80%, and open rooms at
+        # their cap. A paused room already alerted is left out, so however many there are, an
+        # open room at its cap is always reached.
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""SELECT id, status, budget_usd_cap, cost_usd_accum, metadata_json
                       FROM "{schema}"."squad_threads"
-                     WHERE status IN ('open', 'paused')
-                       AND budget_usd_cap IS NOT NULL
+                     WHERE budget_usd_cap IS NOT NULL
                        AND budget_usd_cap > 0
                        AND cost_usd_accum >= budget_usd_cap * 0.8
+                       AND (
+                           (status IN ('open', 'paused')
+                            AND COALESCE(metadata_json->>'budget_alert_80_sent', 'false') <> 'true')
+                           OR (status = 'open' AND cost_usd_accum >= budget_usd_cap)
+                       )
                      ORDER BY updated_at ASC
                      LIMIT $1""",
                 self._batch_size,

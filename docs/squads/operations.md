@@ -80,15 +80,26 @@ Before broad rollout, run these in canary:
   coordinator synthesis discloses it. A runtime renews the claim of each task
   whose turn it has queued or is running on every router sweep, so a turn that
   waits or runs longer than the TTL is neither dispatched twice nor escalated.
-  Claims of a paused or spent thread wait until it is open again.
+  A squad turn requeued from the dead-letter queue stays a squad turn, and its
+  claim is renewed the same way. Claims of a paused or spent thread wait until
+  it is open again.
 - Exceed 80% and then 100% of a thread budget; router must emit alert and
-  auto-pause the thread (`budget_exceeded_auto_pause`, reason `budget`).
-  A room reopened at its cap is paused again, with a new event.
+  auto-pause the thread (`budget_exceeded_auto_pause`, reason `budget`), one
+  event per pause. A room reopened at its cap is paused again, with a new
+  event; one reopened under its cap is no longer marked as paused by the
+  budget, and a later overrun pauses it again. Paused rooms already alerted
+  do not keep the sweep from an open room at its cap.
   A thread that is not `open`, or whose spend reached its cap, runs no agent
   turn on any path: web, Telegram, the inbox, unblocked tasks or synthesis,
   and the queue worker checks again when it takes a queued or recovered turn.
+  A thread the worker or the queue cannot read runs no turn either. When the
+  worker refuses a queued turn, its task's claim is released without counting
+  an expiry, so pauses never escalate a task, and the first router sweep after
+  the thread is open again under its cap dispatches the task again, without
+  waiting for `SQUAD_CLAIM_TTL_S` and without a `claim_expired` event.
   A dashboard post or Telegram topic message to such a thread is not routed;
-  the sender is told why.
+  the sender is told why. A dashboard room update may set only `photo_url` in
+  `metadata`; keys the server keeps, such as the budget flags, are refused.
 - Pause a room from the dashboard; the room must show a `thread_paused`
   system event with reason `operator`.
 - Disable a Telegram bot admin permission; bind/strict checks must fail closed.

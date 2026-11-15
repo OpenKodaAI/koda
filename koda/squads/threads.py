@@ -370,6 +370,15 @@ class SquadThreadStore:
                 extras = ", completed_at = NOW()"
             elif new_status == "archived":
                 extras = ", archived_at = NOW()"
+            elif new_status == "open":
+                # A room reopened under its cap is no longer paused by the budget; one reopened at
+                # its cap keeps the flag, and the budget sweep pauses it again (D-075).
+                extras = """, metadata_json = CASE
+                                 WHEN budget_usd_cap IS NULL OR budget_usd_cap <= 0
+                                      OR cost_usd_accum < budget_usd_cap
+                                 THEN COALESCE(metadata_json, '{}'::jsonb) - 'budget_auto_paused'
+                                 ELSE metadata_json
+                             END"""
             row = await conn.fetchrow(
                 f"""UPDATE "{self._schema}"."squad_threads"
                        SET status = $2, updated_at = NOW(){extras}

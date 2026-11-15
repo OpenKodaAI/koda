@@ -714,3 +714,48 @@ async def test_a_task_whose_turn_waits_or_runs_here_keeps_its_claim_past_its_ttl
     # Once no turn of it is queued or running here, its claim expires as a silent worker's does.
     await _expire_claim(tasks, task_ids["QA"])
     assert [claim.task_id for claim in (await router.sweep_once()).expired_claims] == [task_ids["QA"]]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_pauses_that_catch_a_queued_turn_never_escalate_its_task_and_a_reopen_dispatches_it_again(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock, fresh_queues: None
+) -> None:
+    from types import SimpleNamespace
+
+    from koda.services import queue_manager as qm
+
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    router = _router(threads, tasks)
+
+    for cycle in (1, 2):
+        # QA's turn waits in this runtime's queue when the operator pauses the room, so the worker
+        # refuses it when it takes it.
+        await _queue_turn_here(thread_id=thread_id, task_id=task_ids["QA"], agent_id="QA", parent=parent)
+        await threads.update_thread_status(thread_id, "paused")
+        with (
+            patch.object(qm, "_execute_single_task", AsyncMock()) as execute,
+            patch.object(qm, "update_task_status", MagicMock()),
+            patch.object(qm, "_update_runtime_queue_status", MagicMock()),
+        ):
+            await qm._process_queue(42, SimpleNamespace(user_data={}, bot=None, application=None))
+        execute.assert_not_awaited()
+
+        # The refused claim is not an expiry: the task is neither dispatched nor escalated while
+        # the room is paused, and the first sweep after the reopen, well within the claim TTL,
+        # dispatches it to QA again.
+        assert (await router.sweep_once()).expired_claims == []
+        assert turn_stubs.await_count == cycle - 1
+        await threads.update_thread_status(thread_id, "open")
+        await router.sweep_once()
+        assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA"] * cycle
+        assert turn_stubs.await_args_list[-1].kwargs["squad_task_id"] == task_ids["QA"]
+        qa_task = await tasks.get_task(task_ids["QA"])
+        assert qa_task is not None and qa_task.status == "claimed" and qa_task.assigned_agent_id == "QA"
+        assert int(qa_task.metadata.get("claim_expiry_count") or 0) == 0
+
+    # No worker went silent, so the room shows no claim expiry and no escalation.
+    history = await threads.thread_history(thread_id=thread_id, limit=100)
+    assert [row for row in history if (row.get("metadata") or {}).get("event_type") == "claim_expired"] == []
+    assert [row for row in history if row["type"] == "task_result"] == []

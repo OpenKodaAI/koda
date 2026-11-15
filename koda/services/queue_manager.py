@@ -1476,22 +1476,50 @@ async def _squad_turn_refusal_at_pickup(raw_item: Any) -> str | None:
 
     Checked when the per-user worker takes the item, so a turn queued while its thread was open,
     or recovered from the persisted queue after a restart, runs no turn once the thread is paused
-    or its spend reached its cap. A thread that cannot be read is left to the run's own checks.
+    or its spend reached its cap. A thread that cannot be read may be either, so its turn does not
+    run either (fail closed); its task is dispatched again once the thread reads runnable.
     """
     if not isinstance(raw_item, dict):
         return None
     thread_id = str(raw_item.get("squad_thread_id") or "").strip()
     if not thread_id:
         return None
-    try:
-        from koda.squads import get_squad_thread_store, squad_thread_turn_refusal
+    from koda.squads import get_squad_thread_store, squad_thread_turn_refusal
 
+    thread = None
+    try:
         thread_store = get_squad_thread_store()
         thread = await thread_store.get_thread(thread_id) if thread_store is not None else None
     except Exception:
         log.exception("squad_turn_pickup_check_failed", thread_id=thread_id)
-        return None
-    return squad_thread_turn_refusal(thread) if thread is not None else None
+    if thread is None:
+        log.warning("squad_turn_thread_unreadable_at_pickup", thread_id=thread_id)
+        return f"thread {thread_id} could not be read"
+    return squad_thread_turn_refusal(thread)
+
+
+async def _release_refused_squad_turn_claim(raw_item: Any) -> None:
+    """Release the task claim of a squad turn the worker refused, without counting an expiry (D-097).
+
+    The squad router's next sweep after the thread is open again under its cap dispatches the task
+    to its assignee again, instead of waiting for the claim TTL and spending one of the task's
+    expiries on a turn no worker lost.
+    """
+    if not isinstance(raw_item, dict):
+        return
+    squad_task_id = str(raw_item.get("squad_task_id") or "").strip()
+    agent_id = str(raw_item.get("executing_agent_id") or AGENT_ID or "default").strip()
+    if not squad_task_id or not agent_id:
+        return
+    try:
+        from koda.squads import get_squad_task_store
+
+        task_store = get_squad_task_store()
+        if task_store is not None:
+            await task_store.release_refused_claim(task_id=squad_task_id, agent_id=agent_id)
+    except Exception:
+        # The claim then expires at its TTL, and the sweep dispatches the task again then.
+        log.exception("squad_turn_refused_claim_release_failed", squad_task_id=squad_task_id)
 
 
 async def _cancel_pending_task(task: asyncio.Task[Any] | None) -> None:
@@ -2088,6 +2116,19 @@ def _build_recovered_raw_item(
     return raw
 
 
+# The queue-item fields that make a turn a squad turn (see ``enqueue_squad_agent_task``).
+_SQUAD_TURN_FIELDS = (
+    "executing_agent_id",
+    "squad_thread_id",
+    "squad_task_id",
+    "parent_message_id",
+    "delegation_chain",
+    "delegation_request_id",
+    "delegation_origin_agent_id",
+    "telegram_message_thread_id",
+)
+
+
 def _build_dlq_reprocess_raw_item(
     entry: dict[str, Any], payload: dict[str, Any] | None, *, task_id: int
 ) -> dict[str, Any]:
@@ -2112,7 +2153,7 @@ def _build_dlq_reprocess_raw_item(
             image_paths = [str(path) for path in payload_image_paths if path]
         artifact_bundle = payload.get("artifact_bundle")
         force_audio_response = bool(payload.get("force_audio_response"))
-    return _build_user_message_raw_item(
+    raw_item = _build_user_message_raw_item(
         task_id=task_id,
         chat_id=chat_id,
         query_text=query_text,
@@ -2125,6 +2166,12 @@ def _build_dlq_reprocess_raw_item(
         artifact_bundle=artifact_bundle,
         force_audio_response=force_audio_response,
     )
+    # A squad turn stays one: it runs in its room, the worker checks its thread when it takes it,
+    # and this runtime renews its task's claim while it waits (D-075, D-097).
+    for key in _SQUAD_TURN_FIELDS:
+        if payload and payload.get(key) is not None:
+            raw_item[key] = payload[key]
+    return raw_item
 
 
 async def _ensure_queue_worker(user_id: int, context: BotContext) -> None:
@@ -2392,7 +2439,9 @@ async def enqueue_squad_agent_task(
     """Enqueue a squad-scoped turn with runtime context already attached.
 
     Raises ``SquadThreadNotRunnableError`` when the thread is not open or its spend reached its
-    budget cap: such a thread runs no turn, whichever path asks for one (D-075).
+    budget cap: such a thread runs no turn, whichever path asks for one (D-075). A thread that
+    cannot be found is refused the same way, and an error reading it is raised, so no turn is
+    queued without the check.
     """
     if _shutting_down:
         raise RuntimeError("Agent runtime is shutting down.")
@@ -2400,8 +2449,16 @@ async def enqueue_squad_agent_task(
     from koda.squads import SquadThreadNotRunnableError, get_squad_thread_store, squad_thread_turn_refusal
 
     thread_store = get_squad_thread_store()
-    thread = await thread_store.get_thread(squad_thread_id) if thread_store is not None else None
-    refusal = squad_thread_turn_refusal(thread) if thread is not None else None
+    try:
+        thread = await thread_store.get_thread(squad_thread_id) if thread_store is not None else None
+    except Exception:
+        # The caller retries (the inbox dispatcher nacks the message): no turn runs unchecked.
+        log.exception("squad_turn_thread_read_failed", thread_id=squad_thread_id)
+        raise
+    if thread is None:
+        log.warning("squad_turn_thread_unreadable", thread_id=squad_thread_id)
+        raise SquadThreadNotRunnableError(f"thread {squad_thread_id} could not be read")
+    refusal = squad_thread_turn_refusal(thread)
     if refusal is not None:
         raise SquadThreadNotRunnableError(refusal)
 
@@ -9514,10 +9571,14 @@ async def _process_queue(user_id: int, context: BotContext) -> None:
 
                 if (refusal := await _squad_turn_refusal_at_pickup(raw_item)) is not None:
                     # The thread was paused or spent after this turn was queued, or before a restart
-                    # recovered it: it runs no turn (D-075). This is not a failed turn, so no failed
-                    # task result is posted; its task keeps its claim, which the squad router
-                    # dispatches again once the thread runs.
+                    # recovered it, or cannot be read: it runs no turn (D-075). This is not a failed
+                    # turn, so no failed task result is posted. Its task's claim is released without
+                    # counting an expiry, and the squad router dispatches the task again once the
+                    # thread runs (D-097). This runtime stops renewing the claim first.
                     log.info("squad_turn_refused_at_pickup", task_id=task_id, user_id=user_id, reason=refusal)
+                    if task_id is not None:
+                        _squad_turn_claims.pop(task_id, None)
+                    await _release_refused_squad_turn_claim(raw_item)
                     if task_id is not None:
                         update_task_status(
                             task_id,
@@ -9852,6 +9913,7 @@ async def requeue_dlq_entry(
         source_action="dlq_reprocess",
     )
     raw_item = _build_dlq_reprocess_raw_item(entry, payload, task_id=task_id)
+    _track_squad_turn_claim(task_id, raw_item)
     queue = get_queue(user_id)
     await queue.put(raw_item)
     _track_queued_task_id(user_id, task_id)

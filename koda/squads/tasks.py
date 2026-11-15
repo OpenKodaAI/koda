@@ -67,6 +67,9 @@ class ExpiredClaim:
     version_after: int
     # How many times this task's claim has expired, this time included.
     expiry_count: int = 1
+    # The claim was released because a queue worker refused its turn (the thread was paused or
+    # spent), not because a worker went silent, so it is not counted as an expiry.
+    refused: bool = False
 
 
 @dataclass
@@ -479,18 +482,44 @@ class SquadTaskStore:
                       FROM unnest($1::uuid[], $2::text[]) AS c(task_id, agent_id)
                      WHERE t.id = c.task_id
                        AND t.assigned_agent_id = c.agent_id
-                       AND t.status = 'claimed'""",
+                       AND t.status = 'claimed'
+                       AND COALESCE(t.metadata_json->>'claim_refused', 'false') <> 'true'""",
                 [task_id for task_id, _agent_id in claims],
                 [agent_id for _task_id, agent_id in claims],
                 str(max(1, int(ttl_seconds))),
             )
         return int(str(result).split()[-1] or 0)
 
+    async def release_refused_claim(self, *, task_id: str, agent_id: str) -> bool:
+        """Release ``agent_id``'s claim of a task whose queued turn a worker refused (D-075, D-097).
+
+        The worker refuses a turn of a thread that is paused, spent or cannot be read. The claim
+        is due at once and marked ``claim_refused``, so the first claim sweep after the thread is
+        open again under its cap returns the task to ``pending`` without counting an expiry, and
+        the router dispatches it to its assignee again without waiting for ``SQUAD_CLAIM_TTL_S``.
+        A refused claim is not renewed. As with a renewal, the version and ``updated_at`` stay.
+        Returns whether the agent still held the claim.
+        """
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                f"""UPDATE "{self._schema}"."squad_tasks"
+                       SET claim_expires_at = NOW(),
+                           metadata_json = COALESCE(metadata_json, '{{}}'::jsonb) || '{{"claim_refused": true}}'::jsonb
+                     WHERE id = $1
+                       AND assigned_agent_id = $2
+                       AND status = 'claimed'""",
+                task_id,
+                agent_id,
+            )
+        return str(result) == "UPDATE 1"
+
     async def sweep_expired_claims(self, *, batch_size: int = 50, squad_id: str | None = None) -> list[ExpiredClaim]:
         """Atomically revert tasks past their claim TTL back to ``pending``.
 
         The planned assignee is kept, so the squad router can dispatch the task to it again, and
-        ``metadata.claim_expiry_count`` counts the expiries (D-097). Only the tasks of threads
+        ``metadata.claim_expiry_count`` counts the expiries (D-097); a claim a worker released
+        because it refused the turn (``claim_refused``) is not counted. Only the tasks of threads
         that can run turns are swept: open and under their budget cap. A paused or spent
         thread's claims wait until it is open again under its cap (D-075).
         With ``squad_id``, only the tasks of that squad's threads are swept.
@@ -501,7 +530,8 @@ class SquadTaskStore:
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""WITH expired AS (
-                        SELECT t.id, t.assigned_agent_id
+                        SELECT t.id, t.assigned_agent_id,
+                               COALESCE(t.metadata_json->>'claim_refused', 'false') = 'true' AS refused
                           FROM "{self._schema}"."squad_tasks" AS t
                           JOIN "{self._schema}"."squad_threads" AS th ON th.id = t.thread_id
                          WHERE t.status = 'claimed'
@@ -520,16 +550,19 @@ class SquadTaskStore:
                        SET status = 'pending',
                            claim_token = NULL,
                            claim_expires_at = NULL,
-                           metadata_json = COALESCE(t.metadata_json, '{{}}'::jsonb) || jsonb_build_object(
-                               'claim_expiry_count',
-                               COALESCE((t.metadata_json->>'claim_expiry_count')::int, 0) + 1
-                           ),
+                           metadata_json = CASE
+                               WHEN expired.refused THEN COALESCE(t.metadata_json, '{{}}'::jsonb) - 'claim_refused'
+                               ELSE COALESCE(t.metadata_json, '{{}}'::jsonb) || jsonb_build_object(
+                                   'claim_expiry_count',
+                                   COALESCE((t.metadata_json->>'claim_expiry_count')::int, 0) + 1
+                               )
+                           END,
                            version = t.version + 1,
                            updated_at = NOW()
                       FROM expired
                      WHERE t.id = expired.id
                  RETURNING t.id, t.thread_id, t.version,
-                           expired.assigned_agent_id AS prior_agent,
+                           expired.assigned_agent_id AS prior_agent, expired.refused,
                            (t.metadata_json->>'claim_expiry_count')::int AS expiry_count""",
                 max(1, min(int(batch_size), 500)),
                 squad_id,
@@ -540,7 +573,8 @@ class SquadTaskStore:
                 thread_id=str(r["thread_id"]),
                 previously_assigned_agent_id=r["prior_agent"],
                 version_after=int(r["version"]),
-                expiry_count=int(r["expiry_count"] or 1),
+                expiry_count=int(r["expiry_count"] or 0),
+                refused=bool(r["refused"]),
             )
             for r in rows
         ]

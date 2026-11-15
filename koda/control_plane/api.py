@@ -2498,6 +2498,12 @@ async def delete_dashboard_session_route(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "deleted": deleted})
 
 
+# The room metadata keys a client may set with ``metadata``. Every other key is the server's: the
+# budget sweep's flags (``budget_auto_paused``, ``budget_alert_80_sent``), the photo hash, the
+# Telegram title key, so a patch that names one is refused (D-075).
+_CLIENT_ROOM_METADATA_KEYS = frozenset({"photo_url"})
+
+
 async def patch_dashboard_room_route(request: web.Request) -> web.Response:
     """Patch room metadata (title, coordinator, status)."""
     if (resp := _authorize_request(request)) is not None:
@@ -2533,6 +2539,11 @@ async def patch_dashboard_room_route(request: web.Request) -> web.Response:
         else:
             metadata_patch["photo_url"] = str(photo).strip()
     if isinstance(payload.get("metadata"), dict):
+        server_keys = sorted(str(key) for key in payload["metadata"] if str(key) not in _CLIENT_ROOM_METADATA_KEYS)
+        if server_keys:
+            return web.json_response(
+                {"error": f"room metadata cannot be set by a client: {', '.join(server_keys)}"}, status=400
+            )
         for key, value in payload["metadata"].items():
             metadata_patch[str(key)] = value
 
