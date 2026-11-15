@@ -40,8 +40,8 @@ class PluginManifest:
     tools: list[PluginToolDef] = field(default_factory=list)
     prompt_section: str = ""
     requires: dict[str, Any] = field(default_factory=dict)
-    # The verified bytes of a skill package's files, by real path. When set, the handlers load
-    # from these bytes only, never from a later read of the files (D-292).
+    # The verified bytes of a skill package's files, by path under plugin_dir. When set, the
+    # handlers load from these bytes only, never from a later read of the files (D-292).
     sources: dict[str, bytes] | None = None
 
 
@@ -173,7 +173,8 @@ class PluginRegistry:
         from the plugin directory without following a symlink, so a file or a
         directory swapped in after the check is not loaded (D-270); a skill
         package's handler source is the verified bytes in ``manifest.sources``
-        instead, and a file missing there is not loaded (D-292). The module
+        hashed at the handler's path, wherever a symlink swapped in there points,
+        and a file missing there is not loaded (D-292). The module
         gets a flat name, with no parent package, so a relative import in it fails
         instead of resolving against another package; the name starts with the
         plugin's prefix, which ``unregister`` removes (D-291). ``sys.path`` is left
@@ -196,7 +197,7 @@ class PluginRegistry:
         module_name = _plugin_module_prefix(manifest.name) + module_path.replace(".", "/")
         try:
             if manifest.sources is not None:
-                source = manifest.sources.get(str(file_path))
+                source = manifest.sources.get(os.path.normpath(relative_path))
                 if source is None:
                     log.warning("plugin_handler_not_verified", handler=handler_path, plugin_dir=str(plugin_dir))
                     return None

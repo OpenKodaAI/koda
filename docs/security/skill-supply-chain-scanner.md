@@ -87,12 +87,17 @@ inside its directory, however package code loads it, while the handlers
 register or later, at tool-call time: an `import` statement,
 `importlib.util.spec_from_file_location` or a `SourceFileLoader` of its own all
 end in `SourceFileLoader.get_code`, which for those files reads neither a
-`__pycache__` entry (D-273) nor the file on disk. A module file
-that was not hashed, for example one added after the check, is refused with an
+`__pycache__` entry (D-273) nor the file on disk. The bytes are looked up by
+the path the module is loaded from, under the package directory, not by where
+a symlink there points: a file or a directory in the package swapped for a
+symlink after the check, to a file outside the package or to another package
+file, still runs the bytes hashed at that path. A module file that was not
+hashed, for example one added after the check, is refused with an
 `ImportError`. A compiled module inside a package's directory (a `.pyc` without
-its source, an extension module) is refused too, because Python would read it
-from disk when it loads: package code loads from its verified `.py` sources
-only.
+its source, an extension module) and a module in an archive there (a `.zip`
+that package code puts on `sys.path` or opens with `zipimport`) are refused
+too, because Python would read them from disk when they load: package code
+loads from its verified `.py` sources only.
 
 A registered package changed on disk keeps running the bytes that were
 verified, and is checked again whenever it registers again: `plugin_reload`

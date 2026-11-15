@@ -525,8 +525,9 @@ def test_an_import_outside_every_package_searches_the_path_once_after_a_package_
     assert searches == ["koda_no_such_module_d273"]
 
 
+@pytest.mark.parametrize("change", ["rewrite", "symlink_to_another_package_file"])
 def test_a_handler_rewritten_between_the_hash_and_the_load_runs_the_hashed_bytes(
-    tmp_path: Path, plugin_registry: object, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, plugin_registry: object, monkeypatch: pytest.MonkeyPatch, change: str
 ) -> None:
     """D-292: the handler runs from the bytes the integrity check hashed, not from a later read of the file."""
     from koda.plugins.registry import PluginRegistry
@@ -534,12 +535,19 @@ def test_a_handler_rewritten_between_the_hash_and_the_load_runs_the_hashed_bytes
 
     assert isinstance(plugin_registry, PluginRegistry)
     package_dir = _write_safe_package(tmp_path)
+    (package_dir / "other_handlers.py").write_text(
+        "async def read_notes(params, ctx):\n    return 'evil from another package file'\n", encoding="utf-8"
+    )
     install_skill_package(package_dir, agent_id="ATLAS")
     real_verify = _package.verify_skill_package_integrity
 
     def verify_then_rewrite(lock: dict, **kwargs: object) -> dict:
         integrity = real_verify(lock, **kwargs)  # type: ignore[arg-type]
-        (package_dir / "handlers.py").write_text(_EVIL_HANDLER, encoding="utf-8")
+        if change == "rewrite":
+            (package_dir / "handlers.py").write_text(_EVIL_HANDLER, encoding="utf-8")
+        else:
+            (package_dir / "handlers.py").unlink()
+            (package_dir / "handlers.py").symlink_to(package_dir / "other_handlers.py")
         return integrity
 
     monkeypatch.setattr(_package, "verify_skill_package_integrity", verify_then_rewrite)
@@ -655,6 +663,103 @@ def test_a_compiled_module_in_a_package_is_refused_at_tool_call_time(
             asyncio.run(handler({}, None))
     finally:
         sys.modules.pop("safe_pack_notes", None)
+
+
+@pytest.mark.parametrize("swap", ["file_to_outside", "directory_to_outside", "file_to_another_package_file"])
+def test_a_package_path_swapped_for_a_symlink_after_registration_runs_the_bytes_hashed_at_that_path(
+    tmp_path: Path, plugin_registry: object, swap: str
+) -> None:
+    """D-292: a module is looked up by the path the loader was given, so a symlink swapped in runs nothing unhashed."""
+    import asyncio
+    import shutil
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(
+        _LAZY_IMPORT_HANDLER.replace("Path(__file__).parent)", 'Path(__file__).parent / "lib")'), encoding="utf-8"
+    )
+    lib = package_dir / "lib"
+    lib.mkdir()
+    (lib / "safe_pack_notes.py").write_text('NOTES = "safe"\n', encoding="utf-8")
+    (lib / "other_notes.py").write_text('NOTES = "another package file"\n', encoding="utf-8")
+    install_skill_package(package_dir, agent_id="ATLAS")
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "safe_pack_notes.py").write_text('NOTES = "evil via symlink"\n', encoding="utf-8")
+    if swap == "file_to_outside":
+        (lib / "safe_pack_notes.py").unlink()
+        (lib / "safe_pack_notes.py").symlink_to(outside / "safe_pack_notes.py")
+    elif swap == "directory_to_outside":
+        shutil.move(str(lib), str(tmp_path / "moved_lib"))
+        lib.symlink_to(outside, target_is_directory=True)
+    else:
+        (lib / "safe_pack_notes.py").unlink()
+        (lib / "safe_pack_notes.py").symlink_to(lib / "other_notes.py")
+    assert ensure_installed_package_tools_registered("ATLAS") == {}
+    try:
+        result = asyncio.run(handler({}, None))
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
+
+    assert result.output == "safe"
+
+
+_ZIP_IMPORT_HANDLER = """
+import sys
+from pathlib import Path
+
+
+async def read_notes(params, ctx):
+    archive = str(Path(__file__).with_name("vendor.zip"))
+    sys.path.insert(0, archive)
+    try:
+        import safe_pack_zipped
+    finally:
+        sys.path.remove(archive)
+    return safe_pack_zipped.NOTES
+""".lstrip()
+
+
+@pytest.mark.parametrize("route", ["import", "load_module"])
+def test_a_module_in_an_archive_inside_a_package_is_refused_at_tool_call_time(
+    tmp_path: Path, plugin_registry: object, route: str
+) -> None:
+    """D-292: zipimport reads an archive from disk when it loads a module, after the check, so that is refused."""
+    import asyncio
+    import warnings
+    import zipfile
+    import zipimport
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    archive = package_dir / "vendor.zip"
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("safe_pack_zipped.py", 'NOTES = "safe"\n')
+    (package_dir / "handlers.py").write_text(_ZIP_IMPORT_HANDLER, encoding="utf-8")
+    install_skill_package(package_dir, agent_id="ATLAS")
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("safe_pack_zipped.py", 'NOTES = "evil via zip"\n')
+    try:
+        with pytest.raises(ImportError, match="verified .py sources only"):
+            if route == "import":
+                asyncio.run(handler({}, None))
+            else:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", DeprecationWarning)
+                    zipimport.zipimporter(str(archive)).load_module("safe_pack_zipped")
+    finally:
+        sys.modules.pop("safe_pack_zipped", None)
+        sys.path_importer_cache.pop(str(archive), None)
 
 
 def test_the_registry_does_not_reload_a_skill_package_from_its_files(tmp_path: Path, plugin_registry: object) -> None:
