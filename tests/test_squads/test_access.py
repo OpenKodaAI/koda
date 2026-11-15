@@ -130,3 +130,70 @@ async def test_operator_cross_workspace_rejected(
             thread_id=thread.id,
             principal=SquadPrincipal.workspace_operator("ops", workspace_id="other"),
         )
+
+
+async def _set_coordinator(dsn: str, squad_id: str, agent_id: str) -> None:
+    import asyncpg  # type: ignore[import-not-found]
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute(
+            f"""INSERT INTO "{_schema()}"."squad_coordinator_state" (squad_id, coordinator_agent_id)
+                  VALUES ($1, $2)""",
+            squad_id,
+            agent_id,
+        )
+    finally:
+        await conn.close()
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_squad_admin_requires_the_current_coordinator_or_a_workspace_operator(
+    stores: tuple[SquadThreadStore, SquadAccessService],
+    migrated_postgres: str,
+) -> None:
+    _, access = stores
+    # No coordinator yet: no agent may administer the squad, itself included.
+    with pytest.raises(SquadAccessError):
+        await access.require_squad_admin(
+            squad_id="build",
+            squad_workspace_id="acme",
+            principal=SquadPrincipal.agent("WORKER"),
+        )
+    await _set_coordinator(migrated_postgres, "build", "PM")
+    with pytest.raises(SquadAccessError):
+        await access.require_squad_admin(
+            squad_id="build",
+            squad_workspace_id="acme",
+            principal=SquadPrincipal.agent("WORKER"),
+        )
+    await access.require_squad_admin(
+        squad_id="build",
+        squad_workspace_id="acme",
+        principal=SquadPrincipal.agent("PM"),
+    )
+    # A coordinator of one squad does not administer another.
+    with pytest.raises(SquadAccessError):
+        await access.require_squad_admin(
+            squad_id="ops",
+            squad_workspace_id="acme",
+            principal=SquadPrincipal.agent("PM"),
+        )
+    await access.require_squad_admin(
+        squad_id="build",
+        squad_workspace_id="acme",
+        principal=SquadPrincipal.workspace_operator("owner", workspace_id="acme"),
+    )
+    with pytest.raises(SquadAccessError):
+        await access.require_squad_admin(
+            squad_id="build",
+            squad_workspace_id="acme",
+            principal=SquadPrincipal.workspace_operator("owner", workspace_id="other"),
+        )
+    with pytest.raises(SquadAccessError):
+        await access.require_squad_admin(
+            squad_id="build",
+            squad_workspace_id="acme",
+            principal=SquadPrincipal.thread_owner(42, workspace_id="acme"),
+        )

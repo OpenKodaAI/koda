@@ -292,10 +292,14 @@ class CoordinatorService:
         triggered_by: str | None = None,
         reason: str | None = None,
         force_replace: bool = False,
+        replace_agent_id: str | None = None,
         agent_spec: dict[str, Any] | None = None,
         auto: bool = False,
         thread_store: Any | None = None,
     ) -> CoordinatorState:
+        """Elect ``agent_id``. An existing coordinator is replaced only with
+        ``force_replace`` (operators) or when it is ``replace_agent_id`` (a
+        coordinator handing its own seat over), checked under the row lock."""
         if not squad_id or not agent_id:
             raise ValueError("squad_id and agent_id are required")
         resolved_spec = agent_spec if agent_spec is not None else self._load_agent_spec(agent_id)
@@ -309,7 +313,7 @@ class CoordinatorService:
                 squad_id,
             )
             previous = current["coordinator_agent_id"] if current is not None else None
-            if previous and previous != agent_id and not force_replace:
+            if previous and previous != agent_id and not force_replace and previous != replace_agent_id:
                 raise CoordinatorConflictError(
                     f"squad {squad_id!r} already has coordinator {previous!r}; pass force_replace=True"
                 )

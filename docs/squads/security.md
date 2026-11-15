@@ -21,5 +21,15 @@ a reason and the access service emits a governance audit event.
 Coordinator election validates the real AgentSpec from the control plane.
 Caller-supplied tool lists are ignored.
 
+Squad administration is its own `squad_admin` tool category, so granting the
+messaging tools (`agent_comm`) never grants it. Electing or demoting the
+coordinator, binding or unbinding Telegram and router ticks need either a
+workspace operator, through
+`PUT`/`DELETE /api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/coordinator`
+for election, or the squad's current coordinator, through the agent tools. The
+agent tools take no `force_replace` or `force`: a coordinator can only hand its
+own seat over, and `squad_telegram_bind` runs the `/squad_bind` supergroup,
+forum and admin checks against Telegram instead of trusting the caller.
+
 Artifact updates require ownership and an `If-Match` style version check to
 prevent concurrent overwrites.

@@ -15,6 +15,7 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import Any
 
+from koda.agent_contract import SQUAD_ADMIN_TOOL_IDS
 from koda.logging_config import get_logger
 
 log = get_logger(__name__)
@@ -49,6 +50,8 @@ _TOOL_PREFIX_CATEGORY: dict[str, str] = {
 
 
 def _infer_tool_category(tool: str) -> str:
+    if tool in SQUAD_ADMIN_TOOL_IDS:
+        return "squad_admin"
     for prefix, label in _TOOL_PREFIX_CATEGORY.items():
         if tool.startswith(prefix):
             return label

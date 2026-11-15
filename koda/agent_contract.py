@@ -616,6 +616,19 @@ _CORE_TOOL_DEFINITIONS: tuple[CoreToolDefinition, ...] = (
 CORE_TOOL_CATALOG: dict[str, CoreToolDefinition] = {definition.id: definition for definition in _CORE_TOOL_DEFINITIONS}
 CORE_TOOL_IDS: tuple[str, ...] = tuple(CORE_TOOL_CATALOG)
 
+# Squad administration tools. They sit in their own ``squad_admin`` category so a
+# messaging (``agent_comm``) grant never implies them, and their handlers accept only
+# the squad's current coordinator (operators use the control-plane routes).
+SQUAD_ADMIN_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "squad_coordinator_elect",
+        "squad_coordinator_demote",
+        "squad_telegram_bind",
+        "squad_telegram_unbind",
+        "squad_router_tick",
+    }
+)
+
 _CORE_PROVIDER_DEFINITIONS: tuple[CoreProviderDefinition, ...] = (
     CoreProviderDefinition(
         id="claude",

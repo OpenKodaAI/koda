@@ -485,6 +485,32 @@ class SquadAccessService:
         if coordinator_id != agent_id:
             raise SquadAccessError(f"agent {agent_id!r} is not coordinator for squad {squad_id!r}")
 
+    async def require_squad_admin(
+        self,
+        *,
+        squad_id: str,
+        squad_workspace_id: str,
+        principal: SquadPrincipal,
+    ) -> None:
+        """Authorize squad administration: electing or demoting the coordinator,
+        binding or unbinding Telegram, and router ticks.
+
+        ``squad_workspace_id`` is the workspace that owns the squad, as the control
+        plane records it. A workspace operator must be scoped to that workspace; an
+        agent must be the squad's current coordinator. Nothing else passes, so a
+        messaging grant alone never reaches these actions.
+        """
+        if not squad_id or not squad_workspace_id:
+            raise SquadAccessError("squad_id and the squad's workspace are required")
+        if principal.kind == "workspace_operator":
+            if not principal.workspace_id or principal.workspace_id != squad_workspace_id:
+                raise SquadAccessError("operator is not scoped to this workspace")
+            return
+        if principal.kind == "agent":
+            await self.require_coordinator(squad_id=squad_id, agent_id=principal.agent_id or "")
+            return
+        raise SquadAccessError("squad administration requires a workspace operator or the squad's coordinator")
+
 
 _service: SquadAccessService | None = None
 

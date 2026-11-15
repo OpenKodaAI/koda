@@ -136,6 +136,32 @@ async def test_elect_force_replace(service: CoordinatorService) -> None:
 
 @pytest.mark.postgres
 @pytest.mark.asyncio
+async def test_elect_replaces_only_the_named_coordinator(service: CoordinatorService) -> None:
+    await service.elect(squad_id="build", agent_id="PM", agent_spec=_eligible_spec())
+    with pytest.raises(CoordinatorConflictError):
+        await service.elect(
+            squad_id="build",
+            agent_id="OPS",
+            replace_agent_id="STALE",
+            agent_spec=_eligible_spec(),
+        )
+    state = await service.current_coordinator("build")
+    assert state is not None and state.coordinator_agent_id == "PM"
+    state = await service.elect(
+        squad_id="build",
+        agent_id="OPS",
+        replace_agent_id="PM",
+        triggered_by="PM",
+        agent_spec=_eligible_spec(),
+    )
+    assert state.coordinator_agent_id == "OPS"
+    history = await service.list_history(squad_id="build", limit=1)
+    assert history[0].event_type == "replaced"
+    assert history[0].previous_coordinator_agent_id == "PM"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
 async def test_demote_clears_state(service: CoordinatorService) -> None:
     await service.elect(squad_id="build", agent_id="PM", agent_spec=_eligible_spec())
     state = await service.demote(squad_id="build", reason="paused")
