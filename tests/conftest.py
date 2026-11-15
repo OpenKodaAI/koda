@@ -46,6 +46,17 @@ _SESSION_STATE_ROOT = Path(tempfile.mkdtemp(prefix="koda-test-state-"))
 atexit.register(shutil.rmtree, _SESSION_STATE_ROOT, True)
 os.environ["STATE_ROOT_DIR"] = str(_SESSION_STATE_ROOT)
 os.environ.pop(f"{os.environ['AGENT_ID']}_STATE_ROOT_DIR", None)
+# Runtime scratch (task dirs and their events.ndjson, image and artifact scratch) lives under
+# RUNTIME_EPHEMERAL_ROOT, <tmp>/koda-runtime/<agent> by default, which every session on the machine
+# shares; task ids restart at 1 in each test database, so sessions appended to each other's task
+# logs (D-276). Give it this session's own directory too; RUNTIME_ROOT_DIR follows it.
+_SHARED_RUNTIME_ROOT = Path(tempfile.gettempdir()) / "koda-runtime"
+_SESSION_RUNTIME_ROOT = Path(tempfile.mkdtemp(prefix="koda-test-runtime-"))
+atexit.register(shutil.rmtree, _SESSION_RUNTIME_ROOT, True)
+os.environ["RUNTIME_EPHEMERAL_ROOT"] = str(_SESSION_RUNTIME_ROOT)
+for _key in ("RUNTIME_EPHEMERAL_ROOT", "RUNTIME_ROOT_DIR"):
+    os.environ.pop(f"{os.environ['AGENT_ID']}_{_key}", None)
+os.environ.pop("RUNTIME_ROOT_DIR", None)
 
 
 def _koda_paths_under(root: Path) -> list[str]:
@@ -69,15 +80,29 @@ def _koda_paths_under(root: Path) -> list[str]:
     return found
 
 
+def _session_root_leaks() -> list[str]:
+    """Koda path settings in the real state dir or in the shared default runtime root."""
+    return [
+        f"under {root}: {path}" for root in (_REAL_STATE_ROOT, _SHARED_RUNTIME_ROOT) for path in _koda_paths_under(root)
+    ]
+
+
 @pytest.fixture(scope="session", autouse=True)
 def session_state_root():
-    """This session's STATE_ROOT_DIR; fails the run if a loaded module points into the real one.
+    """This session's STATE_ROOT_DIR; fails the run if a loaded module points into the real one
+    or into the shared default runtime root.
 
     The end-of-session check has the blind spots listed on :func:`_koda_paths_under`.
     """
     yield _SESSION_STATE_ROOT
-    leaked = _koda_paths_under(_REAL_STATE_ROOT)
-    assert not leaked, f"Koda paths under the real state dir {_REAL_STATE_ROOT}: {leaked}"
+    leaked = _session_root_leaks()
+    assert not leaked, f"Koda paths outside this session's state and runtime dirs: {leaked}"
+
+
+@pytest.fixture(scope="session")
+def session_runtime_root() -> Path:
+    """This session's RUNTIME_EPHEMERAL_ROOT (D-276); session_state_root guards the shared default."""
+    return _SESSION_RUNTIME_ROOT
 
 
 @pytest.fixture(autouse=True)
