@@ -29,10 +29,12 @@ Caller-supplied tool lists are ignored.
 
 Squad administration is its own `squad_admin` tool category, so granting the
 messaging tools (`agent_comm`) never grants it. Electing or demoting the
-coordinator, binding or unbinding Telegram and router ticks need either a
-workspace operator, through
+coordinator, binding or unbinding Telegram, router ticks and opening a thread
+(`squad_thread_create`, which names the thread's coordinator and participants)
+need either a workspace operator, through
 `PUT`/`DELETE /api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/coordinator`
-for election, or the squad's current coordinator, through the agent tools. The
+for election and `/squad_thread_new` or the Rooms dashboard for threads, or the
+squad's current coordinator, through the agent tools. The
 agent tools take no `force_replace` or `force`: a coordinator can only hand its
 own seat over, and `squad_telegram_bind` runs the `/squad_bind` supergroup,
 forum and admin checks against Telegram instead of trusting the caller.

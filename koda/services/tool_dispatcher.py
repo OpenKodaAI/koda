@@ -3643,6 +3643,15 @@ async def _handle_squad_thread_create(params: dict, ctx: ToolContext) -> AgentTo
             success=False,
             output="Missing 'workspace_id' or 'squad_id'.",
         )
+    # Opening a thread names its coordinator and participants: a coordination action.
+    admin_err = await _require_squad_admin(
+        tool="squad_thread_create",
+        ctx=ctx,
+        squad_id=str(squad_id),
+        workspace_id=str(workspace_id),
+    )
+    if admin_err:
+        return admin_err
 
     from koda.squads import get_squad_thread_store
 

@@ -494,7 +494,7 @@ class SquadAccessService:
         principal: SquadPrincipal,
     ) -> None:
         """Authorize squad administration: electing or demoting the coordinator,
-        binding or unbinding Telegram, and router ticks.
+        binding or unbinding Telegram, router ticks and opening threads.
 
         ``squad_workspace_id`` is the workspace that owns the squad, as the control
         plane records it. A workspace operator must be scoped to that workspace; an

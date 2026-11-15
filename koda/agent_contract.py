@@ -626,6 +626,7 @@ SQUAD_ADMIN_TOOL_IDS: frozenset[str] = frozenset(
         "squad_telegram_bind",
         "squad_telegram_unbind",
         "squad_router_tick",
+        "squad_thread_create",
     }
 )
 

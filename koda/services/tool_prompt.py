@@ -679,7 +679,7 @@ Communicate with other agents, delegate tasks, and coordinate work.
 ### Squad Threads
 Persistent multi-agent conversations scoped to a (workspace_id, squad_id).
 
-- `squad_thread_create` — Open a new thread.
+- `squad_thread_create` — Open a new thread (the squad's current coordinator only).
   Params: `{"workspace_id": "...", "squad_id": "...", "title": "...",
             "participants": [{"agent_id": "FRONTEND", "role": "worker"}],
             "coordinator_agent_id": "PM"}`
@@ -721,9 +721,9 @@ A squad MAY have an elected coordinator that orchestrates the team. Without one,
 routing falls back to @mention + capability scoring.
 
 Squad administration tools (`squad_coordinator_elect`, `squad_coordinator_demote`,
-`squad_router_tick`, `squad_telegram_bind`, `squad_telegram_unbind`) work only for
-the squad's current coordinator; anyone else gets `Forbidden`. Operators elect the
-first coordinator from the control plane.
+`squad_router_tick`, `squad_telegram_bind`, `squad_telegram_unbind`,
+`squad_thread_create`) work only for the squad's current coordinator; anyone else
+gets `Forbidden`. Operators elect the first coordinator from the control plane.
 
 - `squad_coordinator_elect` — Hand the coordinator seat to another agent of the squad
   (or an agent of its workspace that is in no squad).

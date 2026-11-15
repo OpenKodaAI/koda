@@ -348,7 +348,7 @@ async def test_squad_thread_create_no_store(ctx: ToolContext, monkeypatch: pytes
     monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
     with patch("koda.squads.get_squad_thread_store", return_value=None):
         result = await _handle_squad_thread_create(
-            {"workspace_id": "w", "squad_id": "s", "title": "t"},
+            {"workspace_id": "acme", "squad_id": "s", "title": "t"},
             ctx,
         )
     assert not result.success
@@ -383,7 +383,7 @@ async def test_squad_thread_create_success(ctx: ToolContext, monkeypatch: pytest
     with patch("koda.squads.get_squad_thread_store", return_value=mock_store):
         result = await _handle_squad_thread_create(
             {
-                "workspace_id": "w",
+                "workspace_id": "acme",
                 "squad_id": "s",
                 "title": "t",
                 "coordinator_agent_id": "PM",
@@ -1092,6 +1092,7 @@ def test_squad_admin_tools_have_their_own_category() -> None:
         "squad_telegram_bind",
         "squad_telegram_unbind",
         "squad_router_tick",
+        "squad_thread_create",
     )
     for tool in admin_tools:
         assert _infer_tool_category(tool) == "squad_admin", tool
@@ -1159,6 +1160,11 @@ async def test_coordinator_elect_drops_caller_force_replace(ctx: ToolContext, mo
         (_handle_squad_coordinator_demote, {"squad_id": "build"}, "koda.squads.get_coordinator_service"),
         (_handle_squad_router_tick, {"squad_id": "build"}, "koda.squads.get_squad_router"),
         (_handle_squad_telegram_unbind, {"squad_id": "build"}, "koda.squads.get_telegram_binding_service"),
+        (
+            _handle_squad_thread_create,
+            {"workspace_id": "acme", "squad_id": "build", "title": "t", "coordinator_agent_id": "WORKER"},
+            "koda.squads.get_squad_thread_store",
+        ),
         (
             _handle_squad_telegram_bind,
             {"workspace_id": "acme", "squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
@@ -1831,3 +1837,27 @@ async def test_coordinator_get_with_state_and_history(ctx: ToolContext, monkeypa
     assert result.success
     assert "coordinator=PM" in result.output
     assert "elected" in result.output
+
+
+@pytest.mark.asyncio
+async def test_squad_thread_create_checks_the_caller_and_the_squad_workspace(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-306: opening a thread is a coordination action, checked like the other squad_admin tools."""
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.executing_agent_id = "WORKER"
+    access = _DenyingSquadAdmin()
+    store = AsyncMock()
+    with (
+        patch("koda.squads.get_squad_access_service", return_value=access),
+        patch("koda.squads.get_squad_thread_store", return_value=store),
+    ):
+        refused = await _handle_squad_thread_create({"workspace_id": "acme", "squad_id": "build"}, ctx)
+        other_workspace = await _handle_squad_thread_create({"workspace_id": "beta", "squad_id": "build"}, ctx)
+    assert refused.output.startswith("Forbidden:")
+    assert other_workspace.output.startswith("Forbidden:")
+    assert "workspace" in other_workspace.output
+    store.create_thread.assert_not_awaited()
+    principal = access.admin_calls[0]["principal"]
+    assert getattr(principal, "agent_id", None) == "WORKER"
+    assert access.admin_calls[0]["squad_workspace_id"] == "acme"
