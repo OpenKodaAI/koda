@@ -159,12 +159,16 @@ class PostgresMessageBus:
     async def _insert(
         self,
         from_agent: str,
-        to_agent: str,
+        to_agent: str | list[str],
         content: str,
         message_type: str,
         metadata: dict[str, Any],
     ) -> str:
+        """Insert one message for one agent or, given a list, one message for all of them."""
         assert self._pool is not None
+        to_agents = [to_agent] if isinstance(to_agent, str) else list(to_agent)
+        # A message to several agents keeps ``to_agent`` NULL, as thread posts do.
+        single_to_agent = to_agents[0] if len(to_agents) == 1 else None
         metadata = dict(metadata or {})
         kind = str(metadata.get("kind") or ("agent_text" if message_type == "text" else message_type))
         payload = metadata.get("payload")
@@ -189,7 +193,7 @@ class PostgresMessageBus:
                          LIMIT 1""",
                     str(idempotency_key),
                     from_agent,
-                    to_agent,
+                    single_to_agent,
                 )
                 if existing is not None:
                     return f"msg-{int(existing)}"
@@ -205,8 +209,8 @@ class PostgresMessageBus:
                 message_uuid,
                 str(thread_id) if thread_id else None,
                 from_agent,
-                to_agent,
-                json.dumps([to_agent]),
+                single_to_agent,
+                json.dumps(to_agents),
                 str(content or ""),
                 message_type,
                 kind,
@@ -217,26 +221,27 @@ class PostgresMessageBus:
                 str(in_reply_to) if in_reply_to else None,
                 str(idempotency_key) if idempotency_key else None,
             )
-            await conn.execute(
-                f"""INSERT INTO "{self._schema}"."squad_message_recipients" (message_id, to_agent_id)
-                      VALUES ($1, $2)
-                      ON CONFLICT DO NOTHING""",
-                int(row_id),
-                to_agent,
-            )
-            notify_payload = json.dumps({"to_agent": to_agent, "msg_id": int(row_id)})
-            await conn.execute("SELECT pg_notify($1, $2)", self._notify_channel, notify_payload)
+            for recipient in to_agents:
+                await conn.execute(
+                    f"""INSERT INTO "{self._schema}"."squad_message_recipients" (message_id, to_agent_id)
+                          VALUES ($1, $2)
+                          ON CONFLICT DO NOTHING""",
+                    int(row_id),
+                    recipient,
+                )
+                notify_payload = json.dumps({"to_agent": recipient, "msg_id": int(row_id)})
+                await conn.execute("SELECT pg_notify($1, $2)", self._notify_channel, notify_payload)
         msg_id = f"msg-{int(row_id)}"
         self._record_local(
             AgentMessage(
                 from_agent=from_agent,
-                to_agent=to_agent,
+                to_agent=to_agents[0],
                 content=content,
                 message_type=message_type,
                 metadata=metadata,
                 message_id=msg_id,
                 thread_id=str(thread_id) if thread_id else None,
-                to_agent_ids=[to_agent],
+                to_agent_ids=list(to_agents),
                 kind=kind,
                 payload=payload if isinstance(payload, dict) else {},
                 causation_id=str(causation_id) if causation_id else None,
@@ -630,19 +635,26 @@ class PostgresMessageBus:
         *,
         thread_id: str,
         recipients: Iterable[str],
+        metadata: dict[str, Any] | None = None,
     ) -> int:
+        """Post one thread message addressed to each participant whose inbox has room."""
         await self._ensure_started()
-        count = 0
+        to_agents: list[str] = []
         for agent_id in broadcast_recipients(from_agent, recipients, exclude):
             try:
-                if await self._inbox_size(agent_id) >= self._max_inbox_size:
-                    continue
-                metadata = {"thread_id": thread_id, "kind": "agent_text"}
-                await self._insert(from_agent, agent_id, content, "text", metadata)
-                count += 1
+                if await self._inbox_size(agent_id) < self._max_inbox_size:
+                    to_agents.append(agent_id)
             except Exception:
                 log.exception("postgres_bus_broadcast_send_failed", to=agent_id)
-        return count
+        if not to_agents:
+            return 0
+        message_metadata = {**(metadata or {}), "thread_id": thread_id, "kind": "agent_text"}
+        try:
+            await self._insert(from_agent, to_agents, content, "text", message_metadata)
+        except Exception:
+            log.exception("postgres_bus_broadcast_send_failed", to=to_agents)
+            return 0
+        return len(to_agents)
 
     def list_agents(self) -> list[dict[str, Any]]:
         # Best-effort in-process snapshot. Cross-process state lives in the DB.

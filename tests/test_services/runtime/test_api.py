@@ -351,12 +351,17 @@ async def test_runtime_task_browser_exposes_preview_url(tmp_path):
     assert payload["browser"]["preview_path"] == "artifacts/preview.png"
 
 
+# Free-text fields whose text may start with "/" without naming a host path.
+_TEXT_KEYS = {"last_title", "kernel_error", "unavailable_reason"}
+
+
 def _absolute_paths(value: object, key: str = "") -> list[str]:
     if isinstance(value, dict):
         return [path for item_key, item in value.items() for path in _absolute_paths(item, str(item_key))]
     if isinstance(value, list):
         return [path for item in value for path in _absolute_paths(item, key)]
-    if isinstance(value, str) and value.startswith("/") and not key.endswith("_url"):
+    is_text = key in _TEXT_KEYS or key.endswith("_url")
+    if isinstance(value, str) and not is_text and value.startswith(("/", "file:")):
         return [f"{key}={value}"]
     return []
 
@@ -369,6 +374,7 @@ async def test_runtime_task_browser_payload_has_no_absolute_host_paths(tmp_path)
     screenshot.parent.mkdir(parents=True, exist_ok=True)
     screenshot.write_bytes(b"\x89PNG\r\n")
     outside = tmp_path / "elsewhere" / "shot.png"
+    page = task_root / "browser" / "page.html"
     controller = _ControllerStub(
         runtime_root=runtime_root,
         env={"task_id": 7, "browser_scope_id": 7},
@@ -378,10 +384,21 @@ async def test_runtime_task_browser_payload_has_no_absolute_host_paths(tmp_path)
             "runtime_dir": str(task_root / "browser"),
             "last_screenshot_path": str(screenshot),
             "metadata": {"runtime_dir": str(task_root / "browser"), "profile_dir": str(outside.parent)},
-            "downloads": [str(outside)],
+            "download_paths": [str(outside)],
+            "url": outside.as_uri(),
+            "origin": outside.as_uri(),
+            "last_url": page.as_uri(),
+            "last_title": "/",
+            "kernel_error": "/usr/bin/Xvfb: not found",
+            "unavailable_reason": "/dev/shm is full",
             "session_persisted_only": True,
         },
     )
+    kernel_runtime_dir = tmp_path / "kernel" / "tasks" / "7" / "browser"
+    controller.store.list_browser_sessions = lambda task_id: [  # type: ignore[method-assign]
+        {"id": 1, "status": "running", "metadata": {"runtime_dir": str(task_root / "browser")}},
+        {"id": 2, "status": "running", "metadata": {"runtime_dir": str(kernel_runtime_dir), "scope_id": 7}},
+    ]
     request = _request(task_id=7, headers={"X-Runtime-Token": "secret"})
 
     with (
@@ -390,13 +407,22 @@ async def test_runtime_task_browser_payload_has_no_absolute_host_paths(tmp_path)
     ):
         response = await _runtime_task_browser(request)
 
-    browser = json.loads(response.text)["browser"]
-    assert _absolute_paths(browser) == []
+    body = json.loads(response.text)
+    assert _absolute_paths(body) == []
+    browser = body["browser"]
     assert browser["runtime_dir"] == "browser"
     assert browser["last_screenshot_path"] == "browser/browser_7_1.png"
     assert browser["preview_path"] == "browser/browser_7_1.png"
     assert browser["metadata"] == {"runtime_dir": "browser", "profile_dir": None}
-    assert browser["downloads"] == [None]
+    assert browser["download_paths"] == [None]
+    assert (browser["url"], browser["origin"], browser["last_url"]) == (None, None, "browser/page.html")
+    assert browser["last_title"] == "/"
+    assert browser["kernel_error"] == "/usr/bin/Xvfb: not found"
+    assert browser["unavailable_reason"] == "/dev/shm is full"
+    assert body["sessions"] == [
+        {"id": 1, "status": "running", "metadata": {"runtime_dir": "browser"}},
+        {"id": 2, "status": "running", "metadata": {"runtime_dir": None, "scope_id": 7}},
+    ]
 
 
 @pytest.mark.asyncio
@@ -1333,6 +1359,41 @@ async def test_squad_message_runs_as_the_thread_owner_not_a_caller_chosen_user()
     assert store.calls == [_THREAD_ID]
     kwargs = enqueue.await_args.kwargs
     assert (kwargs["user_id"], kwargs["chat_id"]) == (777, -100555)
+    # The caller learns that the identity it sent was not used.
+    assert json.loads(response.text)["ignored"] == ["squad.user_id", "squad.chat_id", "squad.telegram_chat_id"]
+
+
+@pytest.mark.asyncio
+async def test_squad_message_logs_a_caller_identity_it_ignores():
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, _enqueue, _store = await _send_squad_message(
+            {"thread_id": _THREAD_ID, "target_agent_id": "WORKER", "user_id": 1},
+            thread=thread,
+        )
+
+    assert response.status == 202
+    assert json.loads(response.text)["ignored"] == ["squad.user_id"]
+    log.warning.assert_called_once_with(
+        "squad_message_identity_ignored",
+        thread_id=_THREAD_ID,
+        session_id="squad-session",
+        ignored=["squad.user_id"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_squad_message_with_the_thread_identity_reports_nothing_ignored():
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, _enqueue, _store = await _send_squad_message(
+            {"thread_id": _THREAD_ID, "target_agent_id": "WORKER", "user_id": 777, "chat_id": -100555},
+            thread=thread,
+        )
+
+    assert response.status == 202
+    assert json.loads(response.text)["ignored"] == []
+    log.warning.assert_not_called()
 
 
 @pytest.mark.asyncio

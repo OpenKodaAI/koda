@@ -264,11 +264,13 @@ class InMemoryMessageBus:
         *,
         thread_id: str,
         recipients: Iterable[str],
+        metadata: dict[str, Any] | None = None,
     ) -> int:
         """Send a thread message to each of the thread's participants. Returns count sent."""
+        message_metadata = {**(metadata or {}), "thread_id": thread_id, "kind": "agent_text"}
         count = 0
         for agent_id in broadcast_recipients(from_agent, recipients, exclude):
-            msg_id = await self.send(from_agent, agent_id, content, {"thread_id": thread_id, "kind": "agent_text"})
+            msg_id = await self.send(from_agent, agent_id, content, dict(message_metadata))
             if not msg_id.startswith("Error"):
                 count += 1
         return count

@@ -262,12 +262,15 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   private thread, and break-glass access is refused when its audit event cannot be written.
   (M1-E5-T1, M1-E5-T4, D-038, D-041, D-304, D-306)
 - `agent_broadcast` reaches only the active participants of the current squad thread, needs
-  write access to that thread, and tags each message with the thread. It never reaches
-  `system`, `user:*` or `operator:*` pseudo-agents or agents of other threads and workspaces;
-  outside a squad thread it is refused. A squad message sent to the runtime API runs as the
-  thread's owner and chat, not as a `user_id` or `chat_id` the caller supplies. The memory
-  engine refuses a recall without a positive `user_id` instead of returning every user's
-  memories. (M1-E5-T2, D-040, D-134, D-137)
+  write access to that thread, and tags each message with the thread, the sender's squad
+  task and its delegation chain. It never reaches the `system`, `user:*` or `operator:*`
+  pseudo-agents (an agent named `SYSTEM` or `OPERATOR` is still reached) or agents of other
+  threads and workspaces; outside a squad thread it is refused. On Postgres a broadcast is
+  one thread message with all its recipients, so the squad room shows it once. A squad
+  message sent to the runtime API runs as the thread's owner and chat, not as a `user_id`
+  or `chat_id` the caller supplies; the response lists such a field under `ignored` and
+  the runtime logs it. The memory engine refuses a recall without a positive `user_id`
+  instead of returning every user's memories. (M1-E5-T2, D-040, D-134, D-137)
 
 
 ### Added
@@ -451,9 +454,10 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 
 - The runtime API answers a non-numeric `after_offset` on the terminal WebSocket with `400`
   instead of `500`, and a bad `offset` on a schedule detail names `offset` in its error. The
-  browser payload gives paths relative to the task's runtime directory and never an
-  absolute host path, so the dashboard's browser panel shows `browser` as its runtime
-  directory. (M3-E8-T4)
+  browser payload and its browser session rows give paths, `file:` URLs included, relative
+  to the task's runtime directory and never an absolute host path, so the dashboard's
+  browser panel shows `browser` as its runtime directory. A page title or error that starts
+  with `/` is kept. (M3-E8-T4)
 - Automatic and web-created scheduled jobs run. Every reminder, interval and cron run
   used to be blocked as "policy snapshot is missing". Migration 047 adds the scheduler
   events table and the dispatch and validation columns that a real Postgres database

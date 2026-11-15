@@ -24,14 +24,15 @@ MessageKind = Literal[
 ]
 
 
-# Senders and principals that write to ``squad_messages`` but own no inbox.
+# Senders and principals that write to ``squad_messages`` but own no inbox. They are
+# lower-case; agent ids are upper-case, so an agent named ``SYSTEM`` is a real agent.
 _PSEUDO_AGENT_IDS = frozenset({"system", "operator", "squad_router", "user"})
 
 
 def is_pseudo_agent(agent_id: str | None) -> bool:
     """True for ids that name no agent: router and system senders, and ``user:*``/``operator:*`` principals."""
     value = str(agent_id or "").strip()
-    return not value or ":" in value or value.lower() in _PSEUDO_AGENT_IDS
+    return not value or ":" in value or value in _PSEUDO_AGENT_IDS
 
 
 def broadcast_recipients(from_agent: str, recipients: Iterable[str], exclude: set[str] | None = None) -> list[str]:

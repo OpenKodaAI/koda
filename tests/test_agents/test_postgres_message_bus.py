@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -273,10 +274,29 @@ async def test_broadcast_reaches_only_thread_participants(bus_factory, clean_squ
     assert count == 2
     conn = await asyncpg.connect(clean_squad_messages)
     try:
+        # One thread message for all recipients, so the transcript shows the broadcast once.
         rows = await conn.fetch(
-            f'''SELECT to_agent, thread_id::text AS thread_id FROM "{_schema()}"."squad_messages"
-                 WHERE content = 'ping' ORDER BY to_agent'''
+            f"""SELECT id, to_agent, to_agent_ids, thread_id::text AS thread_id
+                  FROM "{_schema()}"."squad_messages"
+                 WHERE content = 'ping'"""
+        )
+        recipients = await conn.fetch(
+            f'''SELECT message_id, to_agent_id FROM "{_schema()}"."squad_message_recipients"
+                 WHERE message_id = ANY($1::bigint[]) ORDER BY to_agent_id''',
+            [row["id"] for row in rows],
         )
     finally:
         await conn.close()
-    assert [(row["to_agent"], row["thread_id"]) for row in rows] == [("b", thread_id), ("c", thread_id)]
+    assert len(rows) == 1
+    assert (rows[0]["to_agent"], rows[0]["thread_id"]) == (None, thread_id)
+    to_agent_ids = rows[0]["to_agent_ids"]
+    assert (json.loads(to_agent_ids) if isinstance(to_agent_ids, str) else to_agent_ids) == ["b", "c"]
+    assert [(row["message_id"], row["to_agent_id"]) for row in recipients] == [
+        (rows[0]["id"], "b"),
+        (rows[0]["id"], "c"),
+    ]
+    for agent_id in ("b", "c"):
+        # Each recipient's inbox holds its seed message, then the broadcast.
+        inbox = await bus.receive_batch(agent_id, limit=10, timeout=3)
+        broadcast = [msg for msg in inbox if msg.content == "ping"]
+        assert [(msg.thread_id, msg.metadata["kind"]) for msg in broadcast] == [(thread_id, "agent_text")]

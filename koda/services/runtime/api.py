@@ -8,7 +8,7 @@ import json
 import mimetypes
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import quote
+from urllib.parse import quote, unquote, urlparse
 from uuid import UUID, uuid4
 
 from aiohttp import WSMsgType, web
@@ -248,23 +248,50 @@ def _latest_browser_preview_path(task_id: int) -> Path | None:
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
-def _task_relative_paths(value: object, task_root: Path) -> object:
-    """Rewrite host paths relative to the task's runtime directory; a path outside it becomes ``None``."""
+_PATH_KEY_SUFFIXES = ("_path", "_dir", "_file", "_root")
+
+
+def _is_path_key(key: str) -> bool:
+    """True for a key that holds a filesystem path: ``path``, ``dir``, ``*_path``, ``*_dir``, ``*_file``, ``*_root``.
+
+    A plural (``download_paths``) holds a list of them.
+    """
+    name = key.lower().removesuffix("s")
+    return name in {"path", "dir"} or name.endswith(_PATH_KEY_SUFFIXES)
+
+
+def _task_relative_path(path: Path, task_root: Path) -> str | None:
+    try:
+        return path.resolve().relative_to(task_root.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _task_relative_paths(value: object, task_root: Path, key: str = "") -> object:
+    """Rewrite host paths relative to the task's runtime directory; a path outside it becomes ``None``.
+
+    A host path is an absolute path under a path key (see ``_is_path_key``) or a ``file:`` URL under
+    any key. Other text, such as a page title or an error that starts with ``/``, is kept as it is.
+    """
     if isinstance(value, dict):
-        return {key: _task_relative_paths(item, task_root) for key, item in value.items()}
+        return {item_key: _task_relative_paths(item, task_root, str(item_key)) for item_key, item in value.items()}
     if isinstance(value, list):
-        return [_task_relative_paths(item, task_root) for item in value]
-    if isinstance(value, str) and Path(value).is_absolute():
-        try:
-            return Path(value).resolve().relative_to(task_root.resolve()).as_posix()
-        except ValueError:
-            return None
+        return [_task_relative_paths(item, task_root, key) for item in value]
+    if isinstance(value, str):
+        if value[:5].lower() == "file:":
+            return _task_relative_path(Path(unquote(urlparse(value).path)), task_root)
+        if _is_path_key(key) and Path(value).is_absolute():
+            return _task_relative_path(Path(value), task_root)
     return value
+
+
+def _task_runtime_root(task_id: int) -> Path:
+    return Path(get_runtime_controller().runtime_root) / "tasks" / str(task_id)
 
 
 def _browser_payload(task_id: int) -> dict[str, object]:
     controller = get_runtime_controller()
-    task_root = controller.runtime_root / "tasks" / str(task_id)
+    task_root = _task_runtime_root(task_id)
     browser = cast(dict[str, object], _task_relative_paths(dict(controller.get_browser_snapshot(task_id)), task_root))
     preview_path = _latest_browser_preview_path(task_id)
     browser["screenshot_url"] = f"/api/runtime/tasks/{task_id}/browser/screenshot"
@@ -273,7 +300,7 @@ def _browser_payload(task_id: int) -> dict[str, object]:
         bool(browser) and not bool(browser.get("session_persisted_only"))
     )
     if preview_path is not None:
-        browser["preview_path"] = _task_relative_paths(str(preview_path), task_root)
+        browser["preview_path"] = _task_relative_path(preview_path, task_root)
     return browser
 
 
@@ -1070,10 +1097,11 @@ async def _runtime_task_browser(request: web.Request) -> web.Response:
         return auth
     task_id = int(request.match_info["task_id"])
     controller = get_runtime_controller()
+    sessions = controller.store.list_browser_sessions(task_id)
     return web.json_response(
         {
             "browser": _browser_payload(task_id),
-            "sessions": controller.store.list_browser_sessions(task_id),
+            "sessions": _task_relative_paths(sessions, _task_runtime_root(task_id)),
         }
     )
 
@@ -1647,6 +1675,19 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
         chat_id = int(thread.telegram_chat_id or 0) or -_dashboard_actor_id(
             namespace="squad-chat", session_id=session_id
         )
+        # A caller identity that differs from the thread's is dropped, and the caller is told so.
+        ignored = [
+            f"squad.{name}"
+            for name, used in (("user_id", user_id), ("chat_id", chat_id), ("telegram_chat_id", chat_id))
+            if str(squad_payload.get(name) or "").strip() and optional_int(squad_payload.get(name)) != used
+        ]
+        if ignored:
+            log.warning(
+                "squad_message_identity_ignored",
+                thread_id=squad_thread_id,
+                session_id=session_id,
+                ignored=ignored,
+            )
         chain_raw = squad_payload.get("delegation_chain")
         delegation_chain = [str(item) for item in chain_raw] if isinstance(chain_raw, list) else []
         target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"
@@ -1674,6 +1715,7 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
                 "session_id": session_id,
                 "task_id": task_id,
                 "squad_thread_id": squad_thread_id,
+                "ignored": ignored,
             },
             status=202,
         )

@@ -56,6 +56,7 @@ class MessageBus(Protocol):
         *,
         thread_id: str,
         recipients: Iterable[str],
+        metadata: dict[str, Any] | None = None,
     ) -> int: ...
 
     def list_agents(self) -> list[dict[str, Any]]: ...

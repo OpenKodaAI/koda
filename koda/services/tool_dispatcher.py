@@ -3806,11 +3806,18 @@ async def _handle_agent_broadcast(params: dict, ctx: ToolContext) -> AgentToolRe
     if store is None:
         return AgentToolResult(tool="agent_broadcast", success=False, output="Squad thread store unavailable.")
     participants = await store.list_participants(thread_id=thread_id, active_only=True)
+    # The same squad task, cycle and chain as ``agent_send``, so each recipient's turn stays tied
+    # to the sender's work and a broadcast loop shows up in the delegation chain.
     count = await get_message_bus().broadcast(
         _ctx_agent_id(ctx),
         message,
         thread_id=thread_id,
         recipients=[participant.agent_id for participant in participants],
+        metadata={
+            "squad_task_id": ctx.squad_task_id,
+            "parent_message_id": ctx.parent_message_id,
+            "delegation_chain": ctx.delegation_chain,
+        },
     )
     return AgentToolResult(tool="agent_broadcast", success=True, output=f"Broadcast sent to {count} agents.")
 

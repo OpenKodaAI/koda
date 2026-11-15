@@ -77,6 +77,15 @@ async def test_broadcast_never_reaches_pseudo_agents(bus: InMemoryMessageBus) ->
 
 
 @pytest.mark.asyncio
+async def test_broadcast_reaches_agents_named_like_pseudo_agents(bus: InMemoryMessageBus) -> None:
+    # Agent ids are upper-case, so SYSTEM or OPERATOR is a real agent, not the ``system`` sender.
+    agents = ["SYSTEM", "OPERATOR", "USER", "SQUAD_ROUTER"]
+    count = await bus.broadcast("agent-1", "update", thread_id="t-1", recipients=agents)
+    assert count == 4
+    assert {a["agent_id"] for a in bus.list_agents()} == set(agents)
+
+
+@pytest.mark.asyncio
 async def test_list_agents(bus: InMemoryMessageBus) -> None:
     bus._ensure_inbox("a1")
     bus._ensure_inbox("a2")

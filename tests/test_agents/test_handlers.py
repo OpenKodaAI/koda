@@ -300,6 +300,36 @@ async def test_broadcast_reaches_only_the_current_thread_participants(
 
 
 @pytest.mark.asyncio
+async def test_broadcast_carries_the_squad_task_and_delegation_chain(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from koda.agents.message_bus import InMemoryMessageBus
+
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.squad_thread_id = "thread-1"
+    ctx.executing_agent_id = "LEAD"
+    ctx.squad_task_id = "task-7"
+    ctx.parent_message_id = "msg-41"
+    ctx.delegation_chain = ["ORIGIN"]
+    bus = InMemoryMessageBus()
+    with (
+        patch("koda.agents.get_message_bus", return_value=bus),
+        patch("koda.squads.get_squad_thread_store", return_value=_ParticipantStore(["LEAD", "WORKER"])),
+    ):
+        result = await _handle_agent_broadcast({"message": "update"}, ctx)
+    assert result.success, result.output
+    msg = await bus.receive("WORKER", timeout=0.1)
+    assert msg is not None
+    assert msg.metadata == {
+        "thread_id": "thread-1",
+        "kind": "agent_text",
+        "squad_task_id": "task-7",
+        "parent_message_id": "msg-41",
+        "delegation_chain": ["ORIGIN"],
+    }
+
+
+@pytest.mark.asyncio
 async def test_broadcast_requires_write_access_to_the_thread(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
     from koda.squads.access import SquadAccessError
 
