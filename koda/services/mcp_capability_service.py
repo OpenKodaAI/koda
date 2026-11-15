@@ -97,9 +97,11 @@ def verify_capabilities(
     - If ``force_refresh=False`` and a fresh snapshot exists in
       ``cp_mcp_capability_snapshots``, returns it without spawning the server.
     - Otherwise resolves the runtime payload (catalog + agent connection),
-      starts a temporary :class:`McpServerInstance`, runs ``initialize`` plus
-      ``tools/list``, ``resources/list``, ``resources/templates/list``, and
-      ``prompts/list``, persists results, and returns the new snapshot.
+      starts a temporary :class:`McpServerInstance` with the catalog's stored
+      isolation (refused, as the worker refuses it, when that fails the start
+      checks), runs ``initialize`` plus ``tools/list``, ``resources/list``,
+      ``resources/templates/list``, and ``prompts/list``, persists results, and
+      returns the new snapshot.
     """
     cached = _load_snapshot(agent_id, server_key)
     if cached is not None and not force_refresh and not _is_stale(cached):
@@ -117,16 +119,6 @@ def verify_capabilities(
         _persist_snapshot(snapshot)
         return snapshot
 
-    instance = McpServerInstance(
-        server_key=server_key,
-        agent_id=agent_id,
-        transport_type=str(payload.get("transport_type") or "stdio"),
-        command=payload.get("command") or None,
-        url=payload.get("url"),
-        env=payload.get("env_values") or None,
-        headers=payload.get("headers") or None,
-    )
-
     snapshot = CapabilitySnapshot(
         agent_id=agent_id,
         server_key=server_key,
@@ -134,7 +126,12 @@ def verify_capabilities(
         ttl_seconds=ttl_seconds,
     )
 
+    instance: McpServerInstance | None = None
     try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        # The manager's probe helper applies the stored isolation, or refuses as the worker would.
+        instance = get_control_plane_manager()._mcp_probe_instance(agent_id, server_key, payload)
         run_coro_sync(instance.start())
         session = instance.session
         if session is None:
@@ -167,8 +164,9 @@ def verify_capabilities(
             error=str(exc),
         )
     finally:
-        with contextlib.suppress(Exception):
-            run_coro_sync(instance.stop())
+        if instance is not None:
+            with contextlib.suppress(Exception):
+                run_coro_sync(instance.stop())
 
     snapshot.captured_at = now_iso()
     _persist_snapshot(snapshot)

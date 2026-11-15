@@ -116,15 +116,22 @@
    "wave": "W13",
    "name": "Onda 13",
    "scope": "Ambiente MCP mínimo e validação das restrições (D-300, D-301) e provedores honestos (D-296..D-298), mesclados no lote 6; diretório de runtime isolado nos testes e Escape no editor de rotinas (D-276, D-277), aprovados para o lote 7",
-   "status": "final_review",
-   "ref": "1f6697c, task/FIX-D276"
+   "status": "merged",
+   "ref": "efe71f0"
   },
   {
    "wave": "W14",
    "name": "Onda 14",
-   "scope": "Segurança: restrições MCP validadas também na partida e caminhos de teste do painel com o sandbox (D-316..D-318, D-321); scanner de pacotes cobre rotas de execução fora do import e aliases (D-309..D-311, D-323). Squads: pausa por orçamento e por operador, reenvio de reivindicações expiradas (M3-E6-T5, D-287). Design: tokens definidos e contraste do texto (M8-E5-T3, D-267), erros ARIA críticos da paleta (D-282)",
+   "scope": "Segurança: restrições MCP validadas também na partida e caminhos de teste do painel com o sandbox (D-316..D-318, D-321); scanner de pacotes cobre rotas de execução fora do import e aliases (D-309..D-311, D-323). Squads: pausa por orçamento e por operador, reenvio de reivindicações expiradas (M3-E6-T5, D-287). Design: tokens definidos e contraste do texto (M8-E5-T3, D-267), erros ARIA críticos da paleta (D-282); aprovados para o lote 7 exceto M3-E6-T5 (segunda rodada: uma pausa não pode gastar as expirações da reivindicação)",
+   "status": "merged",
+   "ref": "efe71f0"
+  },
+  {
+   "wave": "W15",
+   "name": "Onda 15",
+   "scope": "Segurança: scanner de pacotes com uma regra única e linear (D-326..D-329, segunda rodada); tabelas de aprovação em migration com BIGINT e agent_id (M2-E1-T1, aprovada) e fim do fallback em JSON, concessão revogada que não volta, expiração exata (M2-E1-T2, D-343..D-347); broadcast só para participantes, identidade de squad no servidor e recall rejeita user_id <= 0 (M1-E5-T2); API de runtime responde 400 a parâmetros inválidos (M3-E8-T4). Squads: delegação limitada (M3-E6-T4, aprovada), cadeia preservada no fallback pelo barramento e metadados de tarefa só do servidor (D-338, D-339, D-352..D-354). Design: tamanhos de fonte que agora se aplicam (D-330..D-334, aprovados), regras globais fora de camada, foco escondido no seletor de idioma, popovers sem nome e Escape (D-319, D-320, D-348..D-351)",
    "status": "implementing",
-   "ref": "task/SEC-D316, task/SEC-D321, task/SEC-D311, task/SEC-D323, task/M3-E6-T5, task/M8-E5-T3"
+   "ref": "task/SEC-D326, task/M2-E1-T2, task/M1-E5-T2, task/SQ-D352, task/M8-D349"
   }
  ],
  "meta": [

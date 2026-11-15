@@ -895,7 +895,7 @@ export function RoomChatPane({
                       "group relative -mx-3 grid grid-cols-[3rem_minmax(0,1fr)_2rem] gap-x-3 rounded-[var(--radius-panel-sm)] px-3",
                       "transition-colors duration-[120ms] hover:bg-[var(--hover-tint)]",
                       isContinuation ? "py-0.5" : "py-2",
-                      message.type === "system_event" && "opacity-90",
+                      message.type === "system_event" && "opacity-90 has-[:focus-visible]:opacity-100",
                     )}
                     aria-label={t("sessions.room.messageFrom", { label: authorLabel })}
                   >
@@ -1039,7 +1039,7 @@ export function RoomChatPane({
             "flex flex-col rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] shadow-[var(--shadow-xs)]",
             "transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             "focus-within:border-[color:var(--focus-ring)] focus-within:bg-[var(--panel)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]",
-            submitting && "opacity-70",
+            submitting && "opacity-70 has-[:focus-visible]:opacity-100",
           )}
         >
           {replyDraft ? (

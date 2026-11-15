@@ -88,12 +88,12 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-15 06:20 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 08:05 UTC. The progress tracker mirrors this list for the operator.)
 
-- Integration batch 6 merged: SEC-D283 + SEC-D294, SEC-D292, M1-E5-T1/T4 + SQ-D304, M1-E3-T6 + M1-E4-T6 + M1-E5-T3 + SEC-D300, M6-E3-T2/T4 + M6-E1-T5/T8 + M6-D296, FIX-D293, M5-E3-T8.
-- Approved, waiting for integration batch 7: FIX-D276 (D-276, D-277), SEC-D316 (D-316 to D-318), SEC-D311 (D-309 to D-311).
-- Lean lanes running: M3-E6-T5 (+D-287, D-289), M8-E5-T3 tokens (+D-267, D-281, D-282), SEC-D321 (control-plane MCP test paths), SEC-D323 (scanner alias forms).
-- Awaiting the operator: ADR-002 OQ-1..OQ-12 and plan Q-25..Q-32; the web Docker image build; shellcheck for `scripts/install.sh`; actionlint and a first GitHub Actions run of `migrations-gate.yml`.
+- Integration batch 7 merged: FIX-D276, SEC-D316 + SEC-D321, SEC-D311 + SEC-D323, M3-E6-T5 (two rounds), M8-E5-T3.
+- Approved, waiting for integration batch 8: M2-E1-T1 (approval tables, D-059, D-060), M8-D330 (D-330 to D-334), M3-E6-T4 (bounded delegation, D-095, D-096, D-185).
+- Lean lanes running: SEC-D326 (scanner static routes, D-326 to D-329), M1-E5-T2 + M3-E8-T4 (broadcast scope, squad identity, recall users, runtime API parameters), M2-E1-T2 (+ D-343 to D-345, D-347), M8-D349 (D-319, D-320, D-348 to D-351), SQ-D352 (D-338, D-339, D-352 to D-354).
+- Awaiting the operator: Q-33 (MCP isolation fallback, D-324), ADR-002 OQ-1..OQ-12 and plan Q-25..Q-31; the web Docker image build; shellcheck for `scripts/install.sh`; actionlint and a first GitHub Actions run of `migrations-gate.yml`.
 
 ## Pending findings for the plan (verified by the orchestrator)
 

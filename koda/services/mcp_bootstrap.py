@@ -236,15 +236,45 @@ def _load_catalog_entry(server_key: str) -> dict[str, Any] | None:
         return None
 
 
+class McpStartRefusedError(RuntimeError):
+    """A server whose stored settings fail the save-time checks is not started."""
+
+
 def _catalog_isolation(catalog: dict[str, Any]) -> dict[str, Any]:
-    """The catalog's stored isolation profile and constraints, as ``ensure_started`` kwargs."""
+    """The catalog's stored isolation profile and constraints, as ``ensure_started`` kwargs.
+
+    Rows saved before the constraints were validated are checked here with the
+    same rule as a save, against this process's state roots, so a sensitive or
+    relative mount refuses to start the server instead of being bind-mounted.
+    """
+    from koda.integrations.custom_mcp_registry import ValidationError, validate_isolation_constraints
     from koda.services.mcp_isolation import IsolationConstraints
 
-    constraints = catalog.get("isolation_constraints")
+    stored = catalog.get("isolation_constraints")
+    constraints = stored if isinstance(stored, dict) else {}
+    try:
+        validate_isolation_constraints(constraints)
+    except ValidationError as exc:
+        log.warning("mcp_server_start_refused", server_key=str(catalog.get("server_key") or ""), reason=str(exc))
+        raise McpStartRefusedError(f"refused to start: {exc}") from exc
     return {
         "isolation_profile": str(catalog.get("isolation_profile") or "") or None,
-        "isolation_constraints": IsolationConstraints.from_dict(constraints if isinstance(constraints, dict) else None),
+        "isolation_constraints": IsolationConstraints.from_dict(constraints),
     }
+
+
+def _record_start_refused(agent_id: str, server_key: str, error: str) -> None:
+    """Show the refusal as the connection's last error, as a failed bootstrap start does."""
+    with contextlib.suppress(Exception):
+        from koda.control_plane.manager import get_control_plane_manager
+
+        get_control_plane_manager()._record_mcp_runtime_state(  # type: ignore[attr-defined]
+            agent_id,
+            server_key,
+            success=False,
+            error=error,
+            tools=[],
+        )
 
 
 def _load_single_connection(agent_id: str, server_key: str) -> dict[str, Any] | None:

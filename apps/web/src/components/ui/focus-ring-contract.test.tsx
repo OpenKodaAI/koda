@@ -1,12 +1,19 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ts from "typescript";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { CommandBar } from "@/components/command-bar/command-bar";
+import type { CommandBarContext } from "@/components/command-bar/command-registry";
+import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { EffortPicker, type EffortCapability } from "@/components/control-plane/shared/effort-picker";
 import { TagInputField } from "@/components/control-plane/shared/tag-input-field";
+import { UiForm } from "@/components/sessions/chat/generative/blocks/ui-form";
+import { RoomChatPane } from "@/components/sessions/chat/room-chat-pane";
+import { UserMessage } from "@/components/sessions/chat/user-message";
 import { RailSearch } from "@/components/sessions/rail/rail-search";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -188,7 +195,9 @@ function dimmedOnFocus(focused: Element): string[] {
     const dim = classes.find((name) => DIM_UTILITY.test(name) && name !== "opacity-100");
     if (!dim) continue;
     const restore = element === focused ? "focus-visible:opacity-100" : "has-[:focus-visible]:opacity-100";
-    if (!classes.includes(restore)) {
+    // focus:opacity-100 also covers keyboard focus on the control itself.
+    const restored = classes.includes(restore) || (element === focused && classes.includes("focus:opacity-100"));
+    if (!restored) {
       const role = element.getAttribute("role");
       found.push(`${element.tagName.toLowerCase()}${role ? `[role=${role}]` : ""} is ${dim} without ${restore}`);
     }
@@ -588,3 +597,236 @@ describe("focus ring contract (M8-E1-T1)", () => {
     });
   });
 });
+
+// D-267: --text-quaternary is text, not decoration (form-field descriptions,
+// recurrence hints, cron labels, the Schedule step's next runs, metric
+// labels), so it keeps WCAG AA 4.5:1 on every surface text sits on, the
+// modal glass over its scrim and the floating glass included. The
+// hover-strong and tint-strong fills are pressed and selected states, and a
+// --hover-tint highlight on the light modal glass takes --text-quaternary to
+// 4.37:1: text on them uses --text-tertiary or stronger.
+const TEXT_SURFACES = [
+  ...SURFACES.filter((surface) => surface !== "--surface-hover-strong" && surface !== "--surface-tint-strong"),
+  "--field-bg",
+  "--table-header-bg",
+];
+
+describe("text contrast (D-267)", () => {
+  for (const [theme, { tokens }] of Object.entries(THEMES)) {
+    it(`--text-quaternary keeps 4.5:1 on every ${theme} text surface and glass panel`, () => {
+      const text = tokens["--text-quaternary"];
+      const canvas = parseColor(tokens["--canvas"]);
+      const backgrounds: [string, string | Rgba][] = [
+        ...TEXT_SURFACES.map((surface): [string, string] => [surface, tokens[surface]]),
+        [
+          "--overlay-modal-bg over the scrim",
+          over(tokens["--overlay-modal-bg"], over(tokens["--overlay-backdrop-bg"], canvas)),
+        ],
+        ["--overlay-floating-bg", over(tokens["--overlay-floating-bg"], canvas)],
+      ];
+      for (const [name, background] of backgrounds) {
+        expect(background, `${theme} defines ${name}`).toBeDefined();
+        expect(contrast(text, background), `${theme}: ${text} on ${name}`).toBeGreaterThanOrEqual(4.5);
+      }
+      // It stays the quietest text step.
+      expect(contrast(tokens["--text-tertiary"], canvas)).toBeGreaterThan(contrast(text, canvas));
+    });
+  }
+
+  // The palette's active option paints --hover-tint over its glass: the modal
+  // glass over the scrim on Ctrl+K, the floating glass inline on Home. Every
+  // text the active option carries is checked on both, in every theme.
+  it("the command palette's active option keeps 4.5:1 for its text on --hover-tint over the glass", async () => {
+    const ctx: CommandBarContext = {
+      agents: [{ id: "ATLAS", label: "Atlas", color: "#D97757", colorRgb: "217, 119, 87" }],
+      stats: [],
+      router: { push: vi.fn() },
+      t: (key) => (key === "commandBar.agent.description" ? "Open agent detail" : key),
+      openAgentDetail: vi.fn(),
+    };
+    render(<CommandBar ctx={ctx} mode="modal" placeholder="Search commands" emptyState="Nothing found" />);
+    const listbox = await screen.findByRole("listbox");
+    const option = within(listbox).getByRole("option", { name: /Atlas/ });
+    fireEvent.mouseEnter(option);
+    expect(option).toHaveAttribute("aria-selected", "true");
+
+    // The text token of each text node: the nearest text colour class from
+    // the node up to the option.
+    const painted: [string, string][] = [];
+    const walker = document.createTreeWalker(option, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent?.trim();
+      if (!text) continue;
+      let token: string | undefined;
+      for (let element = node.parentElement; element && !token; element = element.parentElement) {
+        token = [...element.classList].map((name) => name.match(/^text-\[var\((--text-[\w-]+)\)\]$/)?.[1]).find(Boolean);
+        if (element === option) break;
+      }
+      painted.push([text, token ?? "no text colour"]);
+    }
+    expect(painted.map(([text]) => text)).toEqual(["Atlas", "Open agent detail"]);
+
+    for (const [theme, { tokens }] of Object.entries(THEMES)) {
+      const canvas = parseColor(tokens["--canvas"]);
+      const highlights: [string, Rgba][] = [
+        [
+          "--hover-tint over the modal glass",
+          over(tokens["--hover-tint"], over(tokens["--overlay-modal-bg"], over(tokens["--overlay-backdrop-bg"], canvas))),
+        ],
+        ["--hover-tint over the floating glass", over(tokens["--hover-tint"], over(tokens["--overlay-floating-bg"], canvas))],
+      ];
+      for (const [text, token] of painted) {
+        expect(tokens[token], `${theme} defines ${token}`).toBeDefined();
+        for (const [name, background] of highlights) {
+          expect(
+            contrast(resolveToken(tokens, tokens[token]), background),
+            `${theme}: "${text}" in ${token} on ${name}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
+});
+
+// D-281: the session surfaces that dim a wrapper around something that can
+// take focus keep the ring at full strength while it does.
+describe("dimmed session surfaces keep a full-strength ring on focus (D-281)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("a pending user message", async () => {
+    const { container } = render(
+      <I18nProvider initialLanguage="en-US">
+        <UserMessage text="See [the runbook](https://example.com/runbook)" pending />
+      </I18nProvider>,
+    );
+    const stops = await tabStops(container);
+    expect(stops.map((stop) => stop.tagName.toLowerCase())).toContain("a");
+    for (const stop of stops) {
+      expect(dimmedOnFocus(stop), stop.textContent ?? "").toEqual([]);
+    }
+  });
+
+  it("a submitted ui-form", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <I18nProvider initialLanguage="en-US">
+          <ToastProvider>
+            <UiForm
+            block={{
+              id: "form_ring",
+              version: 1,
+              state: "complete",
+              block_type: "ui_form",
+              payload: { fields: [{ kind: "text", id: "name", label: "Name", required: false }], submit_label: "Send" },
+            }}
+            agentId="ATLAS"
+            sessionId="sess-ring"
+            />
+          </ToastProvider>
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    const form = container.querySelector("form") as HTMLFormElement;
+    fireEvent.submit(form);
+    await waitFor(() => expect(form).toHaveAttribute("data-submitted", "true"));
+    // Its own fields are disabled once submitted, but the dimmed form is a
+    // group: anything focusable inside it brings it back to full opacity.
+    const classes = form.className.split(/\s+/);
+    expect(classes.some((name) => /^opacity-\d+$/.test(name) && name !== "opacity-100")).toBe(true);
+    expect(classes).toContain("has-[:focus-visible]:opacity-100");
+  });
+
+  describe("RoomChatPane", () => {
+    const thread = {
+      id: "thread-ring",
+      workspaceId: "workspace-1",
+      squadId: "squad-1",
+      title: "Ring room",
+      status: "active",
+      ownerUserId: 1,
+      coordinatorAgentId: "planner",
+      currentOwnerAgentId: null,
+      telegramChatId: null,
+      telegramMessageThreadId: null,
+      budgetUsdCap: null,
+      costUsdAccum: "0",
+      createdAt: "2026-03-28T10:00:00.000Z",
+      updatedAt: "2026-03-28T10:05:00.000Z",
+    };
+    const message = (id: number, content: string, type: string) => ({
+      id,
+      messageUuid: `message-${id}`,
+      from: "planner",
+      to: null,
+      toAgentIds: [],
+      content,
+      type,
+      metadata: {},
+      createdAt: `2026-03-28T10:0${id}:00.000Z`,
+    });
+    const detail = {
+      thread,
+      coordinatorAgentId: "planner",
+      participants: [{ agentId: "planner", role: "coordinator", joinedAt: thread.createdAt, leftAt: null }],
+      recentMessages: [message(1, "Planner joined the room", "system_event"), message(2, "Plan ready", "agent_text")],
+      page: { limit: 32, returned: 2, nextCursor: null, hasMore: false },
+      activeTasks: [],
+      artifacts: [],
+      openTaskCount: 0,
+      doneTaskCount: 0,
+    };
+
+    function renderRoom() {
+      vi.spyOn(global, "fetch").mockImplementation(async (_input, init) => {
+        // A post that never settles keeps the composer in its submitting state.
+        if ((init?.method ?? "GET") === "POST") return new Promise<Response>(() => {});
+        return new Response(JSON.stringify(detail), { status: 200, headers: { "Content-Type": "application/json" } });
+      });
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      return render(
+        <QueryClientProvider client={client}>
+          <I18nProvider initialLanguage="en-US">
+            <ToastProvider>
+              <AgentCatalogProvider
+                initialAgents={[
+                  { id: "planner", label: "Planner", color: "#22C7D8", colorRgb: "34, 199, 216", initials: "PL", status: "active", model: "m" },
+                ]}
+              >
+                <RoomChatPane threadId="thread-ring" />
+              </AgentCatalogProvider>
+            </ToastProvider>
+          </I18nProvider>
+        </QueryClientProvider>,
+      );
+    }
+
+    it("the system_event row", async () => {
+      renderRoom();
+      const row = (await screen.findByText("Planner joined the room")).closest("article") as HTMLElement;
+      const reply = within(row).getByRole("button", { name: "Reply" });
+      expect(row.className).toMatch(/(^|\s)opacity-\d+(\s|$)/);
+      expect(dimmedOnFocus(reply)).toEqual([]);
+    });
+
+    it("the composer while it submits", async () => {
+      const user = userEvent.setup();
+      renderRoom();
+      const row = (await screen.findByText("Plan ready")).closest("article") as HTMLElement;
+      await user.click(within(row).getByRole("button", { name: "Reply" }));
+      const textbox = screen.getByPlaceholderText(/Send a message to this room/i);
+      fireEvent.change(textbox, { target: { value: "On it" } });
+      fireEvent.submit(textbox.closest("form") as HTMLFormElement);
+      await waitFor(() => expect(textbox).toBeDisabled());
+      // The reply chip's cancel button stays focusable inside the dimmed composer.
+      const cancel = screen.getByRole("button", { name: "Cancel reply" });
+      expect(dimmedOnFocus(cancel)).toEqual([]);
+    });
+  });
+});
+

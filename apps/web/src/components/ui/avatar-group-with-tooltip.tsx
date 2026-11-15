@@ -113,6 +113,7 @@ export function AvatarGroupWithTooltips({
     <TooltipProvider delayDuration={250}>
       <div
         className={cn(shellClass, classes.shell, className)}
+        role="group"
         aria-label={ariaLabel}
       >
         <div className="flex min-w-0 items-center">
@@ -124,6 +125,7 @@ export function AvatarGroupWithTooltips({
                     "relative inline-flex shrink-0 rounded-full",
                     index > 0 && classes.overlap,
                   )}
+                  role="img"
                   aria-label={avatar.name}
                 >
                   <Avatar
@@ -161,6 +163,7 @@ export function AvatarGroupWithTooltips({
                     classes.avatar,
                     visible.length > 0 && classes.overlap,
                   )}
+                  role="img"
                   aria-label={`${overflow.length} more participants`}
                 >
                   +{overflow.length}

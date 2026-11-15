@@ -740,3 +740,43 @@ Gates at f3c95fc (`int/b6`), then the auth test fix:
 - `pytest -m postgres`: 425 passed, the same 1 failed, 2 skipped; passes after the fix.
 - Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 194 files and 1212 tests passed; `pnpm build:web` ok.
 - Rust (on `../koda-wt/.target-int`): `cargo fmt --all --check` ok; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo test --workspace` 22 suites, 100 passed, 0 failed, 3 ignored.
+
+## Integration batch 7 (2026-11-15, `int/b7`, rule 10 lean lanes)
+
+Lanes (each lane built on the approved branch it extends, merged at its tip):
+- FIX-D276 (tests, routines):
+  - Each test session has its own `RUNTIME_EPHEMERAL_ROOT`, and a session guard fails the run when a module points into the shared runtime root (D-276).
+  - Escape in a popover or menu inside the routine editor closes only that layer (D-277).
+- SEC-D316, then SEC-D321 (MCP isolation):
+  - Mount rules apply at start as well as on save. Mount hosts must be absolute, and every configured state root is protected (D-316 to D-318).
+  - Control-plane probes start the server with the stored isolation of the catalog row they read (D-321).
+- SEC-D311, then SEC-D323 (skill package scanner):
+  - Code-running routes that the verified bytes do not cover need review, reported as `python.exec_from_file`.
+  - In-package directory symlinks load the bytes hashed at the real path. Unregister drops modules and refuses the root (D-309 to D-311).
+  - `os.system`, `subprocess`, `exec` and `eval` are denied however a package imports them, and the backend modules are denied imports (D-323).
+- M3-E6-T5, two rounds (squads):
+  - A paused, spent or unreadable room runs no turn on any path, and a pause leaves exactly one event that names its reason.
+  - The budget sweep reaches every open room at its cap.
+  - Expired claims are redispatched, then escalated. A refused claim is released without counting an expiry, so two pause and reopen cycles never escalate a task.
+  - Server-owned room metadata is refused from clients (D-075, D-097, D-287, D-289).
+- M8-E5-T3 (design system):
+  - Every referenced token is defined, and a contract test enforces it. The design guide matches the code.
+  - `--text-quaternary` meets 4.5:1 in both themes (D-267).
+  - The palette listbox and the /sessions axe findings are fixed (D-282), and dimmed surfaces keep a full-strength ring (D-281).
+  - axe shows no violations on /, /sessions, a room, /control-plane/system/general and /routines/schedules in light and dark.
+
+At integration:
+- `koda/control_plane/manager.py`: the import from the redactor that batch 6 removed (`koda.services.runtime.redaction`) was dropped, and `state_roots_in` was kept.
+- `koda/services/queue_manager.py` `_process_queue`: kept the M3-E6-T5 refusal block and dropped its pre-batch-6 tuple-form item parsing, since items are always dicts now.
+- The first gate run was stopped mid-pytest to add M3-E6-T5. The gates then ran again on the whole batch.
+- Full pytest: `tests/test_runtime_root_isolation.py::test_a_dotenv_cannot_move_the_session_roots` failed after the integration tests. `tests/integration/test_runtime_postgres_{extended,isolation}.py` set `koda.config.AGENT_ID` for the rest of the session. Fixed in 22b7653 with an autouse fixture that restores it and reloads the store module. The three files pass together (39 passed).
+- Recorded: D-319 to D-342 (fixed ones marked), Q-33, CHANGELOG entries for every lane, FEATURE_MATRIX notes, and M3-E6-T5 and M8-E5-T3 done.
+
+Gates at 1f3830c (`int/b7`), then the test fix 22b7653:
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: 773 files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 350 source files.
+- `pytest --cov=koda`: 10488 passed, 1 failed (the test above), 34 skipped, 175 xfailed; 70 % coverage. After the fix, the three affected files: 39 passed.
+- `pytest -m postgres`: 449 passed, 2 skipped.
+- Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 197 files and 1236 tests passed; `pnpm build:web` ok.
+- Rust: not run, because the batch changes no file under `rust/` or `proto/` (`git diff 8ea9010..HEAD -- rust proto` is empty).

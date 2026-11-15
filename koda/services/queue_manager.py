@@ -1428,6 +1428,136 @@ _agent_id_label = AGENT_ID or "default"
 _cancelled_task_ids: set[int] = set()
 # The reason given for each cancelled queued task, recorded when the worker discards it.
 _cancelled_task_reasons: dict[int, str] = {}
+# Runtime task id -> (squad task id, executing agent) of each squad turn on this runtime's queues,
+# from the moment it is queued until the worker is done with it (D-097).
+_squad_turn_claims: dict[int, tuple[str, str]] = {}
+# A squad turn whose thread could not be read when the worker took it is taken again after each of
+# these delays in turn, and refused once they are used up (D-075).
+_SQUAD_PICKUP_READ_RETRY_DELAYS_S: tuple[float, ...] = (2.0, 5.0, 15.0, 30.0, 60.0)
+_squad_pickup_retries: set[asyncio.Task[None]] = set()
+
+
+def _track_squad_turn_claim(task_id: int | None, raw_item: Any) -> None:
+    """Remember a queued squad turn whose task claim this runtime renews while the turn is alive."""
+    if task_id is None or not isinstance(raw_item, dict):
+        return
+    squad_task_id = str(raw_item.get("squad_task_id") or "").strip()
+    agent_id = str(raw_item.get("executing_agent_id") or AGENT_ID or "default").strip()
+    if squad_task_id and agent_id:
+        _squad_turn_claims[int(task_id)] = (squad_task_id, agent_id)
+
+
+def active_squad_turn_claims() -> list[tuple[str, str]]:
+    """The ``(squad task id, agent)`` claims of the squad turns queued or running on this runtime.
+
+    The squad router renews them before it sweeps expired claims, so a turn that waits behind
+    others in the serial per-user queue, or runs for longer than ``SQUAD_CLAIM_TTL_S``, is not
+    dispatched a second time or escalated while it is alive (D-097).
+    """
+    return list(dict.fromkeys(_squad_turn_claims.values()))
+
+
+class _SquadThreadReadError(Exception):
+    """The squad thread of the turn the worker took could not be read; a later read may succeed."""
+
+
+async def _squad_turn_refusal_at_pickup(raw_item: Any) -> str | None:
+    """Why the squad turn the worker just took may not run, or None when it may (D-075).
+
+    Checked when the per-user worker takes the item, so a turn queued while its thread was open,
+    or recovered from the persisted queue after a restart, runs no turn once the thread is paused
+    or its spend reached its cap. A thread that cannot be read may be either, so its turn does not
+    run either (fail closed): a read error raises ``_SquadThreadReadError``, for the worker to take
+    the turn again later, and a thread that is not found refuses the turn.
+    """
+    if not isinstance(raw_item, dict):
+        return None
+    thread_id = str(raw_item.get("squad_thread_id") or "").strip()
+    if not thread_id:
+        return None
+    from koda.squads import get_squad_thread_store, squad_thread_turn_refusal
+
+    try:
+        thread_store = get_squad_thread_store()
+        thread = await thread_store.get_thread(thread_id) if thread_store is not None else None
+    except Exception as exc:
+        log.exception("squad_turn_pickup_check_failed", thread_id=thread_id)
+        raise _SquadThreadReadError(f"thread {thread_id} could not be read") from exc
+    if thread is None:
+        log.warning("squad_turn_thread_unreadable_at_pickup", thread_id=thread_id)
+        return f"thread {thread_id} could not be read"
+    return squad_thread_turn_refusal(thread)
+
+
+async def _release_refused_squad_turn_claim(raw_item: Any) -> None:
+    """Release the task claim of a squad turn the worker refused, without counting an expiry (D-097).
+
+    The squad router's next sweep after the thread is open again under its cap dispatches the task
+    to its assignee again, instead of waiting for the claim TTL and spending one of the task's
+    expiries on a turn no worker lost.
+    """
+    if not isinstance(raw_item, dict):
+        return
+    await _release_refused_squad_task_claim(
+        squad_task_id=str(raw_item.get("squad_task_id") or ""),
+        agent_id=str(raw_item.get("executing_agent_id") or AGENT_ID or "default"),
+    )
+
+
+async def _release_refused_squad_task_claim(*, squad_task_id: str, agent_id: str) -> None:
+    """Release ``agent_id``'s claim of a task whose turn was refused, without counting an expiry (D-097)."""
+    squad_task_id = squad_task_id.strip()
+    agent_id = agent_id.strip()
+    if not squad_task_id or not agent_id:
+        return
+    try:
+        from koda.squads import get_squad_task_store
+
+        task_store = get_squad_task_store()
+        if task_store is not None:
+            await task_store.release_refused_claim(task_id=squad_task_id, agent_id=agent_id)
+    except Exception:
+        # The claim then expires at its TTL, and the sweep dispatches the task again then.
+        log.exception("squad_turn_refused_claim_release_failed", squad_task_id=squad_task_id)
+
+
+def _retry_squad_turn_pickup_later(user_id: int, context: BotContext, raw_item: Any, task_id: int | None) -> bool:
+    """Put a squad turn whose thread read failed back on its queue after a delay (D-075).
+
+    Returns False, for the worker to refuse the turn, once the retries are used up. The turn stays
+    queued meanwhile: it can be cancelled, and this runtime keeps renewing its task's claim.
+    """
+    if not isinstance(raw_item, dict) or _shutting_down:
+        return False
+    attempt = int(raw_item.get("_squad_pickup_read_attempts") or 0)
+    if attempt >= len(_SQUAD_PICKUP_READ_RETRY_DELAYS_S):
+        return False
+    raw_item["_squad_pickup_read_attempts"] = attempt + 1
+    delay = _SQUAD_PICKUP_READ_RETRY_DELAYS_S[attempt]
+    _track_queued_task_id(user_id, task_id)
+
+    async def _requeue() -> None:
+        # The worker stops tracking the claim when it is done with the item; this runs after that.
+        _track_squad_turn_claim(task_id, raw_item)
+        await asyncio.sleep(delay)
+        if _shutting_down:
+            return
+        await get_queue(user_id).put(raw_item)
+        _sync_user_queue_observability(user_id)
+        await _ensure_queue_worker(user_id, context)
+
+    retry = asyncio.create_task(_requeue())
+    _squad_pickup_retries.add(retry)
+    retry.add_done_callback(_squad_pickup_retries.discard)
+    log.warning(
+        "squad_turn_pickup_retry_scheduled",
+        task_id=task_id,
+        user_id=user_id,
+        thread_id=raw_item.get("squad_thread_id"),
+        attempt=attempt + 1,
+        delay_s=delay,
+    )
+    return True
 
 
 async def _cancel_pending_task(task: asyncio.Task[Any] | None) -> None:
@@ -1981,6 +2111,19 @@ def _build_recovered_raw_item(
     return raw
 
 
+# The queue-item fields that make a turn a squad turn (see ``enqueue_squad_agent_task``).
+_SQUAD_TURN_FIELDS = (
+    "executing_agent_id",
+    "squad_thread_id",
+    "squad_task_id",
+    "parent_message_id",
+    "delegation_chain",
+    "delegation_request_id",
+    "delegation_origin_agent_id",
+    "telegram_message_thread_id",
+)
+
+
 def _build_dlq_reprocess_raw_item(
     entry: dict[str, Any], payload: dict[str, Any] | None, *, task_id: int
 ) -> dict[str, Any]:
@@ -2005,7 +2148,7 @@ def _build_dlq_reprocess_raw_item(
             image_paths = [str(path) for path in payload_image_paths if path]
         artifact_bundle = payload.get("artifact_bundle")
         force_audio_response = bool(payload.get("force_audio_response"))
-    return _build_user_message_raw_item(
+    raw_item = _build_user_message_raw_item(
         task_id=task_id,
         chat_id=chat_id,
         query_text=query_text,
@@ -2018,6 +2161,12 @@ def _build_dlq_reprocess_raw_item(
         artifact_bundle=artifact_bundle,
         force_audio_response=force_audio_response,
     )
+    # A squad turn stays one: it runs in its room, the worker checks its thread when it takes it,
+    # and this runtime renews its task's claim while it waits (D-075, D-097).
+    for key in _SQUAD_TURN_FIELDS:
+        if payload and payload.get(key) is not None:
+            raw_item[key] = payload[key]
+    return raw_item
 
 
 async def _ensure_queue_worker(user_id: int, context: BotContext) -> None:
@@ -2282,9 +2431,39 @@ async def enqueue_squad_agent_task(
     telegram_message_thread_id: int | None = None,
     bot_override: Any | None = None,
 ) -> int:
-    """Enqueue a squad-scoped turn with runtime context already attached."""
+    """Enqueue a squad-scoped turn with runtime context already attached.
+
+    Raises ``SquadThreadNotRunnableError`` when the thread is not open or its spend reached its
+    budget cap: such a thread runs no turn, whichever path asks for one (D-075). A thread that
+    does not exist raises ``SquadThreadNotFoundError`` (a ``SquadThreadNotRunnableError``), and an
+    error reading it is raised, so no turn is queued without the check.
+    """
     if _shutting_down:
         raise RuntimeError("Agent runtime is shutting down.")
+
+    from koda.squads import (
+        SquadThreadNotFoundError,
+        SquadThreadNotRunnableError,
+        get_squad_thread_store,
+        squad_thread_turn_refusal,
+    )
+
+    thread_store = get_squad_thread_store()
+    try:
+        thread = await thread_store.get_thread(squad_thread_id) if thread_store is not None else None
+    except Exception:
+        # The caller retries (the inbox dispatcher nacks the message): no turn runs unchecked.
+        log.exception("squad_turn_thread_read_failed", thread_id=squad_thread_id)
+        raise
+    if thread_store is None:
+        log.warning("squad_turn_thread_unreadable", thread_id=squad_thread_id)
+        raise SquadThreadNotRunnableError(f"thread {squad_thread_id} could not be read")
+    if thread is None:
+        log.warning("squad_turn_thread_not_found", thread_id=squad_thread_id)
+        raise SquadThreadNotFoundError(f"thread {squad_thread_id} not found")
+    refusal = squad_thread_turn_refusal(thread)
+    if refusal is not None:
+        raise SquadThreadNotRunnableError(refusal)
 
     from koda.services import audit
 
@@ -2322,6 +2501,7 @@ async def enqueue_squad_agent_task(
         "delegation_origin_agent_id": delegation_origin_agent_id,
         "telegram_message_thread_id": telegram_message_thread_id,
     }
+    _track_squad_turn_claim(task_id, raw_item)
     queue = get_queue(user_id)
     await queue.put(raw_item)
     _track_queued_task_id(user_id, task_id)
@@ -2426,6 +2606,7 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
     """
     from koda.agents import get_message_bus
     from koda.config import SQUAD_POLL_INTERVAL_S, SQUADS_ENABLED
+    from koda.squads import SquadThreadNotRunnableError
 
     agent_id = AGENT_ID or "default"
     if not SQUADS_ENABLED:
@@ -2506,6 +2687,26 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
                 )
             except asyncio.CancelledError:
                 raise
+            except SquadThreadNotRunnableError as exc:
+                # A paused, closed or spent thread runs no turn, so the message is dropped rather
+                # than retried until it dead-letters. The claim of a task it asked this agent to
+                # run is released without counting an expiry, and the squad router dispatches the
+                # task again once the thread can run (D-075, D-097).
+                log.info(
+                    "squad_inbox_message_refused",
+                    agent_id=agent_id,
+                    message_id=msg.message_id,
+                    kind=kind,
+                    thread_id=str(thread_id),
+                    reason=str(exc),
+                )
+                if kind in {"task_request", "delegation_request"}:
+                    await _release_refused_squad_task_claim(
+                        squad_task_id=str(metadata.get("squad_task_id") or metadata.get("task_id") or ""),
+                        agent_id=agent_id,
+                    )
+                with contextlib.suppress(Exception):
+                    await bus.ack(agent_id, msg.message_id)
             except Exception as exc:
                 log.exception(
                     "squad_inbox_dispatch_failed",
@@ -6611,6 +6812,7 @@ async def _advance_squad_task_from_run(
     response_text: str,
     artifact_ids: list[str],
     cancelled: bool = False,
+    terminal_status: str | None = None,
 ) -> None:
     if not ctx.squad_thread_id or not ctx.squad_task_id:
         return
@@ -6634,7 +6836,7 @@ async def _advance_squad_task_from_run(
                 agent_id=agent_id,
                 expected_version=task.version,
             )
-        terminal_status = "cancelled" if cancelled else "failed" if run_result.error else "done"
+        terminal_status = terminal_status or ("cancelled" if cancelled else "failed" if run_result.error else "done")
         await store.update_task_status(
             task_id=task.id,
             new_status=terminal_status,
@@ -6697,7 +6899,7 @@ async def _maybe_enqueue_unblocked_squad_tasks(
         return 0
     try:
         from koda.config import SQUAD_CLAIM_TTL_S
-        from koda.squads import get_squad_task_store, get_squad_thread_store
+        from koda.squads import SquadThreadNotRunnableError, get_squad_task_store, get_squad_thread_store
 
         thread_store = get_squad_thread_store()
         task_store = get_squad_task_store()
@@ -6813,6 +7015,19 @@ async def _maybe_enqueue_unblocked_squad_tasks(
                             },
                         },
                     )
+            except SquadThreadNotRunnableError as exc:
+                # The room was paused or spent meanwhile: the task's claim is released without
+                # counting an expiry, and the squad router dispatches it again once the room can
+                # run (D-075, D-097).
+                log.info(
+                    "squad_unblocked_task_refused",
+                    thread_id=ctx.squad_thread_id,
+                    squad_task_id=claimed.id,
+                    assignee=assignee,
+                    reason=str(exc),
+                )
+                await _release_refused_squad_task_claim(squad_task_id=claimed.id, agent_id=assignee)
+                continue
             except Exception:
                 log.exception(
                     "squad_unblocked_task_enqueue_failed",
@@ -6844,6 +7059,9 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
 ) -> None:
     """Queue the coordinator synthesis once the cycle's tasks have ended, then record each handoff's outcome.
 
+    The cycle's tasks are those whose ``coordination_parent_message_id`` is the turn's parent
+    message; open tasks of other cycles of the thread do not hold it (D-287).
+
     With ``swept_handoff_id`` the squad router's sweep runs the check for that handoff: it queues
     nothing unless the handoff is open in the cycle it reads, and it adds no result for the swept
     task, whose turn did not run here.
@@ -6873,9 +7091,11 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             return
         open_tasks = []
         for attempt in range(4):
+            # This cycle's tasks only: an open task of an earlier cycle does not hold this one (D-287).
             open_tasks = await task_store.list_tasks(
                 thread_id=ctx.squad_thread_id,
                 status=["pending", "claimed", "in_progress", "blocked"],
+                coordination_parent_message_id=ctx.parent_message_id,
                 limit=1,
             )
             if not open_tasks:
@@ -7206,12 +7426,13 @@ async def _persist_squad_turn_result(
     log_model: str,
     cancelled: bool = False,
     posted_by: str | None = None,
+    task_status: str | None = None,
 ) -> tuple[str | None, list[str]]:
     """Post a squad turn's answer to its thread, resolve the obligations it answers and advance its task.
 
     With ``cancelled`` the task result says ``cancelled`` and the task is cancelled. With
     ``posted_by`` that sender posts the result for the executing agent, which is recorded as the
-    task's ``assigned_agent_id``.
+    task's ``assigned_agent_id``. ``task_status`` ends the task with that status instead.
     Returns the posted message ref (``msg-<id>``) and the ids of the registered artifacts.
     """
     squad_message_id: str | None = None
@@ -7284,6 +7505,7 @@ async def _persist_squad_turn_result(
                 response_text=response_text,
                 artifact_ids=squad_artifact_ids,
                 cancelled=cancelled,
+                terminal_status=task_status,
             )
     except Exception:
         log.exception("squad_post_process_message_persist_failed", thread_id=ctx.squad_thread_id)
@@ -7517,6 +7739,124 @@ async def complete_open_squad_handoff(*, thread_id: str, squad_task_id: str, han
         artifact_ids=[],
         swept_handoff_id=handoff_id,
     )
+
+
+async def redispatch_expired_squad_claim(*, task_id: str) -> str:
+    """Dispatch a squad task whose claim expired to its planned assignee once, then escalate it (D-097).
+
+    The squad router's sweep calls this after it reverted the claim to ``pending``, with the
+    assignee kept. On the first expiry the assignee claims the task again and its task request is
+    dispatched to it again; a refused dispatch leaves that claim to expire too. On a later expiry
+    the task is escalated to the coordinator: the system posts a failed task result for the
+    assignee that says so, the task ends ``escalated``, and its follow-ups run, so its dependents
+    are cancelled and the coordinator synthesis, which discloses the escalation, is queued once
+    the cycle's tasks have ended. A task whose dependencies are not all done is left pending for
+    the dependency path to dispatch. Returns ``redispatched``, ``escalated`` or ``skipped``.
+    """
+    if _shutting_down:
+        return "skipped"
+    from types import SimpleNamespace
+
+    from koda.config import SQUAD_CLAIM_TTL_S
+    from koda.squads import TaskClaimConflictError, dispatch_squad_turn, get_squad_task_store, get_squad_thread_store
+
+    thread_store = get_squad_thread_store()
+    task_store = get_squad_task_store()
+    if thread_store is None or task_store is None:
+        return "skipped"
+    task = await task_store.get_task(task_id)
+    if task is None or task.status != "pending" or not task.assigned_agent_id:
+        return "skipped"
+    thread = await thread_store.get_thread(task.thread_id)
+    if thread is None or not thread.coordinator_agent_id:
+        return "skipped"
+    dependencies = [await task_store.get_task(dependency_id) for dependency_id in task.depends_on]
+    if any(dependency is None or dependency.status != "done" for dependency in dependencies):
+        return "skipped"
+    assignee = str(task.assigned_agent_id)
+    coordinator = str(thread.coordinator_agent_id)
+    expiries = int(task.metadata.get("claim_expiry_count") or 0)
+    parent_message_id = str(task.metadata.get("coordination_parent_message_id") or "") or None
+    request_id = f"coord-{task.id}"
+    if expiries <= 1:
+        try:
+            claimed = await task_store.claim_task(task_id=task.id, agent_id=assignee, ttl_seconds=SQUAD_CLAIM_TTL_S)
+        except TaskClaimConflictError:
+            # Another path dispatched it first.
+            return "skipped"
+        result = await dispatch_squad_turn(
+            target_agent_id=assignee,
+            thread=thread,
+            thread_store=thread_store,
+            query_text=_render_existing_squad_task_request(claimed),
+            parent_message_id=parent_message_id,
+            metadata={
+                "kind": "task_request",
+                "from_agent": coordinator,
+                "squad_task_id": claimed.id,
+                "task_id": claimed.id,
+                "request_id": request_id,
+                "correlation_id": request_id,
+            },
+            squad_task_id=claimed.id,
+            delegation_chain=[coordinator],
+            delegation_request_id=request_id,
+            delegation_origin_agent_id=coordinator,
+            telegram_message_thread_id=thread.telegram_message_thread_id,
+        )
+        return "redispatched" if result.dispatched else "skipped"
+    reason = (
+        f"Not completed: the claim of task {task.id} ({task.title}) by {assignee} expired {expiries} times, "
+        f"so the task is escalated to the coordinator {coordinator}."
+    )
+    ctx = QueryContext(
+        provider="",
+        work_dir="",
+        model="",
+        session_id="",
+        provider_session_id=None,
+        system_prompt="",
+        agent_mode="",
+        permission_mode="",
+        max_turns=0,
+        executing_agent_id=assignee,
+        squad_thread_id=thread.id,
+        squad_task_id=task.id,
+        parent_message_id=parent_message_id,
+        delegation_request_id=request_id,
+        delegation_origin_agent_id=coordinator,
+        telegram_message_thread_id=thread.telegram_message_thread_id,
+    )
+    squad_message_id, artifact_ids = await _persist_squad_turn_result(
+        ctx=ctx,
+        run_result=RunResult(
+            provider="",
+            model="",
+            result=reason,
+            session_id="",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=True,
+            stop_reason="error",
+        ),
+        response_text=reason,
+        runtime_task_id=None,
+        created_artifacts=[],
+        cost=0.0,
+        log_model="",
+        posted_by="system",
+        task_status="escalated",
+    )
+    # No turn context: the follow-ups use this runtime's application and bot.
+    await _dispatch_squad_follow_ups(
+        user_id=int(thread.owner_user_id or 0),
+        context=cast(BotContext, SimpleNamespace(application=None, bot=None)),
+        ctx=ctx,
+        response_text=reason,
+        squad_message_id=squad_message_id,
+        artifact_ids=artifact_ids,
+    )
+    return "escalated"
 
 
 async def _post_process(
@@ -9268,6 +9608,34 @@ async def _process_queue(user_id: int, context: BotContext) -> None:
                         )
                     continue
 
+                try:
+                    refusal = await _squad_turn_refusal_at_pickup(raw_item)
+                except _SquadThreadReadError as exc:
+                    # A read error may pass: the turn is taken again later, and refused only once
+                    # the retries are used up (D-075).
+                    if _retry_squad_turn_pickup_later(user_id, context, raw_item, task_id):
+                        continue
+                    refusal = str(exc)
+                if refusal is not None:
+                    # The thread was paused or spent after this turn was queued, or before a restart
+                    # recovered it, or cannot be read: it runs no turn (D-075). This is not a failed
+                    # turn, so no failed task result is posted. Its task's claim is released without
+                    # counting an expiry, and the squad router dispatches the task again once the
+                    # thread runs (D-097). This runtime stops renewing the claim first.
+                    log.info("squad_turn_refused_at_pickup", task_id=task_id, user_id=user_id, reason=refusal)
+                    if task_id is not None:
+                        _squad_turn_claims.pop(task_id, None)
+                    await _release_refused_squad_turn_claim(raw_item)
+                    if task_id is not None:
+                        update_task_status(
+                            task_id,
+                            "cancelled",
+                            error_message=refusal,
+                            completed_at=datetime.now(UTC).isoformat(),
+                        )
+                        _update_runtime_queue_status(task_id, "cancelled", last_error=refusal)
+                    continue
+
                 if task_id is None:
                     # Every producer creates the task row and sets ``_task_id``.
                     raise ValueError("queue item has no task id")
@@ -9308,6 +9676,9 @@ async def _process_queue(user_id: int, context: BotContext) -> None:
                     error=exc,
                 )
             finally:
+                # Its turn is over here, so this runtime stops renewing its task's claim (D-097).
+                if task_id is not None:
+                    _squad_turn_claims.pop(task_id, None)
                 queue.task_done()
                 _sync_user_queue_observability(user_id)
     finally:
@@ -9473,6 +9844,7 @@ async def recover_pending_tasks(application: Any) -> dict[str, int]:
         lease_owner = str(task_row.get("lease_owner") or "").strip()
         if lease_owner:
             release_task_lease(task_id, lease_owner)
+        _track_squad_turn_claim(task_id, raw_item)
         queue = get_queue(user_id)
         await queue.put(raw_item)
         _track_queued_task_id(user_id, task_id)
@@ -9562,6 +9934,7 @@ async def requeue_dlq_entry(
         source_action="dlq_reprocess",
     )
     raw_item = _build_dlq_reprocess_raw_item(entry, payload, task_id=task_id)
+    _track_squad_turn_claim(task_id, raw_item)
     queue = get_queue(user_id)
     await queue.put(raw_item)
     _track_queued_task_id(user_id, task_id)

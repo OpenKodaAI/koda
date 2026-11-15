@@ -295,7 +295,7 @@ export function Sidebar({
               )}
             >
               <span className="flex h-7 w-7 shrink-0 items-center justify-center">
-                <KodaMark className="h-7 w-7" />
+                <KodaMark className="h-7 w-7" decorative />
               </span>
               <span className={cn("min-w-0", collapsed && "lg:hidden")}>
                 <span className="block max-w-[9.75rem] whitespace-nowrap text-[1.125rem] font-medium tracking-[-0.04em] text-[var(--text-primary)] transition-all duration-300 ease-[cubic-bezier(0.22,1,0.36,1)]">

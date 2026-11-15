@@ -3,7 +3,9 @@
 Wraps ``SquadTaskStore.sweep_expired_claims`` in a long-running coroutine so a
 coordinator's claim TTL eventually triggers a revert when a worker goes
 silent. When a thread store is available, each reverted claim emits a
-``system_event`` so the transcript shows what happened.
+``system_event`` so the transcript shows what happened. Each reverted task is
+then dispatched again to its planned assignee once, and escalated on a later
+expiry (D-097).
 
 Phase 5 will wire this into ``supervisor.start()``. Until then, callers can
 start it manually (``squad_router_tick`` sweeps one squad's expired claims).
@@ -122,6 +124,17 @@ class SquadRouter:
                 await task
 
     async def _sweep_claims(self, *, squad_id: str | None = None) -> list[ExpiredClaim]:
+        # This runtime's queued and running squad turns renew their tasks' claims first, so only a
+        # silent worker's claim expires; each runtime's router renews its own turns' claims (D-097).
+        from koda.services.queue_manager import active_squad_turn_claims
+
+        if claims := active_squad_turn_claims():
+            from koda.config import SQUAD_CLAIM_TTL_S
+
+            try:
+                await self._task_store.renew_claims(claims=claims, ttl_seconds=SQUAD_CLAIM_TTL_S)
+            except Exception:
+                log.exception("squad_router_claim_renewal_failed", squad_id=squad_id)
         try:
             expired = await self._task_store.sweep_expired_claims(batch_size=self._batch_size, squad_id=squad_id)
         except Exception:
@@ -129,6 +142,10 @@ class SquadRouter:
             expired = []
         if expired and self._thread_store is not None:
             for claim in expired:
+                if claim.refused:
+                    # A worker refused the turn of a paused, spent or unreadable thread; no worker
+                    # went silent, so no claim_expired (a pause is explained by its own event).
+                    continue
                 try:
                     await self._emit_revert_event(claim)
                 except Exception:
@@ -137,10 +154,22 @@ class SquadRouter:
                         thread_id=claim.thread_id,
                         task_id=claim.task_id,
                     )
+        if expired:
+            from koda.services.queue_manager import redispatch_expired_squad_claim
+
+            for claim in expired:
+                try:
+                    await redispatch_expired_squad_claim(task_id=claim.task_id)
+                except Exception:
+                    log.exception(
+                        "squad_router_claim_redispatch_failed",
+                        thread_id=claim.thread_id,
+                        task_id=claim.task_id,
+                    )
         return expired
 
     async def sweep_squad_claims(self, squad_id: str) -> SweepReport:
-        """Revert the expired claims of ``squad_id``'s threads, and nothing else.
+        """Revert the expired claims of ``squad_id``'s threads, then dispatch or escalate those tasks, and nothing else.
 
         This is the ``squad_router_tick`` sweep: a coordinator reaches only its own squad. The
         other sweeps (auto-election, timeouts, dead letters, budgets, open handoffs) cover every
@@ -229,6 +258,7 @@ class SquadRouter:
             "task_id": claim.task_id,
             "previously_assigned_agent_id": claim.previously_assigned_agent_id,
             "version_after": claim.version_after,
+            "expiry_count": claim.expiry_count,
         }
         try:
             await self._thread_store.post_thread_message(
@@ -378,14 +408,21 @@ class SquadRouter:
             return 0, 0
         pool = await self._thread_store._ensure_pool()  # noqa: SLF001
         schema = self._thread_store._schema  # noqa: SLF001
+        # Only the rooms the sweep still acts on: those not yet alerted at 80%, and open rooms at
+        # their cap. A paused room already alerted is left out, so however many there are, an
+        # open room at its cap is always reached.
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""SELECT id, status, budget_usd_cap, cost_usd_accum, metadata_json
                       FROM "{schema}"."squad_threads"
-                     WHERE status IN ('open', 'paused')
-                       AND budget_usd_cap IS NOT NULL
+                     WHERE budget_usd_cap IS NOT NULL
                        AND budget_usd_cap > 0
                        AND cost_usd_accum >= budget_usd_cap * 0.8
+                       AND (
+                           (status IN ('open', 'paused')
+                            AND COALESCE(metadata_json->>'budget_alert_80_sent', 'false') <> 'true')
+                           OR (status = 'open' AND cost_usd_accum >= budget_usd_cap)
+                       )
                      ORDER BY updated_at ASC
                      LIMIT $1""",
                 self._batch_size,
@@ -414,9 +451,13 @@ class SquadRouter:
                         thread_id,
                     )
                 alerts += 1
-            if ratio >= 1.0 and row["status"] == "open" and not metadata.get("budget_auto_paused"):
+            # An open thread at its cap runs no turn, so it is paused, and the room told why, each
+            # time it is open there: a room an operator reopened at its cap is paused again. Only
+            # the UPDATE that paused it posts the event, so a pause that won the race (the
+            # operator's, or another runtime's sweep) is not announced twice.
+            if ratio >= 1.0 and row["status"] == "open":
                 async with pool.acquire() as conn:
-                    await conn.execute(
+                    paused = await conn.execute(
                         f"""UPDATE "{schema}"."squad_threads"
                                SET status = 'paused',
                                    metadata_json = metadata_json || '{{"budget_auto_paused": true}}'::jsonb,
@@ -425,11 +466,18 @@ class SquadRouter:
                                AND status = 'open'""",
                         thread_id,
                     )
+                if paused != "UPDATE 1":
+                    continue
                 await self._emit_system_event(
                     thread_id=thread_id,
                     event_type="budget_exceeded_auto_pause",
                     content=f"[budget_exceeded_auto_pause] thread paused at ${cost:.4f} of ${cap:.4f}",
-                    metadata={"event_type": "budget_exceeded_auto_pause", "cost_usd": cost, "budget_usd_cap": cap},
+                    metadata={
+                        "event_type": "budget_exceeded_auto_pause",
+                        "reason": "budget",
+                        "cost_usd": cost,
+                        "budget_usd_cap": cap,
+                    },
                 )
                 pauses += 1
         return alerts, pauses
@@ -439,8 +487,8 @@ class SquadRouter:
 
         A handoff is checked when it was requested less than ``_HANDOFF_COMPLETION_MAX_AGE_S`` ago
         in an open thread, is still ``requested`` or ``accepted``, its cycle has a task, no task of
-        its thread is open (the check waits for every open task of the thread), and its cycle's
-        tasks have not changed for ``_HANDOFF_COMPLETION_GRACE_S``. The check runs as the
+        its cycle is open (as in the check, open tasks of other cycles do not hold it, D-287), and
+        its cycle's tasks have not changed for ``_HANDOFF_COMPLETION_GRACE_S``. The check runs as the
         follow-up of the cycle's most recently changed task that the coordinator does not own.
         Each sweep takes the next batch after the last one, so handoffs the check cannot close do
         not keep it from the others. A runtime checks a handoff only while it holds a transaction
@@ -488,10 +536,10 @@ class SquadRouter:
                            SELECT 1
                              FROM "{schema}"."squad_tasks" AS o
                             WHERE o.thread_id = h.thread_id
+                              AND o.metadata_json->>'handoff_correlation_id' = h.correlation_id
                               AND (
                                   o.status IN ('pending', 'claimed', 'in_progress', 'blocked')
-                                  OR (o.metadata_json->>'handoff_correlation_id' = h.correlation_id
-                                      AND o.updated_at > NOW() - make_interval(secs => $2))
+                                  OR o.updated_at > NOW() - make_interval(secs => $2)
                               )
                        )
                   ORDER BY h.id ASC

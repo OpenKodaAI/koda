@@ -1,10 +1,11 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ComponentProps } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSwitcher } from "@/components/layout/agent-switcher";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { useEscapeToClose } from "@/hooks/use-animated-presence";
 import type { AgentDisplay } from "@/lib/agent-constants";
 
 vi.mock("@/hooks/use-create-agent", () => ({
@@ -69,9 +70,16 @@ function installAgentFetch(agents: AgentDisplay[]) {
   return fetchMock;
 }
 
+// A dialog that closes on Escape the way the routine editor does.
+function EscapeToCloseParent({ onClose, children }: { onClose: () => void; children: ReactNode }) {
+  useEscapeToClose(true, onClose);
+  return <>{children}</>;
+}
+
 function renderSwitcher(
   agents: AgentDisplay[],
   props: Partial<ComponentProps<typeof AgentSwitcher>> = {},
+  onParentEscape: () => void = () => {},
 ) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -85,13 +93,15 @@ function renderSwitcher(
     <QueryClientProvider client={queryClient}>
       <I18nProvider initialLanguage="en-US">
         <AgentCatalogProvider initialAgents={agents}>
-          <AgentSwitcher
-            multiple
-            selectedBotIds={[]}
-            onSelectionChange={vi.fn()}
-            showCreate={false}
-            {...props}
-          />
+          <EscapeToCloseParent onClose={onParentEscape}>
+            <AgentSwitcher
+              multiple
+              selectedBotIds={[]}
+              onSelectionChange={vi.fn()}
+              showCreate={false}
+              {...props}
+            />
+          </EscapeToCloseParent>
         </AgentCatalogProvider>
       </I18nProvider>
     </QueryClientProvider>,
@@ -114,6 +124,26 @@ describe("AgentSwitcher", () => {
     const trigger = screen.getByRole("button", { name: /select agent/i });
     expect(trigger.parentElement).toHaveClass("field-shell");
     expect(screen.queryByRole("button", { name: /create agent/i })).not.toBeInTheDocument();
+  });
+
+  // D-277: the menu closed on Escape from a window bubble listener without preventDefault(), so
+  // the same Escape also reached useEscapeToClose and closed the routine editor around it.
+  it("closes only its menu on Escape inside a dialog, which the next Escape closes", async () => {
+    const onParentEscape = vi.fn();
+    installAgentFetch([makeAgent(0)]);
+    renderSwitcher([makeAgent(0)], { multiple: false, showAll: false }, onParentEscape);
+    const trigger = screen.getByRole("button", { name: /select agent/i });
+    fireEvent.click(trigger);
+    const search = await screen.findByRole("textbox");
+
+    fireEvent.keyDown(search, { key: "Escape" });
+
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(onParentEscape).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(trigger, { key: "Escape" });
+
+    expect(onParentEscape).toHaveBeenCalledTimes(1);
   });
 
   it("renders agents in five-item pages and fetches the next page on dropdown scroll", async () => {

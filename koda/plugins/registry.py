@@ -88,6 +88,11 @@ class PluginRegistry:
         to_remove = [k for k in sys.modules if k.startswith(prefix)]
         for k in to_remove:
             del sys.modules[k]
+        if manifest.sources is not None:
+            # A skill package: its files map to no bytes now, and the modules its code imported are dropped (D-310).
+            from koda.skills._package import _PACKAGE_SOURCE_ONLY_CODE
+
+            _PACKAGE_SOURCE_ONLY_CODE.remove_root(manifest.plugin_dir)
         log.info("plugin_unregistered", name=plugin_name)
         return None
 
@@ -174,7 +179,9 @@ class PluginRegistry:
         directory swapped in after the check is not loaded (D-270); a skill
         package's handler source is the verified bytes in ``manifest.sources``
         hashed at the handler's path, wherever a symlink swapped in there points,
-        and a file missing there is not loaded (D-292). The module
+        or, when none were hashed there, at its real path inside the package, which
+        a directory symlink inside the package leads to (D-309); a file missing at
+        both is not loaded (D-292). The module
         gets a flat name, with no parent package, so a relative import in it fails
         instead of resolving against another package; the name starts with the
         plugin's prefix, which ``unregister`` removes (D-291). ``sys.path`` is left
@@ -198,6 +205,10 @@ class PluginRegistry:
         try:
             if manifest.sources is not None:
                 source = manifest.sources.get(os.path.normpath(relative_path))
+                if source is None:
+                    # Declared through a directory symlink inside the package: the bytes hashed
+                    # at the handler's real path, which file_path is (D-309).
+                    source = manifest.sources.get(str(file_path.relative_to(plugin_dir.resolve())))
                 if source is None:
                     log.warning("plugin_handler_not_verified", handler=handler_path, plugin_dir=str(plugin_dir))
                     return None

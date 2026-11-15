@@ -326,9 +326,9 @@ export function ChatComposer({
               "flex flex-col rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] shadow-[var(--shadow-xs)]",
               "transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
               "focus-within:border-[color:var(--focus-ring)] focus-within:bg-[var(--panel)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]",
-              disabled && "opacity-70",
             )}
             role="combobox"
+            aria-label={resolvedPlaceholder}
             aria-expanded={popoverOpen}
             aria-haspopup="listbox"
             aria-controls={activeListboxId}

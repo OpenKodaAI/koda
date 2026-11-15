@@ -290,6 +290,7 @@ export function ApprovalPrompt({
           ) : null}
 
           <div
+            role="group"
             aria-label={t("generated.sessions.parameter_diff_55849f7f")}
             className="rounded-[var(--radius-chip)] border border-[color:var(--divider-hair)] bg-[var(--panel)]"
           >

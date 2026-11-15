@@ -128,7 +128,7 @@ export function UiForm({ block, agentId, sessionId }: UiFormProps) {
       data-submitted={done || undefined}
       className={cn(
         "rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] p-3 flex flex-col gap-3",
-        done && "opacity-60",
+        done && "opacity-60 has-[:focus-visible]:opacity-100",
       )}
     >
       {title ? (
