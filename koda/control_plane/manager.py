@@ -170,6 +170,7 @@ from .agent_spec import (
     resolve_scope_documents,
     validate_agent_spec,
 )
+from .agent_tables import AGENT_DELETE_TABLES, PER_AGENT_TABLES
 from .crypto import decrypt_secret, encrypt_secret, mask_secret
 from .dashboard_memory import (
     apply_memory_curation_action as dashboard_apply_memory_curation_action,
@@ -1693,33 +1694,7 @@ class ControlPlaneManager:
             )
         else:
             execute("DELETE FROM cp_agent_definitions WHERE id = ?", (legacy_id,))
-        for table in (
-            "cp_agent_assignments",
-            "cp_agent_config_versions",
-            "cp_agent_connections",
-            "cp_agent_documents",
-            "cp_agent_sections",
-            "cp_apply_operations",
-            "cp_bot_gateway_tokens",
-            "cp_connection_discovery_runs",
-            "cp_knowledge_assets",
-            "cp_mcp_agent_connections",
-            "cp_mcp_capability_policies",
-            "cp_mcp_capability_snapshots",
-            "cp_mcp_discovered_prompts",
-            "cp_mcp_discovered_resources",
-            "cp_mcp_discovered_tools",
-            "cp_mcp_oauth_sessions",
-            "cp_mcp_oauth_tokens",
-            "cp_mcp_tool_policies",
-            "cp_mcp_user_servers",
-            "cp_policy_spend_ledger",
-            "cp_secret_values",
-            "cp_skill_assets",
-            "cp_telegram_offsets",
-            "cp_telegram_pending_updates",
-            "cp_template_assets",
-        ):
+        for table in PER_AGENT_TABLES:
             execute(f"UPDATE {table} SET agent_id = ? WHERE agent_id = ?", (canonical_id, legacy_id))
 
     def _require_agent_row(self, agent_id: str) -> tuple[str, Any]:
@@ -10005,25 +9980,6 @@ class ControlPlaneManager:
         )
         return True
 
-    # Tables that hold per-agent state and must be purged on hard delete.
-    # Order does not matter — each row is scoped by agent_id — but cp_agent_definitions
-    # is written last so the main row survives if any cascade step fails.
-    _AGENT_CASCADE_TABLES: tuple[str, ...] = (
-        "cp_agent_sections",
-        "cp_agent_documents",
-        "cp_agent_config_versions",
-        "cp_apply_operations",
-        "cp_knowledge_assets",
-        "cp_template_assets",
-        "cp_skill_assets",
-        "cp_mcp_agent_connections",
-        "cp_mcp_tool_policies",
-        "cp_mcp_discovered_tools",
-        "cp_mcp_oauth_tokens",
-        "cp_mcp_oauth_sessions",
-        "cp_agent_connections",
-    )
-
     def delete_agent(self, agent_id: str) -> bool:
         """Hard-delete an agent and every dependent cp_* row.
 
@@ -10036,7 +9992,10 @@ class ControlPlaneManager:
             normalized, _ = self._require_agent_row(agent_id)
         except KeyError:
             return False
-        for table in self._AGENT_CASCADE_TABLES:
+        # cp_agent_definitions is deleted last so the main row survives if a
+        # cascade step fails. AGENT_DELETE_TABLES is not yet every per-agent
+        # table (D-054).
+        for table in AGENT_DELETE_TABLES:
             execute(f"DELETE FROM {table} WHERE agent_id = ?", (normalized,))
         execute("DELETE FROM cp_agent_definitions WHERE id = ?", (normalized,))
         return True
