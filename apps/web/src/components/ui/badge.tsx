@@ -16,7 +16,7 @@ export interface BadgeButtonProps
 }
 
 const badgeVariants = cva(
-  "inline-flex items-center justify-center border border-transparent font-medium focus:outline-hidden focus:ring-2 focus:ring-[var(--accent)] focus:ring-offset-2 focus:ring-offset-[var(--canvas)] [&_svg]:-ms-px [&_svg]:shrink-0",
+  "inline-flex items-center justify-center border border-transparent font-medium [&_svg]:-ms-px [&_svg]:shrink-0",
   {
     variants: {
       variant: {

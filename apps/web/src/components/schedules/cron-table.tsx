@@ -528,7 +528,6 @@ function ActionButton({
             "inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-chip)] border border-transparent text-[var(--text-tertiary)]",
             "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             "hover:border-[color:var(--border-subtle)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
-            "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]",
             "disabled:cursor-not-allowed disabled:opacity-50",
             state === "pending" && "border-[color:var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-secondary)] opacity-100",
             state === "success" && "border-[color:var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--tone-success-dot)] opacity-100",

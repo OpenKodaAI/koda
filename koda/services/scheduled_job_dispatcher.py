@@ -20,6 +20,8 @@ _dispatcher_application: Any | None = None
 _dispatcher_event = asyncio.Event()
 _dispatcher_id = f"{socket.gethostname()}:{os.getpid()}:{uuid.uuid4().hex[:8]}"
 _inflight_dispatch_tasks: set[asyncio.Task[None]] = set()
+# Run id of each `_dispatch_run` still executing in this process; its lease is live even when it expired.
+_inflight_run_ids: dict[asyncio.Task[None], int] = {}
 
 _RUNTIME_TASK_TERMINAL_STATUSES = {"completed", "failed", "cancelled", "needs_review"}
 _RUNTIME_QUEUE_LIVE_STATUSES = {"queued", "running"}
@@ -39,13 +41,16 @@ def _materialize_due_runs(now: datetime | None = None) -> int:
     jobs = _jobs()
     now = now or jobs._utcnow()
     cutoff = now - timedelta(hours=jobs.SCHEDULER_CATCHUP_WINDOW_HOURS)
+    # Only this agent's jobs: every agent process shares the scheduler tables, and a job runs
+    # through its own agent's bot and runtime, under its own agent's policy snapshot.
     rows = _store().fetch_all(
         """
         SELECT * FROM scheduled_jobs
         WHERE status = ? AND next_run_at IS NOT NULL AND next_run_at <= ?
+          AND agent_id IS NOT DISTINCT FROM ?
         ORDER BY next_run_at ASC
         """,
-        (jobs.JOB_STATUS_ACTIVE, jobs._iso(now)),
+        (jobs.JOB_STATUS_ACTIVE, jobs._iso(now), jobs.AGENT_ID),
     )
     materialized = 0
     for row in rows:
@@ -206,6 +211,7 @@ def _claim_due_runs(limit: int | None = None) -> list[dict[str, Any]]:
         FROM scheduled_job_runs r
         JOIN scheduled_jobs j ON j.id = r.scheduled_job_id
         WHERE j.status IN (?, ?, ?, ?, ?)
+          AND j.agent_id IS NOT DISTINCT FROM ?
           AND r.status IN (?, ?)
           AND COALESCE(r.next_attempt_at, r.scheduled_for) <= ?
           AND (r.lease_expires_at IS NULL OR r.lease_expires_at < ?)
@@ -218,6 +224,7 @@ def _claim_due_runs(limit: int | None = None) -> list[dict[str, Any]]:
             jobs.JOB_STATUS_ACTIVE,
             jobs.JOB_STATUS_PAUSED,
             jobs.JOB_STATUS_FAILED_OPEN,
+            jobs.AGENT_ID,
             jobs.RUN_STATUS_QUEUED,
             jobs.RUN_STATUS_RETRYING,
             jobs._iso(now),
@@ -308,15 +315,53 @@ def _release_run(
     )
 
 
+def _refresh_inflight_leases() -> int:
+    """Extend the lease of every run still dispatching in this process.
+
+    Only this process knows that these runs are live. Another process of the same agent (an overlapping
+    restart, a cluster handover) sees only the lease, so it must never see it expire mid-dispatch.
+    """
+    run_ids = sorted(set(_inflight_run_ids.values()))
+    if not run_ids:
+        return 0
+    jobs = _jobs()
+    now = jobs._utcnow()
+    placeholders = ", ".join("?" for _ in run_ids)
+    return int(
+        _store().execute(
+            f"""
+            UPDATE scheduled_job_runs
+            SET lease_expires_at = ?, lease_heartbeat_at = ?, updated_at = ?
+            WHERE id IN ({placeholders}) AND status = ? AND lease_owner = ?
+            """,
+            (
+                jobs._iso(now + timedelta(seconds=jobs.SCHEDULER_LEASE_SECONDS)),
+                jobs._iso(now),
+                jobs._iso(now),
+                *run_ids,
+                jobs.RUN_STATUS_RUNNING,
+                _dispatcher_id,
+            ),
+        )
+        or 0
+    )
+
+
 async def run_dispatch_cycle(application: Any) -> dict[str, int]:
     from koda.services.scheduled_job_runtime import _dispatch_run
 
+    # Every cycle, not only at startup: a run whose completion callback was lost
+    # would otherwise stay `running` and block its job until a restart.
+    recover_expired_leases()
+    _refresh_inflight_leases()
     materialized = _materialize_due_runs()
     claimed = _claim_due_runs()
     for run in claimed:
         task = asyncio.create_task(_dispatch_run(application, run))
         _inflight_dispatch_tasks.add(task)
+        _inflight_run_ids[task] = int(run["id"])
         task.add_done_callback(_inflight_dispatch_tasks.discard)
+        task.add_done_callback(lambda done: _inflight_run_ids.pop(done, None))
     return {"materialized": materialized, "claimed": len(claimed), "inflight": len(_inflight_dispatch_tasks)}
 
 
@@ -356,6 +401,7 @@ async def start_scheduler_dispatcher(application: Any) -> None:
         return
     _dispatcher_application = application
     recover_expired_leases()
+    report_unowned_jobs()
     if _dispatcher_task and not _dispatcher_task.done():
         return
     _dispatcher_task = asyncio.create_task(_dispatcher_loop(application))
@@ -386,14 +432,19 @@ def wake_dispatcher() -> None:
 def recover_expired_leases() -> int:
     jobs = _jobs()
     now = jobs._utcnow()
+    # Only this agent's runs: whether a run's dispatch still runs is known only inside the owning
+    # agent's process, so another agent's process must never recover (and re-run) it.
     rows = _store().fetch_all(
         """
-        SELECT id, scheduled_job_id, task_id, max_attempts, lease_recovery_count, trace_id, trigger_reason
-        FROM scheduled_job_runs
-        WHERE status = ? AND lease_expires_at IS NOT NULL AND lease_expires_at < ?
-        ORDER BY id ASC
+        SELECT r.id, r.scheduled_job_id, r.task_id, r.max_attempts, r.lease_recovery_count, r.trace_id,
+               r.trigger_reason
+        FROM scheduled_job_runs r
+        JOIN scheduled_jobs j ON j.id = r.scheduled_job_id
+        WHERE r.status = ? AND r.lease_expires_at IS NOT NULL AND r.lease_expires_at < ?
+          AND j.agent_id IS NOT DISTINCT FROM ?
+        ORDER BY r.id ASC
         """,
-        (jobs.RUN_STATUS_RUNNING, jobs._iso(now)),
+        (jobs.RUN_STATUS_RUNNING, jobs._iso(now), jobs.AGENT_ID),
     )
     recovered = 0
     refreshed = 0
@@ -418,7 +469,9 @@ def recover_expired_leases() -> int:
         scheduled_job_id = int(row["scheduled_job_id"])
         trace_id = str(row.get("trace_id") or "") or None
         task_id = cast(int | None, row.get("task_id"))
-        if _task_still_active(task_id):
+        # A reminder or shell run has no runtime task and no heartbeat: while its dispatch still
+        # runs here, an expired lease means a slow send or command, not a lost callback.
+        if run_id in _inflight_run_ids.values() or _task_still_active(task_id):
             new_expiry = now + timedelta(seconds=jobs.SCHEDULER_LEASE_SECONDS)
             _store().execute(
                 """
@@ -512,38 +565,78 @@ def recover_expired_leases() -> int:
     return recovered + refreshed
 
 
+def _unowned_job_ids() -> list[int]:
+    """Live jobs without an agent, which a process with an agent id never runs (none without one)."""
+    jobs = _jobs()
+    if not jobs.AGENT_ID:
+        return []
+    rows = _store().fetch_all(
+        "SELECT id FROM scheduled_jobs WHERE agent_id IS NULL AND status != ? ORDER BY id ASC",
+        (jobs.JOB_STATUS_ARCHIVED,),
+    )
+    return [int(row["id"]) for row in rows]
+
+
+def report_unowned_jobs() -> list[int]:
+    """Log the jobs this agent skips because they have no agent, and return their ids.
+
+    A job created by a process started without AGENT_ID has no agent. Each agent materializes, claims
+    and recovers only its own jobs, so no supervised agent runs such a job until an operator assigns it
+    (docs/operations/upgrade.md).
+    """
+    job_ids = _unowned_job_ids()
+    if job_ids:
+        log.warning(
+            "scheduler_unowned_jobs_skipped",
+            agent_id=_jobs().AGENT_ID,
+            count=len(job_ids),
+            job_ids=job_ids[:50],
+            reason="These jobs have no agent_id; assign each to the agent that should run it.",
+        )
+    return job_ids
+
+
 def get_scheduler_snapshot() -> dict[str, Any]:
-    """Return a lightweight scheduler operational snapshot."""
+    """Return a lightweight scheduler operational snapshot of this agent's jobs and runs."""
     jobs = _jobs()
     now = jobs._utcnow()
+    # This agent's rows only: the metrics carry this agent's label, and it dispatches only its own jobs.
     active_jobs = _store().fetch_val(
-        "SELECT COUNT(*) FROM scheduled_jobs WHERE status IN (?, ?, ?, ?, ?)",
+        "SELECT COUNT(*) FROM scheduled_jobs WHERE status IN (?, ?, ?, ?, ?) AND agent_id IS NOT DISTINCT FROM ?",
         (
             jobs.JOB_STATUS_VALIDATION_PENDING,
             jobs.JOB_STATUS_VALIDATED,
             jobs.JOB_STATUS_ACTIVE,
             jobs.JOB_STATUS_PAUSED,
             jobs.JOB_STATUS_FAILED_OPEN,
+            jobs.AGENT_ID,
         ),
     )
     due_runs = _store().fetch_val(
         """
-        SELECT COUNT(*) FROM scheduled_job_runs
-        WHERE status IN (?, ?) AND COALESCE(next_attempt_at, scheduled_for) <= ?
+        SELECT COUNT(*) FROM scheduled_job_runs r
+        JOIN scheduled_jobs j ON j.id = r.scheduled_job_id
+        WHERE r.status IN (?, ?) AND COALESCE(r.next_attempt_at, r.scheduled_for) <= ?
+          AND j.agent_id IS NOT DISTINCT FROM ?
         """,
-        (jobs.RUN_STATUS_QUEUED, jobs.RUN_STATUS_RETRYING, jobs._iso(now)),
+        (jobs.RUN_STATUS_QUEUED, jobs.RUN_STATUS_RETRYING, jobs._iso(now), jobs.AGENT_ID),
     )
     leased_runs = _store().fetch_val(
-        "SELECT COUNT(*) FROM scheduled_job_runs WHERE lease_expires_at IS NOT NULL AND lease_expires_at >= ?",
-        (jobs._iso(now),),
+        """
+        SELECT COUNT(*) FROM scheduled_job_runs r
+        JOIN scheduled_jobs j ON j.id = r.scheduled_job_id
+        WHERE r.lease_expires_at IS NOT NULL AND r.lease_expires_at >= ?
+          AND j.agent_id IS NOT DISTINCT FROM ?
+        """,
+        (jobs._iso(now), jobs.AGENT_ID),
     )
     failed_open_jobs = _store().fetch_val(
-        "SELECT COUNT(*) FROM scheduled_jobs WHERE status = ?",
-        (jobs.JOB_STATUS_FAILED_OPEN,),
+        "SELECT COUNT(*) FROM scheduled_jobs WHERE status = ? AND agent_id IS NOT DISTINCT FROM ?",
+        (jobs.JOB_STATUS_FAILED_OPEN, jobs.AGENT_ID),
     )
     validation_pending_jobs = _store().fetch_val(
-        "SELECT COUNT(*) FROM scheduled_jobs WHERE status = ?",
-        (jobs.JOB_STATUS_VALIDATION_PENDING,),
+        "SELECT COUNT(*) FROM scheduled_jobs WHERE status = ? AND agent_id IS NOT DISTINCT FROM ?",
+        (jobs.JOB_STATUS_VALIDATION_PENDING, jobs.AGENT_ID),
     )
     snapshot = jobs.SchedulerSnapshot(
         active_jobs=int(active_jobs),
@@ -552,6 +645,7 @@ def get_scheduler_snapshot() -> dict[str, Any]:
         failed_open_jobs=int(failed_open_jobs),
         validation_pending_jobs=int(validation_pending_jobs),
         dispatcher_running=bool(_dispatcher_task and not _dispatcher_task.done()),
+        unowned_jobs=len(_unowned_job_ids()),
     )
     try:
         from koda.services.metrics import SCHEDULED_ACTIVE_JOBS, SCHEDULED_DUE_RUNS, SCHEDULED_LEASED_RUNS

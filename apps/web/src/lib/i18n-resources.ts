@@ -140,6 +140,7 @@ export const resources = {
       },
       sidebar: {
         ariaLabel: "Main navigation",
+        regionLabel: "Sidebar",
         newSession: "New session",
         newSessionLabel: "Start a new session",
         recents: "Recents",
@@ -856,6 +857,7 @@ export const resources = {
       },
       sidebar: {
         ariaLabel: "Navegação principal",
+        regionLabel: "Barra lateral",
         newSession: "Nova sessão",
         newSessionLabel: "Iniciar uma nova sessão",
         recents: "Recentes",
@@ -1571,6 +1573,7 @@ export const resources = {
       },
       sidebar: {
         ariaLabel: "Navegación principal",
+        regionLabel: "Barra lateral",
         newSession: "Nueva sesión",
         newSessionLabel: "Iniciar una nueva sesión",
         recents: "Recientes",
@@ -2288,6 +2291,7 @@ export const resources = {
       },
       sidebar: {
         ariaLabel: "Navigation principale",
+        regionLabel: "Barre latérale",
         newSession: "Nouvelle session",
         newSessionLabel: "Démarrer une nouvelle session",
         recents: "Récents",
@@ -3007,6 +3011,7 @@ export const resources = {
       },
       sidebar: {
         ariaLabel: "Hauptnavigation",
+        regionLabel: "Seitenleiste",
         newSession: "Neue Sitzung",
         newSessionLabel: "Eine neue Sitzung starten",
         recents: "Zuletzt verwendet",

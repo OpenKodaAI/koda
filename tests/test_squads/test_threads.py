@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -266,3 +267,56 @@ async def test_post_to_unknown_thread_raises(store: SquadThreadStore) -> None:
             from_agent="X",
             content="orphan",
         )
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_an_idempotency_key_alone_does_not_drop_a_post(store: SquadThreadStore) -> None:
+    # Agent tools pass agent-supplied metadata, so a reused key must not swallow a new update.
+    thread = await store.create_thread(workspace_id="acme", squad_id="build", title="t")
+    first = await store.post_thread_message(
+        thread_id=thread.id, from_agent="FE", content="status: started", metadata={"idempotency_key": "status"}
+    )
+    second = await store.post_thread_message(
+        thread_id=thread.id, from_agent="FE", content="status: done", idempotency_key="status"
+    )
+
+    assert second != first
+    history = await store.thread_history(thread_id=thread.id, limit=10)
+    assert [row["content"] for row in history] == ["status: done", "status: started"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_dedupe_returns_the_message_already_posted_with_the_key(store: SquadThreadStore) -> None:
+    thread = await store.create_thread(workspace_id="acme", squad_id="build", title="t")
+    other = await store.create_thread(workspace_id="acme", squad_id="build", title="other")
+    first = await store.post_thread_message(
+        thread_id=thread.id, from_agent="PM", content="returned", idempotency_key="handoff:1", dedupe=True
+    )
+    again = await store.post_thread_message(
+        thread_id=thread.id, from_agent="PM", content="returned again", idempotency_key="handoff:1", dedupe=True
+    )
+    # Two posts racing with the same key serialize on the thread row: one message.
+    raced = await asyncio.gather(
+        *(
+            store.post_thread_message(
+                thread_id=thread.id,
+                from_agent="PM",
+                content="failed",
+                metadata={"idempotency_key": "handoff:2"},
+                dedupe=True,
+            )
+            for _ in range(2)
+        )
+    )
+    # The key is scoped to its thread.
+    elsewhere = await store.post_thread_message(
+        thread_id=other.id, from_agent="PM", content="returned", idempotency_key="handoff:1", dedupe=True
+    )
+
+    assert again == first
+    assert raced[0] == raced[1]
+    assert elsewhere not in {first, raced[0]}
+    history = await store.thread_history(thread_id=thread.id, limit=10)
+    assert [row["content"] for row in history] == ["failed", "returned"]

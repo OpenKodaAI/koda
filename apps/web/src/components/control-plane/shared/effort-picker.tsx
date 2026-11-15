@@ -102,7 +102,7 @@ export function EffortPicker(props: EffortPickerProps) {
           value={String(effectiveValue ?? capability.defaultValue ?? items[0]?.id ?? "")}
           onChange={(next) => onChange(next)}
           ariaLabel={labelText}
-          className={cn(isInheriting && "opacity-60")}
+          className={cn(isInheriting && "opacity-60 has-[:focus-visible]:opacity-100")}
         />
       ) : (
         <div className="flex items-center gap-3">
@@ -115,7 +115,10 @@ export function EffortPicker(props: EffortPickerProps) {
             value={Number(effectiveValue ?? capability.defaultValue ?? capability.min)}
             onChange={(event) => onChange(Number(event.target.value))}
             disabled={readOnly}
-            className={cn("h-1 flex-1 cursor-pointer accent-[var(--accent)]", isInheriting && "opacity-60")}
+            className={cn(
+              "h-1 flex-1 cursor-pointer accent-[var(--accent)]",
+              isInheriting && "opacity-60 focus-visible:opacity-100",
+            )}
             aria-label={labelText}
           />
           <input
@@ -130,8 +133,8 @@ export function EffortPicker(props: EffortPickerProps) {
             disabled={readOnly}
             className={cn(
               "h-9 w-20 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-right text-sm font-mono text-[var(--text-primary)]",
-              "focus:outline-none focus:ring-1 focus:ring-[var(--accent-muted)]",
-              isInheriting && "opacity-60",
+              "focus-visible:border-[var(--focus-ring)] focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
+              isInheriting && "opacity-60 focus-visible:opacity-100",
             )}
           />
           <span className="text-xs text-[var(--text-quaternary)]">{t("modelEffort.tokensUnit")}</span>

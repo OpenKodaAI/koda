@@ -82,11 +82,12 @@ operator reinstalls and reviews the package to load it again.
 Handler code loads from the `.py` sources only. Python neither reads nor writes
 a bytecode cache while the runtime registers a package's handlers, so a cache
 file planted next to a handler, or next to a module the handler imports when it
-loads, does not run in place of the verified source. That holds only during
-registration: a module package code imports later, at tool-call time (which
-needs package code that puts its own directory on `sys.path`), goes through
-Python's normal `__pycache__` lookup, and those cache files are not covered by
-the hash.
+loads, does not run in place of the verified source. Once a package registers,
+the runtime also compiles every module file inside a package's directory from
+its source for the rest of the process, however package code loads it later, at
+tool-call time: an `import` statement, `importlib.util.spec_from_file_location`
+or a `SourceFileLoader` of its own all end in `SourceFileLoader.get_code`, which
+then skips `__pycache__` for those files (D-273).
 
 A rollback restores the previous lock, not the previous files. When the files
 on disk no longer hash to that revision's `package_hash`, for example because

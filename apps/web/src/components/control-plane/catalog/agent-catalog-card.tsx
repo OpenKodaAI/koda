@@ -129,7 +129,7 @@ export function AgentCatalogCard({
               <h3 className="min-w-0">
                 <Link
                   href={`/control-plane/agents/${agent.id}`}
-                  className="block min-w-0 truncate whitespace-nowrap text-[0.9375rem] font-medium leading-tight tracking-[-0.02em] text-[var(--text-primary)] transition-opacity duration-200 hover:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-0 group-hover:opacity-100"
+                  className="block min-w-0 truncate whitespace-nowrap text-[0.9375rem] font-medium leading-tight tracking-[-0.02em] text-[var(--text-primary)] transition-opacity duration-200 hover:opacity-100 group-hover:opacity-100"
                   title={agent.display_name}
                 >
                   <span className="block">

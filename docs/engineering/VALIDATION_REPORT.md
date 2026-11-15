@@ -687,3 +687,29 @@ Gates at 8a26acc (`int/b4`):
 - Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 189 files and 1158 tests passed; `pnpm build:web` ok.
 - Rust: `cargo fmt --all --check` ok; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo test --workspace` 22 suites, 102 passed, 0 failed, 3 ignored (on the dedicated `../koda-wt/.target-int`).
 - Doc and plan checks after the records: 81 passed; plan lint consistent (354 tasks).
+
+## Integration batch 5 (2026-11-15, `int/b5`, rule 10 lean lanes)
+
+Lanes:
+- SEC-D269 (D-269, D-270, D-273): the MCP prompt section is capped (128 tools per server, 64 parameters per tool, 100,000 characters) and says what it left out; plugin handlers load from one checked open, under flat module names; package code compiles from source for the process lifetime, at tool-call time too.
+- M10-E1-T2: CLAUDE.md is the one canonical guide at the root and in apps/web, AGENTS.md is a pointer, and `tests/test_agent_guides.py` keeps them from drifting.
+- M9-E1-T4, M9-E2-T1, M9-E2-T2 (performance): with 10,000 cleaned environments the reconcile sweep makes 8 queries instead of 70,008 (about 250 s); a closed command palette makes no stats requests; chat and room mutations no longer revalidate the layout; vitest runs files in parallel (121 s against 436 s serial, same 1125 results).
+- M2-E2-T1, M2-E2-T5 (data): owner registration, password reset, agent delete and workspace delete each run in one transaction, proven with Postgres trigger-injected faults; a migrations gate diffs an upgrade from the previous release against a fresh install and refuses plain index builds on large tables; migration 049 now builds its index CONCURRENTLY.
+- M3-E4-T6 and D-259 (memory, scheduler): a labelled EN and PT-BR corpus (109 block, 62 allow) pins the memory safety scanner; jobs are scoped to their agent (Q-31) and the upgrade doc says how to assign old jobs.
+- M3-E6-T1, T2, T3 (squads): follow-ups are queued after the worker lock is released (the M0-E3-T2 deadlock test now passes as a normal test); a coordinator answers once every destination has ended, and the router sweep completes stranded handoffs.
+- M8-E1-T1, T2, T3 (accessibility): a visible 2px focus ring on every primitive in both themes, a keyboard-usable language switcher, one h1 per page, a skip-link target on the auth routes.
+
+At integration:
+- Conflicts: agent delete runs the canonical `AGENT_DELETE_TABLES` (M2-E3-T2) inside one transaction (M2-E2-T1); chat markdown keeps the static component map (M9-E2-T2's flake fix) with the headings one level down (M8-E1-T3).
+- Fixes for lanes built on older bases (ade34ab, e9d903b, f2c28a1): the delete-tables unit test records through `with_connection`; the squad fixture and the sweep test no longer reference `_user_semaphores` and `RuntimeStore`, which batch 3 removed; the D-019 strict xfail became a normal test; the landmarks contract allows the insecure-transport screen's h1.
+- The first gate run also failed because the orchestrator ran tests against the gate's database while the gate ran; the gate database is now used by the gate only.
+- Recorded: D-280 to D-289 and D-291 to D-293, M2-E2-T5 in review (actionlint and a first GitHub Actions run of `migrations-gate.yml` are not possible here), CHANGELOG entries for every lane, FEATURE_MATRIX notes, QUALITY_BASELINE web-test time.
+
+Gates (`int/b5`, second run at e9d903b; the two sweep-query tests fixed in f2c28a1 were rerun after):
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: 761 files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 349 source files.
+- `pytest --cov=koda`: 8938 passed, 2 failed (`tests/integration/test_runtime_sweep_queries.py`, both patched the removed `controller.RuntimeStore`), 34 skipped, 176 xfailed. After f2c28a1 that file passes (4 passed).
+- `pytest -m postgres`: 382 passed, the same 2 failed, 2 skipped, 1 xfailed; after f2c28a1 they pass.
+- Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 194 files and 1212 tests passed; `pnpm build:web` ok.
+- Rust: not touched by this batch.

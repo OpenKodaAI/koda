@@ -263,7 +263,7 @@ export function Sidebar({
           mobileOpen ? "translate-x-0" : "-translate-x-full",
           collapsed && "lg:w-[3.5rem]"
         )}
-        aria-label={t("sidebar.ariaLabel")}
+        aria-label={t("sidebar.regionLabel")}
         {...tourRoute("shell.sidebar")}
       >
         <div
@@ -323,7 +323,6 @@ export function Sidebar({
               }}
               className={cn(
                 "inline-flex min-h-[34px] items-center justify-center gap-2 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--panel-strong)]",
-                "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sidebar-surface)]",
                 collapsed ? "lg:h-9 lg:w-9 lg:px-0" : "w-full",
               )}
               {...tourAnchor("shell.sidebar.new-session")}
@@ -333,7 +332,10 @@ export function Sidebar({
             </Link>
           </div>
 
-          <nav className={cn("mt-5", collapsed && "lg:mt-3 lg:items-center")}>
+          <nav
+            aria-label={t("sidebar.ariaLabel")}
+            className={cn("mt-5", collapsed && "lg:mt-3 lg:items-center")}
+          >
             <SidebarNavList
               items={primaryItems}
               pathname={pathname}
@@ -346,7 +348,10 @@ export function Sidebar({
           </nav>
 
           <div className="mt-auto pt-4">
-            <nav className={cn(collapsed && "lg:items-center")}>
+            <nav
+              aria-label={t("sidebar.sections.system")}
+              className={cn(collapsed && "lg:items-center")}
+            >
               <SidebarNavList
                 items={footerItems}
                 pathname={pathname}

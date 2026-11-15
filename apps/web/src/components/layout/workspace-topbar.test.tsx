@@ -74,7 +74,7 @@ describe("WorkspaceTopbar", () => {
       </ThemeProvider>,
     );
 
-    const languageButton = screen.getByRole("button", { name: /Language/i });
+    const languageButton = screen.getByRole("combobox", { name: /Language/i });
     const themeButton = screen.getByRole("button", { name: /Theme/i });
 
     expect(languageButton.compareDocumentPosition(themeButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

@@ -243,9 +243,9 @@ function EditorHeader({
               </span>
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-2.5">
-              <h1 className="truncate text-[1.28rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+              <h2 className="truncate text-[1.28rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
                 {state.displayName || agentId}
-              </h1>
+              </h2>
             </div>
           </div>
         </div>

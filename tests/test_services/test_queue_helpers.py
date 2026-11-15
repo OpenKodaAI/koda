@@ -601,6 +601,71 @@ class TestSquadDeliverySynthesis:
         assert payload["metadata"]["payload"]["artifact_ids"] == ["artifact-1"]
 
     @pytest.mark.asyncio
+    async def test_coordinator_synthesis_counts_an_answered_reply_obligation_as_a_handoff_reply(self) -> None:
+        ctx = self._task_context()
+        thread_store = AsyncMock()
+        thread_store.get_thread = AsyncMock(
+            return_value=MagicMock(
+                squad_id="build",
+                coordinator_agent_id="PM",
+                owner_user_id=42,
+                telegram_chat_id=None,
+                telegram_message_thread_id=7,
+            )
+        )
+        handoff = {
+            "schema_version": "handoff_event.v1",
+            "handoff_id": "handoff-1",
+            "status": "requested",
+            "source_agent_id": "PM",
+            "destination_agent_ids": ["FE", "QA"],
+            "parent_message_id": "msg-1",
+        }
+        thread_store.thread_history = AsyncMock(
+            return_value=[
+                {
+                    "type": "task_result",
+                    "from": "FE",
+                    "content": "frontend done",
+                    "metadata": {"parent_message_id": "msg-1", "squad_task_id": "frontend-task"},
+                },
+                {"id": 2, "type": "system_event", "from": "PM", "content": "", "metadata": {"payload": handoff}},
+                {
+                    "id": 1,
+                    "type": "user_input",
+                    "from": "user:alice",
+                    "content": "ship it",
+                    "metadata": {},
+                    # QA answered the user's message through a reply obligation instead of a task_result.
+                    "reply_obligations": [{"id": 7, "status": "answered", "targetAgentId": "QA"}],
+                },
+            ]
+        )
+        task_store = AsyncMock()
+        task_store.list_tasks = AsyncMock(return_value=[])
+        bus = MagicMock()
+        bus.send = AsyncMock()
+
+        with (
+            patch("koda.squads.get_squad_thread_store", return_value=thread_store),
+            patch("koda.squads.get_squad_task_store", return_value=task_store),
+            patch("koda.agents.get_message_bus", return_value=bus),
+        ):
+            await _maybe_enqueue_squad_coordinator_synthesis(
+                user_id=42,
+                context=MagicMock(application=None),
+                ctx=ctx,
+                response_text="frontend done",
+                squad_message_id="msg-3",
+                artifact_ids=[],
+            )
+
+        bus.send.assert_awaited_once()
+        [handoff_post] = thread_store.post_thread_message.await_args_list
+        assert handoff_post.kwargs["metadata"]["payload"]["handoff_id"] == "handoff-1"
+        assert handoff_post.kwargs["metadata"]["payload"]["status"] == "returned"
+
+    @pytest.mark.asyncio
     async def test_coordinator_synthesis_skips_existing_synthesis_request(self) -> None:
         ctx = self._task_context()
         thread_store = AsyncMock()

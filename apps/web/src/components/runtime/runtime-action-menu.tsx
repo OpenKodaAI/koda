@@ -171,7 +171,7 @@ function RuntimeMenuItem({
       className={cn(
         "flex h-8 w-full items-center gap-2 rounded-[var(--radius-chip)] px-2 text-left text-[13px] font-medium outline-none",
         "transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "focus-visible:bg-[var(--hover-tint)] focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
+        "focus-visible:bg-[var(--hover-tint)]",
         "disabled:cursor-progress disabled:opacity-70",
         tone === "danger"
           ? "text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)]"

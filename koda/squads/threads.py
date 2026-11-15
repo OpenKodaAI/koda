@@ -438,7 +438,16 @@ class SquadThreadStore:
         in_reply_to: int | str | None = None,
         requires_response_by: datetime | None = None,
         idempotency_key: str | None = None,
+        dedupe: bool = False,
     ) -> int:
+        """Post a message to the thread and return its id.
+
+        The idempotency key (``idempotency_key`` or ``metadata["idempotency_key"]``)
+        is stored with the message. Only with ``dedupe=True`` does it deduplicate:
+        the post then returns the id of the message already posted with that key
+        in this thread, and concurrent posts of the key serialize on the thread
+        row. Agent tools pass agent-supplied keys, so they do not opt in.
+        """
         metadata = dict(metadata or {})
         normalized_to_agent_ids = [str(value).strip() for value in to_agent_ids or [] if str(value).strip()]
         if normalized_to_agent_ids:
@@ -458,12 +467,24 @@ class SquadThreadStore:
             metadata["requires_response_by"] = requires_response_by.isoformat()
         pool = await self._ensure_pool()
         async with pool.acquire() as conn, conn.transaction():
+            deduplicate = dedupe and bool(normalized_idempotency)
             exists = await conn.fetchval(
-                f'SELECT 1 FROM "{self._schema}"."squad_threads" WHERE id = $1',
+                f'SELECT 1 FROM "{self._schema}"."squad_threads" WHERE id = $1'
+                + (" FOR UPDATE" if deduplicate else ""),
                 thread_id,
             )
             if not exists:
                 raise KeyError(f"thread {thread_id!r} not found")
+            if deduplicate:
+                existing_id = await conn.fetchval(
+                    f"""SELECT id FROM "{self._schema}"."squad_messages"
+                         WHERE thread_id = $1 AND idempotency_key = $2
+                      ORDER BY id LIMIT 1""",
+                    thread_id,
+                    str(normalized_idempotency),
+                )
+                if existing_id is not None:
+                    return int(existing_id)
             row_id = await conn.fetchval(
                 f"""INSERT INTO "{self._schema}"."squad_messages"
                         (message_uuid, thread_id, from_agent, to_agent, to_agent_ids, content,
@@ -560,7 +581,14 @@ class SquadThreadStore:
         limit: int = 50,
         before_id: int | None = None,
         visible_after: datetime | None = None,
+        cycle_parent_message_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        """The thread's messages, newest first.
+
+        With ``cycle_parent_message_ids`` only the messages of the cycles those message refs
+        (``msg-<id>``) started: the messages themselves, and the messages whose metadata or payload
+        names one of them as ``parent_message_id``, however old they are.
+        """
         params: list[Any] = [thread_id]
         sql = f"""SELECT id, from_agent, to_agent, content, message_type,
                        message_uuid, to_agent_ids, kind, payload_json,
@@ -568,6 +596,15 @@ class SquadThreadStore:
                        requires_response_by, idempotency_key, created_at
                   FROM "{self._schema}"."squad_messages"
                  WHERE thread_id = $1"""
+        if cycle_parent_message_ids is not None:
+            refs = [str(ref) for ref in cycle_parent_message_ids if ref]
+            params.append([ref_id for ref in refs if (ref_id := _message_ref_to_id(ref)) is not None])
+            params.append(refs)
+            sql += (
+                f" AND (id = ANY(${len(params) - 1}::bigint[])"
+                f" OR metadata_json->>'parent_message_id' = ANY(${len(params)}::text[])"
+                f" OR metadata_json->'payload'->>'parent_message_id' = ANY(${len(params)}::text[]))"
+            )
         if before_id is not None:
             params.append(int(before_id))
             sql += f" AND id < ${len(params)}"

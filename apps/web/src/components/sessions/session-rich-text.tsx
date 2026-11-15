@@ -130,33 +130,35 @@ const MARKDOWN_COMPONENTS: Components = {
       <WithMentions tag="li">{children}</WithMentions>
     </li>
   ),
+  // A message sits under the page's h1, so its headings render one level
+  // down (M8-E1-T3); the class keeps the size of the markdown level.
   h1: ({ children }) => (
-    <h1>
+    <h2 className="session-richtext__h1">
       <WithMentions tag="h1">{children}</WithMentions>
-    </h1>
-  ),
-  h2: ({ children }) => (
-    <h2>
-      <WithMentions tag="h2">{children}</WithMentions>
     </h2>
   ),
-  h3: ({ children }) => (
-    <h3>
-      <WithMentions tag="h3">{children}</WithMentions>
+  h2: ({ children }) => (
+    <h3 className="session-richtext__h2">
+      <WithMentions tag="h2">{children}</WithMentions>
     </h3>
   ),
-  h4: ({ children }) => (
-    <h4>
-      <WithMentions tag="h4">{children}</WithMentions>
+  h3: ({ children }) => (
+    <h4 className="session-richtext__h3">
+      <WithMentions tag="h3">{children}</WithMentions>
     </h4>
   ),
-  h5: ({ children }) => (
-    <h5>
-      <WithMentions tag="h5">{children}</WithMentions>
+  h4: ({ children }) => (
+    <h5 className="session-richtext__h4">
+      <WithMentions tag="h4">{children}</WithMentions>
     </h5>
   ),
+  h5: ({ children }) => (
+    <h6 className="session-richtext__h5">
+      <WithMentions tag="h5">{children}</WithMentions>
+    </h6>
+  ),
   h6: ({ children }) => (
-    <h6>
+    <h6 className="session-richtext__h6">
       <WithMentions tag="h6">{children}</WithMentions>
     </h6>
   ),

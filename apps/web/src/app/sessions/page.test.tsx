@@ -422,6 +422,19 @@ describe("SessionsPage chat redesign", () => {
     await expectInChatLog("Everything shipped correctly.");
   }, 10_000);
 
+  it("renders exactly one <h1> while a conversation is open (M8-E1-T3)", async () => {
+    renderSessionsPage();
+
+    await within(await screen.findByRole("log")).findByText(
+      "Everything shipped correctly.",
+      {},
+      { timeout: CHAT_TEXT_WAIT },
+    );
+    const headings = screen.getAllByRole("heading", { level: 1 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveTextContent("Sessions");
+  }, 10_000);
+
   it("loads older regular session pages near the top and reuses them from cache", async () => {
     currentQueryString = "agent=ATLAS&session=session-alpha";
     currentSearchParams = new URLSearchParams(currentQueryString);

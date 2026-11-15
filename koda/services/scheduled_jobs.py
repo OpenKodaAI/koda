@@ -142,6 +142,8 @@ class SchedulerSnapshot:
     failed_open_jobs: int
     validation_pending_jobs: int
     dispatcher_running: bool
+    # Jobs without an agent (created by a process started without AGENT_ID), which this agent skips.
+    unowned_jobs: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -151,6 +153,7 @@ class SchedulerSnapshot:
             "failed_open_jobs": self.failed_open_jobs,
             "validation_pending_jobs": self.validation_pending_jobs,
             "dispatcher_running": self.dispatcher_running,
+            "unowned_jobs": self.unowned_jobs,
         }
 
 
@@ -393,11 +396,22 @@ def _record_scheduler_event(
     return event_id
 
 
+def _job_belongs_to_this_agent(job: Mapping[str, Any]) -> bool:
+    """Whether this process's agent owns the job (NULL-safe: no agent id owns the jobs created without one)."""
+    return (str(job.get("agent_id") or "") or None) == (AGENT_ID or None)
+
+
 def _get_job(job_id: int, user_id: int | None = None) -> dict[str, Any] | None:
     if user_id is None:
         row = _fetchone("SELECT * FROM scheduled_jobs WHERE id = ?", (job_id,))
     else:
-        row = _fetchone("SELECT * FROM scheduled_jobs WHERE id = ? AND user_id = ?", (job_id, user_id))
+        # A user's lookup (bot commands, agent tools, runtime API actions) sees only this agent's jobs:
+        # the same user talks to several agents' bots, and a run queued here for another agent's job
+        # would carry this agent's policy snapshot.
+        row = _fetchone(
+            "SELECT * FROM scheduled_jobs WHERE id = ? AND user_id = ? AND agent_id IS NOT DISTINCT FROM ?",
+            (job_id, user_id, AGENT_ID),
+        )
     return _normalize_job(row)
 
 
@@ -973,8 +987,9 @@ def create_job(
 
 
 def list_jobs(user_id: int, *, include_archived: bool = False) -> list[dict[str, Any]]:
-    query = "SELECT * FROM scheduled_jobs WHERE user_id = ?"
-    params: list[Any] = [user_id]
+    """The user's jobs on this agent (bot commands, agent tools, cron wrappers)."""
+    query = "SELECT * FROM scheduled_jobs WHERE user_id = ? AND agent_id IS NOT DISTINCT FROM ?"
+    params: list[Any] = [user_id, AGENT_ID]
     if not include_archived:
         query += " AND status != ?"
         params.append(JOB_STATUS_ARCHIVED)
@@ -1026,8 +1041,8 @@ def list_job_runs(
         "WHERE r.scheduled_job_id = ?"
     )
     if user_id is not None:
-        query += " AND j.user_id = ?"
-        params.append(user_id)
+        query += " AND j.user_id = ? AND j.agent_id IS NOT DISTINCT FROM ?"
+        params.extend([user_id, AGENT_ID])
     query += " ORDER BY r.id DESC LIMIT ? OFFSET ?"
     params.extend([limit, max(0, int(offset))])
     runs: list[dict[str, Any]] = []
@@ -1052,8 +1067,8 @@ def list_job_events(
         "WHERE e.scheduled_job_id = ?"
     )
     if user_id is not None:
-        query += " AND j.user_id = ?"
-        params.append(user_id)
+        query += " AND j.user_id = ? AND j.agent_id IS NOT DISTINCT FROM ?"
+        params.extend([user_id, AGENT_ID])
     if run_id is not None:
         query += " AND e.scheduled_run_id = ?"
         params.append(run_id)
@@ -1223,17 +1238,15 @@ def create_run(
     now = _utcnow()
     scheduled_for = scheduled_for or now
     job = _get_job(scheduled_job_id)
-    policy_snapshot = None
-    policy_snapshot_json = "{}"
-    policy_snapshot_hash = ""
-    if job is not None:
-        policy_snapshot, policy_snapshot_json, policy_snapshot_hash = _policy_snapshot_payload(job)
+    # The run's snapshot is built from this process's policy, so only the job's own agent creates runs.
+    if job is None or not _job_belongs_to_this_agent(job):
+        raise ValueError(f"Scheduled job {scheduled_job_id} not found for this agent.")
+    policy_snapshot, policy_snapshot_json, policy_snapshot_hash = _policy_snapshot_payload(job)
     trace_id = _new_scheduler_trace_id("schedrun")
     metadata_payload = dict(metadata or {})
     metadata_payload.setdefault("policy_snapshot_json", policy_snapshot_json)
     metadata_payload.setdefault("policy_snapshot_hash", policy_snapshot_hash)
-    if policy_snapshot is not None:
-        metadata_payload.setdefault("policy_snapshot", policy_snapshot)
+    metadata_payload.setdefault("policy_snapshot", policy_snapshot)
     run_id = _insert_returning_id(
         """
         INSERT INTO scheduled_job_runs (
@@ -1281,7 +1294,8 @@ def queue_validation_run(
 ) -> tuple[int | None, str]:
     """Queue a manual dry-run validation for a job."""
     job = _get_job(job_id, user_id)
-    if not job:
+    # The job's snapshot is rewritten from this process's policy, so only the job's own agent validates it.
+    if not job or not _job_belongs_to_this_agent(job):
         return None, "Job not found."
     if job["status"] == JOB_STATUS_ARCHIVED:
         return None, "Archived jobs cannot be validated."

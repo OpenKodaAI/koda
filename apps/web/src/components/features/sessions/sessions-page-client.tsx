@@ -1095,6 +1095,9 @@ function SessionsPageContent() {
       className="flex h-full min-h-0 overflow-hidden bg-[var(--canvas)] text-[var(--text-primary)]"
       {...tourRoute("sessions", tourVariant)}
     >
+      {/* /sessions hides the workspace topbar, whose route title is the <h1>
+          elsewhere; the thread and room views use <h2> (M8-E1-T3). */}
+      <h1 className="sr-only">{t("routeMeta.sessions.title")}</h1>
       <div className="hidden md:flex" {...tourAnchor("sessions.conversation-rail")}>
         <SessionRail
           sessions={sessions}

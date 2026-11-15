@@ -1501,7 +1501,7 @@ export function RuntimeFilesPanel({
           </div>
         </aside>
 
-        <main className="runtime-files-workbench">
+        <div className="runtime-files-workbench">
           <div className="runtime-files-project-search">
             <div className="runtime-files-project-search__field">
               <Search className="h-3.5 w-3.5 shrink-0" />
@@ -1968,7 +1968,7 @@ export function RuntimeFilesPanel({
               )}
             </div>
           </div>
-        </main>
+        </div>
       </div>
     </TooltipProvider>
   );
@@ -2138,7 +2138,7 @@ function RuntimeFileMenuItem({
       className={cn(
         "flex h-8 w-full items-center gap-2 rounded-[var(--radius-chip)] px-2 text-left text-[13px] font-medium outline-none",
         "transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "focus-visible:bg-[var(--hover-tint)] focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
+        "focus-visible:bg-[var(--hover-tint)]",
         tone === "danger"
           ? "text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)]"
           : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",

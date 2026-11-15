@@ -16,7 +16,7 @@ Environment: `AGENT_TOKEN=test-token`, `ALLOWED_USER_IDS=123456789` (CI dummy va
 | Python types | `mypy koda/ --ignore-missing-imports` | pass | 5s | 358 files; pyproject has 13 unused `[[tool.mypy.overrides]]` module sections |
 | Python tests | `pytest --cov=koda --cov-report=term-missing` | pass | 93s | 4874 passed, 200 skipped, 9 warnings; line coverage 61% |
 | Web lint | `pnpm lint:web` | pass | 39s | 0 errors, 40 warnings (30 `react-hooks/exhaustive-deps`, 10 `no-unused-vars`) |
-| Web tests | `pnpm test:web` | pass | 201s | 154 files, 686 tests |
+| Web tests | `pnpm test:web` | pass | 121s | 186 files, 1125 tests (parallel files since M9-E2-T2; serial on the same machine took 436 s) |
 | Web build | `pnpm build:web` | pass | 44s | needs `fonts.googleapis.com` / `fonts.gstatic.com` |
 | Rust format | `cargo fmt --check --manifest-path rust/Cargo.toml` | **fails (tooling)** | — | rustfmt 1.9 prints "Failed to find targets" for a virtual workspace manifest when run from the repo root. `cargo fmt --all --check --manifest-path rust/Cargo.toml` and `cd rust && cargo fmt --check` both pass. CI runs it inside `rust/`, so only the documented command is wrong. |
 | Rust lint | `cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings` | pass | 2s (cached) | — |

@@ -330,7 +330,7 @@ export function PageSearchField({
           type="button"
           onClick={() => onChange("")}
           aria-label={clearLabel}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]"
         >
           <X className="h-3.5 w-3.5" aria-hidden="true" />
         </button>

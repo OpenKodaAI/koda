@@ -38,6 +38,11 @@ MCP_PROMPT_INFIX = "prompt__"
 # Caps on third-party text that reaches the system prompt.
 MCP_TOOL_DESCRIPTION_MAX_CHARS = 1500
 MCP_PARAM_DESCRIPTION_MAX_CHARS = 300
+# Caps on how much of a server's tool list reaches it (D-269): tools shown per server,
+# parameters shown per tool, and characters of tool entries in the whole MCP section.
+MCP_PROMPT_MAX_TOOLS_PER_SERVER = 128
+MCP_TOOL_MAX_PARAMS = 64
+MCP_PROMPT_SECTION_MAX_CHARS = 100_000
 
 _CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
 

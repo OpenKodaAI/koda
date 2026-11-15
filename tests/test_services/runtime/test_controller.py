@@ -72,6 +72,9 @@ class _StoreStub:
     def list_environments(self) -> list[dict[str, Any]]:
         return [self.env] if self.env else []
 
+    def list_live_environments(self) -> list[dict[str, Any]]:
+        return self.list_environments()
+
     def get_environment_by_task(self, task_id: int) -> dict[str, Any] | None:
         if self.env and int(self.env["task_id"]) == task_id:
             return self.env
@@ -2176,7 +2179,6 @@ async def test_recover_task_prefers_kernel_cleanup_for_old_workspace(
     controller._rehydrate_environment_state = _rehydrate_environment_state  # type: ignore[method-assign]
     store.get_latest_checkpoint = lambda task_id: {"id": 91, "checkpoint_dir": str(checkpoint_dir)}  # type: ignore[attr-defined]
     store.add_recovery_action = lambda **kwargs: 1  # type: ignore[attr-defined]
-    monkeypatch.setattr(controller, "_has_alive_recorded_processes", lambda **kwargs: False)
 
     result = await controller.recover_task(task_id=1, actor="test")
 
@@ -2262,7 +2264,6 @@ async def test_recover_task_prefers_kernel_restore_when_rust_requires_it(
     controller = _build_controller(monkeypatch, tmp_path, store=store, kernel=kernel)
     store.get_latest_checkpoint = lambda task_id: {"id": 91, "checkpoint_dir": str(tmp_path / "checkpoint")}  # type: ignore[attr-defined]
     store.add_recovery_action = lambda **kwargs: 1  # type: ignore[attr-defined]
-    monkeypatch.setattr(controller, "_has_alive_recorded_processes", lambda **kwargs: False)
 
     result = await controller.recover_task(task_id=1, actor="test")
 
@@ -2326,7 +2327,6 @@ async def test_recover_task_fails_closed_when_rust_requires_kernel_recreate(
     )
     controller = _build_controller(monkeypatch, tmp_path, store=store, kernel=kernel)
     store.get_latest_checkpoint = lambda task_id: {"id": 91, "checkpoint_dir": str(checkpoint_dir)}  # type: ignore[attr-defined]
-    monkeypatch.setattr(controller, "_has_alive_recorded_processes", lambda **kwargs: False)
 
     with pytest.raises(RuntimeError, match="runtime kernel create_environment required during recovery"):
         await controller.recover_task(task_id=1, actor="test")
@@ -2662,9 +2662,12 @@ async def test_cancel_task_without_environment_discards_a_queued_task(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """D-009: a queued light task is discarded on dequeue and stays reported as cancelled."""
+    """D-009: a queued light task is discarded on dequeue and stays reported as cancelled.
+
+    The queued task is a squad turn, so the worker records it as a cancelled run is (D-074).
+    """
     import asyncio
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     import koda.services.queue_manager as queue_manager
     import koda.services.runtime as runtime_package
@@ -2680,8 +2683,17 @@ async def test_cancel_task_without_environment_discards_a_queued_task(
 
     queue: asyncio.Queue[Any] = asyncio.Queue()
     monkeypatch.setitem(queue_manager._user_queues, user_id, queue)
+    # What enqueue_squad_agent_task queues for a squad destination.
+    squad_turn = {
+        "_dashboard_chat": True,
+        "squad_thread_id": "thread-1",
+        "squad_task_id": "task-qa",
+        "executing_agent_id": "QA",
+    }
     for tid in (running_id, queued_id):
-        await queue.put({"_task_id": tid, "chat_id": 79, "query_text": f"query {tid}"})
+        await queue.put(
+            {"_task_id": tid, "chat_id": 79, "query_text": f"query {tid}", **(squad_turn if tid == queued_id else {})}
+        )
         queue_manager._track_queued_task_id(user_id, tid)
     context = MagicMock()
     context.user_data = {}
@@ -2700,7 +2712,10 @@ async def test_cancel_task_without_environment_discards_a_queued_task(
             queue_manager._unregister_task(task_info)
 
     try:
-        with patch.object(queue_manager, "_execute_single_task", side_effect=_fake_execute):
+        with (
+            patch.object(queue_manager, "_execute_single_task", side_effect=_fake_execute),
+            patch.object(queue_manager, "_record_failed_squad_task_turn", AsyncMock()) as record_squad_turn,
+        ):
             worker = asyncio.create_task(queue_manager._process_queue(user_id, context))
             try:
                 await asyncio.wait_for(first_started.wait(), timeout=10)
@@ -2730,6 +2745,12 @@ async def test_cancel_task_without_environment_discards_a_queued_task(
         # The worker discarded the cancelled item, consumed its marker, and no
         # later observability sync reported it as queued again.
         assert executed == [running_id]
+        record_squad_turn.assert_awaited_once()
+        recorded = record_squad_turn.await_args.kwargs
+        assert recorded["item"].squad_task_id == "task-qa"
+        assert recorded["error_message"] == "Cancelled by /cancel command."
+        assert recorded["cancelled"] is True
+        assert recorded["task_id"] == queued_id
         assert queue.qsize() == 0
         assert queued_id not in queue_manager._cancelled_task_ids
         assert store.queue_items[queued_id]["status"] == "cancelled"

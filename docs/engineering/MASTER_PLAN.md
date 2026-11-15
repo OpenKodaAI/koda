@@ -1336,12 +1336,12 @@ Owner BE · Risk low · Gate none · **pending** · Deps M2-E1-T1
 #### M2-E2 — Transactions and migrations
 
 #### M2-E2-T1 · Transactions for multi-statement writes
-Owner BE · Risk med · Gate none · **ready** · Deps —
+Owner BE · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-056, F-SET-01, F-SET-04, F-AGT-04
 - **Files:** `koda/state/control_plane_store.py` (~106), `koda/control_plane/operator_auth.py`, `koda/control_plane/manager.py` (agent and workspace delete), `docs/security/authentication.md` (atomicity note, as CLAUDE.md requires for `operator_auth.py` changes)
 - **Do:** add `async with store.transaction()`. Use it for owner registration, password reset, agent delete and workspace delete.
 - **Done when:** a fault injected mid-operation leaves no partial state, for example no owner without recovery codes.
-- **Tests:** G-PG fault-injection tests; G · **Evidence:** —
+- **Tests:** G-PG fault-injection tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": owner registration, password reset, agent delete and workspace delete commit all their writes or none; Postgres trigger-injected faults leave no owner without recovery codes and no half-deleted agent
 
 #### M2-E2-T2 · Transactional, locked migration runner
 Owner BE (OPS, review REV) · Risk high · Gate none · **pending** · Deps M2-E6-T2
@@ -1375,12 +1375,12 @@ Owner BE · Risk med · Gate none · **done** · Deps —
 - **Tests:** G-PG regression test that mixes callers on one pool · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": codecs installed once per connection; the backend schema is a startup `search_path` (ADR-040); Postgres tests show a CTE named like a table, quoted names and `current_schema()` resolve to the schema, and the statement cache is kept
 
 #### M2-E2-T5 · A migrations gate that detects drift
-Owner OPS · Risk low · Gate none · **ready** · Deps —
+Owner OPS · Risk low · Gate none · **in-review** · Deps —
 - **Addresses:** D-106, TD-125, F-PLT-04
 - **Files:** `.github/workflows/migrations-gate.yml` (~61), `docs/operations/upgrade.md`
 - **Do:** apply the previous release's schema, apply the current migrations, and diff the result against a fresh install. Use `uv sync --locked`. Correct the claim in the upgrade doc.
 - **Done when:** a PR that changes DDL outside a migration fails the gate, and a PR that adds a transactional `CREATE INDEX` on a table the gate lists as large fails it too (it must use the online kind).
-- **Tests:** `actionlint`; G-CI · **Evidence:** —
+- **Tests:** `actionlint`; G-CI · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": `.github/workflows/migrations-gate.yml` diffs an upgrade from the previous release against a fresh install and refuses plain index builds on large tables; a local run against Postgres passed, and its first catch was 049 (now CONCURRENTLY). Missing: actionlint and a first GitHub Actions run
 
 #### M2-E2-T6 · One-shot migration scripts tracked or retired
 Owner BE (OPS) · Risk med · Gate none · **pending** · Deps M2-E2-T2
@@ -1726,12 +1726,12 @@ Owner AIM · Risk low · Gate none · **ready** · Deps —
 - **Tests:** unit tests; G · **Evidence:** —
 
 #### M3-E4-T6 · Memory safety scanner precision
-Owner SEC (AIM) · Risk low · Gate none · **ready** · Deps —
+Owner SEC (AIM) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-035, F-MEM-15
 - **Files:** `koda/memory/safety.py` (~37)
 - **Do:** flag `.env` only with a path boundary or a read or exfiltration verb. Drop only the offending item, not the batch. Add PT-BR injection patterns, leaving the existing prompt content untranslated.
 - **Done when:** `process.env` text is kept, a PT-BR injection is caught, and the rest of the batch survives.
-- **Tests:** unit tests; G · **Evidence:** —
+- **Tests:** unit tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": a labelled EN and PT-BR corpus (109 block, 62 allow, with NFD variants) pins the scanner; `process.env` text is kept, PT-BR injections are caught and the scan stays linear
 
 #### M3-E4-T7 · Memory utility feedback changes the memories that were recalled
 Owner AIM · Risk low · Gate none · **pending** · Deps M3-E4-T1
@@ -1776,28 +1776,28 @@ Owner BE (AIM) · Risk med · Gate decision Q-2 (approval batch 1) · **blocked*
 #### M3-E6 — Squads (journey: a squad room conversation with delegation and synthesis)
 
 #### M3-E6-T1 · Squad follow-ups are dispatched after the lock is released
-Owner BE (AIM, review REV) · Risk high · Gate none · **pending** · Deps M0-E3-T2
+Owner BE (AIM, review REV) · Risk high · Gate none · **done** · Deps M0-E3-T2
 - **Addresses:** D-019, F-SQD-16
 - **Files:** `koda/services/queue_manager.py` (~8104, `_post_process`)
 - **Do:** collect squad follow-ups during post-processing and dispatch them after the per-user lock is released, using `asyncio.create_task`.
 - **Done when:** the M0-E3-T2 squad xfail passes, with no deadlock under the real lock.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": squad follow-ups are queued after the per-user worker lock is released; the M0-E3-T2 strict xfail now passes and is removed
 
 #### M3-E6-T2 · The coordinator always answers
-Owner AIM · Risk med · Gate none · **ready** · Deps —
+Owner AIM · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-015, F-SQD-13, TD-108 (missing squad-path tests)
 - **Files:** `koda/squads/coordinator_engine.py` (~853), the Telegram and web squad handlers
 - **Do:** when no task is dispatched, return `coordinated=False`, or dispatch the coordinator with the clarification or decline instruction.
 - **Done when:** ask_clarification, decline and handoff each produce a user-visible reply.
-- **Tests:** G-PG squad tests · **Evidence:** —
+- **Tests:** G-PG squad tests · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": ask_clarification, decline and handoff each produce a user-visible reply; a coordinator answers once every destination has ended, after a refused dispatch, a restart or a queued cancel (the router sweep completes stranded handoffs)
 
 #### M3-E6-T3 · Handoffs complete
-Owner AIM · Risk med · Gate none · **ready** · Deps —
+Owner AIM · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-074, F-SQD-16
 - **Files:** `koda/squads/synthesis_gate.py` (~18), the handoff event writer
 - **Do:** mark a handoff complete once every destination has replied (from task results or reply obligations).
 - **Done when:** synthesis runs after a handoff completes.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": synthesis runs once per cycle after a handoff completes; failures, cancels and budget stops record a result and cascade to dependents
 
 #### M3-E6-T4 · Bounded delegation and `agent_send`
 Owner AIM (SEC) · Risk med · Gate none · **ready** · Deps —
@@ -1951,13 +1951,13 @@ Owner BE · Risk low · Gate none · **done** · Deps —
 #### M4-E1-T4 · DBManager and boot-time SSH tunnels
 Owner BE (SEC, review REV) · Risk low · Gate none · **ready** · Deps —
 - **Addresses:** TD-036, F-SKL-34; the read-only guard bypass becomes moot
-- **Files:** `koda/services/db_manager.py`, `koda/__main__.py` (~828-839), `pyproject.toml` (asyncssh), `uv.lock`, `CLAUDE.md` (line 49), `AGENTS.md` (line 49)
-- **Do:** first confirm that no tool, handler or MCP catalog entry gives agents database access through DBManager or any other path. Then remove it, its boot hook and the asyncssh dependency. The project guides make "read-only database rules" a first-class guardrail, so update line 49 of both guides in the same change:
+- **Files:** `koda/services/db_manager.py`, `koda/__main__.py` (~828-839), `pyproject.toml` (asyncssh), `uv.lock`, `CLAUDE.md` (line 49; `AGENTS.md` is only a pointer to it since M10-E1-T2 and must not gain the sentence)
+- **Do:** first confirm that no tool, handler or MCP catalog entry gives agents database access through DBManager or any other path. Then remove it, its boot hook and the asyncssh dependency. The project guides make "read-only database rules" a first-class guardrail, so update line 49 of CLAUDE.md in the same change:
   - if no agent database path remains, the line says that agents have no direct database tool, and that any database access added later must be read-only by default and covered by the guardrail suite;
   - if another path exists, the line names the module that enforces read-only access, and a test covers it.
 
   The guide change gets an independent review (as M10-E1-T2 requires for project-instruction files).
-- **Done when:** the worker boots without opening tunnels, and both guides state where read-only database access is enforced, or that no such access exists.
+- **Done when:** the worker boots without opening tunnels, and CLAUDE.md states where read-only database access is enforced, or that no such access exists.
 - **Tests:** G; M0-E3-T3 · **Evidence:** —
 
 #### M4-E1-T5 · Vestigial memory pipeline
@@ -3083,28 +3083,28 @@ Owner OPS · Risk med · Gate none · **pending** · Deps M2-E6-T1
 #### M8-E1 — Accessibility
 
 #### M8-E1-T1 · Visible focus
-Owner UX · Risk med · Gate none · **ready** · Deps —
+Owner UX · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-114, F-WEB-15, F-WEB-16
 - **Files:** `apps/web/src/components/ui/input.tsx` (~32), `apps/web/src/app/globals.css` (the global `outline: none` and `box-shadow: none !important` resets)
 - **Do:** give focus a distinct ring with at least 3:1 contrast. Remove the global box-shadow reset, or scope it so that focus rings survive, and record the decision in `apps/web/CLAUDE.md`.
 - **Done when:** keyboard focus is visible on every primitive in both themes.
-- **Tests:** web tests; axe check (M8-E1-T4) · **Evidence:** —
+- **Tests:** web tests; axe check (M8-E1-T4) · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": every primitive shows a 2px `--focus-ring` in both themes, measured from pixels at 3:1 or more; a contract test scans components for ring utilities on non-field controls; the command bar closes on blur
 
 #### M8-E1-T2 · Keyboard-usable language switcher
-Owner UX · Risk low · Gate none · **ready** · Deps —
+Owner UX · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-115, F-WEB-09
 - **Files:** `apps/web/src/components/layout/language-switcher.tsx` (~147)
 - **Do:** rebuild it on the Radix Select or Popover primitive.
 - **Done when:** the arrow keys, Enter and Escape work and focus is managed.
-- **Tests:** web tests · **Evidence:** —
+- **Tests:** web tests · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": the language switcher works with the arrow keys, Enter and Escape, manages focus, and is not interactive while it fades out
 
 #### M8-E1-T3 · Landmarks, headings and the skip link
-Owner UX · Risk low · Gate none · **ready** · Deps —
+Owner UX · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-189, D-190, F-WEB-14
 - **Files:** `apps/web/src/app/control-plane/system/layout.tsx` (~39), the topbar, `components/setup/setup-frame.tsx` (~64), the runtime files panel
 - **Do:** one `<h1>` per page, no nested `<main>`, and a skip-link target on the auth routes.
 - **Done when:** an axe landmark check passes on the key routes.
-- **Tests:** web tests · **Evidence:** —
+- **Tests:** web tests · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": one `<h1>` per page (message headings render one level down), no nested `<main>`, and a skip-link target on the auth routes; axe reports no landmark violation on the key routes
 
 #### M8-E1-T4 · Browser accessibility pass
 Owner QA (UX) · Risk low · Gate infra: Docker for the full stack (CI) · **pending** · Deps M0-E3-T7
@@ -3392,12 +3392,12 @@ Owner BE · Risk med · Gate none · **ready** · Deps —
 - **Tests:** query-count test; G-PG · **Evidence:** —
 
 #### M9-E1-T4 · Runtime sweeps over active environments only
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-112 (sweep part)
 - **Files:** `koda/services/runtime/postgres_store.py` (~1367), the controller loops
 - **Do:** filter environments by active status in SQL, and remove the N+1 queries.
 - **Done when:** a sweep issues the same number of queries with 10 and with 10,000 historical environments (query-count test).
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": sweeps select live environments in SQL; with 10,000 cleaned environments the reconcile sweep makes 8 queries instead of 70,008 (250 s), the resource sweep 7 instead of 12; `tests/integration/test_runtime_sweep_queries.py` asserts equal counts at 10 and 10,000
 
 #### M9-E1-T5 · Simplify the semantic cache
 Owner AIM · Risk med · Gate none · **ready** · Deps —
@@ -3426,20 +3426,20 @@ Owner BE · Risk low · Gate none · **pending** · Deps M2-E2-T2
 #### M9-E2 — Web performance
 
 #### M9-E2-T1 · Palette polling and layout revalidation
-Owner FE · Risk low · Gate none · **ready** · Deps —
+Owner FE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-186, D-187
 - **Files:** `components/command-bar/command-bar-modal.tsx` (~22), `app/api/control-plane/[...path]/route.ts` (~481)
 - **Do:** run the stats query only while the palette is open. Skip `revalidatePath('/', 'layout')` for chat and session mutations.
 - **Done when:** a closed palette makes no stats requests, and a chat send triggers no layout refetch.
-- **Tests:** web tests · **Evidence:** —
+- **Tests:** web tests · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": a closed palette makes no stats requests (3 in 65 s before); chat, session and room mutations no longer revalidate the layout, agent mutations still do
 
 #### M9-E2-T2 · Vitest parallelism
-Owner QA · Risk low · Gate none · **ready** · Deps —
+Owner QA · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-190
 - **Files:** `apps/web/vitest.config.ts` (~19-20)
 - **Do:** enable file parallelism, fix any shared-state test that this exposes, and record the reason if serial running must stay.
 - **Done when:** `pnpm test:web` is faster than the 201 s baseline, with equal results.
-- **Tests:** G · **Evidence:** —
+- **Tests:** G · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": vitest runs files in parallel: 121 s against 436 s serial back to back (201 s earlier baseline), identical results for all 1125 tests
 
 #### M9-E3 — Maintainability
 
@@ -3546,12 +3546,12 @@ Owner PROD · Risk low · Gate none · **pending** · Deps M5-E3-T1
 - **Tests:** doc generation test; link check · **Evidence:** —
 
 #### M10-E1-T2 · Agent guides and stale contributor docs
-Owner ARCH (REV) · Risk low · Gate none · **ready** · Deps —
+Owner ARCH (REV) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-197, D-158
-- **Files:** `CLAUDE.md`, `AGENTS.md`, `docs/README.md` (~91), `docs/operations/demo-data.md`
+- **Files:** `CLAUDE.md`, `AGENTS.md`, `docs/README.md` (~91), `docs/demo-data.md`
 - **Do:** make one guide canonical and the other a pointer. Fix the three stale statements in D-158. Keep the vault-reading instructions working. These are project-instruction files, so they get an independent review.
 - **Done when:** the two root guides cannot drift, and the statements are true.
-- **Tests:** doc tests · **Evidence:** —
+- **Tests:** doc tests · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": CLAUDE.md is the canonical guide at the root and in apps/web, and each AGENTS.md is a short pointer; `tests/test_agent_guides.py` fails if a pointer gains instructions or a fixed D-158 statement comes back
 
 #### M10-E1-T3 · Changelog coverage check
 Owner PROD (QA) · Risk low · Gate none · **pending** · Deps M1-E7-T6, M0-E1-T4

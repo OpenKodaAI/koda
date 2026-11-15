@@ -638,7 +638,7 @@ export function ModelSelector({
             >
               {/* Search */}
               <div className="border-b border-[var(--divider-hair)] px-2.5 py-2">
-                <div className="flex h-8 items-center gap-2 rounded-[var(--radius-input)] px-2.5 text-[var(--text-tertiary)] transition-[background-color,box-shadow] duration-150 focus-within:bg-[var(--panel-soft)] focus-within:shadow-[inset_0_0_0_1px_var(--border-strong)]">
+                <div className="flex h-8 items-center gap-2 rounded-[var(--radius-input)] px-2.5 text-[var(--text-tertiary)] transition-[background-color,box-shadow] duration-150 focus-within:bg-[var(--panel-soft)] focus-within:outline focus-within:-outline-offset-1 focus-within:outline-[color:var(--focus-ring)]">
                   <Search size={13} className="shrink-0 text-[var(--text-quaternary)]" />
                   <input
                     type="text"
@@ -654,7 +654,7 @@ export function ModelSelector({
                       type="button"
                       onClick={() => setSearch("")}
                       aria-label={t("generated.controlPlane.limpar_busca_0bb288dc")}
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)] focus-visible:outline-none"
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)]"
                     >
                       <X size={12} />
                     </button>

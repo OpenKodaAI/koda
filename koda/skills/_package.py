@@ -5,11 +5,14 @@ from __future__ import annotations
 import ast
 import contextlib
 import hashlib
+import importlib.machinery
 import json
+import os
 import re
 import sys
 import tempfile
-from collections.abc import Iterator
+import types
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -596,14 +599,77 @@ def verify_skill_package_integrity(lock: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
+    """Compile a module from its source, never reading or writing a bytecode cache.
+
+    The source is *source* when given (bytes already read through a checked handle),
+    otherwise the file at *path*.
+    """
+
+    def __init__(self, fullname: str, path: str, source: bytes | None = None) -> None:
+        super().__init__(fullname, path)
+        self._source = source
+
+    def get_code(self, fullname: str) -> types.CodeType:
+        path = self.get_filename(fullname)
+        source = self._source if self._source is not None else self.get_data(path)
+        return self.source_to_code(source, path)
+
+
+_GetCode = Callable[[importlib.machinery.SourceFileLoader, str], types.CodeType | None]
+
+
+class _PackageSourceOnlyCode:
+    """Compile every module file inside an installed package's directory from its source (D-273).
+
+    Bytecode caches are not part of the package hash, so a ``__pycache__`` entry planted next
+    to a package module must never run in place of the verified source: not while the
+    handlers register, and not later, at tool-call time, whichever way package code loads
+    the module (an import statement, ``importlib.util.spec_from_file_location`` or a
+    ``SourceFileLoader`` of its own). Every one of those ends in
+    ``SourceFileLoader.get_code``, so once a package registers, that method compiles a file
+    inside a package directory from its source, for the rest of the process. It never reads
+    or writes a cache for such a file and leaves every other file to the usual cache lookup,
+    and no import searches the path more than it did before.
+    """
+
+    def __init__(self) -> None:
+        self._roots: tuple[str, ...] = ()
+        self._default_get_code: _GetCode | None = None
+
+    def add_root(self, package_dir: Path) -> None:
+        root = os.path.join(os.path.realpath(package_dir), "")
+        if root not in self._roots:
+            self._roots = (*self._roots, root)
+        if self._default_get_code is None:
+            self._default_get_code = importlib.machinery.SourceFileLoader.get_code
+            source_only = self
+
+            def get_code(loader: importlib.machinery.SourceFileLoader, fullname: str) -> types.CodeType | None:
+                return source_only.get_code(loader, fullname)
+
+            importlib.machinery.SourceFileLoader.get_code = get_code  # type: ignore[method-assign, assignment]
+
+    def get_code(self, loader: importlib.machinery.SourceFileLoader, fullname: str) -> types.CodeType | None:
+        path = loader.get_filename(fullname)
+        if os.path.realpath(path).startswith(self._roots):
+            return loader.source_to_code(loader.get_data(path), path)
+        assert self._default_get_code is not None
+        return self._default_get_code(loader, fullname)
+
+
+_PACKAGE_SOURCE_ONLY_CODE = _PackageSourceOnlyCode()
+
+
 @contextlib.contextmanager
 def _source_only_imports() -> Iterator[None]:
     """Load package code from its source files only, while the handlers are registered.
 
     Bytecode caches are not part of the package hash, so Python must neither read a
     ``__pycache__`` entry next to the source (one planted there would run instead of the
-    verified source) nor write one. Both settings are process-wide and restored on exit, so
-    an import package code makes later, at tool-call time, uses Python's normal cache lookup.
+    verified source) nor write one. Both settings are process-wide and restored on exit;
+    module files in a package's directory, then or at tool-call time, compile from source
+    through ``_PackageSourceOnlyCode``.
     """
 
     previous_dont_write, previous_prefix = sys.dont_write_bytecode, sys.pycache_prefix
@@ -693,6 +759,7 @@ def ensure_installed_package_tools_registered(
             prompt_section="",
             requires={"source": "skill_package"},
         )
+        _PACKAGE_SOURCE_ONLY_CODE.add_root(manifest.plugin_dir)
         with _source_only_imports():
             err = registry.register(manifest)
         if err:
@@ -873,9 +940,10 @@ def _hash_package(
     for file_path in files:
         rel = _rel(package_dir, file_path)
         if not include_bytecode_caches and _is_bytecode_cache(rel):
-            # Bytecode caches change whenever Python imports the package and are not loaded
-            # while its handlers register (see _source_only_imports), so they are not part of
-            # the approved package. Every other file under __pycache__ is.
+            # Bytecode caches change whenever Python imports the package and package code
+            # never loads from them (see _source_only_imports and _PackageSourceOnlyCode),
+            # so they are not part of the approved package. Every other file under
+            # __pycache__ is.
             continue
         try:
             content = file_path.read_bytes()

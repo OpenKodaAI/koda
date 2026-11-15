@@ -104,7 +104,7 @@ export const RuntimeControlCard = memo(function RuntimeControlCard({ selectedBot
                 href={`/runtime/${row.agentId}/tasks/${row.taskId}`}
                 className={[
                   "group grid grid-cols-[1fr_auto] items-center gap-3 rounded-[var(--radius-panel-sm)] px-3 py-3 transition-colors",
-                  "hover:bg-[var(--hover-tint)] focus-visible:bg-[var(--hover-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                  "hover:bg-[var(--hover-tint)] focus-visible:bg-[var(--hover-tint)]",
                   index > 0 ? "border-t border-[color:var(--divider-hair)]" : "",
                 ].join(" ")}
               >

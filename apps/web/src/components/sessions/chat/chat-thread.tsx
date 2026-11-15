@@ -294,10 +294,10 @@ function ChatThreadImpl({
                 agentLabel ??
                 t("sessions.thread.newChatEyebrow", undefined)}
             </p>
-            <h1 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
+            <h2 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
               {emptyTitle ??
                 t("sessions.thread.heroTitle", undefined)}
-            </h1>
+            </h2>
             <p className="m-0 max-w-[480px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
               {emptyDescription ??
                 t("sessions.thread.heroHelper", undefined)}
@@ -406,7 +406,6 @@ function ChatThreadImpl({
               "pointer-events-auto !inline-flex !h-9 !w-9 !min-w-9 !max-w-9 shrink-0 items-center justify-center rounded-full",
               "border border-[color:var(--border-subtle)] bg-[color:var(--panel)] text-[var(--text-secondary)] shadow-[var(--shadow-floating)] backdrop-blur",
               "transition-[background-color,border-color,color,transform] duration-[140ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[color:var(--border-strong)] hover:bg-[color:var(--panel-strong)] hover:text-[var(--text-primary)] active:scale-[0.98]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
             )}
             style={{ width: 36, minWidth: 36, maxWidth: 36 }}
           >

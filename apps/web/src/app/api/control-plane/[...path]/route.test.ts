@@ -239,4 +239,48 @@ describe("control plane proxy route", () => {
     expect(response.headers.get("x-koda-upstream-unavailable")).toBe("1");
     expect(await response.json()).toMatchObject({ providers: [], agents: [], unavailable: true });
   });
+
+  describe("layout revalidation after mutations", () => {
+    async function mutate(method: "POST" | "PATCH" | "DELETE", path: string[]) {
+      const { controlPlaneFetch } = await import("@/lib/control-plane");
+      const { getWebOperatorTokenFromCookie } = await import("@/lib/web-operator-session");
+      const { isTrustedDashboardRequest } = await import("@/lib/request-origin");
+      const { revalidatePath } = await import("next/cache");
+
+      vi.mocked(getWebOperatorTokenFromCookie).mockResolvedValue("operator-token");
+      vi.mocked(isTrustedDashboardRequest).mockReturnValue(true);
+      vi.mocked(controlPlaneFetch).mockResolvedValue(
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+      );
+
+      const route = await import("./route");
+      const response = await route[method](
+        request(`http://localhost/api/control-plane/${path.join("/")}`, method),
+        { params: Promise.resolve({ path }) },
+      );
+      expect(response.status).toBe(200);
+      return vi.mocked(revalidatePath).mock.calls;
+    }
+
+    it.each([
+      ["a chat send", "POST", ["dashboard", "agents", "ATLAS", "sessions", "messages"]],
+      ["a session rename", "PATCH", ["dashboard", "agents", "ATLAS", "sessions", "session-1"]],
+      ["a session delete", "DELETE", ["dashboard", "agents", "ATLAS", "sessions", "session-1"]],
+      ["a room post", "POST", ["dashboard", "squads", "threads", "thread-1", "messages"]],
+      ["a new room", "POST", ["dashboard", "squads", "squad-1", "threads"]],
+    ] as const)("skips the layout refetch for %s", async (_label, method, path) => {
+      const calls = await mutate(method, [...path]);
+
+      expect(calls).not.toContainEqual(["/", "layout"]);
+    });
+
+    it("still revalidates the layout for agent mutations", async () => {
+      const calls = await mutate("POST", ["agents", "ATLAS", "publish"]);
+
+      expect(calls).toContainEqual(["/", "layout"]);
+    });
+  });
 });

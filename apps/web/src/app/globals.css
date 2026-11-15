@@ -30,7 +30,7 @@
   --icon-primary: #101010;
   --icon-secondary: #45403b;
   --icon-tertiary: #615b54;
-  --focus-ring: #b9b2a6;
+  --focus-ring: #6f685f;
   --selection-bg: #eceae3;
   --table-header-bg: #f5f3eb;
   --table-row-hover: #eceae3;
@@ -252,7 +252,7 @@
     --icon-primary: #F5F5F5;
     --icon-secondary: #B8B8B8;
     --icon-tertiary: #9A9A9A;
-    --focus-ring: #3A3A3A;
+    --focus-ring: #8A8A8A;
     --selection-bg: rgba(255, 255, 255, 0.22);
     --table-header-bg: #141414;
     --table-row-hover: #1A1A1A;
@@ -399,7 +399,7 @@ html.dark {
   --icon-primary: #F5F5F5;
   --icon-secondary: #B8B8B8;
   --icon-tertiary: #9A9A9A;
-  --focus-ring: #3A3A3A;
+  --focus-ring: #8A8A8A;
   --selection-bg: rgba(255, 255, 255, 0.22);
   --table-header-bg: #141414;
   --table-row-hover: #1A1A1A;
@@ -697,9 +697,10 @@ textarea:disabled {
 }
 
 /* Form inputs handle focus by recoloring their own border; skip the global
-   outline so we don't paint an inner ring inside composer-style wrappers. */
-input:focus,
-input:focus-visible,
+   outline so we don't paint an inner ring inside composer-style wrappers.
+   Checkboxes and radios draw no ring of their own, so they keep it. */
+input:not([type="checkbox"], [type="radio"]):focus,
+input:not([type="checkbox"], [type="radio"]):focus-visible,
 textarea:focus,
 textarea:focus-visible,
 select:focus,
@@ -1100,10 +1101,8 @@ button[aria-label="Open Next Dev Tools"] {
   transform: translateY(-0.01em);
 }
 
+/* Positioned by Radix Select (popper); z-index is copied to its wrapper. */
 .language-switcher__menu {
-  position: absolute;
-  top: calc(100% + 0.55rem);
-  right: 0;
   z-index: 80;
   width: min(11rem, calc(100vw - 1.5rem));
   overflow: hidden;
@@ -1128,6 +1127,7 @@ button[aria-label="Open Next Dev Tools"] {
   padding: 0.62rem 0.72rem;
   text-align: left;
   color: var(--text-secondary);
+  cursor: pointer;
   transition:
     background-color 140ms ease,
     color 140ms ease;
@@ -1142,13 +1142,16 @@ button[aria-label="Open Next Dev Tools"] {
 
 .language-switcher__option:hover,
 .language-switcher__option:focus-visible,
+.language-switcher__option[data-highlighted],
 .language-switcher__option--active {
   background: var(--surface-hover);
   color: var(--text-primary);
 }
 
+/* Keep the global focus ring, drawn inside the option so the menu edge
+   does not clip it. */
 .language-switcher__option:focus-visible {
-  outline: none;
+  outline-offset: -2px;
 }
 
 .language-switcher__option-label {
@@ -1470,8 +1473,8 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .workspace-topbar__sidebar-toggle:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 0;
   background: var(--surface-hover);
   color: var(--text-primary);
 }
@@ -1634,6 +1637,8 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .tour-coachmark {
+  /* The global ring falls under 3:1 on the light glass card (M8-E1-T1). */
+  --focus-ring: var(--text-secondary);
   position: fixed;
   z-index: 110;
   pointer-events: auto;
@@ -2182,12 +2187,6 @@ button[aria-label="Open Next Dev Tools"] {
   color: #f0c86f;
 }
 
-.settings-warning-indicator:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 1px rgba(214, 164, 64, 0.28),
-    0 0 0 4px rgba(214, 164, 64, 0.08);
-}
 
 .settings-warning-indicator--active {
   border-color: rgba(214, 164, 64, 0.28);
@@ -2567,8 +2566,8 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .action-button:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text-primary) 90%, transparent);
+  outline: 1.5px solid color-mix(in srgb, var(--text-primary) 90%, transparent);
+  outline-offset: -1.5px;
 }
 
 .action-button:disabled {
@@ -3373,6 +3372,26 @@ button[aria-label="Open Next Dev Tools"] {
   font-size: 0.92rem;
 }
 
+/* SessionRichText renders markdown headings one level down (M8-E1-T3); these
+   keep the size of the markdown level. */
+.session-richtext .session-richtext__h1 {
+  font-size: 1.18rem;
+}
+
+.session-richtext .session-richtext__h2 {
+  font-size: 1.08rem;
+}
+
+.session-richtext .session-richtext__h3 {
+  font-size: 1rem;
+}
+
+.session-richtext .session-richtext__h4,
+.session-richtext .session-richtext__h5,
+.session-richtext .session-richtext__h6 {
+  font-size: 0.92rem;
+}
+
 .session-richtext ul,
 .session-richtext ol {
   padding-left: 1.15rem;
@@ -3487,12 +3506,7 @@ button[aria-label="Open Next Dev Tools"] {
   color: var(--text-secondary);
 }
 
-.session-richtext--user h1,
-.session-richtext--user h2,
-.session-richtext--user h3,
-.session-richtext--user h4,
-.session-richtext--user h5,
-.session-richtext--user h6 {
+.session-richtext.session-richtext--user :is(h1, h2, h3, h4, h5, h6) {
   font-size: 0.96rem;
 }
 
@@ -3663,13 +3677,13 @@ button[aria-label="Open Next Dev Tools"] {
   border-color: var(--border-strong);
 }
 
+/* A .field-shell input or textarea loses the global outline to the form-field
+   rule, so the box-shadow is its ring. A .field-shell button keeps the global
+   outline, because the reset nulls its box-shadow. */
 .field-shell:focus,
 .field-shell:focus-visible {
-  border-color: var(--border-strong);
-  outline: none;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--focus-ring) 70%, transparent),
-    0 8px 18px rgba(0, 0, 0, 0.06);
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 1px var(--focus-ring);
 }
 
 /* Range slider styling */
@@ -3720,6 +3734,12 @@ input[type="range"] {
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.24),
     inset 0 0 24px rgba(255, 255, 255, 0.14);
+}
+
+/* Every range input, with or without .ui-slider, is a form field: the
+   global rule removes its outline, so it draws its own ring (M8-E1-T1). */
+input[type="range"]:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .agent-board-color-slider:disabled {
@@ -5709,11 +5729,11 @@ input[type="range"]::-moz-range-thumb {
 .runtime-stage-shell__expand:focus-visible {
   background: var(--hover-tint);
   color: var(--text-primary);
-  outline: none;
 }
 
 .runtime-stage-shell__expand:focus-visible {
-  box-shadow: 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 0;
 }
 
 .runtime-stage__header,
@@ -6971,8 +6991,8 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .runtime-files-icon-button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 0;
 }
 
 .runtime-files-icon-button--danger:hover {
@@ -7065,8 +7085,8 @@ input[type="range"]::-moz-range-thumb {
 
 .runtime-files-open-editor__main:focus-visible {
   border-radius: var(--radius-chip);
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
 }
 
 .runtime-files-open-editor__main svg,
@@ -7356,7 +7376,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .runtime-files-project-search__field:focus-within {
-  box-shadow: 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
   color: var(--text-secondary);
 }
 
@@ -7552,8 +7572,8 @@ input[type="range"]::-moz-range-thumb {
 
 .runtime-files-tab__main:focus-visible {
   border-radius: var(--radius-chip);
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
 }
 
 .runtime-files-tab__dot {
@@ -7973,6 +7993,7 @@ input[type="range"]::-moz-range-thumb {
 
 :where(html.dark, html[data-theme="dark"]) .language-switcher__option:hover,
 :where(html.dark, html[data-theme="dark"]) .language-switcher__option:focus-visible,
+:where(html.dark, html[data-theme="dark"]) .language-switcher__option[data-highlighted],
 :where(html.dark, html[data-theme="dark"]) .language-switcher__option--active {
   background: rgba(255, 255, 255, 0.045);
 }
@@ -9559,10 +9580,21 @@ input[type="range"]::-moz-range-thumb {
   --overlay-modal-shadow: none;
 }
 
-html body *,
+/* No box-shadow anywhere, except on a focused text-entry field (M8-E1-T1,
+   D-114). Those fields (input, textarea, select, contenteditable) lose the
+   global outline below, so their border and box-shadow ring are their focus
+   indicator. Every other control, and every focus-within wrapper, draws focus
+   with an outline. :where() keeps the reset at its original (0,0,2)
+   specificity. */
+html body *:where(:not(:is(input, textarea, select, [contenteditable="true"]):focus-visible)),
 html body *::before,
 html body *::after {
   box-shadow: none !important;
+}
+
+html body *,
+html body *::before,
+html body *::after {
   text-shadow: none !important;
 }
 
@@ -9578,8 +9610,8 @@ html body :focus-visible {
   outline-offset: 2px;
 }
 
-html body input:focus,
-html body input:focus-visible,
+html body input:not([type="checkbox"], [type="radio"]):focus,
+html body input:not([type="checkbox"], [type="radio"]):focus-visible,
 html body textarea:focus,
 html body textarea:focus-visible,
 html body select:focus,
@@ -9777,11 +9809,6 @@ html body [contenteditable="true"]:focus-visible {
   background: var(--tone-warning-bg-strong);
   color: var(--tone-warning-text);
   transform: none;
-}
-
-:where(html[data-theme="light"]) .settings-warning-indicator:focus-visible {
-  outline: 2px solid var(--tone-warning-border);
-  outline-offset: 2px;
 }
 
 :where(html[data-theme="light"]) .glass-table--sticky-last tbody tr:hover td:last-child,
@@ -10355,9 +10382,7 @@ html body [contenteditable="true"]:focus-visible {
 .auth-input.auth-input:focus-visible {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--panel-soft) 60%, var(--panel) 40%);
-  box-shadow:
-    0 0 0 4px var(--accent-muted),
-    0 1px 0 rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 1px var(--accent);
   outline: none;
 }
 
@@ -10459,7 +10484,7 @@ html body [contenteditable="true"]:focus-visible {
 .bootstrap-code-input__cell:focus,
 .bootstrap-code-input__cell:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-muted);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 /* Filled (but unfocused) cells keep the neutral border — only the text

@@ -186,7 +186,7 @@ function ExecutionHistoryComponent({
                 "grid-cols-[200px_minmax(0,1fr)_auto]",
                 "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                 "hover:bg-[var(--hover-tint)]",
-                "focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] rounded-[var(--radius-panel-sm)]",
+                "rounded-[var(--radius-panel-sm)]",
                 index > 0 && "border-t border-[color:var(--divider-hair)]",
               )}
             >

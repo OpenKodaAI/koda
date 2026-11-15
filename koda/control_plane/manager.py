@@ -10035,18 +10035,23 @@ class ControlPlaneManager:
         Returns True if the agent existed and was removed, False if it was
         already gone (idempotent — repeated DELETE calls should not raise).
         Runtime / audit tables (tasks, query_history, audit_events) are
-        intentionally left alone so historical records survive.
+        intentionally left alone so historical records survive. The deletes
+        commit together or not at all.
         """
         try:
             normalized, _ = self._require_agent_row(agent_id)
         except KeyError:
             return False
-        # cp_agent_definitions is deleted last so the main row survives if a
-        # cascade step fails. AGENT_DELETE_TABLES is not yet every per-agent
-        # table (D-054).
-        for table in AGENT_DELETE_TABLES:
-            execute(f"DELETE FROM {table} WHERE agent_id = ?", (normalized,))
-        execute("DELETE FROM cp_agent_definitions WHERE id = ?", (normalized,))
+        # cp_agent_definitions is deleted last, and every delete runs in one
+        # transaction, so a failing step leaves all rows in place.
+        # AGENT_DELETE_TABLES is not yet every per-agent table (D-054).
+
+        def _delete(conn: Any) -> None:
+            for table in AGENT_DELETE_TABLES:
+                conn.execute(f"DELETE FROM {table} WHERE agent_id = ?", (normalized,))
+            conn.execute("DELETE FROM cp_agent_definitions WHERE id = ?", (normalized,))
+
+        with_connection(_delete)
         return True
 
     def clone_agent(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:

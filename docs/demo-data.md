@@ -33,7 +33,8 @@ The capture script opens authenticated dashboard pages and writes stable PNG nam
 - `control-plane.png`
 - `agent-detail.png`
 - `runtime.png`
-- `runtime-task.png`
+
+When the local `KODA` agent has a runtime task, the script also writes `runtime-task.png`. The committed set in `docs/assets/screenshots` does not include it.
 
 ## Clear
 

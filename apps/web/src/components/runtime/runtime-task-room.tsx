@@ -175,7 +175,7 @@ function RuntimeTaskHeader({
           <div className="flex min-w-0 flex-wrap items-center gap-2 font-mono text-[0.72rem] text-[var(--text-tertiary)]">
             <Link
               href={`/runtime?agent=${agentId}`}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
               aria-label={t("common.back")}
             >
               <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
@@ -202,9 +202,9 @@ function RuntimeTaskHeader({
             <LiveRuntimeBadge />
           </div>
 
-          <h1 className="m-0 mt-2 max-w-[860px] text-[1.125rem] font-medium leading-[1.24] tracking-[var(--tracking-tight)] text-[var(--text-primary)] [text-wrap:balance] sm:text-[1.25rem]">
+          <h2 className="m-0 mt-2 max-w-[860px] text-[1.125rem] font-medium leading-[1.24] tracking-[var(--tracking-tight)] text-[var(--text-primary)] [text-wrap:balance] sm:text-[1.25rem]">
             {title}
-          </h1>
+          </h2>
 
           {branchName ? (
             <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
