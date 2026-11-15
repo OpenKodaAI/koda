@@ -186,8 +186,13 @@ async def test_handle_mcp_tool_call_server_not_started():
 
 @pytest.mark.asyncio
 async def test_lazy_start_passes_the_bootstrap_env_helper_values_to_the_server():
-    """The bridge imports the bootstrap helpers inside a broad ``try``; a renamed
-    helper would only log ``mcp_lazy_start_failed``. Pin the names it imports."""
+    """Pin the bootstrap helper names the bridge imports.
+
+    The import sits inside the ``try`` of ``_lazy_start_mcp_server``: a renamed
+    helper raises ``ImportError``, which is logged as ``mcp_lazy_start_failed``
+    and re-raised, so every MCP call that needs a lazy start returns a
+    "failed to start" result.
+    """
     from koda.services.mcp_bridge import _lazy_start_mcp_server
 
     instance = MagicMock()
