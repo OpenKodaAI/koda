@@ -17720,6 +17720,53 @@ for (const [language, labels] of Object.entries(modelFunctionUnavailableLabels))
   };
 }
 
+// D-116 (M6-E1-T9): applying a proposal only marks its ledger-only effects as
+// applied; no executor changes prompts, skills, policy or memory yet.
+const improvementProposalLabels: Record<
+  string,
+  { accept: string; reviewDescription: string; status: { applied: string } }
+> = {
+  "en-US": {
+    accept: "Accept (recorded)",
+    reviewDescription:
+      "Validate, accept, or roll back approved proposals. Accepting records the decision; it does not change the agent.",
+    status: { applied: "accepted (recorded)" },
+  },
+  "pt-BR": {
+    accept: "Aceitar (registrado)",
+    reviewDescription:
+      "Valide, aceite ou reverta propostas aprovadas. Aceitar registra a decisão; não altera o agente.",
+    status: { applied: "aceita (registrada)" },
+  },
+  "es-ES": {
+    accept: "Aceptar (registrado)",
+    reviewDescription:
+      "Valida, acepta o revierte propuestas aprobadas. Aceptar registra la decisión; no cambia el agente.",
+    status: { applied: "aceptada (registrada)" },
+  },
+  "fr-FR": {
+    accept: "Accepter (enregistré)",
+    reviewDescription:
+      "Validez, acceptez ou annulez les propositions approuvées. Accepter enregistre la décision ; cela ne modifie pas l'agent.",
+    status: { applied: "acceptée (enregistrée)" },
+  },
+  "de-DE": {
+    accept: "Annehmen (protokolliert)",
+    reviewDescription:
+      "Genehmigte Vorschläge validieren, annehmen oder zurücksetzen. Annehmen protokolliert die Entscheidung; der Agent wird nicht geändert.",
+    status: { applied: "angenommen (protokolliert)" },
+  },
+};
+
+for (const [language, labels] of Object.entries(improvementProposalLabels)) {
+  const translation = mutableResources[language]?.translation;
+  if (!translation) continue;
+  translation.evaluations = {
+    ...(translation.evaluations ?? {}),
+    proposals: labels,
+  };
+}
+
 const sidebarEvaluationLabels: Record<
   string,
   { label: string; loading: string }

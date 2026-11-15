@@ -8,6 +8,7 @@ import { I18nProvider } from "@/components/providers/i18n-provider";
 import { ToastNotification } from "@/components/ui/toast-notification";
 import { ToastProvider } from "@/hooks/use-toast";
 import { requestJson } from "@/lib/http-client";
+import { translateForLanguage } from "@/lib/i18n";
 
 vi.mock("@/lib/http-client", () => ({
   requestJson: vi.fn(),
@@ -402,5 +403,55 @@ describe("EvaluationsPageClient", () => {
       );
     });
     expect(await screen.findByRole("status")).toHaveTextContent("Proposal action queued.");
+  });
+
+  // D-116 / F-MON-24 (M6-E1-T9): apply only marks ledger rows; nothing
+  // changes the agent, so the UI says "accept (recorded)".
+  it("labels apply as accept (recorded) and never claims the agent changes", async () => {
+    const baseImplementation = requestJsonMock.getMockImplementation()!;
+    requestJsonMock.mockImplementation(async (path: string, init?: RequestInit) => {
+      const payload = await baseImplementation(path, init);
+      if (path.includes("/improvement-proposals?")) {
+        const [first] = (payload as { items: Array<Record<string, unknown>> }).items;
+        return {
+          ...(payload as Record<string, unknown>),
+          items: [
+            { ...first, status: "approved", validation_result: { status: "passed" } },
+            { ...first, proposal_id: "prop:2", summary: "Recorded change", status: "applied" },
+          ],
+        };
+      }
+      return payload;
+    });
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("tab", { name: "Proposals" }));
+
+    const accept = await screen.findByRole("button", { name: "Accept (recorded)" });
+    expect(accept).toBeEnabled();
+    expect(screen.queryByRole("button", { name: "Apply" })).not.toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Validate, accept, or roll back approved proposals. Accepting records the decision; it does not change the agent.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("accepted (recorded)")).toBeInTheDocument();
+    expect(screen.queryByText("applied")).not.toBeInTheDocument();
+
+    fireEvent.click(accept);
+    await waitFor(() => {
+      expect(requestJsonMock).toHaveBeenCalledWith(
+        "/api/control-plane/agents/ATLAS/improvement-proposals/prop%3A1/apply",
+        expect.objectContaining({ method: "POST" }),
+      );
+    });
+  });
+
+  it("words the accept label in pt-BR", () => {
+    expect(translateForLanguage("pt-BR", "evaluations.proposals.accept")).toBe("Aceitar (registrado)");
+    expect(translateForLanguage("pt-BR", "evaluations.proposals.status.applied")).toBe("aceita (registrada)");
+    expect(translateForLanguage("pt-BR", "evaluations.proposals.reviewDescription")).toContain(
+      "não altera o agente",
+    );
   });
 });

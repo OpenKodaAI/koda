@@ -27,7 +27,7 @@ Configure providers, prompts, tools, secrets, agents, squads, memory policy, cha
 
 **Give memory guardrails before giving it power.** Namespaced recall, memory safety scanning, redacted provenance, stale/conflict handling, utility feedback, and context-governance drops keep memory useful without silently trusting unsafe context.
 
-**Improve agents through governed proposals.** `improvement_proposal.v1` turns eval failures, user corrections, tool failures, timeouts, and manual signals into reviewable proposals with evidence refs, validation plans, rollback plans, audit, metrics, and RunGraph lifecycle nodes. Koda does not auto-mutate prompts, skills, policy, or memory without approval.
+**Review improvement proposals with evidence.** `improvement_proposal.v1` turns eval failures, user corrections, tool failures, timeouts, and manual signals into reviewable proposals with evidence refs, validation plans, rollback plans, audit, metrics, and RunGraph lifecycle nodes. Accepting a proposal records the decision only: Koda does not yet change prompts, skills, policy, or memory from a proposal.
 
 **Install skills without bypassing supply-chain checks.** `koda_skill.v1`, scanner decisions, package locks, eval evidence, recommendation status, strict per-agent allowlists, and rollback state keep skills local-first and reversible.
 
@@ -163,7 +163,7 @@ Koda keeps infrastructure bootstrap and product configuration separate. `.env` b
 | Runtime | Queue manager, task rooms, browser and terminal access, artifacts, child runs, recovery, DLQ, schedules |
 | Squads | Squad Rooms, mentions, reply obligations, handoffs, route scoring, synthesis readiness, transcript-visible coordination |
 | Memory | Safety scanner, namespaces, provenance, recall explanations, stale/conflict drops, utility feedback, quality counters |
-| Self-improvement | Governed proposal queue, eval-failure proposals, validation before apply, rollback ledger, audit and metrics |
+| Self-improvement | Governed proposal queue, eval-failure proposals, validation before accept (recorded only), rollback ledger, audit and metrics |
 | Skills | Local-first packages, supply-chain scanner, strict allowlists, eval-backed recommendation, trust registry, rollback |
 | Channels | `channel_gateway.v1`, Telegram live path (the only channel that runs), identity pairing, approve/block/revoke |
 | Evals and traces | `eval_case.v1`, squad golden eval, RunGraph completeness, release-quality gates, trajectory export |

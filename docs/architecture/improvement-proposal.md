@@ -40,8 +40,11 @@ The operator flow is:
 1. Review `pending_review`.
 2. Approve or reject.
 3. Validate approved proposals with offline eval or smoke evidence.
-4. Apply only after post-approval validation passes, RunGraph lifecycle
-   evidence exists, and rollback effects can be recorded.
+4. Apply (shown as "Accept (recorded)" in the UI) only after post-approval
+   validation passes, RunGraph lifecycle evidence exists, and rollback effects
+   can be recorded. Apply records the decision and marks the `ledger_only`
+   effects as applied; it does not change the agent until typed executors
+   exist (see Rollback below).
 5. Roll back applied proposals through the effect ledger when needed.
 
 Invalid transitions fail closed. Rejected proposals do not mutate runtime state.
