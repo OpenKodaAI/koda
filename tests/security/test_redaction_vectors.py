@@ -15,7 +15,10 @@ import asyncio
 import importlib
 import importlib.util
 import json
+import signal
+import statistics
 import tempfile
+import time
 from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
@@ -94,7 +97,7 @@ VALUE_VECTORS: list[tuple[Any, Any]] = [
     ("chave_api=k1", f"chave_api={R}"),
     # Long identifiers that are not secrets: tool names, directories, UUID and file names.
     ("mcp__github__pull_request_review_write", "mcp__github__pull_request_review_write"),
-    ("/home/user/projects/my_very_long_project_directory", "/home/user/projects/my_very_long_project_directory"),
+    ("/srv/projects/my_very_long_project_directory", "/srv/projects/my_very_long_project_directory"),
     (
         "/srv/koda/artifacts/1b4e28ba-2fa1-11d2-883f-0016d3cca427/quarterly_financial_report_2026.pdf",
         "/srv/koda/artifacts/1b4e28ba-2fa1-11d2-883f-0016d3cca427/quarterly_financial_report_2026.pdf",
@@ -164,6 +167,22 @@ MASKED_TEXT: list[tuple[str, str, str]] = [
     ("value in braces", "password={hunter2}", f"password={R}"),
     ("guard: secret after a non-secret value", "user=admin;password=hunter2 ok", f"user=admin;password={R} ok"),
     ("guard: key-<base36> secret", "key-k3j5h2m9q8w7e6r5t4y3u2i1o0p9a8", R),
+    # A number is a token count only under a count key.
+    ("digits under a non-count tokens key", "access_tokens=86753091234", f"access_tokens={R}"),
+    ("digits under refresh_tokens", "refresh_tokens: 12345678", f"refresh_tokens: {R}"),
+    # A bare value stops before a closing quote.
+    (
+        "flag inside a JSON string",
+        '{"cmd":"--password=hunter2","x":1}',
+        f'{{"cmd":"--password={R}","x":1}}',
+    ),
+    (
+        "flag ends a quoted command",
+        '{"cmd": "mysql -u root --password=hunter2"}',
+        f'{{"cmd": "mysql -u root --password={R}"}}',
+    ),
+    ("flag inside single quotes", "mysql '--password=hunter2' db", f"mysql '--password={R}' db"),
+    ("quote inside a bare value", 'password=ab"cd ok', f"password={R} ok"),
 ]
 
 # (label, text): identifiers and plain text that hold no secret, unchanged.
@@ -202,6 +221,11 @@ KEPT_TEXT: list[tuple[str, str]] = [
     ("token counts in text", "prompt_tokens: 1200, completion_tokens: 300"),
     ("max_tokens in text", "max_tokens=4096"),
     ("token count in JSON text", '{"prompt_tokens": 1200}'),
+    ("more token count keys", "input_tokens=512 output_tokens=128 total_tokens=640"),
+    ("camelCase token count keys", 'maxTokens: 4096, {"completionTokens": 300, "totalTokens": 640}'),
+    # Names made of Title-Case words.
+    ("Title-Case file name", "Quarterly_Financial_Report_2026.pdf"),
+    ("Title-Case kebab name with K8s", "Deploy-K8s-Production-Cluster"),
 ]
 
 # (label, payload, expected): keys whose whole value is masked, or kept.
@@ -414,3 +438,62 @@ def test_security_sidecar_no_longer_serves_redaction() -> None:
     generated = root / "koda/internal_rpc/generated/security/v1"
     for name in ("security_pb2.py", "security_pb2_grpc.py"):
         assert "RedactValue" not in (generated / name).read_text(encoding="utf-8"), name
+
+
+# Linear-time guard. The redactor runs synchronously on untrusted text in every path,
+# the terminal websocket stream inside the event loop included, so no pattern may
+# backtrack exponentially or rescan what it already consumed. Each builder returns about
+# ``size`` characters of input that made an earlier pattern do so.
+def _repeat(unit: str, size: int) -> str:
+    return unit * max(1, size // len(unit))
+
+
+ADVERSARIAL: dict[str, Callable[[int], str]] = {
+    # About 40 short segments that two segment shapes both match, then one neither does.
+    "ambiguous segments": lambda size: _repeat("-".join(["a1"] * 40) + "-aB ", size),
+    # k=v pairs with no whitespace: form bodies, query strings, ;-joined env strings.
+    "k=v run": lambda size: _repeat("a=1&b=2;c=3;", size),
+    "token run": lambda size: _repeat("aB3", size),
+    "flag chain": lambda size: _repeat("--opt=v1", size),
+    "repeated separators": lambda size: "a1" + "-_" * (size // 4) + "aB" + " " * (size // 2) + "=x",
+}
+GUARD_PATHS: dict[str, Callable[[str], Any]] = {
+    **{f"text:{name}": path for name, path in TEXT_PATHS.items()},
+    **{f"key:{name}": (lambda text, path=path: path({text: text})) for name, path in KEY_PATHS.items()},
+}
+_GUARD_SIZE = 50_000
+_GUARD_CAP_SECONDS = 0.5  # the median for 100 KB, generous on a loaded machine
+_GUARD_HARD_LIMIT_SECONDS = 2.0  # one call; stops a catastrophic backtrack
+
+
+def _timed(redact: Callable[[str], Any], text: str) -> float:
+    def _expire(signum: int, frame: object) -> None:
+        raise TimeoutError(f"redacting {len(text)} characters took over {_GUARD_HARD_LIMIT_SECONDS}s")
+
+    previous = signal.signal(signal.SIGALRM, _expire)
+    signal.setitimer(signal.ITIMER_REAL, _GUARD_HARD_LIMIT_SECONDS)
+    try:
+        # CPU time: the work done, not the waits of a loaded machine.
+        start = time.process_time()
+        redact(text)
+        return time.process_time() - start
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+
+@pytest.mark.skipif(not hasattr(signal, "setitimer"), reason="needs SIGALRM")
+@pytest.mark.parametrize("path", sorted(GUARD_PATHS))
+@pytest.mark.parametrize("family", sorted(ADVERSARIAL))
+def test_redaction_time_is_linear_in_the_input(family: str, path: str) -> None:
+    redact = GUARD_PATHS[path]
+    small, large = ADVERSARIAL[family](_GUARD_SIZE), ADVERSARIAL[family](2 * _GUARD_SIZE)
+    small_times: list[float] = []
+    large_times: list[float] = []
+    for _ in range(5):
+        small_times.append(_timed(redact, small))
+        large_times.append(_timed(redact, large))
+    small_median, large_median = statistics.median(small_times), statistics.median(large_times)
+    assert large_median < _GUARD_CAP_SECONDS, (small_median, large_median)
+    # A floor of 1 ms keeps paths that truncate before redacting out of timer noise.
+    assert large_median / max(small_median, 0.001) < 3, (small_median, large_median)

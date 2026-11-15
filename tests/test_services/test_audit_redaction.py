@@ -250,7 +250,7 @@ class TestExecutionTraceIdentifiers:
         return {
             "request": {
                 "session_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-                "work_dir": "/home/user/projects/my_very_long_project_directory",
+                "work_dir": "/srv/projects/my_very_long_project_directory",
             },
             "tools": [{"name": "mcp__github__pull_request_review_write", "success": True}],
             "raw_artifacts": {

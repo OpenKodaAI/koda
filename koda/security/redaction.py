@@ -14,6 +14,11 @@ module. It applies three rules, in this order:
 3. Generic long tokens: a run of 24 or more token characters that mixes letters and
    digits is masked, except Koda's own identifier shapes (``_IDENTIFIER_SHAPES``), so
    session ids, tool names, file names and UUID paths stay readable.
+
+The redactor runs synchronously on untrusted text, the terminal websocket stream in the
+event loop included, so every pattern runs in time linear in its input: shapes that can
+match the same text sit in atomic groups or under possessive quantifiers, and the
+key=value rule reads a value only under a sensitive key.
 """
 
 from __future__ import annotations
@@ -57,54 +62,56 @@ def is_sensitive_key(key: str) -> bool:
     return _key_is_sensitive(key, exact=True)
 
 
-# A value after "key:" or "key=": quoted, or the whole run up to whitespace or a comma. A
-# value an earlier rule already masked is left alone (token=[REDACTED]&x=1 keeps &x=1).
-_VALUE = r"(?:\"(?P<dq>[^\"\n]*)\"|'(?P<sq>[^'\n]*)'|(?P<bare>(?!\[REDACTED\])[^\s,]+))"
-# An auth scheme kept in front of the masked value (Authorization: Bearer [REDACTED]). The
-# group is atomic: after a scheme, only the token may be masked, never the scheme word.
-_SCHEME = r"(?>(?P<scheme>(?i:bearer|basic|digest|token)\s+)?)"
-_SEP = r"(?P<sep>\s*[:=]\s*)"
-# The key may be a command-line flag (--password=, -token=).
-_KEY_VALUE_RE = re.compile(
-    r"(?<![A-Za-z0-9_.\-])(?P<q>[\"']?)-{0,2}(?P<key>[A-Za-z_][A-Za-z0-9_.\-]*)(?P=q)" + _SEP + _SCHEME + _VALUE
+# A value after "key:" or "key=": quoted, or the whole run up to whitespace, a comma or a
+# closing quote (one followed by whitespace, , ; ) ] } or the end, as in "--password=x").
+# A value an earlier rule already masked is left alone (token=[REDACTED]&x=1 keeps &x=1).
+# An auth scheme is kept in front of the masked value (Authorization: Bearer [REDACTED]);
+# the group is atomic, so after a scheme only the token may be masked.
+_VALUE_RE = re.compile(
+    r"(?>(?P<scheme>(?i:bearer|basic|digest|token)\s++)?)"
+    r"(?:\"(?P<dq>[^\"\n]*+)\"|'(?P<sq>[^'\n]*+)'"
+    r"|(?P<bare>(?!\[REDACTED\])(?:[^\s,\"']++|[\"'](?=[^\s,;)\]}]))++))"
 )
+_SEP = r"(?P<sep>\s*+[:=]\s*+)"
+# The key may be quoted ("key": value) or a command-line flag (--password=, -token=).
+_KEY_RE = re.compile(r"(?<![A-Za-z0-9_.\-])(?P<q>[\"']?)-{0,2}(?P<key>[A-Za-z_][A-Za-z0-9_.\-]*+)(?P=q)" + _SEP)
 # Sensitive names written as several words.
-_PHRASE_VALUE_RE = re.compile(
-    r"(?<![A-Za-z0-9_\-])(?P<key>(?i:(?:api|access|secret|private)\s+key|token\s+de\s+acesso"
-    r"|chave\s+(?:de\s+|da\s+)?(?:api|acesso)))" + _SEP + _SCHEME + _VALUE
+_PHRASE_RE = re.compile(
+    r"(?<![A-Za-z0-9_\-])(?P<key>(?i:(?:api|access|secret|private)\s++key|token\s++de\s++acesso"
+    r"|chave\s++(?:de\s++|da\s++)?(?:api|acesso)))" + _SEP
 )
-_QUERY_RE = re.compile(r"(?P<lead>[?&])(?P<key>[A-Za-z0-9_.\-]+)=(?P<value>[^&\s#\"']+)")
+_QUERY_RE = re.compile(r"(?P<lead>[?&])(?P<key>[A-Za-z0-9_.\-]++)=(?P<value>[^&\s#\"']++)")
+
+# In free text, a number under a count key is a usage count (prompt_tokens: 1200).
+_TOKEN_COUNT_KEYS = frozenset(f"{kind}_tokens" for kind in ("max", "input", "output", "total", "prompt", "completion"))
 
 
-def _mask_value(match: re.Match[str]) -> str:
-    quote = '"' if match.group("dq") is not None else "'" if match.group("sq") is not None else ""
-    return f"{match.string[match.start() : match.end('sep')]}{match.group('scheme') or ''}{quote}{REDACTED}{quote}"
+def _masked_value(key: str, value: re.Match[str]) -> str | None:
+    text = next(group for group in value.group("dq", "sq", "bare") if group is not None)
+    if _key_words(key) in _TOKEN_COUNT_KEYS and not _HAS_LETTER.search(text):
+        return None
+    quote = '"' if value.group("dq") is not None else "'" if value.group("sq") is not None else ""
+    return f"{value.group('scheme') or ''}{quote}{REDACTED}{quote}"
 
 
-# In free text, a number under a "tokens" key is a usage count (prompt_tokens: 1200).
-_TOKEN_COUNT_KEY_RE = re.compile(r"(?:^|_)tokens(?:_|$)")
-
-
-def _masks_key_value(match: re.Match[str]) -> bool:
-    key = match.group("key")
-    if not _key_is_sensitive(key, exact=False):
-        return False
-    value = next(group for group in match.group("dq", "sq", "bare") if group is not None)
-    return not (_TOKEN_COUNT_KEY_RE.search(_key_words(key)) and not _HAS_LETTER.search(value))
-
-
-def _sub_key_values(text: str) -> str:
-    # A non-secret key gives up only its "key=" part, so a secret inside its value is still
-    # found (user=admin;password=hunter2); a secret value is masked whole.
+def _sub_key_values(text: str, key_re: re.Pattern[str]) -> str:
+    # The search matches only "key=", so a non-secret key gives up just that part and a
+    # secret inside its value is still found (user=admin;password=hunter2). Only a secret
+    # key's value is read, once, and masked whole.
     parts: list[str] = []
     position = 0
-    while match := _KEY_VALUE_RE.search(text, position):
-        if _masks_key_value(match):
-            parts.append(text[position : match.start()] + _mask_value(match))
-            position = match.end()
-        else:
-            parts.append(text[position : match.end("sep")])
-            position = match.end("sep")
+    while match := key_re.search(text, position):
+        end = match.end()
+        key = match.group("key")
+        if _key_is_sensitive(key, exact=False):
+            value = _VALUE_RE.match(text, end)
+            masked = None if value is None else _masked_value(key, value)
+            if value is not None and masked is not None:
+                parts.append(text[position:end] + masked)
+                position = value.end()
+                continue
+        parts.append(text[position:end])
+        position = end
     return "".join(parts) + text[position:]
 
 
@@ -116,28 +123,28 @@ def _mask_query(match: re.Match[str]) -> str:
 
 _ID = r"(?<![A-Za-z0-9_\-])"
 _END = r"(?![A-Za-z0-9_\-])"
-# Applied in order; a None replacement is the key=value rule (_sub_key_values).
+# Applied in order; a None replacement is a key=value rule (_sub_key_values).
 _SUBSTITUTIONS: tuple[tuple[re.Pattern[str], Any], ...] = (
     # URL credentials, any scheme (https://u:p@, postgresql://u:p@, redis://:p@).
     (
-        re.compile(r"(?i)(?<![A-Za-z0-9+.\-])([a-z][a-z0-9+.\-]*://)[^/\s:@]*:[^/\s@]+@"),
+        re.compile(r"(?i)(?<![A-Za-z0-9+.\-])([a-z][a-z0-9+.\-]*+://)[^/\s:@]*+:[^/\s@]++@"),
         rf"\1{REDACTED}:{REDACTED}@",
     ),
     # Cookie headers carry every cookie up to the end of the line.
-    (re.compile(r"(?i)" + _ID + r"((?:set-)?cookie\s*:\s*)[^\r\n\"]+"), rf"\1{REDACTED}"),
+    (re.compile(r"(?i)" + _ID + r"((?:set-)?cookie\s*+:\s*)[^\r\n\"]+"), rf"\1{REDACTED}"),
     # Bearer and basic credentials, the whole token with + / and = padding. A free-text
     # "basic" only counts before a base64 value (a digit, + or /, or a lower-upper pair).
-    (re.compile(r"(?i)" + _ID + r"(bearer\s+)[A-Za-z0-9._~+/\-]+=*"), rf"\1{REDACTED}"),
+    (re.compile(r"(?i)" + _ID + r"(bearer\s++)[A-Za-z0-9._~+/\-]++=*+"), rf"\1{REDACTED}"),
     (
         re.compile(
-            r"(?i)" + _ID + r"(basic\s+)(?-i:(?=[A-Za-z0-9+/]*(?:[0-9+/]|[a-z][A-Z])))"
-            r"[A-Za-z0-9+/]{8,}={0,2}(?![A-Za-z0-9+/=])"
+            r"(?i)" + _ID + r"(basic\s++)(?-i:(?=[A-Za-z0-9+/]*(?:[0-9+/]|[a-z][A-Z])))"
+            r"[A-Za-z0-9+/]{8,}+={0,2}+(?![A-Za-z0-9+/=])"
         ),
         rf"\1{REDACTED}",
     ),
     (_QUERY_RE, _mask_query),
-    (_PHRASE_VALUE_RE, _mask_value),
-    (_KEY_VALUE_RE, None),
+    (_PHRASE_RE, None),
+    (_KEY_RE, None),
     # Provider key prefixes: OpenAI and Anthropic, AWS, GitHub, Slack, Google.
     (re.compile(_ID + r"sk-[A-Za-z0-9_\-]{20,}"), REDACTED),
     (re.compile(r"(?<![A-Za-z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Za-z0-9])"), REDACTED),
@@ -151,10 +158,17 @@ _UUID_HEX = r"[0-9a-f]{12}[1-8][0-9a-f]{3}[89ab][0-9a-f]{15}"
 # One word of a camelCase name: a capitalised word (Postgres, Ec2), a capital and digits
 # (V2, S3) or an acronym before the next word (HTTP in HTTPServer).
 _CAMEL_WORD = r"(?:[A-Z][a-z]{2,}[0-9]{0,2}|[A-Z][a-z]?[0-9]{1,2}|[A-Z]{2,5}(?=[A-Z][a-z]|(?![A-Za-z0-9])))"
-_CAMEL = r"(?:[a-z]{2,}[0-9]{0,2}|" + _CAMEL_WORD + r")(?:" + _CAMEL_WORD + r")+"
-# One segment of a word-segment name: a camelCase name, a single-case word optionally
-# followed by digits (report, 2026, v2), or a short lowercase mix (k8s, i18n, e2e, 2026q3).
-_SEGMENT = r"(?:" + _CAMEL + r"|(?:[a-z]+|[A-Z]+)[0-9]*|[0-9]+(?:[a-z]+|[A-Z]+)?|[a-z0-9]{1,6})"
+# A name splits into words one way only, so the repetition is possessive.
+_CAMEL = r"(?:[a-z]{2,}[0-9]{0,2}|" + _CAMEL_WORD + r")(?:" + _CAMEL_WORD + r")++"
+# One segment of a word-segment name: a camelCase name, a lowercase, Title-Case or capital
+# word optionally followed by digits (report, Report, HTTP, 2026, v2), digits and a word
+# (2026q3), or a short lowercase mix, optionally capitalised (k8s, K8s, i18n, e2e). Its
+# shapes overlap, so the segment is atomic and must reach the next separator: a failed
+# name is never retried with another split (no exponential backtracking).
+_SEGMENT = (
+    r"(?>(?:" + _CAMEL + r"|[A-Z]?[a-z]+[0-9]*|[A-Z]+[0-9]*|[0-9]+(?:[a-z]+|[A-Z]+)?|[A-Z]?[a-z0-9]{1,6})"
+    r"(?![A-Za-z0-9]))"
+)
 _IDENTIFIER_SHAPES = re.compile(
     "|".join(
         (
@@ -164,25 +178,29 @@ _IDENTIFIER_SHAPES = re.compile(
             # req-<hex> (agents/postgres_message_bus.py), boot_/rec_/sess_/usr_/tok_<hex>
             # (control_plane/operator_auth.py), imp_/ipe_<hex> (improvement_proposals.py),
             # <prefix>_<hex> (scheduled_jobs.py), provider_auth.py session ids.
-            r"(?:[a-z]+[_\-])*" + _UUID_HEX,
+            r"(?:[a-z]++[_\-])*+" + _UUID_HEX,
             # <prefix>-<sha256[:24]>: squad-<hex> (runtime/api.py, control_plane/manager.py),
             # <prefix>_<hex> (channels/gateway.py).
-            r"(?:[a-z]+[_\-])+[0-9a-f]{24}",
+            r"(?:[a-z]++[_\-])++[0-9a-f]{24}",
             # task-<id>-operator-shell-<token_hex(6)> (runtime/controller.py).
             r"task-[0-9]+-operator-shell-[0-9a-f]{12}",
             # worker_<pid>_<hex12> (services/queue_manager.py).
             r"worker_[0-9]+_[0-9a-f]{12}",
             # Word-segment names (tool names, snake/kebab file and directory names, model
             # names): two or more segments.
-            _SEGMENT + r"(?:[_\-]+" + _SEGMENT + r")+",
+            _SEGMENT + r"(?:[_\-]++" + _SEGMENT + r")++",
             # <stem>-<token_hex(4)>: a collision-suffixed artifact name (runtime/controller.py).
-            _SEGMENT + r"(?:[_\-]+" + _SEGMENT + r")*-[0-9a-f]{8}",
+            _SEGMENT + r"(?:[_\-]++" + _SEGMENT + r")*+-[0-9a-f]{8}",
             # camelCase names with a digit: class names in exception text, MCP tool names.
             _CAMEL,
         )
     )
 )
-_LONG_TOKEN_RE = re.compile(_ID + r"[A-Za-z0-9_\-]{24,}" + _END)
+# The generic long-token rule. Known trade-off: lowercase alphanumeric secrets split into
+# groups of 6 characters or fewer by dashes or underscores (for example
+# k3j5h2-m9q8w7-e6r5t4-y3u2i1-o0p9a8, also with each group capitalised) are kept, to keep
+# kebab-case names readable.
+_LONG_TOKEN_RE = re.compile(_ID + r"[A-Za-z0-9_\-]{24,}+" + _END)
 _HAS_LETTER = re.compile(r"[A-Za-z]")
 _HAS_DIGIT = re.compile(r"[0-9]")
 
@@ -197,7 +215,7 @@ def _mask_long_token(match: re.Match[str]) -> str:
 def redact_text(text: str) -> str:
     """Mask the secrets inside a string (known formats first, then long random tokens)."""
     for pattern, replacement in _SUBSTITUTIONS:
-        text = _sub_key_values(text) if replacement is None else pattern.sub(replacement, text)
+        text = _sub_key_values(text, pattern) if replacement is None else pattern.sub(replacement, text)
     return _LONG_TOKEN_RE.sub(_mask_long_token, text)
 
 

@@ -137,22 +137,26 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   `name: value`, env-style lines and command-line flags under a sensitive name
   (`HEROKU_API_KEY=…`, `AWS_SECRET_ACCESS_KEY=…`, `senha=…`, `"apiKey": "…"`,
   `--password=…`, `--api-key=…`, `-token=…`), with an unquoted value masked whole up to
-  whitespace or a comma (`password=Tr0ub4dor&3`, `password=[x]`), credentials in any URL
-  scheme, query-string secrets (including an OAuth `code`), whole cookie headers and
-  provider keys (`sk-`, AWS key IDs, `ghp_`/`gho_`/`github_pat_`, Slack `xox*-`, Google
-  `AIza`), each only where it starts a word. Token counts in text (`prompt_tokens: 1200`,
-  `max_tokens=4096`) stay readable. Any other run of 24 or more letters, digits, `-` and
-  `_` that mixes letters and digits is masked, except Koda's own identifiers: UUIDs,
+  whitespace, a comma or a closing quote (`password=Tr0ub4dor&3`, `password=[x]`,
+  `"--password=…"`), credentials in any URL scheme, query-string secrets (including an
+  OAuth `code`), whole cookie headers and provider keys (`sk-`, AWS key IDs,
+  `ghp_`/`gho_`/`github_pat_`, Slack `xox*-`, Google `AIza`), each only where it starts a
+  word. Token counts under a count key (`prompt_tokens: 1200`, `max_tokens=4096`,
+  `inputTokens: 512`) stay readable; digits under any other `tokens` key
+  (`access_tokens=…`) are masked. Any other run of 24 or more letters, digits, `-` and `_`
+  that mixes letters and digits is masked, except Koda's own identifiers: UUIDs,
   `session-`, `squad-` and operator-shell session ids, prefixed ids, collision-suffixed
   artifact names (`screenshot-final-a1b2c3d4.png`), camelCase names
   (`KnowledgeV2PostgresBackend`, `describeEc2Instances`) and tool, file and model names
-  made of words, short mixed segments included (`list_k8s_namespaces`,
-  `i18n-translations`, `e2e-tests`). Run graphs no longer blank a whole string because it
-  mentions a secret word. Runtime redaction no longer calls the security sidecar, and
-  the sidecar no longer serves a `RedactValue` RPC. A terminal attach no longer sends its
-  attach token to the runtime kernel as the kernel session id. Structured logs write
-  `[REDACTED]` instead of `***`, also for an empty value, under every key the redactor
-  treats as sensitive. (M5-E3-T8)
+  made of words, Title-Case and short mixed segments included (`list_k8s_namespaces`,
+  `i18n-translations`, `e2e-tests`, `Quarterly_Financial_Report_2026.pdf`,
+  `Deploy-K8s-Production-Cluster`). Every pattern runs in time linear in its input, so no
+  text can stall a terminal stream or the event loop with backtracking. Run graphs no
+  longer blank a whole string because it mentions a secret word. Runtime redaction no
+  longer calls the security sidecar, and the sidecar no longer serves a `RedactValue` RPC.
+  A terminal attach no longer sends its attach token to the runtime kernel as the kernel
+  session id. Structured logs write `[REDACTED]` instead of `***`, also for an empty
+  value, under every key the redactor treats as sensitive. (M5-E3-T8)
 
 ### Added
 
