@@ -26,6 +26,7 @@ import contextlib
 import json
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import asyncpg
@@ -51,7 +52,7 @@ _TABLES = (
     "scheduled_jobs",
 )
 _TURN_TIMEOUT_S = 30.0
-_USER_IDS = frozenset({910001, 910002, 910003, 910004, 910005, 910006})
+_USER_IDS = frozenset({910001, 910002, 910003, 910004, 910005, 910006, 910007})
 
 
 async def _drain_background_work() -> None:
@@ -436,7 +437,10 @@ class _CancelScenario:
             app, user_id=self.user_id, chat_id=self.chat_id, text="Quick question", message_id=2
         )
 
-    async def assert_first_cancelled_and_second_answered(self, dsn: str) -> dict[str, Any]:
+    async def assert_first_cancelled_and_second_answered(
+        self, dsn: str, *, command_replies: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
+        """``command_replies``: the replies to commands sent between the two messages, in order."""
         await _wait_for_worker(self.user_id)
         assert self.provider.cancelled_turns == 1
         assert [call.query for call in self.provider.calls] == ["Write a long report", "Quick question"]
@@ -451,7 +455,8 @@ class _CancelScenario:
 
         # Nothing of the cancelled turn stays visible: no partial output, answer or failure notice.
         bot: FakeBot = self.application.bot
-        feedback, answer = bot.visible(self.chat_id)
+        feedback, *replies, answer = bot.visible(self.chat_id)
+        assert tuple(reply.text for reply in replies) == command_replies
         assert feedback.text == (
             "Received your message and queued it. I'll process it once the current task finishes. "
             f"Reference: #{self.second_id}."
@@ -486,41 +491,21 @@ async def test_cancel_stops_the_running_light_task_and_the_worker_runs_the_next_
         await _stop_worker(scenario.user_id)
 
 
-class RuntimeStoreCannotSeeTask(AssertionError):
-    """The runtime store reads ``tasks`` with a different ``agent_id`` casing than the task writer uses."""
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=RuntimeStoreCannotSeeTask,
-    reason=(
-        "New defect found by M0-E3-T2, not yet registered (no D- id or owning task; D-061 and M2-E3-T5 cover "
-        "the memory-engine join, not this): koda/state/history_store.py _current_agent_scope writes "
-        "tasks.agent_id upper-cased ('AGENT_A') while koda/services/runtime/postgres_store.py _agent_scope "
-        "reads it lower-cased ('agent_a'). Every RuntimeController task lookup on Postgres misses, so "
-        "/cancel <id> answers 'Task #N not found.' and bare /cancel answers 'Nothing running.' while the "
-        "task keeps running and delivers its answer: the D-009 fix is unreachable from /cancel on Postgres."
-    ),
-)
 async def test_cancel_command_stops_the_running_light_task_on_postgres(
     agent_db: str, queue_state: None, application: FakeApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``/cancel <id>``: the Telegram command cancels through ``RuntimeController.cancel_task``."""
+    """``/cancel <id>``: the Telegram command cancels through ``RuntimeController.cancel_task``.
+
+    The runtime store finds the task row ``koda.state.history_store`` wrote (D-293).
+    """
     from koda.services.runtime import get_runtime_controller
 
     scenario = _CancelScenario(application, monkeypatch, user_id=910006)
     try:
         await scenario.start()
-        controller = get_runtime_controller()
-        result = await controller.cancel_task(
+        result = await get_runtime_controller().cancel_task(
             task_id=scenario.first_id, actor="telegram_command", reason=_CANCEL_REASON
         )
-        if result is None and controller.store.get_task_runtime(scenario.first_id) is None:
-            row = await _task_row(agent_db, scenario.first_id)
-            raise RuntimeStoreCannotSeeTask(
-                f"task {scenario.first_id} exists with agent_id={row['agent_id']!r} and status={row['status']!r}, "
-                f"but the runtime store looks it up with agent_id={controller.store._agent_scope!r}"
-            )
         assert result == {
             "ok": True,
             "action": "cancelled",
@@ -529,6 +514,55 @@ async def test_cancel_command_stops_the_running_light_task_on_postgres(
             "final_phase": "cancelled_retained",
         }
         cancelled = await scenario.assert_first_cancelled_and_second_answered(agent_db)
+        assert cancelled["current_phase"] == "cancelled_retained"
+    finally:
+        await _stop_worker(scenario.user_id)
+
+
+@pytest.mark.parametrize(
+    ("with_task_id", "reply"),
+    [
+        (True, "Task #{task_id} cancelled. Final phase: cancelled_retained."),
+        (False, "Cancelled 1 task(s)."),
+    ],
+    ids=["cancel_task_id", "cancel_all"],
+)
+async def test_cancel_telegram_handler_stops_the_running_light_task_on_postgres(
+    agent_db: str,
+    queue_state: None,
+    application: FakeApplication,
+    monkeypatch: pytest.MonkeyPatch,
+    with_task_id: bool,
+    reply: str,
+) -> None:
+    """``/cancel`` and ``/cancel <id>`` through the Telegram handler ``cmd_cancel`` (D-293).
+
+    Before D-293 the runtime store looked ``tasks`` up with a lower-case
+    ``agent_id`` the task writer never uses: ``/cancel <id>`` answered "Task #N
+    not found." and ``/cancel`` "Nothing running." while the turn kept running
+    and delivered its answer. The second message is still queued, so ``/cancel``
+    without an id stops only the running turn.
+    """
+    import koda.auth as auth_mod
+    from koda.handlers.commands import cmd_cancel
+
+    scenario = _CancelScenario(application, monkeypatch, user_id=910007)
+    # The sender is an allowed user, as on a configured deployment.
+    monkeypatch.setattr(auth_mod, "ALLOWED_USER_IDS", {scenario.user_id})
+    try:
+        await scenario.start()
+        args = [str(scenario.first_id)] if with_task_id else []
+        command = fake_text_update(
+            application.bot,
+            user_id=scenario.user_id,
+            chat_id=scenario.chat_id,
+            text=" ".join(["/cancel", *args]),
+            message_id=3,
+        )
+        await cmd_cancel(command, SimpleNamespace(args=args))
+        expected = reply.format(task_id=scenario.first_id)
+        assert application.bot.messages[-1].text == expected
+        cancelled = await scenario.assert_first_cancelled_and_second_answered(agent_db, command_replies=(expected,))
         assert cancelled["current_phase"] == "cancelled_retained"
     finally:
         await _stop_worker(scenario.user_id)
