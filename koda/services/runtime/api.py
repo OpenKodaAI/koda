@@ -248,9 +248,24 @@ def _latest_browser_preview_path(task_id: int) -> Path | None:
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
+def _task_relative_paths(value: object, task_root: Path) -> object:
+    """Rewrite host paths relative to the task's runtime directory; a path outside it becomes ``None``."""
+    if isinstance(value, dict):
+        return {key: _task_relative_paths(item, task_root) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_task_relative_paths(item, task_root) for item in value]
+    if isinstance(value, str) and Path(value).is_absolute():
+        try:
+            return Path(value).resolve().relative_to(task_root.resolve()).as_posix()
+        except ValueError:
+            return None
+    return value
+
+
 def _browser_payload(task_id: int) -> dict[str, object]:
     controller = get_runtime_controller()
-    browser = dict(controller.get_browser_snapshot(task_id))
+    task_root = controller.runtime_root / "tasks" / str(task_id)
+    browser = cast(dict[str, object], _task_relative_paths(dict(controller.get_browser_snapshot(task_id)), task_root))
     preview_path = _latest_browser_preview_path(task_id)
     browser["screenshot_url"] = f"/api/runtime/tasks/{task_id}/browser/screenshot"
     browser["preview_url"] = str(browser["screenshot_url"])
@@ -258,7 +273,7 @@ def _browser_payload(task_id: int) -> dict[str, object]:
         bool(browser) and not bool(browser.get("session_persisted_only"))
     )
     if preview_path is not None:
-        browser["preview_path"] = str(preview_path)
+        browser["preview_path"] = _task_relative_paths(str(preview_path), task_root)
     return browser
 
 
@@ -353,9 +368,10 @@ async def _runtime_schedule_detail(request: web.Request) -> web.Response:
         return auth
     job_id = int(request.match_info["job_id"])
     run_limit = _parse_positive_int(request.query.get("run_limit"), name="run_limit", default=25, maximum=100)
+    run_offset_name = "run_offset" if request.query.get("run_offset") else "offset"
     run_offset = _parse_positive_int(
-        request.query.get("run_offset") or request.query.get("offset"),
-        name="run_offset",
+        request.query.get(run_offset_name),
+        name=run_offset_name,
         default=0,
         minimum=0,
         maximum=100_000,
@@ -1394,7 +1410,13 @@ async def _runtime_terminal_ws(request: web.Request) -> web.WebSocketResponse:
         raise web.HTTPForbidden(text="invalid terminal attach session")
     controller = get_runtime_controller()
     can_write = bool(int(session.get("can_write") or 0))
-    after_offset = int(request.query.get("after_offset", "0"))
+    after_offset = _parse_positive_int(
+        request.query.get("after_offset"),
+        name="after_offset",
+        default=0,
+        minimum=0,
+        maximum=_MAX_RUNTIME_ID,
+    )
     terminal_row = next(
         (item for item in controller.store.list_terminals(task_id) if int(item["id"]) == terminal_id),
         None,

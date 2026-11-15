@@ -348,7 +348,55 @@ async def test_runtime_task_browser_exposes_preview_url(tmp_path):
     assert payload["browser"]["screenshot_url"] == "/api/runtime/tasks/7/browser/screenshot"
     assert payload["browser"]["preview_url"] == "/api/runtime/tasks/7/browser/screenshot"
     assert payload["browser"]["preview_available"] is True
-    assert payload["browser"]["preview_path"] == str(preview_path)
+    assert payload["browser"]["preview_path"] == "artifacts/preview.png"
+
+
+def _absolute_paths(value: object, key: str = "") -> list[str]:
+    if isinstance(value, dict):
+        return [path for item_key, item in value.items() for path in _absolute_paths(item, str(item_key))]
+    if isinstance(value, list):
+        return [path for item in value for path in _absolute_paths(item, key)]
+    if isinstance(value, str) and value.startswith("/") and not key.endswith("_url"):
+        return [f"{key}={value}"]
+    return []
+
+
+@pytest.mark.asyncio
+async def test_runtime_task_browser_payload_has_no_absolute_host_paths(tmp_path):
+    runtime_root = tmp_path / "runtime"
+    task_root = runtime_root / "tasks" / "7"
+    screenshot = task_root / "browser" / "browser_7_1.png"
+    screenshot.parent.mkdir(parents=True, exist_ok=True)
+    screenshot.write_bytes(b"\x89PNG\r\n")
+    outside = tmp_path / "elsewhere" / "shot.png"
+    controller = _ControllerStub(
+        runtime_root=runtime_root,
+        env={"task_id": 7, "browser_scope_id": 7},
+        browser_snapshot={
+            "scope_id": 7,
+            "status": "unavailable",
+            "runtime_dir": str(task_root / "browser"),
+            "last_screenshot_path": str(screenshot),
+            "metadata": {"runtime_dir": str(task_root / "browser"), "profile_dir": str(outside.parent)},
+            "downloads": [str(outside)],
+            "session_persisted_only": True,
+        },
+    )
+    request = _request(task_id=7, headers={"X-Runtime-Token": "secret"})
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+    ):
+        response = await _runtime_task_browser(request)
+
+    browser = json.loads(response.text)["browser"]
+    assert _absolute_paths(browser) == []
+    assert browser["runtime_dir"] == "browser"
+    assert browser["last_screenshot_path"] == "browser/browser_7_1.png"
+    assert browser["preview_path"] == "browser/browser_7_1.png"
+    assert browser["metadata"] == {"runtime_dir": "browser", "profile_dir": None}
+    assert browser["downloads"] == [None]
 
 
 @pytest.mark.asyncio

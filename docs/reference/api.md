@@ -135,6 +135,10 @@ runtime environment that has already finished (for example completed, failed, ca
 
 `POST /api/runtime/sessions/messages` with a `squad` object queues a turn on that squad thread. The worker takes the identity the turn runs as from the thread, not from the request: the thread's `owner_user_id` and `telegram_chat_id`, or an id derived from the session when the thread has none. `squad.user_id`, `squad.chat_id` and `squad.telegram_chat_id` are ignored. A `squad.thread_id` that is not a UUID returns `400`, an unknown thread `404`.
 
+Numeric query parameters (`limit` on `/api/runtime/schedules`; `run_limit`, `run_offset` or `offset`, and `event_limit` on `/api/runtime/schedules/{job_id}`; `after_offset` on the terminal WebSocket; and the stream parameters below) answer a value that is not an integer or is out of range with `400` and `invalid <name>`. A WebSocket route checks them before the upgrade.
+
+The browser payload (the `browser` object of `GET /api/runtime/tasks/{task_id}/browser` and `POST /api/runtime/tasks/{task_id}/attach/browser`, and the browser WebSocket's `browser.snapshot` messages) gives file paths such as `runtime_dir`, `last_screenshot_path` and `preview_path` relative to the task's runtime directory, for example `browser/browser_7_1700000000000.png`. A path outside that directory is `null`; the payload never carries an absolute host path.
+
 WebSocket routes:
 
 - `GET /ws/runtime`
