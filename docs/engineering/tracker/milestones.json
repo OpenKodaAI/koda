@@ -14,9 +14,9 @@
    "name": "Segurança",
    "total": 68,
    "done": 35,
-   "in_progress": 0,
+   "in_progress": 1,
    "awaiting_evidence": 3,
-   "remaining": 30
+   "remaining": 29
   },
   {
    "milestone": "M2",
@@ -31,10 +31,10 @@
    "milestone": "M3",
    "name": "Jornadas críticas quebradas",
    "total": 43,
-   "done": 15,
-   "in_progress": 0,
+   "done": 16,
+   "in_progress": 2,
    "awaiting_evidence": 3,
-   "remaining": 25
+   "remaining": 22
   },
   {
    "milestone": "M4",
@@ -50,9 +50,9 @@
    "name": "Consolidação de arquitetura",
    "total": 61,
    "done": 1,
-   "in_progress": 0,
+   "in_progress": 1,
    "awaiting_evidence": 0,
-   "remaining": 60
+   "remaining": 59
   },
   {
    "milestone": "M6",

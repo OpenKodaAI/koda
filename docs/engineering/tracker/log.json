@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L33",
+   "at": "2026-11-15 10:45",
+   "event": "Lote 9 mesclado (fe94c49): 10.690 testes Python (1 guarda de tempo instável sob carga corrigida na integração), 504 Postgres, 1256 web. Entraram: aprovações pendentes expiram no reinício sem erro e cada worker lê só as linhas do seu agente; squads liberam a reivindicação em toda recusa e a varredura de orçamento não trava por uma sala; modo somente leitura bloqueia toda escrita, filhas de execução dry-run também são dry-run e o custo delas conta na execução pai; eventos, ambientes e terminais do runtime sem caminhos do host. Aprovados para o lote 10: scanner de pacotes (D-326..D-329), chamadas de ferramenta malformadas e salas ao vivo (M3-E3-T3, M3-E6-T6), downloads de modelo verificados por hash e validação de canais no backend (M1-E7-T9, M5-E8-T5). 103 de 347 tarefas do plano concluídas"
+  },
+  {
    "id": "L32",
    "at": "2026-11-15 09:55",
    "event": "Lote 8 mesclado (d62e100) com todos os gates verdes: 10.628 testes Python sem falhas, 484 Postgres, 1256 web, 101 Rust, e 9 de 9 testes no navegador (Escape no editor de rotinas fecha só o popover). Entraram: aprovações no Postgres com ids BIGINT e escopo por agente, sem fallback em JSON e com concessão revogada que não volta; execuções filhas limitadas às ferramentas da execução pai; delegação sem ciclos nem pingue-pongue, com a cadeia preservada em todos os caminhos; broadcast só para os participantes da sala e identidade da mensagem de squad decidida no servidor; resposta do navegador sem caminhos do host; tamanhos de fonte, cores de link e cursores que agora se aplicam. Aprovados para o lote 9: expiração das aprovações pendentes no reinício, confiabilidade de squads, modo somente leitura que bloqueia toda escrita e custo de execuções filhas contado na execução pai, eventos e ambientes do runtime sem caminhos do host. 102 de 347 tarefas do plano concluídas"
