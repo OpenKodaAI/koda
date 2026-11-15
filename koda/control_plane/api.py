@@ -926,6 +926,111 @@ async def delete_squad(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+async def _squad_admin_operator(request: web.Request) -> tuple[str, str] | web.Response:
+    """Authorize the operator for squad administration in the workspace that owns the squad.
+
+    Returns ``(username, squad_id)``, or the error response.
+    """
+    from koda.squads import SquadAccessError, SquadPrincipal, get_squad_access_service
+
+    access_service = get_squad_access_service()
+    if access_service is None:
+        return _service_unavailable(RuntimeError("squad access service unavailable"))
+    manager = _manager()
+    workspace_row = manager._workspace_row(request.match_info["workspace_id"])
+    squad_row = manager._squad_row(request.match_info["squad_id"])
+    auth = _require_auth_context(request)
+    username = auth.username or "operator"
+    try:
+        await access_service.require_squad_admin(
+            squad_id=str(squad_row["id"]),
+            squad_workspace_id=str(squad_row["workspace_id"] or ""),
+            principal=SquadPrincipal.workspace_operator(username, workspace_id=str(workspace_row["id"])),
+        )
+    except SquadAccessError as exc:
+        return web.json_response({"error": str(exc)}, status=403)
+    return username, str(squad_row["id"])
+
+
+async def put_squad_coordinator_route(request: web.Request) -> web.Response:
+    """Operator election of the squad coordinator (agents cannot elect themselves)."""
+    payload = await _json_payload(request)
+    agent_id = str(payload.get("agentId") or payload.get("agent_id") or "").strip()
+    if not agent_id:
+        return web.json_response({"error": "agentId is required"}, status=400)
+    authorized = await _squad_admin_operator(request)
+    if isinstance(authorized, web.Response):
+        return authorized
+    username, squad_id = authorized
+    force_replace = payload.get("forceReplace", payload.get("force_replace", False))
+    if not isinstance(force_replace, bool):
+        return web.json_response({"error": "forceReplace must be a boolean"}, status=400)
+    if not _manager().is_squad_member_agent(agent_id, squad_id):
+        return web.json_response(
+            {"error": f"agent {agent_id!r} is not a member of squad {squad_id!r} or of its workspace"},
+            status=400,
+        )
+
+    from koda.squads import (
+        CoordinatorConflictError,
+        CoordinatorEligibilityError,
+        get_coordinator_service,
+        get_squad_thread_store,
+    )
+
+    service = get_coordinator_service()
+    if service is None:
+        return _service_unavailable(RuntimeError("coordinator service unavailable"))
+    reason = str(payload.get("reason") or "").strip() or None
+    try:
+        state = await service.elect(
+            squad_id=squad_id,
+            agent_id=agent_id,
+            triggered_by=f"operator:{username}",
+            reason=reason,
+            force_replace=force_replace,
+            agent_spec=_manager().get_agent_spec(agent_id),
+            thread_store=get_squad_thread_store(),
+        )
+    except CoordinatorConflictError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
+    except CoordinatorEligibilityError as exc:
+        return web.json_response({"error": str(exc)}, status=400)
+    return web.json_response(
+        {
+            "ok": True,
+            "squad_id": squad_id,
+            "coordinator_agent_id": state.coordinator_agent_id,
+            "election_policy": state.election_policy,
+        }
+    )
+
+
+async def delete_squad_coordinator_route(request: web.Request) -> web.Response:
+    """Operator demotion of the squad coordinator."""
+    authorized = await _squad_admin_operator(request)
+    if isinstance(authorized, web.Response):
+        return authorized
+    username, squad_id = authorized
+
+    from koda.squads import CoordinatorNotFoundError, get_coordinator_service, get_squad_thread_store
+
+    service = get_coordinator_service()
+    if service is None:
+        return _service_unavailable(RuntimeError("coordinator service unavailable"))
+    reason = str(request.query.get("reason") or "").strip() or None
+    try:
+        state = await service.demote(
+            squad_id=squad_id,
+            triggered_by=f"operator:{username}",
+            reason=reason,
+            thread_store=get_squad_thread_store(),
+        )
+    except CoordinatorNotFoundError:
+        return web.json_response({"error": f"squad {squad_id!r} has no active coordinator"}, status=404)
+    return web.json_response({"ok": True, "squad_id": squad_id, "coordinator_agent_id": state.coordinator_agent_id})
+
+
 async def delete_agent(request: web.Request) -> web.Response:
     removed = _manager().delete_agent(request.match_info["agent_id"])
     return web.json_response({"ok": True, "deleted": removed})
@@ -2946,7 +3051,7 @@ async def list_agent_tools_catalog_route(request: web.Request) -> web.Response: 
         "ls": "List a directory",
         "search": "Search the web or docs",
         "fetch": "Fetch a URL",
-        "curl": "HTTP request via curl",
+        "curl": "Alias of /fetch: fetch a URL",
         "browse": "Browser automation",
         "screenshot": "Capture a screenshot",
     }
@@ -5084,16 +5189,22 @@ async def handle_oauth_callback_route(request: web.Request) -> web.Response:
         status = 200 if result.get("success") else 400
         return web.json_response(result, status=status)
 
-    frontend_target = str(
-        result.get("frontend_callback_uri") or request.query.get("frontend_callback_uri") or ""
-    ).strip()
-    if not frontend_target:
-        return web.json_response(result, status=200 if result.get("success") else 400)
     if result.get("success"):
+        frontend_target = str(result.get("frontend_callback_uri") or "").strip()
+        if not frontend_target:
+            return web.json_response(result, status=200)
         raise web.HTTPFound(
             f"{frontend_target}?status=success&server_key={result['server_key']}&agent_id={result['agent_id']}"
         )
-    raise web.HTTPFound(f"{frontend_target}?status=error&error={result.get('error', 'token_exchange_failed')}")
+    # A failure redirects only to the configured web origin; a query-supplied
+    # or stored frontend_callback_uri is never a redirect target here.
+    from koda.config import MCP_OAUTH_CALLBACK_BASE_URL
+
+    configured = urllib.parse.urlparse(MCP_OAUTH_CALLBACK_BASE_URL.strip())
+    if configured.scheme not in {"http", "https"} or not configured.netloc:
+        return web.json_response(result, status=400)
+    error_query = urllib.parse.urlencode({"status": "error", "error": result.get("error") or "token_exchange_failed"})
+    raise web.HTTPFound(f"{configured.scheme}://{configured.netloc}/oauth/callback?{error_query}")
 
 
 async def refresh_oauth_token_route(request: web.Request) -> web.Response:
@@ -5489,6 +5600,14 @@ def setup_control_plane_routes(app: web.Application) -> None:
     app.router.add_put("/api/control-plane/workspaces/{workspace_id}/spec", put_workspace_spec)
     app.router.add_get("/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/spec", get_squad_spec)
     app.router.add_put("/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/spec", put_squad_spec)
+    app.router.add_put(
+        "/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/coordinator",
+        put_squad_coordinator_route,
+    )
+    app.router.add_delete(
+        "/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/coordinator",
+        delete_squad_coordinator_route,
+    )
     app.router.add_post("/api/control-plane/agents/{agent_id}/clone", clone_agent)
     app.router.add_post("/api/control-plane/agents/{agent_id}/publish", publish_agent)
     app.router.add_post("/api/control-plane/agents/{agent_id}/activate", activate_agent)

@@ -27,7 +27,16 @@ from .bootstrap_file import (
     is_loopback_request,
     read_bootstrap_file,
 )
-from .database import execute, fetch_all, fetch_one, json_dump, json_load, now_iso, with_connection
+from .database import (
+    WriteConflictError,
+    execute,
+    fetch_all,
+    fetch_one,
+    json_dump,
+    json_load,
+    now_iso,
+    with_connection,
+)
 from .operator_profile_photos import (
     delete_operator_profile_photo,
     read_operator_profile_photo,
@@ -59,6 +68,15 @@ _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 _OPERATOR_ONLY_AUTH_STATUS_FIELDS: tuple[str, ...] = ("recovery_available",)
 # Public auth status fields the setup screen needs, sent before login only while no owner exists.
 _SETUP_ONLY_AUTH_STATUS_FIELDS: tuple[str, ...] = ("bootstrap_file_path", "loopback_trust_enabled")
+# The first statement of the registration and regeneration transactions: their
+# checks rely on each statement reading what is committed when it starts, which
+# a server or role default of REPEATABLE READ or SERIALIZABLE would break.
+_READ_COMMITTED = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
+# Owner registrations take this transaction-scoped lock next, keyed on the users
+# table, so they run one after another (D-294). The no-owner check is a separate,
+# later statement, so it reads the rows committed by the time the lock is held.
+_OWNER_REGISTRATION_LOCK = "SELECT pg_advisory_xact_lock('cp_operator_users'::regclass::oid::bigint)"
+_NO_OWNER_YET = "SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM cp_operator_users)"
 
 
 class AuthError(Exception):
@@ -366,6 +384,8 @@ class OperatorAuthService:
         now = _utc_now()
         bootstrap_id = f"boot_{uuid4().hex}"
         normalized = _normalize_bootstrap_code(code)
+        # A concurrent first use of the same file code inserts it too; the
+        # loser's insert does nothing and both read the one row (D-283).
         execute(
             """
             INSERT INTO cp_bootstrap_codes (
@@ -378,7 +398,7 @@ class OperatorAuthService:
                 issued_by,
                 metadata_json
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO NOTHING
+            ON CONFLICT DO NOTHING
             """,
             (
                 bootstrap_id,
@@ -411,19 +431,25 @@ class OperatorAuthService:
         if row is None and self._bootstrap_file_matches(normalized):
             row = self._insert_bootstrap_code(code=normalized, label="bootstrap_file")
         if row is None or _is_expired(row.get("expires_at")) or row.get("consumed_at"):
-            emit_security("security.operator_bootstrap_exchange_failed", reason="invalid_or_expired_code")
-            raise ValueError("Setup code is invalid or expired.")
+            raise self._invalid_setup_code()
         return row
+
+    def _invalid_setup_code(self) -> ValueError:
+        emit_security("security.operator_bootstrap_exchange_failed", reason="invalid_or_expired_code")
+        return ValueError("Setup code is invalid or expired.")
 
     def exchange_bootstrap_code(self, code: str) -> dict[str, Any]:
         row = self._redeemable_bootstrap_code(code)
         registration_token = _random_secret("kodar")
         exchange_expires_at = (_utc_now() + timedelta(seconds=CONTROL_PLANE_REGISTRATION_TOKEN_TTL_SECONDS)).isoformat()
-        execute(
+        # Only an unused code is consumed (D-283): when a concurrent exchange or
+        # registration consumed it after the read above, nothing is written and
+        # the answer is that of any other invalid code.
+        consumed = execute(
             """
             UPDATE cp_bootstrap_codes
             SET consumed_at = ?, exchange_token_hash = ?, exchange_issued_at = ?, exchange_expires_at = ?
-            WHERE id = ?
+            WHERE id = ? AND consumed_at = ''
             """,
             (
                 now_iso(),
@@ -433,6 +459,8 @@ class OperatorAuthService:
                 str(row["id"]),
             ),
         )
+        if not consumed:
+            raise self._invalid_setup_code()
         emit_security("security.operator_bootstrap_exchanged", code_hint=str(row.get("code_hint") or ""))
         return {
             "ok": True,
@@ -626,14 +654,22 @@ class OperatorAuthService:
             and not str(bootstrap_code or "").strip()
             and is_loopback_request(remote_ip, forwarded_for)
         )
+        # An invalid token or setup code hashes the password before it answers,
+        # as a registration that passes the check and loses the race does
+        # below, so the two take about the same time (D-283).
         if str(registration_token or "").strip():
             row = self._registration_row(registration_token)
             if row is None or row.get("exchange_consumed_at") or _is_expired(row.get("exchange_expires_at")):
+                _password_hasher().hash(password)
                 raise ValueError("Registration token is invalid or expired.")
         elif str(bootstrap_code or "").strip():
             # The setup code is consumed in the registration transaction below,
             # so a failed registration leaves it usable.
-            row = self._redeemable_bootstrap_code(bootstrap_code)
+            try:
+                row = self._redeemable_bootstrap_code(bootstrap_code)
+            except ValueError:
+                _password_hasher().hash(password)
+                raise
             redeem_setup_code = True
         elif not trusted_loopback:
             raise ValueError("Bootstrap code is invalid or expired.")
@@ -655,6 +691,30 @@ class OperatorAuthService:
         session_metadata = {"origin": "register_owner", "remote_ip": remote_ip, "forwarded_for": forwarded_for}
 
         def _register(conn: Any) -> tuple[list[str], str, str]:
+            conn.execute(_READ_COMMITTED)
+            # A concurrent registration waits here until this one commits (D-294).
+            conn.execute(_OWNER_REGISTRATION_LOCK)
+            # The code is consumed next and only while unused (D-283): a
+            # concurrent registration with the same code then matches no row,
+            # and its whole transaction rolls back.
+            if row is not None and redeem_setup_code:
+                conn.execute(
+                    """
+                    UPDATE cp_bootstrap_codes SET consumed_at = ?, exchange_consumed_at = ?
+                    WHERE id = ? AND consumed_at = ''
+                    """,
+                    (now_iso(), now_iso(), str(row["id"])),
+                    require_row=True,
+                )
+            elif row is not None:
+                conn.execute(
+                    "UPDATE cp_bootstrap_codes SET exchange_consumed_at = ? WHERE id = ? AND exchange_consumed_at = ''",
+                    (now_iso(), str(row["id"])),
+                    require_row=True,
+                )
+            # One owner (D-294): a registration with another code, or with
+            # loopback trust, that waited on the lock finds the owner and rolls back.
+            conn.execute(_NO_OWNER_YET, require_row=True)
             conn.execute(
                 """
                 INSERT INTO cp_operator_users (
@@ -692,16 +752,6 @@ class OperatorAuthService:
                 ),
             )
             codes = self._issue_recovery_codes(user_id=user_id, generation=recovery_generation, conn=conn)
-            if row is not None and redeem_setup_code:
-                conn.execute(
-                    "UPDATE cp_bootstrap_codes SET consumed_at = ?, exchange_consumed_at = ? WHERE id = ?",
-                    (now_iso(), now_iso(), str(row["id"])),
-                )
-            elif row is not None:
-                conn.execute(
-                    "UPDATE cp_bootstrap_codes SET exchange_consumed_at = ? WHERE id = ?",
-                    (now_iso(), str(row["id"])),
-                )
             token, session_id = self._insert_session(
                 user_id=user_id,
                 subject_type="operator",
@@ -713,7 +763,14 @@ class OperatorAuthService:
 
         # Every write above commits together or not at all (D-056): a failure
         # leaves no owner, no recovery codes, no session and an unused setup code.
-        recovery_codes, session_token, session_id = with_connection(_register)
+        try:
+            recovery_codes, session_token, session_id = with_connection(_register)
+        except WriteConflictError as exc:
+            if str(exc) == _NO_OWNER_YET:
+                raise ValueError("Owner account already exists. Sign in instead.") from None
+            if redeem_setup_code:
+                raise self._invalid_setup_code() from None
+            raise ValueError("Registration token is invalid or expired.") from None
         if row is not None and redeem_setup_code:
             emit_security("security.operator_bootstrap_exchanged", code_hint=str(row.get("code_hint") or ""))
         consume_bootstrap_file()
@@ -772,6 +829,11 @@ class OperatorAuthService:
         user_id = str(row["id"])
 
         def _reset(conn: Any) -> None:
+            # The user row is written first, as in _regenerate, so concurrent
+            # resets and regenerations of one account queue on it instead of
+            # deadlocking on each other's codes. The code is then consumed only
+            # while unused (D-283): a reset that waited on the row and finds
+            # its code spent matches no row, and its whole transaction rolls back.
             conn.execute(
                 "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
                 (password_hash, now_iso(), user_id),
@@ -780,9 +842,10 @@ class OperatorAuthService:
                 """
                 UPDATE cp_operator_recovery_codes
                 SET consumed_at = ?, consumed_reason = ?
-                WHERE id = ?
+                WHERE id = ? AND consumed_at = ''
                 """,
                 (now_iso(), "password_reset", str(code_row["id"])),
+                require_row=True,
             )
             conn.execute(
                 """
@@ -795,7 +858,10 @@ class OperatorAuthService:
             self._revoke_sessions_for_user(user_id, conn=conn)
 
         # The new password, the spent codes and the revoked sessions commit together (D-056).
-        with_connection(_reset)
+        try:
+            with_connection(_reset)
+        except WriteConflictError:
+            raise ValueError("Invalid identifier or recovery code.") from None
 
         emit_security(
             "security.operator_password_reset_recovery",
@@ -828,11 +894,17 @@ class OperatorAuthService:
         )
 
         password_hash = _password_hasher().hash(new_password)
-        execute(
-            "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
-            (password_hash, now_iso(), context.user_id),
-        )
-        self._revoke_sessions_for_user(context.user_id, except_session_id=context.session_id)
+        user_id = context.user_id
+
+        def _change(conn: Any) -> None:
+            conn.execute(
+                "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
+                (password_hash, now_iso(), user_id),
+            )
+            self._revoke_sessions_for_user(user_id, except_session_id=context.session_id, conn=conn)
+
+        # The new password and the revoked sessions commit together (D-284).
+        with_connection(_change)
         emit_security(
             "security.operator_password_changed",
             user_id=_optional_audit_user_id(context.user_id),
@@ -974,23 +1046,40 @@ class OperatorAuthService:
         except (VerifyMismatchError, VerificationError, InvalidHashError):
             raise ValueError("Invalid current password.") from None
 
-        # Invalidate existing
         current_generation = str(row.get("recovery_generation") or "")
-        execute(
-            """
-            UPDATE cp_operator_recovery_codes
-            SET consumed_at = ?, consumed_reason = ?
-            WHERE user_id = ? AND consumed_at = '' AND generation = ?
-            """,
-            (now_iso(), "regenerated", context.user_id, current_generation),
-        )
-
         generation = uuid4().hex
-        new_codes = self._issue_recovery_codes(user_id=context.user_id, generation=generation)
-        execute(
-            "UPDATE cp_operator_users SET recovery_generation = ?, updated_at = ? WHERE id = ?",
-            (generation, now_iso(), context.user_id),
-        )
+        user_id = context.user_id
+
+        def _regenerate(conn: Any) -> list[str]:
+            conn.execute(_READ_COMMITTED)
+            # The user row first, as in the password reset, so the two queue
+            # on it instead of deadlocking on the codes. It moves only from the
+            # generation read above (D-295): of two regenerations sent at once,
+            # the one that waited on the row matches none and stores no batch.
+            conn.execute(
+                """
+                UPDATE cp_operator_users SET recovery_generation = ?, updated_at = ?
+                WHERE id = ? AND recovery_generation = ?
+                """,
+                (generation, now_iso(), user_id, current_generation),
+                require_row=True,
+            )
+            conn.execute(
+                """
+                UPDATE cp_operator_recovery_codes
+                SET consumed_at = ?, consumed_reason = ?
+                WHERE user_id = ? AND consumed_at = '' AND generation = ?
+                """,
+                (now_iso(), "regenerated", user_id, current_generation),
+            )
+            return self._issue_recovery_codes(user_id=user_id, generation=generation, conn=conn)
+
+        # The old codes' invalidation, the new codes and the new generation
+        # commit together (D-284): a failure leaves the current codes usable.
+        try:
+            new_codes = with_connection(_regenerate)
+        except WriteConflictError:
+            raise ValueError("Recovery codes were regenerated by another request. Try again.") from None
 
         emit_security(
             "security.operator_recovery_codes_regenerated",

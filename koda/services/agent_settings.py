@@ -492,6 +492,15 @@ def _publish_agent_runtime_update(manager: ControlPlaneManager, agent_id: str) -
     return True
 
 
+def _publish_model_change(manager: ControlPlaneManager, agent_id: str) -> None:
+    """Publish a model change, or raise so the caller is not told the running agent uses it (D-068)."""
+    if not _publish_agent_runtime_update(manager, agent_id):
+        raise ValueError(
+            "A alteracao foi salva no rascunho, mas a publicacao do agent falhou; "
+            "o agent continua com o modelo anterior. Corrija os erros de publicacao do agent."
+        )
+
+
 def set_agent_voice_policy_enabled(enabled: bool) -> dict[str, Any] | None:
     settings = get_agent_runtime_settings(force_refresh=True)
     if settings is None:
@@ -548,6 +557,7 @@ def set_agent_general_provider(provider_id: str) -> dict[str, Any] | None:
     }
     local_policy["functional_defaults"] = functional_defaults
     manager.put_model_policy(agent_id, {"policy": normalize_model_policy(local_policy)})
+    _publish_model_change(manager, agent_id)
     invalidate_agent_settings_cache(agent_id)
     return get_agent_runtime_settings(force_refresh=True)
 
@@ -574,6 +584,7 @@ def set_agent_general_model(provider_id: str, model_id: str) -> dict[str, Any] |
     }
     local_policy["functional_defaults"] = functional_defaults
     manager.put_model_policy(agent_id, {"policy": normalize_model_policy(local_policy)})
+    _publish_model_change(manager, agent_id)
     invalidate_agent_settings_cache(agent_id)
     return get_agent_runtime_settings(force_refresh=True)
 
@@ -583,7 +594,7 @@ def set_agent_functional_default(
     provider_id: str,
     model_id: str,
     *,
-    publish: bool = False,
+    publish: bool = True,
 ) -> dict[str, Any] | None:
     settings = get_agent_runtime_settings(force_refresh=True)
     if settings is None:
@@ -611,7 +622,7 @@ def set_agent_functional_default(
         local_policy["default_models"] = default_models
     manager.put_model_policy(agent_id, {"policy": normalize_model_policy(local_policy)})
     if publish:
-        _publish_agent_runtime_update(manager, agent_id)
+        _publish_model_change(manager, agent_id)
     invalidate_agent_settings_cache(agent_id)
     return get_agent_runtime_settings(force_refresh=True)
 

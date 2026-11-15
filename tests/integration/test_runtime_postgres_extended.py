@@ -23,6 +23,7 @@ from typing import Any
 import asyncpg
 import pytest
 
+from koda.state.agent_scope import task_agent_scope
 from tests.postgres_fixtures import close_shared_postgres_backends
 
 pytestmark = [pytest.mark.postgres]
@@ -85,6 +86,7 @@ def _build_store(agent_id: str):
 
 
 async def _seed_task(dsn: str, *, agent_id: str, task_id: int) -> None:
+    """Insert a task row under the ``agent_id`` scope ``koda.state.history_store`` writes (D-293)."""
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(
@@ -94,7 +96,7 @@ async def _seed_task(dsn: str, *, agent_id: str, task_id: int) -> None:
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             task_id,
-            agent_id,
+            task_agent_scope(agent_id),
             100,
             100,
             "queued",
@@ -106,6 +108,17 @@ async def _seed_task(dsn: str, *, agent_id: str, task_id: int) -> None:
         )
     finally:
         await conn.close()
+
+
+async def test_seeded_task_row_is_visible_to_the_runtime_store(runtime_db: str) -> None:
+    """``_seed_task`` writes the rows the store's ``tasks`` reads and updates find (D-293)."""
+    await _seed_task(runtime_db, agent_id="agent_a", task_id=1)
+    store = _build_store("agent_a")
+    store.heartbeat(1, None, phase="executing")
+    task = store.get_task_runtime(1)
+    assert task is not None
+    assert task["id"] == 1
+    assert task["current_phase"] == "executing"
 
 
 # upsert_terminal / list_terminals

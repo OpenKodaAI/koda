@@ -102,6 +102,14 @@ def _write_plugin(root: Path, handler: str) -> Path:
     return plugin_dir
 
 
+def _manifest(plugin_dir: Path) -> PluginManifest:
+    from koda.plugins.manifest import parse_manifest
+
+    manifest = parse_manifest(plugin_dir / "plugin.yaml")
+    assert not isinstance(manifest, str)
+    return manifest
+
+
 def _write_evil(root: Path) -> Path:
     outside = root / "outside"
     outside.mkdir(exist_ok=True)
@@ -127,7 +135,7 @@ class TestHandlerPathContainment:
     def test_escaping_handler_paths_are_rejected_before_import(self, tmp_path: Path, handler: str) -> None:
         plugin_dir = _write_plugin(tmp_path, "handlers.run")
         with patch("koda.plugins.registry.importlib.util.spec_from_file_location") as spec_from_file:
-            handler_fn = PluginRegistry()._load_handler(plugin_dir, handler)
+            handler_fn = PluginRegistry()._load_handler(_manifest(plugin_dir), handler)
 
         assert handler_fn is None
         spec_from_file.assert_not_called()
@@ -200,7 +208,7 @@ class TestHandlerLoadIsAtomic:
             return result
 
         with patch.object(_package, "_safe_child_path", check_then_swap):
-            handler_fn = PluginRegistry()._load_handler(plugin_dir, "sub.handlers.run")
+            handler_fn = PluginRegistry()._load_handler(_manifest(plugin_dir), "sub.handlers.run")
 
         assert swapped
         assert handler_fn is None
@@ -231,7 +239,7 @@ class TestHandlerLoadIsAtomic:
             return checks[-1]
 
         with patch.object(_package, "_safe_child_path", flipping_check):
-            handler_fn = PluginRegistry()._load_handler(plugin_dir, "sub.handlers.run")
+            handler_fn = PluginRegistry()._load_handler(_manifest(plugin_dir), "sub.handlers.run")
 
         assert checks
         assert handler_fn is None
@@ -252,7 +260,7 @@ class TestHandlerLoadIsAtomic:
         lookalike = types.ModuleType("_koda_plugin_demo")
         lookalike.__path__ = [str(outside)]
         with patch.dict(sys.modules, {"_koda_plugin_demo": lookalike}):
-            handler_fn = PluginRegistry()._load_handler(plugin_dir, "handlers.run")
+            handler_fn = PluginRegistry()._load_handler(_manifest(plugin_dir), "handlers.run")
             sys.modules.pop("_koda_plugin_demo.helper", None)
 
         assert handler_fn is None

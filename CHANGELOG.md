@@ -171,6 +171,96 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   no parent package. (D-270)
 - Skill package code always runs from its verified `.py` sources, also for modules it loads
   at tool-call time; a bytecode cache planted after approval never runs. (D-273)
+- A failed MCP OAuth callback redirects only to the origin of
+  `MCP_OAUTH_CALLBACK_BASE_URL`, at `/oauth/callback` with the error code, and answers
+  JSON when that setting is empty. It no longer redirects to a `frontend_callback_uri`
+  taken from the query string or the session. (M1-E3-T6, D-030)
+- Stdio MCP servers start with the isolation profile and constraints stored in their
+  catalog entry instead of the defaults. Docker isolation passes the server environment
+  by name (`-e NAME`) instead of writing it to a temp file that was never deleted, and
+  refuses to start a server whose env sets `DOCKER_*`, `HOME` or `PATH`, which the
+  docker CLI would read for itself. When
+  the sandbox cannot enforce `egress_allowlist` (bubblewrap, sandbox-exec and Docker all
+  share the network), the start logs `mcp_isolation_egress_allowlist_unenforced` and the
+  server reports `egress: unrestricted` in its isolation status. (M1-E4-T6, D-028,
+  D-133)
+- Stdio MCP servers no longer inherit Koda's environment. Under native, bubblewrap
+  and sandbox-exec isolation, a server with no env of its own used to receive all of
+  it: the control-plane token, the database DSN and provider keys. Every server now
+  gets only `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TERM`
+  and `TZ` from Koda's environment, plus its own env. Docker already passed only the
+  server's own names. Behaviour change: proxy and CA variables such as `HTTPS_PROXY`,
+  `HTTP_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` and
+  `REQUESTS_CA_BUNDLE` are no longer passed through. A server that needs them must
+  set them in its own env. (D-300)
+- Saving a custom MCP server refuses isolation constraints the runtime cannot parse,
+  a `network_mode` other than `none`, `egress_allowlist` or `any`, and mounts of
+  sensitive host paths, read-only or not. These are Koda's state directory and master
+  key files, `/etc`, `/root`, `/proc`, `/sys`, `/dev`, the Docker socket, credential
+  directories such as `~/.ssh`, and any mount on, inside or above them. The check
+  follows symlinks and reads `//etc` as `/etc`, and the sandbox doctor applies the
+  same rule. A server already saved with an unknown `network_mode` fails to start
+  with that error until the value is corrected; before, it shared the host network.
+  (D-301)
+- Channel gateway pairing: codes are 8 letters and digits, one message tries at most
+  one code (the whole message, or `/start CODE`) and other messages are not attempts,
+  and a sender (one user across all its chats) with 5 failed attempts in 15 minutes is
+  locked out of pairing for 15 minutes (`channel.pairing_locked`). The gateway keeps its
+  state only in Postgres; the `STATE_ROOT_DIR/channel_gateway` JSON file is no longer
+  read or written. Handling a message writes the sender's identity only when its status
+  changes and does not put a queue item the dashboard resolved back as pending, so it no
+  longer overwrites an approval, block or revoke made from the dashboard at the same
+  time. A failed identity read denies the message (`channel.gateway_unavailable`)
+  without writing anything. (M1-E5-T3, D-182)
+
+- One redactor, in process, masks secrets in audit details, runtime streams, store rows
+  and API previews, run graphs, eval exports, memory previews, workspace-import excerpts
+  and structured logs, with the same output on every path. A value under a sensitive key
+  is masked whole; keys are split into words, so camelCase and PT-BR keys count
+  (`basicAuth`, `authKey`, `auth_key`, `senha`, `novaSenha`, `chave`, `chave_api`), while
+  `author`, `auth_mode`, `authority` and `session_id` do not. In text it masks bearer and
+  basic credentials (the whole token, with `+`, `/` and `=` padding), `name=value`,
+  `name: value`, env-style lines and command-line flags under a sensitive name
+  (`HEROKU_API_KEY=…`, `AWS_SECRET_ACCESS_KEY=…`, `senha=…`, `"apiKey": "…"`,
+  `--password=…`, `--api-key=…`, `-token=…`), with an unquoted value masked whole up to
+  whitespace, a comma or, inside a quoted command, the quote that closes it
+  (`password=Tr0ub4dor&3`, `password=[x]`, `password=ab"};cd`, `"--password=…"`),
+  credentials in any URL scheme, query-string secrets (including an
+  OAuth `code`), whole cookie headers and provider keys (`sk-`, AWS key IDs,
+  `ghp_`/`gho_`/`github_pat_`, Slack `xox*-`, Google `AIza`), each only where it starts a
+  word. Token counts under a count key (`prompt_tokens: 1200`, `max_tokens=4096`,
+  `inputTokens: 512`, `OPENAI_MAX_TOKENS=4096`, `cache_read_input_tokens: 10`,
+  `maxOutputTokens: 8192`) stay readable; digits under any other `tokens` key
+  (`access_tokens=…`) are masked. Any other run of 24 or more letters, digits, `-` and `_`
+  that mixes letters and digits is masked, except Koda's own identifiers: UUIDs,
+  `session-`, `squad-` and operator-shell session ids, prefixed ids, collision-suffixed
+  artifact names (`screenshot-final-a1b2c3d4.png`), camelCase names
+  (`KnowledgeV2PostgresBackend`, `describeEc2Instances`) and tool, file and model names
+  made of words, Title-Case and short mixed segments included (`list_k8s_namespaces`,
+  `i18n-translations`, `e2e-tests`, `Quarterly_Financial_Report_2026.pdf`,
+  `Deploy-K8s-Production-Cluster`). Every pattern runs in time linear in its input, so no
+  text can stall a terminal stream or the event loop with backtracking. Run graphs no
+  longer blank a whole string because it mentions a secret word. Runtime redaction no
+  longer calls the security sidecar, and the sidecar no longer serves a `RedactValue` RPC.
+  A terminal attach no longer sends its attach token to the runtime kernel as the kernel
+  session id. Structured logs write `[REDACTED]` instead of `***`, also for an empty
+  value, under every key the redactor treats as sensitive. (M5-E3-T8)
+- Setup codes, registration tokens and recovery codes can be used only once, even when two
+  requests arrive at the same moment: the second changes nothing and fails like any invalid
+  code. Only one owner account can be created, also when two first-run registrations arrive
+  with different valid codes. (D-283, D-294)
+- Skill package code runs from the exact bytes the integrity check hashed: a file rewritten
+  or added after the check, or a compiled module in a package directory, does not run, and a
+  package re-registers only through its lock. Unregistering a package removes all its handler
+  modules. (D-292, D-291)
+- Squad administration (electing or demoting the coordinator, Telegram bind and unbind, the
+  router tick and opening threads) needs the squad's current coordinator or an operator of its
+  workspace; a messaging grant no longer covers it and the agent tools have no force flags.
+  Operators elect and demote through `PUT` and `DELETE
+  /api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/coordinator`. A coordinator
+  can no longer open a private thread it is not in, squad sync never adds members to a
+  private thread, and break-glass access is refused when its audit event cannot be written.
+  (M1-E5-T1, M1-E5-T4, D-038, D-041, D-304, D-306)
 
 
 ### Added
@@ -264,6 +354,25 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   install and refuses plain index builds on large tables. Migration 049 builds
   `idx_audit_events_type_time` with `CREATE INDEX CONCURRENTLY`. (M2-E2-T5)
 - `CLAUDE.md` is the one contributor and agent guide; `AGENTS.md` points to it. (M10-E1-T2)
+- The Telegram `/curl` command is an alias of `/fetch` and gives its result for the same
+  URL. Its output changes in three ways: it first replies "Fetching...", the page is sent
+  as plain text instead of inside a code block, and without a URL it answers
+  "Usage: /fetch <url>". The agent tool catalog describes `curl` as "Alias of /fetch", and
+  `/help` lists `/fetch` with `/curl` as its alias. (M6-E3-T4)
+- Publishing an agent fails when its model policy names an unknown provider in
+  `default_models`, `tier_models` or `available_models_by_provider`, as it already did
+  for `default_provider`. The core providers and the local runtimes `llamacpp` and `mlx`
+  are accepted. At runtime, an unknown provider id still falls back to the default
+  provider but logs `unknown_provider_id`. (M6-E3-T2, D-157)
+- Changing the agent's general provider or model, or a per-function default model, from
+  Telegram (`/settings`, `/provider`, `/model`, `/featuremodel` or chat) now publishes the
+  agent. Before, the change was only saved as a draft and the agent kept the model of its
+  published version. The supervisor then restarts that agent's worker on the new version,
+  as a voice change already did. The restart resets the Telegram chat state of every chat
+  with that agent (the current session, the `/setdir` directory and the agent mode), and a
+  task still running after the 15-second shutdown grace period is stopped. When the agent
+  cannot be published, the change stays in the draft and the reply says the agent keeps
+  its previous model, instead of reporting the new one. (M6-E3-T2, D-068)
 
 
 ### Removed
@@ -392,6 +501,31 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   from the keyboard, and each page has one h1. (M8-E1-T1, M8-E1-T2, M8-E1-T3)
 - The memory safety scanner is pinned by a labelled English and Portuguese corpus: fewer
   false refusals of developer text, more Portuguese injections caught. (M3-E4-T6, D-035)
+- With `RUNTIME_ENVIRONMENTS_ENABLED=true`, light tasks and answers from the response
+  cache complete. Before, every such task failed with "runtime terminal output requires
+  a kernel-backed terminal path" after the provider had answered. The kernel terminal is
+  now required only for a task with a runtime environment, and the non-streaming
+  provider run registers one as the streaming run does. (M6-E1-T8, D-064)
+- A task with a write step is no longer sent to review, with its answer replaced by "Nao
+  posso confirmar a conclusao operacional com seguranca...", only because there is no
+  knowledge to ground it. When knowledge is disabled (`KNOWLEDGE_ENABLED=false`) or the
+  agent's knowledge corpus is empty, the answer is still evaluated (action plan, metrics,
+  warnings) but the grounding gate does not retain it, and the runtime logs
+  `grounding_gate_skipped` instead. (M6-E1-T5, F-MEM-28)
+- With `RUNTIME_ENVIRONMENTS_ENABLED=true`, a task whose provider never ran (no eligible
+  provider, or the provider is unavailable) now fails with the provider error, such as "No
+  verified providers are eligible for runtime fallback.", instead of "runtime terminal
+  output requires a kernel-backed terminal path". A provider error that is delivered as a
+  completed answer still needs the kernel terminal. (D-297)
+- A chat message that names a provider used only by one feature (`elevenlabs`, `kokoro`
+  or `whispercpp`) without the feature, such as "switch to kokoro", no longer changes the
+  agent's general provider to the default one. Nothing changes, and the reply names the
+  feature to use, for example "switch audio to kokoro". (D-296)
+- Regenerating recovery codes and changing the password are each one transaction, and a
+  double-submitted regenerate answers 400 instead of storing a second batch. Startup
+  migrations are no longer cancelled by the query timeout. (D-284, D-295, D-285)
+- `/cancel <id>` and `/cancel` stop a running task on Postgres; before, the runtime looked
+  tasks up with an agent id casing the writer never uses. (D-293)
 
 
 ## [1.0.18] - 2026-05-20

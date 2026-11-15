@@ -3,22 +3,29 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import secrets
+import string
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any, Literal, cast
 
 from koda.channels.types import ChannelIdentity, IncomingMessage
-from koda.config import AGENT_ID, STATE_ROOT_DIR
+from koda.config import AGENT_ID
 from koda.logging_config import get_logger
 
 log = get_logger(__name__)
 
 CHANNEL_GATEWAY_SCHEMA_VERSION = "channel_gateway.v1"
 PAIRING_CODE_TTL_SECONDS = 15 * 60
+# Every code has this shape, so only a message of this shape is a pairing attempt
+# and ordinary short messages do not use up a sender's attempts.
+PAIRING_CODE_LENGTH = 8
+_PAIRING_CODE_ALPHABET = string.ascii_uppercase + string.digits
+# A sender gets this many failed pairing attempts per lockout window; the last
+# one locks the sender out of pairing for the window.
+PAIRING_MAX_FAILURES = 5
+PAIRING_LOCKOUT_SECONDS = 15 * 60
 _MAX_TEXT_PREVIEW = 240
 
 GatewayStatus = Literal["pending", "paired", "allowed", "blocked", "revoked"]
@@ -26,6 +33,12 @@ GatewayDecision = Literal["allow", "queue_for_pairing", "deny", "paired"]
 GatewaySeverity = Literal["info", "warning", "error"]
 
 _LAST_DECISIONS: dict[str, dict[str, Any]] = {}
+# Per-sender pairing limits, keyed by "<agent_id>:<channel_type>:<user_id>" so one
+# user has one budget across all its chats (monotonic seconds).
+_PAIRING_FAILURES: dict[str, list[float]] = {}
+_PAIRING_LOCKED_UNTIL: dict[str, float] = {}
+# Past this many senders, entries whose window has passed are pruned.
+_PAIRING_STATE_MAX = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,50 +142,6 @@ def _safe_text(value: object, *, limit: int = _MAX_TEXT_PREVIEW) -> str:
     return text[:limit] + ("..." if len(text) > limit else "")
 
 
-def _fallback_path(agent_id: str | None) -> Path:
-    return STATE_ROOT_DIR / "channel_gateway" / _normalize_agent_id(agent_id).lower() / "gateway.json"
-
-
-def _empty_state(agent_id: str) -> dict[str, Any]:
-    return {
-        "schema_version": CHANNEL_GATEWAY_SCHEMA_VERSION,
-        "agent_id": agent_id,
-        "identities": [],
-        "unknown_senders": [],
-        "pairing_codes": [],
-        "events": [],
-        "updated_at": _now_iso(),
-    }
-
-
-def _read_fallback_state(agent_id: str) -> dict[str, Any]:
-    path = _fallback_path(agent_id)
-    if not path.exists():
-        return _empty_state(agent_id)
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        log.warning("channel_gateway_fallback_read_failed", path=str(path), exc_info=True)
-        return _empty_state(agent_id)
-    if not isinstance(payload, dict):
-        return _empty_state(agent_id)
-    state = _empty_state(agent_id)
-    state.update(payload)
-    state["schema_version"] = CHANNEL_GATEWAY_SCHEMA_VERSION
-    state["agent_id"] = agent_id
-    return state
-
-
-def _write_fallback_state(agent_id: str, state: dict[str, Any]) -> None:
-    path = _fallback_path(agent_id)
-    state = {**state, "schema_version": CHANNEL_GATEWAY_SCHEMA_VERSION, "agent_id": agent_id, "updated_at": _now_iso()}
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
-    except OSError:
-        log.warning("channel_gateway_fallback_write_failed", path=str(path), exc_info=True)
-
-
 def _primary_backend(agent_id: str) -> Any | None:
     try:
         from koda.state.primary import get_primary_state_backend
@@ -216,65 +185,38 @@ def _list_primary_pairing_codes(agent_id: str) -> list[dict[str, Any]] | None:
     return list(result) if isinstance(result, list) else None
 
 
+# Gateway state lives only in the primary backend, one row per identity, sender or
+# code. Without a primary backend nothing is stored: unknown senders stay denied.
+
+
 def _persist_identity(agent_id: str, record: dict[str, Any]) -> None:
     backend = _primary_backend(agent_id)
     if backend is not None and hasattr(backend, "upsert_channel_gateway_identity"):
         _run_primary(backend.upsert_channel_gateway_identity(agent_id, record))
-    state = _read_fallback_state(agent_id)
-    identities = [item for item in state.get("identities", []) if item.get("identity_id") != record.get("identity_id")]
-    identities.append(record)
-    state["identities"] = identities
-    _write_fallback_state(agent_id, state)
 
 
 def _persist_unknown_sender(agent_id: str, payload: dict[str, Any]) -> None:
     backend = _primary_backend(agent_id)
     if backend is not None and hasattr(backend, "upsert_channel_unknown_sender"):
         _run_primary(backend.upsert_channel_unknown_sender(agent_id, payload))
-    state = _read_fallback_state(agent_id)
-    unknown = [
-        item for item in state.get("unknown_senders", []) if item.get("identity_id") != payload.get("identity_id")
-    ]
-    unknown.append(payload)
-    state["unknown_senders"] = unknown
-    _write_fallback_state(agent_id, state)
 
 
 def _delete_unknown_sender(agent_id: str, identity_id: str) -> None:
     backend = _primary_backend(agent_id)
     if backend is not None and hasattr(backend, "delete_channel_unknown_sender"):
         _run_primary(backend.delete_channel_unknown_sender(agent_id, identity_id))
-    state = _read_fallback_state(agent_id)
-    state["unknown_senders"] = [
-        item for item in state.get("unknown_senders", []) if item.get("identity_id") != identity_id
-    ]
-    _write_fallback_state(agent_id, state)
 
 
 def _persist_pairing_code(agent_id: str, payload: dict[str, Any]) -> None:
     backend = _primary_backend(agent_id)
     if backend is not None and hasattr(backend, "upsert_channel_pairing_code"):
         _run_primary(backend.upsert_channel_pairing_code(agent_id, payload))
-    state = _read_fallback_state(agent_id)
-    codes = [
-        item for item in state.get("pairing_codes", []) if item.get("pairing_code_id") != payload.get("pairing_code_id")
-    ]
-    codes.append(payload)
-    state["pairing_codes"] = codes
-    _write_fallback_state(agent_id, state)
 
 
 def _consume_pairing_code(agent_id: str, pairing_code_id: str) -> None:
     backend = _primary_backend(agent_id)
     if backend is not None and hasattr(backend, "consume_channel_pairing_code"):
         _run_primary(backend.consume_channel_pairing_code(agent_id, pairing_code_id))
-    state = _read_fallback_state(agent_id)
-    now = _now_iso()
-    state["pairing_codes"] = [
-        {**item, "used_at": now} if item.get("pairing_code_id") == pairing_code_id else item
-        for item in state.get("pairing_codes", [])
-    ]
-    _write_fallback_state(agent_id, state)
 
 
 def _append_event(
@@ -293,11 +235,6 @@ def _append_event(
     backend = _primary_backend(agent_id)
     if backend is not None and hasattr(backend, "append_channel_gateway_event"):
         _run_primary(backend.append_channel_gateway_event(agent_id, event_type, event))
-    state = _read_fallback_state(agent_id)
-    events = list(state.get("events", []))
-    events.append(event)
-    state["events"] = events[-500:]
-    _write_fallback_state(agent_id, state)
     _emit_observability(agent_id, event_type, payload, severity=severity)
     return str(event["event_id"])
 
@@ -400,27 +337,17 @@ def _identity_from_unknown(agent_id: str, identity_id: str) -> ChannelIdentity |
 
 def list_gateway_identities(agent_id: str | None) -> list[dict[str, Any]]:
     normalized = _normalize_agent_id(agent_id)
-    primary = _list_primary_identities(normalized)
-    if primary is not None:
-        return primary
-    state = _read_fallback_state(normalized)
-    return [dict(item) for item in state.get("identities", []) if isinstance(item, dict)]
+    return [dict(item) for item in _list_primary_identities(normalized) or [] if isinstance(item, dict)]
 
 
 def list_unknown_senders(agent_id: str | None) -> list[dict[str, Any]]:
     normalized = _normalize_agent_id(agent_id)
-    primary = _list_primary_unknown_senders(normalized)
-    if primary is not None:
-        return primary
-    state = _read_fallback_state(normalized)
-    return [dict(item) for item in state.get("unknown_senders", []) if isinstance(item, dict)]
+    return [dict(item) for item in _list_primary_unknown_senders(normalized) or [] if isinstance(item, dict)]
 
 
 def list_pairing_codes(agent_id: str | None, *, include_used: bool = False) -> list[dict[str, Any]]:
     normalized = _normalize_agent_id(agent_id)
-    primary = _list_primary_pairing_codes(normalized)
-    codes = primary if primary is not None else _read_fallback_state(normalized).get("pairing_codes", [])
-    items = [dict(item) for item in codes if isinstance(item, dict)]
+    items = [dict(item) for item in _list_primary_pairing_codes(normalized) or [] if isinstance(item, dict)]
     now = datetime.now(UTC)
     filtered: list[dict[str, Any]] = []
     for item in items:
@@ -441,7 +368,7 @@ def create_pairing_code(
     ttl_seconds: int = PAIRING_CODE_TTL_SECONDS,
 ) -> dict[str, Any]:
     normalized = _normalize_agent_id(agent_id)
-    code = secrets.token_urlsafe(5).replace("-", "").replace("_", "")[:8].upper()
+    code = "".join(secrets.choice(_PAIRING_CODE_ALPHABET) for _ in range(PAIRING_CODE_LENGTH))
     now = datetime.now(UTC)
     payload = {
         "schema_version": CHANNEL_GATEWAY_SCHEMA_VERSION,
@@ -590,7 +517,19 @@ def evaluate_incoming_message(
     )
 
     legacy_allowed = _coerce_int(identity.user_id) in set(legacy_allowed_user_ids or set())
-    existing = _identity_by_id(normalized, identity_id)
+    identities = _list_primary_identities(normalized)
+    if identities is None and _primary_backend(normalized) is not None:
+        # A failed read is not "no identity": deny without writing, so a transient
+        # failure never replaces an operator's approval, block or revoke.
+        return _identity_read_failed(normalized, identity, identity_id)
+    existing = next(
+        (
+            dict(item)
+            for item in identities or []
+            if isinstance(item, dict) and str(item.get("identity_id") or "") == identity_id
+        ),
+        None,
+    )
     raw_status = str((existing or {}).get("status") or "pending")
     status = cast(
         GatewayStatus,
@@ -628,15 +567,16 @@ def evaluate_incoming_message(
         )
 
     if legacy_allowed or status == "allowed":
-        source = "legacy_allowed_user_ids" if legacy_allowed and status != "allowed" else "channel_gateway"
-        record = _record_from_identity(
-            normalized,
-            identity,
-            status="allowed",
-            source=source,
-            allowed_by="legacy_allowed_user_ids" if legacy_allowed else str((existing or {}).get("allowed_by") or ""),
-        )
-        _persist_identity(normalized, record)
+        # The identity is written only when its status changes, never on every message.
+        if status != "allowed":
+            record = _record_from_identity(
+                normalized,
+                identity,
+                status="allowed",
+                source="legacy_allowed_user_ids",
+                allowed_by="legacy_allowed_user_ids",
+            )
+            _persist_identity(normalized, record)
         return ChannelGatewayDecision(
             schema_version=CHANNEL_GATEWAY_SCHEMA_VERSION,
             decision="allow",
@@ -649,8 +589,25 @@ def evaluate_incoming_message(
             reason_code="channel.identity_allowed",
         )
 
-    pairing = _matching_pairing_code(normalized, identity.channel_type, message.text)
+    attempt = _pairing_attempt(message.text)
+    limiter_key = f"{normalized}:{identity.channel_type.lower()}:{identity.user_id}"
+    pairing: dict[str, Any] | None = None
+    locked_out = False
+    if attempt:
+        now = _clock()
+        locked_out = _pairing_locked(limiter_key, now)
+        if not locked_out:
+            pairing = _matching_pairing_code(normalized, identity.channel_type, attempt)
+            if pairing is None and _record_pairing_failure(limiter_key, now):
+                locked_out = True
+                _append_event(
+                    normalized,
+                    "pairing_locked_out",
+                    {"identity_id": identity_id, "status": "pending", "reason_code": "channel.pairing_locked"},
+                    severity="warning",
+                )
     if pairing is not None:
+        _PAIRING_FAILURES.pop(limiter_key, None)
         record = _record_from_identity(
             normalized,
             identity,
@@ -702,15 +659,40 @@ def evaluate_incoming_message(
         "first_seen_at": str((existing or {}).get("created_at") or _now_iso()),
         "last_seen_at": _now_iso(),
     }
-    pending_record = _record_from_identity(normalized, identity, status="pending", source="unknown_sender")
-    _persist_identity(normalized, pending_record)
-    _persist_unknown_sender(normalized, unknown_payload)
+    if str((existing or {}).get("status") or "") != "pending":
+        pending_record = _record_from_identity(normalized, identity, status="pending", source="unknown_sender")
+        _persist_identity(normalized, pending_record)
+    # Re-read before queueing: if the control plane approved or blocked the sender
+    # while this message was handled, it also resolved the queue entry, and
+    # writing it again would show a resolved sender as pending review.
+    if str((_identity_by_id(normalized, identity_id) or {}).get("status") or "") == "pending":
+        _persist_unknown_sender(normalized, unknown_payload)
     event_id = _append_event(
         normalized,
         "unknown_sender_queued",
         {"identity_id": identity_id, "status": "pending", "channel_type": identity.channel_type},
         severity="warning",
     )
+    if locked_out:
+        reason_code = "channel.pairing_locked"
+        error = ChannelGatewayError(
+            code=reason_code,
+            category="rate_limit",
+            message="Too many pairing attempts from this sender.",
+            retryable=True,
+            user_action="Wait before sending a pairing code again, or ask an operator to approve the sender.",
+            detail_ref="docs/operations/channel-gateway-runbook.md",
+        )
+    else:
+        reason_code = "channel.identity_unknown"
+        error = ChannelGatewayError(
+            code=reason_code,
+            category="permission",
+            message="This channel identity has not been approved for the agent.",
+            retryable=True,
+            user_action="Open the dashboard channel gateway and approve or block the sender.",
+            detail_ref="docs/operations/channel-gateway-runbook.md",
+        )
     return ChannelGatewayDecision(
         schema_version=CHANNEL_GATEWAY_SCHEMA_VERSION,
         decision="queue_for_pairing",
@@ -720,14 +702,38 @@ def evaluate_incoming_message(
         channel_id=identity.channel_id,
         user_id=identity.user_id,
         status="pending",
-        reason_code="channel.identity_unknown",
+        reason_code=reason_code,
+        event_id=event_id,
+        error=error,
+    )
+
+
+def _identity_read_failed(agent_id: str, identity: ChannelIdentity, identity_id: str) -> ChannelGatewayDecision:
+    log.warning("channel_gateway_identity_read_failed", agent_id=agent_id, identity_id=identity_id)
+    reason_code = "channel.gateway_unavailable"
+    event_id = _append_event(
+        agent_id,
+        "identity_read_failed",
+        {"identity_id": identity_id, "status": "unavailable", "reason_code": reason_code},
+        severity="error",
+    )
+    return ChannelGatewayDecision(
+        schema_version=CHANNEL_GATEWAY_SCHEMA_VERSION,
+        decision="deny",
+        allowed=False,
+        identity_id=identity_id,
+        channel_type=identity.channel_type,
+        channel_id=identity.channel_id,
+        user_id=identity.user_id,
+        status="pending",
+        reason_code=reason_code,
         event_id=event_id,
         error=ChannelGatewayError(
-            code="channel.identity_unknown",
-            category="permission",
-            message="This channel identity has not been approved for the agent.",
+            code=reason_code,
+            category="dependency_unavailable",
+            message="The channel gateway could not read this sender's identity.",
             retryable=True,
-            user_action="Open the dashboard channel gateway and approve or block the sender.",
+            user_action="Send the message again; if it keeps failing, check the primary database.",
             detail_ref="docs/operations/channel-gateway-runbook.md",
         ),
     )
@@ -772,24 +778,67 @@ def denial_message_for_decision(decision: dict[str, Any] | None) -> str:
         return "Channel pairing complete. Send your request again."
     if code == "channel.identity_unknown":
         return "Access denied. This sender is pending operator approval in the Koda channel gateway."
+    if code == "channel.pairing_locked":
+        minutes = PAIRING_LOCKOUT_SECONDS // 60
+        return f"Access denied. Too many pairing attempts; wait {minutes} minutes before sending a pairing code again."
     if code == "channel.policy_denied":
         return "Access denied. This sender is blocked in the Koda channel gateway."
+    if code == "channel.gateway_unavailable":
+        return "Access denied. The Koda channel gateway could not check this sender; try again shortly."
     return "Access denied."
 
 
-def _matching_pairing_code(agent_id: str, channel_type: str, text: str) -> dict[str, Any] | None:
-    normalized_text = str(text or "").strip().upper()
-    if not normalized_text:
-        return None
-    tokens = {normalized_text}
-    for token in normalized_text.replace("/", " ").replace(":", " ").split():
-        if token:
-            tokens.add(token.strip())
+def _pairing_attempt(text: str) -> str:
+    """The one code a message offers: the whole message, or the argument of a
+    leading command such as ``/start CODE``, when it has the shape of a code
+    (``PAIRING_CODE_LENGTH`` letters and digits). Any other message tries no code,
+    so one message is at most one guess and chit-chat is not a guess.
+    """
+    tokens = str(text or "").strip().upper().split()
+    if tokens and tokens[0].startswith("/"):
+        tokens = tokens[1:]
+    if len(tokens) != 1 or len(tokens[0]) != PAIRING_CODE_LENGTH:
+        return ""
+    if not all(char in _PAIRING_CODE_ALPHABET for char in tokens[0]):
+        return ""
+    return tokens[0]
+
+
+def _clock() -> float:
+    return time.monotonic()
+
+
+def _pairing_locked(key: str, now: float) -> bool:
+    if _PAIRING_LOCKED_UNTIL.get(key, 0.0) > now:
+        return True
+    _PAIRING_LOCKED_UNTIL.pop(key, None)
+    return False
+
+
+def _record_pairing_failure(key: str, now: float) -> bool:
+    """Count a failed attempt; return True when it locks the sender out."""
+    failures = [at for at in _PAIRING_FAILURES.get(key, []) if now - at < PAIRING_LOCKOUT_SECONDS]
+    failures.append(now)
+    if len(failures) >= PAIRING_MAX_FAILURES:
+        _PAIRING_FAILURES.pop(key, None)
+        _PAIRING_LOCKED_UNTIL[key] = now + PAIRING_LOCKOUT_SECONDS
+        if len(_PAIRING_LOCKED_UNTIL) > _PAIRING_STATE_MAX:
+            for stale in [k for k, until in _PAIRING_LOCKED_UNTIL.items() if until <= now]:
+                _PAIRING_LOCKED_UNTIL.pop(stale, None)
+        return True
+    _PAIRING_FAILURES[key] = failures
+    if len(_PAIRING_FAILURES) > _PAIRING_STATE_MAX:
+        for stale in [k for k, times in _PAIRING_FAILURES.items() if now - times[-1] >= PAIRING_LOCKOUT_SECONDS]:
+            _PAIRING_FAILURES.pop(stale, None)
+    return False
+
+
+def _matching_pairing_code(agent_id: str, channel_type: str, attempt: str) -> dict[str, Any] | None:
     for item in list_pairing_codes(agent_id):
         if str(item.get("channel_type") or "").lower() != channel_type.lower():
             continue
         code = str(item.get("code") or "").upper()
-        if code and code in tokens:
+        if code and secrets.compare_digest(code.encode(), attempt.encode()):
             return item
     return None
 

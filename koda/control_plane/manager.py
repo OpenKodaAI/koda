@@ -61,6 +61,7 @@ from koda.provider_models import (
     resolve_model_function_catalog,
     resolve_provider_function_model_catalog,
 )
+from koda.security.redaction import redact_value
 from koda.services.elevenlabs_catalog import (
     ELEVENLABS_DEFAULT_TTS_MODEL,
     canonicalize_elevenlabs_language,
@@ -126,7 +127,6 @@ from koda.services.provider_auth import (
     verify_provider_local_connection,
     verify_provider_subscription_login,
 )
-from koda.services.runtime.redaction import redact_value
 from koda.services.supertonic_manager import (
     SUPERTONIC_DEFAULT_LANGUAGE_ID,
     SUPERTONIC_DEFAULT_MODEL_ID,
@@ -1732,6 +1732,23 @@ class ControlPlaneManager:
         if row is None:
             raise KeyError(normalized)
         return row
+
+    def is_squad_member_agent(self, agent_id: str, squad_id: str) -> bool:
+        """Whether ``agent_id`` may serve ``squad_id``, as its coordinator for one.
+
+        It must belong to the squad, or be an agent of the squad's workspace that is in no
+        squad. Unknown agents and squads are not members.
+        """
+        try:
+            squad_row = self._squad_row(squad_id)
+            _, agent_row = self._require_agent_row(agent_id)
+        except (KeyError, ValueError):
+            return False
+        squad_workspace_id = _normalize_optional_org_id(squad_row["workspace_id"])
+        if not squad_workspace_id or _normalize_optional_org_id(agent_row["workspace_id"]) != squad_workspace_id:
+            return False
+        agent_squad_id = _normalize_optional_org_id(agent_row["squad_id"])
+        return agent_squad_id is None or agent_squad_id == str(squad_row["id"])
 
     def _next_workspace_entity_id(self, table: str, base_value: str) -> str:
         base = _slug(base_value)
@@ -5633,8 +5650,14 @@ class ControlPlaneManager:
             schema=KNOWLEDGE_V2_POSTGRES_SCHEMA,
             embedding_dimension=KNOWLEDGE_V2_EMBEDDING_DIMENSION,
         )
+
+        async def _bootstrap() -> bool:
+            # The bridge stops waiting after PRIMARY_STATE_BRIDGE_TIMEOUT_SECONDS;
+            # the shield keeps that from cancelling the migrations (D-285).
+            return bool(await asyncio.shield(backend.bootstrap()))
+
         try:
-            bootstrapped = bool(run_coro_sync(backend.bootstrap()))
+            bootstrapped = bool(run_coro_sync(_bootstrap()))
             health = dict(run_coro_sync(backend.health()))
         except Exception as exc:
             return {
@@ -13653,6 +13676,10 @@ class ControlPlaneManager:
             "remote_url": row.get("remote_url") or row.get("url") or None,
             "env_schema": json_load(str(row.get("env_schema_json") or "[]"), []),
             "headers_schema": json_load(str(row.get("headers_schema_json") or "[]"), []),
+            "isolation_profile": str(row.get("isolation_profile") or "auto"),
+            "isolation_constraints": _safe_json_object(
+                json_load(str(row.get("isolation_constraints_json") or "{}"), {})
+            ),
             "documentation_url": row.get("documentation_url") or None,
             "logo_key": row.get("logo_key") or None,
             "category": str(row.get("category") or "general"),

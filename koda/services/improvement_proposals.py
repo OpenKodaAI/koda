@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from koda.knowledge.repository import KnowledgeRepository
 from koda.memory.safety import assert_memory_text_safe
-from koda.services.runtime.redaction import redact_value
+from koda.security.redaction import redact_value
 
 SCHEMA_VERSION = "improvement_proposal.v1"
 

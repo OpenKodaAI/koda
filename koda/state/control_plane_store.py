@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -59,7 +60,10 @@ def _normalize_primary_query(query: str) -> str:
 
 def init_control_plane_db() -> None:
     backend = _require_primary_backend()
-    run_coro_sync(backend.start())
+    # start() applies the schema migrations. The control plane calls this from
+    # its running event loop, so through the bridge, whose time limit would
+    # cancel an index build on a large table at every boot (D-285).
+    run_coro_sync(backend.start(), timeout=math.inf)
 
 
 def fetch_all(query: str, params: tuple[Any, ...] = ()) -> list[Any]:
@@ -106,14 +110,25 @@ def execute_many(query: str, items: list[tuple[Any, ...]]) -> None:
         run_coro_sync(primary_execute(normalized, item))
 
 
+class WriteConflictError(RuntimeError):
+    """A write recorded with ``require_row=True`` matched no row, so its ``with_connection`` applied nothing."""
+
+
 class Transaction:
     """The statements of one open Postgres transaction, all on one connection."""
 
     def __init__(self, conn: Any) -> None:
         self._conn = conn
 
-    async def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
-        await self._conn.execute(_normalize_qmark_placeholders(_normalize_primary_query(query)), *tuple(params))
+    async def execute(self, query: str, params: tuple[Any, ...] = ()) -> int:
+        """Run one statement and return the number of rows it affected."""
+        status = await self._conn.execute(
+            _normalize_qmark_placeholders(_normalize_primary_query(query)), *tuple(params)
+        )
+        try:
+            return int(str(status).rsplit(" ", 1)[-1])
+        except (TypeError, ValueError):
+            return 0
 
 
 @asynccontextmanager
@@ -124,10 +139,11 @@ async def transaction() -> AsyncIterator[Transaction]:
         yield Transaction(conn)
 
 
-async def _apply_in_transaction(operations: list[tuple[str, tuple[Any, ...]]]) -> None:
+async def _apply_in_transaction(operations: list[tuple[str, tuple[Any, ...], bool]]) -> None:
     async with transaction() as tx:
-        for query, params in operations:
-            await tx.execute(query, params)
+        for query, params, require_row in operations:
+            if await tx.execute(query, params) == 0 and require_row:
+                raise WriteConflictError(query)
 
 
 def with_connection(fn: Any) -> Any:
@@ -135,15 +151,18 @@ def with_connection(fn: Any) -> Any:
 
     ``fn`` only records writes: they run after it returns, so a read inside
     ``fn`` does not see them. If any statement fails, none of them is applied.
+    A statement recorded with ``require_row=True`` fails when it affects no
+    row (``WriteConflictError``): a conditional ``UPDATE ... WHERE`` that
+    another transaction got to first rolls back the whole set.
     """
     _require_primary_backend()
 
     class _PrimaryConnectionRecorder:
         def __init__(self) -> None:
-            self.operations: list[tuple[str, tuple[Any, ...]]] = []
+            self.operations: list[tuple[str, tuple[Any, ...], bool]] = []
 
-        def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
-            self.operations.append((_normalize_primary_query(query), tuple(params)))
+        def execute(self, query: str, params: tuple[Any, ...] = (), *, require_row: bool = False) -> None:
+            self.operations.append((_normalize_primary_query(query), tuple(params), require_row))
 
     recorder = _PrimaryConnectionRecorder()
     result = fn(recorder)

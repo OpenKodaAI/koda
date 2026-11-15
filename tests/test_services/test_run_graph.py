@@ -119,7 +119,7 @@ def test_build_run_graph_from_flat_trace_runtime_events_and_redaction() -> None:
                         "provenance": {
                             "selected_count": 1,
                             "dropped_reasons": {"sensitive_memory_not_allowed": 1},
-                            "raw_content": "sk-live-secret",
+                            "raw_content": "sk-live-4eC39HqLyjWDarjtT1zdp7dc",
                         },
                     }
                 ],
@@ -190,6 +190,7 @@ def test_build_run_graph_from_flat_trace_runtime_events_and_redaction() -> None:
     assert "handoff_event" in node_types
     assert "cost" in node_types
     assert "sk-live-secret" not in encoded
+    assert "4eC39HqLyjWDarjtT1zdp7dc" not in encoded
     assert "abcdefghijklmnopqrstuvwxyz123456" not in encoded
     assert "[REDACTED]" in encoded
     memory_context_nodes = [

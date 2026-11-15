@@ -50,13 +50,17 @@ async def _bot_is_admin(update: Update, context: BotContext) -> bool:
     chat = update.effective_chat
     if chat is None:
         return False
+    return await _bot_is_chat_admin(context.bot, chat.id)
+
+
+async def _bot_is_chat_admin(bot: Any, chat_id: int) -> bool:
     try:
-        me = await context.bot.get_me()
-        member = await context.bot.get_chat_member(chat.id, me.id)
+        me = await bot.get_me()
+        member = await bot.get_chat_member(chat_id, me.id)
         status = str(getattr(member, "status", "") or "")
         return status in {"administrator", "creator"}
     except Exception:
-        log.exception("squad_bind_admin_check_failed", chat_id=getattr(chat, "id", None))
+        log.exception("squad_bind_admin_check_failed", chat_id=chat_id)
         return False
 
 
@@ -68,6 +72,14 @@ async def _all_member_bots_are_admin(update: Update, *, squad_id: str) -> tuple[
     chat = update.effective_chat
     if chat is None:
         return False, "No chat available for admin validation."
+    return await _all_member_bots_are_chat_admins(chat.id, squad_id=squad_id)
+
+
+async def _all_member_bots_are_chat_admins(chat_id: int, *, squad_id: str) -> tuple[bool, str | None]:
+    from koda.config import SQUAD_TELEGRAM_STRICT_ADMIN_CHECK
+
+    if not SQUAD_TELEGRAM_STRICT_ADMIN_CHECK:
+        return True, None
     try:
         from telegram import Bot
 
@@ -89,21 +101,45 @@ async def _all_member_bots_are_admin(update: Update, *, squad_id: str) -> tuple[
             bot = Bot(token)
             try:
                 me = await bot.get_me()
-                member = await bot.get_chat_member(chat.id, me.id)
+                member = await bot.get_chat_member(chat_id, me.id)
                 status = str(getattr(member, "status", "") or "")
                 if status not in {"administrator", "creator"}:
                     not_admin.append(agent_id)
             except Exception:
-                log.exception("squad_bind_member_admin_check_failed", chat_id=chat.id, agent_id=agent_id)
+                log.exception("squad_bind_member_admin_check_failed", chat_id=chat_id, agent_id=agent_id)
                 not_admin.append(agent_id)
         if missing:
             return False, "Missing AGENT_TOKEN for squad bots: " + ", ".join(sorted(missing))
         if not_admin:
             return False, "These squad bots are not admins in this supergroup: " + ", ".join(sorted(not_admin))
     except Exception as exc:
-        log.exception("squad_bind_strict_admin_check_failed", chat_id=getattr(chat, "id", None), squad_id=squad_id)
+        log.exception("squad_bind_strict_admin_check_failed", chat_id=chat_id, squad_id=squad_id)
         return False, f"Strict admin validation failed: {exc}"
     return True, None
+
+
+async def verify_squad_bind_chat(bot: Any, chat_id: int, *, squad_id: str) -> tuple[Any | None, str | None]:
+    """Apply the ``/squad_bind`` chat checks to ``chat_id`` as the Bot API reports it.
+
+    The agent tool path has no Telegram update, so the chat type and forum flag are
+    read from Telegram instead of trusting the caller. Returns ``(chat, None)`` when
+    every check passes, else ``(None, reason)``.
+    """
+    try:
+        chat = await bot.get_chat(chat_id)
+    except Exception as exc:
+        log.exception("squad_bind_get_chat_failed", chat_id=chat_id)
+        return None, f"Cannot read Telegram chat {chat_id}: {exc}"
+    if str(getattr(chat, "type", "") or "") != "supergroup":
+        return None, "Telegram squad binding requires a supergroup."
+    if not bool(getattr(chat, "is_forum", False)):
+        return None, "This supergroup must have forum topics enabled before binding."
+    if not await _bot_is_chat_admin(bot, chat_id):
+        return None, "The bot must be an admin in this supergroup before binding."
+    all_admin, admin_error = await _all_member_bots_are_chat_admins(chat_id, squad_id=squad_id)
+    if not all_admin:
+        return None, admin_error or "All squad bots must be admins in this supergroup."
+    return chat, None
 
 
 def _resolve_workspace_and_squad(args: list[Any]) -> tuple[str | None, str | None, str | None]:

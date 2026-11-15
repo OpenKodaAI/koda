@@ -126,7 +126,7 @@ def test_log_format_json_takes_effect_and_redacts(entrypoint: str, tmp_path: Pat
     (written,) = [event for event in events if event["event"] == "bootstrap_file_written"]
     assert written["code_source"] == "generated"
     (attempt,) = [event for event in events if event["event"] == "operator_login_attempt"]
-    assert attempt["code"] == attempt["password"] == attempt["token"] == "***"
+    assert attempt["code"] == attempt["password"] == attempt["token"] == "[REDACTED]"
 
     for secret in _SECRETS:
         assert secret not in stdout

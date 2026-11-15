@@ -24,6 +24,7 @@ from koda.config import (
     PROVIDER_MODELS,
     TRANSCRIPT_REPLAY_LIMIT,
 )
+from koda.logging_config import get_logger
 from koda.services.llamacpp_runner import (
     get_llamacpp_capabilities,
     run_llamacpp,
@@ -68,6 +69,17 @@ _NATIVE_FIRST_CHUNK_TIMEOUTS: dict[str, float] = {
     "gemini": float(GEMINI_FIRST_CHUNK_TIMEOUT),
     "ollama": float(FIRST_CHUNK_TIMEOUT),
 }
+
+
+log = get_logger(__name__)
+
+
+def _native_target(provider: str) -> str:
+    """Return the native runner for ``provider``; a provider without one runs on the claude CLI."""
+    if provider in _NATIVE_PROVIDER_MODULES:
+        return provider
+    log.error("provider_runner_missing", provider=provider, fallback="claude")
+    return "claude"
 
 
 @functools.cache
@@ -266,7 +278,7 @@ async def get_provider_capabilities(provider: str, turn_mode: TurnMode) -> Provi
     if http_runner is not None:
         capabilities: ProviderCapabilities = await http_runner["capabilities"](turn_mode)
         return capabilities
-    native_provider = normalized if normalized in _NATIVE_PROVIDER_MODULES else "claude"
+    native_provider = _native_target(normalized)
     runner = _native_runner(native_provider)
     capabilities_fn = getattr(runner, f"get_{native_provider}_capabilities")
     return cast("ProviderCapabilities", await capabilities_fn(turn_mode))
@@ -390,7 +402,7 @@ async def run_llm(
         )
         result = result_obj
     else:
-        target = normalized if normalized in _NATIVE_PROVIDER_MODULES else "claude"
+        target = _native_target(normalized)
         runner = _native_runner(target)
         run_fn = getattr(runner, f"run_{target}")
         kwargs: dict[str, Any] = dict(
@@ -494,7 +506,7 @@ async def run_llm_streaming(
         ):
             yield chunk
         return
-    target = normalized if normalized in _NATIVE_PROVIDER_MODULES else "claude"
+    target = _native_target(normalized)
     runner = _native_runner(target)
     stream_fn = getattr(runner, f"run_{target}_streaming")
     effective_first_chunk = (

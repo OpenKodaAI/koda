@@ -89,6 +89,7 @@ async def bootstrap_mcp_for_agent(agent_id: str) -> dict[str, Any]:
                 url=url,
                 env=env_values if env_values else None,
                 headers=headers,
+                **_catalog_isolation(catalog),
             )
 
             started_servers += 1
@@ -233,6 +234,17 @@ def _load_catalog_entry(server_key: str) -> dict[str, Any] | None:
         return manager.get_mcp_catalog_entry(server_key)
     except Exception:
         return None
+
+
+def _catalog_isolation(catalog: dict[str, Any]) -> dict[str, Any]:
+    """The catalog's stored isolation profile and constraints, as ``ensure_started`` kwargs."""
+    from koda.services.mcp_isolation import IsolationConstraints
+
+    constraints = catalog.get("isolation_constraints")
+    return {
+        "isolation_profile": str(catalog.get("isolation_profile") or "") or None,
+        "isolation_constraints": IsolationConstraints.from_dict(constraints if isinstance(constraints, dict) else None),
+    }
 
 
 def _load_single_connection(agent_id: str, server_key: str) -> dict[str, Any] | None:

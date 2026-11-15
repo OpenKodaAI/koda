@@ -312,7 +312,9 @@ class KnowledgeV2PostgresBackend:
             if self._ready:
                 return True
             try:
-                conn = await self._open_direct_connection()
+                # No query timeout: a migration step such as an index build on
+                # a large table can run longer than any query (D-285).
+                conn = await self._open_direct_connection(query_timeout=False)
                 try:
                     # This connection has no startup search_path, so it reports the default.
                     self._default_search_path = str(await conn.fetchval("SHOW search_path") or "")
@@ -497,7 +499,13 @@ class KnowledgeV2PostgresBackend:
         except TypeError:
             return self._pool.acquire()
 
-    async def _open_direct_connection(self, *, server_settings: dict[str, str] | None = None) -> Any:
+    async def _open_direct_connection(
+        self,
+        *,
+        server_settings: dict[str, str] | None = None,
+        query_timeout: bool = True,
+    ) -> Any:
+        """Open a connection outside the pool; ``query_timeout=False`` leaves its statements without a time limit."""
         try:
             await asyncio.wait_for(
                 self._direct_connection_gate.acquire(),
@@ -514,7 +522,7 @@ class KnowledgeV2PostgresBackend:
                 return await asyncpg.connect(
                     self._dsn,
                     timeout=self._acquire_timeout_seconds,
-                    command_timeout=self._query_timeout_seconds,
+                    command_timeout=self._query_timeout_seconds if query_timeout else None,
                     server_settings=server_settings,
                 )
             except TypeError:
@@ -2476,8 +2484,9 @@ class KnowledgeV2PostgresBackend:
                 (
                     # Token registry — one row per agent. The bot-gateway
                     # service polls Telegram on behalf of every registered
-                    # bot. ``bot_token`` is treated as a secret; gateway
-                    # logs redact it via the koda-security-core helpers.
+                    # bot. ``bot_token`` is treated as a secret: the gateway
+                    # never logs it, and Python paths mask it through
+                    # koda.security.redaction (its key matches ``token``).
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."cp_bot_gateway_tokens" (
                             agent_id TEXT PRIMARY KEY,
                             bot_token TEXT NOT NULL,
@@ -4651,6 +4660,17 @@ class KnowledgeV2PostgresBackend:
             }
             for row in rows
         ]
+
+    async def has_knowledge_chunks(self) -> bool:
+        """Whether this agent's knowledge corpus holds any chunk; True when the backend cannot tell."""
+        if not self.bootstrapped:
+            return True
+        async with self._connection() as conn:
+            value = await conn.fetchval(
+                f"""SELECT EXISTS (SELECT 1 FROM "{self._schema}"."knowledge_chunks" WHERE agent_id = $1)""",
+                self._agent_id,
+            )
+        return bool(value)
 
     async def count_recent_queries(self, *, user_id: int, since: datetime | str) -> int:
         if not self.bootstrapped:

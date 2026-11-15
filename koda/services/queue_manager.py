@@ -3982,6 +3982,35 @@ def _agent_turn_output_audit_payload(result: RunResult) -> dict[str, Any]:
         }
 
 
+def _grounding_gate_skip_reason(knowledge_resolution: Any | None) -> str:
+    """Why the grounding gate does not judge this answer, or "" when it does (M6-E1-T5).
+
+    With knowledge disabled, or an agent whose knowledge corpus is empty, no answer can cite
+    an authoritative source, so the gate would send every task with a write to review.
+    """
+    from koda.knowledge.config import KNOWLEDGE_ENABLED
+
+    if not KNOWLEDGE_ENABLED:
+        return "knowledge_disabled"
+    if bool(getattr(knowledge_resolution, "corpus_empty", False)):
+        return "knowledge_corpus_empty"
+    return ""
+
+
+def _requires_kernel_terminal(runtime_env_id: int | None, run_result: RunResult) -> bool:
+    """Whether a run must carry a kernel-backed terminal path (D-064).
+
+    Only a task with a runtime environment runs its provider on a kernel terminal: a light task
+    gets no environment, and a cache hit runs no provider. An error result without a terminal ran
+    no provider either (no eligible or available provider), so its error reaches the user (D-297);
+    a provider run in an environment registers its terminal before it starts. The caller checks
+    after the completed-output recovery step, so a result delivered as a success always needs one.
+    """
+    if run_result.error and not run_result.runtime_terminal_path:
+        return False
+    return RUNTIME_ENVIRONMENTS_ENABLED and runtime_env_id is not None and run_result.stop_reason != "cache_hit"
+
+
 async def _run_fallback(
     ctx: QueryContext,
     item: QueueItem,
@@ -4014,7 +4043,20 @@ async def _run_fallback(
             )
 
     track_task = asyncio.create_task(_track_process())
+    runtime_terminal_id: int | None = None
+    runtime_terminal_path: str | None = None
     try:
+        if task_id is not None and RUNTIME_ENVIRONMENTS_ENABLED and ctx.runtime_env_id is not None:
+            from koda.services.runtime import get_runtime_controller
+
+            runtime_terminal_path = "kernel-stream://stdout"
+            runtime_terminal_id = await get_runtime_controller().register_terminal(
+                task_id=task_id,
+                terminal_kind="provider",
+                label=f"{ctx.provider} run",
+                path=runtime_terminal_path,
+                stream_path="kernel-stream://stdout",
+            )
         with contextlib.suppress(Exception):
             from koda.services import audit
 
@@ -4058,6 +4100,8 @@ async def _run_fallback(
             supports_native_resume=bool(result.get("supports_native_resume", ctx.supports_native_resume)),
             error_kind=str(result.get("error_kind", "")),
             retryable=bool(result.get("retryable", False)),
+            runtime_terminal_id=runtime_terminal_id,
+            runtime_terminal_path=runtime_terminal_path,
         )
         with contextlib.suppress(Exception):
             from koda.services import audit
@@ -8281,6 +8325,17 @@ async def _execute_single_task(
                     if RUNTIME_ENVIRONMENTS_ENABLED:
                         task_root = Path(runtime.runtime_root) / "tasks" / str(task_id)
                         task_root.mkdir(parents=True, exist_ok=True)
+
+                    if _recover_provider_error_with_completed_output(run_result):
+                        log.warning(
+                            "provider_error_recovered_with_completed_output",
+                            task_id=task_id,
+                            provider=run_result.provider,
+                            model=run_result.model,
+                            stop_reason=run_result.stop_reason,
+                        )
+                    # After the recovery step, which can turn an error into a success (D-297).
+                    if _requires_kernel_terminal(task_info.runtime_env_id, run_result):
                         runtime_terminal_path = str(run_result.runtime_terminal_path or "")
                         if not runtime_terminal_path.startswith(("kernel://", "kernel-stream://")):
                             raise RuntimeError("runtime terminal output requires a kernel-backed terminal path")
@@ -8291,15 +8346,6 @@ async def _execute_single_task(
                                 label=f"{run_result.provider} attempt {attempt}",
                                 path=runtime_terminal_path,
                             )
-
-                    if _recover_provider_error_with_completed_output(run_result):
-                        log.warning(
-                            "provider_error_recovered_with_completed_output",
-                            task_id=task_id,
-                            provider=run_result.provider,
-                            model=run_result.model,
-                            stop_reason=run_result.stop_reason,
-                        )
 
                     # Check if the result itself indicates a retryable error
                     if run_result.error and (
@@ -8333,6 +8379,7 @@ async def _execute_single_task(
                     final_status = "completed"
                     runtime_final_phase: str | None = None
                     response_override: str | None = None
+                    grounding_gate_skip = _grounding_gate_skip_reason(getattr(ctx, "knowledge_resolution", None))
                     try:
                         orchestration_service = _get_knowledge_orchestration_service()
                         (
@@ -8394,7 +8441,14 @@ async def _execute_single_task(
                         for warning in list(_answer_eval_value(ctx.answer_evaluation, "warnings", []) or []):
                             if warning not in run_result.warnings:
                                 run_result.warnings.append(str(warning))
-                        if getattr(ctx.grounding_gate_decision, "status", "passed") != "passed":
+                        if getattr(ctx.grounding_gate_decision, "status", "passed") != "passed" and grounding_gate_skip:
+                            log.info(
+                                "grounding_gate_skipped",
+                                task_id=task_id,
+                                reason=grounding_gate_skip,
+                                gate_reasons=list(getattr(ctx.grounding_gate_decision, "reasons", []) or []),
+                            )
+                        elif getattr(ctx.grounding_gate_decision, "status", "passed") != "passed":
                             final_status = "needs_review"
                             runtime_final_phase = "needs_review_retained"
                             response_override = str(

@@ -17,6 +17,7 @@ from koda.services.mcp_client import (
 from koda.services.mcp_isolation import (
     IsolationConstraints,
     IsolationStrategy,
+    effective_egress,
     select_isolation_strategy,
 )
 
@@ -58,6 +59,7 @@ class McpServerInstance:
         self._isolation_profile = isolation_profile
         self._isolation_constraints = isolation_constraints or IsolationConstraints()
         self._isolation_strategy: IsolationStrategy | None = None
+        self._egress: str | None = None
 
         self._session: McpSession | None = None
         self._transport: McpTransport | None = None
@@ -106,6 +108,14 @@ class McpServerInstance:
     def is_unhealthy(self) -> bool:
         return self._unhealthy_since is not None
 
+    @property
+    def isolation_status(self) -> dict[str, str]:
+        """Sandbox kind and the egress it really enforces (stdio servers only)."""
+        return {
+            "isolation": self._isolation_strategy.kind if self._isolation_strategy else "none",
+            "egress": self._egress or "not_applicable",
+        }
+
     def bump_restart_attempt(self) -> None:
         self._restart_attempts += 1
 
@@ -125,7 +135,8 @@ class McpServerInstance:
             if not self._command:
                 raise ValueError("stdio transport requires a command")
             command, env = self._isolated_command(self._command, self._env or {})
-            transport = StdioTransport(command[0], args=command[1:], env=env or None)
+            # Always an explicit mapping: ``env=None`` would inherit Koda's whole environment.
+            transport = StdioTransport(command[0], args=command[1:], env=env)
             await transport.start()
             self._transport = transport
         elif self._transport_type == "http_sse":
@@ -149,7 +160,7 @@ class McpServerInstance:
             agent_id=self._agent_id,
             transport=self._transport_type,
             tools=len(self._cached_tools),
-            isolation=self._isolation_strategy.kind if self._isolation_strategy else "none",
+            **self.isolation_status,
         )
 
     def _isolated_command(self, command: list[str], env: dict[str, str]) -> tuple[list[str], dict[str, str]]:
@@ -159,7 +170,17 @@ class McpServerInstance:
             env_override=os.environ.get("KODA_MCP_ISOLATION"),
         )
         self._isolation_strategy = strategy
-        return strategy.wrap(command, env, self._isolation_constraints)
+        wrapped = strategy.wrap(command, env, self._isolation_constraints)
+        self._egress = effective_egress(strategy.kind, self._isolation_constraints)
+        if self._isolation_constraints.network_mode == "egress_allowlist" and self._egress == "unrestricted":
+            logger.warning(
+                "mcp_isolation_egress_allowlist_unenforced",
+                server_key=self._server_key,
+                agent_id=self._agent_id,
+                isolation=strategy.kind,
+                egress=self._egress,
+            )
+        return wrapped
 
     def touch(self) -> None:
         """Mark this instance as recently active (resets idle timer)."""

@@ -245,3 +245,13 @@ class TestProviderFallbackChain:
 
         assert chain[0] == "claude"
         assert "codex" in chain
+
+
+def test_provider_without_a_runner_falls_back_to_claude_loudly():
+    # M6-E3-T2 (D-157): a provider with no native or HTTP runner is served by the claude CLI,
+    # and the fallback is logged as an error instead of happening silently.
+    with patch.object(llm_runner_module, "log") as mock_log:
+        assert llm_runner_module._native_target("codex") == "codex"
+        mock_log.error.assert_not_called()
+        assert llm_runner_module._native_target("mystery") == "claude"
+    mock_log.error.assert_called_once_with("provider_runner_missing", provider="mystery", fallback="claude")

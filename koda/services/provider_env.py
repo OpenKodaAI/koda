@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import cast
 
 from koda.internal_rpc.security_guard import get_security_guard_client
 from koda.services.provider_auth import (
@@ -33,10 +33,6 @@ def validate_runtime_path(value: str, *, allow_empty: bool = False) -> str:
         return get_security_guard_client().validate_runtime_path(str(value), allow_empty=allow_empty)
     except Exception as exc:
         raise ValueError(str(exc)) from exc
-
-
-def redact_runtime_value(value: Any, *, key_hint: str | None = None) -> Any:
-    return get_security_guard_client().redact_value(value, key_hint=key_hint)
 
 
 def validate_scoped_object_key(*, agent_id: str, object_key: str) -> str:

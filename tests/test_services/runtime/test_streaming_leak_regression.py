@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
+from koda.security.redaction import redact_value
 from koda.services.evals import build_trajectory_export
 from koda.services.run_graph import build_run_graph_from_trace
-from koda.services.runtime.redaction import redact_value
 
 
 def test_streaming_payloads_run_graph_and_exports_do_not_leak_raw_secrets() -> None:

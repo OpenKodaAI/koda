@@ -9,12 +9,16 @@ DB-free and run without Postgres.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import functools
 import io
 import json
 import statistics
+import threading
 import time
 import uuid
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -31,7 +35,8 @@ from koda.control_plane import bootstrap_file as bootstrap_file_mod
 from koda.control_plane import database as control_plane_db
 from koda.control_plane import operator_auth as operator_auth_mod
 from koda.control_plane import operator_profile_photos
-from tests.postgres_fixtures import injected_fault
+from koda.state import primary as primary_state
+from tests.postgres_fixtures import injected_fault, stop_primary_bridge
 
 STRONG_PASSWORD = "CorrectHorseBattery!9"
 ANOTHER_STRONG_PASSWORD = "R3volution@Nebula!42"
@@ -209,6 +214,393 @@ def test_owner_registration_fault_keeps_the_registration_token_not_the_setup_cod
         service.register_owner(bootstrap_code=bootstrap["code"], **owner)
     payload = service.register_owner(registration_token=exchanged["registration_token"], **owner)
     assert payload["operator"]["email"] == "cli@example.com"
+
+
+@pytest.fixture()
+def bridge_loop() -> Iterator[None]:
+    """Run the sync service's Postgres calls on the bridge loop, as the control plane does, so threads share it."""
+    primary_state._ensure_bridge_loop()
+    yield
+    stop_primary_bridge()
+
+
+def _concurrently(
+    monkeypatch: pytest.MonkeyPatch,
+    service: operator_auth_mod.OperatorAuthService,
+    checkpoint: str,
+    *attempts: Callable[[], Any],
+) -> list[Any]:
+    """Run ``attempts`` on their own threads, each waiting after ``service.<checkpoint>`` until all have passed it.
+
+    Every attempt has validated the same code before any of them writes, the
+    window two concurrent requests race in. Each outcome is the attempt's
+    return value or the exception it raised.
+    """
+    barrier = threading.Barrier(len(attempts), timeout=20)
+    original = getattr(service, checkpoint)
+
+    def _checkpoint(*args: Any, **kwargs: Any) -> Any:
+        result = original(*args, **kwargs)
+        barrier.wait()
+        return result
+
+    monkeypatch.setattr(service, checkpoint, _checkpoint)
+
+    def _outcome(attempt: Callable[[], Any]) -> Any:
+        try:
+            return attempt()
+        except Exception as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=len(attempts)) as pool:
+        return list(pool.map(_outcome, attempts))
+
+
+def _default_isolation(monkeypatch: pytest.MonkeyPatch, level: str) -> None:
+    """Open the control-plane transactions as a server whose ``default_transaction_isolation`` is ``level`` does."""
+    from koda.state import control_plane_store
+
+    @contextlib.asynccontextmanager
+    async def _transaction() -> AsyncIterator[Any]:
+        backend = control_plane_store._require_primary_backend()
+        async with backend._connection() as conn:
+            await conn.execute(f"SET default_transaction_isolation = '{level}'")
+            try:
+                async with conn.transaction():
+                    yield control_plane_store.Transaction(conn)
+            finally:
+                await conn.execute("RESET default_transaction_isolation")
+
+    monkeypatch.setattr(control_plane_store, "transaction", _transaction)
+
+
+def _hold_after(monkeypatch: pytest.MonkeyPatch, prefix: str) -> None:
+    """Make each of two transactions wait, after its statement that starts with ``prefix``, for the other's.
+
+    Neither commits until both have run that statement, or 1 s has passed:
+    the other is then waiting on a lock this one holds.
+    """
+    from koda.state import control_plane_store
+
+    barrier = threading.Barrier(2, timeout=1)
+    original = control_plane_store.Transaction.execute
+
+    async def _execute(self: Any, query: str, params: tuple[Any, ...] = ()) -> int:
+        count = await original(self, query, params)
+        if query.startswith(prefix):
+            with contextlib.suppress(threading.BrokenBarrierError):
+                await asyncio.to_thread(barrier.wait)
+        return count
+
+    monkeypatch.setattr(control_plane_store.Transaction, "execute", _execute)
+
+
+def _split(outcomes: list[Any]) -> tuple[list[Any], list[Exception]]:
+    return (
+        [outcome for outcome in outcomes if not isinstance(outcome, Exception)],
+        [outcome for outcome in outcomes if isinstance(outcome, Exception)],
+    )
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("presented", ["bootstrap_code", "registration_token"])
+def test_concurrent_registrations_with_one_code_create_one_owner(
+    operator_db: Path,
+    bridge_loop: None,
+    monkeypatch: pytest.MonkeyPatch,
+    presented: str,
+) -> None:
+    """D-283: two registrations racing with the same setup code (or registration token) create one owner."""
+    service = operator_auth_mod.OperatorAuthService()
+    if presented == "bootstrap_code":
+        credential = {"bootstrap_code": _bootstrap_file_code(service)}
+        # Both have looked the file code up and found no row before either stores it.
+        checkpoint, refusal = "_bootstrap_file_matches", "Setup code is invalid or expired."
+    else:
+        exchanged = service.exchange_bootstrap_code(service.issue_bootstrap_code(label="cli")["code"])
+        credential = {"registration_token": exchanged["registration_token"]}
+        checkpoint, refusal = "_registration_row", "Registration token is invalid or expired."
+
+    outcomes = _concurrently(
+        monkeypatch,
+        service,
+        checkpoint,
+        *(
+            functools.partial(service.register_owner, email=email, password=STRONG_PASSWORD, **credential)
+            for email in ("first@example.com", "second@example.com")
+        ),
+    )
+
+    succeeded, refused = _split(outcomes)
+    assert len(succeeded) == 1, outcomes
+    assert [type(exc) for exc in refused] == [ValueError] and str(refused[0]) == refusal
+    owner = succeeded[0]
+    assert [row["id"] for row in control_plane_db.fetch_all("SELECT id FROM cp_operator_users")] == [
+        owner["operator"]["id"]
+    ]
+    assert _count("cp_operator_recovery_codes") == len(owner["recovery_codes"])
+    assert _count("cp_operator_sessions") == 1
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("default_isolation", ["read committed", "repeatable read"])
+@pytest.mark.parametrize("presented", ["two_setup_codes", "loopback"])
+def test_concurrent_registrations_with_different_credentials_create_one_owner(
+    operator_db: Path,
+    bridge_loop: None,
+    monkeypatch: pytest.MonkeyPatch,
+    presented: str,
+    default_isolation: str,
+) -> None:
+    """D-294: two registrations racing with two valid setup codes (or two loopback-trusted ones) create one owner.
+
+    The loser changes nothing and gets the answer a registration gets once an owner exists,
+    whatever the server's default isolation level.
+    """
+    _default_isolation(monkeypatch, default_isolation)
+    service = operator_auth_mod.OperatorAuthService()
+    codes = [_bootstrap_file_code(service), service.issue_bootstrap_code(label="cli")["code"]]
+    if presented == "two_setup_codes":
+        credentials: list[dict[str, Any]] = [{"bootstrap_code": code, "remote_ip": "203.0.113.7"} for code in codes]
+    else:
+        credentials = [{"remote_ip": "127.0.0.1"}, {"remote_ip": "127.0.0.1"}]
+
+    # Both have checked that no owner exists, redeemed their credential and
+    # recorded their writes before either transaction runs. A transaction that
+    # finds no owner commits only once the other has looked too, unless the
+    # other waits on the registration lock.
+    _hold_after(monkeypatch, operator_auth_mod._NO_OWNER_YET)
+    outcomes = _concurrently(
+        monkeypatch,
+        service,
+        "_insert_session",
+        *(
+            functools.partial(service.register_owner, email=email, password=STRONG_PASSWORD, **credential)
+            for email, credential in zip(("first@example.com", "second@example.com"), credentials, strict=True)
+        ),
+    )
+
+    succeeded, refused = _split(outcomes)
+    assert len(succeeded) == 1, outcomes
+    assert [type(exc) for exc in refused] == [ValueError], outcomes
+    assert str(refused[0]) == "Owner account already exists. Sign in instead."
+    owner = succeeded[0]
+    assert [row["id"] for row in control_plane_db.fetch_all("SELECT id FROM cp_operator_users")] == [
+        owner["operator"]["id"]
+    ]
+    assert _count("cp_operator_recovery_codes") == len(owner["recovery_codes"])
+    assert _count("cp_operator_sessions") == 1
+    consumed = {
+        str(row["code_hash"]): bool(row["consumed_at"] or row["exchange_consumed_at"])
+        for row in control_plane_db.fetch_all("SELECT * FROM cp_bootstrap_codes")
+    }
+    by_code = [
+        consumed.get(operator_auth_mod._hash_secret(operator_auth_mod._normalize_bootstrap_code(code)))
+        for code in codes
+    ]
+    if presented == "two_setup_codes":
+        # The winner's code is spent; the loser's is left unused, as after any
+        # failed registration, but once an owner exists no setup code registers anyone.
+        assert by_code[outcomes.index(owner)] is True
+        assert by_code[1 - outcomes.index(owner)] is False
+    else:
+        assert by_code == [None, False]
+    for code in codes:
+        with pytest.raises(ValueError, match=r"^Owner account already exists\. Sign in instead\.$"):
+            service.register_owner(
+                bootstrap_code=code, email="third@example.com", password=STRONG_PASSWORD, remote_ip="203.0.113.7"
+            )
+
+
+@pytest.mark.postgres
+def test_concurrent_setup_code_exchanges_issue_one_registration_token(
+    operator_db: Path,
+    bridge_loop: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-283: two exchanges racing with the same setup code issue one registration token, and it works."""
+    service = operator_auth_mod.OperatorAuthService()
+    code = service.issue_bootstrap_code(label="cli")["code"]
+
+    outcomes = _concurrently(
+        monkeypatch,
+        service,
+        "_redeemable_bootstrap_code",
+        *(functools.partial(service.exchange_bootstrap_code, code) for _ in range(2)),
+    )
+
+    succeeded, refused = _split(outcomes)
+    assert len(succeeded) == 1, outcomes
+    assert [type(exc) for exc in refused] == [ValueError] and str(refused[0]) == "Setup code is invalid or expired."
+    payload = operator_auth_mod.OperatorAuthService().register_owner(
+        registration_token=succeeded[0]["registration_token"],
+        email="cli@example.com",
+        password=STRONG_PASSWORD,
+    )
+    assert payload["operator"]["email"] == "cli@example.com"
+
+
+@pytest.mark.postgres
+def test_concurrent_resets_with_one_recovery_code_apply_one_password(
+    operator_db: Path,
+    bridge_loop: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-283: two password resets racing with the same recovery code: one applies, the other changes nothing."""
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    passwords = (ANOTHER_STRONG_PASSWORD, "Quantum#Lighthouse!77")
+
+    outcomes = _concurrently(
+        monkeypatch,
+        service,
+        "_validate_operator_password",
+        *(
+            functools.partial(
+                service.reset_password_with_recovery_code, "owner", payload["recovery_codes"][0], password
+            )
+            for password in passwords
+        ),
+    )
+
+    succeeded, refused = _split(outcomes)
+    assert succeeded == [{"ok": True}], outcomes
+    assert [type(exc) for exc in refused] == [ValueError] and str(refused[0]) == "Invalid identifier or recovery code."
+    winner = outcomes.index({"ok": True})
+    fresh = operator_auth_mod.OperatorAuthService()
+    assert fresh.login(identifier="owner", password=passwords[winner])["operator"]["username"] == "owner"
+    with pytest.raises(operator_auth_mod.AuthError):
+        fresh.login(identifier="owner", password=passwords[1 - winner])
+    reasons = [row["consumed_reason"] for row in control_plane_db.fetch_all("SELECT * FROM cp_operator_recovery_codes")]
+    assert reasons.count("password_reset") == 1
+    assert reasons.count("password_reset_invalidation") == len(payload["recovery_codes"]) - 1
+
+
+def _interleaved(monkeypatch: pytest.MonkeyPatch, first: Callable[[], Any], second: Callable[[], Any]) -> list[Any]:
+    """Run ``first`` and ``second`` on their own threads, their transactions interleaved after their first statement.
+
+    ``second`` starts once ``first``'s transaction has run its first
+    statement. Each transaction then waits, up to 2 s, until the other has run
+    its first statement too, as two control-plane processes can. Each outcome
+    is the attempt's return value or the exception it raised.
+    """
+    from koda.state import control_plane_store
+
+    started = threading.Event()
+    barrier = threading.Barrier(2, timeout=2)
+    original = control_plane_store.Transaction.execute
+
+    async def _execute(self: Any, query: str, params: tuple[Any, ...] = ()) -> int:
+        count = await original(self, query, params)
+        if not getattr(self, "_koda_test_interleaved", False):
+            self._koda_test_interleaved = True
+            started.set()
+            # A broken barrier: the other transaction waits on a lock this one holds.
+            with contextlib.suppress(threading.BrokenBarrierError):
+                await asyncio.to_thread(barrier.wait)
+        return count
+
+    monkeypatch.setattr(control_plane_store.Transaction, "execute", _execute)
+
+    def _outcome(attempt: Callable[[], Any]) -> Any:
+        try:
+            return attempt()
+        except Exception as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        first_outcome = pool.submit(_outcome, first)
+        assert started.wait(timeout=20)
+        second_outcome = pool.submit(_outcome, second)
+        return [first_outcome.result(), second_outcome.result()]
+
+
+@pytest.mark.postgres
+def test_concurrent_resets_with_two_codes_of_one_account_do_not_deadlock(
+    operator_db: Path,
+    bridge_loop: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two resets of one account with two valid codes: one applies, the other fails like any invalid code."""
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    passwords = (ANOTHER_STRONG_PASSWORD, "Quantum#Lighthouse!77")
+
+    outcomes = _interleaved(
+        monkeypatch,
+        *(
+            functools.partial(service.reset_password_with_recovery_code, "owner", code, password)
+            for code, password in zip(payload["recovery_codes"][:2], passwords, strict=True)
+        ),
+    )
+
+    assert outcomes[0] == {"ok": True}, outcomes
+    assert type(outcomes[1]) is ValueError and str(outcomes[1]) == "Invalid identifier or recovery code.", outcomes
+    fresh = operator_auth_mod.OperatorAuthService()
+    assert fresh.login(identifier="owner", password=passwords[0])["operator"]["username"] == "owner"
+
+
+@pytest.mark.postgres
+def test_a_reset_and_a_regeneration_of_one_account_do_not_deadlock(
+    operator_db: Path,
+    bridge_loop: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A reset and a recovery-code regeneration of one account, interleaved: both complete."""
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    context = service.resolve_bearer_token(payload["session_token"])
+    assert context is not None
+
+    outcomes = _interleaved(
+        monkeypatch,
+        functools.partial(
+            service.reset_password_with_recovery_code, "owner", payload["recovery_codes"][-1], ANOTHER_STRONG_PASSWORD
+        ),
+        functools.partial(service.regenerate_recovery_codes, context, current_password=STRONG_PASSWORD),
+    )
+
+    assert outcomes[0] == {"ok": True}, outcomes
+    assert isinstance(outcomes[1], dict), outcomes
+    assert len(outcomes[1]["recovery_codes"]) == len(payload["recovery_codes"])
+    assert service.reset_password_with_recovery_code("owner", outcomes[1]["recovery_codes"][0], STRONG_PASSWORD) == {
+        "ok": True
+    }
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("presented", ["bootstrap_code", "registration_token"])
+def test_an_invalid_setup_credential_hashes_the_password_like_a_registration_that_loses_the_race(
+    operator_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    presented: str,
+) -> None:
+    """A wrong code costs the password hash a registration that passed the code check and lost the race pays."""
+    service = operator_auth_mod.OperatorAuthService()
+    _bootstrap_file_code(service)
+    hashes: list[str] = []
+    real_hasher = operator_auth_mod._password_hasher()
+
+    class _CountingHasher:
+        def hash(self, password: str | bytes, **kwargs: Any) -> str:
+            hashes.append(str(password))
+            return real_hasher.hash(password, **kwargs)
+
+        def __getattr__(self, name: str) -> Any:
+            return getattr(real_hasher, name)
+
+    monkeypatch.setattr(operator_auth_mod, "_password_hasher", functools.lru_cache(maxsize=1)(_CountingHasher))
+
+    with pytest.raises(ValueError, match="is invalid or expired"):
+        service.register_owner(
+            email="vps@example.com",
+            password=STRONG_PASSWORD,
+            remote_ip="203.0.113.7",
+            **{presented: "WRONG-WRONG-WRONG"},
+        )
+
+    assert len(hashes) == 1
+    assert _count("cp_operator_users") == 0
 
 
 @pytest.mark.postgres
@@ -1275,6 +1667,25 @@ def test_change_password_revokes_other_sessions_but_keeps_current(
 
 
 @pytest.mark.postgres
+def test_change_password_fault_changes_nothing(operator_db: Path) -> None:
+    """D-284: when revoking the other sessions fails, the password and the sessions stay as they were."""
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    context = service.resolve_bearer_token(payload["session_token"])
+    assert context is not None
+    other_login = service.login(identifier="owner", password=STRONG_PASSWORD)
+    password_hash = _user_row(payload["operator"]["id"])["password_hash"]
+
+    with injected_fault("cp_operator_sessions", "UPDATE"), pytest.raises(Exception, match="injected fault"):
+        service.change_password(context, current_password=STRONG_PASSWORD, new_password=ANOTHER_STRONG_PASSWORD)
+
+    assert _user_row(payload["operator"]["id"])["password_hash"] == password_hash
+    assert service.resolve_bearer_token(other_login["session_token"]) is not None
+    service.change_password(context, current_password=STRONG_PASSWORD, new_password=ANOTHER_STRONG_PASSWORD)
+    assert service.resolve_bearer_token(other_login["session_token"]) is None
+
+
+@pytest.mark.postgres
 def test_change_password_rejects_wrong_current_password(
     operator_db: Path,
 ) -> None:
@@ -1430,6 +1841,80 @@ def test_regenerate_recovery_codes_invalidates_old(
         recovery_code=new_codes[0],
         new_password=ANOTHER_STRONG_PASSWORD,
     )
+
+
+@pytest.mark.postgres
+def test_regenerate_recovery_codes_fault_keeps_the_current_codes(operator_db: Path) -> None:
+    """D-284: when storing the new batch fails partway, the current codes stay usable and no new code is kept."""
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    context = service.resolve_bearer_token(payload["session_token"])
+    assert context is not None
+    generation = _user_row(payload["operator"]["id"])["recovery_generation"]
+    second_new_code = len(payload["recovery_codes"]) + 1
+
+    with (
+        injected_fault("cp_operator_recovery_codes", "INSERT", rows_before=second_new_code),
+        pytest.raises(Exception, match="injected fault"),
+    ):
+        service.regenerate_recovery_codes(context, current_password=STRONG_PASSWORD)
+
+    assert _user_row(payload["operator"]["id"])["recovery_generation"] == generation
+    assert _count("cp_operator_recovery_codes") == len(payload["recovery_codes"])
+    summary = service.recovery_codes_summary(context)
+    assert summary["remaining"] == summary["total"] == len(payload["recovery_codes"])
+    assert service.reset_password_with_recovery_code(
+        identifier="owner",
+        recovery_code=payload["recovery_codes"][0],
+        new_password=ANOTHER_STRONG_PASSWORD,
+    ) == {"ok": True}
+
+
+@pytest.mark.postgres
+@pytest.mark.parametrize("default_isolation", ["read committed", "repeatable read"])
+def test_concurrent_regenerations_store_one_batch(
+    operator_db: Path,
+    bridge_loop: None,
+    monkeypatch: pytest.MonkeyPatch,
+    default_isolation: str,
+) -> None:
+    """D-295: a double-submitted regeneration stores one batch, the one returned; the other request changes nothing.
+
+    The other request gets the 400 answer whatever the server's default isolation level.
+    """
+    _default_isolation(monkeypatch, default_isolation)
+    service = operator_auth_mod.OperatorAuthService()
+    payload = _create_owner(service)
+    context = service.resolve_bearer_token(payload["session_token"])
+    assert context is not None
+
+    # Both have read the current generation and recorded their writes before
+    # either transaction runs. The one that moves the generation first commits
+    # only once the other has tried too, which then waits on the user row.
+    _hold_after(monkeypatch, "UPDATE cp_operator_users SET recovery_generation")
+    outcomes = _concurrently(
+        monkeypatch,
+        service,
+        "_issue_recovery_codes",
+        *(
+            functools.partial(service.regenerate_recovery_codes, context, current_password=STRONG_PASSWORD)
+            for _ in range(2)
+        ),
+    )
+
+    succeeded, refused = _split(outcomes)
+    assert len(succeeded) == 1, outcomes
+    assert [type(exc) for exc in refused] == [ValueError], outcomes
+    assert str(refused[0]) == "Recovery codes were regenerated by another request. Try again."
+    new_codes = succeeded[0]["recovery_codes"]
+    assert _count("cp_operator_recovery_codes") == len(payload["recovery_codes"]) + len(new_codes)
+    summary = service.recovery_codes_summary(context)
+    assert summary["remaining"] == summary["total"] == len(new_codes)
+    assert service.reset_password_with_recovery_code(
+        identifier="owner",
+        recovery_code=new_codes[0],
+        new_password=ANOTHER_STRONG_PASSWORD,
+    ) == {"ok": True}
 
 
 @pytest.mark.postgres

@@ -8,14 +8,14 @@ use koda_proto::security::v1::security_guard_service_server::{
     SecurityGuardService, SecurityGuardServiceServer,
 };
 use koda_proto::security::v1::{
-    RedactValueRequest, RedactValueResponse, SanitizeEnvironmentRequest,
-    SanitizeEnvironmentResponse, ValidateFilePolicyRequest, ValidateFilePolicyResponse,
-    ValidateObjectKeyRequest, ValidateObjectKeyResponse, ValidateRuntimePathRequest,
-    ValidateRuntimePathResponse, ValidateShellCommandRequest, ValidateShellCommandResponse,
+    SanitizeEnvironmentRequest, SanitizeEnvironmentResponse, ValidateFilePolicyRequest,
+    ValidateFilePolicyResponse, ValidateObjectKeyRequest, ValidateObjectKeyResponse,
+    ValidateRuntimePathRequest, ValidateRuntimePathResponse, ValidateShellCommandRequest,
+    ValidateShellCommandResponse,
 };
 use koda_security_core::{
-    canonicalize_existing_file, redact_value, sanitize_env, validate_runtime_path,
-    validate_scoped_object_key, validate_shell_command,
+    canonicalize_existing_file, sanitize_env, validate_runtime_path, validate_scoped_object_key,
+    validate_shell_command,
 };
 use serde_json::Value;
 use tokio::fs;
@@ -83,26 +83,6 @@ impl SecurityGuardService for SecurityServer {
         Ok(Response::new(ValidateObjectKeyResponse { object_key }))
     }
 
-    async fn redact_value(
-        &self,
-        request: Request<RedactValueRequest>,
-    ) -> Result<Response<RedactValueResponse>, Status> {
-        let payload = request.into_inner();
-        let value = serde_json::from_str::<Value>(&payload.value_json)
-            .map_err(|error| Status::invalid_argument(format!("invalid value_json: {error}")))?;
-        let redacted = redact_value(
-            &value,
-            if payload.key_hint.trim().is_empty() {
-                None
-            } else {
-                Some(payload.key_hint.as_str())
-            },
-        );
-        Ok(Response::new(RedactValueResponse {
-            value_json: redacted.to_string(),
-        }))
-    }
-
     async fn validate_file_policy(
         &self,
         request: Request<ValidateFilePolicyRequest>,
@@ -134,8 +114,7 @@ impl SecurityGuardService for SecurityServer {
         details.insert("maturity".to_string(), "ga".to_string());
         details.insert(
             "capabilities".to_string(),
-            "shell_command,env_sanitization,runtime_path,object_key,redaction,file_policy"
-                .to_string(),
+            "shell_command,env_sanitization,runtime_path,object_key,file_policy".to_string(),
         );
         details.insert("cutover_allowed".to_string(), "true".to_string());
         Ok(Response::new(HealthResponse {

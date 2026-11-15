@@ -14,6 +14,7 @@ primary_fetch_one = _store.primary_fetch_one
 primary_fetch_val = _store.primary_fetch_val
 run_coro_sync = _store.run_coro_sync
 _connect = _store._connect
+WriteConflictError = _store.WriteConflictError
 
 
 def _sync_store_overrides() -> None:
@@ -71,6 +72,7 @@ def now_iso() -> str:
 
 __all__ = [
     "STATE_BACKEND",
+    "WriteConflictError",
     "get_primary_state_backend",
     "primary_execute",
     "primary_fetch_all",

@@ -60,11 +60,38 @@ class _FakeSquadAccess:
     async def require_coordinator(self, **_: object) -> None:
         return None
 
+    async def require_squad_admin(self, **_: object) -> None:
+        return None
+
+
+class _DenyingSquadAdmin(_FakeSquadAccess):
+    def __init__(self) -> None:
+        self.admin_calls: list[dict[str, object]] = []
+
+    async def require_squad_admin(self, **kwargs: object) -> None:
+        from koda.squads.access import SquadAccessError
+
+        self.admin_calls.append(dict(kwargs))
+        raise SquadAccessError("agent 'WORKER' is not coordinator for squad 'build'")
+
 
 @pytest.fixture(autouse=True)
 def default_squad_access() -> object:
-    with patch("koda.squads.get_squad_access_service", return_value=_FakeSquadAccess()):
+    with (
+        patch("koda.squads.get_squad_access_service", return_value=_FakeSquadAccess()),
+        patch("koda.services.tool_dispatcher._resolve_squad_workspace_id", return_value="acme"),
+    ):
         yield
+
+
+def _forum_bot(*, chat_type: str = "supergroup", is_forum: bool = True, status: str = "administrator") -> AsyncMock:
+    from types import SimpleNamespace
+
+    bot = AsyncMock()
+    bot.get_chat = AsyncMock(return_value=SimpleNamespace(id=-100, type=chat_type, is_forum=is_forum, title="Build"))
+    bot.get_me = AsyncMock(return_value=SimpleNamespace(id=99))
+    bot.get_chat_member = AsyncMock(return_value=SimpleNamespace(status=status))
+    return bot
 
 
 @pytest.fixture
@@ -321,7 +348,7 @@ async def test_squad_thread_create_no_store(ctx: ToolContext, monkeypatch: pytes
     monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
     with patch("koda.squads.get_squad_thread_store", return_value=None):
         result = await _handle_squad_thread_create(
-            {"workspace_id": "w", "squad_id": "s", "title": "t"},
+            {"workspace_id": "acme", "squad_id": "s", "title": "t"},
             ctx,
         )
     assert not result.success
@@ -356,7 +383,7 @@ async def test_squad_thread_create_success(ctx: ToolContext, monkeypatch: pytest
     with patch("koda.squads.get_squad_thread_store", return_value=mock_store):
         result = await _handle_squad_thread_create(
             {
-                "workspace_id": "w",
+                "workspace_id": "acme",
                 "squad_id": "s",
                 "title": "t",
                 "coordinator_agent_id": "PM",
@@ -921,7 +948,7 @@ async def test_router_tick_disabled(ctx: ToolContext, monkeypatch: pytest.Monkey
 async def test_router_tick_no_router(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
     with patch("koda.squads.get_squad_router", return_value=None):
-        result = await _handle_squad_router_tick({}, ctx)
+        result = await _handle_squad_router_tick({"squad_id": "build"}, ctx)
     assert not result.success
     assert "unavailable" in result.output
 
@@ -932,11 +959,14 @@ async def test_router_tick_empty_sweep(ctx: ToolContext, monkeypatch: pytest.Mon
     from koda.squads.router import SweepReport
 
     mock_router = AsyncMock()
-    mock_router.sweep_once = AsyncMock(return_value=SweepReport())
+    mock_router.sweep_squad_claims = AsyncMock(return_value=SweepReport())
     with patch("koda.squads.get_squad_router", return_value=mock_router):
-        result = await _handle_squad_router_tick({}, ctx)
+        result = await _handle_squad_router_tick({"squad_id": "build"}, ctx)
     assert result.success
     assert "nothing expired" in result.output
+    # The tick sweeps the coordinator's own squad, never the global tables.
+    mock_router.sweep_squad_claims.assert_awaited_once_with("build")
+    mock_router.sweep_once.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -975,6 +1005,8 @@ async def test_telegram_bind_conflict(ctx: ToolContext, monkeypatch: pytest.Monk
 
     mock_service = AsyncMock()
     mock_service.bind = AsyncMock(side_effect=TelegramBindingConflictError("chat owned by other"))
+    monkeypatch.setattr("koda.config.SQUAD_TELEGRAM_STRICT_ADMIN_CHECK", False)
+    ctx.bot = _forum_bot()
     with patch("koda.squads.get_telegram_binding_service", return_value=mock_service):
         result = await _handle_squad_telegram_bind(
             {"workspace_id": "acme", "squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
@@ -1000,6 +1032,8 @@ async def test_telegram_bind_success(ctx: ToolContext, monkeypatch: pytest.Monke
     )
     mock_service = AsyncMock()
     mock_service.bind = AsyncMock(return_value=binding)
+    monkeypatch.setattr("koda.config.SQUAD_TELEGRAM_STRICT_ADMIN_CHECK", False)
+    ctx.bot = _forum_bot()
     with patch("koda.squads.get_telegram_binding_service", return_value=mock_service):
         result = await _handle_squad_telegram_bind(
             {"workspace_id": "acme", "squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
@@ -1043,6 +1077,300 @@ async def test_telegram_binding_get_no_args(ctx: ToolContext, monkeypatch: pytes
     monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
     result = await _handle_squad_telegram_binding_get({}, ctx)
     assert not result.success
+
+
+# --- squad administration authorization (M1-E5-T1) ---
+
+
+def test_squad_admin_tools_have_their_own_category() -> None:
+    from koda.services.tool_dispatcher import _infer_tool_category
+    from koda.squads.capabilities import _infer_tool_category as _capability_category
+
+    admin_tools = (
+        "squad_coordinator_elect",
+        "squad_coordinator_demote",
+        "squad_telegram_bind",
+        "squad_telegram_unbind",
+        "squad_router_tick",
+        "squad_thread_create",
+    )
+    for tool in admin_tools:
+        assert _infer_tool_category(tool) == "squad_admin", tool
+        assert _capability_category(tool) == "squad_admin", tool
+    for tool in ("squad_reply", "squad_post", "squad_coordinator_get", "squad_telegram_binding_get", "agent_send"):
+        assert _infer_tool_category(tool) == "agent_comm", tool
+
+
+@pytest.mark.asyncio
+async def test_non_coordinator_cannot_elect_itself(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.executing_agent_id = "WORKER"
+    access = _DenyingSquadAdmin()
+    mock_service = AsyncMock()
+    mock_service.elect = AsyncMock(return_value=_coordinator_state(coordinator_agent_id="WORKER"))
+    with (
+        patch("koda.squads.get_squad_access_service", return_value=access),
+        patch("koda.control_plane.manager.get_control_plane_manager") as manager,
+        patch("koda.squads.get_coordinator_service", return_value=mock_service),
+    ):
+        manager.return_value.get_agent_spec.return_value = _eligible_spec()
+        result = await _handle_squad_coordinator_elect(
+            {"squad_id": "build", "agent_id": "WORKER", "force_replace": True},
+            ctx,
+        )
+    assert not result.success
+    assert result.output.startswith("Forbidden:")
+    mock_service.elect.assert_not_awaited()
+    assert len(access.admin_calls) == 1
+    call = access.admin_calls[0]
+    assert call["squad_id"] == "build"
+    assert call["squad_workspace_id"] == "acme"
+    principal = call["principal"]
+    assert getattr(principal, "kind", None) == "agent"
+    assert getattr(principal, "agent_id", None) == "WORKER"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_elect_drops_caller_force_replace(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.executing_agent_id = "PM"
+    mock_service = AsyncMock()
+    mock_service.elect = AsyncMock(return_value=_coordinator_state(coordinator_agent_id="OPS"))
+    with (
+        patch("koda.control_plane.manager.get_control_plane_manager") as manager,
+        patch("koda.squads.get_coordinator_service", return_value=mock_service),
+        patch("koda.squads.get_squad_thread_store", return_value=None),
+    ):
+        manager.return_value.get_agent_spec.return_value = _eligible_spec()
+        result = await _handle_squad_coordinator_elect(
+            {"squad_id": "build", "agent_id": "OPS", "force_replace": True},
+            ctx,
+        )
+    assert result.success
+    kwargs = mock_service.elect.await_args.kwargs
+    assert kwargs["force_replace"] is False
+    # The current coordinator may hand its own seat over, and nothing else.
+    assert kwargs["replace_agent_id"] == "PM"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("handler", "params", "service_patch"),
+    [
+        (_handle_squad_coordinator_demote, {"squad_id": "build"}, "koda.squads.get_coordinator_service"),
+        (_handle_squad_router_tick, {"squad_id": "build"}, "koda.squads.get_squad_router"),
+        (_handle_squad_telegram_unbind, {"squad_id": "build"}, "koda.squads.get_telegram_binding_service"),
+        (
+            _handle_squad_thread_create,
+            {"workspace_id": "acme", "squad_id": "build", "title": "t", "coordinator_agent_id": "WORKER"},
+            "koda.squads.get_squad_thread_store",
+        ),
+        (
+            _handle_squad_telegram_bind,
+            {"workspace_id": "acme", "squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
+            "koda.squads.get_telegram_binding_service",
+        ),
+    ],
+)
+async def test_squad_admin_tools_refuse_a_non_coordinator(
+    ctx: ToolContext,
+    monkeypatch: pytest.MonkeyPatch,
+    handler: object,
+    params: dict[str, object],
+    service_patch: str,
+) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.executing_agent_id = "WORKER"
+    ctx.bot = _forum_bot()
+    service = AsyncMock()
+    with (
+        patch("koda.squads.get_squad_access_service", return_value=_DenyingSquadAdmin()),
+        patch(service_patch, return_value=service),
+    ):
+        result = await handler(params, ctx)  # type: ignore[operator]
+    assert not result.success
+    assert result.output.startswith("Forbidden:")
+    assert service.mock_calls == []
+
+
+@pytest.mark.asyncio
+async def test_coordinator_demote_names_the_caller_as_the_expected_coordinator(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.executing_agent_id = "PM"
+    mock_service = AsyncMock()
+    mock_service.demote = AsyncMock(return_value=_coordinator_state(coordinator_agent_id=None))
+    with (
+        patch("koda.squads.get_coordinator_service", return_value=mock_service),
+        patch("koda.squads.get_squad_thread_store", return_value=None),
+    ):
+        result = await _handle_squad_coordinator_demote({"squad_id": "build"}, ctx)
+    assert result.success
+    assert mock_service.demote.await_args.kwargs["expected_coordinator_agent_id"] == "PM"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_demote_refuses_when_the_seat_changed(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    from koda.squads.coordinator import CoordinatorConflictError
+
+    ctx.executing_agent_id = "PM"
+    mock_service = AsyncMock()
+    conflict = CoordinatorConflictError("squad 'build' coordinator is 'OPS', not 'PM'")
+    mock_service.demote = AsyncMock(side_effect=conflict)
+    with (
+        patch("koda.squads.get_coordinator_service", return_value=mock_service),
+        patch("koda.squads.get_squad_thread_store", return_value=None),
+    ):
+        result = await _handle_squad_coordinator_demote({"squad_id": "build"}, ctx)
+    assert not result.success
+    assert "OPS" in result.output
+
+
+@pytest.mark.asyncio
+async def test_coordinator_elect_refuses_an_agent_outside_the_squad(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.executing_agent_id = "PM"
+    mock_service = AsyncMock()
+    with (
+        patch("koda.control_plane.manager.get_control_plane_manager") as manager,
+        patch("koda.squads.get_coordinator_service", return_value=mock_service),
+        patch("koda.squads.get_squad_thread_store", return_value=None),
+    ):
+        manager.return_value.get_agent_spec.return_value = _eligible_spec()
+        manager.return_value.is_squad_member_agent.return_value = False
+        result = await _handle_squad_coordinator_elect({"squad_id": "build", "agent_id": "BETA_PM"}, ctx)
+    assert not result.success
+    assert result.output.startswith("Forbidden:")
+    manager.return_value.is_squad_member_agent.assert_called_once_with("BETA_PM", "build")
+    mock_service.elect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_router_tick_requires_squad_id(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    mock_router = AsyncMock()
+    with patch("koda.squads.get_squad_router", return_value=mock_router):
+        result = await _handle_squad_router_tick({}, ctx)
+    assert not result.success
+    assert "squad_id" in result.output
+    mock_router.sweep_once.assert_not_awaited()
+    mock_router.sweep_squad_claims.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_telegram_bind_rejects_a_workspace_the_squad_is_not_in(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.bot = _forum_bot()
+    mock_service = AsyncMock()
+    with patch("koda.squads.get_telegram_binding_service", return_value=mock_service):
+        result = await _handle_squad_telegram_bind(
+            {"workspace_id": "other", "squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
+            ctx,
+        )
+    assert not result.success
+    assert result.output.startswith("Forbidden:")
+    mock_service.bind.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("bot_kwargs", "expected"),
+    [
+        ({"chat_type": "group"}, "supergroup"),
+        ({"is_forum": False}, "forum"),
+        ({"status": "member"}, "admin"),
+    ],
+)
+async def test_telegram_bind_checks_the_chat_through_the_bot_api(
+    ctx: ToolContext,
+    monkeypatch: pytest.MonkeyPatch,
+    bot_kwargs: dict[str, object],
+    expected: str,
+) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    monkeypatch.setattr("koda.config.SQUAD_TELEGRAM_STRICT_ADMIN_CHECK", False)
+    ctx.bot = _forum_bot(**bot_kwargs)  # type: ignore[arg-type]
+    mock_service = AsyncMock()
+    with patch("koda.squads.get_telegram_binding_service", return_value=mock_service):
+        result = await _handle_squad_telegram_bind(
+            {"workspace_id": "acme", "squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
+            ctx,
+        )
+    assert not result.success
+    assert expected in result.output
+    mock_service.bind.assert_not_awaited()
+    ctx.bot.get_chat.assert_awaited_once_with(-100)
+
+
+@pytest.mark.asyncio
+async def test_telegram_bind_applies_the_strict_squad_bot_admin_check(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    monkeypatch.setattr("koda.config.SQUAD_TELEGRAM_STRICT_ADMIN_CHECK", True)
+    ctx.bot = _forum_bot()
+    mock_service = AsyncMock()
+    with (
+        patch("koda.squads.get_telegram_binding_service", return_value=mock_service),
+        patch("koda.control_plane.manager.get_control_plane_manager") as manager,
+    ):
+        manager.return_value.list_agents.return_value = [{"id": "FE", "squad_id": "build"}]
+        manager.return_value.get_decrypted_secret_value.return_value = ""
+        result = await _handle_squad_telegram_bind(
+            {"workspace_id": "acme", "squad_id": "build", "telegram_chat_id": -100, "is_forum": True},
+            ctx,
+        )
+    assert not result.success
+    assert "Missing AGENT_TOKEN for squad bots: FE" in result.output
+    mock_service.bind.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_telegram_bind_drops_caller_force_and_identity(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    monkeypatch.setattr("koda.config.SQUAD_TELEGRAM_STRICT_ADMIN_CHECK", False)
+    from koda.squads.telegram_bridge import SquadTelegramBinding
+
+    ctx.bot = _forum_bot()
+    binding = SquadTelegramBinding(
+        squad_id="build",
+        telegram_chat_id=-100,
+        chat_title="Build",
+        is_forum=True,
+        bound_by_user_id=1,
+        bound_at=None,
+        updated_at=None,
+    )
+    mock_service = AsyncMock()
+    mock_service.bind = AsyncMock(return_value=binding)
+    with patch("koda.squads.get_telegram_binding_service", return_value=mock_service):
+        result = await _handle_squad_telegram_bind(
+            {
+                "workspace_id": "acme",
+                "squad_id": "build",
+                "telegram_chat_id": -100,
+                "is_forum": True,
+                "force": True,
+                "bound_by_user_id": 999,
+                "chat_title": "Spoofed",
+            },
+            ctx,
+        )
+    assert result.success
+    kwargs = mock_service.bind.await_args.kwargs
+    assert kwargs["force"] is False
+    assert kwargs["bound_by_user_id"] == ctx.user_id
+    assert kwargs["chat_title"] == "Build"
+    assert kwargs["is_forum"] is True
+    assert kwargs["metadata"]["workspace_id"] == "acme"
 
 
 # --- squad dashboard handlers ---
@@ -1461,7 +1789,7 @@ async def test_router_tick_reverts_summary(ctx: ToolContext, monkeypatch: pytest
     from koda.squads.tasks import ExpiredClaim
 
     mock_router = AsyncMock()
-    mock_router.sweep_once = AsyncMock(
+    mock_router.sweep_squad_claims = AsyncMock(
         return_value=SweepReport(
             expired_claims=[
                 ExpiredClaim(
@@ -1474,10 +1802,12 @@ async def test_router_tick_reverts_summary(ctx: ToolContext, monkeypatch: pytest
         )
     )
     with patch("koda.squads.get_squad_router", return_value=mock_router):
-        result = await _handle_squad_router_tick({}, ctx)
+        result = await _handle_squad_router_tick({"squad_id": "build"}, ctx)
     assert result.success
     assert "reverted 1" in result.output
     assert "FE" in result.output
+    mock_router.sweep_squad_claims.assert_awaited_once_with("build")
+    mock_router.sweep_once.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1507,3 +1837,27 @@ async def test_coordinator_get_with_state_and_history(ctx: ToolContext, monkeypa
     assert result.success
     assert "coordinator=PM" in result.output
     assert "elected" in result.output
+
+
+@pytest.mark.asyncio
+async def test_squad_thread_create_checks_the_caller_and_the_squad_workspace(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-306: opening a thread is a coordination action, checked like the other squad_admin tools."""
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.executing_agent_id = "WORKER"
+    access = _DenyingSquadAdmin()
+    store = AsyncMock()
+    with (
+        patch("koda.squads.get_squad_access_service", return_value=access),
+        patch("koda.squads.get_squad_thread_store", return_value=store),
+    ):
+        refused = await _handle_squad_thread_create({"workspace_id": "acme", "squad_id": "build"}, ctx)
+        other_workspace = await _handle_squad_thread_create({"workspace_id": "beta", "squad_id": "build"}, ctx)
+    assert refused.output.startswith("Forbidden:")
+    assert other_workspace.output.startswith("Forbidden:")
+    assert "workspace" in other_workspace.output
+    store.create_thread.assert_not_awaited()
+    principal = access.admin_calls[0]["principal"]
+    assert getattr(principal, "agent_id", None) == "WORKER"
+    assert access.admin_calls[0]["squad_workspace_id"] == "acme"

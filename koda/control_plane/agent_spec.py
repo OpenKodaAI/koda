@@ -20,6 +20,7 @@ from koda.agent_contract import (
     resolve_allowed_tool_ids,
     tool_subset_summary,
 )
+from koda.config import PROVIDER_MODELS
 from koda.control_plane.execution_policy import normalize_execution_policy, validate_execution_policy
 from koda.control_plane.settings import looks_like_secret_key
 from koda.provider_models import MODEL_FUNCTION_IDS, build_function_model_catalog, get_model_effort_capability
@@ -1250,6 +1251,20 @@ def validate_agent_spec(
                     "model_policy.fallback_order contains providers outside allowed_providers: "
                     + ", ".join(disallowed_fallback)
                 )
+
+        # A provider id the runtime does not know would silently fall back to the default
+        # provider (D-157), so the per-provider model maps are checked like default_provider.
+        # The runtime also runs providers outside the core catalog (llamacpp, mlx).
+        known_map_providers = {*CORE_PROVIDER_IDS, *PROVIDER_MODELS}
+        for field, normalize_provider_map in (
+            ("available_models_by_provider", _normalize_provider_models),
+            ("default_models", _normalize_default_models),
+            ("tier_models", _normalize_tier_models),
+        ):
+            provider_map = normalize_provider_map(model_policy.get(field))
+            unknown_providers = [provider for provider in provider_map if provider not in known_map_providers]
+            if unknown_providers:
+                errors.append(f"model_policy.{field} contains unknown providers: {', '.join(unknown_providers)}")
 
         for provider, models in _normalize_provider_models(model_policy.get("available_models_by_provider")).items():
             known_models = set(available_models.get(provider.lower(), []))

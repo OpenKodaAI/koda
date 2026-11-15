@@ -219,6 +219,39 @@ async def test_lazy_start_passes_the_bootstrap_env_helper_values_to_the_server()
 
 
 @pytest.mark.asyncio
+async def test_lazy_start_passes_the_catalog_isolation_settings_to_the_server():
+    from koda.services.mcp_bridge import _lazy_start_mcp_server
+    from koda.services.mcp_isolation import IsolationConstraints, Mount
+
+    instance = MagicMock()
+    instance.cached_tools = []
+    catalog = {
+        "server_key": "github",
+        "transport_type": "stdio",
+        "command": ["mcp-github"],
+        "isolation_profile": "bwrap",
+        "isolation_constraints": {"network_mode": "none", "mounts": [{"host": "/srv", "container": "/srv"}]},
+    }
+    with (
+        patch("koda.services.mcp_bootstrap._load_catalog_entry", return_value=catalog),
+        patch(
+            "koda.services.mcp_bootstrap._load_agent_mcp_connections",
+            return_value=[{"server_key": "github", "enabled": True}],
+        ),
+        patch("koda.services.mcp_bridge.mcp_server_manager") as mock_manager,
+        patch("koda.services.mcp_bridge.register_mcp_tools_for_agent"),
+    ):
+        mock_manager.ensure_started = AsyncMock(return_value=instance)
+        await _lazy_start_mcp_server("github", "agent-1")
+
+    kwargs = mock_manager.ensure_started.await_args.kwargs
+    assert kwargs["isolation_profile"] == "bwrap"
+    assert kwargs["isolation_constraints"] == IsolationConstraints(
+        network_mode="none", mounts=(Mount(host="/srv", container="/srv"),)
+    )
+
+
+@pytest.mark.asyncio
 async def test_handle_mcp_tool_call_invalid_tool_id():
     result = await handle_mcp_tool_call("web_search", {}, "agent-1")
     assert result["success"] is False

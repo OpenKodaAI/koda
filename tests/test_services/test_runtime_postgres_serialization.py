@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import json
 from typing import Any
 
@@ -127,12 +126,25 @@ def test_runtime_artifact_reads_are_case_insensitive_for_agent_scope(monkeypatch
     assert get_params == ("KODA", 428)
 
 
-def test_runtime_queue_list_reconciles_uppercase_task_agent_scope() -> None:
+def test_runtime_queue_list_joins_tasks_on_the_task_agent_scope(monkeypatch):
+    """``tasks`` rows carry the upper-case scope their writer uses; queue items the lower-case one (D-293)."""
     from koda.services.runtime.postgres_store import PostgresRuntimeStore
 
-    source = inspect.getsource(PostgresRuntimeStore.list_runtime_queues)
+    store = PostgresRuntimeStore.__new__(PostgresRuntimeStore)
+    store._agent_scope = "koda"  # type: ignore[attr-defined]
+    store._task_agent_scope = "KODA"  # type: ignore[attr-defined]
+    captured: dict[str, tuple[str, tuple[Any, ...]]] = {}
 
-    assert "lower(t.agent_id) = rq.agent_id" in source
+    def fake_fetch_all(query: str, params: tuple[Any, ...]) -> list[dict[str, Any]]:
+        captured["all"] = (query, params)
+        return []
+
+    monkeypatch.setattr(store, "_fetch_all", fake_fetch_all)
+
+    assert store.list_runtime_queues() == []
+    query, params = captured["all"]
+    assert "LEFT JOIN tasks AS t ON t.agent_id = ? AND t.id = rq.task_id" in query
+    assert params == ("KODA", "koda")
 
 
 def test_execution_episode_primary_path_serializes_json_fields(monkeypatch):

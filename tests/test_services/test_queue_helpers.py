@@ -5,6 +5,7 @@ import contextlib
 import re
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,6 +28,7 @@ from koda.services.queue_manager import (
     _control_plane_prompt_for_agent,
     _detect_audio_response_request,
     _get_throttle_interval,
+    _grounding_gate_skip_reason,
     _maybe_enqueue_squad_coordinator_synthesis,
     _maybe_enqueue_squad_reply_synthesis,
     _maybe_enqueue_unblocked_squad_tasks,
@@ -36,6 +38,7 @@ from koda.services.queue_manager import (
     _prepare_query_context,
     _process_queue,
     _recover_provider_error_with_completed_output,
+    _requires_kernel_terminal,
     _resolve_provider_context,
     _run_fallback,
     _run_result_has_native_tool_calls,
@@ -959,6 +962,258 @@ class TestRuntimeTerminalCutover:
         runtime.register_terminal.assert_awaited_once()
         assert runtime.register_terminal.await_args.kwargs["path"] == "kernel-stream://stdout"
         assert runtime.register_terminal.await_args.kwargs["stream_path"] == "kernel-stream://stdout"
+
+    @pytest.mark.parametrize(
+        ("knowledge_enabled", "resolution", "reason"),
+        [
+            (False, None, "knowledge_disabled"),
+            (True, SimpleNamespace(corpus_empty=True), "knowledge_corpus_empty"),
+            (True, SimpleNamespace(corpus_empty=False), ""),
+            # Knowledge on but no resolution (recall failed or timed out): the gate still judges.
+            (True, None, ""),
+        ],
+    )
+    def test_grounding_gate_is_skipped_without_knowledge_or_corpus(self, knowledge_enabled, resolution, reason):
+        # M6-E1-T5 (F-MEM-28): with no knowledge to cite, the gate would send every write to review.
+        with patch("koda.knowledge.config.KNOWLEDGE_ENABLED", knowledge_enabled):
+            assert _grounding_gate_skip_reason(resolution) == reason
+
+    @pytest.mark.parametrize(
+        ("enabled", "runtime_env_id", "stop_reason", "required"),
+        [
+            (True, 7, "completed", True),
+            (True, None, "completed", False),
+            (True, 7, "cache_hit", False),
+            (True, None, "cache_hit", False),
+            (False, 7, "completed", False),
+        ],
+    )
+    def test_kernel_terminal_is_required_only_for_a_provider_run_in_a_runtime_env(
+        self, enabled, runtime_env_id, stop_reason, required
+    ):
+        # M6-E1-T8 (D-064): light tasks have no environment and cache hits run no provider.
+        run_result = RunResult(
+            provider="claude",
+            model="claude-sonnet-4-6",
+            result="done",
+            session_id="canon-1",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=False,
+            stop_reason=stop_reason,
+        )
+        with patch("koda.services.queue_manager.RUNTIME_ENVIRONMENTS_ENABLED", enabled):
+            assert _requires_kernel_terminal(runtime_env_id, run_result) is required
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("scenario", ["no_eligible_provider", "provider_unavailable"])
+    async def test_error_result_that_ran_no_provider_skips_the_kernel_terminal_check(self, scenario):
+        # D-297: with RUNTIME_ENVIRONMENTS_ENABLED a task with an environment whose provider never ran
+        # failed with "runtime terminal output requires a kernel-backed terminal path", hiding the
+        # provider error. Such an error result has no terminal, so the check does not apply to it.
+        ctx = QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            runtime_env_id=7,
+            fallback_chain=[] if scenario == "no_eligible_provider" else ["claude"],
+        )
+        unavailable_ctx = QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            runtime_env_id=7,
+            warnings=["claude is not connected"],
+            provider_available=False,
+        )
+        with (
+            patch("koda.services.queue_manager.RUNTIME_ENVIRONMENTS_ENABLED", True),
+            patch("koda.services.queue_manager.get_provider_fallback_chain", return_value=[]),
+            patch("koda.services.queue_manager.get_provider_runtime_eligibility", return_value={}),
+            patch("koda.services.queue_manager._resolve_provider_context", AsyncMock(return_value=unavailable_ctx)),
+            patch("koda.services.queue_manager._run_streaming", AsyncMock()) as run_streaming,
+            patch("koda.services.audit.emit_task_lifecycle"),
+        ):
+            result = await _run_with_provider_fallback(
+                ctx, QueueItem(chat_id=111, query_text="hello"), 111, 111, MagicMock(), task_id=7
+            )
+            required = _requires_kernel_terminal(7, result)
+
+        run_streaming.assert_not_awaited()
+        assert result.error is True
+        expected = (
+            "No verified providers are eligible for runtime fallback."
+            if scenario == "no_eligible_provider"
+            else "claude is not connected"
+        )
+        assert result.result == expected
+        assert required is False
+
+    def test_error_result_from_a_provider_run_still_needs_a_kernel_terminal(self):
+        # D-297: a provider that ran in a runtime environment registered its terminal, error or not.
+        run_result = RunResult(
+            provider="claude",
+            model="claude-sonnet-4-6",
+            result="provider failed",
+            session_id="canon-1",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=True,
+            stop_reason="error",
+            runtime_terminal_path="kernel-stream://stdout",
+        )
+        with patch("koda.services.queue_manager.RUNTIME_ENVIRONMENTS_ENABLED", True):
+            assert _requires_kernel_terminal(7, run_result) is True
+
+    @pytest.mark.asyncio
+    async def test_recovered_provider_error_without_a_kernel_terminal_is_not_delivered(self, tmp_path):
+        # D-297 review: the terminal check skips an error result without a terminal, but the recovery
+        # step can turn an error with completed-looking output into a success. A result delivered as a
+        # success must still carry a kernel-backed terminal (D-064), so the check runs after recovery.
+        from koda.services import queue_manager as qm
+
+        task_id = user_id = chat_id = 92970
+        run_result = RunResult(
+            provider="codex",
+            model="gpt-5.4-mini",
+            result=(
+                "Fechei em sequência, como você pediu: o planejador travou o briefing "
+                "e o desenvolvedor já entregou a LP.\n\n"
+                "**Artefato**\n"
+                "- [fintech_landing_page.html](runtime_home/fintech_landing_page.html)\n\n"
+                "**O que ficou pronto**\n"
+                "- Landing page única, autocontida e responsiva."
+            ),
+            session_id="canon-1",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=True,
+            stop_reason="error",
+            error_kind="provider_runtime",
+        )
+        ctx = QueryContext(
+            provider="codex",
+            work_dir=str(tmp_path),
+            model="gpt-5.4-mini",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+        )
+        raw_item = qm._build_user_message_raw_item(
+            task_id=task_id,
+            chat_id=chat_id,
+            query_text="build the landing page",
+            provider="codex",
+            model="gpt-5.4-mini",
+            work_dir=str(tmp_path),
+            session_id="canon-1",
+            update=None,
+            image_paths=None,
+            artifact_bundle=None,
+        )
+        raw_item["_runtime_preprovisioned"] = True
+        runtime = MagicMock()
+        runtime.runtime_root = str(tmp_path / "runtime")
+        runtime.store.get_environment_by_task.return_value = {
+            "id": 7,
+            "workspace_path": str(tmp_path),
+            "classification": "standard",
+            "environment_kind": "dev_worktree",
+        }
+        for method in ("mark_phase", "register_terminal", "record_warning", "finalize_task", "heartbeat"):
+            setattr(runtime, method, AsyncMock())
+        context = MagicMock()
+        context.user_data = {}
+        context.bot.send_message = AsyncMock()
+        task_info = TaskInfo(task_id=task_id, user_id=user_id, chat_id=chat_id, query_text="build the landing page")
+        send_task_error = AsyncMock()
+
+        with (
+            patch("koda.services.runtime.get_runtime_controller", return_value=runtime),
+            patch("koda.services.queue_manager.RUNTIME_ENVIRONMENTS_ENABLED", True),
+            patch("koda.services.queue_manager.acquire_task_lease", return_value=True),
+            patch("koda.services.queue_manager.extend_task_lease", return_value=True),
+            patch("koda.services.queue_manager.release_task_lease"),
+            patch("koda.services.queue_manager.update_task_with_lease", return_value=True),
+            patch("koda.services.queue_manager._prepare_query_context", AsyncMock(return_value=ctx)),
+            patch("koda.services.queue_manager._process_task_item", AsyncMock(return_value=run_result)),
+            patch("koda.services.queue_manager._record_execution_episode", AsyncMock()),
+            patch("koda.services.queue_manager._record_procedural_memory", AsyncMock()),
+            patch("koda.services.queue_manager._finalize_scheduled_run", AsyncMock()),
+            patch("koda.services.queue_manager._send_task_error", send_task_error),
+            patch("koda.utils.command_helpers.init_user_data"),
+            patch("koda.services.audit.emit"),
+            patch("koda.services.audit.emit_task_lifecycle"),
+            patch("koda.services.audit.emit_execution_trace"),
+        ):
+            await qm._execute_single_task(raw_item, user_id, context, task_id, task_info)
+
+        phases = [call.kwargs["phase"] for call in runtime.mark_phase.await_args_list]
+        assert "validating" not in phases
+        runtime.register_terminal.assert_not_awaited()
+        send_task_error.assert_awaited_once()
+        assert send_task_error.await_args.args[1] == "runtime terminal output requires a kernel-backed terminal path"
+        runtime.finalize_task.assert_awaited_once_with(
+            task_id=task_id,
+            success=False,
+            error_message="runtime terminal output requires a kernel-backed terminal path",
+        )
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("runtime_env_id", [7, None])
+    async def test_run_fallback_registers_a_kernel_terminal_for_runtime_env(self, runtime_env_id):
+        # M6-E1-T8 (D-064): the non-streaming fallback registers its terminal as streaming does, so a task
+        # with a runtime environment passes the kernel terminal check; a task without one registers none.
+        ctx = QueryContext(
+            provider="codex",
+            work_dir="/tmp",
+            model="gpt-5.4-mini",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            runtime_env_id=runtime_env_id,
+        )
+        context = MagicMock()
+        context.bot = AsyncMock()
+        runtime = MagicMock()
+        runtime.register_terminal = AsyncMock(return_value=17)
+        run_llm = AsyncMock(return_value={"result": "done", "session_id": "prov-1", "_stop_reason": "completed"})
+
+        with (
+            patch("koda.services.runtime.get_runtime_controller", return_value=runtime),
+            patch("koda.services.queue_manager.RUNTIME_ENVIRONMENTS_ENABLED", True),
+            patch("koda.services.queue_manager.run_llm", new=run_llm),
+        ):
+            result = await _run_fallback(ctx, QueueItem(chat_id=111, query_text="hello"), 111, 111, context, task_id=7)
+
+        assert result.result == "done"
+        if runtime_env_id is None:
+            runtime.register_terminal.assert_not_awaited()
+            assert (result.runtime_terminal_id, result.runtime_terminal_path) == (None, None)
+        else:
+            runtime.register_terminal.assert_awaited_once()
+            assert runtime.register_terminal.await_args.kwargs["path"] == "kernel-stream://stdout"
+            assert runtime.register_terminal.await_args.kwargs["stream_path"] == "kernel-stream://stdout"
+            assert (result.runtime_terminal_id, result.runtime_terminal_path) == (17, "kernel-stream://stdout")
+            assert run_llm.await_args.kwargs["runtime_task_id"] == 7
 
     @pytest.mark.asyncio
     async def test_prepare_query_context_forces_safe_dry_run_mode(self):

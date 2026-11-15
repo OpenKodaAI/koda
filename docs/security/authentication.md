@@ -94,6 +94,38 @@ setup code: `POST /api/control-plane/auth/bootstrap/exchange` already consumed t
 code, so a retry with it fails with `Setup code is invalid or expired.`
 `bootstrap.txt` is deleted only after the transaction commits.
 
+A setup code or registration token is consumed only while it is still unused: the
+transaction's first write marks it consumed on that condition, and a write that matches no
+row rolls the whole transaction back. Two registrations sent at once with the same code
+therefore create one owner. The other request waits for the first to commit, writes nothing,
+and gets the answer of any other invalid code: `Setup code is invalid or expired.`, or
+`Registration token is invalid or expired.` for a token. That request has already hashed its
+password, so a registration with an invalid setup code or token hashes the submitted password
+too before it answers: the two answer in about the same time, the loser later only by the
+wait for the winner's commit. The setup routes have no timing floor.
+`POST /api/control-plane/auth/bootstrap/exchange` consumes the setup code on the same
+condition, so of two exchanges sent at once with one code, one gets a registration token and
+the other `Setup code is invalid or expired.`
+
+There is only ever one owner, even when two registrations sent at once present different
+credentials: the `bootstrap.txt` code and a `koda auth issue-code` code, or two
+loopback-trusted requests. Before any write, the registration transaction takes a
+transaction-scoped Postgres advisory lock keyed on the `cp_operator_users` table, so
+registrations run one after another. After consuming its code, and before writing the user
+row, it checks in a separate statement, which reads what was committed before it got the lock,
+that no operator exists yet; when one does, the whole transaction rolls back. The request that
+waited for the first to commit therefore writes nothing and gets the answer of any
+registration once an owner exists: `Owner account already exists. Sign in instead.` Its setup
+code stays unused, as after any failed registration, but with an owner in place no setup code
+registers anyone. Two registrations with the same code still get the invalid-code answer
+above, because the code is consumed before the owner check. The owner check reads what was
+committed only at READ COMMITTED, where each statement takes a fresh snapshot: at REPEATABLE
+READ or SERIALIZABLE the snapshot is taken when the lock wait starts, before the first owner
+commits, and both registrations would create an owner (no unique constraint on the owner role
+backs the lock). The registration transaction therefore sets
+`SET TRANSACTION ISOLATION LEVEL READ COMMITTED` as its first statement, whatever the
+server's, database's or role's `default_transaction_isolation`.
+
 The web UI shows the codes on the second setup screen, requires an acknowledgement checkbox
 ("I saved my codes"), and never retrieves them again.
 
@@ -253,8 +285,10 @@ every field and the operator's profile.
   `Sec-Fetch-Site: same-origin` when the `Origin` does not match: a browser always sends `Origin`
   with a WebSocket handshake, so the relay takes nothing else.
 - Revocation: logout revokes the current session. Password _change_ revokes every other
-  session for the same user and keeps the initiating session alive. Password _reset_ via
-  recovery code revokes **all** sessions for the user.
+  session for the same user and keeps the initiating session alive; the new password and the
+  revocation are one database transaction, so if either write fails the password and the
+  sessions stay as they were. Password _reset_ via recovery code revokes **all** sessions for
+  the user.
 
 ### Plain HTTP
 
@@ -351,10 +385,28 @@ their stronger password checks.
   - the password hash is rotated
 
   These writes are one database transaction: if any of them fails, the password, the
-  codes and the sessions all stay as they were, and the same code still works.
+  codes and the sessions all stay as they were, and the same code still works. Its first
+  write is the password hash on the user row, so concurrent resets and regenerations of
+  one account wait for each other on that row instead of deadlocking on each other's codes.
+  Its second marks the code consumed only while it is still unused, and a write that
+  matches no row rolls the transaction back, so of two resets sent at once with the same
+  code, or with two codes of the same account, one sets its password and the other changes
+  nothing and fails with the generic `Invalid identifier or recovery code.`
 - The owner must regenerate a fresh batch from `/settings/account` › Security (calling
   `POST /api/control-plane/auth/recovery-codes/regenerate`, which requires the current
-  password).
+  password). Moving `cp_operator_users.recovery_generation` to a new batch, marking the
+  current codes consumed (`consumed_reason = "regenerated"`) and storing the new batch are
+  one database transaction, written in that order (the user row first, as in a reset): if
+  any of these writes fails, the current codes stay usable and no new code is kept. The
+  generation moves only from the one the request read, and a write that matches no row rolls
+  the transaction back, so of two regenerations sent at once (a double-submitted form), one
+  stores its batch and returns it, and the other changes nothing and fails with HTTP 400
+  `Recovery codes were regenerated by another request. Try again.` Only one new batch is
+  stored, and it is the one a successful response shows. Like a registration, the
+  transaction first sets `SET TRANSACTION ISOLATION LEVEL READ COMMITTED`, whatever the
+  server's `default_transaction_isolation`: the request that waited on the user row then
+  re-reads it and matches no row, where REPEATABLE READ would fail it with a serialization
+  error and HTTP 500 instead of the 400 above.
 
 This mirrors Google and GitHub's policy: a printed sheet of codes is useful once, but once
 one of them is compromised the whole sheet has to be rotated.
@@ -504,10 +556,20 @@ message would reveal that the account exists.
 - The control plane (`python -m koda.control_plane`) configures the structured logging pipeline
   (`setup_logging` in `koda/logging_config.py`) before anything logs; the agent workers configure
   it at startup. `LOG_FORMAT=json` writes one JSON object per line on stdout; any other value
-  writes console lines. The pipeline replaces with `***` the value of these top-level event keys,
-  in any case: `password`, `new_password`, `current_password`, `recovery_code`, `session_token`,
-  `registration_token`, `bootstrap_code`, `code`, `totp_secret`, `api_key`, `apikey`, `secret`,
-  `private_key`, `token`, `authorization` and `cookie`. It does not look inside nested values, and
+  writes console lines. The pipeline replaces with `[REDACTED]` the value of every top-level event
+  key that the shared redactor (`koda/security/redaction.py`, the one audit, runtime and evals use)
+  treats as sensitive. The redactor splits a key into words (camelCase, `snake_case` and
+  `kebab-case`) and masks a key that contains, in any case, `authorization`, `token`, `secret`,
+  `password`, `passwd`, `cookie`, `credential`, `api_key`/`apikey`, `access_key`, `private_key`,
+  `recovery_code`, `bootstrap_code` or `credencial`/`credenciais`; a key with the word `auth` as
+  its last word or before `key`, `header`, `pass`/`password`, `token`, `secret`, `value` or
+  `string` (`auth`, `basicAuth`, `proxy_auth`, `auth_key`, `authKey`, `auth_header`); a key with
+  the PT-BR word
+  `senha` or `segredo`, a key that is exactly `chave`, or `chave` before `api`, `acesso`,
+  `secreta` or `privada` (`chave_api`, `chave_de_acesso`); or a key that is exactly `code` or
+  `session`. So `password`, `session_token`, `totp_secret`, `authorization` and `novaSenha` are
+  masked, while `exit_code`, `code_source`, `session_id`, `auth_mode`, `author`, `authority`
+  and `palavra_chave` are not. It does not look inside nested values or rewrite other values, and
   records from the standard `logging` module, such as third-party libraries', are formatted (with
   the same `level`, `logger` and `timestamp` keys) but not redacted. Both formats print an
   exception's plain traceback, its type, message and stack, without local variables: a console

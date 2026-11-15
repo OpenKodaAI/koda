@@ -713,3 +713,30 @@ Gates (`int/b5`, second run at e9d903b; the two sweep-query tests fixed in f2c28
 - `pytest -m postgres`: 382 passed, the same 2 failed, 2 skipped, 1 xfailed; after f2c28a1 they pass.
 - Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 194 files and 1212 tests passed; `pnpm build:web` ok.
 - Rust: not touched by this batch.
+
+## Integration batch 6 (2026-11-15, `int/b6`, rule 10 lean lanes)
+
+Lanes (each lane built on the approved branch it extends, merged at its tip):
+- SEC-D283 then SEC-D294 (auth): setup codes, registration tokens and recovery codes are single-use under concurrency (conditional consumption with `require_row`); only one owner can be created, also with two different valid codes (transaction-scoped advisory lock and a no-operator guard); regenerating recovery codes and changing the password are one transaction each, and a double-submitted regenerate answers 400; migrations run without the query timeout. The loser of a recovery race still gets the 300 ms floor (`auth_password_recover` pads every `ValueError`).
+- SEC-D292 (skill packages): the bytes that run are the bytes that were hashed, unhashed files and compiled modules in a package are refused, re-registration goes through the lock, and unregister removes every handler module.
+- M1-E5-T1, M1-E5-T4, then SQ-D304 (squads): a `squad_admin` category for election, demotion, Telegram bind and unbind, router tick and thread create, passed only by the current coordinator or a workspace-scoped operator (new PUT/DELETE coordinator routes); participant-only thread access; break-glass refused when its audit write fails; private threads excluded from squad sync.
+- M1-E3-T6, M1-E4-T6, M1-E5-T3, then SEC-D300 (security): the OAuth failure redirect goes only to the configured origin; stored MCP isolation settings are applied and Docker passes env by name; channel pairing is rate-limited with lockout and expiry in Postgres; stdio MCP servers get a minimal environment (Q-32) and stored constraints are validated on save.
+- M6-E3-T2, M6-E3-T4, M6-E1-T5, M6-E1-T8, then M6-D296 (agent behaviour): unknown provider ids fail publish; model and provider changes publish and failures are reported; `/curl` is an alias of `/fetch`; the grounding gate and the kernel terminal check no longer block tasks; provider errors are not masked.
+- FIX-D293: `/cancel <id>` and `/cancel` work on Postgres through the real Telegram handler.
+- M5-E3-T8 (redaction, round 3): one redactor with linear-time patterns; the Rust RedactValue RPC is gone (proto and Rust sources changed).
+
+At integration:
+- Conflicts resolved keeping both sides: CHANGELOG (four times), `koda/agent_contract.py` (DISPATCHER_TOOL_IDS and SQUAD_ADMIN_TOOL_IDS), the tool dispatcher and audit and runtime store imports, the memory safety tests, the operator auth test imports.
+- Test user ids: the `/cancel` scenario moved to user 910009 so it no longer shares 910007 with an M6 test.
+- `docs/openapi/control-plane.json`: regenerate documents 201, and 400 on a conflict (f3c95fc).
+- The concurrent recovery-reset test expected `ValueError` from a wrong-password sign-in; since batch 3 that is `AuthError` (401). Fixed in the integration commit below; rerun passed.
+- Recorded: D-290, D-294 to D-318 (fixed ones marked), Q-32, CHANGELOG entries for every lane, FEATURE_MATRIX notes, R-42.
+
+Gates at f3c95fc (`int/b6`), then the auth test fix:
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: 770 files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 350 source files.
+- `pytest --cov=koda`: 10326 passed, 1 failed (the test above), 34 skipped, 175 xfailed. After the fix, `tests/test_control_plane_operator_auth.py`: 113 passed (Postgres included).
+- `pytest -m postgres`: 425 passed, the same 1 failed, 2 skipped; passes after the fix.
+- Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 194 files and 1212 tests passed; `pnpm build:web` ok.
+- Rust (on `../koda-wt/.target-int`): `cargo fmt --all --check` ok; `cargo clippy --workspace --all-targets -- -D warnings` clean; `cargo test --workspace` 22 suites, 100 passed, 0 failed, 3 ignored.

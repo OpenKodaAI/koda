@@ -32,7 +32,7 @@ from koda.memory.types import (
     RecallExplanation,
     RecallResult,
 )
-from koda.services.runtime.redaction import redact_value
+from koda.security.redaction import redact_value
 
 log = get_logger(__name__)
 

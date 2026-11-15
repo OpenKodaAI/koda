@@ -40,6 +40,9 @@ class PluginManifest:
     tools: list[PluginToolDef] = field(default_factory=list)
     prompt_section: str = ""
     requires: dict[str, Any] = field(default_factory=dict)
+    # The verified bytes of a skill package's files, by path under plugin_dir. When set, the
+    # handlers load from these bytes only, never from a later read of the files (D-292).
+    sources: dict[str, bytes] | None = None
 
 
 ToolHandler = Callable[[dict, Any], Awaitable[Any]]
@@ -63,7 +66,7 @@ class PluginRegistry:
                 return f"Tool ID '{tool.id}' conflicts with plugin '{self._tool_to_plugin.get(tool.id, 'unknown')}'."
         # Load handlers
         for tool in manifest.tools:
-            handler = self._load_handler(manifest.plugin_dir, tool.handler_path)
+            handler = self._load_handler(manifest, tool.handler_path)
             if handler is None:
                 return f"Failed to load handler '{tool.handler_path}' for tool '{tool.id}'."
             self._handlers[tool.id] = handler
@@ -147,6 +150,9 @@ class PluginRegistry:
         manifest = self._plugins.get(plugin_name)
         if not manifest:
             return f"Plugin '{plugin_name}' not found."
+        if manifest.sources is not None:
+            # A skill package registers again only from its lock, which verifies its files first (D-292).
+            return f"Plugin '{plugin_name}' is a skill package: plugin_reload reloads it from its lock."
         plugin_dir = manifest.plugin_dir
         err = self.unregister(plugin_name)
         if err:
@@ -158,19 +164,25 @@ class PluginRegistry:
             return new_manifest
         return self.register(new_manifest)
 
-    def _load_handler(self, plugin_dir: Path, handler_path: str) -> ToolHandler | None:
+    def _load_handler(self, manifest: PluginManifest, handler_path: str) -> ToolHandler | None:
         """Load a handler function from a plugin module.
 
-        The handler file must resolve inside *plugin_dir*; an absolute path, a
+        The handler file must resolve inside the plugin directory; an absolute path, a
         traversal or a symlink out of the plugin is rejected before anything is
         imported. The source is then read from a handle opened by walking down
         from the plugin directory without following a symlink, so a file or a
-        directory swapped in after the check is not loaded (D-270). The module
+        directory swapped in after the check is not loaded (D-270); a skill
+        package's handler source is the verified bytes in ``manifest.sources``
+        hashed at the handler's path, wherever a symlink swapped in there points,
+        and a file missing there is not loaded (D-292). The module
         gets a flat name, with no parent package, so a relative import in it fails
-        instead of resolving against another package. ``sys.path`` is left
+        instead of resolving against another package; the name starts with the
+        plugin's prefix, which ``unregister`` removes (D-291). ``sys.path`` is left
         untouched.
         """
         from koda.skills._package import _safe_child_path, _SourceOnlyLoader
+
+        plugin_dir = manifest.plugin_dir
 
         parts = handler_path.rsplit(".", 1)
         if len(parts) != 2:
@@ -182,9 +194,15 @@ class PluginRegistry:
             log.warning("plugin_handler_path_rejected", handler=handler_path, plugin_dir=str(plugin_dir))
             return None
         # Create a unique module name to avoid conflicts
-        module_name = _plugin_module_prefix(plugin_dir.name) + module_path.replace(".", "/")
+        module_name = _plugin_module_prefix(manifest.name) + module_path.replace(".", "/")
         try:
-            source = _read_checked_source(plugin_dir, file_path)
+            if manifest.sources is not None:
+                source = manifest.sources.get(os.path.normpath(relative_path))
+                if source is None:
+                    log.warning("plugin_handler_not_verified", handler=handler_path, plugin_dir=str(plugin_dir))
+                    return None
+            else:
+                source = _read_checked_source(plugin_dir, file_path)
             if source is None:
                 log.warning("plugin_handler_path_changed", handler=handler_path, plugin_dir=str(plugin_dir))
                 return None
@@ -209,11 +227,12 @@ class PluginRegistry:
 def _plugin_module_prefix(plugin_name: str) -> str:
     """The start of a plugin's handler module names, which hold no dot, so there is no parent package.
 
-    A '/' ends the plugin's part and separates the module's parts. It cannot occur in a
-    directory name, and the dots of the plugin name are escaped, so two plugins' names
-    never meet and one prefix matches the modules of one plugin only.
+    Loading and unregistering both derive it from the manifest name (D-291), which is unique
+    in the registry. A '/' ends the plugin's part and separates the module's parts; the
+    dots and slashes of the plugin name are escaped, so two plugins' names never meet and
+    one prefix matches the modules of one plugin only.
     """
-    return "_koda_plugin_" + plugin_name.replace("%", "%25").replace(".", "%2E") + "/"
+    return "_koda_plugin_" + plugin_name.replace("%", "%25").replace(".", "%2E").replace("/", "%2F") + "/"
 
 
 def _read_checked_source(plugin_dir: Path, file_path: Path) -> bytes | None:

@@ -164,6 +164,11 @@ class KnowledgeManager:
                 primary_resolution=primary_resolution,
                 experiment_plan=experiment_plan,
             )
+            if not primary_resolution.hits:
+                try:
+                    primary_resolution.corpus_empty = await self._storage_v2.knowledge_corpus_is_empty_async()
+                except Exception:
+                    log.warning("knowledge_corpus_check_failed", agent_id=self._agent_id, exc_info=True)
             return primary_resolution
 
     async def build_context(

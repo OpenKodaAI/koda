@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping
 from typing import Any
 
@@ -128,20 +127,6 @@ class SecurityGuardClient:
             metadata=self._rpc_metadata(),
         )
         return str(response.object_key)
-
-    def redact_value(self, value: Any, *, key_hint: str | None = None) -> Any:
-        self._ensure_started()
-        stub, security_pb2 = self._rpc_client()
-        response = stub.RedactValue(
-            self._build_request(
-                security_pb2.RedactValueRequest,
-                value_json=json.dumps(value, ensure_ascii=False, default=str),
-                key_hint=key_hint or "",
-            ),
-            timeout=config.INTERNAL_RPC_DEADLINE_MS / 1000,
-            metadata=self._rpc_metadata(),
-        )
-        return json.loads(str(response.value_json or "null") or "null")
 
     def validate_file_policy(self, *, path: str, require_file: bool = True) -> str:
         self._ensure_started()

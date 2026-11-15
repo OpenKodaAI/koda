@@ -88,19 +88,12 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-15 05:30 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 06:20 UTC. The progress tracker mirrors this list for the operator.)
 
-- Integration batch 5 merged: SEC-D269, M10-E1-T2, M9-E1-T4 + M9-E2-T1/T2, M2-E2-T1 (+ T5 in review), M3-E4-T6, M3-E6-T1/T2/T3, M8-E1-T1/T2/T3.
-- Approved, waiting for integration batch 6:
-  - SEC-D283 (D-283 single-use codes, D-284, D-285), then SEC-D294 (D-294 one owner, D-295) on top of it.
-  - SEC-D292 (D-292 hash once and load those bytes, D-291).
-  - M1-E5-T1 + M1-E5-T4 squad authorization, then SQ-D304 (D-304, D-306) on top of it.
-  - M1-E3-T6 + M1-E4-T6 + M1-E5-T3 (OAuth redirect, MCP isolation settings, channel pairing limits).
-  - M6-E3-T2/T4 + M6-E1-T5/T8 (provider ids, /curl alias, grounding gate, runtime terminal).
-  - FIX-D293 (/cancel on Postgres).
-  - M5-E3-T8 one redactor with linear-time patterns (changes `rust/` and `proto/`; Rust gates on `../koda-wt/.target-int`).
-- Lean lanes running: FIX-D276 (D-276 runtime root isolation, D-277 routine editor Escape), SEC-D300 (D-300, D-301), M6-D296 (D-296, D-297, D-298).
-- Awaiting the operator: ADR-002 OQ-1..OQ-12 and plan Q-25..Q-31; the web Docker image build; shellcheck for `scripts/install.sh`; actionlint and a first GitHub Actions run of `migrations-gate.yml`.
+- Integration batch 6 merged: SEC-D283 + SEC-D294, SEC-D292, M1-E5-T1/T4 + SQ-D304, M1-E3-T6 + M1-E4-T6 + M1-E5-T3 + SEC-D300, M6-E3-T2/T4 + M6-E1-T5/T8 + M6-D296, FIX-D293, M5-E3-T8.
+- Approved, waiting for integration batch 7: FIX-D276 (D-276, D-277), SEC-D316 (D-316 to D-318), SEC-D311 (D-309 to D-311).
+- Lean lanes running: M3-E6-T5 (+D-287, D-289), M8-E5-T3 tokens (+D-267, D-281, D-282), SEC-D321 (control-plane MCP test paths), SEC-D323 (scanner alias forms).
+- Awaiting the operator: ADR-002 OQ-1..OQ-12 and plan Q-25..Q-32; the web Docker image build; shellcheck for `scripts/install.sh`; actionlint and a first GitHub Actions run of `migrations-gate.yml`.
 
 ## Pending findings for the plan (verified by the orchestrator)
 

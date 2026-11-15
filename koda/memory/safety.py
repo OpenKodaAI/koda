@@ -9,7 +9,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from koda.services.runtime.redaction import redact_value
+from koda.security.redaction import redact_value
 
 _ZERO_WIDTH_OR_BIDI = re.compile(r"[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]")
 _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
@@ -317,18 +317,7 @@ def memory_safety_payload(memory: Any) -> dict[str, Any]:
 
 
 def _redacted_preview(text: str, *, limit: int = 240) -> str:
-    sample = text[: max(limit * 2, limit)]
-    try:
-        redacted = str(redact_value(sample, key_hint="memory_safety"))
-    except Exception:
-        redacted = re.sub(
-            r"(?i)(password|api[_ -]?key|access[_ -]?token|secret)\s*[:=]\s*['\"]?[^\\s'\"]+",
-            r"\1=[REDACTED]",
-            sample,
-        )
-        redacted = re.sub(r"(AKIA|ASIA)[A-Z0-9]{16}", "[REDACTED]", redacted)
-        redacted = re.sub(r"sk-[A-Za-z0-9_-]{20,}", "[REDACTED]", redacted)
-        redacted = re.sub(r"gh[pousr]_[A-Za-z0-9_]{30,}", "[REDACTED]", redacted)
+    redacted = str(redact_value(text[: max(limit * 2, limit)], key_hint="memory_safety"))
     redacted = _ZERO_WIDTH_OR_BIDI.sub("", redacted)
     redacted = _CONTROL_CHARS.sub("", redacted)
     return redacted[:limit]

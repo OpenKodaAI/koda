@@ -620,3 +620,68 @@ async def test_mcp_oauth_routes_cover_start_callback_refresh_revoke_and_status()
     assert json.loads(refresh_response.text) == {"success": True, "agent_id": "ATLAS", "server_key": "linear"}
     assert json.loads(revoke_response.text) == {"success": True, "agent_id": "ATLAS", "server_key": "linear"}
     assert json.loads(status_response.text)["connected"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "callback_result",
+    [
+        {"success": False, "error": "invalid_or_expired_session"},
+        {"success": False, "error": "session_expired", "frontend_callback_uri": "https://stored.example/cb"},
+    ],
+)
+async def test_mcp_oauth_callback_failure_redirects_only_to_configured_origin(
+    callback_result: dict[str, object],
+) -> None:
+    async def fake_callback(state: str, code: str, error: str | None = None):
+        return dict(callback_result)
+
+    request = _Request(
+        query={"state": "state-1", "code": "code-1", "frontend_callback_uri": "https://evil.example/steal"},
+    )
+    with (
+        patch("koda.services.mcp_oauth.handle_oauth_callback", side_effect=fake_callback),
+        patch("koda.config.MCP_OAUTH_CALLBACK_BASE_URL", "https://koda.example.com/some/path"),
+        pytest.raises(web.HTTPFound) as redirect,
+    ):
+        await control_plane_api.handle_oauth_callback_route(request)
+
+    assert redirect.value.location == (
+        f"https://koda.example.com/oauth/callback?status=error&error={callback_result['error']}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_callback_failure_without_configured_origin_answers_json() -> None:
+    async def fake_callback(state: str, code: str, error: str | None = None):
+        return {"success": False, "error": "access_denied"}
+
+    request = _Request(
+        query={"state": "state-1", "error": "access_denied", "frontend_callback_uri": "https://evil.example/steal"},
+    )
+    with (
+        patch("koda.services.mcp_oauth.handle_oauth_callback", side_effect=fake_callback),
+        patch("koda.config.MCP_OAUTH_CALLBACK_BASE_URL", ""),
+    ):
+        response = await control_plane_api.handle_oauth_callback_route(request)
+
+    assert response.status == 400
+    assert json.loads(response.text)["error"] == "access_denied"
+
+
+@pytest.mark.asyncio
+async def test_mcp_oauth_callback_failure_error_code_is_query_encoded() -> None:
+    async def fake_callback(state: str, code: str, error: str | None = None):
+        return {"success": False, "error": "access_denied&next=https://evil.example"}
+
+    request = _Request(query={"state": "state-1", "error": "x"})
+    with (
+        patch("koda.services.mcp_oauth.handle_oauth_callback", side_effect=fake_callback),
+        patch("koda.config.MCP_OAUTH_CALLBACK_BASE_URL", "https://koda.example.com"),
+        pytest.raises(web.HTTPFound) as redirect,
+    ):
+        await control_plane_api.handle_oauth_callback_route(request)
+
+    assert redirect.value.location == (
+        "https://koda.example.com/oauth/callback?status=error&error=access_denied%26next%3Dhttps%3A%2F%2Fevil.example"
+    )

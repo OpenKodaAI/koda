@@ -7,7 +7,6 @@ import argparse
 import asyncio
 import json
 import sys
-import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -21,6 +20,60 @@ CHANNEL_GATEWAY_SMOKE_SCHEMA_VERSION = "channel_gateway_smoke.v1"
 
 class ChannelGatewaySmokeError(RuntimeError):
     """Raised when the channel gateway smoke cannot prove the contract."""
+
+
+class InMemoryChannelGatewayBackend:
+    """The primary backend's channel gateway rows, kept in memory for offline runs.
+
+    The gateway persists only through the primary backend, so the offline smoke and
+    the unit tests hand it this store. Rows behave like the Postgres tables: one row
+    per identity, unknown sender and pairing code, and an append-only event log.
+    """
+
+    def __init__(self) -> None:
+        self.identities: dict[tuple[str, str], dict[str, Any]] = {}
+        self.unknown_senders: dict[tuple[str, str], dict[str, Any]] = {}
+        self.pairing_codes: dict[tuple[str, str], dict[str, Any]] = {}
+        self.events: list[dict[str, Any]] = []
+        self.identity_writes = 0
+
+    async def upsert_channel_gateway_identity(self, agent_id: str, record: dict[str, Any]) -> None:
+        self.identities[(agent_id, str(record["identity_id"]))] = dict(record)
+        self.identity_writes += 1
+
+    async def list_channel_gateway_identities(self, agent_id: str) -> list[dict[str, Any]]:
+        return [dict(row) for (agent, _), row in self.identities.items() if agent == agent_id]
+
+    async def upsert_channel_unknown_sender(self, agent_id: str, payload: dict[str, Any]) -> None:
+        self.unknown_senders[(agent_id, str(payload["identity_id"]))] = dict(payload)
+
+    async def list_channel_unknown_senders(self, agent_id: str) -> list[dict[str, Any]]:
+        return [
+            dict(row)
+            for (agent, _), row in self.unknown_senders.items()
+            if agent == agent_id and row.get("status") == "pending"
+        ]
+
+    async def delete_channel_unknown_sender(self, agent_id: str, identity_id: str) -> None:
+        row = self.unknown_senders.get((agent_id, identity_id))
+        if row is not None:
+            row["status"] = "resolved"
+
+    async def upsert_channel_pairing_code(self, agent_id: str, payload: dict[str, Any]) -> None:
+        self.pairing_codes[(agent_id, str(payload["pairing_code_id"]))] = dict(payload)
+
+    async def list_channel_pairing_codes(self, agent_id: str) -> list[dict[str, Any]]:
+        return [
+            dict(row) for (agent, _), row in self.pairing_codes.items() if agent == agent_id and not row.get("used_at")
+        ]
+
+    async def consume_channel_pairing_code(self, agent_id: str, pairing_code_id: str) -> None:
+        row = self.pairing_codes.get((agent_id, pairing_code_id))
+        if row is not None and not row.get("used_at"):
+            row["used_at"] = "used"
+
+    async def append_channel_gateway_event(self, agent_id: str, event_type: str, payload: dict[str, Any]) -> None:
+        self.events.append({"agent_id": agent_id, "event_type": event_type, **payload})
 
 
 def read_payload(path: Path) -> dict[str, Any]:
@@ -104,208 +157,203 @@ def execute_offline_smoke(payload: dict[str, Any]) -> dict[str, Any]:
     channel_type = str(scenario.get("channel_type") or "telegram")
     channel_id = str(scenario.get("channel_id") or "release-smoke")
 
-    old_root = gateway.STATE_ROOT_DIR
     old_primary = gateway._primary_backend
     old_observability = gateway._emit_observability
     results: list[dict[str, Any]] = []
-    with tempfile.TemporaryDirectory(prefix="koda-channel-gateway-smoke-") as tmp_dir:
-        gateway.STATE_ROOT_DIR = Path(tmp_dir)
-        gateway._primary_backend = lambda _agent_id: None
-        gateway._emit_observability = lambda *_args, **_kwargs: None
-        try:
-            unknown = _message(
+    backend = InMemoryChannelGatewayBackend()
+    gateway._primary_backend = lambda _agent_id: backend
+    gateway._emit_observability = lambda *_args, **_kwargs: None
+    try:
+        unknown = _message(
+            channel_type=channel_type,
+            channel_id=channel_id,
+            user_id="unknown-user",
+            text="hello from an unknown sender",
+        )
+        unknown_decision = gateway.evaluate_incoming_message(agent_id, unknown, legacy_allowed_user_ids=set())
+        results.append(
+            {
+                "step": "unknown_sender",
+                "decision": unknown_decision.decision,
+                "allowed": unknown_decision.allowed,
+                "reason_code": unknown_decision.reason_code,
+            }
+        )
+
+        code = gateway.create_pairing_code(agent_id, channel_type=channel_type, created_by="release-smoke")
+        paired = gateway.evaluate_incoming_message(
+            agent_id,
+            _message(
                 channel_type=channel_type,
                 channel_id=channel_id,
-                user_id="unknown-user",
-                text="hello from an unknown sender",
-            )
-            unknown_decision = gateway.evaluate_incoming_message(agent_id, unknown, legacy_allowed_user_ids=set())
-            results.append(
-                {
-                    "step": "unknown_sender",
-                    "decision": unknown_decision.decision,
-                    "allowed": unknown_decision.allowed,
-                    "reason_code": unknown_decision.reason_code,
-                }
-            )
+                user_id="paired-user",
+                text=str(code["code"]),
+            ),
+            legacy_allowed_user_ids=set(),
+        )
+        paired_next = gateway.evaluate_incoming_message(
+            agent_id,
+            _message(
+                channel_type=channel_type,
+                channel_id=channel_id,
+                user_id="paired-user",
+                text="real task after pairing",
+            ),
+            legacy_allowed_user_ids=set(),
+        )
+        results.append(
+            {
+                "step": "pairing",
+                "decision": paired.decision,
+                "allowed": paired.allowed,
+                "next_allowed": paired_next.allowed,
+                "reason_code": paired.reason_code,
+            }
+        )
 
-            code = gateway.create_pairing_code(agent_id, channel_type=channel_type, created_by="release-smoke")
-            paired = gateway.evaluate_incoming_message(
-                agent_id,
-                _message(
-                    channel_type=channel_type,
-                    channel_id=channel_id,
-                    user_id="paired-user",
-                    text=str(code["code"]),
-                ),
-                legacy_allowed_user_ids=set(),
-            )
-            paired_next = gateway.evaluate_incoming_message(
-                agent_id,
-                _message(
-                    channel_type=channel_type,
-                    channel_id=channel_id,
-                    user_id="paired-user",
-                    text="real task after pairing",
-                ),
-                legacy_allowed_user_ids=set(),
-            )
-            results.append(
-                {
-                    "step": "pairing",
-                    "decision": paired.decision,
-                    "allowed": paired.allowed,
-                    "next_allowed": paired_next.allowed,
-                    "reason_code": paired.reason_code,
-                }
-            )
-
-            approval_message = _message(
+        approval_message = _message(
+            channel_type=channel_type,
+            channel_id=channel_id,
+            user_id="approved-user",
+            text="please approve me",
+        )
+        approval_first = gateway.evaluate_incoming_message(agent_id, approval_message, legacy_allowed_user_ids=set())
+        gateway.approve_identity(agent_id, approval_first.identity_id, approved_by="release-smoke")
+        approval_second = gateway.evaluate_incoming_message(
+            agent_id,
+            _message(
                 channel_type=channel_type,
                 channel_id=channel_id,
                 user_id="approved-user",
-                text="please approve me",
-            )
-            approval_first = gateway.evaluate_incoming_message(
-                agent_id, approval_message, legacy_allowed_user_ids=set()
-            )
-            gateway.approve_identity(agent_id, approval_first.identity_id, approved_by="release-smoke")
-            approval_second = gateway.evaluate_incoming_message(
-                agent_id,
-                _message(
-                    channel_type=channel_type,
-                    channel_id=channel_id,
-                    user_id="approved-user",
-                    text="approved task",
-                ),
-                legacy_allowed_user_ids=set(),
-            )
-            results.append(
-                {
-                    "step": "approve",
-                    "decision": approval_second.decision,
-                    "allowed": approval_second.allowed,
-                    "reason_code": approval_second.reason_code,
-                }
-            )
+                text="approved task",
+            ),
+            legacy_allowed_user_ids=set(),
+        )
+        results.append(
+            {
+                "step": "approve",
+                "decision": approval_second.decision,
+                "allowed": approval_second.allowed,
+                "reason_code": approval_second.reason_code,
+            }
+        )
 
-            blocked_message = _message(
-                channel_type=channel_type,
-                channel_id=channel_id,
-                user_id="blocked-user",
-                text="block me",
-            )
-            blocked_first = gateway.evaluate_incoming_message(agent_id, blocked_message, legacy_allowed_user_ids=set())
-            gateway.block_identity(agent_id, blocked_first.identity_id, blocked_by="release-smoke")
-            blocked_second = gateway.evaluate_incoming_message(agent_id, blocked_message, legacy_allowed_user_ids=set())
-            results.append(
-                {
-                    "step": "block",
-                    "decision": blocked_second.decision,
-                    "allowed": blocked_second.allowed,
-                    "reason_code": blocked_second.reason_code,
-                }
-            )
+        blocked_message = _message(
+            channel_type=channel_type,
+            channel_id=channel_id,
+            user_id="blocked-user",
+            text="block me",
+        )
+        blocked_first = gateway.evaluate_incoming_message(agent_id, blocked_message, legacy_allowed_user_ids=set())
+        gateway.block_identity(agent_id, blocked_first.identity_id, blocked_by="release-smoke")
+        blocked_second = gateway.evaluate_incoming_message(agent_id, blocked_message, legacy_allowed_user_ids=set())
+        results.append(
+            {
+                "step": "block",
+                "decision": blocked_second.decision,
+                "allowed": blocked_second.allowed,
+                "reason_code": blocked_second.reason_code,
+            }
+        )
 
-            revoked_message = _message(
-                channel_type=channel_type,
-                channel_id=channel_id,
-                user_id="revoked-user",
-                text="allow then revoke",
-            )
-            revoked_first = gateway.evaluate_incoming_message(agent_id, revoked_message, legacy_allowed_user_ids=set())
-            gateway.approve_identity(agent_id, revoked_first.identity_id, approved_by="release-smoke")
-            gateway.revoke_identity(agent_id, revoked_first.identity_id, revoked_by="release-smoke")
-            revoked_second = gateway.evaluate_incoming_message(agent_id, revoked_message, legacy_allowed_user_ids=set())
-            results.append(
-                {
-                    "step": "revoke",
-                    "decision": revoked_second.decision,
-                    "allowed": revoked_second.allowed,
-                    "status": revoked_second.status,
-                    "reason_code": revoked_second.reason_code,
-                }
-            )
+        revoked_message = _message(
+            channel_type=channel_type,
+            channel_id=channel_id,
+            user_id="revoked-user",
+            text="allow then revoke",
+        )
+        revoked_first = gateway.evaluate_incoming_message(agent_id, revoked_message, legacy_allowed_user_ids=set())
+        gateway.approve_identity(agent_id, revoked_first.identity_id, approved_by="release-smoke")
+        gateway.revoke_identity(agent_id, revoked_first.identity_id, revoked_by="release-smoke")
+        revoked_second = gateway.evaluate_incoming_message(agent_id, revoked_message, legacy_allowed_user_ids=set())
+        results.append(
+            {
+                "step": "revoke",
+                "decision": revoked_second.decision,
+                "allowed": revoked_second.allowed,
+                "status": revoked_second.status,
+                "reason_code": revoked_second.reason_code,
+            }
+        )
 
-            group_text = str(_as_dict(scenario.get("group_mention")).get("text") or "@koda route this to the room")
-            unmentioned_group_message = _message(
-                channel_type=channel_type,
-                channel_id="group-room",
-                user_id="group-user",
-                text=str(_as_dict(scenario.get("group_unmentioned")).get("text") or "route this to the room"),
-                is_group=True,
-                message_id="group-msg-0",
-            )
-            results.append(
-                {
-                    "step": "group_unmentioned",
-                    "contains_mention": "@" in unmentioned_group_message.text,
-                    "is_group": unmentioned_group_message.channel.is_group,
-                    "delivered": False,
-                }
-            )
+        group_text = str(_as_dict(scenario.get("group_mention")).get("text") or "@koda route this to the room")
+        unmentioned_group_message = _message(
+            channel_type=channel_type,
+            channel_id="group-room",
+            user_id="group-user",
+            text=str(_as_dict(scenario.get("group_unmentioned")).get("text") or "route this to the room"),
+            is_group=True,
+            message_id="group-msg-0",
+        )
+        results.append(
+            {
+                "step": "group_unmentioned",
+                "contains_mention": "@" in unmentioned_group_message.text,
+                "is_group": unmentioned_group_message.channel.is_group,
+                "delivered": False,
+            }
+        )
 
-            group_message = _message(
-                channel_type=channel_type,
-                channel_id="group-room",
-                user_id="group-user",
-                text=group_text,
-                is_group=True,
-                message_id="group-msg-1",
+        group_message = _message(
+            channel_type=channel_type,
+            channel_id="group-room",
+            user_id="group-user",
+            text=group_text,
+            is_group=True,
+            message_id="group-msg-1",
+        )
+        group_first = gateway.evaluate_incoming_message(agent_id, group_message, legacy_allowed_user_ids=set())
+        gateway.approve_identity(agent_id, group_first.identity_id, approved_by="release-smoke")
+        group_delivery = _run(
+            _manager_callback_decision(
+                agent_id=agent_id,
+                message=group_message,
             )
-            group_first = gateway.evaluate_incoming_message(agent_id, group_message, legacy_allowed_user_ids=set())
-            gateway.approve_identity(agent_id, group_first.identity_id, approved_by="release-smoke")
-            group_delivery = _run(
-                _manager_callback_decision(
-                    agent_id=agent_id,
-                    message=group_message,
-                )
-            )
-            results.append(
-                {
-                    "step": "group_mention",
-                    "contains_mention": "@" in group_text,
-                    "is_group": group_message.channel.is_group,
-                    **group_delivery,
-                }
-            )
+        )
+        results.append(
+            {
+                "step": "group_mention",
+                "contains_mention": "@" in group_text,
+                "is_group": group_message.channel.is_group,
+                **group_delivery,
+            }
+        )
 
-            room = _as_dict(scenario.get("room"))
-            expected_squad_id = str(room.get("squad_id") or "build")
-            binding_squad_id = str(room.get("binding_squad_id") or expected_squad_id)
-            participants = [str(item) for item in _as_list(room.get("participants")) if str(item)]
-            expected_target = str(_as_dict(scenario.get("group_mention")).get("target_agent_id") or "FE")
-            results.append(
-                {
-                    "step": "room_squad_routing",
-                    "workspace_id": str(room.get("workspace_id") or "acme"),
-                    "squad_id": expected_squad_id,
-                    "binding_matches_room": binding_squad_id == expected_squad_id,
-                    "target_is_participant": expected_target in participants,
-                }
-            )
+        room = _as_dict(scenario.get("room"))
+        expected_squad_id = str(room.get("squad_id") or "build")
+        binding_squad_id = str(room.get("binding_squad_id") or expected_squad_id)
+        participants = [str(item) for item in _as_list(room.get("participants")) if str(item)]
+        expected_target = str(_as_dict(scenario.get("group_mention")).get("target_agent_id") or "FE")
+        results.append(
+            {
+                "step": "room_squad_routing",
+                "workspace_id": str(room.get("workspace_id") or "acme"),
+                "squad_id": expected_squad_id,
+                "binding_matches_room": binding_squad_id == expected_squad_id,
+                "target_is_participant": expected_target in participants,
+            }
+        )
 
-            reply_message = _message(
-                channel_type=channel_type,
-                channel_id="group-room",
-                user_id="group-user",
-                text="reply with requested evidence",
-                is_group=True,
-                message_id="group-msg-2",
-                reply_to_id="agent-msg-1",
-            )
-            reply_delivery = _run(_manager_callback_decision(agent_id=agent_id, message=reply_message))
-            results.append(
-                {
-                    "step": "reply_obligation_channel",
-                    "delivered": reply_delivery["delivered"],
-                    "reply_to_id": reply_delivery["reply_to_id"],
-                }
-            )
-        finally:
-            gateway.STATE_ROOT_DIR = old_root
-            gateway._primary_backend = old_primary
-            gateway._emit_observability = old_observability
+        reply_message = _message(
+            channel_type=channel_type,
+            channel_id="group-room",
+            user_id="group-user",
+            text="reply with requested evidence",
+            is_group=True,
+            message_id="group-msg-2",
+            reply_to_id="agent-msg-1",
+        )
+        reply_delivery = _run(_manager_callback_decision(agent_id=agent_id, message=reply_message))
+        results.append(
+            {
+                "step": "reply_obligation_channel",
+                "delivered": reply_delivery["delivered"],
+                "reply_to_id": reply_delivery["reply_to_id"],
+            }
+        )
+    finally:
+        gateway._primary_backend = old_primary
+        gateway._emit_observability = old_observability
 
     return {
         "schema_version": CHANNEL_GATEWAY_SMOKE_SCHEMA_VERSION,

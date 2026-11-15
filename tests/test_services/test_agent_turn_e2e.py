@@ -9,7 +9,9 @@ edges are replaced:
   ``claude`` entry of ``llm_runner._HTTP_PROVIDER_RUNNERS``, so capability
   checks, ``run_llm_streaming``, provider fallback, the agent tool loop and
   the retry loop above it are production code;
-* Telegram: ``tests.fakes.telegram.FakeBot`` records what is delivered.
+* Telegram: ``tests.fakes.telegram.FakeBot`` records what is delivered;
+* the response cache, in the runtime-environments scenario only: ``_StubCache``
+  holds one answer, so a cache hit runs without loading the cache's embedding model.
 
 No function on the orchestration path is patched; tests only set
 configuration (the retry back-off, the squad stores' database URL) and reset
@@ -26,6 +28,7 @@ import contextlib
 import json
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import asyncpg
@@ -51,7 +54,7 @@ _TABLES = (
     "scheduled_jobs",
 )
 _TURN_TIMEOUT_S = 30.0
-_USER_IDS = frozenset({910001, 910002, 910003, 910004, 910005, 910006})
+_USER_IDS = frozenset({910001, 910002, 910003, 910004, 910005, 910006, 910007, 910008, 910009})
 
 
 async def _drain_background_work() -> None:
@@ -295,6 +298,64 @@ async def test_success_delivers_the_answer_and_persists_the_completed_task(
     assert trace["assistant"]["response_text"] == "Paris is the capital of France."
 
 
+class _StubCache:
+    """The response cache, holding an answer for one question (the cache, like the provider, is an edge)."""
+
+    _initialized = True
+
+    def __init__(self, query: str, response: str) -> None:
+        self._query = query
+        self._response = response
+
+    async def lookup(self, query: str, user_id: int, **_kwargs: Any) -> Any:
+        from koda.services.cache_manager import CacheLookupResult
+
+        if query != self._query:
+            return None
+        return CacheLookupResult(
+            cache_id=1, response=self._response, match_type="exact", similarity=1.0, original_cost_usd=0.01
+        )
+
+    async def store(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+async def test_light_task_and_cache_hit_complete_with_runtime_environments_enabled(
+    agent_db: str, queue_state: None, application: FakeApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M6-E1-T8 (D-064): with ``RUNTIME_ENVIRONMENTS_ENABLED`` a light task gets no runtime environment.
+
+    It has no kernel-backed terminal, so the terminal check, which applies only to a task with an
+    environment, must not fail it after the provider answered. A question answered from the cache
+    runs no provider, and completes too.
+    """
+    from koda.services import cache_manager
+    from koda.services import queue_manager as qm
+
+    monkeypatch.setattr(qm, "RUNTIME_ENVIRONMENTS_ENABLED", True)
+    cached_answer = "Rome is the capital of Italy, and has been since 1871."
+    monkeypatch.setattr(
+        cache_manager, "get_cache_manager", lambda: _StubCache("What is the capital of Italy?", cached_answer)
+    )
+    user_id = chat_id = 910007
+    provider = StubProvider([ProviderTurn(text="Paris is the capital of France.", cost_usd=0.01)]).install(monkeypatch)
+
+    answered_id = await _send(application, user_id=user_id, chat_id=chat_id, text="What is the capital of France?")
+    await _wait_for_worker(user_id)
+    cached_id = await _send(
+        application, user_id=user_id, chat_id=chat_id, text="What is the capital of Italy?", message_id=2
+    )
+    await _wait_for_worker(user_id)
+
+    assert [call.query for call in provider.calls] == ["What is the capital of France?"]
+    for task_id in (answered_id, cached_id):
+        row = await _task_row(agent_db, task_id)
+        assert (row["status"], row["error_message"]) == ("completed", None)
+    bot: FakeBot = application.bot
+    answers = [message.text or "" for message in bot.visible(chat_id)]
+    assert [answer.split("\n")[0] for answer in answers] == ["Paris is the capital of France.", cached_answer]
+
+
 async def test_retryable_provider_error_is_retried_then_dead_lettered(
     agent_db: str,
     queue_state: None,
@@ -407,6 +468,57 @@ async def test_read_tool_called_through_agent_cmd_feeds_its_result_back_to_the_p
     assert "Stretch break" in step["output"]
 
 
+async def test_write_task_completes_when_knowledge_is_disabled(
+    agent_db: str, queue_state: None, application: FakeApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M6-E1-T5 (F-MEM-28): without knowledge no answer can cite a source, so the grounding gate is skipped.
+
+    The gate judges every task with a write step. Here the step is a ``file_write`` that the default
+    integration policy blocks; the gate counts it all the same. Before, the task was finalised as
+    ``needs_review`` and its answer replaced by "Nao posso confirmar a conclusao operacional com
+    seguranca...", because there was no knowledge resolution to ground it.
+    """
+    from koda.knowledge import config as knowledge_config
+    from koda.services import queue_manager
+
+    monkeypatch.setattr(knowledge_config, "KNOWLEDGE_ENABLED", False)
+    # Only the gate is skipped: the answer is still evaluated and the action plan still built.
+    real_service = queue_manager._get_knowledge_orchestration_service()
+    plan_payloads: list[dict[str, Any]] = []
+
+    def build_plan_payload(**kwargs: Any) -> dict[str, Any]:
+        payload = real_service.build_plan_payload(**kwargs)
+        plan_payloads.append(payload)
+        return payload
+
+    service = SimpleNamespace(evaluate_response=real_service.evaluate_response, build_plan_payload=build_plan_payload)
+    monkeypatch.setattr(queue_manager, "_get_knowledge_orchestration_service", lambda: service)
+    user_id = chat_id = 910008
+    provider = StubProvider(
+        [
+            ProviderTurn(
+                text='Writing it. <agent_cmd tool="file_write">{"path": "notes.txt", "content": "hello"}</agent_cmd>',
+                session_id="prov-sess-write",
+            ),
+            ProviderTurn(text="I could not save the note: writing files is not allowed here."),
+        ]
+    ).install(monkeypatch)
+
+    task_id = await _send(application, user_id=user_id, chat_id=chat_id, text="Save a note saying hello")
+    await _wait_for_worker(user_id)
+
+    assert len(provider.calls) >= 2
+    [step] = (await _execution_trace(agent_db, task_id))["tools"]
+    assert (step["tool"], step["metadata"]["write"]) == ("file_write", True)
+    row = await _task_row(agent_db, task_id)
+    assert (row["status"], row["error_message"]) == ("completed", None)
+    bot: FakeBot = application.bot
+    answer = bot.visible(chat_id)[-1]
+    assert (answer.text or "").startswith("I could not save the note: writing files is not allowed here.")
+    [plan] = plan_payloads
+    assert {"answer_trace", "judge_result"} <= set(plan)
+
+
 _CANCEL_REASON = "Cancelled by /cancel command."
 
 
@@ -436,7 +548,10 @@ class _CancelScenario:
             app, user_id=self.user_id, chat_id=self.chat_id, text="Quick question", message_id=2
         )
 
-    async def assert_first_cancelled_and_second_answered(self, dsn: str) -> dict[str, Any]:
+    async def assert_first_cancelled_and_second_answered(
+        self, dsn: str, *, command_replies: tuple[str, ...] = ()
+    ) -> dict[str, Any]:
+        """``command_replies``: the replies to commands sent between the two messages, in order."""
         await _wait_for_worker(self.user_id)
         assert self.provider.cancelled_turns == 1
         assert [call.query for call in self.provider.calls] == ["Write a long report", "Quick question"]
@@ -451,7 +566,8 @@ class _CancelScenario:
 
         # Nothing of the cancelled turn stays visible: no partial output, answer or failure notice.
         bot: FakeBot = self.application.bot
-        feedback, answer = bot.visible(self.chat_id)
+        feedback, *replies, answer = bot.visible(self.chat_id)
+        assert tuple(reply.text for reply in replies) == command_replies
         assert feedback.text == (
             "Received your message and queued it. I'll process it once the current task finishes. "
             f"Reference: #{self.second_id}."
@@ -486,41 +602,21 @@ async def test_cancel_stops_the_running_light_task_and_the_worker_runs_the_next_
         await _stop_worker(scenario.user_id)
 
 
-class RuntimeStoreCannotSeeTask(AssertionError):
-    """The runtime store reads ``tasks`` with a different ``agent_id`` casing than the task writer uses."""
-
-
-@pytest.mark.xfail(
-    strict=True,
-    raises=RuntimeStoreCannotSeeTask,
-    reason=(
-        "New defect found by M0-E3-T2, not yet registered (no D- id or owning task; D-061 and M2-E3-T5 cover "
-        "the memory-engine join, not this): koda/state/history_store.py _current_agent_scope writes "
-        "tasks.agent_id upper-cased ('AGENT_A') while koda/services/runtime/postgres_store.py _agent_scope "
-        "reads it lower-cased ('agent_a'). Every RuntimeController task lookup on Postgres misses, so "
-        "/cancel <id> answers 'Task #N not found.' and bare /cancel answers 'Nothing running.' while the "
-        "task keeps running and delivers its answer: the D-009 fix is unreachable from /cancel on Postgres."
-    ),
-)
 async def test_cancel_command_stops_the_running_light_task_on_postgres(
     agent_db: str, queue_state: None, application: FakeApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """``/cancel <id>``: the Telegram command cancels through ``RuntimeController.cancel_task``."""
+    """``/cancel <id>``: the Telegram command cancels through ``RuntimeController.cancel_task``.
+
+    The runtime store finds the task row ``koda.state.history_store`` wrote (D-293).
+    """
     from koda.services.runtime import get_runtime_controller
 
     scenario = _CancelScenario(application, monkeypatch, user_id=910006)
     try:
         await scenario.start()
-        controller = get_runtime_controller()
-        result = await controller.cancel_task(
+        result = await get_runtime_controller().cancel_task(
             task_id=scenario.first_id, actor="telegram_command", reason=_CANCEL_REASON
         )
-        if result is None and controller.store.get_task_runtime(scenario.first_id) is None:
-            row = await _task_row(agent_db, scenario.first_id)
-            raise RuntimeStoreCannotSeeTask(
-                f"task {scenario.first_id} exists with agent_id={row['agent_id']!r} and status={row['status']!r}, "
-                f"but the runtime store looks it up with agent_id={controller.store._agent_scope!r}"
-            )
         assert result == {
             "ok": True,
             "action": "cancelled",
@@ -529,6 +625,55 @@ async def test_cancel_command_stops_the_running_light_task_on_postgres(
             "final_phase": "cancelled_retained",
         }
         cancelled = await scenario.assert_first_cancelled_and_second_answered(agent_db)
+        assert cancelled["current_phase"] == "cancelled_retained"
+    finally:
+        await _stop_worker(scenario.user_id)
+
+
+@pytest.mark.parametrize(
+    ("with_task_id", "reply"),
+    [
+        (True, "Task #{task_id} cancelled. Final phase: cancelled_retained."),
+        (False, "Cancelled 1 task(s)."),
+    ],
+    ids=["cancel_task_id", "cancel_all"],
+)
+async def test_cancel_telegram_handler_stops_the_running_light_task_on_postgres(
+    agent_db: str,
+    queue_state: None,
+    application: FakeApplication,
+    monkeypatch: pytest.MonkeyPatch,
+    with_task_id: bool,
+    reply: str,
+) -> None:
+    """``/cancel`` and ``/cancel <id>`` through the Telegram handler ``cmd_cancel`` (D-293).
+
+    Before D-293 the runtime store looked ``tasks`` up with a lower-case
+    ``agent_id`` the task writer never uses: ``/cancel <id>`` answered "Task #N
+    not found." and ``/cancel`` "Nothing running." while the turn kept running
+    and delivered its answer. The second message is still queued, so ``/cancel``
+    without an id stops only the running turn.
+    """
+    import koda.auth as auth_mod
+    from koda.handlers.commands import cmd_cancel
+
+    scenario = _CancelScenario(application, monkeypatch, user_id=910009)
+    # The sender is an allowed user, as on a configured deployment.
+    monkeypatch.setattr(auth_mod, "ALLOWED_USER_IDS", {scenario.user_id})
+    try:
+        await scenario.start()
+        args = [str(scenario.first_id)] if with_task_id else []
+        command = fake_text_update(
+            application.bot,
+            user_id=scenario.user_id,
+            chat_id=scenario.chat_id,
+            text=" ".join(["/cancel", *args]),
+            message_id=3,
+        )
+        await cmd_cancel(command, SimpleNamespace(args=args))
+        expected = reply.format(task_id=scenario.first_id)
+        assert application.bot.messages[-1].text == expected
+        cancelled = await scenario.assert_first_cancelled_and_second_answered(agent_db, command_replies=(expected,))
         assert cancelled["current_phase"] == "cancelled_retained"
     finally:
         await _stop_worker(scenario.user_id)
