@@ -639,3 +639,78 @@ async def test_list_tasks_reads_one_coordination_cycle(stores: tuple[SquadThread
     cycle = await tasks.list_tasks(thread_id=thread_id, coordination_parent_message_id=parent)
 
     assert sorted(task.id for task in cycle) == sorted(task_ids.values())
+
+
+@pytest.fixture
+def fresh_queues(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Module queue state of the runtime, empty for the test and restored after it."""
+    from koda.services import queue_manager as qm
+
+    for name in ("_user_queues", "_queue_workers", "_user_queue_task_ids", "_user_tasks", "_squad_turn_claims"):
+        monkeypatch.setattr(qm, name, {}, raising=False)
+
+
+async def _queue_turn_here(*, thread_id: str, task_id: str, agent_id: str, parent: str) -> None:
+    """Queue the task's turn on this runtime's per-user queue, behind turns that keep it waiting."""
+    from collections import defaultdict
+    from types import SimpleNamespace
+
+    from koda.services import queue_manager as qm
+
+    with (
+        patch.object(qm, "create_task", MagicMock(return_value=601)),
+        patch.object(qm, "_persist_runtime_queue_item", AsyncMock()),
+        patch.object(qm, "_ensure_queue_worker", AsyncMock()),
+    ):
+        await qm.enqueue_squad_agent_task(
+            application=SimpleNamespace(user_data=defaultdict(dict), bot=None),
+            user_id=42,
+            chat_id=-42,
+            query_text="task request",
+            executing_agent_id=agent_id,
+            squad_thread_id=thread_id,
+            squad_task_id=task_id,
+            parent_message_id=parent,
+        )
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_task_whose_turn_waits_or_runs_here_keeps_its_claim_past_its_ttl(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock, fresh_queues: None
+) -> None:
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from koda.services import queue_manager as qm
+
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    await _queue_turn_here(thread_id=thread_id, task_id=task_ids["QA"], agent_id="QA", parent=parent)
+    router = _router(threads, tasks)
+
+    # The turn waits behind others in the serial per-user queue for longer than the claim TTL.
+    await _expire_claim(tasks, task_ids["QA"])
+    assert (await router.sweep_once()).expired_claims == []
+    waiting = await tasks.get_task(task_ids["QA"])
+    assert waiting is not None and waiting.status == "claimed" and waiting.assigned_agent_id == "QA"
+    assert waiting.claim_expires_at is not None and waiting.claim_expires_at > datetime.now(UTC)
+
+    # The turn itself runs for longer than the claim TTL.
+    async def _long_turn(*_args: Any, **_kwargs: Any) -> None:
+        await _expire_claim(tasks, task_ids["QA"])
+        assert (await router.sweep_once()).expired_claims == []
+
+    with patch.object(qm, "_execute_single_task", AsyncMock(side_effect=_long_turn)) as execute:
+        await qm._process_queue(42, SimpleNamespace(user_data={}, bot=None, application=None))
+    execute.assert_awaited_once()
+
+    # The task was never dispatched a second time, nor escalated, while its turn was alive here.
+    assert turn_stubs.await_count == 0
+    running = await tasks.get_task(task_ids["QA"])
+    assert running is not None and running.status == "claimed"
+    assert "claim_expiry_count" not in running.metadata
+
+    # Once no turn of it is queued or running here, its claim expires as a silent worker's does.
+    await _expire_claim(tasks, task_ids["QA"])
+    assert [claim.task_id for claim in (await router.sweep_once()).expired_claims] == [task_ids["QA"]]

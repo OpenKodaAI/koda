@@ -1446,6 +1446,52 @@ _agent_id_label = AGENT_ID or "default"
 _cancelled_task_ids: set[int] = set()
 # The reason given for each cancelled queued task, recorded when the worker discards it.
 _cancelled_task_reasons: dict[int, str] = {}
+# Runtime task id -> (squad task id, executing agent) of each squad turn on this runtime's queues,
+# from the moment it is queued until the worker is done with it (D-097).
+_squad_turn_claims: dict[int, tuple[str, str]] = {}
+
+
+def _track_squad_turn_claim(task_id: int | None, raw_item: Any) -> None:
+    """Remember a queued squad turn whose task claim this runtime renews while the turn is alive."""
+    if task_id is None or not isinstance(raw_item, dict):
+        return
+    squad_task_id = str(raw_item.get("squad_task_id") or "").strip()
+    agent_id = str(raw_item.get("executing_agent_id") or AGENT_ID or "default").strip()
+    if squad_task_id and agent_id:
+        _squad_turn_claims[int(task_id)] = (squad_task_id, agent_id)
+
+
+def active_squad_turn_claims() -> list[tuple[str, str]]:
+    """The ``(squad task id, agent)`` claims of the squad turns queued or running on this runtime.
+
+    The squad router renews them before it sweeps expired claims, so a turn that waits behind
+    others in the serial per-user queue, or runs for longer than ``SQUAD_CLAIM_TTL_S``, is not
+    dispatched a second time or escalated while it is alive (D-097).
+    """
+    return list(dict.fromkeys(_squad_turn_claims.values()))
+
+
+async def _squad_turn_refusal_at_pickup(raw_item: Any) -> str | None:
+    """Why the squad turn the worker just took may not run, or None when it may (D-075).
+
+    Checked when the per-user worker takes the item, so a turn queued while its thread was open,
+    or recovered from the persisted queue after a restart, runs no turn once the thread is paused
+    or its spend reached its cap. A thread that cannot be read is left to the run's own checks.
+    """
+    if not isinstance(raw_item, dict):
+        return None
+    thread_id = str(raw_item.get("squad_thread_id") or "").strip()
+    if not thread_id:
+        return None
+    try:
+        from koda.squads import get_squad_thread_store, squad_thread_turn_refusal
+
+        thread_store = get_squad_thread_store()
+        thread = await thread_store.get_thread(thread_id) if thread_store is not None else None
+    except Exception:
+        log.exception("squad_turn_pickup_check_failed", thread_id=thread_id)
+        return None
+    return squad_thread_turn_refusal(thread) if thread is not None else None
 
 
 async def _cancel_pending_task(task: asyncio.Task[Any] | None) -> None:
@@ -2395,6 +2441,7 @@ async def enqueue_squad_agent_task(
         "delegation_origin_agent_id": delegation_origin_agent_id,
         "telegram_message_thread_id": telegram_message_thread_id,
     }
+    _track_squad_turn_claim(task_id, raw_item)
     queue = get_queue(user_id)
     await queue.put(raw_item)
     _track_queued_task_id(user_id, task_id)
@@ -9465,6 +9512,22 @@ async def _process_queue(user_id: int, context: BotContext) -> None:
                         )
                     continue
 
+                if (refusal := await _squad_turn_refusal_at_pickup(raw_item)) is not None:
+                    # The thread was paused or spent after this turn was queued, or before a restart
+                    # recovered it: it runs no turn (D-075). This is not a failed turn, so no failed
+                    # task result is posted; its task keeps its claim, which the squad router
+                    # dispatches again once the thread runs.
+                    log.info("squad_turn_refused_at_pickup", task_id=task_id, user_id=user_id, reason=refusal)
+                    if task_id is not None:
+                        update_task_status(
+                            task_id,
+                            "cancelled",
+                            error_message=refusal,
+                            completed_at=datetime.now(UTC).isoformat(),
+                        )
+                        _update_runtime_queue_status(task_id, "cancelled", last_error=refusal)
+                    continue
+
                 if isinstance(raw_item, dict):
                     chat_id = int(raw_item.get("chat_id") or 0)
                     query_text = str(raw_item.get("query_text") or "continuation")
@@ -9531,6 +9594,9 @@ async def _process_queue(user_id: int, context: BotContext) -> None:
                     error=exc,
                 )
             finally:
+                # Its turn is over here, so this runtime stops renewing its task's claim (D-097).
+                if task_id is not None:
+                    _squad_turn_claims.pop(task_id, None)
                 queue.task_done()
                 _sync_user_queue_observability(user_id)
     finally:
@@ -9696,6 +9762,7 @@ async def recover_pending_tasks(application: Any) -> dict[str, int]:
         lease_owner = str(task_row.get("lease_owner") or "").strip()
         if lease_owner:
             release_task_lease(task_id, lease_owner)
+        _track_squad_turn_claim(task_id, raw_item)
         queue = get_queue(user_id)
         await queue.put(raw_item)
         _track_queued_task_id(user_id, task_id)

@@ -614,6 +614,22 @@ async def dispatch_squad_turn(
                 dispatched=True,
                 enqueued_task_id=int(task_id),
             )
+        except SquadThreadNotRunnableError as exc:
+            # The queue's own read found the thread paused or spent after this one was taken: a
+            # deliberate refusal, which the room's pause event explains, not a failed delivery.
+            log.info(
+                "squad_turn_refused",
+                thread_id=thread_id,
+                target_agent_id=target_agent_id,
+                squad_task_id=squad_task_id,
+                reason=str(exc),
+            )
+            return SquadTurnDispatchResult(
+                target_agent_id=target_agent_id,
+                transport="local_queue",
+                dispatched=False,
+                error=str(exc),
+            )
         except Exception as exc:
             await record_squad_dispatch_unavailable(
                 thread_store,

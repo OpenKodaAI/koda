@@ -240,3 +240,154 @@ async def test_a_thread_the_budget_sweep_pauses_runs_no_turn(threads: SquadThrea
     history = await threads.thread_history(thread_id=thread.id, limit=20)
     [event] = [m for m in history if (m.get("metadata") or {}).get("event_type") == "budget_exceeded_auto_pause"]
     assert event["metadata"]["reason"] == "budget"
+
+
+@pytest.mark.asyncio
+async def test_a_turn_the_queue_refuses_is_not_recorded_as_a_dispatch_failure() -> None:
+    from koda.squads import SquadThreadNotRunnableError
+
+    # The thread read before dispatch is open; the queue's own read finds it paused.
+    application = SimpleNamespace(user_data=defaultdict(dict), bot=object())
+    enqueue = AsyncMock(side_effect=SquadThreadNotRunnableError("thread is paused"))
+    thread_store = AsyncMock()
+    with (
+        patch(
+            "koda.services.runtime.get_runtime_controller",
+            return_value=SimpleNamespace(_application=application),
+        ),
+        patch("koda.services.queue_manager.enqueue_squad_agent_task", enqueue),
+    ):
+        result = await dispatch_squad_turn(
+            target_agent_id="FE",
+            thread=_thread(),
+            thread_store=thread_store,
+            query_text="Build the UI",
+            parent_message_id="msg-1",
+            squad_task_id="task-1",
+        )
+
+    assert result.dispatched is False
+    assert result.error == "thread is paused"
+    # A deliberate refusal posts no agent_dispatch_unavailable event: the room already says why.
+    thread_store.post_thread_message.assert_not_awaited()
+
+
+@pytest.fixture
+def fresh_queues(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Module queue state of the runtime, empty for the test and restored after it."""
+    from koda.services import queue_manager as qm
+
+    for name in ("_user_queues", "_queue_workers", "_user_queue_task_ids", "_user_tasks", "_squad_turn_claims"):
+        monkeypatch.setattr(qm, name, {}, raising=False)
+
+
+async def _queue_a_squad_turn(thread_id: str) -> int:
+    """Queue a squad turn on the owner's per-user queue while no worker runs it yet."""
+    from koda.services import queue_manager as qm
+
+    with (
+        patch.object(qm, "create_task", Mock(return_value=501)),
+        patch.object(qm, "_persist_runtime_queue_item", AsyncMock()),
+        patch.object(qm, "_ensure_queue_worker", AsyncMock()),
+    ):
+        return await qm.enqueue_squad_agent_task(
+            application=SimpleNamespace(user_data=defaultdict(dict), bot=None),
+            user_id=42,
+            chat_id=-42,
+            query_text="Build the UI",
+            executing_agent_id="FE",
+            squad_thread_id=thread_id,
+            squad_task_id="00000000-0000-0000-0000-0000000000f1",
+        )
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("state", "reason"), [("paused", "thread is paused"), ("spent", "budget cap"), ("open", None)])
+async def test_the_queue_worker_runs_no_turn_of_a_thread_that_stopped_after_the_turn_was_queued(
+    threads: SquadThreadStore, fresh_queues: None, state: str, reason: str | None
+) -> None:
+    from koda.services import queue_manager as qm
+
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        budget_usd_cap=Decimal("1.00"),
+    )
+    execute = AsyncMock()
+    update_status = Mock()
+    record_failed = AsyncMock()
+    with patch("koda.squads.get_squad_thread_store", return_value=threads):
+        assert await _queue_a_squad_turn(thread.id) == 501
+        # The operator pauses, or a turn ahead of this one spends the cap, before the worker gets here.
+        if state == "paused":
+            await threads.update_thread_status(thread.id, "paused")
+        elif state == "spent":
+            await _spend(threads, thread.id, "1.00")
+        with (
+            patch.object(qm, "_execute_single_task", execute),
+            patch.object(qm, "update_task_status", update_status),
+            patch.object(qm, "_update_runtime_queue_status", Mock()),
+            patch.object(qm, "_record_failed_squad_task_turn", record_failed),
+        ):
+            await qm._process_queue(42, SimpleNamespace(user_data={}, bot=None, application=None))
+
+    if reason is None:
+        execute.assert_awaited_once()
+        return
+    execute.assert_not_awaited()
+    [call] = update_status.call_args_list
+    assert call.args == (501, "cancelled")
+    assert reason in str(call.kwargs["error_message"])
+    # A deliberate refusal is not a failed turn: no failed task result, and the task keeps its claim
+    # for the router to dispatch again once the thread runs.
+    record_failed.assert_not_awaited()
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_concurrent_pauses_report_one_open_to_paused_transition(threads: SquadThreadStore) -> None:
+    thread = await threads.create_thread(workspace_id="acme", squad_id="build", title="room")
+
+    results = await asyncio.gather(
+        threads.transition_thread_status(thread.id, "paused"),
+        threads.transition_thread_status(thread.id, "paused"),
+    )
+
+    assert sorted(previous for _thread, previous in results) == ["open", "paused"]
+    assert all(updated.status == "paused" for updated, _previous in results)
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_the_budget_sweep_pauses_a_room_reopened_at_its_cap_again_and_says_so(threads: SquadThreadStore) -> None:
+    from koda.squads.router import SquadRouter
+
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        budget_usd_cap=Decimal("1.00"),
+    )
+    await _spend(threads, thread.id, "1.00")
+    task_store = AsyncMock()
+    task_store.sweep_expired_claims = AsyncMock(return_value=[])
+    router = SquadRouter(task_store=task_store, thread_store=threads)
+    assert (await router.sweep_once()).budget_auto_pauses == 1
+
+    # The operator reopens the room; the cap cannot be raised from the dashboard.
+    await threads.update_thread_status(thread.id, "open")
+    assert (await router.sweep_once()).budget_auto_pauses == 1
+
+    paused = await threads.get_thread(thread.id)
+    assert paused is not None and paused.status == "paused"
+    history = await threads.thread_history(thread_id=thread.id, limit=20)
+    events = [m for m in history if (m.get("metadata") or {}).get("event_type") == "budget_exceeded_auto_pause"]
+    assert len(events) == 2
+    # Nothing else changed, so a third sweep posts nothing.
+    assert (await router.sweep_once()).budget_auto_pauses == 0

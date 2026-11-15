@@ -461,6 +461,31 @@ class SquadTaskStore:
             deliverables=deliverables,
         )
 
+    async def renew_claims(self, *, claims: list[tuple[str, str]], ttl_seconds: int) -> int:
+        """Push back the deadline of each ``(task_id, agent_id)`` claim that agent still holds.
+
+        A runtime renews the claims of the tasks whose turns it has queued or is running, so the
+        sweep reverts only a silent worker's claim (D-097). Only the deadline moves: the version
+        and ``updated_at`` stay, so a status change in flight is not made stale. Returns the
+        number of claims renewed.
+        """
+        if not claims:
+            return 0
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            result = await conn.execute(
+                f"""UPDATE "{self._schema}"."squad_tasks" AS t
+                       SET claim_expires_at = NOW() + ($3 || ' seconds')::interval
+                      FROM unnest($1::uuid[], $2::text[]) AS c(task_id, agent_id)
+                     WHERE t.id = c.task_id
+                       AND t.assigned_agent_id = c.agent_id
+                       AND t.status = 'claimed'""",
+                [task_id for task_id, _agent_id in claims],
+                [agent_id for _task_id, agent_id in claims],
+                str(max(1, int(ttl_seconds))),
+            )
+        return int(str(result).split()[-1] or 0)
+
     async def sweep_expired_claims(self, *, batch_size: int = 50, squad_id: str | None = None) -> list[ExpiredClaim]:
         """Atomically revert tasks past their claim TTL back to ``pending``.
 

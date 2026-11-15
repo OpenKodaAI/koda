@@ -902,3 +902,47 @@ async def test_inbound_auth_failure_denies_before_squad_lookup(monkeypatch: pyte
     mock_binding.get_for_chat.assert_not_called()
     mock_thread_store.find_by_telegram_topic.assert_not_called()
     mock_enqueue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("overrides", "reason"),
+    [
+        ({"status": "paused"}, "thread is paused"),
+        ({"budget_usd_cap": Decimal("1.00"), "cost_usd_accum": Decimal("1.00")}, "budget cap"),
+    ],
+)
+async def test_inbound_to_a_thread_that_runs_no_turns_routes_nothing_and_says_why(
+    overrides: dict[str, object], reason: str
+) -> None:
+    update = _make_inbound_update(text="@fe please style this")
+    ctx = _make_context()
+    ctx.application = MagicMock()
+    mock_binding = AsyncMock()
+    mock_binding.get_for_chat = AsyncMock(return_value=_binding())
+    mock_thread_store = AsyncMock()
+    mock_thread_store.find_by_telegram_topic = AsyncMock(return_value=_thread(coordinator_agent_id="PM", **overrides))
+    mock_thread_store.post_thread_message = AsyncMock(return_value=42)
+    mock_thread_store.list_participants = AsyncMock(
+        return_value=[MagicMock(agent_id="FE", left_at=None), MagicMock(agent_id="PM", left_at=None)]
+    )
+    notify = AsyncMock()
+    mock_enqueue = AsyncMock()
+    mock_bus = AsyncMock()
+    with (
+        patch("koda.squads.get_telegram_binding_service", return_value=mock_binding),
+        patch("koda.squads.get_squad_thread_store", return_value=mock_thread_store),
+        patch("koda.handlers.squad_handlers._notify_squad_targets", notify),
+        patch("koda.services.queue_manager.enqueue_squad_agent_task", mock_enqueue),
+        patch("koda.agents.get_message_bus", return_value=mock_bus),
+    ):
+        await route_squad_supergroup_message(update, ctx)
+
+    # No routing, planning, task or claim: nothing would run, and nothing runs later on reopen.
+    notify.assert_not_awaited()
+    mock_thread_store.post_thread_message.assert_not_awaited()
+    mock_enqueue.assert_not_awaited()
+    mock_bus.send.assert_not_awaited()
+    # The user is told why in the topic.
+    update.message.reply_text.assert_awaited_once()
+    assert reason in update.message.reply_text.await_args.args[0]

@@ -1242,8 +1242,12 @@ async def post_dashboard_squad_thread_message_route(request: web.Request) -> web
         return access_resp
     if access is None:
         return web.json_response({"error": "thread access unavailable"}, status=503)
-    if access.thread.status != "open":
-        return web.json_response({"error": f"thread is {access.thread.status}"}, status=409)
+    from koda.squads import squad_thread_turn_refusal
+
+    # A room that is not open, or whose spend reached its budget cap, runs no turn, so the post
+    # is refused with the reason rather than stored for a dispatch that is refused (D-075).
+    if (refusal := squad_thread_turn_refusal(access.thread)) is not None:
+        return web.json_response({"error": refusal}, status=409)
     raw_from = payload.get("from_agent")
     ctx = _request_auth_context(request)
     from_agent = f"operator:{ctx.username}" if ctx is not None else "operator"
@@ -2550,15 +2554,16 @@ async def patch_dashboard_room_route(request: web.Request) -> web.Response:
     new_status = payload.get("status")
     if new_status is not None:
         new_status = str(new_status).strip()
-        previous = await thread_store.get_thread(thread_id) if new_status == "paused" else None
         try:
-            await thread_store.update_thread_status(thread_id, new_status)
+            _updated, previous_status = await thread_store.transition_thread_status(thread_id, new_status)
         except KeyError:
             return web.json_response({"error": "thread not found"}, status=404)
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
-        if previous is not None and previous.status != "paused":
-            # The room says why it stopped, as the budget auto-pause does (D-075).
+        if new_status == "paused" and previous_status == "open":
+            # The room says why it stopped, as the budget auto-pause does (D-075). Only the change
+            # that found the room open under the row lock posts it, so concurrent pauses, or a
+            # pause racing the budget sweep's, post one event.
             auth = _request_auth_context(request)
             paused_by = f"operator:{auth.username}" if auth is not None else "operator"
             metadata = {"event_type": "thread_paused", "reason": "operator", "paused_by": paused_by}

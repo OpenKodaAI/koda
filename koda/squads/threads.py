@@ -337,6 +337,15 @@ class SquadThreadStore:
         return _row_to_thread(row)
 
     async def update_thread_status(self, thread_id: str, new_status: str) -> ThreadDescriptor:
+        thread, _previous = await self.transition_thread_status(thread_id, new_status)
+        return thread
+
+    async def transition_thread_status(self, thread_id: str, new_status: str) -> tuple[ThreadDescriptor, str]:
+        """Set the thread's status; returns the thread and the status the row lock found.
+
+        A caller that reacts to a transition (the operator pause event) compares that status
+        with ``new_status``: of two concurrent changes to the same status, one finds the old status.
+        """
         if new_status not in _VALID_STATUSES:
             raise ValueError(f"status must be one of {sorted(_VALID_STATUSES)}")
         pool = await self._ensure_pool()
@@ -353,7 +362,7 @@ class SquadThreadStore:
                     f'SELECT * FROM "{self._schema}"."squad_threads" WHERE id = $1',
                     thread_id,
                 )
-                return _row_to_thread(row)
+                return _row_to_thread(row), str(current)
             if new_status not in _ALLOWED_TRANSITIONS.get(current, set()):
                 raise ValueError(f"illegal transition {current!r} -> {new_status!r}")
             extras = ""
@@ -369,7 +378,7 @@ class SquadThreadStore:
                 thread_id,
                 new_status,
             )
-        return _row_to_thread(row)
+        return _row_to_thread(row), str(current)
 
     async def add_participant(
         self,

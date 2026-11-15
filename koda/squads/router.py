@@ -124,6 +124,17 @@ class SquadRouter:
                 await task
 
     async def _sweep_claims(self, *, squad_id: str | None = None) -> list[ExpiredClaim]:
+        # This runtime's queued and running squad turns renew their tasks' claims first, so only a
+        # silent worker's claim expires; each runtime's router renews its own turns' claims (D-097).
+        from koda.services.queue_manager import active_squad_turn_claims
+
+        if claims := active_squad_turn_claims():
+            from koda.config import SQUAD_CLAIM_TTL_S
+
+            try:
+                await self._task_store.renew_claims(claims=claims, ttl_seconds=SQUAD_CLAIM_TTL_S)
+            except Exception:
+                log.exception("squad_router_claim_renewal_failed", squad_id=squad_id)
         try:
             expired = await self._task_store.sweep_expired_claims(batch_size=self._batch_size, squad_id=squad_id)
         except Exception:
@@ -429,9 +440,13 @@ class SquadRouter:
                         thread_id,
                     )
                 alerts += 1
-            if ratio >= 1.0 and row["status"] == "open" and not metadata.get("budget_auto_paused"):
+            # An open thread at its cap runs no turn, so it is paused, and the room told why, each
+            # time it is open there: a room an operator reopened at its cap is paused again. Only
+            # the UPDATE that paused it posts the event, so a pause that won the race (the
+            # operator's, or another runtime's sweep) is not announced twice.
+            if ratio >= 1.0 and row["status"] == "open":
                 async with pool.acquire() as conn:
-                    await conn.execute(
+                    paused = await conn.execute(
                         f"""UPDATE "{schema}"."squad_threads"
                                SET status = 'paused',
                                    metadata_json = metadata_json || '{{"budget_auto_paused": true}}'::jsonb,
@@ -440,6 +455,8 @@ class SquadRouter:
                                AND status = 'open'""",
                         thread_id,
                     )
+                if paused != "UPDATE 1":
+                    continue
                 await self._emit_system_event(
                     thread_id=thread_id,
                     event_type="budget_exceeded_auto_pause",

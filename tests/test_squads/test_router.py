@@ -124,6 +124,30 @@ async def test_sweep_open_handoffs_needs_a_thread_store() -> None:
     assert await SquadRouter(task_store=AsyncMock())._sweep_open_handoffs() == 0
 
 
+@pytest.mark.asyncio
+async def test_the_budget_sweep_posts_no_pause_event_when_its_pause_changed_no_row() -> None:
+    # The SELECT read the thread open at its cap, but an operator paused it before the UPDATE ran:
+    # the UPDATE changes no row (the fake answers "UPDATE 0"), so the operator's event is the only one.
+    conn = _FakeConnection(
+        rows=[
+            {
+                "id": "thread-1",
+                "status": "open",
+                "budget_usd_cap": 1.0,
+                "cost_usd_accum": 1.0,
+                "metadata_json": {"budget_alert_80_sent": True},
+            }
+        ]
+    )
+    thread_store = _FakeThreadStore(conn)
+    router = SquadRouter(task_store=AsyncMock(), thread_store=thread_store)  # type: ignore[arg-type]
+
+    assert await router._sweep_budgets() == (0, 0)
+
+    thread_store.post_thread_message.assert_not_awaited()
+    thread_store.notify_event.assert_not_awaited()
+
+
 def test_sweep_report_reverted_count_default() -> None:
     assert SweepReport().reverted_count == 0
 
