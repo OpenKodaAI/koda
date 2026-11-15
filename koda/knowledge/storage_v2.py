@@ -177,7 +177,7 @@ class KnowledgeStorageV2:
         self._require_primary_backend()
         if not self.primary_read_enabled():
             # OFF mode keeps no artifact evidence. Before M4-E1-T6 this read
-            # selected from artifact_evidence_nodes, which no schema creates.
+            # selected from a table no schema creates.
             return []
         return await self._postgres.list_artifact_derivative_rows(
             task_id=task_id,

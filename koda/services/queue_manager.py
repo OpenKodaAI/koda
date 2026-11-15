@@ -1043,22 +1043,6 @@ def _serialize_knowledge_hits(hits: list[Any]) -> list[dict[str, Any]]:
     return serialized
 
 
-async def _persist_artifact_evidence_nodes(
-    query_context: Any | None,
-    dossiers: list[Any],
-) -> None:
-    if query_context is None or not dossiers:
-        return
-    try:
-        from koda.knowledge import get_knowledge_manager
-
-        km = get_knowledge_manager()
-        if km.initialized:
-            await km.ingest_artifact_dossiers(query_context, dossiers)
-    except Exception:
-        log.exception("artifact_evidence_import_error")
-
-
 def _policy_to_dict(policy: Any | None) -> dict[str, Any]:
     if policy is None:
         return {}
@@ -3427,8 +3411,6 @@ async def _prepare_query_context(
         permission_mode = "plan"
         _query_warnings.append("artifact dossier incomplete; writes blocked")
         ungrounded_operationally = True
-
-    await _persist_artifact_evidence_nodes(knowledge_query_context, artifact_dossiers)
 
     try:
         from koda.services.agent_asset_registry import get_agent_asset_registry
