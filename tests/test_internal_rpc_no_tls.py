@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 from unittest.mock import patch
 
@@ -65,3 +66,21 @@ def test_no_channel_takes_a_tls_path(monkeypatch: pytest.MonkeyPatch) -> None:
     secure_aio.assert_not_called()
     assert [call.args[0] for call in insecure.call_args_list] == list(targets)
     assert [call.args[0] for call in insecure_aio.call_args_list] == list(targets)
+
+
+def test_rust_workspace_does_not_compile_tonic_tls() -> None:
+    # No sidecar terminates gRPC TLS any more, so tonic's rustls server stack
+    # must not be compiled in, by the workspace or by any crate.
+    rust = ROOT / "rust"
+    workspace = tomllib.loads((rust / "Cargo.toml").read_text())
+    tonic_specs = [workspace["workspace"]["dependencies"]["tonic"]]
+    for manifest in sorted(rust.glob("*/Cargo.toml")):
+        crate = tomllib.loads(manifest.read_text())
+        for table in ("dependencies", "dev-dependencies", "build-dependencies"):
+            spec = crate.get(table, {}).get("tonic")
+            if isinstance(spec, dict):
+                tonic_specs.append(spec)
+
+    assert len(tonic_specs) > 1
+    for spec in tonic_specs:
+        assert "tls" not in spec.get("features", [])
