@@ -293,6 +293,57 @@ async def test_a_delegation_result_that_races_the_timeout_is_not_kept(monkeypatc
     assert bus._delegation_data == {}
 
 
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_resolved_delegation_is_persisted_for_a_delegator_in_another_process(bus_factory) -> None:  # type: ignore[no-untyped-def]
+    """The write is kept alive until it is done, so a second bus instance reads the result (D-354)."""
+    import gc
+
+    caller = bus_factory()
+    worker = bus_factory()
+    request = DelegationRequest(from_agent="a", to_agent="b", task="x", timeout=10, request_id="req-gc")
+    delegation = asyncio.create_task(caller.delegate(request))
+    msg = await worker.receive("b", timeout=3)
+    assert msg is not None
+    await worker.ack("b", msg.message_id)
+
+    worker.resolve_delegation(
+        "req-gc", DelegationResult(request_id="req-gc", from_agent="b", to_agent="a", success=True, result="ok")
+    )
+    # Nothing else refers to the write: a collection before it runs does not drop it.
+    gc.collect()
+
+    result = await asyncio.wait_for(delegation, timeout=10)
+    assert result.success
+    assert result.result == "ok"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_delegation_result_write_is_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A delegator in another process reads only the persisted row, so a failed write is not silent (D-354)."""
+    from unittest.mock import AsyncMock, Mock
+
+    from koda.agents import postgres_message_bus
+
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    monkeypatch.setattr(bus, "_ensure_started", AsyncMock())
+    monkeypatch.setattr(bus, "_insert", AsyncMock(side_effect=RuntimeError("database down")))
+    log = Mock()
+    monkeypatch.setattr(postgres_message_bus, "log", log)
+
+    bus.resolve_delegation(
+        "req-1", DelegationResult(request_id="req-1", from_agent="worker", to_agent="caller", success=False)
+    )
+    for _ in range(50):
+        if log.exception.called:
+            break
+        await asyncio.sleep(0.01)
+
+    log.exception.assert_called_once()
+    assert log.exception.call_args.args == ("delegation_result_persist_failed",)
+    assert log.exception.call_args.kwargs["request_id"] == "req-1"
+
+
 @pytest.mark.asyncio
 async def test_a_delegation_request_persists_its_chain(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock

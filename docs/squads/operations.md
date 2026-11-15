@@ -15,7 +15,10 @@ Production rollout should be canary-first:
    command surfaces.
 4. Switch the canary workspace to `INTER_AGENT_BUS_BACKEND=postgres`.
 5. Watch inbox depth, delivery attempts, delegation latency, router sweep
-   counts, dead-letter rows, Telegram retry counts, and SSE client count.
+   counts, dead-letter rows, Telegram retry counts, and SSE client count. A
+   delegator in another process reads its result only from Postgres, so a
+   result the bus could not write is logged as
+   `delegation_result_persist_failed`, with its `request_id`.
 6. Promote more workspaces only after no unauthorized access, duplicate run, or
    dead-letter growth is observed.
 

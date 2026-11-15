@@ -63,6 +63,7 @@ class PostgresMessageBus:
         self._cursors: dict[str, int] = {}
         self._delegation_results: dict[str, asyncio.Event] = {}
         self._delegation_data: dict[str, DelegationResult] = {}
+        self._persist_tasks: set[asyncio.Task[None]] = set()
         self._local_log: list[AgentMessage] = []
         self._max_local_log = 500
         self._started = False
@@ -538,7 +539,17 @@ class PostgresMessageBus:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(self._persist_delegation_result(request_id, result))
+        # The loop holds a task only weakly: the write is held here until it is done, since a
+        # delegator in another process reads only the persisted row (D-354).
+        task = loop.create_task(self._persist_delegation_result_or_log(request_id, result))
+        self._persist_tasks.add(task)
+        task.add_done_callback(self._persist_tasks.discard)
+
+    async def _persist_delegation_result_or_log(self, request_id: str, result: DelegationResult) -> None:
+        try:
+            await self._persist_delegation_result(request_id, result)
+        except Exception:
+            log.exception("delegation_result_persist_failed", request_id=request_id)
 
     async def _persist_delegation_result(self, request_id: str, result: DelegationResult) -> None:
         await self._ensure_started()
