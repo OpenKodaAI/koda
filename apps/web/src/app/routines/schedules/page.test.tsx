@@ -81,6 +81,9 @@ const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => 
       page: { limit: 25, offset: 0, returned: items.length, next_offset: null, has_more: false },
     });
   }
+  if (url.includes("/schedules/preview?")) {
+    return json({ next_runs: [] });
+  }
   if (url.endsWith("/api/runtime/agents/alpha/schedules/7") && (init?.method ?? "GET") === "GET") {
     return json(detail());
   }

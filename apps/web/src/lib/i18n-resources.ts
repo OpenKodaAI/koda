@@ -15784,6 +15784,7 @@ mutableResources["en-US"].translation.routines = {
       daily: "Daily",
       weekly: "Weekly",
       monthly: "Monthly",
+      interval: "Interval",
       custom: "Custom",
     },
     presetsLabel: "Recurrence preset",
@@ -15801,6 +15802,8 @@ mutableResources["en-US"].translation.routines = {
     },
     customCron: "Cron expression",
     customCronHint: "Each cell uses cron syntax: number, range, list, step, or * for any.",
+    interval: "Every",
+    intervalHint: "Seconds, or a number followed by m, h or d (for example 30m).",
     cron: {
       minute: "min",
       hour: "hour",
@@ -15907,6 +15910,7 @@ mutableResources["en-US"].translation.routines = {
       dateTimeRequired: "Pick a date and time for the one-shot run.",
       customCronRequired: "Provide a cron expression.",
       cronInvalid: "Cron expression has invalid values.",
+      intervalRequired: "Provide an interval.",
     },
   },
 };
@@ -15961,6 +15965,7 @@ mutableResources["pt-BR"].translation.routines = {
       daily: "Diária",
       weekly: "Semanal",
       monthly: "Mensal",
+      interval: "Intervalo",
       custom: "Personalizada",
     },
     presetsLabel: "Recorrência",
@@ -15978,6 +15983,8 @@ mutableResources["pt-BR"].translation.routines = {
     },
     customCron: "Expressão cron",
     customCronHint: "Cada célula aceita sintaxe cron: número, intervalo, lista, passo, ou * para qualquer.",
+    interval: "A cada",
+    intervalHint: "Segundos, ou um número seguido de m, h ou d (por exemplo 30m).",
     cron: {
       minute: "min",
       hour: "hora",
@@ -16084,6 +16091,7 @@ mutableResources["pt-BR"].translation.routines = {
       dateTimeRequired: "Escolha uma data e hora para a execução única.",
       customCronRequired: "Forneça uma expressão cron.",
       cronInvalid: "A expressão cron tem valores inválidos.",
+      intervalRequired: "Informe um intervalo.",
     },
   },
 };
@@ -16138,6 +16146,7 @@ mutableResources["es-ES"].translation.routines = {
       daily: "Diaria",
       weekly: "Semanal",
       monthly: "Mensual",
+      interval: "Intervalo",
       custom: "Personalizada",
     },
     presetsLabel: "Recurrencia",
@@ -16155,6 +16164,8 @@ mutableResources["es-ES"].translation.routines = {
     },
     customCron: "Expresión cron",
     customCronHint: "Cada celda acepta sintaxis cron: número, rango, lista, paso o * para cualquiera.",
+    interval: "Cada",
+    intervalHint: "Segundos, o un número seguido de m, h o d (por ejemplo 30m).",
     cron: {
       minute: "min",
       hour: "hora",
@@ -16261,6 +16272,7 @@ mutableResources["es-ES"].translation.routines = {
       dateTimeRequired: "Elige fecha y hora para la ejecución única.",
       customCronRequired: "Proporciona una expresión cron.",
       cronInvalid: "La expresión cron tiene valores inválidos.",
+      intervalRequired: "Indica un intervalo.",
     },
   },
 };
@@ -16315,6 +16327,7 @@ mutableResources["fr-FR"].translation.routines = {
       daily: "Quotidien",
       weekly: "Hebdomadaire",
       monthly: "Mensuel",
+      interval: "Intervalle",
       custom: "Personnalisé",
     },
     presetsLabel: "Récurrence",
@@ -16332,6 +16345,8 @@ mutableResources["fr-FR"].translation.routines = {
     },
     customCron: "Expression cron",
     customCronHint: "Chaque cellule accepte la syntaxe cron : nombre, plage, liste, pas, ou * pour tous.",
+    interval: "Toutes les",
+    intervalHint: "Secondes, ou un nombre suivi de m, h ou d (par exemple 30m).",
     cron: {
       minute: "min",
       hour: "heure",
@@ -16438,6 +16453,7 @@ mutableResources["fr-FR"].translation.routines = {
       dateTimeRequired: "Choisissez une date et une heure.",
       customCronRequired: "Indiquez une expression cron.",
       cronInvalid: "L'expression cron contient des valeurs invalides.",
+      intervalRequired: "Indiquez un intervalle.",
     },
   },
 };
@@ -16492,6 +16508,7 @@ mutableResources["de-DE"].translation.routines = {
       daily: "Täglich",
       weekly: "Wöchentlich",
       monthly: "Monatlich",
+      interval: "Intervall",
       custom: "Benutzerdefiniert",
     },
     presetsLabel: "Wiederholung",
@@ -16509,6 +16526,8 @@ mutableResources["de-DE"].translation.routines = {
     },
     customCron: "Cron-Ausdruck",
     customCronHint: "Jede Zelle akzeptiert Cron-Syntax: Zahl, Bereich, Liste, Schritt oder * für alles.",
+    interval: "Alle",
+    intervalHint: "Sekunden oder eine Zahl gefolgt von m, h oder d (zum Beispiel 30m).",
     cron: {
       minute: "min",
       hour: "Std.",
@@ -16615,6 +16634,7 @@ mutableResources["de-DE"].translation.routines = {
       dateTimeRequired: "Wähle Datum und Uhrzeit für die einmalige Ausführung.",
       customCronRequired: "Gib einen Cron-Ausdruck an.",
       cronInvalid: "Cron-Ausdruck enthält ungültige Werte.",
+      intervalRequired: "Gib ein Intervall an.",
     },
   },
 };

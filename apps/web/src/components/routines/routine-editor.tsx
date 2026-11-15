@@ -30,6 +30,11 @@ import {
 } from "@/hooks/use-animated-presence";
 import { ConnectorPicker } from "@/components/routines/connector-picker";
 import {
+  useSchedulePreview,
+  type SchedulePreview,
+  type SchedulePreviewRequest,
+} from "@/hooks/use-schedule-preview";
+import {
   RecurrencePicker,
   type RecurrencePickerValue,
 } from "@/components/routines/recurrence-picker";
@@ -37,7 +42,8 @@ import {
   cronToPreset,
   defaultRecurrenceFields,
   presetToCron,
-  validateCron,
+  utcToZonedWallTime,
+  zonedWallTimeToUtc,
 } from "@/lib/routines/recurrence";
 import type { AgentDisplay } from "@/lib/agent-constants";
 import type { CronJob, ScheduleDetail } from "@/lib/types";
@@ -54,7 +60,7 @@ export interface RoutineFormPayload {
   agentId: string;
   modelPreference: string | null;
   scheduleMode: "once" | "recurring";
-  triggerType: "one_shot" | "cron";
+  triggerType: "one_shot" | "cron" | "interval";
   scheduleExpr: string;
   oneShotAt: string | null;
   timezone: string;
@@ -92,11 +98,26 @@ interface FormState extends RecurrencePickerValue {
   allowedPaths: string;
 }
 
-function defaultDateTimeLocal(now: Date = new Date()): string {
-  const next = new Date(now.getTime() + 60 * 60 * 1000);
-  next.setMinutes(0, 0, 0);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}T${pad(next.getHours())}:${pad(next.getMinutes())}`;
+// One-shot times are edited as wall-clock times in the routine's timezone (D-081).
+function wallTimeIn(date: Date, timezone: string): string {
+  try {
+    return utcToZonedWallTime(date, timezone);
+  } catch {
+    return utcToZonedWallTime(date, "UTC");
+  }
+}
+
+function wallTimeToIso(wall: string, timezone: string): string {
+  try {
+    return zonedWallTimeToUtc(wall, timezone).toISOString();
+  } catch {
+    return zonedWallTimeToUtc(wall, "UTC").toISOString();
+  }
+}
+
+function defaultDateTimeLocal(timezone: string, now: Date = new Date()): string {
+  // The next full hour, at least an hour from now, in the routine's timezone.
+  return `${wallTimeIn(new Date(now.getTime() + 60 * 60 * 1000), timezone).slice(0, 14)}00`;
 }
 
 // The routine name is stored in `payload.name` (D-063). Runtime responses put the query text in
@@ -132,13 +153,10 @@ function jobPermissions(job: CronJob): Pick<FormState, "readOnly" | "allowedPath
   };
 }
 
-function jobOneShotAt(job: CronJob | null | undefined): string {
-  if (!job?.schedule_expr) return defaultDateTimeLocal();
-  const trimmed = job.schedule_expr.trim();
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) return defaultDateTimeLocal();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${parsed.getFullYear()}-${pad(parsed.getMonth() + 1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+function jobOneShotAt(job: CronJob, timezone: string): string {
+  const parsed = new Date((job.schedule_expr ?? "").trim());
+  if (!job.schedule_expr || Number.isNaN(parsed.getTime())) return defaultDateTimeLocal(timezone);
+  return wallTimeIn(parsed, timezone);
 }
 
 function buildInitialState(
@@ -151,13 +169,16 @@ function buildInitialState(
   if (mode === "edit" && job) {
     const triggerType = (job.trigger_type ?? "interval").trim();
     const scheduleMode = triggerType === "one_shot" ? "once" : "recurring";
-    const cronExpr = (job.schedule_expr || job.cron_expression || "").trim();
-    const detected = scheduleMode === "recurring" ? cronToPreset(cronExpr) : null;
+    const timezone = job.timezone || defaultTimezone;
+    const scheduleExpr = (job.schedule_expr || job.cron_expression || "").trim();
+    // Interval jobs stay interval jobs (D-080); only cron expressions map onto the presets.
+    const isInterval = triggerType === "interval";
+    const detected = scheduleMode === "recurring" && !isInterval ? cronToPreset(scheduleExpr) : null;
     const recurrence = detected ?? {
       ...defaultRecurrenceFields(),
-      preset: "custom" as const,
+      preset: isInterval ? ("interval" as const) : ("custom" as const),
     };
-    const customCron = scheduleMode === "recurring" && !detected ? cronExpr : "";
+    const customCron = scheduleMode === "recurring" && !isInterval && !detected ? scheduleExpr : "";
 
     const notificationMode = ((job.notification_policy as { mode?: string } | undefined)?.mode ??
       "summary_complete") as NotificationMode;
@@ -170,10 +191,11 @@ function buildInitialState(
       agentId: job.bot_id ?? defaultAgentId ?? fallbackAgentId,
       modelPreference: job.model_preference ?? "",
       scheduleMode,
-      oneShotAt: scheduleMode === "once" ? jobOneShotAt(job) : defaultDateTimeLocal(),
+      oneShotAt: scheduleMode === "once" ? jobOneShotAt(job, timezone) : defaultDateTimeLocal(timezone),
       recurrence,
       customCron,
-      timezone: job.timezone || defaultTimezone,
+      intervalExpr: isInterval ? scheduleExpr : "",
+      timezone,
       connectors: [],
       notificationMode,
       verificationMode,
@@ -187,9 +209,10 @@ function buildInitialState(
     agentId: defaultAgentId ?? fallbackAgentId,
     modelPreference: "",
     scheduleMode: "recurring",
-    oneShotAt: defaultDateTimeLocal(),
+    oneShotAt: defaultDateTimeLocal(defaultTimezone),
     recurrence: defaultRecurrenceFields(),
     customCron: "",
+    intervalExpr: "",
     timezone: defaultTimezone,
     connectors: [],
     notificationMode: "summary_complete",
@@ -199,15 +222,21 @@ function buildInitialState(
   };
 }
 
+function recurringSchedule(state: FormState): Pick<SchedulePreviewRequest, "triggerType" | "scheduleExpr"> {
+  if (state.recurrence.preset === "interval") {
+    return { triggerType: "interval", scheduleExpr: state.intervalExpr.trim() };
+  }
+  if (state.recurrence.preset === "custom") {
+    return { triggerType: "cron", scheduleExpr: state.customCron.trim() };
+  }
+  return { triggerType: "cron", scheduleExpr: presetToCron(state.recurrence) };
+}
+
 function normalizePayload(state: FormState): RoutineFormPayload {
-  const triggerType: "one_shot" | "cron" =
-    state.scheduleMode === "once" ? "one_shot" : "cron";
-  const scheduleExpr =
+  const { triggerType, scheduleExpr } =
     state.scheduleMode === "once"
-      ? new Date(state.oneShotAt).toISOString()
-      : state.recurrence.preset === "custom"
-        ? state.customCron.trim()
-        : presetToCron(state.recurrence);
+      ? { triggerType: "one_shot" as const, scheduleExpr: wallTimeToIso(state.oneShotAt, state.timezone) }
+      : recurringSchedule(state);
 
   const allowedPaths = state.allowedPaths
     .split(/\r?\n/)
@@ -232,7 +261,8 @@ function normalizePayload(state: FormState): RoutineFormPayload {
   };
 }
 
-function validateStep(state: FormState, step: WizardStep): string | null {
+// "scheduleInvalid" shows the scheduler's own reason, from the schedule preview.
+function validateStep(state: FormState, step: WizardStep, preview: SchedulePreview): string | null {
   if (step === 1) {
     if (!state.agentId) return "agentRequired";
     if (!state.name.trim()) return "nameRequired";
@@ -246,18 +276,25 @@ function validateStep(state: FormState, step: WizardStep): string | null {
       state.recurrence.preset === "custom"
     ) {
       if (!state.customCron.trim()) return "customCronRequired";
-      if (validateCron(state.customCron)) return "cronInvalid";
     }
+    if (
+      state.scheduleMode === "recurring" &&
+      state.recurrence.preset === "interval" &&
+      !state.intervalExpr.trim()
+    ) {
+      return "intervalRequired";
+    }
+    if (state.scheduleMode === "recurring" && preview.status === "invalid") return "scheduleInvalid";
     return null;
   }
   return null;
 }
 
-function validateAll(state: FormState): string | null {
+function validateAll(state: FormState, preview: SchedulePreview): string | null {
   return (
-    validateStep(state, 1) ||
-    validateStep(state, 2) ||
-    validateStep(state, 3) ||
+    validateStep(state, 1, preview) ||
+    validateStep(state, 2, preview) ||
+    validateStep(state, 3, preview) ||
     null
   );
 }
@@ -300,9 +337,17 @@ export function RoutineEditor({
       oneShotAt: state.oneShotAt,
       recurrence: state.recurrence,
       customCron: state.customCron,
+      intervalExpr: state.intervalExpr,
       timezone: state.timezone,
     }),
-    [state.scheduleMode, state.oneShotAt, state.recurrence, state.customCron, state.timezone],
+    [
+      state.scheduleMode,
+      state.oneShotAt,
+      state.recurrence,
+      state.customCron,
+      state.intervalExpr,
+      state.timezone,
+    ],
   );
 
   const handleRecurrenceChange = useCallback((next: RecurrencePickerValue) => {
@@ -312,9 +357,19 @@ export function RoutineEditor({
       oneShotAt: next.oneShotAt,
       recurrence: next.recurrence,
       customCron: next.customCron,
+      intervalExpr: next.intervalExpr,
       timezone: next.timezone,
     }));
   }, []);
+
+  const previewRequest = useMemo((): SchedulePreviewRequest | null => {
+    if (!open || state.scheduleMode !== "recurring" || !state.agentId) return null;
+    const schedule = recurringSchedule(state);
+    if (!schedule.scheduleExpr) return null;
+    return { agentId: state.agentId, timezone: state.timezone, ...schedule };
+  }, [open, state]);
+  const preview = useSchedulePreview(previewRequest);
+  const allowInterval = mode === "edit" && job?.trigger_type === "interval";
 
   const handleConnectorsChange = useCallback((next: string[]) => {
     setState((prev) => ({ ...prev, connectors: next }));
@@ -324,7 +379,11 @@ export function RoutineEditor({
 
   const inlineError =
     errorMessage ||
-    (validationKey ? t(`routines.editor.validation.${validationKey}`) : null) ||
+    (validationKey === "scheduleInvalid"
+      ? preview.message || t("routines.editor.validation.cronInvalid")
+      : validationKey
+        ? t(`routines.editor.validation.${validationKey}`)
+        : null) ||
     null;
 
   const requestClose = useCallback(() => {
@@ -339,7 +398,7 @@ export function RoutineEditor({
   if (typeof document === "undefined") return null;
 
   function goNext() {
-    const error = validateStep(state, step);
+    const error = validateStep(state, step, preview);
     if (error) {
       setValidationKey(error);
       return;
@@ -356,12 +415,12 @@ export function RoutineEditor({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (disabled) return;
-    const error = validateAll(state);
+    const error = validateAll(state, preview);
     if (error) {
       setValidationKey(error);
       // Jump to the step that owns the error.
-      if (validateStep(state, 1)) setStep(1);
-      else if (validateStep(state, 2)) setStep(2);
+      if (validateStep(state, 1, preview)) setStep(1);
+      else if (validateStep(state, 2, preview)) setStep(2);
       return;
     }
     setValidationKey(null);
@@ -459,6 +518,8 @@ export function RoutineEditor({
                 <RecurrencePicker
                   value={recurrenceValue}
                   onChange={handleRecurrenceChange}
+                  preview={preview}
+                  allowInterval={allowInterval}
                   disabled={disabled}
                 />
               ) : null}

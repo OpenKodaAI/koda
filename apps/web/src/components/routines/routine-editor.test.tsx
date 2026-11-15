@@ -1,5 +1,5 @@
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { RoutineEditor } from "@/components/routines/routine-editor";
@@ -66,11 +66,33 @@ beforeAll(() => {
   }
 });
 
+// The schedule step asks the scheduler to validate and preview the schedule (D-080).
+let previewResponse: () => Response = () => json({ next_runs: [] });
+const previewFetch = vi.fn(async () => previewResponse());
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+function previewRequests() {
+  return previewFetch.mock.calls.map(([input]) => new URL(String(input), "http://localhost"));
+}
+
 beforeEach(() => {
   // The i18n provider persists the active language; reset it so each test renders the
   // language it asks for.
   window.localStorage.clear();
   document.cookie = `${LOCALE_COOKIE_KEY}=; path=/; max-age=0`;
+  previewResponse = () => json({ next_runs: [] });
+  previewFetch.mockClear();
+  vi.stubGlobal("fetch", previewFetch);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 const AGENTS: AgentDisplay[] = [
@@ -266,6 +288,124 @@ describe("RoutineEditor", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0].timezone).toBe("America/Sao_Paulo");
+  });
+
+  describe("schedule step (D-080, D-081)", () => {
+    function scheduledJob(overrides: Partial<CronJob>): CronJob {
+      return {
+        id: 9,
+        bot_id: "alpha",
+        user_id: 1,
+        chat_id: null,
+        cron_expression: "",
+        trigger_type: "cron",
+        schedule_expr: "",
+        timezone: "UTC",
+        command: "Sweep the docs",
+        description: "",
+        created_at: null,
+        enabled: 1,
+        status: "active",
+        work_dir: "/repo",
+        payload: { name: "Docs sweep", query: "Sweep the docs" },
+        ...overrides,
+      };
+    }
+
+    async function saveFromSchedule() {
+      fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+      fireEvent.click(await screen.findByRole("button", { name: /save/i }));
+    }
+
+    it("accepts a step cron and previews the scheduler's runs in the routine's zone", async () => {
+      previewResponse = () =>
+        json({
+          next_runs: [
+            "2026-12-01T12:00:00+00:00",
+            "2026-12-01T12:05:00+00:00",
+            "2026-12-01T12:10:00+00:00",
+          ],
+        });
+      const { onSubmit } = renderEditor({
+        mode: "edit",
+        job: scheduledJob({
+          schedule_expr: "*/5 * * * *",
+          cron_expression: "*/5 * * * *",
+          timezone: "America/Sao_Paulo",
+        }),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+
+      expect(await screen.findByText(/09:00/)).toBeInTheDocument();
+      expect(screen.getByText(/09:05/)).toBeInTheDocument();
+      const [request] = previewRequests();
+      expect(request.pathname).toBe("/api/runtime/agents/alpha/schedules/preview");
+      expect(request.searchParams.get("trigger_type")).toBe("cron");
+      expect(request.searchParams.get("schedule_expr")).toBe("*/5 * * * *");
+      expect(request.searchParams.get("timezone")).toBe("America/Sao_Paulo");
+
+      await saveFromSchedule();
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0][0]).toMatchObject({
+        triggerType: "cron",
+        scheduleExpr: "*/5 * * * *",
+        timezone: "America/Sao_Paulo",
+      });
+    });
+
+    it("blocks the schedule step with the scheduler's reason", async () => {
+      const reason = "Invalid schedule expression for cron: [61 * * * *] is not acceptable";
+      previewResponse = () => json({ error: reason }, 422);
+      const { onSubmit } = renderEditor({
+        mode: "edit",
+        job: scheduledJob({ schedule_expr: "61 * * * *", cron_expression: "61 * * * *" }),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+
+      expect(await screen.findByText(reason)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      await waitFor(() => expect(screen.getAllByText(reason)).toHaveLength(2));
+      expect(screen.queryByRole("button", { name: /save/i })).not.toBeInTheDocument();
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("keeps an interval trigger as an interval", async () => {
+      const { onSubmit } = renderEditor({
+        mode: "edit",
+        job: scheduledJob({ trigger_type: "interval", schedule_expr: "3600", cron_expression: "3600" }),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+
+      expect(await screen.findByDisplayValue("3600")).toBeInTheDocument();
+      await waitFor(() =>
+        expect(previewRequests().at(-1)?.searchParams.get("trigger_type")).toBe("interval"),
+      );
+      await saveFromSchedule();
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0][0]).toMatchObject({ triggerType: "interval", scheduleExpr: "3600" });
+    });
+
+    it("shows and saves a one-shot time in the routine's zone", async () => {
+      const { onSubmit } = renderEditor({
+        mode: "edit",
+        job: scheduledJob({
+          trigger_type: "one_shot",
+          schedule_expr: "2026-12-01T00:00:00+00:00",
+          cron_expression: "",
+          timezone: "Asia/Tokyo",
+        }),
+      });
+      fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+
+      expect(await screen.findByText("09:00")).toBeInTheDocument();
+      await saveFromSchedule();
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+      expect(onSubmit.mock.calls[0][0]).toMatchObject({
+        triggerType: "one_shot",
+        scheduleExpr: "2026-12-01T00:00:00.000Z",
+        timezone: "Asia/Tokyo",
+      });
+    });
   });
 
   // D-006 interim mitigation (M1-E8-T1): runs ignore read-only and allowed paths, so the
