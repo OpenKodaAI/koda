@@ -316,7 +316,14 @@ export function CommandBar({
           );
 
           if (isInline && typeof document !== "undefined" && anchorRect) {
-            return createPortal(dropdown, document.body);
+            // Portaled to <body>, the dropdown sits outside every landmark
+            // (axe region, D-333), so it brings its own named region.
+            return createPortal(
+              <div role="region" aria-label={placeholder}>
+                {dropdown}
+              </div>,
+              document.body,
+            );
           }
           return dropdown;
         })()

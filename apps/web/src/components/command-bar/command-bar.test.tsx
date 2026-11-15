@@ -197,6 +197,18 @@ describe("CommandBar empty query (D-332)", () => {
   });
 });
 
+describe("CommandBar inline dropdown landmark (D-333)", () => {
+  it("portals the dropdown inside a region named after the input", async () => {
+    // Portaled to <body>, the dropdown was outside every landmark (axe region).
+    const input = renderBar();
+    await userEvent.setup().click(input);
+    const listbox = await screen.findByRole("listbox");
+    const region = screen.getByRole("region", { name: "Search commands" });
+    expect(region.parentElement).toBe(document.body);
+    expect(region).toContainElement(listbox);
+  });
+});
+
 // M8-E5-T3: text in the palette stays on the type scale (12 / 13 / 14 …),
 // through Tailwind's text-xs or a --font-size-* token, with no arbitrary px
 // or rem size and nothing under the 12px floor. The global .eyebrow class

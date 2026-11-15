@@ -90,7 +90,9 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[18rem] p-3">
-        <header className="mb-2 flex items-center justify-between gap-2">
+        {/* A div, not <header>: the popover portals outside <main>, where a
+            header is a second banner landmark (D-333). */}
+        <div className="mb-2 flex items-center justify-between gap-2">
           <button
             type="button"
             onClick={() => setMonth((current) => subMonths(current, 1))}
@@ -110,7 +112,7 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
           >
             <ChevronRight className="icon-sm" strokeWidth={1.75} />
           </button>
-        </header>
+        </div>
         <div className="grid grid-cols-7 gap-1">
           {dayLabels.map((label, index) => (
             <span

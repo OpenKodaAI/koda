@@ -482,7 +482,9 @@ export function RoutineEditor({
             <X className="h-4 w-4" />
           </button>
 
-          <header className="shrink-0 px-7 pb-4 pt-7 pr-14">
+          {/* A div, not <header>: portaled outside <main>, a header is a second
+              banner landmark next to the workspace topbar (D-333). */}
+          <div className="shrink-0 px-7 pb-4 pt-7 pr-14">
             <h2
               id="routine-editor-title"
               className="m-0 text-[1.0625rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]"
@@ -507,7 +509,7 @@ export function RoutineEditor({
                 ))}
               </span>
             </p>
-          </header>
+          </div>
 
           <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
             <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-7 pb-6 pt-2">

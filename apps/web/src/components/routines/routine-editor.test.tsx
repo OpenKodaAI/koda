@@ -1,7 +1,8 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
+import { DatePicker } from "@/components/routines/date-picker";
 import { RoutineEditor } from "@/components/routines/routine-editor";
 import type { AgentDisplay } from "@/lib/agent-constants";
 import {
@@ -413,6 +414,33 @@ describe("RoutineEditor", () => {
     const rendered = document.body.textContent ?? "";
     expect(rendered).not.toContain(tr(language, "routines.editor.connectors.description"));
     expect(rendered).not.toContain(tr(language, "routines.editor.connectors.empty"));
+  });
+
+  it("adds no banner landmark next to the workspace topbar on any step (D-333)", async () => {
+    // The dialog portals outside <main>, so a <header> in it was a second banner.
+    renderEditor();
+    const dialog = await screen.findByRole("dialog");
+    const banners = () => within(dialog).queryAllByRole("banner").length + dialog.querySelectorAll("header").length;
+    expect(banners()).toBe(0);
+    fireEvent.change(screen.getByPlaceholderText(/Daily code review/i), { target: { value: "Daily review" } });
+    fireEvent.change(screen.getByPlaceholderText(/Describe what the agent should do/i), {
+      target: { value: "Look for regressions in main." },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+    expect(await screen.findByText(/schedule/i)).toBeInTheDocument();
+    expect(banners()).toBe(0);
+  });
+
+  it("opens the date picker without a banner landmark (D-333)", async () => {
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <DatePicker value={new Date(2026, 11, 1)} onChange={vi.fn()} />
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button"));
+    expect(await screen.findByRole("button", { name: /previous month/i })).toBeInTheDocument();
+    expect(screen.queryAllByRole("banner")).toHaveLength(0);
+    expect(document.querySelectorAll("header")).toHaveLength(0);
   });
 
   describe("schedule step (D-080, D-081)", () => {
