@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Clock } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
 
 interface TimePickerProps {
@@ -28,6 +29,7 @@ function parseTime(value: string): { hour: number; minute: number } {
 }
 
 export function TimePicker({ value, onChange, disabled = false, className }: TimePickerProps) {
+  const { t } = useAppI18n();
   const [open, setOpen] = useState(false);
   const { hour, minute } = parseTime(value);
   const display = `${pad(hour)}:${pad(minute)}`;
@@ -54,7 +56,7 @@ export function TimePicker({ value, onChange, disabled = false, className }: Tim
           type="button"
           disabled={disabled}
           className={cn(
-            "flex h-9 w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-primary)] outline-none",
+            "flex h-9 w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[color:var(--text-primary)] outline-none",
             "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             "border-[var(--border-subtle)] hover:border-[var(--border-strong)]",
             "focus-visible:border-[var(--accent)] data-[state=open]:border-[var(--accent)]",
@@ -63,13 +65,13 @@ export function TimePicker({ value, onChange, disabled = false, className }: Tim
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
-            <Clock className="icon-sm shrink-0 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+            <Clock className="icon-sm shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
             <span className="font-mono text-[0.875rem]">{display}</span>
           </span>
-          <ChevronDown className="icon-sm shrink-0 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+          <ChevronDown className="icon-sm shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[14rem] p-0">
+      <PopoverContent align="start" className="w-[14rem] p-0" aria-label={t("routines.editor.timeOfDay")}>
         <div className="grid grid-cols-2 divide-x divide-[var(--divider-hair)]">
           <div ref={hourListRef} className="max-h-[15rem] overflow-y-auto py-1">
             {HOURS.map((h) => {
@@ -84,8 +86,8 @@ export function TimePicker({ value, onChange, disabled = false, className }: Tim
                     "flex w-full items-center justify-center px-3 py-1.5 text-center font-mono text-[0.8125rem]",
                     "transition-[background-color,color] duration-[120ms]",
                     selected
-                      ? "bg-[var(--panel-strong)] text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+                      ? "bg-[var(--panel-strong)] text-[color:var(--text-primary)]"
+                      : "text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   {pad(h)}
@@ -106,8 +108,8 @@ export function TimePicker({ value, onChange, disabled = false, className }: Tim
                     "flex w-full items-center justify-center px-3 py-1.5 text-center font-mono text-[0.8125rem]",
                     "transition-[background-color,color] duration-[120ms]",
                     selected
-                      ? "bg-[var(--panel-strong)] text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+                      ? "bg-[var(--panel-strong)] text-[color:var(--text-primary)]"
+                      : "text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   {pad(m)}

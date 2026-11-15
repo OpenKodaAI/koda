@@ -77,7 +77,7 @@ export function TagInputField({
     <FormField label={label} description={description}>
       <div className="rounded-[var(--radius-shell)] border border-[var(--border-subtle)] bg-[var(--canvas)] p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <span className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
+          <span className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--text-quaternary)]">
             {t("generated.controlPlane.etiquetas_curtas_d7969da7")}
           </span>
           <button
@@ -106,7 +106,7 @@ export function TagInputField({
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.8, opacity: 0 }}
                 transition={{ duration: 0.15 }}
-                className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--surface-tint-strong)] pl-3 pr-1.5 py-1 text-xs text-[var(--text-secondary)]"
+                className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--surface-tint-strong)] pl-3 pr-1.5 py-1 text-xs text-[color:var(--text-secondary)]"
               >
                 {tag}
                 <button
@@ -115,7 +115,7 @@ export function TagInputField({
                     event.stopPropagation();
                     removeTag(index);
                   }}
-                  className="rounded-[var(--radius-pill)] p-1 transition-colors hover:bg-[var(--surface-hover-strong)] hover:text-[var(--tone-danger-text)]"
+                  className="rounded-[var(--radius-pill)] p-1 transition-colors hover:bg-[var(--surface-hover-strong)] hover:text-[color:var(--tone-danger-text)]"
                   aria-label={`${t("generated.controlPlane.remover_5465770e")} ${tag}`}
                 >
                   <X size={10} />
@@ -130,13 +130,13 @@ export function TagInputField({
               value={input}
               onChange={(event) => setInput(event.target.value)}
               onKeyDown={handleKeyDown}
-              className="min-w-[180px] flex-1 bg-transparent border-none outline-none text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+              className="min-w-[180px] flex-1 bg-transparent border-none outline-none text-sm text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)]"
               placeholder={values.length === 0 ? tl(placeholder) : t("generated.controlPlane.digite_e_pressione_enter_a2bf9a1f")}
             />
           ) : null}
         </div>
 
-        <span className="mt-3 block text-xs text-[var(--text-quaternary)]">
+        <span className="mt-3 block text-xs text-[color:var(--text-quaternary)]">
           {isFull
             ? t("generated.controlPlane.limite_de_count_itens_atingido_5489a1a8", { count: maxTags ?? 0 })
             : t("generated.controlPlane.pressione_enter_para_adicionar_ou_cole_vario_e2accc2a")}

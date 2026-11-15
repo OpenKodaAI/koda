@@ -377,7 +377,7 @@ export function AgentSwitcher({
           className={cn(
             "flex h-8 w-full min-w-[180px] max-w-[240px] items-center justify-between gap-2.5",
             "rounded-[calc(var(--radius-input)-4px)] bg-transparent px-2 text-left",
-            "transition-colors duration-[var(--transition-fast)]",
+            "transition-colors duration-[120ms] ease-[var(--ease-out-quart)]",
             "hover:bg-[var(--hover-tint)]",
             "disabled:cursor-not-allowed disabled:opacity-60",
             open && "bg-[var(--hover-tint)]",
@@ -409,18 +409,18 @@ export function AgentSwitcher({
                 />
               );
             })()}
-            <span className="block min-w-0 truncate text-sm font-medium text-[var(--text-primary)]">
+            <span className="block min-w-0 truncate text-sm font-medium text-[color:var(--text-primary)]">
               {summaryLabel}
             </span>
             {multiple && resolvedBotIds.length > 1 && !allSelected ? (
-              <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-[var(--panel-strong)] px-2 text-[10px] font-semibold tabular-nums text-[var(--text-secondary)]">
+              <span className="inline-flex h-5 shrink-0 items-center rounded-full bg-[var(--panel-strong)] px-2 text-[10px] font-semibold tabular-nums text-[color:var(--text-secondary)]">
                 {resolvedBotIds.length}
               </span>
             ) : null}
           </span>
           <ChevronDown
             className={cn(
-              "h-4 w-4 shrink-0 text-[var(--text-quaternary)] transition-transform duration-200",
+              "h-4 w-4 shrink-0 text-[color:var(--text-quaternary)] transition-transform duration-200",
               open && "rotate-180",
             )}
           />
@@ -433,8 +433,8 @@ export function AgentSwitcher({
             disabled={creating}
             className={cn(
               "inline-flex h-8 w-8 shrink-0 items-center justify-center",
-              "rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[var(--text-primary)]",
-              "transition-colors duration-[var(--transition-fast)]",
+              "rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[color:var(--text-primary)]",
+              "transition-colors duration-[120ms] ease-[var(--ease-out-quart)]",
               "hover:bg-[var(--surface-hover)] active:scale-[0.96]",
               "disabled:cursor-not-allowed disabled:opacity-60",
             )}
@@ -485,14 +485,14 @@ export function AgentSwitcher({
                   {shouldShowSearch ? (
                     <div className="border-b border-[color:var(--divider-hair)] px-2 py-2">
                       <label className="flex items-center gap-2 rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-soft)] px-2.5">
-                        <Search className="h-3.5 w-3.5 text-[var(--text-quaternary)]" />
+                        <Search className="h-3.5 w-3.5 text-[color:var(--text-quaternary)]" />
                         <input
                           ref={searchRef}
                           type="text"
                           value={search}
                           onChange={(event) => setSearch(event.target.value)}
                           placeholder={t("agentSwitcher.searchPlaceholder")}
-                          className="h-8 w-full bg-transparent text-[0.8125rem] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+                          className="h-8 w-full bg-transparent text-[0.8125rem] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-quaternary)]"
                         />
                       </label>
                     </div>
@@ -556,7 +556,7 @@ export function AgentSwitcher({
                               {agent.label}
                             </span>
                             {isActive ? (
-                              <Check className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]" />
+                              <Check className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-secondary)]" />
                             ) : null}
                           </button>
                         );
@@ -564,12 +564,12 @@ export function AgentSwitcher({
                     ) : isFetching ? (
                       <div className="flex justify-center px-3 py-6" aria-label={t("agentSwitcher.loadingAgents")}>
                         <LoaderCircle
-                          className="h-4 w-4 animate-spin text-[var(--text-tertiary)]"
+                          className="h-4 w-4 animate-spin text-[color:var(--text-tertiary)]"
                           strokeWidth={1.75}
                         />
                       </div>
                     ) : (
-                      <div className="px-3 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
+                      <div className="px-3 py-6 text-center text-[0.8125rem] text-[color:var(--text-tertiary)]">
                         {t("agentSwitcher.noResults")}
                       </div>
                     )}
@@ -580,7 +580,7 @@ export function AgentSwitcher({
                         aria-label={t("agentSwitcher.loadingAgents")}
                       >
                         <LoaderCircle
-                          className="h-3.5 w-3.5 animate-spin text-[var(--text-quaternary)]"
+                          className="h-3.5 w-3.5 animate-spin text-[color:var(--text-quaternary)]"
                           strokeWidth={1.75}
                         />
                       </div>

@@ -482,14 +482,16 @@ export function RoutineEditor({
             <X className="h-4 w-4" />
           </button>
 
-          <header className="shrink-0 px-7 pb-4 pt-7 pr-14">
+          {/* A div, not <header>: portaled outside the main landmark, a header is a second
+              banner landmark next to the workspace topbar (D-333). */}
+          <div className="shrink-0 px-7 pb-4 pt-7 pr-14">
             <h2
               id="routine-editor-title"
-              className="m-0 text-[1.0625rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]"
+              className="m-0 text-[1.0625rem] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]"
             >
               {title}
             </h2>
-            <p className="m-0 mt-1 flex items-center gap-2 text-[0.8125rem] text-[var(--text-tertiary)]">
+            <p className="m-0 mt-1 flex items-center gap-2 text-[0.8125rem] text-[color:var(--text-tertiary)]">
               <span>{stepLabel}</span>
               <span className="flex items-center gap-1" aria-hidden>
                 {[1, 2, 3].map((index) => (
@@ -507,7 +509,7 @@ export function RoutineEditor({
                 ))}
               </span>
             </p>
-          </header>
+          </div>
 
           <form onSubmit={handleSubmit} className="flex min-h-0 flex-1 flex-col">
             <div className="flex flex-1 flex-col gap-5 overflow-y-auto px-7 pb-6 pt-2">
@@ -645,7 +647,7 @@ function BasicsStep({ state, setState, agents, disabled, t }: BasicsStepProps) {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-1.5">
-        <label className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+        <label className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
           {t("routines.editor.agent")}
         </label>
         <AgentSwitcher
@@ -664,9 +666,9 @@ function BasicsStep({ state, setState, agents, disabled, t }: BasicsStepProps) {
       </div>
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+        <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
           {t("routines.editor.name")}
-          <span className="ml-1 text-[var(--accent)]">*</span>
+          <span className="ml-1 text-[color:var(--accent)]">*</span>
         </span>
         <Input
           value={state.name}
@@ -678,9 +680,9 @@ function BasicsStep({ state, setState, agents, disabled, t }: BasicsStepProps) {
       </label>
 
       <label className="flex flex-col gap-1.5">
-        <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+        <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
           {t("routines.editor.instructions")}
-          <span className="ml-1 text-[var(--accent)]">*</span>
+          <span className="ml-1 text-[color:var(--accent)]">*</span>
         </span>
         <textarea
           value={state.instructions}
@@ -690,7 +692,7 @@ function BasicsStep({ state, setState, agents, disabled, t }: BasicsStepProps) {
           placeholder={t("routines.editor.instructionsPlaceholder")}
           rows={6}
           disabled={disabled}
-          className="min-h-[180px] w-full resize-y rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3.5 py-2.5 text-[0.875rem] leading-[1.5] text-[var(--text-primary)] outline-none transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] placeholder:text-[var(--text-quaternary)] hover:border-[var(--border-strong)] focus-visible:border-[var(--accent)] focus-visible:bg-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-60"
+          className="min-h-[180px] w-full resize-y rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3.5 py-2.5 text-[0.875rem] leading-[1.5] text-[color:var(--text-primary)] outline-none transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] placeholder:text-[color:var(--text-quaternary)] hover:border-[var(--border-strong)] focus-visible:border-[var(--accent)] focus-visible:bg-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-60"
         />
       </label>
     </div>
@@ -743,7 +745,7 @@ function RefineStep({
       {activeTab === "behavior" ? (
         <div className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5">
-            <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+            <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
               {t("routines.editor.model")}
             </span>
             <Input
@@ -760,7 +762,7 @@ function RefineStep({
           </label>
           <div className="grid gap-3 md:grid-cols-2">
             <label className="flex flex-col gap-1.5">
-              <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+              <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
                 {t("routines.editor.behavior.notification")}
               </span>
               <Select
@@ -790,7 +792,7 @@ function RefineStep({
               </Select>
             </label>
             <label className="flex flex-col gap-1.5">
-              <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+              <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
                 {t("routines.editor.behavior.verification")}
               </span>
               <Select
@@ -841,17 +843,17 @@ function RefineStep({
               className="mt-0.5 h-4 w-4 cursor-pointer accent-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
             />
             <span className="flex flex-1 flex-col gap-0.5">
-              <span className="flex flex-wrap items-center gap-2 text-[0.875rem] font-medium text-[var(--text-primary)]">
+              <span className="flex flex-wrap items-center gap-2 text-[0.875rem] font-medium text-[color:var(--text-primary)]">
                 {t("routines.editor.permissions.readOnly")}
                 <StatusBadge tone="warning">{t("routines.editor.permissions.notEnforced")}</StatusBadge>
               </span>
-              <span className="text-[0.8125rem] text-[var(--text-tertiary)]">
+              <span className="text-[0.8125rem] text-[color:var(--text-tertiary)]">
                 {t("routines.editor.permissions.readOnlyDescription")}
               </span>
             </span>
           </label>
           <label className="flex flex-col gap-1.5">
-            <span className="flex flex-wrap items-center gap-2 text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+            <span className="flex flex-wrap items-center gap-2 text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
               {t("routines.editor.permissions.allowedPaths")}
               <StatusBadge tone="warning">{t("routines.editor.permissions.notEnforced")}</StatusBadge>
             </span>
@@ -863,9 +865,9 @@ function RefineStep({
               placeholder={t("routines.editor.permissions.allowedPathsPlaceholder")}
               rows={4}
               disabled
-              className="min-h-[96px] w-full resize-y rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3.5 py-2.5 font-mono text-[0.8125rem] leading-[1.5] text-[var(--text-primary)] outline-none transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] placeholder:text-[var(--text-quaternary)] hover:border-[var(--border-strong)] focus-visible:border-[var(--accent)] focus-visible:bg-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-60"
+              className="min-h-[96px] w-full resize-y rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3.5 py-2.5 font-mono text-[0.8125rem] leading-[1.5] text-[color:var(--text-primary)] outline-none transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] placeholder:text-[color:var(--text-quaternary)] hover:border-[var(--border-strong)] focus-visible:border-[var(--accent)] focus-visible:bg-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-60"
             />
-            <span className="text-[0.75rem] text-[var(--text-tertiary)]">
+            <span className="text-[0.75rem] text-[color:var(--text-tertiary)]">
               {t("routines.editor.permissions.allowedPathsHint")}
             </span>
           </label>

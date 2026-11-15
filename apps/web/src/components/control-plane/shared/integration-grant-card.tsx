@@ -171,16 +171,16 @@ export function IntegrationGrantCard({
               : "bg-[rgba(255,255,255,0.04)]",
           )}
         >
-          {logo || <Plug size={16} className="text-[var(--text-quaternary)]" />}
+          {logo || <Plug size={16} className="text-[color:var(--text-quaternary)]" />}
         </div>
 
         {/* Title + description */}
         <div className={cn("min-w-0 flex-1", !enabled && "opacity-50")}>
-          <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+          <div className="truncate text-sm font-semibold text-[color:var(--text-primary)]">
             {integration.title}
           </div>
           {integration.description && (
-            <div className="mt-0.5 truncate text-xs text-[var(--text-quaternary)]">
+            <div className="mt-0.5 truncate text-xs text-[color:var(--text-quaternary)]">
               {integration.description}
             </div>
           )}
@@ -194,7 +194,7 @@ export function IntegrationGrantCard({
           <motion.span
             animate={{ rotate: expanded ? 180 : 0 }}
             transition={{ duration: 0.2 }}
-            className="text-[var(--text-quaternary)]"
+            className="text-[color:var(--text-quaternary)]"
           >
             <ChevronDown size={14} />
           </motion.span>

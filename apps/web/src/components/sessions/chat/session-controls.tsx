@@ -82,8 +82,8 @@ export function SessionControls({
           disabled={disabled || pending !== null}
           title={t("generated.sessions.pause_execution_f0f72c38")}
           className={cn(
-            "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-[0.75rem] text-[var(--text-secondary)]",
-            "transition-colors hover:border-[color:var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-50",
+            "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-[0.75rem] text-[color:var(--text-secondary)]",
+            "transition-colors hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)] disabled:opacity-50",
           )}
         >
           <Pause strokeWidth={1.75} className="icon-xs" />
@@ -97,8 +97,8 @@ export function SessionControls({
           disabled={disabled || pending !== null}
           title={t("generated.sessions.resume_execution_0fbffd9d")}
           className={cn(
-            "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-[0.75rem] text-[var(--text-secondary)]",
-            "transition-colors hover:border-[color:var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-50",
+            "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-[0.75rem] text-[color:var(--text-secondary)]",
+            "transition-colors hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)] disabled:opacity-50",
           )}
         >
           <Play strokeWidth={1.75} className="icon-xs" />
@@ -112,7 +112,7 @@ export function SessionControls({
           disabled={disabled || pending !== null}
           title={t("generated.sessions.stop_execution_e73fad37")}
           className={cn(
-            "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--tone-danger-border)] bg-transparent px-2 text-[0.75rem] text-[var(--tone-danger-text)]",
+            "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[color:var(--tone-danger-border)] bg-transparent px-2 text-[0.75rem] text-[color:var(--tone-danger-text)]",
             "transition-colors hover:bg-[var(--tone-danger-bg)] disabled:opacity-50",
           )}
         >
@@ -121,7 +121,7 @@ export function SessionControls({
         </button>
       ) : null}
       {error ? (
-        <span className="truncate text-[0.6875rem] text-[var(--tone-danger-text)]" title={error}>
+        <span className="truncate text-[0.6875rem] text-[color:var(--tone-danger-text)]" title={error}>
           {error}
         </span>
       ) : null}

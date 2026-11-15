@@ -33,12 +33,12 @@ export function ArtifactCard({ artifact, onOpen, className }: ArtifactCardProps)
         onClick={() => onOpen?.(artifact)}
         className="flex min-w-0 flex-1 items-center gap-3 text-left"
       >
-        <Icon className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+        <Icon className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
         <div className="flex min-w-0 flex-1 flex-col items-start">
-          <span className="truncate text-[0.8125rem] text-[var(--text-primary)]">
+          <span className="truncate text-[0.8125rem] text-[color:var(--text-primary)]">
             {filename}
           </span>
-          <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+          <span className="font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
             {[artifact.kind.toUpperCase(), size].filter(Boolean).join(" · ")}
           </span>
         </div>
@@ -49,7 +49,7 @@ export function ArtifactCard({ artifact, onOpen, className }: ArtifactCardProps)
         disabled={downloader.isDownloading}
         aria-busy={downloader.isDownloading}
         aria-label={t("sessions.artifacts.download", undefined)}
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] transition-colors disabled:opacity-60"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[color:var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)] transition-colors disabled:opacity-60"
       >
         <Download className="icon-xs" strokeWidth={1.75} aria-hidden />
       </button>

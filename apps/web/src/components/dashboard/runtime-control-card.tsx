@@ -53,16 +53,16 @@ export const RuntimeControlCard = memo(function RuntimeControlCard({ selectedBot
       <div className="mb-4 flex flex-col gap-3 border-b border-[color:var(--divider-hair)] pb-4 lg:flex-row lg:items-end lg:justify-between">
         <div>
           <p className="eyebrow">{t("runtime.controlCard.eyebrow")}</p>
-          <h3 className="m-0 mt-1.5 text-[1.0625rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+          <h3 className="m-0 mt-1.5 text-[1.0625rem] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
             {t("runtime.controlCard.title")}
           </h3>
-          <p className="m-0 mt-1 max-w-2xl text-[0.8125rem] leading-5 text-[var(--text-tertiary)]">
+          <p className="m-0 mt-1 max-w-2xl text-[0.8125rem] leading-5 text-[color:var(--text-tertiary)]">
             {t("runtime.controlCard.description")}
           </p>
         </div>
         <Link
           href="/runtime"
-          className="inline-flex h-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] font-medium text-[var(--text-primary)] transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)]"
+          className="inline-flex h-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] font-medium text-[color:var(--text-primary)] transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)]"
         >
           {t("runtime.controlCard.openRuntime")}
         </Link>
@@ -88,11 +88,11 @@ export const RuntimeControlCard = memo(function RuntimeControlCard({ selectedBot
 
       <div className="mt-4 flex flex-col">
         {loading && rows.length === 0 ? (
-          <div className="py-8 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
+          <div className="py-8 text-center text-[0.8125rem] text-[color:var(--text-tertiary)]">
             {t("runtime.controlCard.loading")}
           </div>
         ) : rows.length === 0 ? (
-          <div className="py-8 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
+          <div className="py-8 text-center text-[0.8125rem] text-[color:var(--text-tertiary)]">
             {t("runtime.controlCard.empty")}
           </div>
         ) : (
@@ -110,24 +110,24 @@ export const RuntimeControlCard = memo(function RuntimeControlCard({ selectedBot
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <span className="font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+                    <span className="font-mono text-[0.6875rem] text-[color:var(--text-tertiary)]">
                       {getAgentLabel(row.agentId)} #{row.taskId}
                     </span>
-                    <span className="inline-flex items-center gap-1.5 text-[0.6875rem] text-[var(--text-secondary)]">
+                    <span className="inline-flex items-center gap-1.5 text-[0.6875rem] text-[color:var(--text-secondary)]">
                       <StatusDot tone={phaseTone} pulse={phaseTone === "info" || phaseTone === "warning"} />
                       {getRuntimeLabel(row.phase)}
                     </span>
                     {connected[row.agentId] ? (
-                      <span className="inline-flex items-center gap-1.5 text-[0.6875rem] text-[var(--text-tertiary)]">
+                      <span className="inline-flex items-center gap-1.5 text-[0.6875rem] text-[color:var(--text-tertiary)]">
                         <StatusDot tone="success" pulse />
                         {t("runtime.controlCard.live")}
                       </span>
                     ) : null}
                   </div>
-                  <p className="m-0 mt-1 truncate text-[0.8125rem] text-[var(--text-primary)]">
+                  <p className="m-0 mt-1 truncate text-[0.8125rem] text-[color:var(--text-primary)]">
                     {truncateText(getRuntimeRowSummary(row), 104)}
                   </p>
-                  <p className="m-0 mt-1 truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                  <p className="m-0 mt-1 truncate font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                     {truncateText(
                       row.environment?.workspace_path ||
                         row.environment?.branch_name ||
@@ -138,10 +138,10 @@ export const RuntimeControlCard = memo(function RuntimeControlCard({ selectedBot
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 text-right">
-                  <p className="m-0 text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+                  <p className="m-0 text-[0.6875rem] tabular-nums text-[color:var(--text-quaternary)]">
                     {row.updatedAt ? formatRelativeTime(row.updatedAt) : t("common.now")}
                   </p>
-                  <ArrowRight className="h-3.5 w-3.5 text-[var(--text-quaternary)] transition-colors group-hover:text-[var(--text-secondary)]" />
+                  <ArrowRight className="h-3.5 w-3.5 text-[color:var(--text-quaternary)] transition-colors group-hover:text-[color:var(--text-secondary)]" />
                 </div>
               </Link>
             );

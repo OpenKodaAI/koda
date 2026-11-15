@@ -32,13 +32,13 @@ export function RailSearch({ value, onChange, placeholder, loading = false, clas
           aria-label={t("chat.rail.searching", undefined)}
         >
           <LoaderCircle
-            className="icon-sm animate-spin text-[var(--text-quaternary)]"
+            className="icon-sm animate-spin text-[color:var(--text-quaternary)]"
             strokeWidth={1.75}
             aria-hidden
           />
         </span>
       ) : (
-        <Search className="icon-sm text-[var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
+        <Search className="icon-sm text-[color:var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
       )}
       <input
         type="text"
@@ -46,14 +46,14 @@ export function RailSearch({ value, onChange, placeholder, loading = false, clas
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={resolvedPlaceholder}
-        className="search-input--custom-clear flex-1 bg-transparent text-[var(--font-size-sm)] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+        className="search-input--custom-clear flex-1 bg-transparent text-[length:var(--font-size-sm)] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-quaternary)]"
       />
       {value ? (
         <button
           type="button"
           onClick={() => onChange("")}
           aria-label={t("chat.rail.clearSearch", undefined)}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]"
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[color:var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-secondary)]"
         >
           <X className="icon-xs" strokeWidth={1.75} aria-hidden />
         </button>

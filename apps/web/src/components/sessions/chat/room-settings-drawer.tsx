@@ -514,7 +514,7 @@ export function RoomSettingsPanel({
                 aria-label={t("sessions.room.settings.nameLabel", undefined)}
                 placeholder={t("sessions.room.settings.namePlaceholder", undefined)}
                 className={cn(
-                  "h-8 w-full truncate rounded-[var(--radius-input)] border border-transparent bg-transparent px-2.5 pr-8 font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)] outline-none",
+                  "h-8 w-full truncate rounded-[var(--radius-input)] border border-transparent bg-transparent px-2.5 pr-8 font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)] outline-none",
                   "transition-[border-color,background-color,box-shadow] duration-[140ms] ease-[var(--ease-out-quart)]",
                   "hover:border-[color:var(--border-subtle)] hover:bg-[var(--panel-soft)]",
                   "focus:border-[color:var(--focus-ring)] focus:bg-[var(--panel-soft)] focus:shadow-[0_0_0_1px_var(--focus-ring)]",
@@ -527,7 +527,7 @@ export function RoomSettingsPanel({
               <span
                 aria-hidden
                 className={cn(
-                  "pointer-events-none absolute top-1/2 -translate-y-1/2 text-[var(--text-tertiary)]",
+                  "pointer-events-none absolute top-1/2 -translate-y-1/2 text-[color:var(--text-tertiary)]",
                   inline ? "right-2" : "right-3",
                 )}
               >
@@ -540,7 +540,7 @@ export function RoomSettingsPanel({
             </div>
             <p
               className={cn(
-                "m-0 text-[var(--text-tertiary)]",
+                "m-0 text-[color:var(--text-tertiary)]",
                 inline ? "text-left text-[0.75rem]" : "text-center text-[0.8125rem]",
               )}
             >
@@ -605,11 +605,11 @@ export function RoomSettingsPanel({
                 inline ? "px-0 pt-0" : "px-3 pt-2.5",
               )}
             >
-              <span className="flex items-center gap-2 text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+              <span className="flex items-center gap-2 text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                 <Users className="h-3 w-3" strokeWidth={1.75} aria-hidden />
                 {t("sessions.room.settings.members.eyebrow", undefined)}
               </span>
-              <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+              <span className="font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                 {participants.length}
               </span>
               <Button
@@ -622,7 +622,7 @@ export function RoomSettingsPanel({
                 }}
                 disabled={!detail || Boolean(pendingMutation)}
                 className={cn(
-                  "ml-auto h-6 px-1.5 text-[0.6875rem] text-[var(--text-tertiary)] hover:text-[var(--text-primary)]",
+                  "ml-auto h-6 px-1.5 text-[0.6875rem] text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]",
                   !inline && "h-7 px-2",
                 )}
               >
@@ -657,14 +657,14 @@ export function RoomSettingsPanel({
                     <div className="flex min-w-0 flex-1 flex-col">
                       <span
                         className={cn(
-                          "flex items-center gap-1.5 truncate font-medium text-[var(--text-primary)]",
+                          "flex items-center gap-1.5 truncate font-medium text-[color:var(--text-primary)]",
                           inline ? "text-[0.78125rem]" : "text-[0.8125rem]",
                         )}
                       >
                         {meta.label}
                         {isCoordinator ? (
                           <Crown
-                            className="h-3 w-3 text-[var(--accent)]"
+                            className="h-3 w-3 text-[color:var(--accent)]"
                             strokeWidth={2}
                             aria-label={t(
                               "sessions.room.settings.coordinator",
@@ -673,14 +673,14 @@ export function RoomSettingsPanel({
                           />
                         ) : null}
                         {agentPaused ? (
-                          <span className="ml-1 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.5625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
+                          <span className="ml-1 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.5625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--tone-warning-text)]">
                             {t("sessions.room.create.pausedBadge", undefined)}
                           </span>
                         ) : null}
                       </span>
                       <span
                         className={cn(
-                          "truncate text-[var(--text-tertiary)]",
+                          "truncate text-[color:var(--text-tertiary)]",
                           inline ? "text-[0.6875rem]" : "text-[0.71875rem]",
                         )}
                       >
@@ -706,7 +706,7 @@ export function RoomSettingsPanel({
                             pendingMutation === `remove:${participant.agentId}`
                           }
                           aria-label={t("sessions.room.settings.removeAgent", undefined)}
-                          className="h-7 w-7 px-0 text-[var(--text-tertiary)] hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)]"
+                          className="h-7 w-7 px-0 text-[color:var(--text-tertiary)] hover:bg-[var(--tone-danger-bg)] hover:text-[color:var(--tone-danger-dot)]"
                         >
                           <UserMinus
                             className="h-3.5 w-3.5"
@@ -742,17 +742,17 @@ export function RoomSettingsPanel({
                               className="h-6 w-6 shrink-0"
                             />
                             <div className="flex min-w-0 flex-1 flex-col">
-                              <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+                              <span className="truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
                                 {agent.label || agent.id}
                               </span>
                               {agent.label && agent.label !== agent.id ? (
-                                <span className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                                <span className="truncate font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                                   {agent.id}
                                 </span>
                               ) : null}
                             </div>
                             {isPaused ? (
-                              <span className="rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
+                              <span className="rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--tone-warning-text)]">
                                 {t("sessions.room.create.pausedBadge", undefined)}
                               </span>
                             ) : null}
@@ -767,9 +767,9 @@ export function RoomSettingsPanel({
                         onClick={() => setShowAddPicker(true)}
                         className={cn(
                           "inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-pill)] border border-[color:var(--border-subtle)] bg-transparent px-2.5",
-                          "text-[0.75rem] font-medium tracking-[-0.005em] text-[var(--text-secondary)]",
+                          "text-[0.75rem] font-medium tracking-[-0.005em] text-[color:var(--text-secondary)]",
                           "transition-[background-color,border-color,color] duration-[120ms] ease-[var(--ease-out-quart)]",
-                          "hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
+                          "hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]",
                         )}
                       >
                         <Plus className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
@@ -894,15 +894,15 @@ function ActionTile({
           ? "inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-transparent bg-transparent px-2 text-[0.75rem] font-medium"
           : "group flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 py-2.5 text-[0.75rem] font-medium hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)]",
         compact && tone === "danger"
-          ? "text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)]"
+          ? "text-[color:var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)] hover:text-[color:var(--tone-danger-dot)]"
           : null,
         compact && tone !== "danger"
-          ? "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+          ? "text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
           : null,
         !compact && tone === "danger"
-          ? "text-[var(--tone-danger-dot)] hover:border-[color:var(--tone-danger-border)]"
+          ? "text-[color:var(--tone-danger-dot)] hover:border-[color:var(--tone-danger-border)]"
           : null,
-        !compact && tone !== "danger" ? "text-[var(--text-primary)]" : null,
+        !compact && tone !== "danger" ? "text-[color:var(--text-primary)]" : null,
         compact
           ? "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:bg-transparent"
           : "disabled:cursor-not-allowed disabled:opacity-45 disabled:hover:border-[color:var(--border-subtle)] disabled:hover:bg-[var(--panel-soft)]",
@@ -918,10 +918,10 @@ function ActionTile({
           compact && tone === "danger" ? "text-current" : null,
           compact && tone !== "danger" ? "text-current" : null,
           !compact && tone === "danger"
-            ? "bg-[var(--tone-danger-bg)] text-[var(--tone-danger-dot)]"
+            ? "bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-dot)]"
             : null,
           !compact && tone !== "danger"
-            ? "bg-[var(--panel-strong)] text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]"
+            ? "bg-[var(--panel-strong)] text-[color:var(--text-secondary)] group-hover:text-[color:var(--text-primary)]"
             : null,
         )}
       >
@@ -993,10 +993,10 @@ function RoleSelect({
           className={cn(
             "inline-flex h-7 shrink-0 items-center gap-1 rounded-[var(--radius-pill)] px-2.5",
             "border border-[color:var(--border-subtle)] bg-[var(--panel-soft)]",
-            "text-[0.6875rem] font-medium tracking-[-0.005em] text-[var(--text-secondary)]",
+            "text-[0.6875rem] font-medium tracking-[-0.005em] text-[color:var(--text-secondary)]",
             "transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-            "hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
-            "data-[state=open]:border-[color:var(--border-strong)] data-[state=open]:bg-[var(--surface-hover)] data-[state=open]:text-[var(--text-primary)]",
+            "hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]",
+            "data-[state=open]:border-[color:var(--border-strong)] data-[state=open]:bg-[var(--surface-hover)] data-[state=open]:text-[color:var(--text-primary)]",
             "disabled:opacity-60",
           )}
         >
@@ -1004,7 +1004,7 @@ function RoleSelect({
           <span>{t(meta.labelKey, { defaultValue: meta.fallbackLabel })}</span>
           <ChevronDown
             className={cn(
-              "h-2.5 w-2.5 text-[var(--text-tertiary)] transition-transform duration-[120ms]",
+              "h-2.5 w-2.5 text-[color:var(--text-tertiary)] transition-transform duration-[120ms]",
               open && "rotate-180",
             )}
             strokeWidth={2}
@@ -1016,67 +1016,73 @@ function RoleSelect({
         align="end"
         sideOffset={6}
         className="w-[200px] p-1"
+        aria-label={t("sessions.room.settings.role", undefined)}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        <ul role="listbox" className="flex flex-col">
+        {/* Options sit directly in the listbox (D-332): an li's listitem role
+            breaks the listbox > option chain. */}
+        <div
+          role="listbox"
+          aria-label={t("sessions.room.settings.role", undefined)}
+          className="flex flex-col"
+        >
           {ROLE_OPTIONS.map((role) => {
             const optionMeta = ROLE_META[role];
             const OptionIcon = optionMeta.icon;
             const selected = role === value;
             return (
-              <li key={role}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  onClick={() => {
-                    setOpen(false);
-                    if (role !== value) onChange(role);
-                  }}
+              <button
+                key={role}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => {
+                  setOpen(false);
+                  if (role !== value) onChange(role);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-2 rounded-[var(--radius-panel-sm)] px-2 py-2 text-left",
+                  "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                  "hover:bg-[var(--hover-tint)]",
+                  selected
+                    ? "text-[color:var(--text-primary)]"
+                    : "text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]",
+                )}
+              >
+                <span
+                  aria-hidden
                   className={cn(
-                    "flex w-full items-start gap-2 rounded-[var(--radius-panel-sm)] px-2 py-2 text-left",
-                    "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-                    "hover:bg-[var(--hover-tint)]",
+                    "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
                     selected
-                      ? "text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                      ? "bg-[var(--accent)] text-[color:var(--accent-text)]"
+                      : "bg-[var(--panel-strong)] text-[color:var(--text-tertiary)]",
                   )}
                 >
-                  <span
+                  <OptionIcon className="h-3 w-3" strokeWidth={2} />
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-[0.8125rem] font-medium">
+                    {t(optionMeta.labelKey, {
+                      defaultValue: optionMeta.fallbackLabel,
+                    })}
+                  </span>
+                  <span className="text-[0.6875rem] text-[color:var(--text-tertiary)] leading-[1.35]">
+                    {t(optionMeta.descriptionKey, {
+                      defaultValue: optionMeta.fallbackDescription,
+                    })}
+                  </span>
+                </span>
+                {selected ? (
+                  <Check
+                    className="mt-0.5 h-3 w-3 shrink-0 text-[color:var(--accent)]"
+                    strokeWidth={2.5}
                     aria-hidden
-                    className={cn(
-                      "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
-                      selected
-                        ? "bg-[var(--accent)] text-[var(--accent-text)]"
-                        : "bg-[var(--panel-strong)] text-[var(--text-tertiary)]",
-                    )}
-                  >
-                    <OptionIcon className="h-3 w-3" strokeWidth={2} />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-[0.8125rem] font-medium">
-                      {t(optionMeta.labelKey, {
-                        defaultValue: optionMeta.fallbackLabel,
-                      })}
-                    </span>
-                    <span className="text-[0.6875rem] text-[var(--text-tertiary)] leading-[1.35]">
-                      {t(optionMeta.descriptionKey, {
-                        defaultValue: optionMeta.fallbackDescription,
-                      })}
-                    </span>
-                  </span>
-                  {selected ? (
-                    <Check
-                      className="mt-0.5 h-3 w-3 shrink-0 text-[var(--accent)]"
-                      strokeWidth={2.5}
-                      aria-hidden
-                    />
-                  ) : null}
-                </button>
-              </li>
+                  />
+                ) : null}
+              </button>
             );
           })}
-        </ul>
+        </div>
       </PopoverContent>
     </Popover>
   );

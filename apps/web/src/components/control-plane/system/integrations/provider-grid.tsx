@@ -73,8 +73,8 @@ function ProviderCard({
     >
       <ProviderLogo providerId={provider.id} title={label} active={isVerified} accented />
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold text-[var(--text-primary)]">{label}</div>
-        <div className="mt-0.5 truncate text-xs text-[var(--text-quaternary)]">{description}</div>
+        <div className="truncate text-sm font-semibold text-[color:var(--text-primary)]">{label}</div>
+        <div className="mt-0.5 truncate text-xs text-[color:var(--text-quaternary)]">{description}</div>
       </div>
       <div className="flex shrink-0 items-center">
         <IntegrationCardStatusIndicator status={status} />
@@ -118,13 +118,13 @@ function ProviderDetailView({
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex items-center gap-2 text-sm text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
+        className="inline-flex items-center gap-2 text-sm text-[color:var(--text-tertiary)] transition-colors hover:text-[color:var(--text-primary)]"
       >
         <ArrowLeft size={14} />
         <span>
           {t("generated.controlPlane.provedores_ai_cd03be96")}
-          <span className="mx-1.5 text-[var(--text-quaternary)]">/</span>
-          <span className="text-[var(--text-primary)]">{label}</span>
+          <span className="mx-1.5 text-[color:var(--text-quaternary)]">/</span>
+          <span className="text-[color:var(--text-primary)]">{label}</span>
         </span>
       </button>
 
@@ -138,10 +138,10 @@ function ProviderDetailView({
             accented
           />
           <div>
-            <h2 className="text-lg font-bold tracking-[-0.03em] text-[var(--text-primary)]">
+            <h2 className="text-lg font-bold tracking-[-0.03em] text-[color:var(--text-primary)]">
               {label}
             </h2>
-            <p className="mt-0.5 text-sm text-[var(--text-tertiary)]">{description}</p>
+            <p className="mt-0.5 text-sm text-[color:var(--text-tertiary)]">{description}</p>
           </div>
         </div>
 
@@ -159,7 +159,7 @@ function ProviderDetailView({
               icon={ui.actionIcon}
               className={cn(
                 "rounded-lg px-3.5",
-                ui.shouldShowDisconnect && "text-[var(--text-secondary)]",
+                ui.shouldShowDisconnect && "text-[color:var(--text-secondary)]",
               )}
             >
               {ui.actionLabel}
@@ -195,9 +195,9 @@ function ProviderDetailView({
                 }}
               />
             ) : (
-              <span className="text-sm font-semibold text-[var(--icon-primary)]">{label.slice(0, 1)}</span>
+              <span className="text-sm font-semibold text-[color:var(--icon-primary)]">{label.slice(0, 1)}</span>
             )}
-            <span className="text-sm text-[var(--text-primary)]">
+            <span className="text-sm text-[color:var(--text-primary)]">
               {highlightDescription}
             </span>
           </div>
@@ -216,7 +216,7 @@ function ProviderDetailView({
 
       {/* Info table */}
       <div>
-        <span className="eyebrow mb-2 block text-[var(--text-quaternary)]">
+        <span className="eyebrow mb-2 block text-[color:var(--text-quaternary)]">
           {t("generated.controlPlane.informacoes_62821400")}
         </span>
         <div className="overflow-hidden rounded-lg border border-[var(--border-subtle)]">
@@ -233,8 +233,8 @@ function ProviderDetailView({
                 i % 2 === 0 ? "bg-[var(--surface-elevated-soft)]" : "bg-transparent",
               )}
             >
-              <span className="text-[var(--text-tertiary)]">{row.label}</span>
-              <span className="font-medium text-[var(--text-primary)]">{row.value}</span>
+              <span className="text-[color:var(--text-tertiary)]">{row.label}</span>
+              <span className="font-medium text-[color:var(--text-primary)]">{row.value}</span>
             </div>
           ))}
         </div>
@@ -288,24 +288,24 @@ function ProviderListView({
   return (
     <motion.div {...viewOut}>
       <div className="integration-marketplace-hero">
-        <h2 className="text-xl font-bold tracking-[-0.04em] text-[var(--text-primary)] sm:text-2xl">
+        <h2 className="text-xl font-bold tracking-[-0.04em] text-[color:var(--text-primary)] sm:text-2xl">
           {t("generated.controlPlane.conecte_seus_provedores_ae92d64b")}
         </h2>
-        <p className="mt-1.5 text-sm text-[var(--text-tertiary)]">
+        <p className="mt-1.5 text-sm text-[color:var(--text-tertiary)]">
           {t("generated.controlPlane.configure_os_provedores_de_ia_para_modelos_d_46847e7c")}
         </p>
         <div className="mt-4">
           <div className="relative w-full max-w-sm">
             <Search
               size={15}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)]"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-quaternary)]"
             />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder={t("generated.controlPlane.buscar_provedores_b7908add")}
-              className="field-shell pl-9 pr-3 text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+              className="field-shell pl-9 pr-3 text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)]"
               aria-label={t("generated.controlPlane.buscar_provedores_75d559f1")}
             />
           </div>
@@ -313,14 +313,14 @@ function ProviderListView({
       </div>
 
       {grouped.length === 0 ? (
-        <div className="py-12 text-center text-sm text-[var(--text-quaternary)]">
+        <div className="py-12 text-center text-sm text-[color:var(--text-quaternary)]">
           {t("generated.controlPlane.nenhum_provedor_encontrado_3e744236")}
         </div>
       ) : (
         <div className="mt-4 space-y-4">
           {grouped.map(({ category, entries }) => (
             <div key={category}>
-              <span className="eyebrow mb-2 block text-[var(--text-quaternary)]">
+              <span className="eyebrow mb-2 block text-[color:var(--text-quaternary)]">
                 {providerCategoryLabel(category, t)}
               </span>
               <div className="grid grid-cols-2 gap-2">

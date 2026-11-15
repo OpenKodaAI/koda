@@ -46,10 +46,10 @@ export function IntegrationCard({
 
       {/* Text */}
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+        <div className="truncate text-sm font-semibold text-[color:var(--text-primary)]">
           {entry.label}
         </div>
-        <div className="mt-0.5 truncate text-xs text-[var(--text-quaternary)]">
+        <div className="mt-0.5 truncate text-xs text-[color:var(--text-quaternary)]">
           {tl(entry.tagline)}
         </div>
       </div>

@@ -125,7 +125,7 @@ function EnvSchemaBuilder({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
           {t("generated.controlPlane.variaveis_de_ambiente_0ff6bf11")}
         </span>
         <button
@@ -139,7 +139,7 @@ function EnvSchemaBuilder({
       </div>
 
       {fields.length === 0 ? (
-        <p className="text-xs text-[var(--text-quaternary)]">
+        <p className="text-xs text-[color:var(--text-quaternary)]">
           {t("generated.controlPlane.nenhuma_variavel_de_ambiente_configurada_df427661")}
         </p>
       ) : (
@@ -167,7 +167,7 @@ function EnvSchemaBuilder({
                   placeholder={t("generated.controlPlane.rotulo_26e3218d")}
                 />
               </div>
-              <label className="flex items-center gap-1 whitespace-nowrap pt-1.5 text-[10px] text-[var(--text-quaternary)]">
+              <label className="flex items-center gap-1 whitespace-nowrap pt-1.5 text-[10px] text-[color:var(--text-quaternary)]">
                 <input
                   type="checkbox"
                   checked={field.required}
@@ -179,7 +179,7 @@ function EnvSchemaBuilder({
               <button
                 type="button"
                 onClick={() => removeField(field._id)}
-                className="shrink-0 rounded border border-transparent p-1 text-[var(--tone-danger-text)] transition-colors hover:border-[var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)]"
+                className="shrink-0 rounded border border-transparent p-1 text-[color:var(--tone-danger-text)] transition-colors hover:border-[var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)]"
                 aria-label={t("generated.controlPlane.remover_campo_d0d115ea")}
               >
                 <Trash2 size={12} />
@@ -320,18 +320,18 @@ export function McpServerEditorModal({
 
           <div className="border-b border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-5 py-5 pr-14 sm:px-6 sm:pr-16">
             <div className="space-y-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
                 {isEditing ? t("generated.controlPlane.servidor_mcp_d8982da2") : t("generated.controlPlane.novo_servidor_mcp_604453c4")}
               </p>
               <h3
                 id="mcp-editor-modal-title"
-                className="text-[1.15rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)] sm:text-[1.2rem]"
+                className="text-[1.15rem] font-semibold tracking-[-0.04em] text-[color:var(--text-primary)] sm:text-[1.2rem]"
               >
                 {isEditing
                   ? t("generated.controlPlane.editar_servidor_mcp_560c29f3")
                   : t("generated.controlPlane.adicionar_servidor_mcp_ea88d544")}
               </h3>
-              <p className="max-w-[38rem] text-sm leading-6 text-[var(--text-quaternary)]">
+              <p className="max-w-[38rem] text-sm leading-6 text-[color:var(--text-quaternary)]">
                 {t("generated.controlPlane.configure_a_conexao_global_com_um_servidor_m_c5460c06")}
               </p>
             </div>
@@ -444,7 +444,7 @@ export function McpServerEditorModal({
           </div>
 
           <div className="flex flex-col gap-3 border-t border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-5 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-            <p className="text-xs leading-5 text-[var(--text-quaternary)]">
+            <p className="text-xs leading-5 text-[color:var(--text-quaternary)]">
               {t("generated.controlPlane.esse_servidor_ficara_disponivel_no_catalogo__138cb47f")}
             </p>
 

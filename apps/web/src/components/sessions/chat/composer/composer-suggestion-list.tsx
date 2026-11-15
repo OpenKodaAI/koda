@@ -80,7 +80,7 @@ export function ComposerSuggestionList({
   const searchHeader = hasSearch ? (
     <div className="composer-suggestion-search" role="presentation">
       <Search
-        className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]"
+        className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-quaternary)]"
         strokeWidth={1.75}
         aria-hidden
       />
@@ -94,7 +94,7 @@ export function ComposerSuggestionList({
         autoComplete="off"
         className={cn(
           "composer-suggestion-search__input flex-1 min-w-0 bg-transparent border-0 outline-none",
-          "text-[0.8125rem] leading-[1] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]",
+          "text-[0.8125rem] leading-[1] text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)]",
         )}
         // Stop list-navigation keys (handled at composer level on the
         // textarea) from reaching the input as default text-caret events.
@@ -117,7 +117,7 @@ export function ComposerSuggestionList({
       <div className="flex flex-col">
         {searchHeader}
         <div
-          className="px-3 py-3 text-[0.75rem] text-[var(--text-tertiary)]"
+          className="px-3 py-3 text-[0.75rem] text-[color:var(--text-tertiary)]"
           role="status"
         >
           {emptyLabel}
@@ -147,7 +147,7 @@ export function ComposerSuggestionList({
               {group.label ? (
                 <li
                   role="presentation"
-                  className="px-2 pt-1.5 pb-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]"
+                  className="px-2 pt-1.5 pb-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)]"
                 >
                   {group.label}
                 </li>
@@ -175,12 +175,12 @@ export function ComposerSuggestionList({
                     "flex items-center gap-2 rounded-[var(--radius-panel-sm)] px-2 py-1.5 mx-1 text-left text-[0.8125rem] cursor-pointer",
                     "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                     isActive
-                      ? "bg-[var(--hover-tint)] text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+                      ? "bg-[var(--hover-tint)] text-[color:var(--text-primary)]"
+                      : "text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   {item.iconNode ? (
-                    <span className="shrink-0 text-[var(--text-tertiary)]" aria-hidden>
+                    <span className="shrink-0 text-[color:var(--text-tertiary)]" aria-hidden>
                       {item.iconNode}
                     </span>
                   ) : item.swatchColor ? (
@@ -193,13 +193,13 @@ export function ComposerSuggestionList({
                   <span className="flex min-w-0 flex-1 flex-col">
                     <span className="truncate">{item.label}</span>
                     {item.description ? (
-                      <span className="truncate text-[0.6875rem] text-[var(--text-quaternary)]">
+                      <span className="truncate text-[0.6875rem] text-[color:var(--text-quaternary)]">
                         {item.description}
                       </span>
                     ) : null}
                   </span>
                   {item.meta ? (
-                    <span className="shrink-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]">
+                    <span className="shrink-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)]">
                       {item.meta}
                     </span>
                   ) : null}

@@ -62,7 +62,7 @@ export function SectionScheduler() {
             error={findFieldError(errors, "scheduler.scheduler_poll_interval_seconds")?.message}
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={1}
               value={numberOrEmpty(scheduler.scheduler_poll_interval_seconds)}
@@ -79,7 +79,7 @@ export function SectionScheduler() {
             error={findFieldError(errors, "scheduler.scheduler_lease_seconds")?.message}
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={1}
               value={numberOrEmpty(scheduler.scheduler_lease_seconds)}
@@ -96,7 +96,7 @@ export function SectionScheduler() {
             error={findFieldError(errors, "scheduler.scheduler_run_max_attempts")?.message}
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={1}
               value={numberOrEmpty(scheduler.scheduler_run_max_attempts)}
@@ -113,7 +113,7 @@ export function SectionScheduler() {
             error={findFieldError(errors, "scheduler.scheduler_min_interval_seconds")?.message}
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={1}
               value={numberOrEmpty(scheduler.scheduler_min_interval_seconds)}
@@ -130,7 +130,7 @@ export function SectionScheduler() {
             error={findFieldError(errors, "scheduler.scheduler_retry_base_delay")?.message}
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={1}
               value={numberOrEmpty(scheduler.scheduler_retry_base_delay)}
@@ -147,7 +147,7 @@ export function SectionScheduler() {
             error={findFieldError(errors, "scheduler.scheduler_retry_max_delay")?.message}
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={1}
               value={numberOrEmpty(scheduler.scheduler_retry_max_delay)}
@@ -175,7 +175,7 @@ export function SectionScheduler() {
             error={findFieldError(errors, "scheduler.runbook_governance_hour")?.message}
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={0}
               max={23}
@@ -193,7 +193,7 @@ export function SectionScheduler() {
             error={findFieldError(errors, "scheduler.runbook_revalidation_stale_days")?.message}
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={1}
               value={numberOrEmpty(scheduler.runbook_revalidation_stale_days)}
@@ -212,7 +212,7 @@ export function SectionScheduler() {
             }
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={1}
               value={numberOrEmpty(scheduler.runbook_revalidation_min_verified_runs)}
@@ -233,7 +233,7 @@ export function SectionScheduler() {
             }
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={0}
               max={1}
@@ -257,7 +257,7 @@ export function SectionScheduler() {
             }
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={1}
               value={numberOrEmpty(scheduler.runbook_revalidation_correction_threshold)}
@@ -279,7 +279,7 @@ export function SectionScheduler() {
             }
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={1}
               value={numberOrEmpty(scheduler.runbook_revalidation_rollback_threshold)}

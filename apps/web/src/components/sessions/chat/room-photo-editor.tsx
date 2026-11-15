@@ -384,10 +384,10 @@ export function RoomPhotoEditor({
             aria-label={t("sessions.room.photo.remove", undefined)}
             className={cn(
               "flex h-6 w-6 items-center justify-center rounded-full",
-              "border border-[color:var(--border-strong)] bg-[var(--panel-strong)] text-[var(--text-tertiary)]",
+              "border border-[color:var(--border-strong)] bg-[var(--panel-strong)] text-[color:var(--text-tertiary)]",
               "shadow-[var(--shadow-xs)] outline-none",
               "transition-[background-color,color,border-color] duration-[160ms] ease-[var(--ease-out-quart)]",
-              "hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)] hover:border-[color:var(--tone-danger-border)]",
+              "hover:bg-[var(--tone-danger-bg)] hover:text-[color:var(--tone-danger-dot)] hover:border-[color:var(--tone-danger-border)]",
               "disabled:cursor-wait disabled:opacity-80",
             )}
             style={{
@@ -473,7 +473,7 @@ export function RoomPhotoEditor({
       {error ? (
         <p
           role="alert"
-          className="max-w-[20rem] text-center text-[0.75rem] text-[var(--tone-danger-dot)]"
+          className="max-w-[20rem] text-center text-[0.75rem] text-[color:var(--tone-danger-dot)]"
         >
           {error}
         </p>

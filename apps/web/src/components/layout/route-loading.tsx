@@ -255,7 +255,7 @@ export function AccountRouteLoading() {
 
 export function AuthRouteLoading() {
   return (
-    <div className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden bg-[var(--canvas)] text-[var(--text-primary)]" data-testid="auth-route-loading">
+    <div className="relative flex min-h-[100dvh] w-full flex-col overflow-hidden bg-[var(--canvas)] text-[color:var(--text-primary)]" data-testid="auth-route-loading">
       <header className="relative z-10 flex h-14 shrink-0 items-center justify-end px-5">
         <div className="flex items-center gap-2">
           <SkeletonLine className="h-9 w-28 rounded-[var(--radius-input)]" />

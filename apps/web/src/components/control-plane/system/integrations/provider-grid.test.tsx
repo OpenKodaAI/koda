@@ -337,7 +337,7 @@ describe("ProviderGrid", () => {
     expect(checkIcon).not.toBeNull();
     // The check icon inherits success color from its container's CSS class
     const checkContainer = checkIcon!.closest("div");
-    expect(checkContainer?.className).toContain("text-[var(--tone-success-text)]");
+    expect(checkContainer?.className).toContain("text-[color:var(--tone-success-text)]");
 
     fireEvent.click(providerCard);
 

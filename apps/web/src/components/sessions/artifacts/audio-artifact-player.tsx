@@ -82,7 +82,7 @@ export function AudioArtifactPlayer({
   return (
     <div
       className={cn(
-        "inline-flex w-auto min-w-[220px] max-w-[320px] items-center gap-2 rounded-[var(--radius-chip)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 py-1.5 text-[var(--text-primary)] shadow-none",
+        "inline-flex w-auto min-w-[220px] max-w-[320px] items-center gap-2 rounded-[var(--radius-chip)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 py-1.5 text-[color:var(--text-primary)] shadow-none",
         className,
       )}
     >
@@ -116,7 +116,7 @@ export function AudioArtifactPlayer({
             ? t("sessions.artifacts.pauseAudio", undefined)
             : t("sessions.artifacts.playAudio", undefined)
         }
-        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--text-primary)] text-[var(--canvas)] transition-colors hover:bg-[var(--text-secondary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text-tertiary)]"
+        className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--text-primary)] text-[color:var(--canvas)] transition-colors hover:bg-[var(--text-secondary)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text-tertiary)]"
       >
         {playing ? (
           <Pause className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
@@ -143,7 +143,7 @@ export function AudioArtifactPlayer({
             );
           })}
         </div>
-        <span className="shrink-0 font-mono text-[0.6875rem] leading-none text-[var(--text-tertiary)]">
+        <span className="shrink-0 font-mono text-[0.6875rem] leading-none text-[color:var(--text-tertiary)]">
           {formatAudioTime(visibleTime)}
         </span>
         {artifactDetail ? (
@@ -152,7 +152,7 @@ export function AudioArtifactPlayer({
             onClick={() => void downloader.download(artifactDetail)}
             disabled={downloader.isDownloading}
             aria-label={t("sessions.artifacts.downloadAudio", undefined)}
-            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60"
+            className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[color:var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)] disabled:opacity-60"
           >
             <Download className="h-3 w-3" strokeWidth={1.75} aria-hidden />
           </button>

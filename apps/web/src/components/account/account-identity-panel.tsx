@@ -60,14 +60,14 @@ function ProfileDatum({
 }) {
   return (
     <div className="grid min-w-0 grid-cols-[auto_1fr] gap-3 px-4 py-3.5">
-      <span className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-tertiary)]">
+      <span className="mt-0.5 inline-flex h-7 w-7 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[color:var(--text-tertiary)]">
         <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
       </span>
       <span className="min-w-0">
-        <dt className="font-mono text-[0.625rem] uppercase leading-4 tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+        <dt className="font-mono text-[0.625rem] uppercase leading-4 tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
           {label}
         </dt>
-        <dd className="m-0 mt-1 truncate text-[0.8125rem] text-[var(--text-primary)]" title={value || "—"}>
+        <dd className="m-0 mt-1 truncate text-[0.8125rem] text-[color:var(--text-primary)]" title={value || "—"}>
           {value || "—"}
         </dd>
       </span>
@@ -233,10 +233,10 @@ export function AccountIdentityPanel() {
             />
             <div className="mt-5 grid gap-2">
               <div className="flex items-center justify-between gap-3">
-                <span className="font-mono text-[0.625rem] uppercase leading-4 tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                <span className="font-mono text-[0.625rem] uppercase leading-4 tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                   {t("generated.account.avatar_075d90c5")}
                 </span>
-                <span className="truncate text-right text-[0.6875rem] text-[var(--text-tertiary)]">
+                <span className="truncate text-right text-[0.6875rem] text-[color:var(--text-tertiary)]">
                   {selectedAvatarLabel}
                 </span>
               </div>
@@ -256,7 +256,7 @@ export function AccountIdentityPanel() {
                 <div className="grid gap-1.5">
                   <label
                     htmlFor="account-display-name"
-                    className="font-mono text-[0.625rem] uppercase leading-4 tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]"
+                    className="font-mono text-[0.625rem] uppercase leading-4 tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]"
                   >
                     {translate("generated.account.display_name_a9fa3ec3")}</label>
                   <div className="flex flex-col gap-2 sm:flex-row">
@@ -302,7 +302,7 @@ export function AccountIdentityPanel() {
                     </div>
                   </div>
                   {displayNameError ? (
-                    <p id="account-display-name-error" role="alert" className="m-0 text-[0.75rem] text-[var(--tone-danger-dot)]">
+                    <p id="account-display-name-error" role="alert" className="m-0 text-[0.75rem] text-[color:var(--tone-danger-dot)]">
                       {displayNameError}
                     </p>
                   ) : null}
@@ -325,7 +325,7 @@ export function AccountIdentityPanel() {
               </div>
             </dl>
             <div className="flex flex-col gap-3 border-t border-[var(--divider-hair)] px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="m-0 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
+              <p className="m-0 text-[0.75rem] leading-5 text-[color:var(--text-tertiary)]">
                 {t("generated.account.profile_changes_are_saved_to_this_operator_a_81c7bcf9")}
               </p>
               <Button

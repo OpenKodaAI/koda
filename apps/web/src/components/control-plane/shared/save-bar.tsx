@@ -60,13 +60,13 @@ export function SaveBar({ dirty, saving, onSave, onDiscard }: SaveBarProps) {
             }}
           >
             {showSuccess ? (
-              <span className="flex items-center gap-2 text-sm text-[var(--tone-success-text)]">
+              <span className="flex items-center gap-2 text-sm text-[color:var(--tone-success-text)]">
                 <Check size={16} />
                 {t("controlPlane.shared.saveBar.saved", undefined)}
               </span>
             ) : (
               <>
-                <span className="text-sm text-[var(--tone-warning-text)]">
+                <span className="text-sm text-[color:var(--tone-warning-text)]">
                   {t("controlPlane.shared.saveBar.unsaved", undefined)}
                 </span>
 

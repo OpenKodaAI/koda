@@ -175,7 +175,7 @@ export function SectionVariables() {
                 <input
                   type="text"
                   className={cn(
-                    "field-shell font-mono text-[var(--text-primary)]",
+                    "field-shell font-mono text-[color:var(--text-primary)]",
                     draftKeyError
                       ? "border-[var(--tone-danger-border)] focus:border-[var(--tone-danger-border)]"
                       : "",
@@ -192,7 +192,7 @@ export function SectionVariables() {
                   aria-invalid={draftKeyError ? true : undefined}
                 />
                 {draftKeyError ? (
-                  <span role="alert" className="text-xs text-[var(--tone-danger-text)]">
+                  <span role="alert" className="text-xs text-[color:var(--tone-danger-text)]">
                     {tl(draftKeyError)}
                   </span>
                 ) : null}
@@ -220,7 +220,7 @@ export function SectionVariables() {
                 ) : (
                   <input
                     type="text"
-                    className="field-shell text-[var(--text-primary)]"
+                    className="field-shell text-[color:var(--text-primary)]"
                     value={entryDraft.value}
                     onChange={(event) =>
                       setEntryDraft((prev) => ({ ...prev, value: event.target.value }))
@@ -235,7 +235,7 @@ export function SectionVariables() {
               <span className="eyebrow">{t("generated.controlPlane.descricao_ff40fdea")}</span>
               <input
                 type="text"
-                className="field-shell text-[var(--text-primary)]"
+                className="field-shell text-[color:var(--text-primary)]"
                 value={entryDraft.description}
                 onChange={(event) =>
                   setEntryDraft((prev) => ({ ...prev, description: event.target.value }))
@@ -247,10 +247,10 @@ export function SectionVariables() {
             {entryDraft.type === "secret" && entryDraft.valuePresent ? (
               <div className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[color:var(--tone-success-text)]">
                     {t("generated.controlPlane.armazenada_c08c504b")}
                   </span>
-                  <span className="text-xs text-[var(--text-tertiary)]">
+                  <span className="text-xs text-[color:var(--text-tertiary)]">
                     {t(
                       "generated.controlPlane.o_valor_atual_nunca_e_exibido_digite_uma_nov_df7194d3",
                     )}
@@ -264,8 +264,8 @@ export function SectionVariables() {
                   className={cn(
                     "inline-flex items-center gap-2 self-start rounded-[var(--radius-panel-sm)] border px-3 py-1.5 text-xs transition-colors",
                     entryDraft.clear
-                      ? "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]"
-                      : "border-[var(--border-subtle)] bg-transparent text-[var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)]",
+                      ? "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)]"
+                      : "border-[var(--border-subtle)] bg-transparent text-[color:var(--text-secondary)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)]",
                   )}
                 >
                   <Trash2 size={13} strokeWidth={1.75} />
@@ -293,8 +293,8 @@ export function SectionVariables() {
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-[var(--radius-panel-sm)] border px-2.5 py-1.5 text-xs font-medium transition-colors",
                     entryDraft.type === "secret"
-                      ? "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]"
-                      : "border-[var(--border-subtle)] bg-transparent text-[var(--text-tertiary)]",
+                      ? "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]"
+                      : "border-[var(--border-subtle)] bg-transparent text-[color:var(--text-tertiary)]",
                     isEditing
                       ? "cursor-not-allowed opacity-50"
                       : "cursor-pointer hover:border-[var(--border-strong)]",
@@ -316,8 +316,8 @@ export function SectionVariables() {
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-[var(--radius-panel-sm)] border px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer",
                     entryDraft.scope === "agent_grant"
-                      ? "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--tone-info-text)]"
-                      : "border-[var(--border-subtle)] bg-transparent text-[var(--text-tertiary)] hover:border-[var(--border-strong)]",
+                      ? "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[color:var(--tone-info-text)]"
+                      : "border-[var(--border-subtle)] bg-transparent text-[color:var(--text-tertiary)] hover:border-[var(--border-strong)]",
                   )}
                 >
                   {entryDraft.scope === "agent_grant" ? (
@@ -345,7 +345,7 @@ export function SectionVariables() {
           </div>
 
           {sortedVariables.length === 0 ? (
-            <div className="rounded-[var(--radius-panel-sm)] border border-dashed border-[var(--border-subtle)] px-4 py-6 text-center text-sm text-[var(--text-quaternary)]">
+            <div className="rounded-[var(--radius-panel-sm)] border border-dashed border-[var(--border-subtle)] px-4 py-6 text-center text-sm text-[color:var(--text-quaternary)]">
               {t("generated.controlPlane.nenhuma_variavel_global_customizada_foi_adic_71e7f5d7")}
             </div>
           ) : (
@@ -374,15 +374,15 @@ export function SectionVariables() {
                       >
                         <div className="flex items-center gap-3">
                           <div className="flex min-w-0 flex-1 items-center gap-2">
-                            <span className="truncate font-mono text-sm text-[var(--text-primary)]">
+                            <span className="truncate font-mono text-sm text-[color:var(--text-primary)]">
                               {variable.key}
                             </span>
                             <span
                               className={cn(
                                 "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
                                 variable.type === "secret"
-                                  ? "bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]"
-                                  : "bg-[var(--hover-tint)] text-[var(--text-quaternary)]",
+                                  ? "bg-[var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]"
+                                  : "bg-[var(--hover-tint)] text-[color:var(--text-quaternary)]",
                               )}
                             >
                               {variable.type === "secret" ? t("generated.controlPlane.secret_21981078") : t("generated.controlPlane.public_388f0dbf")}
@@ -391,15 +391,15 @@ export function SectionVariables() {
                               className={cn(
                                 "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
                                 variable.scope === "agent_grant"
-                                  ? "bg-[var(--tone-info-bg)] text-[var(--tone-info-text)]"
-                                  : "bg-[var(--hover-tint)] text-[var(--text-quaternary)]",
+                                  ? "bg-[var(--tone-info-bg)] text-[color:var(--tone-info-text)]"
+                                  : "bg-[var(--hover-tint)] text-[color:var(--text-quaternary)]",
                               )}
                             >
                               {variable.scope === "agent_grant" ? t("generated.controlPlane.grant_359fdf66") : t("generated.controlPlane.system_c5d2946b")}
                             </span>
                           </div>
 
-                          <span className="hidden max-w-[220px] truncate font-mono text-xs text-[var(--text-quaternary)] md:inline">
+                          <span className="hidden max-w-[220px] truncate font-mono text-xs text-[color:var(--text-quaternary)] md:inline">
                             {variable.type === "secret"
                               ? t("generated.controlPlane.segredo_armazenado_bb36dd53")
                               : variable.value}
@@ -422,14 +422,14 @@ export function SectionVariables() {
                               size="sm"
                               onClick={() => handleDelete(variable.key)}
                               aria-label={t("generated.controlPlane.remover_5465770e")}
-                              className="px-2 text-[var(--text-quaternary)] hover:text-[var(--tone-danger-text)]"
+                              className="px-2 text-[color:var(--text-quaternary)] hover:text-[color:var(--tone-danger-text)]"
                             >
                               <Trash2 size={13} strokeWidth={1.75} />
                             </Button>
                           </div>
                         </div>
                         {variable.description ? (
-                          <p className="text-xs text-[var(--text-quaternary)]">
+                          <p className="text-xs text-[color:var(--text-quaternary)]">
                             {variable.description}
                           </p>
                         ) : null}

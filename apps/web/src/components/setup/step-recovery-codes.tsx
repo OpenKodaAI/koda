@@ -65,7 +65,7 @@ export function StepRecoveryCodes({ codes, onConfirmed }: StepRecoveryCodesProps
       </div>
 
       <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-4 py-3">
-        <ul className="grid grid-cols-2 gap-x-5 gap-y-2 font-mono text-[13.5px] tracking-[0.05em] text-[var(--text-primary)]">
+        <ul className="grid grid-cols-2 gap-x-5 gap-y-2 font-mono text-[13.5px] tracking-[0.05em] text-[color:var(--text-primary)]">
           {codes.map((code) => (
             <li key={code} className="tabular-nums">
               {code}
@@ -96,7 +96,7 @@ export function StepRecoveryCodes({ codes, onConfirmed }: StepRecoveryCodesProps
           onChange={(event) => setAcknowledged(event.target.checked)}
           className="mt-0.5 accent-[var(--accent)]"
         />
-        <span className="text-[13px] leading-snug text-[var(--text-secondary)]">
+        <span className="text-[13px] leading-snug text-[color:var(--text-secondary)]">
           {t("auth.setup.recovery_codes.saved_checkbox")}
         </span>
       </label>

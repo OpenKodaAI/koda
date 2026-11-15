@@ -135,7 +135,7 @@ export function TaskTable({
                       <td>
                         <div className="space-y-1">
                           <p className="font-mono text-xs text-foreground">#{task.id}</p>
-                          <p className="truncate text-[11px] text-[var(--text-quaternary)]">
+                          <p className="truncate text-[11px] text-[color:var(--text-quaternary)]">
                             {t("tasks.table.chat", { value: task.chat_id })}
                           </p>
                         </div>
@@ -146,17 +146,17 @@ export function TaskTable({
                       <td>
                         <div className="max-w-full space-y-1.5">
                           <p
-                            className="line-clamp-3 text-sm leading-7 text-[var(--text-primary)] transition-colors group-hover:text-[var(--text-primary)]"
+                            className="line-clamp-3 text-sm leading-7 text-[color:var(--text-primary)] transition-colors group-hover:text-[color:var(--text-primary)]"
                             title={task.query_text ?? t("tasks.table.noDescription")}
                           >
                             {task.query_text || t("tasks.table.noDescription")}
                           </p>
-                          <div className="flex max-w-full flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
-                            <span className="inline-flex max-w-[156px] items-center truncate rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
+                          <div className="flex max-w-full flex-wrap items-center gap-2 text-[11px] text-[color:var(--text-tertiary)]">
+                            <span className="inline-flex max-w-[156px] items-center truncate rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1 font-mono text-[10px] text-[color:var(--text-secondary)]">
                               {task.model ?? t("tasks.table.noModel")}
                             </span>
                             {sessionLabel && (
-                              <span className="max-w-[160px] truncate font-mono text-[10px] text-[var(--text-quaternary)]">
+                              <span className="max-w-[160px] truncate font-mono text-[10px] text-[color:var(--text-quaternary)]">
                                 {t("tasks.table.session", { value: sessionLabel })}
                               </span>
                             )}
@@ -164,7 +164,7 @@ export function TaskTable({
                         </div>
                       </td>
                       <td className="text-right">
-                        <p className="font-mono text-xs tabular-nums text-[var(--text-primary)]">
+                        <p className="font-mono text-xs tabular-nums text-[color:var(--text-primary)]">
                           {formatCost(task.cost_usd)}
                         </p>
                       </td>
@@ -177,19 +177,19 @@ export function TaskTable({
                         </p>
                       </td>
                       <td className="text-right">
-                        <p className="font-mono text-xs tabular-nums text-[var(--text-secondary)]">
+                        <p className="font-mono text-xs tabular-nums text-[color:var(--text-secondary)]">
                           {task.attempt}/{task.max_attempts}
                         </p>
                       </td>
                       <td className="text-right">
                         <div className="space-y-1 whitespace-nowrap">
                           <p
-                            className="text-xs text-[var(--text-secondary)]"
+                            className="text-xs text-[color:var(--text-secondary)]"
                             title={formatDateTime(task.created_at)}
                           >
                             {formatRelativeTime(task.created_at)}
                           </p>
-                          <p className="truncate text-[11px] text-[var(--text-quaternary)]">
+                          <p className="truncate text-[11px] text-[color:var(--text-quaternary)]">
                             {formatDateTime(task.created_at)}
                           </p>
                         </div>
@@ -254,26 +254,26 @@ export function TaskTable({
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+                  <div className="flex items-center gap-2 text-[11px] text-[color:var(--text-tertiary)]">
                     <span className="font-mono">#{task.id}</span>
                     <span className="h-1 w-1 rounded-full bg-[var(--border-strong)]" />
                     <span>{formatRelativeTime(task.created_at)}</span>
                   </div>
-                  <p className="line-clamp-2 text-sm leading-6 text-[var(--text-primary)]">
+                  <p className="line-clamp-2 text-sm leading-6 text-[color:var(--text-primary)]">
                     {task.query_text || t("tasks.table.noDescription")}
                   </p>
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
-                    <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-[color:var(--text-tertiary)]">
+                    <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[color:var(--text-secondary)]">
                       {task.model ?? t("tasks.table.noModel")}
                     </span>
                     {task.session_id && (
-                      <span className="font-mono text-[10px] text-[var(--text-quaternary)]">
+                      <span className="font-mono text-[10px] text-[color:var(--text-quaternary)]">
                         {t("tasks.table.session", { value: formatSession(task.session_id) })}
                       </span>
                     )}
                   </div>
                 </div>
-                <ArrowUpRight className="mt-0.5 h-4 w-4 text-[var(--text-quaternary)]" />
+                <ArrowUpRight className="mt-0.5 h-4 w-4 text-[color:var(--text-quaternary)]" />
               </div>
 
               <div className="mt-4 grid grid-cols-3 gap-3 text-[12px]">
@@ -300,8 +300,8 @@ export function TaskTable({
 function MobileStat({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] px-3 py-3">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-quaternary)]">{label}</p>
-      <p className={cn("mt-1.5 text-[12px] text-[var(--text-secondary)]", mono && "font-mono tabular-nums")}>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">{label}</p>
+      <p className={cn("mt-1.5 text-[12px] text-[color:var(--text-secondary)]", mono && "font-mono tabular-nums")}>
         {mono ? truncateText(value, 22) : value}
       </p>
     </div>

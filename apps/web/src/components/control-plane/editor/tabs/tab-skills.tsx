@@ -109,10 +109,10 @@ function CategoryBadge({ category }: { category: string }) {
 function PackageMetric({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--canvas)] px-3 py-2">
-      <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+      <p className="text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
         {label}
       </p>
-      <p className="mt-1 truncate text-sm text-[var(--text-secondary)]">{value}</p>
+      <p className="mt-1 truncate text-sm text-[color:var(--text-secondary)]">{value}</p>
     </div>
   );
 }
@@ -134,14 +134,14 @@ function CompactSummary({ title, entries }: { title: string; entries: Array<[str
   if (entries.length === 0) return null;
   return (
     <div className="border-t border-[var(--divider-hair)] pt-3">
-      <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+      <p className="text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
         {title}
       </p>
       <dl className="mt-2 grid grid-cols-1 gap-x-4 gap-y-1.5 text-xs md:grid-cols-2">
         {entries.map(([key, value]) => (
           <div key={key} className="min-w-0">
-            <dt className="inline text-[var(--text-quaternary)]">{key}: </dt>
-            <dd className="inline break-words text-[var(--text-secondary)]">{value}</dd>
+            <dt className="inline text-[color:var(--text-quaternary)]">{key}: </dt>
+            <dd className="inline break-words text-[color:var(--text-secondary)]">{value}</dd>
           </div>
         ))}
       </dl>
@@ -153,13 +153,13 @@ function AllowlistChips({ label, items }: { label: string; items: string[] }) {
   if (items.length === 0) return null;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <span className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+      <span className="text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
         {label}
       </span>
       {items.map((item) => (
         <span
           key={item}
-          className="max-w-full truncate rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--canvas)] px-2 py-1 font-mono text-xs text-[var(--text-tertiary)]"
+          className="max-w-full truncate rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--canvas)] px-2 py-1 font-mono text-xs text-[color:var(--text-tertiary)]"
         >
           {item}
         </span>
@@ -386,7 +386,7 @@ export function TabSkills() {
           <div className="flex items-center gap-2">
             <Wand2
               size={15}
-              className="text-[var(--text-quaternary)]"
+              className="text-[color:var(--text-quaternary)]"
             />
             <h3 className="eyebrow">{t("generated.controlPlane.bot_skills_c6e75c49")}</h3>
           </div>
@@ -401,13 +401,13 @@ export function TabSkills() {
           /* ── Empty state ─────────────────────────────────────── */
           <div className="flex flex-col items-center gap-4 rounded-[var(--radius-shell)] border border-dashed border-[var(--border-subtle)] bg-[var(--surface-tint)] px-6 py-10">
             <div className="flex h-12 w-12 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--tone-info-bg)]">
-              <Wand2 size={20} className="text-[var(--tone-info-text)]" />
+              <Wand2 size={20} className="text-[color:var(--tone-info-text)]" />
             </div>
             <div className="text-center">
-              <p className="text-sm font-medium text-[var(--text-secondary)]">
+              <p className="text-sm font-medium text-[color:var(--text-secondary)]">
                 {t("generated.controlPlane.no_custom_skills_yet_d74a99c0")}
               </p>
-              <p className="mt-1 max-w-xs text-xs leading-relaxed text-[var(--text-quaternary)]">
+              <p className="mt-1 max-w-xs text-xs leading-relaxed text-[color:var(--text-quaternary)]">
                 {t(
                   "generated.controlPlane.skills_teach_the_agent_to_follow_specific_me_7df14ed5",
                 )}
@@ -416,7 +416,7 @@ export function TabSkills() {
             <button
               type="button"
               onClick={addSkill}
-              className="mt-1 inline-flex items-center gap-2 rounded-[var(--radius-panel)] bg-[var(--tone-info-bg)] px-4 py-2.5 text-sm font-medium text-[var(--tone-info-text)] transition-colors hover:bg-[var(--tone-info-bg-strong)]"
+              className="mt-1 inline-flex items-center gap-2 rounded-[var(--radius-panel)] bg-[var(--tone-info-bg)] px-4 py-2.5 text-sm font-medium text-[color:var(--tone-info-text)] transition-colors hover:bg-[var(--tone-info-bg-strong)]"
             >
               <Plus size={14} />
               {t("generated.controlPlane.create_first_skill_aa41c669")}
@@ -446,20 +446,20 @@ export function TabSkills() {
                     <motion.span
                       animate={{ rotate: isExpanded ? 90 : 0 }}
                       transition={{ duration: 0.2, ease: EASE_OUT }}
-                      className="text-[var(--text-quaternary)]"
+                      className="text-[color:var(--text-quaternary)]"
                     >
                       <ChevronRight size={14} />
                     </motion.span>
 
                     <span className="flex min-w-0 flex-1 items-center gap-2.5">
-                      <span className="truncate text-sm font-medium text-[var(--text-primary)]">
+                      <span className="truncate text-sm font-medium text-[color:var(--text-primary)]">
                         {skill.name || t("generated.controlPlane.unnamed_skill_1ad27319")}
                       </span>
                       <CategoryBadge category={skill.category || "general"} />
                     </span>
 
                     {skill.instruction && !isExpanded ? (
-                      <span className="hidden max-w-[220px] truncate text-xs text-[var(--text-quaternary)] md:inline">
+                      <span className="hidden max-w-[220px] truncate text-xs text-[color:var(--text-quaternary)] md:inline">
                         {skill.instruction}
                       </span>
                     ) : null}
@@ -470,7 +470,7 @@ export function TabSkills() {
                         e.stopPropagation();
                         setConfirmDelete(skill.id);
                       }}
-                      className="ml-1 rounded-[var(--radius-chip)] p-1.5 text-[var(--text-quaternary)] transition-colors hover:bg-[rgba(250,82,82,0.08)] hover:text-[var(--tone-danger-text)]"
+                      className="ml-1 rounded-[var(--radius-chip)] p-1.5 text-[color:var(--text-quaternary)] transition-colors hover:bg-[rgba(250,82,82,0.08)] hover:text-[color:var(--tone-danger-text)]"
                       aria-label={t("generated.controlPlane.remove_skill_dd547537")}
                     >
                       <Trash2 size={13} />
@@ -631,7 +631,7 @@ export function TabSkills() {
             <button
               type="button"
               onClick={addSkill}
-              className="inline-flex items-center gap-2 self-start rounded-[var(--radius-panel)] border border-dashed border-[var(--border-subtle)] px-4 py-2.5 text-sm text-[var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)]"
+              className="inline-flex items-center gap-2 self-start rounded-[var(--radius-panel)] border border-dashed border-[var(--border-subtle)] px-4 py-2.5 text-sm text-[color:var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[color:var(--text-secondary)]"
             >
               <Plus size={14} />
               {t("generated.controlPlane.add_skill_d6c48d41")}
@@ -644,14 +644,14 @@ export function TabSkills() {
       <section className="flex flex-col gap-4 border-t border-[var(--border-subtle)] pt-5">
         <div className="flex flex-wrap items-center justify-between gap-3 px-1">
           <div className="flex items-center gap-2">
-            <PackageCheck size={15} className="text-[var(--text-quaternary)]" />
+            <PackageCheck size={15} className="text-[color:var(--text-quaternary)]" />
             <h3 className="eyebrow">{t("generated.controlPlane.skill_packages_fb8077a4")}</h3>
           </div>
           <button
             type="button"
             onClick={refreshPackages}
             disabled={packageBusy !== null}
-            className="inline-flex items-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] px-3 py-2 text-xs font-medium text-[var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex items-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] px-3 py-2 text-xs font-medium text-[color:var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[color:var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RotateCcw size={13} />
             {t("generated.controlPlane.refresh_9da693db")}
@@ -667,7 +667,7 @@ export function TabSkills() {
 
         {skillRegistryItems.length > 0 ? (
           <div className="rounded-[var(--radius-shell)] border border-[var(--border-subtle)] bg-[var(--surface-tint)] p-4">
-            <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+            <p className="text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
               {t("generated.controlPlane.local_trust_registry_b46f25c2")}
             </p>
             <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -679,14 +679,14 @@ export function TabSkills() {
                 >
                   <div className="flex min-w-0 items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate font-medium text-[var(--text-secondary)]">
+                      <p className="truncate font-medium text-[color:var(--text-secondary)]">
                         {item.name} {translate("generated.controlPlane.v_76abe6e8")}{item.version}
                       </p>
-                      <p className="mt-1 truncate font-mono text-xs text-[var(--text-quaternary)]">
+                      <p className="mt-1 truncate font-mono text-xs text-[color:var(--text-quaternary)]">
                         {item.package_id}
                       </p>
                     </div>
-                    <span className="shrink-0 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 text-xs uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                    <span className="shrink-0 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 text-xs uppercase tracking-[0.14em] text-[color:var(--text-tertiary)]">
                       {item.recommendation_status}
                     </span>
                   </div>
@@ -729,7 +729,7 @@ export function TabSkills() {
               type="button"
               onClick={scanPackage}
               disabled={!packagePath.trim() || packageBusy !== null}
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] px-4 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] px-4 text-sm font-medium text-[color:var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <ShieldAlert size={15} />
               {packageBusy === "scan" ? t("generated.controlPlane.scanning_f98594ca") : t("generated.controlPlane.scan_e37b96bf")}
@@ -743,7 +743,7 @@ export function TabSkills() {
                 packageScan?.decision === "deny" ||
                 !reviewInstallReady
               }
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius-panel)] bg-[var(--tone-info-bg)] px-4 text-sm font-medium text-[var(--tone-info-text)] transition-colors hover:bg-[var(--tone-info-bg-strong)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-[var(--radius-panel)] bg-[var(--tone-info-bg)] px-4 text-sm font-medium text-[color:var(--tone-info-text)] transition-colors hover:bg-[var(--tone-info-bg-strong)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               <CheckCircle2 size={15} />
               {packageScan?.decision === "review_required" ? t("generated.controlPlane.install_after_review_e63df26d") : t("generated.controlPlane.install_393a9334")}
@@ -751,7 +751,7 @@ export function TabSkills() {
           </div>
 
           {packageError ? (
-            <div className="mt-4 flex gap-2 rounded-[var(--radius-panel)] border border-[rgba(250,82,82,0.25)] bg-[rgba(250,82,82,0.08)] px-3 py-2 text-xs leading-relaxed text-[var(--tone-danger-text)]">
+            <div className="mt-4 flex gap-2 rounded-[var(--radius-panel)] border border-[rgba(250,82,82,0.25)] bg-[rgba(250,82,82,0.08)] px-3 py-2 text-xs leading-relaxed text-[color:var(--tone-danger-text)]">
               <XCircle size={14} className="mt-0.5 shrink-0" />
               <span>{packageError}</span>
             </div>
@@ -761,20 +761,20 @@ export function TabSkills() {
             <div className="mt-5 flex flex-col gap-4 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-tint)] p-4">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-medium text-[var(--text-primary)]">
+                  <p className="text-sm font-medium text-[color:var(--text-primary)]">
                     {packageScan.package.name} {translate("generated.controlPlane.v_76abe6e8")}{packageScan.package.version}
                   </p>
-                  <p className="mt-1 text-xs text-[var(--text-quaternary)]">
+                  <p className="mt-1 text-xs text-[color:var(--text-quaternary)]">
                     {packageScan.package.id} · {packageScan.scanner_version}
                   </p>
                 </div>
                 <span
                   className={`inline-flex items-center rounded-[var(--radius-pill)] px-2.5 py-1 text-xs font-semibold uppercase tracking-[0.14em] ${
                     packageScan.decision === "allow"
-                      ? "bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]"
+                      ? "bg-[var(--tone-success-bg)] text-[color:var(--tone-success-text)]"
                       : packageScan.decision === "deny"
-                        ? "bg-[rgba(250,82,82,0.10)] text-[var(--tone-danger-text)]"
-                        : "bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]"
+                        ? "bg-[rgba(250,82,82,0.10)] text-[color:var(--tone-danger-text)]"
+                        : "bg-[var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]"
                   }`}
                 >
                   {packageScan.decision}
@@ -799,7 +799,7 @@ export function TabSkills() {
 
               {packageScan.decision === "review_required" ? (
                 <div className="flex flex-col gap-3 rounded-[var(--radius-panel)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] p-3">
-                  <label className="flex items-start gap-2 text-xs text-[var(--tone-warning-text)]">
+                  <label className="flex items-start gap-2 text-xs text-[color:var(--tone-warning-text)]">
                     <input
                       type="checkbox"
                       checked={reviewAccepted}
@@ -820,7 +820,7 @@ export function TabSkills() {
               ) : null}
 
               {Object.keys(packageScan.permissions_requested).length > 0 ? (
-                <pre className="max-h-40 overflow-auto rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[rgba(0,0,0,0.18)] p-3 text-xs text-[var(--text-tertiary)]">
+                <pre className="max-h-40 overflow-auto rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[rgba(0,0,0,0.18)] p-3 text-xs text-[color:var(--text-tertiary)]">
                   {JSON.stringify(packageScan.permissions_requested, null, 2)}
                 </pre>
               ) : null}
@@ -832,14 +832,14 @@ export function TabSkills() {
                       key={`${finding.id}-${finding.path}-${finding.message}`}
                       className="flex gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--canvas)] px-3 py-2 text-xs"
                     >
-                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[var(--tone-warning-text)]" />
+                      <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[color:var(--tone-warning-text)]" />
                       <div className="min-w-0">
-                        <p className="font-medium text-[var(--text-secondary)]">
+                        <p className="font-medium text-[color:var(--text-secondary)]">
                           {finding.severity} · {finding.id}
                         </p>
-                        <p className="mt-1 text-[var(--text-quaternary)]">{finding.message}</p>
+                        <p className="mt-1 text-[color:var(--text-quaternary)]">{finding.message}</p>
                         {finding.path ? (
-                          <p className="mt-1 truncate font-mono text-xs text-[var(--text-quaternary)]">
+                          <p className="mt-1 truncate font-mono text-xs text-[color:var(--text-quaternary)]">
                             {finding.path}
                           </p>
                         ) : null}
@@ -848,7 +848,7 @@ export function TabSkills() {
                   ))}
                 </div>
               ) : (
-                <p className="text-xs text-[var(--text-quaternary)]">{t("generated.controlPlane.no_findings_reported_by_scanner_401ba83e")}</p>
+                <p className="text-xs text-[color:var(--text-quaternary)]">{t("generated.controlPlane.no_findings_reported_by_scanner_401ba83e")}</p>
               )}
             </div>
           ) : null}
@@ -856,7 +856,7 @@ export function TabSkills() {
 
         <div className="flex flex-col gap-2">
           {packageLocks.length === 0 ? (
-            <div className="rounded-[var(--radius-shell)] border border-dashed border-[var(--border-subtle)] bg-[var(--surface-tint)] px-5 py-6 text-sm text-[var(--text-quaternary)]">
+            <div className="rounded-[var(--radius-shell)] border border-dashed border-[var(--border-subtle)] bg-[var(--surface-tint)] px-5 py-6 text-sm text-[color:var(--text-quaternary)]">
               {t("generated.controlPlane.no_installed_skill_packages_custom_skills_ab_c1972733")}
             </div>
           ) : (
@@ -867,31 +867,31 @@ export function TabSkills() {
               >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                    <p className="truncate text-sm font-medium text-[color:var(--text-primary)]">
                       {lock.name} {translate("generated.controlPlane.v_76abe6e8")}{lock.version}
                     </p>
-                    <p className="mt-1 text-xs text-[var(--text-quaternary)]">
+                    <p className="mt-1 text-xs text-[color:var(--text-quaternary)]">
                       {lock.package_id} · {lock.installed_skills.length} {t("generated.controlPlane.skills_fc57c4a4")} · {lock.installed_tools.length}{" "}
                       {t("generated.controlPlane.tools_c8224289")}
                     </p>
                     {lock.package_path ? (
-                      <p className="mt-2 truncate font-mono text-xs text-[var(--text-quaternary)]">
+                      <p className="mt-2 truncate font-mono text-xs text-[color:var(--text-quaternary)]">
                         {lock.package_path}
                       </p>
                     ) : null}
                     <div className="mt-3 flex flex-wrap gap-2">
                       {lock.recommendation_status ? (
-                        <span className="rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                        <span className="rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--text-tertiary)]">
                           {lock.recommendation_status}
                         </span>
                       ) : null}
                       {lock.installed_at ? (
-                        <span className="rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 font-mono text-xs text-[var(--text-quaternary)]">
+                        <span className="rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 font-mono text-xs text-[color:var(--text-quaternary)]">
                           {t("generated.controlPlane.installed_2fc4a4e0")} {lock.installed_at}
                         </span>
                       ) : null}
                       {lock.rollback_ref ? (
-                        <span className="rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 font-mono text-xs text-[var(--text-quaternary)]">
+                        <span className="rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 font-mono text-xs text-[color:var(--text-quaternary)]">
                           {t("generated.controlPlane.rollback_68d0d254")} {lock.rollback_ref}
                         </span>
                       ) : null}
@@ -902,7 +902,7 @@ export function TabSkills() {
                       type="button"
                       onClick={() => runPackageEvals(lock.package_id)}
                       disabled={packageBusy !== null}
-                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] px-3 py-2 text-xs text-[color:var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[color:var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <CheckCircle2 size={13} />
                       {packageBusy === "evals" ? t("generated.controlPlane.running_evals_359a2c6d") : t("generated.controlPlane.run_evals_56040b57")}
@@ -911,7 +911,7 @@ export function TabSkills() {
                       type="button"
                       onClick={() => rollbackPackage(lock.package_id)}
                       disabled={!lock.rollback_ref || packageBusy !== null}
-                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] px-3 py-2 text-xs text-[var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] px-3 py-2 text-xs text-[color:var(--text-tertiary)] transition-colors hover:border-[var(--border-strong)] hover:text-[color:var(--text-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <RotateCcw size={13} />
                       {t("generated.controlPlane.rollback_299e720f")}
@@ -920,7 +920,7 @@ export function TabSkills() {
                       type="button"
                       onClick={() => uninstallPackage(lock.package_id)}
                       disabled={packageBusy !== null}
-                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-panel)] border border-[rgba(250,82,82,0.30)] px-3 py-2 text-xs text-[var(--tone-danger-text)] transition-colors hover:bg-[rgba(250,82,82,0.08)] disabled:cursor-not-allowed disabled:opacity-50"
+                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-panel)] border border-[rgba(250,82,82,0.30)] px-3 py-2 text-xs text-[color:var(--tone-danger-text)] transition-colors hover:bg-[rgba(250,82,82,0.08)] disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       <Trash2 size={13} />
                       {t("generated.controlPlane.uninstall_00e07cef")}
@@ -941,7 +941,7 @@ export function TabSkills() {
                   <CompactSummary title={t("generated.controlPlane.eval_summary_51ea59cf")} entries={summaryEntries(lock.eval_summary)} />
                   {lock.skill_evals.length > 0 ? (
                     <div className="border-t border-[var(--divider-hair)] pt-3">
-                      <p className="text-xs font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+                      <p className="text-xs font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                         {t("generated.controlPlane.skill_evals_d0eac852")}
                       </p>
                       <div className="mt-2 flex flex-col gap-1.5">
@@ -957,12 +957,12 @@ export function TabSkills() {
                               key={`${evalId}-${index}`}
                               className="min-w-0 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1.5"
                             >
-                              <p className="truncate text-[var(--text-secondary)]">
+                              <p className="truncate text-[color:var(--text-secondary)]">
                                 {evalId}
-                                {status ? <span className="text-[var(--text-quaternary)]"> · {status}</span> : null}
+                                {status ? <span className="text-[color:var(--text-quaternary)]"> · {status}</span> : null}
                               </p>
                               {summary ? (
-                                <p className="mt-0.5 line-clamp-2 text-[var(--text-quaternary)]">{summary}</p>
+                                <p className="mt-0.5 line-clamp-2 text-[color:var(--text-quaternary)]">{summary}</p>
                               ) : null}
                             </div>
                           );

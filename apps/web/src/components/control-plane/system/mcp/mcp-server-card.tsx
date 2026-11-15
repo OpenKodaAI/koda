@@ -21,8 +21,8 @@ function TransportBadge({ type }: { type: "stdio" | "http_sse" }) {
       className={cn(
         "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider",
         isStdio
-          ? "border border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--tone-info-text)]"
-          : "border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]",
+          ? "border border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[color:var(--tone-info-text)]"
+          : "border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]",
       )}
     >
       {isStdio ? <Terminal size={10} /> : <Globe size={10} />}
@@ -70,12 +70,12 @@ export function McpServerCard({
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
-            <span className="truncate text-sm font-semibold text-[var(--text-primary)]">
+            <span className="truncate text-sm font-semibold text-[color:var(--text-primary)]">
               {server.display_name}
             </span>
             <TransportBadge type={server.transport_type} />
           </div>
-          <span className="mt-0.5 block text-[10px] uppercase tracking-wider text-[var(--text-quaternary)]">
+          <span className="mt-0.5 block text-[10px] uppercase tracking-wider text-[color:var(--text-quaternary)]">
             {tl(categoryLabel)}
           </span>
         </div>
@@ -89,7 +89,7 @@ export function McpServerCard({
 
       {/* Description */}
       {server.description ? (
-        <p className="line-clamp-2 text-xs leading-relaxed text-[var(--text-tertiary)]">
+        <p className="line-clamp-2 text-xs leading-relaxed text-[color:var(--text-tertiary)]">
           {server.description}
         </p>
       ) : null}
@@ -99,7 +99,7 @@ export function McpServerCard({
         <button
           type="button"
           onClick={onEdit}
-          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+          className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
           aria-label={`${t("generated.controlPlane.editar_28e2e08e")} ${server.display_name}`}
         >
           <Pencil size={12} />
@@ -108,7 +108,7 @@ export function McpServerCard({
         <button
           type="button"
           onClick={onDelete}
-          className="inline-flex items-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-xs text-[var(--tone-danger-text)] transition-colors hover:border-[var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)]"
+          className="inline-flex items-center gap-1.5 rounded-md border border-transparent px-2 py-1 text-xs text-[color:var(--tone-danger-text)] transition-colors hover:border-[var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)]"
           aria-label={`${t("generated.controlPlane.remover_5465770e")} ${server.display_name}`}
         >
           <Trash2 size={12} />

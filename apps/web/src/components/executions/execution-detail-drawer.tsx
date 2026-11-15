@@ -89,7 +89,7 @@ export function ExecutionDetailDrawer({
                   type="button"
                   onClick={onExpand}
                   aria-label={t("common.expand")}
-                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-quaternary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg text-[color:var(--text-quaternary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
                 >
                   <Expand className="h-4 w-4" />
                 </button>
@@ -98,7 +98,7 @@ export function ExecutionDetailDrawer({
                 type="button"
                 onClick={onClose}
                 aria-label={t("common.close")}
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-quaternary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[color:var(--text-quaternary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -115,7 +115,7 @@ export function ExecutionDetailDrawer({
               />
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
-                  <h2 className="m-0 truncate text-[1.0625rem] font-medium tracking-[-0.014em] text-[var(--text-primary)]">
+                  <h2 className="m-0 truncate text-[1.0625rem] font-medium tracking-[-0.014em] text-[color:var(--text-primary)]">
                     {getAgentLabel(data.bot_id)}
                   </h2>
                   <ExecutionStatusPill
@@ -125,7 +125,7 @@ export function ExecutionDetailDrawer({
                     })}
                   />
                 </div>
-                <p className="m-0 mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                <p className="m-0 mt-0.5 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                   #{data.task_id} · {data.bot_id}
                 </p>
               </div>
@@ -133,7 +133,7 @@ export function ExecutionDetailDrawer({
 
             {/* Query — the action */}
             {data.query_text ? (
-              <p className="m-0 mt-4 line-clamp-3 break-words text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-secondary)]">
+              <p className="m-0 mt-4 line-clamp-3 break-words text-[length:var(--font-size-sm)] leading-[1.55] text-[color:var(--text-secondary)]">
                 {data.query_text}
               </p>
             ) : null}

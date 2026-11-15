@@ -78,7 +78,7 @@ function ActivityHeatmapComponent({
             />
           ) : null}
           <div className="hidden items-center gap-1.5 sm:flex">
-            <span className="text-[10px] text-[var(--text-quaternary)]">{resolvedLegend.less}</span>
+            <span className="text-[10px] text-[color:var(--text-quaternary)]">{resolvedLegend.less}</span>
             <div className="flex gap-[3px]">
               {[0, 1, 2, 3, 4].map((step) => (
                 <span
@@ -90,7 +90,7 @@ function ActivityHeatmapComponent({
                 />
               ))}
             </div>
-            <span className="text-[10px] text-[var(--text-quaternary)]">{resolvedLegend.more}</span>
+            <span className="text-[10px] text-[color:var(--text-quaternary)]">{resolvedLegend.more}</span>
           </div>
         </div>
       </header>
@@ -106,14 +106,14 @@ function ActivityHeatmapComponent({
               key={String(stat.label)}
               className="flex flex-col gap-0.5 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 py-2.5"
             >
-              <span className="font-[var(--font-mono)] text-[10.5px] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+              <span className="font-[var(--font-mono)] text-[10.5px] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                 {stat.label}
               </span>
-              <span className="text-[1.125rem] font-medium leading-[1.15] tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+              <span className="text-[1.125rem] font-medium leading-[1.15] tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
                 {stat.value}
               </span>
               {stat.hint ? (
-                <span className="text-[0.6875rem] text-[var(--text-tertiary)]">{stat.hint}</span>
+                <span className="text-[0.6875rem] text-[color:var(--text-tertiary)]">{stat.hint}</span>
               ) : null}
             </div>
           ))}

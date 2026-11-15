@@ -193,11 +193,11 @@ function ModalShell({
               <div>
                 <h3
                   id="connection-modal-title"
-                  className="text-lg font-semibold tracking-[-0.03em] text-[var(--text-primary)]"
+                  className="text-lg font-semibold tracking-[-0.03em] text-[color:var(--text-primary)]"
                 >
                   {t("generated.controlPlane.conectar_a587e076")} {entry.label}
                 </h3>
-                <p className="mt-0.5 text-sm text-[var(--text-quaternary)]">
+                <p className="mt-0.5 text-sm text-[color:var(--text-quaternary)]">
                   {entry.tagline || entry.description || t("generated.controlPlane.configuracao_desta_integracao_cabdc5cd")}
                 </p>
               </div>
@@ -207,7 +207,7 @@ function ModalShell({
           <div className="flex-1 overflow-y-auto space-y-4 px-6 py-5">
             {children}
             {error ? (
-              <div className="rounded-xl border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-4 py-3 text-xs text-[var(--tone-danger-text)]">
+              <div className="rounded-xl border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-4 py-3 text-xs text-[color:var(--tone-danger-text)]">
                 {error}
               </div>
             ) : null}
@@ -218,8 +218,8 @@ function ModalShell({
               className={cn(
                 "mx-6 mb-4 flex items-center gap-2 rounded-xl border px-4 py-2.5 text-xs",
                 testResult.success
-                  ? "border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]"
-                  : "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]",
+                  ? "border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[color:var(--tone-success-text)]"
+                  : "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)]",
               )}
             >
               {testResult.success ? (
@@ -232,7 +232,7 @@ function ModalShell({
           ) : null}
 
           <div className="flex items-center justify-between border-t border-[var(--border-subtle)] px-6 py-4">
-            <div className="flex items-center gap-1.5 text-xs text-[var(--text-quaternary)]">
+            <div className="flex items-center gap-1.5 text-xs text-[color:var(--text-quaternary)]">
               <Lock size={11} />
               <span>{t("generated.controlPlane.credenciais_criptografadas_657054e7")}</span>
             </div>
@@ -241,7 +241,7 @@ function ModalShell({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
+                className="rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
               >
                 {t("generated.controlPlane.cancelar_091200fb")}
               </button>
@@ -250,7 +250,7 @@ function ModalShell({
                   type="button"
                   onClick={onTest}
                   disabled={testing || saving}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-50"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-50"
                 >
                   {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
                   {t("generated.controlPlane.testar_53b5c98a")}
@@ -262,7 +262,7 @@ function ModalShell({
                 loading={saving}
                 disabled={!canSave}
                 loadingLabel={t("generated.controlPlane.salvando_7eeded02")}
-                className="rounded-lg px-4 py-2 text-sm font-semibold text-[var(--interactive-active-text)] transition-all"
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-[color:var(--interactive-active-text)] transition-all"
                 style={{
                   background:
                     "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
@@ -312,10 +312,10 @@ function FieldRow({
   return (
     <label className="flex flex-col gap-1.5">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-xs font-medium text-[var(--text-secondary)]">
+        <span className="text-xs font-medium text-[color:var(--text-secondary)]">
           {field.label}
         </span>
-        <span className="text-[11px] text-[var(--text-quaternary)]">
+        <span className="text-[11px] text-[color:var(--text-quaternary)]">
           {valuePresent
             ? t("generated.controlPlane.ja_configurado_preencha_para_substituir_1ec111f0")
             : field.required === false
@@ -324,15 +324,15 @@ function FieldRow({
         </span>
       </div>
       {help ? (
-        <span className="text-[11px] text-[var(--text-quaternary)]">{help}</span>
+        <span className="text-[11px] text-[color:var(--text-quaternary)]">{help}</span>
       ) : null}
       {valuePresent ? (
-        <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+        <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[color:var(--tone-success-text)]">
           {t("generated.controlPlane.configurada_df5188a8")}
         </span>
       ) : null}
       {isSwitch ? (
-        <label className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+        <label className="flex items-center gap-2 text-sm text-[color:var(--text-primary)]">
           <input
             type="checkbox"
             checked={state.value === "true"}
@@ -373,8 +373,8 @@ function FieldRow({
           className={cn(
             "inline-flex items-center gap-2 self-start rounded-lg border px-3 py-1.5 text-xs transition-colors",
             state.clear
-              ? "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]"
-              : "border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]",
+              ? "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)]"
+              : "border-[var(--border-subtle)] text-[color:var(--text-secondary)] hover:bg-[var(--surface-hover)]",
           )}
         >
           <Trash2 size={12} />
@@ -637,7 +637,7 @@ export function ConnectionModalRouter({
     case "custom_stdio":
     case "custom_http": {
       body = (
-        <p className="text-sm text-[var(--text-tertiary)]">
+        <p className="text-sm text-[color:var(--text-tertiary)]">
           {t("generated.controlPlane.sem_credenciais_ative_para_o_koda_iniciar_e__065b2761")}
         </p>
       );
@@ -649,15 +649,15 @@ export function ConnectionModalRouter({
         <div className="flex flex-col gap-4">
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-4 py-3 text-sm">
             <div className="flex items-start gap-2">
-              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[var(--text-tertiary)]" />
+              <AlertTriangle size={14} className="mt-0.5 shrink-0 text-[color:var(--text-tertiary)]" />
               <div className="flex flex-col gap-1">
-                <span className="font-medium text-[var(--text-secondary)]">
+                <span className="font-medium text-[color:var(--text-secondary)]">
                   {t("generated.controlPlane.depende_do_app_local_app_a491f9a3", {
                     app: profile.local_app_name ?? entry.label,
                   })}
                 </span>
                 {profile.local_app_detection_hint ? (
-                  <span className="text-[12px] text-[var(--text-tertiary)]">
+                  <span className="text-[12px] text-[color:var(--text-tertiary)]">
                     {profile.local_app_detection_hint}
                   </span>
                 ) : null}
@@ -667,7 +667,7 @@ export function ConnectionModalRouter({
           {primary.length > 0 ? (
             <>
               <details className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 text-sm">
-                <summary className="cursor-pointer text-xs text-[var(--text-tertiary)]">
+                <summary className="cursor-pointer text-xs text-[color:var(--text-tertiary)]">
                   {t("generated.controlPlane.fallback_manual_nao_recomendado_fc4431e3")}
                 </summary>
                 <div className="mt-3 flex flex-col gap-3">
@@ -702,7 +702,7 @@ export function ConnectionModalRouter({
               isSecret={false}
             />
           ) : (
-            <p className="text-sm text-[var(--text-tertiary)]">
+            <p className="text-sm text-[color:var(--text-tertiary)]">
               {t("generated.controlPlane.nenhum_caminho_configurado_para_este_servido_9c7cf657")}
             </p>
           )}
@@ -738,7 +738,7 @@ export function ConnectionModalRouter({
           ))}
           {scope.length > 0 ? (
             <div className="flex flex-col gap-3 rounded-xl border border-[var(--border-subtle)] px-4 py-3">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+              <span className="text-[11px] uppercase tracking-[0.16em] text-[color:var(--text-tertiary)]">
                 {t("generated.controlPlane.escopo_opcional_00429ae8")}
               </span>
               {scope.map((f) => (
@@ -773,11 +773,11 @@ export function ConnectionModalRouter({
           {readOnly ? (
             <div className="flex items-center justify-between rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-4 py-3">
               <div className="flex flex-col gap-0.5">
-                <span className="text-xs font-medium text-[var(--text-secondary)]">
+                <span className="text-xs font-medium text-[color:var(--text-secondary)]">
                   {readOnly.label}
                 </span>
                 {readOnly.help ? (
-                  <span className="text-[11px] text-[var(--text-quaternary)]">
+                  <span className="text-[11px] text-[color:var(--text-quaternary)]">
                     {readOnly.help}
                   </span>
                 ) : null}
@@ -804,13 +804,13 @@ export function ConnectionModalRouter({
         <div className="flex flex-col gap-4">
           <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-4">
             <div className="flex flex-col gap-3">
-              <span className="text-xs text-[var(--text-tertiary)]">
+              <span className="text-xs text-[color:var(--text-tertiary)]">
                 {profile.strategy === "oauth_only"
                   ? t("generated.controlPlane.este_provedor_so_aceita_oauth_c36493da")
                   : t("generated.controlPlane.recomendado_usar_oauth_o_fallback_manual_fic_d9f002ba")}
               </span>
               {oauthStatus?.connected ? (
-                <div className="flex items-center gap-2 rounded-lg border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-3 py-2 text-xs text-[var(--tone-success-text)]">
+                <div className="flex items-center gap-2 rounded-lg border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-3 py-2 text-xs text-[color:var(--tone-success-text)]">
                   <CheckCircle2 size={13} />
                   <span>
                     {t("generated.controlPlane.conectado_como_account_c6676c13", {
@@ -826,7 +826,7 @@ export function ConnectionModalRouter({
                 className={cn(
                   "inline-flex items-center justify-center gap-2 rounded-xl",
                   "border border-[var(--text-primary)] bg-transparent",
-                  "px-4 py-2 text-sm font-medium text-[var(--text-primary)]",
+                  "px-4 py-2 text-sm font-medium text-[color:var(--text-primary)]",
                   "transition-colors hover:bg-[var(--surface-hover)]",
                   (isOAuthLoading || !onOAuthStart) && "opacity-60 cursor-wait",
                 )}
@@ -844,7 +844,7 @@ export function ConnectionModalRouter({
               <button
                 type="button"
                 onClick={() => setShowManual((v) => !v)}
-                className="inline-flex items-center gap-1.5 self-start text-xs text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)]"
+                className="inline-flex items-center gap-1.5 self-start text-xs text-[color:var(--text-tertiary)] transition-colors hover:text-[color:var(--text-secondary)]"
               >
                 <Settings2 size={12} />
                 {showManual
@@ -870,7 +870,7 @@ export function ConnectionModalRouter({
 
           {profile.strategy === "oauth_only" && primary.length > 0 ? (
             <details className="rounded-xl border border-[var(--border-subtle)] px-4 py-3 text-sm">
-              <summary className="cursor-pointer text-xs text-[var(--text-tertiary)]">
+              <summary className="cursor-pointer text-xs text-[color:var(--text-tertiary)]">
                 {t("generated.controlPlane.fallback_manual_legado_6fb82fe5")}
               </summary>
               <div className="mt-3 flex flex-col gap-3">
@@ -894,7 +894,7 @@ export function ConnectionModalRouter({
 
     default:
       body = (
-        <p className="text-sm text-[var(--text-tertiary)]">
+        <p className="text-sm text-[color:var(--text-tertiary)]">
           {t("generated.controlPlane.strategy_s_nao_implementada_e2df5ef4", { s: profile.strategy })}
         </p>
       );

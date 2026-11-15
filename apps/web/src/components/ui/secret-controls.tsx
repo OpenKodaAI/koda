@@ -37,7 +37,7 @@ export function SecretVisibilityButton({
       onClick={onToggle}
       disabled={disabled}
       className={cn(
-        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-[var(--icon-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--icon-primary)] disabled:pointer-events-none disabled:opacity-60",
+        "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-transparent text-[color:var(--icon-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--icon-primary)] disabled:pointer-events-none disabled:opacity-60",
         className,
       )}
     >
@@ -67,7 +67,7 @@ export function SecretInput({
         autoComplete={autoComplete ?? "new-password"}
         spellCheck={spellCheck ?? false}
         className={cn(
-          "field-shell w-full px-4 py-2.5 pr-14 text-sm text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60",
+          "field-shell w-full px-4 py-2.5 pr-14 text-sm text-[color:var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60",
           inputClassName,
         )}
       />

@@ -895,7 +895,7 @@ function RoutineExecutionsDrawer({
       onOpenChange={onOpenChange}
       title={
         <span className="inline-flex min-w-0 items-center gap-2">
-          <History className="icon-sm shrink-0 text-[var(--text-quaternary)]" strokeWidth={1.75} />
+          <History className="icon-sm shrink-0 text-[color:var(--text-quaternary)]" strokeWidth={1.75} />
           <span className="truncate">{title}</span>
         </span>
       }
@@ -925,14 +925,14 @@ function RoutineExecutionsDrawer({
         ) : runs.length === 0 ? (
           <div className="flex flex-col items-center gap-2 py-10 text-center">
             <History
-              className="icon-lg text-[var(--text-quaternary)]"
+              className="icon-lg text-[color:var(--text-quaternary)]"
               strokeWidth={1.5}
               aria-hidden
             />
-            <p className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+            <p className="m-0 text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-primary)]">
               {t("schedules.executions.empty", undefined)}
             </p>
-            <p className="m-0 max-w-[32rem] text-[0.75rem] leading-[1.5] text-[var(--text-tertiary)]">
+            <p className="m-0 max-w-[32rem] text-[0.75rem] leading-[1.5] text-[color:var(--text-tertiary)]">
               {t("schedules.executions.emptyDescription", undefined)}
             </p>
           </div>
@@ -965,13 +965,13 @@ function RoutineExecutionRow({ run }: { run: ScheduleRun }) {
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+            <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
               #{run.id}
             </span>
             <span
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border px-2 py-0.5 text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)]",
-                "border-[color:var(--border-subtle)] text-[var(--text-secondary)]",
+                "border-[color:var(--border-subtle)] text-[color:var(--text-secondary)]",
               )}
             >
               <StatusDot tone={runStatusTone(run.status)} pulse={run.status === "running"} />
@@ -979,21 +979,21 @@ function RoutineExecutionRow({ run }: { run: ScheduleRun }) {
             </span>
           </div>
           <p
-            className="m-0 mt-2 line-clamp-2 text-[0.8125rem] leading-[1.5] text-[var(--text-primary)]"
+            className="m-0 mt-2 line-clamp-2 text-[0.8125rem] leading-[1.5] text-[color:var(--text-primary)]"
             title={primaryText || undefined}
           >
             {primaryText || t("schedules.executions.noSummary", undefined)}
           </p>
         </div>
         <time
-          className="shrink-0 whitespace-nowrap text-right font-mono text-[0.6875rem] text-[var(--text-quaternary)]"
+          className="shrink-0 whitespace-nowrap text-right font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]"
           title={formatDateTime(activityAt)}
         >
           {formatRelativeTime(activityAt)}
         </time>
       </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)] sm:grid-cols-4">
+      <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)] sm:grid-cols-4">
         <RunMeta label={t("schedules.inspector.runtimeTask")} value={run.task_id ? `#${run.task_id}` : "—"} />
         <RunMeta label={t("common.duration", undefined)} value={formatDuration(run.duration_ms)} />
         <RunMeta label={t("common.attempts", undefined)} value={`${run.attempt}/${run.max_attempts}`} />
@@ -1007,7 +1007,7 @@ function RunMeta({ label, value }: { label: string; value: string }) {
   return (
     <span className="min-w-0">
       <span className="block truncate uppercase tracking-[var(--tracking-mono)]">{label}</span>
-      <span className="mt-0.5 block truncate text-[var(--text-secondary)]" title={value}>
+      <span className="mt-0.5 block truncate text-[color:var(--text-secondary)]" title={value}>
         {value}
       </span>
     </span>

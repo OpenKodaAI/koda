@@ -27,7 +27,7 @@ export function MessageTurn({
       <div className="group flex flex-col gap-1.5 animate-in fade-in-0 duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
         <div className="flex w-full justify-end">{children}</div>
         {showMeta ? (
-          <div className="flex items-center justify-end gap-2 pr-1 text-[0.6875rem] text-[var(--text-quaternary)]">
+          <div className="flex items-center justify-end gap-2 pr-1 text-[0.6875rem] text-[color:var(--text-quaternary)]">
             {timestamp ? (
               <span
                 className={cn(
@@ -40,14 +40,14 @@ export function MessageTurn({
             ) : null}
             {failed ? (
               <>
-                <span className="text-[var(--tone-danger-dot)]">
+                <span className="text-[color:var(--tone-danger-dot)]">
                   {t("chat.thread.failed", undefined)}
                 </span>
                 {onRetry ? (
                   <button
                     type="button"
                     onClick={onRetry}
-                    className="rounded-[var(--radius-panel-sm)] px-1.5 py-0.5 text-[var(--accent)] transition-colors hover:bg-[var(--hover-tint)]"
+                    className="rounded-[var(--radius-panel-sm)] px-1.5 py-0.5 text-[color:var(--accent)] transition-colors hover:bg-[var(--hover-tint)]"
                   >
                     {t("chat.thread.retry", undefined)}
                   </button>
@@ -64,7 +64,7 @@ export function MessageTurn({
     <div className="group flex flex-col gap-2 animate-in fade-in-0 duration-[220ms] ease-[cubic-bezier(0.22,1,0.36,1)]">
       {children}
       {timestamp ? (
-        <div className="flex items-center gap-2 text-[0.6875rem] text-[var(--text-quaternary)]">
+        <div className="flex items-center gap-2 text-[0.6875rem] text-[color:var(--text-quaternary)]">
           <span
             className={cn(
               "opacity-0 transition-opacity duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",

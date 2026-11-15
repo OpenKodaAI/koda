@@ -80,6 +80,7 @@ export function SectionGeneral() {
               error={findFieldError(errors, "account.scheduler_default_timezone")?.message}
             >
               <TimezonePicker
+                label={t("generated.controlPlane.timezone_e4728822")}
                 value={account.scheduler_default_timezone}
                 onValueChange={(v) => update({ scheduler_default_timezone: v })}
                 disabled={isEnvSourced("account.scheduler_default_timezone")}

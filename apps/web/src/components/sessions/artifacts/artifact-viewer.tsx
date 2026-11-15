@@ -53,7 +53,7 @@ export function ArtifactViewer({
     body = <FallbackViewer artifact={artifact} />;
   } else if (preview.isLoading) {
     body = (
-      <div className="flex items-center justify-center px-5 py-12 text-[var(--text-tertiary)]">
+      <div className="flex items-center justify-center px-5 py-12 text-[color:var(--text-tertiary)]">
         <Loader2 className="icon-md animate-spin" strokeWidth={1.75} aria-hidden />
       </div>
     );
@@ -102,14 +102,14 @@ export function ArtifactViewer({
         <header className="flex items-center justify-between border-b border-[color:var(--divider-hair)] px-5 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <Icon
-              className="h-5 w-5 shrink-0 text-[var(--text-tertiary)]"
+              className="h-5 w-5 shrink-0 text-[color:var(--text-tertiary)]"
               strokeWidth={1.75}
             />
             <div className="flex min-w-0 flex-col">
-              <span className="truncate text-[0.875rem] text-[var(--text-primary)]">
+              <span className="truncate text-[0.875rem] text-[color:var(--text-primary)]">
                 {filename}
               </span>
-              <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+              <span className="font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                 {[artifact.kind.toUpperCase(), artifact.mime_type, size]
                   .filter(Boolean)
                   .join(" · ")}

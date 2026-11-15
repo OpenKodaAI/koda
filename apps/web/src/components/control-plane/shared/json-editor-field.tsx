@@ -67,7 +67,7 @@ export function JsonEditorField({
         <textarea
           value={value}
           onChange={(e) => handleChange(e.target.value)}
-          className="field-shell resize-y font-mono text-xs text-[var(--text-primary)]"
+          className="field-shell resize-y font-mono text-xs text-[color:var(--text-primary)]"
           style={{ minHeight: resolvedMinHeight }}
           spellCheck={false}
         />
@@ -87,7 +87,7 @@ export function JsonEditorField({
               }}
               aria-hidden="true"
             />
-            <span className="text-xs text-[var(--text-quaternary)]">
+            <span className="text-xs text-[color:var(--text-quaternary)]">
               {value.trim()
                 ? isValid
                   ? t("generated.controlPlane.valid_json_61f28858")
@@ -110,7 +110,7 @@ export function JsonEditorField({
 
         {/* Error detail */}
         {!isValid && value.trim() && !error && (
-          <p className="mt-1 text-xs text-[var(--tone-danger-text)]">
+          <p className="mt-1 text-xs text-[color:var(--tone-danger-text)]">
             {t("generated.controlPlane.json_syntax_error_detected_112edb55")}
           </p>
         )}

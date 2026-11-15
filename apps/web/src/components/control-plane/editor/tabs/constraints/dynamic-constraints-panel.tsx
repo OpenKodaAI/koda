@@ -66,16 +66,16 @@ function ListField({ label, description, value, placeholder, onChange }: FieldPr
   const { t } = useAppI18n();
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-[var(--text-secondary)]">{label}</span>
+      <span className="text-xs font-medium text-[color:var(--text-secondary)]">{label}</span>
       {description ? (
-        <span className="text-[11px] text-[var(--text-quaternary)]">{description}</span>
+        <span className="text-[11px] text-[color:var(--text-quaternary)]">{description}</span>
       ) : null}
       <input
         type="text"
         value={value}
         onChange={(event) => onChange(parseConstraintList(event.target.value))}
         placeholder={placeholder ?? t("generated.controlPlane.separe_por_virgulas_e538ef88")}
-        className="field-shell text-[var(--text-primary)]"
+        className="field-shell text-[color:var(--text-primary)]"
       />
     </label>
   );
@@ -106,7 +106,7 @@ export function DynamicConstraintsPanel({
     <div className="flex flex-col gap-4 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-4">
       <div className="flex flex-col gap-1">
         <span className="eyebrow">{t("generated.controlPlane.restricoes_de_runtime_3814efcf")}</span>
-        <span className="text-xs text-[var(--text-quaternary)]">
+        <span className="text-xs text-[color:var(--text-quaternary)]">
           {t("generated.controlPlane.apenas_os_limites_aplicaveis_a_esta_integrac_21b79406")}
         </span>
       </div>
@@ -142,10 +142,10 @@ export function DynamicConstraintsPanel({
         {constraints.includes("allow_private_network") ? (
           <div className="flex items-center justify-between rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] px-4 py-3">
             <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-[var(--text-secondary)]">
+              <span className="text-xs font-medium text-[color:var(--text-secondary)]">
                 {t("generated.controlPlane.permitir_rede_privada_52d496b0")}
               </span>
-              <span className="text-[11px] text-[var(--text-quaternary)]">
+              <span className="text-[11px] text-[color:var(--text-quaternary)]">
                 {t("generated.controlPlane.necessario_para_destinos_internos_localhost__efa3ba7f")}
               </span>
             </div>
@@ -159,10 +159,10 @@ export function DynamicConstraintsPanel({
         {constraints.includes("read_only_mode") ? (
           <div className="flex items-center justify-between rounded-xl border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] px-4 py-3">
             <div className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-[var(--text-secondary)]">
+              <span className="text-xs font-medium text-[color:var(--text-secondary)]">
                 {t("generated.controlPlane.modo_somente_leitura_f27e8e0c")}
               </span>
-              <span className="text-[11px] text-[var(--text-quaternary)]">
+              <span className="text-[11px] text-[color:var(--text-quaternary)]">
                 {t("generated.controlPlane.bloqueia_tools_destrutivas_no_runtime_mesmo__c011874f")}
               </span>
             </div>

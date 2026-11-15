@@ -27,7 +27,7 @@ export function UiCard({ block, onAction }: UiCardProps) {
       <CardHeader>
         <div className="flex flex-col">
           {eyebrow ? (
-            <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)] mb-0.5">
+            <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)] mb-0.5">
               {eyebrow}
             </span>
           ) : null}
@@ -48,7 +48,7 @@ export function UiCard({ block, onAction }: UiCardProps) {
             />
           ) : null}
           {body ? (
-            <div className="text-[var(--font-size-md)] leading-[1.55] text-[var(--text-primary)]">
+            <div className="text-[length:var(--font-size-md)] leading-[1.55] text-[color:var(--text-primary)]">
               <SessionRichText content={body} variant="assistant" />
             </div>
           ) : null}
@@ -64,7 +64,7 @@ export function UiCard({ block, onAction }: UiCardProps) {
                   href={action.action.href}
                   target="_blank"
                   rel="noreferrer"
-                  className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] px-3 text-[0.8125rem] text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-panel-sm)] px-3 text-[0.8125rem] text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
                 >
                   {action.label}
                 </a>

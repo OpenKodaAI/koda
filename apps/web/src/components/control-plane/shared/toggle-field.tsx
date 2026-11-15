@@ -38,9 +38,9 @@ export function ToggleField({
     >
       {/* Label + description */}
       <span className="flex flex-col min-w-0">
-        <span className="text-sm font-medium text-[var(--text-primary)]">{translatedLabel}</span>
+        <span className="text-sm font-medium text-[color:var(--text-primary)]">{translatedLabel}</span>
         {translatedDescription && (
-          <span id={descId} className="text-xs text-[var(--text-quaternary)] leading-relaxed">
+          <span id={descId} className="text-xs text-[color:var(--text-quaternary)] leading-relaxed">
             {translatedDescription}
           </span>
         )}

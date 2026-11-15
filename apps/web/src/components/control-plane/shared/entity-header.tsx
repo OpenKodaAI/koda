@@ -42,13 +42,13 @@ export function EntityHeader({
       {breadcrumb.length > 0 ? (
         <nav
           aria-label={translate("generated.controlPlane.breadcrumb_b2115b87")}
-          className="flex flex-wrap items-center gap-1 text-[0.75rem] text-[var(--text-tertiary)]"
+          className="flex flex-wrap items-center gap-1 text-[0.75rem] text-[color:var(--text-tertiary)]"
         >
           {breadcrumb.map((item, index) => (
             <Fragment key={`${item.label}-${index}`}>
               {index > 0 ? (
                 <ChevronRight
-                  className="icon-xs text-[var(--text-quaternary)]"
+                  className="icon-xs text-[color:var(--text-quaternary)]"
                   strokeWidth={1.75}
                   aria-hidden
                 />
@@ -56,12 +56,12 @@ export function EntityHeader({
               {item.href ? (
                 <Link
                   href={item.href}
-                  className="rounded-[var(--radius-panel-sm)] px-1 transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+                  className="rounded-[var(--radius-panel-sm)] px-1 transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
                 >
                   {item.label}
                 </Link>
               ) : (
-                <span className="px-1 text-[var(--text-secondary)]">{item.label}</span>
+                <span className="px-1 text-[color:var(--text-secondary)]">{item.label}</span>
               )}
             </Fragment>
           ))}
@@ -73,18 +73,18 @@ export function EntityHeader({
           {glyph ? (
             <span
               aria-hidden
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)] text-[var(--text-tertiary)]"
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)] text-[color:var(--text-tertiary)]"
               style={color ? { color } : undefined}
             >
               {glyph}
             </span>
           ) : null}
           <div className="flex min-w-0 flex-col gap-1">
-            <h1 className="m-0 truncate text-[1.375rem] font-medium leading-[1.15] tracking-[-0.03em] text-[var(--text-primary)]">
+            <h1 className="m-0 truncate text-[1.375rem] font-medium leading-[1.15] tracking-[-0.03em] text-[color:var(--text-primary)]">
               {name}
             </h1>
             {description ? (
-              <p className="m-0 max-w-[720px] text-[0.875rem] leading-[1.55] text-[var(--text-secondary)]">
+              <p className="m-0 max-w-[720px] text-[0.875rem] leading-[1.55] text-[color:var(--text-secondary)]">
                 {description}
               </p>
             ) : null}
@@ -94,7 +94,7 @@ export function EntityHeader({
       </div>
 
       {meta ? (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.75rem] text-[var(--text-tertiary)]">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.75rem] text-[color:var(--text-tertiary)]">
           {meta}
         </div>
       ) : null}

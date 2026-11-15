@@ -214,14 +214,14 @@ function CronCells({ cron, onChange, disabled, t }: CronCellsProps) {
             placeholder="*"
             className={cn(
               "h-10 w-full rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)]",
-              "text-center font-mono text-[0.9375rem] text-[var(--text-primary)] outline-none",
+              "text-center font-mono text-[0.9375rem] text-[color:var(--text-primary)] outline-none",
               "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-              "placeholder:text-[var(--text-quaternary)]",
+              "placeholder:text-[color:var(--text-quaternary)]",
               "hover:border-[var(--border-strong)] focus-visible:border-[var(--accent)] focus-visible:bg-[var(--panel)]",
               "disabled:cursor-not-allowed disabled:opacity-60",
             )}
           />
-          <span className="text-[0.6875rem] text-[var(--text-quaternary)]">{field.label}</span>
+          <span className="text-[0.6875rem] text-[color:var(--text-quaternary)]">{field.label}</span>
         </label>
       ))}
     </div>
@@ -270,7 +270,7 @@ export function RecurrencePicker({
         <div className="flex flex-col gap-3">
           <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,160px)]">
             <label className="flex flex-col gap-1.5">
-              <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+              <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
                 {t("routines.editor.date")}
               </span>
               <DatePicker
@@ -280,7 +280,7 @@ export function RecurrencePicker({
               />
             </label>
             <label className="flex flex-col gap-1.5">
-              <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+              <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
                 {t("routines.editor.timeOfDay")}
               </span>
               <TimePicker
@@ -293,10 +293,11 @@ export function RecurrencePicker({
             </label>
           </div>
           <label className="flex flex-col gap-1.5">
-            <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+            <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
               {t("routines.editor.timezone")}
             </span>
             <TimezonePicker
+              label={t("routines.editor.timezone")}
               value={value.timezone}
               onValueChange={(tz) => onChange(patch(value, { timezone: tz }))}
               disabled={disabled}
@@ -325,7 +326,7 @@ export function RecurrencePicker({
 
           {value.recurrence.preset === "interval" ? (
             <label className="flex flex-col gap-1.5">
-              <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+              <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
                 {t("routines.editor.interval")}
               </span>
               <Input
@@ -340,7 +341,7 @@ export function RecurrencePicker({
               <span
                 className={cn(
                   "min-h-[1.05rem] text-[0.8125rem]",
-                  scheduleError ? "text-[var(--tone-danger-text)]" : "text-[var(--text-tertiary)]",
+                  scheduleError ? "text-[color:var(--tone-danger-text)]" : "text-[color:var(--text-tertiary)]",
                 )}
               >
                 {scheduleError ?? t("routines.editor.intervalHint")}
@@ -353,7 +354,7 @@ export function RecurrencePicker({
           value.recurrence.preset !== "interval" ? (
             <div className="grid gap-3 md:grid-cols-2">
               <label className="flex flex-col gap-1.5">
-                <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+                <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
                   {t("routines.editor.timeOfDay")}
                 </span>
                 <TimePicker
@@ -371,7 +372,7 @@ export function RecurrencePicker({
 
               {value.recurrence.preset === "weekly" ? (
                 <label className="flex flex-col gap-1.5">
-                  <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+                  <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
                     {t("routines.editor.weekday")}
                   </span>
                   <Select
@@ -401,7 +402,7 @@ export function RecurrencePicker({
 
               {value.recurrence.preset === "monthly" ? (
                 <label className="flex flex-col gap-1.5">
-                  <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+                  <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
                     {t("routines.editor.dayOfMonth")}
                   </span>
                   <Input
@@ -427,7 +428,7 @@ export function RecurrencePicker({
 
           {value.recurrence.preset === "custom" ? (
             <div className="flex flex-col gap-2">
-              <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+              <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
                 {t("routines.editor.customCron")}
               </span>
               <CronCells
@@ -440,10 +441,10 @@ export function RecurrencePicker({
                 className={cn(
                   "min-h-[1.05rem] text-[0.8125rem] transition-colors duration-[120ms]",
                   scheduleError
-                    ? "text-[var(--tone-danger-text)]"
+                    ? "text-[color:var(--tone-danger-text)]"
                     : detectedFromCustom
-                      ? "text-[var(--text-secondary)]"
-                      : "text-[var(--text-quaternary)]",
+                      ? "text-[color:var(--text-secondary)]"
+                      : "text-[color:var(--text-quaternary)]",
                 )}
               >
                 {scheduleError
@@ -456,10 +457,11 @@ export function RecurrencePicker({
           ) : null}
 
           <label className="flex flex-col gap-1.5">
-            <span className="text-[0.75rem] font-medium text-[var(--text-tertiary)]">
+            <span className="text-[0.75rem] font-medium text-[color:var(--text-tertiary)]">
               {t("routines.editor.timezone")}
             </span>
             <TimezonePicker
+              label={t("routines.editor.timezone")}
               value={value.timezone}
               onValueChange={(tz) => onChange(patch(value, { timezone: tz }))}
               disabled={disabled}
@@ -468,7 +470,7 @@ export function RecurrencePicker({
 
           {nextRuns.length > 0 ? (
             <div className="flex flex-col gap-2">
-              <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+              <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                 {t("routines.editor.nextRuns")}
               </span>
               <ol className="m-0 flex flex-col p-0">
@@ -478,10 +480,10 @@ export function RecurrencePicker({
                     className="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 border-b border-[color:var(--divider-hair)] py-2 last:border-b-0"
                   >
                     <StatusDot tone="info" />
-                    <span className="font-mono text-[0.8125rem] text-[var(--text-secondary)]">
+                    <span className="font-mono text-[0.8125rem] text-[color:var(--text-secondary)]">
                       {formatPreviewDate(run, value.timezone, locale)}
                     </span>
-                    <span className="text-[0.75rem] text-[var(--text-quaternary)]">
+                    <span className="text-[0.75rem] text-[color:var(--text-quaternary)]">
                       {formatRelative(run, locale)}
                     </span>
                   </li>

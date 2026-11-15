@@ -99,7 +99,7 @@ export function ConnectIntegrationModal({
             </div>
             <h3
               id="connect-integration-modal-title"
-              className="text-base font-semibold text-[var(--text-primary)]"
+              className="text-base font-semibold text-[color:var(--text-primary)]"
             >
               {t("generated.controlPlane.conectar_a_name_42977fa1", { name: entry.label })}
             </h3>
@@ -119,14 +119,14 @@ export function ConnectIntegrationModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-[var(--border-subtle)] px-4 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
+              className="rounded-lg border border-[var(--border-subtle)] px-4 py-1.5 text-xs font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
             >
               {t("generated.controlPlane.cancelar_091200fb")}
             </button>
             <button
               type="button"
               onClick={() => panelRef.current?.submit()}
-              className="inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-semibold text-[var(--interactive-active-text)] transition-all"
+              className="inline-flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-xs font-semibold text-[color:var(--interactive-active-text)] transition-all"
               style={{
                 background:
                   "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",

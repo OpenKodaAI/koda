@@ -147,7 +147,7 @@ export function UiChart({ block }: { block: UiChartBlock }) {
   return (
     <div className="rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] p-3">
       {title ? (
-        <h4 className="m-0 mb-2 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]">
+        <h4 className="m-0 mb-2 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)]">
           {title}
         </h4>
       ) : null}

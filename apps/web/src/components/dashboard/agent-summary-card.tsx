@@ -95,7 +95,7 @@ export function AgentSummaryCard({
 
       <div className="min-w-0 flex-1">
         <div className="mb-0.5 flex min-w-0 items-center gap-3">
-          <p className="line-clamp-1 max-w-sm text-sm font-semibold text-[var(--text-primary)]">
+          <p className="line-clamp-1 max-w-sm text-sm font-semibold text-[color:var(--text-primary)]">
             {agentConfig.label}
           </p>
           <span
@@ -113,7 +113,7 @@ export function AgentSummaryCard({
           </span>
         </div>
 
-        <p className="line-clamp-1 max-w-2xl text-sm font-normal text-[var(--text-secondary)]">
+        <p className="line-clamp-1 max-w-2xl text-sm font-normal text-[color:var(--text-secondary)]">
           {truncateText(taskText, 140)}
         </p>
       </div>

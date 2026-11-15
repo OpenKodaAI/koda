@@ -27,14 +27,14 @@ interface DetailDatumProps {
 export function DetailDatum({ label, value, hint, className }: DetailDatumProps) {
   return (
     <div className={cn("flex min-w-0 flex-col gap-0.5", className)}>
-      <dt className="font-mono text-[10.5px] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+      <dt className="font-mono text-[10.5px] font-medium uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
         {label}
       </dt>
-      <dd className="m-0 min-w-0 truncate text-[0.8125rem] text-[var(--text-primary)]">
+      <dd className="m-0 min-w-0 truncate text-[0.8125rem] text-[color:var(--text-primary)]">
         {value}
       </dd>
       {hint ? (
-        <span className="text-[0.6875rem] text-[var(--text-tertiary)]">{hint}</span>
+        <span className="text-[0.6875rem] text-[color:var(--text-tertiary)]">{hint}</span>
       ) : null}
     </div>
   );
@@ -60,12 +60,12 @@ export function DetailBlock({
       {title || meta ? (
         <header className="flex items-baseline justify-between gap-3">
           {title ? (
-            <h4 className="m-0 text-[0.8125rem] font-medium text-[var(--text-primary)]">
+            <h4 className="m-0 text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
               {title}
             </h4>
           ) : <span />}
           {meta ? (
-            <span className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+            <span className="font-mono text-[10.5px] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
               {meta}
             </span>
           ) : null}
@@ -73,7 +73,7 @@ export function DetailBlock({
       ) : null}
       <div
         className={cn(
-          "rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-3 text-[0.8125rem] text-[var(--text-secondary)]",
+          "rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-3 text-[0.8125rem] text-[color:var(--text-secondary)]",
           monospace && "font-mono leading-[1.55]",
         )}
       >

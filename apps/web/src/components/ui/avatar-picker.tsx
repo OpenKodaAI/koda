@@ -455,10 +455,10 @@ export function AvatarPicker({
             <OperatorAvatarSvg avatar={selectedAvatar} alt={avatarAlt(selectedAvatar, t)} size={64} />
           </span>
           <div className="min-w-0">
-            <h2 className="m-0 truncate text-[1rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+            <h2 className="m-0 truncate text-[1rem] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
               {displayName ?? t("ui.avatarPicker.me")}
             </h2>
-            <p className="m-0 mt-1 truncate text-[0.75rem] text-[var(--text-tertiary)]">
+            <p className="m-0 mt-1 truncate text-[0.75rem] text-[color:var(--text-tertiary)]">
               {selectedAvatarLabel}
             </p>
           </div>
@@ -486,7 +486,7 @@ export function AvatarPicker({
             >
               <OperatorAvatarSvg avatar={avatar} alt={avatarAlt(avatar, t)} size={28} />
               {selected ? (
-                <span className="absolute right-0.5 top-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--text-primary)] text-[var(--canvas)]">
+                <span className="absolute right-0.5 top-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--text-primary)] text-[color:var(--canvas)]">
                   <Check className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
                 </span>
               ) : null}

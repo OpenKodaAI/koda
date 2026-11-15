@@ -30,10 +30,10 @@ function SecurityMetric({
 }) {
   return (
     <div className="min-w-0 bg-[var(--panel)] px-4 py-3">
-      <p className="m-0 font-mono text-[0.625rem] uppercase leading-4 tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+      <p className="m-0 font-mono text-[0.625rem] uppercase leading-4 tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
         {label}
       </p>
-      <div className="m-0 mt-1 min-h-5 text-[0.8125rem] leading-5 text-[var(--text-primary)]">
+      <div className="m-0 mt-1 min-h-5 text-[0.8125rem] leading-5 text-[color:var(--text-primary)]">
         {loading ? (
           <span className="inline-flex h-3 w-16 animate-pulse rounded bg-[var(--panel-soft)]" aria-label={translate("generated.account.loading_55f38d1e")} />
         ) : (
@@ -55,14 +55,14 @@ function SecurityActionHeader({
 }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-tertiary)]">
+      <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[color:var(--text-tertiary)]">
         <Icon className="h-4 w-4" strokeWidth={1.75} aria-hidden="true" />
       </span>
       <div className="min-w-0">
-        <h3 className="m-0 text-[0.875rem] font-medium text-[var(--text-primary)]">
+        <h3 className="m-0 text-[0.875rem] font-medium text-[color:var(--text-primary)]">
           {title}
         </h3>
-        <p className="m-0 mt-1 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
+        <p className="m-0 mt-1 text-[0.75rem] leading-5 text-[color:var(--text-tertiary)]">
           {description}
         </p>
       </div>
@@ -185,7 +185,7 @@ export function SecuritySettingsCard() {
             <CardDescription>{t("generated.account.password_rotation_and_recovery_code_controls_9d081f29")}</CardDescription>
           </div>
           {loading ? (
-            <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[var(--text-tertiary)]" strokeWidth={1.75} aria-label={translate("generated.account.loading_55f38d1e")} />
+            <LoaderCircle className="mt-0.5 h-4 w-4 shrink-0 animate-spin text-[color:var(--text-tertiary)]" strokeWidth={1.75} aria-label={translate("generated.account.loading_55f38d1e")} />
           ) : null}
         </div>
       </CardHeader>
@@ -278,12 +278,12 @@ export function SecuritySettingsCard() {
 
         {regenCodes && regenCodes.length > 0 ? (
           <div className="border-t border-[var(--divider-hair)] px-5 py-4">
-            <ul className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[12.5px] tabular-nums text-[var(--text-primary)] sm:grid-cols-3">
+            <ul className="grid grid-cols-2 gap-x-4 gap-y-1 font-mono text-[12.5px] tabular-nums text-[color:var(--text-primary)] sm:grid-cols-3">
               {regenCodes.map((code) => (
                 <li key={code}>{code}</li>
               ))}
             </ul>
-            <p className="mt-2 text-[11.5px] text-[var(--text-quaternary)]">
+            <p className="mt-2 text-[11.5px] text-[color:var(--text-quaternary)]">
               {t("auth.setup.recovery_codes.subtitle")}
             </p>
           </div>

@@ -38,12 +38,12 @@ export function MemoryCurationList({
       <div className="border-b border-[var(--border-subtle)] px-4 py-4 sm:px-5">
         <div className="flex items-end justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[15px] font-semibold tracking-[-0.035em] text-[var(--text-primary)]">
+            <p className="text-[15px] font-semibold tracking-[-0.035em] text-[color:var(--text-primary)]">
               {title}
             </p>
-            <p className="mt-1 text-[12px] text-[var(--text-tertiary)]">{subtitle}</p>
+            <p className="mt-1 text-[12px] text-[color:var(--text-tertiary)]">{subtitle}</p>
           </div>
-          <span className="eyebrow text-[10px] text-[var(--text-quaternary)]">{t("memory.curation.sortHint")}</span>
+          <span className="eyebrow text-[10px] text-[color:var(--text-quaternary)]">{t("memory.curation.sortHint")}</span>
         </div>
       </div>
 
@@ -56,7 +56,7 @@ export function MemoryCurationList({
           </div>
         ) : items.length === 0 ? (
           <div className="flex min-h-[24rem] items-center justify-center px-6">
-            <p className="text-[12px] text-[var(--text-tertiary)]">{emptyLabel}</p>
+            <p className="text-[12px] text-[color:var(--text-tertiary)]">{emptyLabel}</p>
           </div>
         ) : (
           <div className="divide-y divide-[var(--border-subtle)]">

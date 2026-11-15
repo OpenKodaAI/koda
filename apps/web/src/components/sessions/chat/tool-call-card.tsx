@@ -105,12 +105,12 @@ export function ToolCallCard({ execution, onOpenDetails }: ToolCallCardProps) {
   }
 
   return (
-    <div className="pt-0.5 text-[0.6875rem] text-[var(--text-quaternary)]">
+    <div className="pt-0.5 text-[0.6875rem] text-[color:var(--text-quaternary)]">
       <button
         type="button"
         onClick={() => setExpanded((value) => !value)}
         aria-expanded={expanded}
-        className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--radius-chip)] py-0.5 pr-1 text-left transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:text-[var(--text-tertiary)]"
+        className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--radius-chip)] py-0.5 pr-1 text-left transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:text-[color:var(--text-tertiary)]"
       >
         <ChevronRight
           className={cn(
@@ -121,10 +121,10 @@ export function ToolCallCard({ execution, onOpenDetails }: ToolCallCardProps) {
           aria-hidden
         />
         <StatusDot tone={tone} pulse={isRunning} className="opacity-70" />
-        <span className="truncate text-[var(--text-tertiary)]">
+        <span className="truncate text-[color:var(--text-tertiary)]">
           {t("chat.toolCall.metadata", undefined)}
         </span>
-        <span aria-hidden className="text-[var(--text-quaternary)]">
+        <span aria-hidden className="text-[color:var(--text-quaternary)]">
           ·
         </span>
         <span className="shrink-0 font-mono">{trailingLabel}</span>
@@ -133,7 +133,7 @@ export function ToolCallCard({ execution, onOpenDetails }: ToolCallCardProps) {
       {expanded ? (
         <div className="ml-5 mt-0.5 flex flex-col gap-1.5">
           {execution.error_message ? (
-            <pre className="m-0 max-h-[140px] overflow-auto rounded-[var(--radius-panel-sm)] border border-[color:var(--divider-hair)] bg-[var(--panel-soft)]/45 p-2 font-mono text-[0.6875rem] leading-[1.45] text-[var(--tone-danger-muted)] whitespace-pre-wrap">
+            <pre className="m-0 max-h-[140px] overflow-auto rounded-[var(--radius-panel-sm)] border border-[color:var(--divider-hair)] bg-[var(--panel-soft)]/45 p-2 font-mono text-[0.6875rem] leading-[1.45] text-[color:var(--tone-danger-muted)] whitespace-pre-wrap">
               {execution.error_message}
             </pre>
           ) : null}
@@ -143,12 +143,12 @@ export function ToolCallCard({ execution, onOpenDetails }: ToolCallCardProps) {
               return (
                 <span
                   key={`${item.label}-${item.value}`}
-                  className="inline-flex items-center gap-1 text-[var(--text-quaternary)]"
+                  className="inline-flex items-center gap-1 text-[color:var(--text-quaternary)]"
                   data-metadata-visual={item.visual.key}
                 >
                   <Icon className="h-2.5 w-2.5 opacity-60" strokeWidth={1.75} aria-hidden="true" />
                   <span className="opacity-80">{item.label}:</span>
-                  <span className="text-[var(--text-tertiary)]">{item.value}</span>
+                  <span className="text-[color:var(--text-tertiary)]">{item.value}</span>
                 </span>
               );
             })}
@@ -161,7 +161,7 @@ export function ToolCallCard({ execution, onOpenDetails }: ToolCallCardProps) {
                   event.stopPropagation();
                   onOpenDetails(execution.task_id);
                 }}
-                className="inline-flex items-center gap-1 rounded-[var(--radius-chip)] py-0.5 pr-1.5 text-[0.6875rem] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)]"
+                className="inline-flex items-center gap-1 rounded-[var(--radius-chip)] py-0.5 pr-1.5 text-[0.6875rem] text-[color:var(--text-quaternary)] transition-colors hover:text-[color:var(--text-secondary)]"
               >
                 {t("chat.toolCall.viewExecution", undefined)}
                 <ExternalLink className="icon-xs" strokeWidth={1.75} aria-hidden />

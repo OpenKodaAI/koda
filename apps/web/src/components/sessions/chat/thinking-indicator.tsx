@@ -17,7 +17,7 @@ export function ThinkingIndicator({ label, className }: ThinkingIndicatorProps) 
       role="status"
       aria-live="polite"
       className={cn(
-        "flex h-6 items-center gap-2 text-[var(--text-tertiary)]",
+        "flex h-6 items-center gap-2 text-[color:var(--text-tertiary)]",
         className,
       )}
     >

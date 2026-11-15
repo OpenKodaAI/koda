@@ -36,7 +36,7 @@ export function CoreGovernancePanel({
     <section>
       <button
         type="button"
-        className="eyebrow flex items-center gap-2 py-2 w-full text-left hover:text-[var(--text-secondary)] transition-colors"
+        className="eyebrow flex items-center gap-2 py-2 w-full text-left hover:text-[color:var(--text-secondary)] transition-colors"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >

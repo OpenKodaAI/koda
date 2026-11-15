@@ -142,7 +142,7 @@ export function ControlPlaneHome({
       />
 
       {message ? (
-        <section className="glass-card px-5 py-4 text-sm text-[var(--text-secondary)]">
+        <section className="glass-card px-5 py-4 text-sm text-[color:var(--text-secondary)]">
           {message}
         </section>
       ) : null}
@@ -152,7 +152,7 @@ export function ControlPlaneHome({
           <div className="space-y-4">
             <div>
               <p className="eyebrow">{t("generated.controlPlane.bots_b2016c98")}</p>
-              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.05em] text-[var(--text-primary)]">
+              <h2 className="mt-2 text-2xl font-semibold tracking-[-0.05em] text-[color:var(--text-primary)]">
                 {formatAgentCatalogCount(tl, agents.length)}
               </h2>
             </div>
@@ -173,11 +173,11 @@ export function ControlPlaneHome({
                           className="h-2.5 w-2.5 rounded-full"
                           style={{ backgroundColor: agent.appearance?.color || "#7A8799" }}
                         />
-                        <h3 className="text-lg font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+                        <h3 className="text-lg font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
                           {agent.display_name}
                         </h3>
                       </Link>
-                      <p className="text-xs uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+                      <p className="text-xs uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
                         {agent.id}
                       </p>
                     </div>
@@ -190,7 +190,7 @@ export function ControlPlaneHome({
                     </span>
                   </div>
 
-                  <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-[var(--text-secondary)]">
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-xs text-[color:var(--text-secondary)]">
                     <span>{t("generated.controlPlane.applied_ca8a9229")} {translate("generated.controlPlane.v_76abe6e8")}{agent.applied_version ?? "—"}</span>
                     <span>{t("generated.controlPlane.desired_918bbbc1")} {translate("generated.controlPlane.v_76abe6e8")}{agent.desired_version ?? "—"}</span>
                     <span>{agent.storage_namespace}</span>
@@ -243,77 +243,77 @@ export function ControlPlaneHome({
           <div className="space-y-4">
             <div>
               <p className="eyebrow">{t("generated.controlPlane.criar_bot_3f7c6aa1")}</p>
-              <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+              <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
                 {t("generated.controlPlane.novo_bot_self_hosted_401d4835")}
               </h2>
             </div>
 
             <label className="block">
-              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                 {t("generated.controlPlane.id_eb64177a")}
               </span>
               <input
                 value={agentId}
                 onChange={(event) => setBotId(event.target.value.toUpperCase())}
                 placeholder={t("generated.controlPlane.exemplo_bot_bc80ea67")}
-                className="field-shell text-[var(--text-primary)]"
+                className="field-shell text-[color:var(--text-primary)]"
               />
             </label>
 
             <label className="block">
-              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                 {t("generated.controlPlane.display_name_13949286")}
               </span>
               <input
                 value={displayName}
                 onChange={(event) => setDisplayName(event.target.value)}
                 placeholder={t("generated.controlPlane.exemplo_bot_52a4140b")}
-                className="field-shell text-[var(--text-primary)]"
+                className="field-shell text-[color:var(--text-primary)]"
               />
             </label>
 
             <div className="grid gap-3 sm:grid-cols-3">
               <label className="block">
-              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                 {t("generated.controlPlane.cor_a63c4fed")}
               </span>
                 <input
                   value={color}
                   onChange={(event) => setColor(event.target.value)}
-                  className="field-shell text-[var(--text-primary)]"
+                  className="field-shell text-[color:var(--text-primary)]"
                 />
               </label>
               <label className="block sm:col-span-2">
-              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                 RGB
               </span>
                 <input
                   value={colorRgb}
                   onChange={(event) => setColorRgb(event.target.value)}
-                  className="field-shell text-[var(--text-primary)]"
+                  className="field-shell text-[color:var(--text-primary)]"
                 />
               </label>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block">
-              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                   {t("generated.controlPlane.namespace_4a91cf30")}
               </span>
                 <input
                   value={nextStorageNamespace}
                   readOnly
-                  className="field-shell text-[var(--text-secondary)]"
+                  className="field-shell text-[color:var(--text-secondary)]"
                 />
               </label>
               <label className="block">
-              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                   {t("generated.controlPlane.health_port_75cfd237")}
               </span>
                 <input
                   value={healthPort}
                   onChange={(event) => setHealthPort(event.target.value)}
-                  className="field-shell text-[var(--text-primary)]"
+                  className="field-shell text-[color:var(--text-primary)]"
                 />
               </label>
             </div>
@@ -335,40 +335,40 @@ export function ControlPlaneHome({
       <section className="grid gap-6 xl:grid-cols-3">
         <div className="glass-card p-5 sm:p-6">
           <p className="eyebrow">{t("generated.controlPlane.core_tools_b3b00936")}</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+          <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
             {t("generated.controlPlane.catalogo_governado_pelo_sistema_05415f6e")}
           </h2>
-          <p className="mt-2 text-sm text-[var(--text-secondary)]">
+          <p className="mt-2 text-sm text-[color:var(--text-secondary)]">
             {t("generated.controlPlane.os_bots_so_habilitam_subsets_desse_catalogo_bde5583d")}
           </p>
           <textarea
             readOnly
             value={prettyJson(coreTools)}
-            className="field-shell mt-4 min-h-[260px] font-mono text-xs text-[var(--text-primary)]"
+            className="field-shell mt-4 min-h-[260px] font-mono text-xs text-[color:var(--text-primary)]"
           />
         </div>
 
         <div className="glass-card p-5 sm:p-6">
           <p className="eyebrow">{t("generated.controlPlane.providers_371bc91d")}</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+          <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
             {t("generated.controlPlane.envelope_global_de_modelos_1c5b926e")}
           </h2>
           <textarea
             readOnly
             value={prettyJson(coreProviders)}
-            className="field-shell mt-4 min-h-[260px] font-mono text-xs text-[var(--text-primary)]"
+            className="field-shell mt-4 min-h-[260px] font-mono text-xs text-[color:var(--text-primary)]"
           />
         </div>
 
         <div className="glass-card p-5 sm:p-6">
           <p className="eyebrow">{t("generated.controlPlane.governanca_d4101c68")}</p>
-          <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+          <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
             {t("generated.controlPlane.policies_e_capabilities_94621b02")}
           </h2>
           <textarea
             readOnly
             value={prettyJson({ policies: corePolicies, capabilities: coreCapabilities })}
-            className="field-shell mt-4 min-h-[260px] font-mono text-xs text-[var(--text-primary)]"
+            className="field-shell mt-4 min-h-[260px] font-mono text-xs text-[color:var(--text-primary)]"
           />
         </div>
       </section>
@@ -378,7 +378,7 @@ export function ControlPlaneHome({
           <div className="flex items-center justify-between gap-3">
             <div>
               <p className="eyebrow">{t("generated.controlPlane.defaults_globais_cdeeccf3")}</p>
-              <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+              <h2 className="mt-2 text-xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
                 {t("generated.controlPlane.heranca_base_para_novos_bots_e_overrides_1ee3212f")}
               </h2>
             </div>
@@ -397,7 +397,7 @@ export function ControlPlaneHome({
           <textarea
             value={defaultsJson}
             onChange={(event) => setDefaultsJson(event.target.value)}
-            className="field-shell min-h-[420px] w-full px-4 py-4 font-mono text-xs text-[var(--text-primary)]"
+            className="field-shell min-h-[420px] w-full px-4 py-4 font-mono text-xs text-[color:var(--text-primary)]"
             spellCheck={false}
           />
         </div>

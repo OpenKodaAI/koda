@@ -258,7 +258,7 @@ function ChatThreadImpl({
             className="mx-auto flex w-full max-w-[960px] flex-col gap-5 px-6 pt-8 pb-8 lg:px-10"
           >
             <div className="flex justify-center pb-1">
-              <LoaderCircle className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" strokeWidth={2} aria-hidden />
+              <LoaderCircle className="h-4 w-4 animate-spin text-[color:var(--text-tertiary)]" strokeWidth={2} aria-hidden />
             </div>
             {Array.from({ length: 3 }).map((_, index) => (
               <div
@@ -279,26 +279,26 @@ function ChatThreadImpl({
           </div>
         ) : error && !hasConversation ? (
           <div className="mx-auto flex h-full w-full max-w-[480px] flex-col items-center justify-center gap-3 px-6 text-center">
-            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]">
+            <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)]">
               <MessageSquareText className="icon-md" strokeWidth={1.75} />
             </span>
-            <p className="m-0 text-[var(--font-size-md)] font-medium text-[var(--text-primary)]">
+            <p className="m-0 text-[length:var(--font-size-md)] font-medium text-[color:var(--text-primary)]">
               {t("chat.thread.errorGeneric", undefined)}
             </p>
-            <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">{error}</p>
+            <p className="m-0 text-[length:var(--font-size-sm)] text-[color:var(--text-tertiary)]">{error}</p>
           </div>
         ) : !hasConversation ? (
           <div className="mx-auto flex h-full w-full max-w-[620px] flex-col items-center justify-center gap-3 px-6 text-center">
-            <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+            <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
               {emptyEyebrow ??
                 agentLabel ??
                 t("sessions.thread.newChatEyebrow", undefined)}
             </p>
-            <h2 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
+            <h2 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[color:var(--text-primary)] sm:text-[1.75rem]">
               {emptyTitle ??
                 t("sessions.thread.heroTitle", undefined)}
             </h2>
-            <p className="m-0 max-w-[480px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
+            <p className="m-0 max-w-[480px] text-[length:var(--font-size-sm)] leading-[1.55] text-[color:var(--text-tertiary)]">
               {emptyDescription ??
                 t("sessions.thread.heroHelper", undefined)}
             </p>
@@ -310,7 +310,7 @@ function ChatThreadImpl({
                 <span
                   role="status"
                   aria-label={loadingLabel}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--divider-hair)] bg-[var(--panel)] text-[var(--text-tertiary)] shadow-[var(--shadow-xs)] backdrop-blur"
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--divider-hair)] bg-[var(--panel)] text-[color:var(--text-tertiary)] shadow-[var(--shadow-xs)] backdrop-blur"
                 >
                   <LoaderCircle className="h-4 w-4 animate-spin" strokeWidth={2} aria-hidden />
                 </span>
@@ -319,7 +319,7 @@ function ChatThreadImpl({
             {loadingOlder ? (
               <div className="flex justify-center">
                 <LoaderCircle
-                  className="h-4 w-4 animate-spin text-[var(--text-tertiary)]"
+                  className="h-4 w-4 animate-spin text-[color:var(--text-tertiary)]"
                   aria-label={t("sessions.thread.loadingOlder", undefined)}
                   strokeWidth={1.75}
                 />
@@ -404,8 +404,8 @@ function ChatThreadImpl({
             onClick={scrollToBottom}
             className={cn(
               "pointer-events-auto !inline-flex !h-9 !w-9 !min-w-9 !max-w-9 shrink-0 items-center justify-center rounded-full",
-              "border border-[color:var(--border-subtle)] bg-[color:var(--panel)] text-[var(--text-secondary)] shadow-[var(--shadow-floating)] backdrop-blur",
-              "transition-[background-color,border-color,color,transform] duration-[140ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[color:var(--border-strong)] hover:bg-[color:var(--panel-strong)] hover:text-[var(--text-primary)] active:scale-[0.98]",
+              "border border-[color:var(--border-subtle)] bg-[color:var(--panel)] text-[color:var(--text-secondary)] shadow-[var(--shadow-floating)] backdrop-blur",
+              "transition-[background-color,border-color,color,transform] duration-[140ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[color:var(--border-strong)] hover:bg-[color:var(--panel-strong)] hover:text-[color:var(--text-primary)] active:scale-[0.98]",
             )}
             style={{ width: 36, minWidth: 36, maxWidth: 36 }}
           >

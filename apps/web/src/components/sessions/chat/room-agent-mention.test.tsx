@@ -77,6 +77,6 @@ describe("room agent mentions", () => {
       />,
     );
 
-    expect(screen.getByText("@Sage")).toHaveClass("text-[var(--tone-info-dot)]");
+    expect(screen.getByText("@Sage")).toHaveClass("text-[color:var(--tone-info-dot)]");
   });
 });

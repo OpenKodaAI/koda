@@ -114,11 +114,11 @@ export function IntegrationConnectionModal({
               <div>
                 <h3
                   id="connection-modal-title"
-                  className="text-lg font-semibold tracking-[-0.03em] text-[var(--text-primary)]"
+                  className="text-lg font-semibold tracking-[-0.03em] text-[color:var(--text-primary)]"
                 >
                   {t("generated.controlPlane.conectar_a587e076")} {entry.label}
                 </h3>
-                <p className="mt-0.5 text-sm text-[var(--text-quaternary)]">
+                <p className="mt-0.5 text-sm text-[color:var(--text-quaternary)]">
                   {tl(entry.tagline)}
                 </p>
               </div>
@@ -141,7 +141,7 @@ export function IntegrationConnectionModal({
               >
                 <div className="space-y-2">
                   {field.storage === "secret" && field.value_present ? (
-                    <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                    <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[color:var(--tone-success-text)]">
                       {t("generated.controlPlane.configurada_df5188a8")}
                     </span>
                   ) : null}
@@ -159,7 +159,7 @@ export function IntegrationConnectionModal({
                     />
                   ) : (
                     <input
-                      className="field-shell text-[var(--text-primary)]"
+                      className="field-shell text-[color:var(--text-primary)]"
                       type={field.input_type === "password" ? "password" : "text"}
                       value={field.value || ""}
                       onChange={(e) =>
@@ -186,8 +186,8 @@ export function IntegrationConnectionModal({
                     className={cn(
                       "mt-2 inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs transition-colors",
                       field.clear
-                        ? "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]"
-                        : "border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]",
+                        ? "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)]"
+                        : "border-[var(--border-subtle)] text-[color:var(--text-secondary)] hover:bg-[var(--surface-hover)]",
                     )}
                   >
                     <Trash2 size={12} />
@@ -201,7 +201,7 @@ export function IntegrationConnectionModal({
           {/* Footer */}
           <div className="flex items-center justify-between border-t border-[var(--border-subtle)] px-6 py-4">
             {/* Security indicator */}
-            <div className="flex items-center gap-1.5 text-xs text-[var(--text-quaternary)]">
+            <div className="flex items-center gap-1.5 text-xs text-[color:var(--text-quaternary)]">
               <Lock size={11} />
               <span>{t("generated.controlPlane.credenciais_criptografadas_657054e7")}</span>
             </div>
@@ -210,7 +210,7 @@ export function IntegrationConnectionModal({
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
+                className="rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
               >
                 {t("generated.controlPlane.cancelar_091200fb")}
               </button>
@@ -220,7 +220,7 @@ export function IntegrationConnectionModal({
                 loading={isIntegrationActionPending(entry.key, "connect")}
                 status={integrationActionStatus(entry.key, "connect")}
                 loadingLabel={t("generated.controlPlane.salvando_7eeded02")}
-                className="rounded-lg px-4 py-2 text-sm font-semibold text-[var(--interactive-active-text)] transition-all"
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-[color:var(--interactive-active-text)] transition-all"
                 style={{
                   background: `linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))`,
                   border: "1px solid var(--interactive-active-border)",

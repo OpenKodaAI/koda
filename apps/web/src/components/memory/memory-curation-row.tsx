@@ -37,7 +37,7 @@ function MemoryRowStatus({ status }: { status: MemoryReviewStatus }) {
   }).toLowerCase();
 
   return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)]">
+    <span className="inline-flex items-center gap-1.5 text-[11px] text-[color:var(--text-tertiary)]">
       <span
         className="h-2.5 w-2.5 rounded-full"
         style={{ backgroundColor: color }}
@@ -122,7 +122,7 @@ export function MemoryCurationRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--text-tertiary)]">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[color:var(--text-tertiary)]">
                 {showAgent ? (
                   <span className="inline-flex items-center gap-1.5">
                     <span
@@ -136,16 +136,16 @@ export function MemoryCurationRow({
                 <span>{typeLabel}</span>
               </div>
 
-              <p className="mt-1 truncate text-[14px] font-medium tracking-[-0.03em] text-[var(--text-primary)]">
+              <p className="mt-1 truncate text-[14px] font-medium tracking-[-0.03em] text-[color:var(--text-primary)]">
                 {title}
               </p>
-              <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-[var(--text-secondary)]">
+              <p className="mt-1 line-clamp-2 text-[13px] leading-5 text-[color:var(--text-secondary)]">
                 {preview}
               </p>
             </div>
 
             <div className="shrink-0 text-right">
-              <span className="block text-[11px] text-[var(--text-tertiary)]">
+              <span className="block text-[11px] text-[color:var(--text-tertiary)]">
                 {formatRelativeTime(activityAt)}
               </span>
               <div className="mt-1">
@@ -154,7 +154,7 @@ export function MemoryCurationRow({
             </div>
           </div>
 
-          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--text-tertiary)]">
+          <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[color:var(--text-tertiary)]">
             {meta.filter(Boolean).map((value, index) => (
               <span key={`${value}-${index}`} className="inline-flex items-center gap-2">
                 {index > 0 ? <span>•</span> : null}

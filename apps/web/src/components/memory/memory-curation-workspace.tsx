@@ -388,7 +388,7 @@ export function MemoryCurationWorkspace({
       <section className="glass-card-sm px-4 py-3.5 sm:px-5">
         <div className="grid gap-3 xl:grid-cols-[12.5rem_12.5rem_13.5rem_minmax(0,1fr)] xl:items-end">
           <div className="min-w-0">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
               {t("memory.curation.mode")}
             </span>
             <SoftTabs
@@ -403,7 +403,7 @@ export function MemoryCurationWorkspace({
           </div>
 
           <label className="block min-w-0">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
               {t("memory.curation.states")}
             </span>
             <Select
@@ -430,7 +430,7 @@ export function MemoryCurationWorkspace({
           </label>
 
           <label className="block min-w-0">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
               {t("memory.curation.type")}
             </span>
             <Select
@@ -455,16 +455,16 @@ export function MemoryCurationWorkspace({
           </label>
 
           <label className="block min-w-0">
-            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+            <span className="mb-2 block text-xs font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
               {t("memory.curation.search")}
             </span>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--text-quaternary)]" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[color:var(--text-quaternary)]" />
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={t("memory.curation.searchPlaceholder")}
-                className="field-shell pl-9 pr-3 text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+                className="field-shell pl-9 pr-3 text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)]"
               />
             </div>
           </label>
@@ -472,7 +472,7 @@ export function MemoryCurationWorkspace({
 
         {selectedCount > 0 ? (
           <div className="mt-3 flex flex-col gap-2 border-t border-[var(--border-subtle)] pt-3 xl:flex-row xl:items-center xl:justify-between">
-            <p className="text-sm text-[var(--text-secondary)]">
+            <p className="text-sm text-[color:var(--text-secondary)]">
               {t("memory.curation.selectedCount", { count: selectedCount })}
             </p>
             <MemoryCurationActions
@@ -494,10 +494,10 @@ export function MemoryCurationWorkspace({
 
       {loadError ? (
         <section className="glass-card px-5 py-6">
-          <p className="text-lg font-semibold text-[var(--text-primary)]">
+          <p className="text-lg font-semibold text-[color:var(--text-primary)]">
             {t("memory.map.unavailableTitle")}
           </p>
-          <p className="mt-3 text-sm leading-7 text-[var(--text-secondary)]">
+          <p className="mt-3 text-sm leading-7 text-[color:var(--text-secondary)]">
             {loadError}
           </p>
           <div className="mt-4">

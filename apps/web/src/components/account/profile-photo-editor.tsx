@@ -324,7 +324,7 @@ export function ProfilePhotoEditor({
               onError={() => setImgError(true)}
             />
           ) : (
-            <span className="flex h-full w-full items-center justify-center font-mono text-[1.55rem] font-medium text-[var(--text-secondary)]">
+            <span className="flex h-full w-full items-center justify-center font-mono text-[1.55rem] font-medium text-[color:var(--text-secondary)]">
               {imgError ? (
                 <ImageOff className="h-5 w-5" strokeWidth={1.75} aria-hidden="true" />
               ) : fallbackAvatarId ? (
@@ -361,7 +361,7 @@ export function ProfilePhotoEditor({
             onClick={(event) => void handleRemove(event)}
             disabled={isBusy}
             aria-label={t("account.profile.photo.remove", undefined)}
-            className="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--panel-strong)] text-[var(--text-tertiary)] shadow-[var(--shadow-xs)] transition-[background-color,border-color,color] duration-[160ms] hover:border-[var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)] disabled:cursor-wait disabled:opacity-80"
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--panel-strong)] text-[color:var(--text-tertiary)] shadow-[var(--shadow-xs)] transition-[background-color,border-color,color] duration-[160ms] hover:border-[var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)] hover:text-[color:var(--tone-danger-dot)] disabled:cursor-wait disabled:opacity-80"
             style={{ position: "absolute", top: -4, right: -4, transform: "translateZ(0)" }}
           >
             {removing ? (
@@ -433,7 +433,7 @@ export function ProfilePhotoEditor({
       ) : null}
 
       {error ? (
-        <p role="alert" className="m-0 max-w-[20rem] text-center text-[0.75rem] leading-5 text-[var(--tone-danger-dot)]">
+        <p role="alert" className="m-0 max-w-[20rem] text-center text-[0.75rem] leading-5 text-[color:var(--tone-danger-dot)]">
           {error}
         </p>
       ) : null}

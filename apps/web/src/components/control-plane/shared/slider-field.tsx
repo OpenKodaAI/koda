@@ -53,7 +53,7 @@ export function SliderField({
               {activeLabel}
             </span>
             {showValue && (
-              <span className="text-[10px] font-mono text-[var(--text-quaternary)] tabular-nums">
+              <span className="text-[10px] font-mono text-[color:var(--text-quaternary)] tabular-nums">
                 ({value})
               </span>
             )}
@@ -80,7 +80,7 @@ export function SliderField({
             }}
           />
           {!activeLabel && showValue && (
-            <span className="text-sm font-mono text-[var(--text-secondary)] min-w-[3ch] text-right tabular-nums">
+            <span className="text-sm font-mono text-[color:var(--text-secondary)] min-w-[3ch] text-right tabular-nums">
               {value}
             </span>
           )}
@@ -99,7 +99,7 @@ export function SliderField({
                     const targetValue = min + (i / (labels.length - 1)) * (max - min);
                     onChange(Math.round(targetValue / step) * step);
                   }}
-                  className="text-[10px] transition-colors cursor-pointer hover:text-[var(--text-secondary)]"
+                  className="text-[10px] transition-colors cursor-pointer hover:text-[color:var(--text-secondary)]"
                   style={{
                     color: isActive ? "var(--text-primary)" : "var(--text-quaternary)",
                     fontWeight: isActive ? 600 : 400,
