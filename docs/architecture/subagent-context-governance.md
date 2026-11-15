@@ -88,11 +88,15 @@ dry-run prompt rules, a fresh provider turn and dry-run tools (writes are
 blocked), and its result lists the `dry_run` warning. The child never
 finalizes the parent's scheduled run.
 A child starts from a copy of its parent turn's context, so it inherits the
-parent's per-turn settings (such as `agent_mode`) and its total spend. The
-budget check (`MAX_TOTAL_BUDGET_USD`) therefore refuses a child once the
-parent's total reaches the budget, and when a child finishes its cost is added
-to the parent's total, so a parent cannot spend past its budget through
-children.
+parent's per-turn settings (such as `agent_mode`) and its total spend. When a
+child finishes, its cost is added to the parent's total. The budget check
+(`MAX_TOTAL_BUDGET_USD`) is the same pre-check the parent's own turn gets: it
+runs when each child starts, against the parent's total at that moment, and
+refuses a child once that total reaches the budget. It reserves nothing, so
+the children that start before any of them finishes (up to the 2 concurrent
+child-runs per parent) all pass the check against the same total and together
+can take the parent's total past the budget. Only a child that starts after
+the total reaches the budget is refused.
 Phase 3 fails closed for write, network-write, destructive, unknown, or
 unrecognized child toolsets until a stricter approval path is implemented.
 
