@@ -3844,10 +3844,13 @@ class KnowledgeV2PostgresBackend:
                     # pending_approvals.py, approval_grants.py). Earlier
                     # releases created both tables at runtime with INTEGER
                     # user and chat ids, so Telegram ids above 2^31 and
-                    # supergroup ids failed the insert (D-059). Widening
-                    # INTEGER to BIGINT loses no data, and the tables are
-                    # small, so the rewrite holds its lock briefly; on a fresh
-                    # schema the ALTERs change nothing.
+                    # supergroup ids failed the insert (D-059), and with REAL
+                    # (float4) epoch seconds, whose step near 1.8e9 is 128
+                    # seconds, so the expiry filter was off by up to a minute
+                    # against a 600-second TTL (D-347). Widening INTEGER to
+                    # BIGINT and REAL to DOUBLE PRECISION loses no data, and
+                    # the tables are small, so the rewrite holds its lock
+                    # briefly; on a fresh schema the ALTERs change nothing.
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."pending_approvals" (
                             op_id TEXT PRIMARY KEY,
                             op_type TEXT NOT NULL,
@@ -3856,8 +3859,8 @@ class KnowledgeV2PostgresBackend:
                             session_id TEXT,
                             chat_id BIGINT,
                             description TEXT,
-                            created_at REAL NOT NULL,
-                            expires_at REAL NOT NULL,
+                            created_at DOUBLE PRECISION NOT NULL,
+                            expires_at DOUBLE PRECISION NOT NULL,
                             payload_json TEXT NOT NULL
                         )""",
                     f"""CREATE TABLE IF NOT EXISTS "{schema}"."approval_grants" (
@@ -3866,16 +3869,20 @@ class KnowledgeV2PostgresBackend:
                             agent_id TEXT NOT NULL,
                             session_id TEXT,
                             chat_id BIGINT,
-                            created_at REAL NOT NULL,
-                            expires_at REAL NOT NULL,
+                            created_at DOUBLE PRECISION NOT NULL,
+                            expires_at DOUBLE PRECISION NOT NULL,
                             payload_json TEXT NOT NULL
                         )""",
                     f"""ALTER TABLE "{schema}"."pending_approvals"
                            ALTER COLUMN user_id TYPE BIGINT,
-                           ALTER COLUMN chat_id TYPE BIGINT""",
+                           ALTER COLUMN chat_id TYPE BIGINT,
+                           ALTER COLUMN created_at TYPE DOUBLE PRECISION,
+                           ALTER COLUMN expires_at TYPE DOUBLE PRECISION""",
                     f"""ALTER TABLE "{schema}"."approval_grants"
                            ALTER COLUMN user_id TYPE BIGINT,
-                           ALTER COLUMN chat_id TYPE BIGINT""",
+                           ALTER COLUMN chat_id TYPE BIGINT,
+                           ALTER COLUMN created_at TYPE DOUBLE PRECISION,
+                           ALTER COLUMN expires_at TYPE DOUBLE PRECISION""",
                     *approval_grant_legacy_rule_sql(schema),
                 ),
             ),

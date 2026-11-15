@@ -125,7 +125,7 @@ async def _ensure_persistence_loaded() -> None:
                     "event": asyncio.Event(),
                     "decision": None,
                     "description": entry.get("description", ""),
-                    "agent_id": str(entry.get("agent_id") or "default"),
+                    "agent_id": str(entry.get("agent_id") or AGENT_ID or "default"),
                     "session_id": str(entry.get("session_id") or "") or None,
                     "chat_id": entry.get("chat_id"),
                     "requests": [
@@ -1200,7 +1200,7 @@ async def dispatch_approved_operation(op_id: str) -> None:
     grants = list(pending.get("grants") or [])
     requests = list(pending.get("requests") or [])
     user_id = int(pending.get("user_id") or 0)
-    agent_id = str(pending.get("agent_id") or "").strip() or "default"
+    agent_id = str(pending.get("agent_id") or "").strip() or AGENT_ID or "default"
     session_id = str(pending.get("session_id") or "").strip() or None
     chat_id = pending.get("chat_id")
 
@@ -1221,24 +1221,28 @@ async def dispatch_approved_operation(op_id: str) -> None:
             await require_message(original_update).reply_text(refusal, parse_mode=ParseMode.HTML)
             return
 
+    # The approval's use is recorded before the operation runs (D-344).
+    if not await _consume_pending_op_grants(
+        grants=grants,
+        requests=requests,
+        user_id=user_id,
+        agent_id=agent_id,
+        session_id=session_id,
+        chat_id=int(chat_id) if chat_id is not None else None,
+    ):
+        log.warning("approved_operation_not_run", op_id=op_id, cmd=pending.get("cmd_name"), reason="grant_not_recorded")
+        await require_message(original_update).reply_text(
+            "Nao foi possivel registrar a aprovacao; a operacao nao foi executada. Tente novamente."
+        )
+        return
+
     original_user_data["_approved"] = True
     _execution_approved.set(True)
-    success = False
     try:
         await handler(original_update, original_context)
-        success = True
     finally:
         _execution_approved.set(False)
         original_user_data["_approved"] = False
-        if success:
-            _consume_pending_op_grants(
-                grants=grants,
-                requests=requests,
-                user_id=user_id,
-                agent_id=agent_id,
-                session_id=session_id,
-                chat_id=int(chat_id) if chat_id is not None else None,
-            )
 
 
 # Decorator
@@ -1415,13 +1419,11 @@ def with_approval(
                 and resolution
                 and resolution.access_level == "read"
             ):
-                _execution_approved.set(True)
-                try:
-                    result = await func(update, context, *args, **kwargs)
-                finally:
-                    _execution_approved.set(False)
-                if approval_grant is not None and requested_scope is not None:
-                    consume_agent_approval_grant(
+                # A grant's use is recorded before the command runs (D-344).
+                if (
+                    approval_grant is not None
+                    and requested_scope is not None
+                    and not await _use_approval_grant(
                         user_id=require_user_id(update),
                         agent_id=AGENT_ID or "default",
                         envelope=policy_evaluation.envelope,
@@ -1429,7 +1431,23 @@ def with_approval(
                         session_id=str(user_data.get("session_id") or "").strip() or None,
                         chat_id=_current_chat_id(update),
                     )
-                return result
+                ):
+                    await _show_approval_keyboard(
+                        update,
+                        context,
+                        command_name,
+                        raw_args,
+                        func,
+                        preview_text=policy_evaluation.preview_text,
+                        requests=approval_requests,
+                        approved_target=approved_target,
+                    )
+                    return None
+                _execution_approved.set(True)
+                try:
+                    return await func(update, context, *args, **kwargs)
+                finally:
+                    _execution_approved.set(False)
 
             if not is_write_operation(policy_command_name, policy_raw_args):
                 _execution_approved.set(True)
@@ -1448,13 +1466,11 @@ def with_approval(
                     _execution_approved.set(False)
 
             if policy_evaluation and policy_evaluation.decision == "allow":
-                _execution_approved.set(True)
-                try:
-                    result = await func(update, context, *args, **kwargs)
-                finally:
-                    _execution_approved.set(False)
-                if approval_grant is not None and requested_scope is not None:
-                    consume_agent_approval_grant(
+                # A grant's use is recorded before the command runs (D-344).
+                if (
+                    approval_grant is not None
+                    and requested_scope is not None
+                    and not await _use_approval_grant(
                         user_id=require_user_id(update),
                         agent_id=AGENT_ID or "default",
                         envelope=policy_evaluation.envelope,
@@ -1462,7 +1478,23 @@ def with_approval(
                         session_id=str(user_data.get("session_id") or "").strip() or None,
                         chat_id=_current_chat_id(update),
                     )
-                return result
+                ):
+                    await _show_approval_keyboard(
+                        update,
+                        context,
+                        command_name,
+                        raw_args,
+                        func,
+                        preview_text=policy_evaluation.preview_text,
+                        requests=approval_requests,
+                        approved_target=approved_target,
+                    )
+                    return None
+                _execution_approved.set(True)
+                try:
+                    return await func(update, context, *args, **kwargs)
+                finally:
+                    _execution_approved.set(False)
 
             # Needs approval → show keyboard, store, return
             await _show_approval_keyboard(
@@ -1577,7 +1609,7 @@ def match_agent_approval_grant(
     return None
 
 
-def consume_agent_approval_grant(
+async def consume_agent_approval_grant(
     *,
     user_id: int,
     agent_id: str,
@@ -1586,6 +1618,15 @@ def consume_agent_approval_grant(
     session_id: str | None = None,
     chat_id: int | None = None,
 ) -> dict[str, Any] | None:
+    """Take one use of the matching grant; call it before the action the grant approves runs.
+
+    The use counts once Postgres records it (D-344). It is taken in memory first, so
+    no concurrent caller takes the same use, and given back if the write fails: the
+    write error is raised, and the caller must not run the action, so a grant is never
+    used more times than it allows and memory matches the database. A grant whose row
+    is gone, because it was revoked or cleaned up meanwhile, is dropped from memory as
+    well and ``None`` is returned (D-343). ``None`` also means that no grant matches.
+    """
     _cleanup_stale_approval_grants()
     for grant_id, grant in list(_APPROVAL_GRANTS.items()):
         if int(grant.get("user_id") or 0) != user_id:
@@ -1600,14 +1641,35 @@ def consume_agent_approval_grant(
             chat_id=chat_id,
         ):
             continue
-        grant["remaining_uses"] = int(grant.get("remaining_uses") or 1) - 1
-        if int(grant["remaining_uses"]) <= 0 or str(grant.get("kind") or "") == "approve_once":
+        before = int(grant.get("remaining_uses") or 1)
+        spent = before <= 1 or str(grant.get("kind") or "") == "approve_once"
+        grant["remaining_uses"] = 0 if spent else before - 1
+        try:
+            if spent:
+                kept = await remove_approval_grant(grant_id, agent_id=agent_id)
+            else:
+                kept = await update_approval_grant(grant_id, dict(grant))
+        except Exception:
+            # Give the use back unless the grant left memory meanwhile (revoked or
+            # expired); then it stays gone.
+            if _APPROVAL_GRANTS.get(grant_id) is grant:
+                grant["remaining_uses"] = before
+            raise
+        if spent or not kept:
             _APPROVAL_GRANTS.pop(grant_id, None)
-            _spawn_store_write(remove_approval_grant(grant_id, agent_id=agent_id))
-        else:
-            _spawn_store_write(update_approval_grant(grant_id, dict(grant)))
+        if not kept:
+            return None
         return dict(grant)
     return None
+
+
+async def _use_approval_grant(**match: Any) -> bool:
+    """Record one use of the matching grant before its action runs; False when it cannot be used."""
+    try:
+        return await consume_agent_approval_grant(**match) is not None
+    except Exception:
+        # The store logged the failed write; the action asks for approval again.
+        return False
 
 
 def peek_agent_approval_grant(
@@ -1637,7 +1699,7 @@ def peek_agent_approval_grant(
     return None
 
 
-def _consume_pending_op_grants(
+async def _consume_pending_op_grants(
     *,
     grants: list[dict[str, Any]],
     requests: list[dict[str, Any]],
@@ -1645,23 +1707,31 @@ def _consume_pending_op_grants(
     agent_id: str,
     session_id: str | None,
     chat_id: int | None,
-) -> None:
+) -> bool:
+    """Take the use of each request's grant before the approved operation runs.
+
+    Returns False when a use could not be recorded; the operation must not run then.
+    """
     if not grants and not requests:
-        return
+        return True
     for request in requests:
         resolved_request = _deserialize_agent_approval_request(request)
         envelope = resolved_request.get("envelope")
         approval_scope = cast(ApprovalScope | None, resolved_request.get("approval_scope"))
         if not isinstance(envelope, ActionEnvelope):
             continue
-        consume_agent_approval_grant(
-            user_id=user_id,
-            agent_id=agent_id,
-            envelope=envelope,
-            approval_scope=approval_scope,
-            session_id=session_id,
-            chat_id=chat_id,
-        )
+        try:
+            await consume_agent_approval_grant(
+                user_id=user_id,
+                agent_id=agent_id,
+                envelope=envelope,
+                approval_scope=approval_scope,
+                session_id=session_id,
+                chat_id=chat_id,
+            )
+        except Exception:
+            return False
+    return True
 
 
 async def rotate_session_approval_state(

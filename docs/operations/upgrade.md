@@ -208,7 +208,8 @@ These changes apply with or without rules:
   no longer match, and their calls ask for approval again.
 - **Approval grants belong to one agent.** Migration `050_approval_tables`
   creates `pending_approvals` and `approval_grants` with BIGINT user and
-  chat ids; earlier releases created them on first use with INTEGER ids.
+  chat ids and DOUBLE PRECISION times; earlier releases created them on
+  first use with INTEGER ids and REAL times, which it widens.
   A stored grant with a blank `agent_id` gets the agent that the approval
   request that issued it, its session or its chat names, when exactly one
   agent is named. A session naming `KODA` counts as naming none, because
@@ -216,6 +217,12 @@ These changes apply with or without rules:
   grant expires, with one
   `approval.grant_expired` audit event (scope `global`) each, and its call
   asks for approval again. No grant without an agent applies to any agent.
+  A grant approved for a request that names no agent now belongs to the
+  worker that issued it instead of agent `default`.
+- **A grant's use is recorded before its action runs.** When Postgres does
+  not record the use, the call or command does not run and asks for
+  approval again. A use counts when the action starts, so an action that
+  fails has used its approval.
 - **Approvals are kept in Postgres only.** Earlier releases wrote
   `approval_grants.json` and `pending_approvals.json` in `STATE_ROOT_DIR`
   when a Postgres write failed, and never read them back. On its first

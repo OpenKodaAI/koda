@@ -12,7 +12,6 @@ expired with one audit row each.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 import uuid
@@ -81,12 +80,6 @@ async def _grant_rows(conn: Any, schema: str) -> dict[str, dict[str, Any]]:
     return {str(row["grant_id"]): {"agent_id": row["agent_id"], **json.loads(row["payload_json"])} for row in rows}
 
 
-async def _drain_tasks_started_since(before: set[asyncio.Task[Any]]) -> None:
-    """Wait for the persistence tasks the approval module started with ``loop.create_task``."""
-    started = asyncio.all_tasks() - before - {asyncio.current_task()}
-    await asyncio.gather(*started)
-
-
 async def test_ids_above_int32_persist_and_survive_a_restart(
     approval_db: tuple[Any, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -147,11 +140,9 @@ async def test_using_a_grant_in_one_agent_leaves_another_agents_grants_intact(
     approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants())
     await approval_grants.save_approval_grant("grant-b", _scope_grant("AGENT_B"), ttl_seconds=600)
 
-    before = asyncio.all_tasks()
-    used = approval.consume_agent_approval_grant(
+    used = await approval.consume_agent_approval_grant(
         user_id=_USER, agent_id="AGENT_A", envelope=_ENVELOPE, approval_scope=_SCOPE, chat_id=_CHAT
     )
-    await _drain_tasks_started_since(before)
 
     assert used is not None and used["grant_id"] == "grant-a"
     rows = await _grant_rows(conn, schema)
@@ -161,11 +152,9 @@ async def test_using_a_grant_in_one_agent_leaves_another_agents_grants_intact(
 
     # The last use removes only agent A's grant.
     for _ in range(2):
-        before = asyncio.all_tasks()
-        approval.consume_agent_approval_grant(
+        await approval.consume_agent_approval_grant(
             user_id=_USER, agent_id="AGENT_A", envelope=_ENVELOPE, approval_scope=_SCOPE, chat_id=_CHAT
         )
-        await _drain_tasks_started_since(before)
     assert set(await _grant_rows(conn, schema)) == {"grant-b"}
 
 
@@ -184,15 +173,66 @@ async def test_a_failure_mid_write_leaves_the_grants_unchanged(
     approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants())
     unchanged = await _grant_rows(conn, schema)
 
-    with injected_fault("approval_grants", "INSERT", rows_before=1):
-        before = asyncio.all_tasks()
-        approval.consume_agent_approval_grant(
+    with injected_fault("approval_grants", "UPDATE", rows_before=1), pytest.raises(asyncpg.PostgresError):
+        await approval.consume_agent_approval_grant(
             user_id=_USER, agent_id="AGENT_A", envelope=_ENVELOPE, approval_scope=_SCOPE, chat_id=_CHAT
         )
-        await _drain_tasks_started_since(before)
 
     assert await _grant_rows(conn, schema) == unchanged
     assert list(tmp_path.iterdir()) == []
+
+
+def _use(approval: Any) -> Any:
+    return approval.consume_agent_approval_grant(
+        user_id=_USER, agent_id="AGENT_A", envelope=_ENVELOPE, approval_scope=_SCOPE, chat_id=_CHAT
+    )
+
+
+async def test_a_revoked_grant_stays_revoked_when_a_use_of_it_follows(approval_db: tuple[Any, str]) -> None:
+    """D-343: a use of a grant another worker revoked meanwhile neither re-inserts it nor counts."""
+    from koda.state import approval_grants
+    from koda.utils import approval
+
+    conn, schema = approval_db
+    await approval_grants.save_approval_grant("grant-a", _scope_grant("AGENT_A"), ttl_seconds=600)
+    approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants())
+
+    # Another worker revokes it (a new session, say); this worker still holds it in memory.
+    assert await approval_grants.remove_approval_grants(agent_id="AGENT_A", user_id=_USER) == 1
+    assert await _use(approval) is None
+
+    assert await _grant_rows(conn, schema) == {}
+    assert "grant-a" not in approval._APPROVAL_GRANTS
+    assert await _use(approval) is None
+
+
+async def test_a_use_postgres_does_not_record_is_refused_and_memory_matches_the_database(
+    approval_db: tuple[Any, str],
+) -> None:
+    """D-344: with a write failing, a grant is never used more often than it allows."""
+    from koda.state import approval_grants
+    from koda.utils import approval
+
+    conn, schema = approval_db
+    await approval_grants.save_approval_grant("grant-a", _scope_grant("AGENT_A", uses=2), ttl_seconds=600)
+    approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants())
+
+    async def remaining() -> tuple[int | None, int | None]:
+        row = (await _grant_rows(conn, schema)).get("grant-a")
+        held = approval._APPROVAL_GRANTS.get("grant-a")
+        return (row or {}).get("remaining_uses"), (held or {}).get("remaining_uses")
+
+    uses = 0
+    # A partial use is an UPDATE, the last use a DELETE: each fails once, and neither counts.
+    for event, left in (("UPDATE", 2), ("DELETE", 1)):
+        with injected_fault("approval_grants", event), pytest.raises(asyncpg.PostgresError):
+            await _use(approval)
+        assert await remaining() == (left, left)
+        assert await _use(approval) is not None
+        uses += 1
+    assert await _use(approval) is None
+    assert uses == 2
+    assert await remaining() == (None, None)
 
 
 async def _audited_grant_count(conn: Any, schema: str, grant_id: str) -> int:
@@ -269,6 +309,48 @@ async def test_the_json_files_are_imported_once_at_startup(
     assert await _audited_grant_count(conn, schema, "json-orphan-m2e1t2") == audited_before + 1
     for name in seeded:
         assert len(list(tmp_path.glob(f"{name}*.migrated"))) == 2
+
+
+# 1.8e9 is a multiple of 128, the step of REAL (float4) there, so 10 seconds either side of this
+# instant round to the same float4 value as the instant itself.
+_ON_A_FLOAT4_STEP = 1_800_000_050.0
+
+
+async def test_the_sql_expiry_filter_is_exact_to_the_second(postgres_url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-347: a grant 10 seconds from expiry is valid, and one expired 10 seconds ago is filtered out."""
+    import koda.knowledge.config as knowledge_config
+    from koda.knowledge.v2.postgres_backend import KnowledgeV2PostgresBackend
+    from koda.state import approval_grants, pending_approvals
+
+    # A fresh schema, so 050 creates the tables as it stands now.
+    schema = f"m2e1t2_expiry_{uuid.uuid4().hex[:10]}"
+    conn = await asyncpg.connect(postgres_url)
+    try:
+        assert await KnowledgeV2PostgresBackend(agent_id=None, dsn=postgres_url, schema=schema).bootstrap()
+        monkeypatch.setattr(knowledge_config, "KNOWLEDGE_V2_POSTGRES_SCHEMA", schema)
+        clock = SimpleNamespace(time=lambda: _ON_A_FLOAT4_STEP)
+        monkeypatch.setattr(approval_grants, "time", clock)
+        monkeypatch.setattr(pending_approvals, "time", clock)
+
+        for name, ttl in (("in-10s", 10), ("10s-ago", -10)):
+            await approval_grants.save_approval_grant(f"grant-{name}", _scope_grant("AGENT_A"), ttl_seconds=ttl)
+            await pending_approvals.save_pending_op(f"op-{name}", {"op_type": "agent_cmd", "user_id": _USER}, ttl)
+
+        assert set(await approval_grants.load_approval_grants()) == {"grant-in-10s"}
+        assert set(await pending_approvals.load_pending_ops()) == {"op-in-10s"}
+        await approval_grants.cleanup_expired_approval_grants()
+        await pending_approvals.cleanup_expired_ops()
+        assert [row["grant_id"] for row in await conn.fetch(f'SELECT grant_id FROM "{schema}"."approval_grants"')] == [
+            "grant-in-10s"
+        ]
+        assert [row["op_id"] for row in await conn.fetch(f'SELECT op_id FROM "{schema}"."pending_approvals"')] == [
+            "op-in-10s"
+        ]
+    finally:
+        close_shared_postgres_backends()
+        stop_primary_bridge()
+        await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        await conn.close()
 
 
 _LEGACY_GRANTS_DDL = """CREATE TABLE "{schema}"."approval_grants" (
@@ -378,12 +460,18 @@ async def test_legacy_grants_get_a_derived_agent_or_expire_with_an_audit_row(pos
             (str(row["table_name"]), str(row["column_name"])): str(row["data_type"])
             for row in await conn.fetch(
                 """SELECT table_name, column_name, data_type FROM information_schema.columns
-                    WHERE table_schema = $1 AND column_name IN ('user_id', 'chat_id')
+                    WHERE table_schema = $1 AND column_name IN ('user_id', 'chat_id', 'created_at', 'expires_at')
                       AND table_name IN ('approval_grants', 'pending_approvals')""",
                 schema,
             )
         }
-        assert set(types.values()) == {"bigint"} and len(types) == 4
+        for table in ("approval_grants", "pending_approvals"):
+            assert (types[(table, "user_id")], types[(table, "chat_id")]) == ("bigint", "bigint")
+            # The runtime created REAL (float4) epoch columns; 050 widens them (D-347).
+            assert (types[(table, "created_at")], types[(table, "expires_at")]) == (
+                "double precision",
+                "double precision",
+            )
 
         rows = {
             str(row["grant_id"]): row

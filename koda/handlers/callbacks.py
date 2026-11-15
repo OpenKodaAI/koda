@@ -1618,7 +1618,7 @@ async def callback_approval(update: Update, context: BotContext) -> None:
 
     grants = _issue_agent_approval_grants(
         user_id=update.effective_user.id,
-        agent_id=str(pending.get("agent_id") or "default"),
+        agent_id=str(pending.get("agent_id") or config.AGENT_ID or "default"),
         session_id=str(pending.get("session_id") or "").strip() or None,
         chat_id=_optional_chat_id(pending.get("chat_id")),
         requests=list(pending.get("requests") or []),
@@ -1699,7 +1699,7 @@ async def callback_agent_cmd_approval(update: Update, context: BotContext) -> No
     if action == "scope":
         grants = _issue_agent_approval_grants(
             user_id=update.effective_user.id,
-            agent_id=str(pending.get("agent_id") or "default"),
+            agent_id=str(pending.get("agent_id") or config.AGENT_ID or "default"),
             session_id=session_id,
             chat_id=chat_id,
             requests=list(pending.get("requests") or []),
@@ -1722,7 +1722,7 @@ async def callback_agent_cmd_approval(update: Update, context: BotContext) -> No
     # action == "ok"
     grants = _issue_agent_approval_grants(
         user_id=update.effective_user.id,
-        agent_id=str(pending.get("agent_id") or "default"),
+        agent_id=str(pending.get("agent_id") or config.AGENT_ID or "default"),
         session_id=session_id,
         chat_id=chat_id,
         requests=list(pending.get("requests") or []),

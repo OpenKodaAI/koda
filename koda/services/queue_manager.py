@@ -5098,7 +5098,31 @@ async def _run_agent_loop(
                     skip_following_reads = True
                 continue
 
-            if policy_evaluation.requires_confirmation:
+            grant_unusable = False
+            if (
+                not policy_evaluation.requires_confirmation
+                and requested_scope is not None
+                and approval_grant is not None
+                and not str(approval_grant.get("grant_id") or "").startswith("edited:")
+            ):
+                # The grant's use is recorded before the call runs (D-344). A grant
+                # revoked meanwhile, or a use Postgres did not record, runs nothing.
+                try:
+                    grant_unusable = (
+                        await consume_agent_approval_grant(
+                            user_id=user_id,
+                            agent_id=AGENT_ID or "default",
+                            envelope=policy_evaluation.envelope,
+                            approval_scope=requested_scope,
+                            session_id=str(context.user_data.get("session_id") or "").strip() or None,
+                            chat_id=chat_id,
+                        )
+                        is None
+                    )
+                except Exception:
+                    grant_unusable = True
+
+            if policy_evaluation.requires_confirmation or grant_unusable:
                 result = AgentToolResult(
                     tool=call.tool,
                     success=False,
@@ -5106,7 +5130,9 @@ async def _run_agent_loop(
                     metadata={
                         "category": _infer_tool_category(call.tool),
                         "approval_required": True,
-                        "policy_reason_code": policy_evaluation.reason_code,
+                        "policy_reason_code": (
+                            "approval_grant_unavailable" if grant_unusable else policy_evaluation.reason_code
+                        ),
                         "policy_rule_id": policy_evaluation.rule_id,
                     },
                 )
@@ -5117,15 +5143,6 @@ async def _run_agent_loop(
 
             result = await execute_tool(call, tool_ctx, policy_evaluation=policy_evaluation)
             executed_pairs.append((call, result))
-            if requested_scope is not None and approval_grant is not None and result.success:
-                consume_agent_approval_grant(
-                    user_id=user_id,
-                    agent_id=AGENT_ID or "default",
-                    envelope=policy_evaluation.envelope,
-                    approval_scope=requested_scope,
-                    session_id=str(context.user_data.get("session_id") or "").strip() or None,
-                    chat_id=chat_id,
-                )
 
         results = [result for _, result in executed_pairs]
         updated_work_dir = context.user_data.get("work_dir", ctx.work_dir)

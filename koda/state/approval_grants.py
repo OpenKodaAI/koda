@@ -1,10 +1,11 @@
 """Scoped approval-grant persistence in Postgres, the only approval store.
 
 Migration ``050_approval_tables`` creates the ``approval_grants`` table. Every
-agent shares it, so each write names one grant of one agent: saving or using a
-grant upserts that grant's row, and removing one deletes it, scoped by its
-``agent_id``. Each write is a single statement, which Postgres runs as one
-transaction: a failure leaves the row and every other row as they were.
+agent shares it, so each write names one grant of one agent: saving a grant
+upserts its row, using one updates its row only while the row exists, and
+removing one deletes it, scoped by its ``agent_id``. Each write is a single
+statement, which Postgres runs as one transaction: a failure leaves the row and
+every other row as they were.
 
 A failed read or write is logged and raised to the caller. Nothing falls back
 to a file: earlier releases wrote ``approval_grants.json`` when a Postgres write
@@ -145,12 +146,17 @@ async def save_approval_grant(grant_id: str, payload: dict[str, Any], ttl_second
     _primary_upsert(grant_id, entry)
 
 
-async def update_approval_grant(grant_id: str, payload: dict[str, Any]) -> None:
-    """Persist a grant's new state, such as its remaining uses, keeping its creation and expiry times."""
-    created_at = float(payload.get("created_at") or time.time())
-    expires_at = float(payload.get("expires_at") or (created_at + 600))
-    entry = dict(payload, grant_id=grant_id, created_at=created_at, expires_at=expires_at)
-    _primary_upsert(grant_id, entry)
+async def update_approval_grant(grant_id: str, payload: dict[str, Any]) -> int:
+    """Store a grant's new state, such as its remaining uses, if its row is still there.
+
+    Returns 1 when the row was updated, and 0 when the grant is gone because it
+    was revoked or cleaned up: a use never re-inserts it (D-343).
+    """
+    return _execute(
+        "update",
+        "UPDATE approval_grants SET payload_json = ? WHERE grant_id = ? AND agent_id = ?",
+        (_json_dumps(dict(payload, grant_id=grant_id)), grant_id, str(payload.get("agent_id") or "")),
+    )
 
 
 async def load_approval_grants() -> dict[str, dict[str, Any]]:
@@ -174,9 +180,9 @@ async def load_approval_grants() -> dict[str, dict[str, Any]]:
     return result
 
 
-async def remove_approval_grant(grant_id: str, *, agent_id: str) -> None:
-    """Delete one grant of ``agent_id``; a grant of another agent is left in place."""
-    _execute(
+async def remove_approval_grant(grant_id: str, *, agent_id: str) -> int:
+    """Delete one grant of ``agent_id``; a grant of another agent is left in place. Returns the rows deleted."""
+    return _execute(
         "remove",
         "DELETE FROM approval_grants WHERE grant_id = ? AND agent_id = ?",
         (grant_id, agent_id),

@@ -894,7 +894,7 @@ class TestAgentCmdApproval:
         assert grant["session_id"] == "session-1"
         assert grant["chat_id"] == 111
 
-    def test_scope_grant_matches_and_consumes_by_scope(self):
+    async def test_scope_grant_matches_and_consumes_by_scope(self):
         envelope = ActionEnvelope(
             tool_id="file_delete",
             integration_id="fileops",
@@ -926,7 +926,7 @@ class TestAgentCmdApproval:
             is not None
         )
 
-        first = consume_agent_approval_grant(
+        first = await consume_agent_approval_grant(
             user_id=222,
             agent_id="agent-a",
             envelope=envelope,
@@ -934,7 +934,7 @@ class TestAgentCmdApproval:
             session_id="session-1",
             chat_id=111,
         )
-        second = consume_agent_approval_grant(
+        second = await consume_agent_approval_grant(
             user_id=222,
             agent_id="agent-a",
             envelope=envelope,
@@ -942,7 +942,7 @@ class TestAgentCmdApproval:
             session_id="session-1",
             chat_id=111,
         )
-        third = consume_agent_approval_grant(
+        third = await consume_agent_approval_grant(
             user_id=222,
             agent_id="agent-a",
             envelope=envelope,

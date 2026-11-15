@@ -25,6 +25,16 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 
 ### Security
 
+- An approval grant's use is recorded in Postgres before the call or command it
+  approves runs. When that write fails, nothing runs and the call asks for approval
+  again, so a grant is never used more times than it allows. Before, the worker counted
+  the use in memory and wrote it afterwards, and a failed write gave the use back on
+  the next restart. A use now counts when the action starts, so an action that fails
+  has used its approval. A use of a grant revoked meanwhile, by a new session for
+  example, no longer stores the grant again, and the worker drops it too. (D-343,
+  D-344)
+- A grant approved for a request that names no agent belongs to the worker that
+  issued it. Before, it named agent `default`. (D-345)
 - The control-plane API and the dashboard are published on loopback by default. Every
   compose file binds the API to `127.0.0.1:${CONTROL_PLANE_PORT:-8090}` and the
   dashboard to `${WEB_PUBLISH_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}`. Before, the base
@@ -453,10 +463,12 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   chats included, are stored in Postgres and survive a restart. Before, the insert
   overflowed an INTEGER column and the entry was lost on restart. Using a grant
   rewrites only that grant; before, each partial use deleted every agent's grants and
-  re-inserted one worker's copy. Migration `050_approval_tables` creates both tables;
-  a stored grant without an agent gets the one agent its request, session or chat
-  names, or expires with an `approval.grant_expired` audit event. (M2-E1-T1, D-059,
-  D-060)
+  re-inserted one worker's copy. Migration `050_approval_tables` creates both tables,
+  with their times in DOUBLE PRECISION: the REAL (float4) columns an earlier release
+  created had a 128-second step, so a grant could read as expired up to a minute
+  early or late. A stored grant without an agent gets the one agent its request,
+  session or chat names, or expires with an `approval.grant_expired` audit event.
+  (M2-E1-T1, D-059, D-060, D-347)
 - Automatic and web-created scheduled jobs run. Every reminder, interval and cron run
   used to be blocked as "policy snapshot is missing". Migration 047 adds the scheduler
   events table and the dispatch and validation columns that a real Postgres database
