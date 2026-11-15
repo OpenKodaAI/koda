@@ -324,6 +324,31 @@ def test_untouched_package_loads_and_a_package_changed_after_approval_refuses_to
     assert "safe_pack" in refused
 
 
+def test_unregister_removes_the_handler_modules_of_a_package_whose_directory_name_is_not_its_id(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """D-291: the handler modules are named and removed by the same prefix, from the package id."""
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path).rename(tmp_path / "checkout_of_safe_pack")
+    install_skill_package(package_dir, agent_id="ATLAS")
+    root = str(package_dir.resolve())
+
+    def package_modules() -> list[str]:
+        return [
+            name
+            for name, module in list(sys.modules.items())
+            if str(getattr(module, "__file__", "") or "").startswith(root)
+        ]
+
+    assert package_modules()
+
+    assert plugin_registry.unregister("safe_pack") is None
+
+    assert package_modules() == []
+
+
 def test_files_pushed_past_the_file_budget_do_not_hide_a_change(tmp_path: Path, plugin_registry: object) -> None:
     """Files the hash cannot cover (beyond the scanner's file budget) count as a change."""
     from koda.plugins.registry import PluginRegistry
