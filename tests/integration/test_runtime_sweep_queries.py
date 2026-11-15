@@ -253,7 +253,7 @@ def _store() -> ps_mod.PostgresRuntimeStore:
 def _controller(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, store: ps_mod.PostgresRuntimeStore
 ) -> controller_module.RuntimeController:
-    monkeypatch.setattr(controller_module, "RuntimeStore", lambda: store)
+    monkeypatch.setattr(controller_module, "PostgresRuntimeStore", lambda: store)
     monkeypatch.setattr(controller_module, "build_runtime_kernel_client", lambda runtime_root, store: _KernelStub())
     monkeypatch.setattr(controller_module, "RecoveryManager", lambda store: SimpleNamespace())
     monkeypatch.setattr(controller_module, "RUNTIME_BROWSER_LIVE_ENABLED", False)
