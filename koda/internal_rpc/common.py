@@ -62,70 +62,13 @@ def _uds_options() -> list[tuple[str, str]]:
 
 
 def create_grpc_channel(target: str, *, async_channel: bool = False) -> Any:
-    """Create a gRPC channel, optionally secured with TLS/mTLS.
+    """Create a plaintext gRPC channel.
 
-    When ``config.GRPC_TLS_ENABLED`` is ``True`` the channel uses
-    ``ssl_channel_credentials`` built from the configured CA cert and optional
-    client cert/key pair (mTLS).  When the flag is ``False`` the channel falls
-    back to an insecure connection for backward compatibility.
+    Internal gRPC has no TLS: the sidecars are reached over a Unix socket,
+    loopback or a private network. The former ``GRPC_TLS_ENABLED`` switch is
+    refused at startup by :mod:`koda.config` (M1-E6-T2).
     """
 
-    if config.GRPC_TLS_ENABLED:
-        import logging
-
-        import grpc
-        import grpc.aio as grpc_aio
-
-        _log = logging.getLogger(__name__)
-
-        root_certificates: bytes | None = None
-        private_key: bytes | None = None
-        certificate_chain: bytes | None = None
-
-        try:
-            if config.GRPC_TLS_CA_CERT:
-                with open(config.GRPC_TLS_CA_CERT, "rb") as fh:
-                    root_certificates = fh.read()
-
-            if config.GRPC_TLS_CLIENT_CERT and config.GRPC_TLS_CLIENT_KEY:
-                with open(config.GRPC_TLS_CLIENT_KEY, "rb") as fh:
-                    private_key = fh.read()
-                with open(config.GRPC_TLS_CLIENT_CERT, "rb") as fh:
-                    certificate_chain = fh.read()
-        except (FileNotFoundError, OSError) as exc:
-            raise RuntimeError(
-                f"gRPC TLS is enabled but certificate files could not be read: {exc}. "
-                "Check GRPC_TLS_CA_CERT, GRPC_TLS_CLIENT_CERT, and GRPC_TLS_CLIENT_KEY paths."
-            ) from exc
-
-        credentials = grpc.ssl_channel_credentials(
-            root_certificates=root_certificates,
-            private_key=private_key,
-            certificate_chain=certificate_chain,
-        )
-
-        _log.info("grpc_tls_channel_created", extra={"target": target, "mtls": private_key is not None})
-
-        # only pass ``options`` when the target is a multi-
-        # endpoint pool. Keeping the single-target call signature
-        # untouched preserves backward compatibility with test stubs
-        # that mocked ``insecure_channel`` as ``lambda target, ...``
-        # before the LB plumbing existed.
-        if target.startswith("ipv4:"):
-            options = _grpc_pool_options()
-            if async_channel:
-                return grpc_aio.secure_channel(target, credentials, options=options)
-            return grpc.secure_channel(target, credentials, options=options)
-        if target.startswith("unix:"):
-            options = _uds_options()
-            if async_channel:
-                return grpc_aio.secure_channel(target, credentials, options=options)
-            return grpc.secure_channel(target, credentials, options=options)
-        if async_channel:
-            return grpc_aio.secure_channel(target, credentials)
-        return grpc.secure_channel(target, credentials)
-
-    # TLS disabled — backward-compatible insecure channel.
     if target.startswith("ipv4:"):
         options = _grpc_pool_options()
         if async_channel:

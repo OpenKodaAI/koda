@@ -199,6 +199,14 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 
 ### Removed
 
+- `GRPC_TLS_ENABLED`, with `GRPC_TLS_CA_CERT`, `GRPC_TLS_CLIENT_CERT` and
+  `GRPC_TLS_CLIENT_KEY`. The switch moved every internal gRPC channel to TLS, but only
+  the security and memory sidecars served TLS, so it broke the runtime-kernel, artifact,
+  retrieval, policy and bot-gateway connections. Koda now refuses to start with
+  `GRPC_TLS_ENABLED=true` and says to remove it, and the security and memory sidecars
+  refuse `GRPC_TLS_SERVER_CERT` and `GRPC_TLS_SERVER_KEY` the same way. Sidecar traffic
+  is not encrypted: keep the sidecar ports on loopback, a Unix socket or a private
+  network (`docs/operations/hardening.md`). (M1-E6-T2, D-139)
 - Onboarding readiness no longer reports the fixed sandbox, MCP, memory and docs
   checks, which never changed. Every remaining check comes from live state. (M1-E1-T3)
 - The runtime image no longer contains npm, npx or corepack. (AG-02)

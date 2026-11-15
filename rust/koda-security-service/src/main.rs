@@ -21,7 +21,7 @@ use serde_json::Value;
 use tokio::fs;
 use tokio::net::UnixListener;
 use tokio_stream::wrappers::UnixListenerStream;
-use tonic::transport::{Identity, Server, ServerTlsConfig};
+use tonic::transport::Server;
 use tonic::{Request, Response, Status};
 
 const SERVICE_NAME: &str = "koda-security-service";
@@ -147,6 +147,27 @@ impl SecurityGuardService for SecurityServer {
     }
 }
 
+/// Server-side gRPC TLS was removed together with `GRPC_TLS_ENABLED` (M1-E6-T2):
+/// no Koda client connects over TLS, so a certificate here only broke every connection.
+/// The settings are refused, not ignored, so nobody takes the traffic for encrypted.
+fn refuse_removed_tls_settings(is_set: impl Fn(&str) -> bool) -> Result<()> {
+    for name in ["GRPC_TLS_SERVER_CERT", "GRPC_TLS_SERVER_KEY"] {
+        if is_set(name) {
+            anyhow::bail!(
+                "{name} is no longer supported: internal gRPC traffic is not encrypted, and no \
+                 client connects over TLS. Remove GRPC_TLS_SERVER_CERT and GRPC_TLS_SERVER_KEY, \
+                 and keep the sidecar ports on loopback, a Unix socket or a private network \
+                 (docs/operations/hardening.md)."
+            );
+        }
+    }
+    Ok(())
+}
+
+fn env_is_set(name: &str) -> bool {
+    std::env::var_os(name).is_some_and(|value| !value.is_empty())
+}
+
 async fn serve_target(target: &str) -> Result<()> {
     let service = SecurityGuardServiceServer::new(SecurityServer);
     let uds_target = target.strip_prefix("unix://").unwrap_or(target);
@@ -165,18 +186,7 @@ async fn serve_target(target: &str) -> Result<()> {
             .await?;
     } else {
         let addr = target.parse()?;
-        let mut server = Server::builder();
-        if let (Ok(cert), Ok(key)) = (
-            std::env::var("GRPC_TLS_SERVER_CERT"),
-            std::env::var("GRPC_TLS_SERVER_KEY"),
-        ) {
-            let cert_pem = std::fs::read_to_string(&cert)?;
-            let key_pem = std::fs::read_to_string(&key)?;
-            let identity = Identity::from_pem(cert_pem, key_pem);
-            let tls = ServerTlsConfig::new().identity(identity);
-            server = server.tls_config(tls)?;
-        }
-        server.add_service(service).serve(addr).await?;
+        Server::builder().add_service(service).serve(addr).await?;
     }
     Ok(())
 }
@@ -184,7 +194,26 @@ async fn serve_target(target: &str) -> Result<()> {
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing(SERVICE_NAME);
+    refuse_removed_tls_settings(env_is_set)?;
     let target =
         std::env::var("SECURITY_GRPC_TARGET").unwrap_or_else(|_| "127.0.0.1:50065".to_string());
     serve_target(&target).await
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn removed_tls_settings_are_refused_with_guidance() {
+        assert!(super::refuse_removed_tls_settings(|_| false).is_ok());
+        for name in ["GRPC_TLS_SERVER_CERT", "GRPC_TLS_SERVER_KEY"] {
+            let error = super::refuse_removed_tls_settings(|candidate| candidate == name)
+                .expect_err("a removed TLS setting must be refused")
+                .to_string();
+            assert!(
+                error.contains(&format!("{name} is no longer supported")),
+                "{error}"
+            );
+            assert!(error.contains("docs/operations/hardening.md"), "{error}");
+        }
+    }
 }
