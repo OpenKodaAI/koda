@@ -49,6 +49,7 @@ export const patchScheduleBodySchema = z.object({
       model: z.string().trim().max(120).optional(),
       notification_policy: z.object({ mode: z.string().max(30) }).passthrough().optional(),
       verification_policy: z.object({ mode: z.string().max(30) }).passthrough().optional(),
+      name: safeText(120).optional(),
       query: safeContent(10_000).optional(),
       text: safeContent(10_000).optional(),
       command: safeContent(10_000).optional(),

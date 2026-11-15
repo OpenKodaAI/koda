@@ -99,6 +99,13 @@ function defaultDateTimeLocal(now: Date = new Date()): string {
   return `${next.getFullYear()}-${pad(next.getMonth() + 1)}-${pad(next.getDate())}T${pad(next.getHours())}:${pad(next.getMinutes())}`;
 }
 
+// The routine name is stored in `payload.name` (D-063). Runtime responses put the query text in
+// `summary`, so the name is never read from there.
+function jobName(job: CronJob): string {
+  const name = job.payload?.name;
+  return typeof name === "string" ? name : "";
+}
+
 function jobInstructions(job: CronJob | null | undefined): string {
   if (!job) return "";
   const payload = job.payload || {};
@@ -158,7 +165,7 @@ function buildInitialState(
       "post_write_if_any") as VerificationMode;
 
     return {
-      name: job.summary ?? "",
+      name: jobName(job),
       instructions: jobInstructions(job),
       agentId: job.bot_id ?? defaultAgentId ?? fallbackAgentId,
       modelPreference: job.model_preference ?? "",

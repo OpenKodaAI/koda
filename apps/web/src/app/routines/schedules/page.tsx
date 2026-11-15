@@ -76,7 +76,7 @@ type SchedulePage = PaginatedListResponse<CronJob> & {
 function getRoutineTitle(job: CronJob | null): string {
   if (!job) return "";
   const payloadName = typeof job.payload?.name === "string" ? job.payload.name.trim() : "";
-  return job.summary?.trim() || payloadName || truncateText(job.command, 56);
+  return payloadName || job.summary?.trim() || truncateText(job.command, 56);
 }
 
 function getRunActivityTimestamp(run: ScheduleRun): string | null {
@@ -165,7 +165,7 @@ function buildPatch(detail: ScheduleDetail, draft: ScheduleEditDraft, name: stri
   }
 
   if (name.trim()) {
-    patch.summary = name.trim();
+    patch.name = name.trim();
   }
 
   return patch;

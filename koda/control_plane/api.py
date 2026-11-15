@@ -3031,6 +3031,7 @@ async def list_dashboard_schedules_route(request: web.Request) -> web.Response:
             _query_agent_ids(request) or None,
             limit=limit + 1 if paged else limit,
             offset=offset,
+            include_archived=bool(_query_bool(request, "include_archived")),
         )
         return web.json_response(_paginated_list_payload(items, limit=limit, offset=offset) if paged else items)
     except RuntimeError as exc:

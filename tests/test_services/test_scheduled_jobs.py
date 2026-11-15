@@ -221,7 +221,7 @@ def test_update_job_keeps_stored_read_only_and_allowed_paths() -> None:
                 "notification_policy": {"mode": "summary_complete"},
                 "verification_policy": {"mode": "post_write_if_any"},
                 "query": "Check deploy health and open incidents",
-                "summary": "Deploy health",
+                "name": "Deploy health",
             },
             expected_config_version=1,
         )

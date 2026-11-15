@@ -213,6 +213,8 @@ describe("RoutineEditor", () => {
     expect(payload.verificationMode).toBe("post_write_if_any");
   });
 
+  // D-063: the name lives in `payload.name`. Runtime responses put the query text in
+  // `summary`, so the editor must not read the name from there.
   it("prefills Basics step in edit mode from an existing job", async () => {
     const job: CronJob = {
       id: 42,
@@ -223,7 +225,7 @@ describe("RoutineEditor", () => {
       trigger_type: "cron",
       schedule_expr: "30 8 * * 1",
       timezone: "America/Sao_Paulo",
-      summary: "Weekly status",
+      summary: "Generate weekly status report",
       command: "Generate weekly status report",
       description: "",
       created_at: null,
@@ -232,7 +234,7 @@ describe("RoutineEditor", () => {
       work_dir: "/repo",
       provider_preference: "anthropic",
       model_preference: "claude-opus-4-7",
-      payload: { query: "Generate weekly status report" },
+      payload: { name: "Weekly status", query: "Generate weekly status report" },
       notification_policy: { mode: "failures_only" },
       verification_policy: { mode: "task_success" },
     };
@@ -286,7 +288,7 @@ describe("RoutineEditor", () => {
         enabled: 1,
         status: "active",
         work_dir: "/repo",
-        payload: { query: "Sweep the docs", ...payload },
+        payload: { name: "Docs sweep", query: "Sweep the docs", ...payload },
       };
     }
 
@@ -333,6 +335,8 @@ describe("RoutineEditor", () => {
       ["has no payload", { ...existingJob({}), payload: undefined }],
     ])("shows an existing routine that %s as off and empty", async (_case, job) => {
       renderEditor({ mode: "edit", job });
+      // A routine without a payload has no stored name, so Basics needs one before Next.
+      fillBasics();
       await openPermissionsTab();
 
       const { readOnly, allowedPaths } = permissionControls();

@@ -1517,6 +1517,9 @@ def update_job(
     else:
         return {"ok": False, "message": f"Unsupported job type: {job_type}"}
 
+    if "name" in normalized_patch:
+        payload["name"] = str(normalized_patch.get("name") or "").strip()
+
     payload["provider"] = provider_preference
     payload["model"] = model_preference
     payload["work_dir"] = work_dir
