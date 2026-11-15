@@ -17682,6 +17682,44 @@ for (const [language, labels] of Object.entries(channelCatalogLabels)) {
   };
 }
 
+// F-ADM-06 (M6-E3-T5): the video and music generation functions only raise,
+// so their default-model slots are locked with this label.
+const modelFunctionUnavailableLabels: Record<string, { badge: string; description: string }> = {
+  "en-US": {
+    badge: "Not available yet",
+    description: "Not available yet: Koda cannot generate this yet. A saved default is kept but never used.",
+  },
+  "pt-BR": {
+    badge: "Ainda não disponível",
+    description:
+      "Ainda não disponível: o Koda ainda não gera este tipo de conteúdo. Um padrão salvo é mantido, mas nunca é usado.",
+  },
+  "es-ES": {
+    badge: "Aún no disponible",
+    description:
+      "Aún no disponible: Koda todavía no genera este tipo de contenido. Un valor predeterminado guardado se conserva, pero nunca se usa.",
+  },
+  "fr-FR": {
+    badge: "Pas encore disponible",
+    description:
+      "Pas encore disponible : Koda ne génère pas encore ce type de contenu. Une valeur par défaut enregistrée est conservée mais jamais utilisée.",
+  },
+  "de-DE": {
+    badge: "Noch nicht verfügbar",
+    description:
+      "Noch nicht verfügbar: Koda kann diese Inhalte noch nicht erzeugen. Ein gespeicherter Standard bleibt erhalten, wird aber nie verwendet.",
+  },
+};
+
+for (const [language, labels] of Object.entries(modelFunctionUnavailableLabels)) {
+  const translation = mutableResources[language]?.translation;
+  if (!translation) continue;
+  translation.controlPlane = {
+    ...(translation.controlPlane ?? {}),
+    modelFunctions: { unavailable: labels },
+  };
+}
+
 const sidebarEvaluationLabels: Record<
   string,
   { label: string; loading: string }

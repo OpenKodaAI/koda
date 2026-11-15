@@ -390,6 +390,14 @@ export type ModelSelectorProps = {
 
 /*  ModelSelector                                                      */
 
+/**
+ * Functional slots whose generation functions only raise
+ * (`generation_stubs.py`, F-ADM-06). Their selectors read "Not available yet"
+ * and cannot be changed; a stored value is kept and shown. M6-E3-T3 removes or
+ * implements them.
+ */
+export const UNAVAILABLE_MODEL_FUNCTION_IDS: ReadonlySet<string> = new Set(["video", "music"]);
+
 const PANEL_MAX_H = 368; // search bar (~52) + list (~320)
 
 export function ModelSelector({
@@ -409,6 +417,7 @@ export function ModelSelector({
   const { t, tl } = useAppI18n();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const unavailable = Boolean(functionId && UNAVAILABLE_MODEL_FUNCTION_IDS.has(functionId));
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
@@ -506,7 +515,9 @@ export function ModelSelector({
   const selectedOption = flat.find((o) => o.combinedValue === value);
   const triggerLabel = selectedOption
     ? selectedOption.displayName
-    : emptyLabel
+    : unavailable
+      ? t("controlPlane.modelFunctions.unavailable.badge")
+      : emptyLabel
       ? tl(emptyLabel)
       : t("generated.controlPlane.selecione_um_modelo_38cc28d1");
 
@@ -580,14 +591,19 @@ export function ModelSelector({
   }, [open]);
 
   return (
-    <FormField label={label} description={description} error={error}>
+    <FormField
+      label={label}
+      description={unavailable ? t("controlPlane.modelFunctions.unavailable.description") : description}
+      error={error}
+    >
       <div className="relative">
         {/* Trigger */}
         <button
           ref={triggerRef}
           type="button"
+          disabled={unavailable}
           onClick={() => { setOpen((v) => !v); setSearch(""); }}
-          className="field-shell flex min-h-[48px] w-full items-center justify-between gap-3 rounded-[1rem] px-4 py-3 text-sm text-left"
+          className="field-shell flex min-h-[48px] w-full items-center justify-between gap-3 rounded-[1rem] px-4 py-3 text-sm text-left disabled:cursor-not-allowed disabled:opacity-60"
         >
           <span className="flex min-w-0 items-center gap-3">
             {selectedOption && (
