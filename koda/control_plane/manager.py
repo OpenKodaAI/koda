@@ -13606,6 +13606,10 @@ class ControlPlaneManager:
             "remote_url": row.get("remote_url") or row.get("url") or None,
             "env_schema": json_load(str(row.get("env_schema_json") or "[]"), []),
             "headers_schema": json_load(str(row.get("headers_schema_json") or "[]"), []),
+            "isolation_profile": str(row.get("isolation_profile") or "auto"),
+            "isolation_constraints": _safe_json_object(
+                json_load(str(row.get("isolation_constraints_json") or "{}"), {})
+            ),
             "documentation_url": row.get("documentation_url") or None,
             "logo_key": row.get("logo_key") or None,
             "category": str(row.get("category") or "general"),

@@ -296,6 +296,19 @@ class TestMCPCatalog:
         with pytest.raises(KeyError):
             mgr.get_mcp_catalog_entry("missing")
 
+    def test_catalog_entry_carries_the_stored_isolation_settings(self, mcp_manager):
+        mgr, db = mcp_manager
+        mgr.upsert_mcp_catalog_entry("linear", {"display_name": "Linear"})
+        row = db._match("cp_mcp_server_catalog", server_key="linear")[0]
+        assert mgr.get_mcp_catalog_entry("linear")["isolation_profile"] == "auto"
+        assert mgr.get_mcp_catalog_entry("linear")["isolation_constraints"] == {}
+        row["isolation_profile"] = "docker"
+        row["isolation_constraints_json"] = json.dumps({"network_mode": "none"})
+
+        entry = mgr.get_mcp_catalog_entry("linear")
+        assert entry["isolation_profile"] == "docker"
+        assert entry["isolation_constraints"] == {"network_mode": "none"}
+
     def test_catalog_entry_defaults(self, mcp_manager):
         mgr, _db = mcp_manager
         result = mgr.upsert_mcp_catalog_entry("minimal", {})

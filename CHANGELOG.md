@@ -163,6 +163,13 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   `MCP_OAUTH_CALLBACK_BASE_URL`, at `/oauth/callback` with the error code, and answers
   JSON when that setting is empty. It no longer redirects to a `frontend_callback_uri`
   taken from the query string or the session. (M1-E3-T6, D-030)
+- Stdio MCP servers start with the isolation profile and constraints stored in their
+  catalog entry instead of the defaults. Docker isolation passes the server environment
+  by name (`-e NAME`) instead of writing it to a temp file that was never deleted. When
+  the sandbox cannot enforce `egress_allowlist` (bubblewrap, sandbox-exec and Docker all
+  share the network), the start logs `mcp_isolation_egress_allowlist_unenforced` and the
+  server reports `egress: unrestricted` in its isolation status. (M1-E4-T6, D-028,
+  D-133)
 
 
 ### Added
