@@ -29,9 +29,10 @@ mechanisms, checked in priority order:
    it holds (a seed may contain `=` or any other separator), and `expires_at` is read from the
    lines after it. The file is published whole: the content goes to a `0600` temp file in the same
    directory, is fsynced, then is hard-linked to `bootstrap.txt`, which fails when that file already
-   exists. Another replica never reads a half-written file, a code is announced only when its file
-   is the one on disk, and a write that fails leaves no file. An install with an owner never writes
-   the file.
+   exists. Writers read, check, replace and publish the file under an `flock` on `.bootstrap.lock`
+   beside it, so when replicas race at expiry one replaces the file and the others keep it. Another
+   replica never reads a half-written file, a code is announced only when its file is the one on
+   disk, and a write that fails leaves no file. An install with an owner never writes the file.
 3. **Loopback trust (dev only)** — when `ALLOW_LOOPBACK_BOOTSTRAP=true` and the request comes
    from `127.0.0.1` / `::1` with no `X-Forwarded-For` hop, no code is required. This mode is
    refused at boot when `KODA_ENV=production`.

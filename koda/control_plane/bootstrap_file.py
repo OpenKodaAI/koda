@@ -25,6 +25,8 @@ supported (in priority order):
    expired file, or one without a code line and a readable expiry, with a new code.
    The code is the file's first line (a seed may contain ``=``), and the file is
    published whole, through a temp file and ``os.link``, so no replica reads it half written.
+   Writers check and replace the file under an ``flock`` on ``.bootstrap.lock`` beside it,
+   so replicas racing at expiry announce one code, the one on disk.
 
 The file is deleted automatically after the owner registers.
 """
@@ -32,12 +34,14 @@ The file is deleted automatically after the owner registers.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import os
 import secrets
 import sys
 import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from koda.logging_config import get_logger
 
@@ -47,9 +51,14 @@ from .settings import (
     STATE_ROOT_DIR,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 log = get_logger(__name__)
 
 _BOOTSTRAP_FILE_PATH: Path = STATE_ROOT_DIR / "control_plane" / "bootstrap.txt"
+# Writers hold an flock on this file, beside bootstrap.txt, while they read, check, replace and publish.
+_BOOTSTRAP_LOCK_NAME = ".bootstrap.lock"
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 # The /setup screen's code field (apps/web/src/components/setup/bootstrap-code-input.tsx)
 # keeps at most this many characters, from _BOOTSTRAP_ALPHABET only, dropping any other.
@@ -196,6 +205,17 @@ def _publish_bootstrap_file(content: bytes) -> bool:
     return True
 
 
+@contextlib.contextmanager
+def _writer_lock() -> Iterator[None]:
+    """Hold an exclusive ``flock`` on the lock file beside the bootstrap file (one writer at a time)."""
+    fd = os.open(_BOOTSTRAP_FILE_PATH.parent / _BOOTSTRAP_LOCK_NAME, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
 def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> str | None:
     """Write a bootstrap code to disk if one is needed and no valid one exists.
 
@@ -214,8 +234,10 @@ def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> st
       with a fresh expiry.
 
     The file is published whole (``_publish_bootstrap_file``): another replica never sees
-    it partly written, and a code is announced only when this call's file is the one on
-    disk. A write that fails, or writes only part of the content, leaves no file and raises.
+    it partly written. Writers read, check, replace and publish under ``_writer_lock``, so
+    when replicas race at expiry one replaces the file, the others find it valid, and a code
+    is announced only when this call's file is the one on disk. A write that fails, or
+    writes only part of the content, leaves no file and raises.
     """
     if has_owner:
         if _BOOTSTRAP_FILE_PATH.exists():
@@ -226,6 +248,13 @@ def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> st
                 log.warning("bootstrap_file_unlink_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
         return None
     now = now or datetime.now(UTC)
+    _BOOTSTRAP_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _writer_lock():
+        return _replace_bootstrap_file_unless_valid(now)
+
+
+def _replace_bootstrap_file_unless_valid(now: datetime) -> str | None:
+    """``ensure_bootstrap_file`` with no owner; the caller holds ``_writer_lock``."""
     if _BOOTSTRAP_FILE_PATH.exists():
         fields = _read_file_fields()
         if _valid_code(fields, now) is not None:
@@ -243,7 +272,6 @@ def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> st
         else:
             # No code line or no readable expires_at: the file never matches a setup code.
             log.warning("bootstrap_file_invalid_replaced", path=str(_BOOTSTRAP_FILE_PATH))
-    _BOOTSTRAP_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     code = CONTROL_PLANE_BOOTSTRAP_CODE_SEED or _generate_code()
     expires_at = now + timedelta(seconds=CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)
     # Encode first: a seed that cannot be encoded raises before any file is created.

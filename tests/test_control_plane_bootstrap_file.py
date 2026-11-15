@@ -5,6 +5,7 @@ from __future__ import annotations
 import errno
 import os
 import re
+import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -266,7 +267,9 @@ def test_the_docs_say_an_expired_setup_code_is_replaced() -> None:
         " is the file's first line, whatever it holds (a seed may contain `=` or any other separator), and"
         " `expires_at` is read from the lines after it. The file is published whole: the content goes to a `0600`"
         " temp file in the same directory, is fsynced, then is hard-linked to `bootstrap.txt`, which fails when"
-        " that file already exists. Another replica never reads a half-written file, a code is announced only"
+        " that file already exists. Writers read, check, replace and publish the file under an `flock` on"
+        " `.bootstrap.lock` beside it, so when replicas race at expiry one replaces the file and the others keep"
+        " it. Another replica never reads a half-written file, a code is announced only"
         " when its file is the one on disk, and a write that fails leaves no file. An install with an owner never"
         " writes the file." in guide
     )
@@ -453,7 +456,7 @@ def test_a_failed_write_leaves_no_file_behind(
 
     monkeypatch.setattr(bootstrap_file_mod.os, "write", _REAL_WRITE)
     assert not isolated_bootstrap.exists()
-    assert list(isolated_bootstrap.parent.iterdir()) == []
+    assert _files_beside_the_lock(isolated_bootstrap) == []
     assert "Koda setup code" not in capsys.readouterr().err
     # Once the disk has room again, the next status request writes a usable code.
     code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
@@ -496,8 +499,14 @@ def test_a_file_that_is_not_utf8_is_replaced(
     assert [call for call in log.warning.call_args_list if call.args == ("bootstrap_file_invalid_replaced",)]
 
 
+def _files_beside_the_lock(path: Path) -> list[str]:
+    """The files in the bootstrap directory, without the writers' lock file."""
+    return sorted(p.name for p in path.parent.iterdir() if p.name != bootstrap_file_mod._BOOTSTRAP_LOCK_NAME)
+
+
 def _open_fds() -> int:
-    return len(os.listdir("/proc/self/fd"))
+    # /dev/fd lists this process's open descriptors on Linux and macOS alike (macOS has no /proc).
+    return len(os.listdir("/dev/fd"))
 
 
 def test_a_seed_that_cannot_be_encoded_opens_no_file(isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -510,35 +519,72 @@ def test_a_seed_that_cannot_be_encoded_opens_no_file(isolated_bootstrap: Path, m
 
     assert _open_fds() == before
     assert not isolated_bootstrap.exists()
-    assert list(isolated_bootstrap.parent.iterdir()) == []
+    assert _files_beside_the_lock(isolated_bootstrap) == []
 
 
 def test_another_replica_never_sees_a_partly_written_file(
     isolated_bootstrap: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Replica B's status request lands while replica A writes: every announced code is the file's code."""
-    seen_during_write: list[bool] = []
-    announced: list[str | None] = []
+    """Replica B reads the file while replica A writes it: B finds no file, never a part of one."""
+    seen_during_write: list[tuple[bool, str | None]] = []
 
-    def write_with_a_second_replica(fd: int, data: bytes) -> int:
+    def write_while_a_second_replica_reads(fd: int, data: bytes) -> int:
         monkeypatch.setattr(bootstrap_file_mod.os, "write", _REAL_WRITE)
-        seen_during_write.append(isolated_bootstrap.exists())
-        announced.append(bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT))
+        seen_during_write.append((isolated_bootstrap.exists(), bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT)))
         return _REAL_WRITE(fd, data)
 
-    monkeypatch.setattr(bootstrap_file_mod.os, "write", write_with_a_second_replica)
-    announced.append(bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT))
+    monkeypatch.setattr(bootstrap_file_mod.os, "write", write_while_a_second_replica_reads)
+    code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
 
     # bootstrap.txt appears only once it holds the whole content.
-    assert seen_during_write == [False]
-    codes = [code for code in announced if code is not None]
-    assert len(codes) == 1
-    assert isolated_bootstrap.read_text(encoding="utf-8").splitlines()[0] == codes[0]
-    assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT) == codes[0]
+    assert seen_during_write == [(False, None)]
+    assert code is not None
+    assert isolated_bootstrap.read_text(encoding="utf-8").splitlines()[0] == code
+    assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT) == code
     assert capsys.readouterr().err.count("Koda setup code") == 1
     assert os.stat(isolated_bootstrap).st_mode & 0o777 == 0o600
     # No temp file is left beside it.
-    assert list(isolated_bootstrap.parent.iterdir()) == [isolated_bootstrap]
+    assert _files_beside_the_lock(isolated_bootstrap) == [isolated_bootstrap.name]
+
+
+def test_two_replicas_replacing_an_expired_file_announce_only_the_code_on_disk(
+    isolated_bootstrap: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replicas A and B both find the expired file; A publishes first. B must not delete A's file."""
+    bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+    capsys.readouterr()
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap_file_mod, "log", log)
+    later = _WRITTEN_AT + _TTL
+    real_read = bootstrap_file_mod._read_file_fields
+    b_has_read = threading.Event()
+    a_is_done = threading.Event()
+
+    def read_then_let_a_publish() -> tuple[str, datetime | None] | None:
+        fields = real_read()
+        if threading.current_thread().name == "replica-b" and not b_has_read.is_set():
+            b_has_read.set()
+            a_is_done.wait(timeout=1)
+        return fields
+
+    monkeypatch.setattr(bootstrap_file_mod, "_read_file_fields", read_then_let_a_publish)
+    announced: dict[str, str | None] = {}
+    replica_b = threading.Thread(
+        target=lambda: announced.update(b=bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=later)),
+        name="replica-b",
+    )
+    replica_b.start()
+    assert b_has_read.wait(timeout=5)
+    announced["a"] = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=later)
+    a_is_done.set()
+    replica_b.join(timeout=5)
+
+    codes = [code for code in announced.values() if code is not None]
+    assert len(codes) == 1
+    assert isolated_bootstrap.read_text(encoding="utf-8").splitlines()[0] == codes[0]
+    assert capsys.readouterr().err.count("Koda setup code") == 1
+    assert [call.args for call in log.info.call_args_list].count(("bootstrap_file_expired_replaced",)) == 1
+    assert not [call for call in log.warning.call_args_list if call.args == ("bootstrap_file_invalid_replaced",)]
 
 
 def test_an_expired_seed_file_is_written_again_with_a_fresh_ttl(
