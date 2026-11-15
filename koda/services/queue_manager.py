@@ -14,6 +14,7 @@ Features:
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import inspect
 import json
@@ -24,7 +25,7 @@ import subprocess
 import time
 import unicodedata
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -1425,6 +1426,8 @@ _heavy_task_semaphore = asyncio.Semaphore(MAX_HEAVY_TASKS_GLOBAL)
 _browser_task_semaphore = asyncio.Semaphore(MAX_BROWSER_TASKS_GLOBAL)
 _agent_id_label = AGENT_ID or "default"
 _cancelled_task_ids: set[int] = set()
+# The reason given for each cancelled queued task, recorded when the worker discards it.
+_cancelled_task_reasons: dict[int, str] = {}
 
 
 async def _cancel_pending_task(task: asyncio.Task[Any] | None) -> None:
@@ -2024,9 +2027,10 @@ async def _ensure_queue_worker(user_id: int, context: BotContext) -> None:
             _queue_workers[user_id] = asyncio.create_task(_process_queue(user_id, context))
 
 
-async def cancel_queued_task(task_id: int) -> bool:
+async def cancel_queued_task(task_id: int, *, reason: str = "Cancelled by scheduler control.") -> bool:
     """Mark a queued task as cancelled so the worker discards it on dequeue.
 
+    A discarded squad turn is recorded with ``reason``, as a cancelled run is.
     Returns False when the task is not waiting in an in-memory queue, for
     example because a worker already dequeued it and it is running. Callers
     must then cancel the active execution with ``cancel_active_task_execution``.
@@ -2035,6 +2039,7 @@ async def cancel_queued_task(task_id: int) -> bool:
         if task_id in task_ids:
             _untrack_queued_task_id(user_id, task_id)
             _cancelled_task_ids.add(task_id)
+            _cancelled_task_reasons[task_id] = reason
             _set_queue_depth_metric()
             return True
     return False
@@ -6561,6 +6566,7 @@ async def _advance_squad_task_from_run(
     run_result: RunResult,
     response_text: str,
     artifact_ids: list[str],
+    cancelled: bool = False,
 ) -> None:
     if not ctx.squad_thread_id or not ctx.squad_task_id:
         return
@@ -6574,16 +6580,17 @@ async def _advance_squad_task_from_run(
         task = await store.get_task(ctx.squad_task_id)
         if task is None or task.status in {"done", "failed", "cancelled", "escalated"}:
             return
-        if task.status == "pending":
+        # A task that ran is claimed and started first; a cancelled one ends from any open status.
+        if task.status == "pending" and not cancelled:
             task = await store.claim_task(task_id=task.id, agent_id=agent_id)
-        if task.status == "claimed":
+        if task.status == "claimed" and not cancelled:
             task = await store.update_task_status(
                 task_id=task.id,
                 new_status="in_progress",
                 agent_id=agent_id,
                 expected_version=task.version,
             )
-        terminal_status = "failed" if run_result.error else "done"
+        terminal_status = "cancelled" if cancelled else "failed" if run_result.error else "done"
         await store.update_task_status(
             task_id=task.id,
             new_status=terminal_status,
@@ -6636,7 +6643,12 @@ async def _maybe_enqueue_unblocked_squad_tasks(
     context: BotContext,
     ctx: QueryContext,
 ) -> int:
-    """Dispatch pending squad tasks whose dependencies just became satisfied."""
+    """Dispatch pending squad tasks whose dependencies just became satisfied.
+
+    A pending task that depends on a task that failed, was cancelled or escalated can never
+    run, so it is cancelled with a task result that says why. Its dependents follow it in the
+    same pass, since a task is created after the tasks it depends on.
+    """
     if not ctx.squad_thread_id:
         return 0
     try:
@@ -6660,13 +6672,17 @@ async def _maybe_enqueue_unblocked_squad_tasks(
             assignee = str(task.assigned_agent_id or "").strip()
             if not assignee or assignee == thread.coordinator_agent_id:
                 continue
-            ready = True
-            for dependency_id in task.depends_on:
-                dependency = await task_store.get_task(dependency_id)
-                if dependency is None or dependency.status != "done":
-                    ready = False
-                    break
-            if not ready:
+            dependencies = [await task_store.get_task(dependency_id) for dependency_id in task.depends_on]
+            ended = next(
+                (dep for dep in dependencies if dep is not None and dep.status in {"failed", "cancelled", "escalated"}),
+                None,
+            )
+            if ended is not None:
+                await _cancel_squad_task_after_its_dependency_ended(
+                    ctx=ctx, task=task, dependency=ended, assignee=assignee, coordinator=thread.coordinator_agent_id
+                )
+                continue
+            if any(dependency is None or dependency.status != "done" for dependency in dependencies):
                 continue
 
             try:
@@ -6780,7 +6796,14 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
     response_text: str,
     squad_message_id: str | None,
     artifact_ids: list[str],
+    swept_handoff_id: str | None = None,
 ) -> None:
+    """Queue the coordinator synthesis once the cycle's tasks have ended, then record each handoff's outcome.
+
+    With ``swept_handoff_id`` the squad router's sweep runs the check for that handoff: it queues
+    nothing unless the handoff is open in the cycle it reads, and it adds no result for the swept
+    task, whose turn did not run here.
+    """
     if not ctx.squad_thread_id or not ctx.squad_task_id:
         return
     try:
@@ -6789,6 +6812,8 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             evaluate_synthesis_readiness,
             get_squad_task_store,
             get_squad_thread_store,
+            message_ref_to_id,
+            record_squad_handoff_event,
             synthesis_gate_metric,
         )
 
@@ -6826,13 +6851,31 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         result_messages: list[dict[str, Any]] = []
         handoff_events: list[dict[str, Any]] = []
         declared_timeouts: list[dict[str, Any]] = []
+        answered_obligations: list[dict[str, Any]] = []
+        source_message_id = message_ref_to_id(ctx.parent_message_id)
         with contextlib.suppress(Exception):
-            history = await thread_store.thread_history(thread_id=ctx.squad_thread_id, limit=120)
+            if ctx.parent_message_id:
+                # The cycle's own messages, however far back in the room they are.
+                history = await thread_store.thread_history(
+                    thread_id=ctx.squad_thread_id,
+                    limit=500,
+                    cycle_parent_message_ids=[ref for ref in (ctx.parent_message_id, squad_message_id) if ref],
+                )
+            else:
+                history = await thread_store.thread_history(thread_id=ctx.squad_thread_id, limit=120)
             for message in history:
                 raw_metadata = message.get("metadata")
                 metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
                 if metadata.get("idempotency_key") == synthesis_idempotency_key:
                     return
+                if source_message_id is not None and message.get("id") == source_message_id:
+                    # A reply obligation on the cycle's source message that a destination answered
+                    # also counts as its reply to a handoff (D-074).
+                    answered_obligations.extend(
+                        item
+                        for item in message.get("reply_obligations") or []
+                        if isinstance(item, dict) and str(item.get("status") or "").lower() == "answered"
+                    )
                 raw_payload = metadata.get("payload")
                 payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
                 if payload.get("schema_version") == "handoff_event.v1" and payload.get("parent_message_id") in {
@@ -6867,7 +6910,22 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                     first_line = next((line.strip() for line in content.splitlines() if line.strip()), "")
                     if first_line:
                         confirmed_results.append(f"- {agent} / {task_id}: {first_line[:500]}")
-        if not any(ctx.squad_task_id and f"/ {ctx.squad_task_id}:" in item for item in visible_results):
+        closed_ids = {
+            event["payload"].get("handoff_id")
+            for event in handoff_events
+            if str(event["payload"].get("status") or "").lower() not in {"requested", "accepted"}
+        }
+        handoff_ids = {event["payload"].get("handoff_id") for event in handoff_events}
+        if handoff_events and handoff_ids <= closed_ids:
+            # Every handoff of the cycle has its outcome, which is recorded only once the synthesis
+            # is queued, so running the check again queues nothing.
+            return
+        if swept_handoff_id is not None and (swept_handoff_id not in handoff_ids or swept_handoff_id in closed_ids):
+            return
+        if swept_handoff_id is None and not any(
+            ctx.squad_task_id and f"/ {ctx.squad_task_id}:" in item for item in visible_results
+        ):
+            # This turn's answer, in case the read above did not return it.
             visible_results.append(f"{executing_agent} / {ctx.squad_task_id}:\n{response_text[:1500]}")
             result_messages.append(
                 {
@@ -6881,6 +6939,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             if first_line:
                 confirmed_results.append(f"- {executing_agent} / {ctx.squad_task_id}: {first_line[:500]}")
         readiness = evaluate_synthesis_readiness(
+            reply_obligations=answered_obligations,
             handoff_events=handoff_events,
             result_messages=result_messages,
             declared_timeouts=declared_timeouts,
@@ -6891,10 +6950,11 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         visible_results_block = "\n\n".join(visible_results)
         confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
         timeout_block = ""
-        if declared_timeouts:
+        # Declared timeouts plus the handoff failures the gate found in the results.
+        if readiness.timeout_disclosures:
             timeout_lines = [
                 "- " + ", ".join(str(agent) for agent in item.get("agent_ids") or []) + f": {item.get('status')}"
-                for item in declared_timeouts
+                for item in readiness.timeout_disclosures
             ]
             timeout_block = "\n\nTimeouts/bloqueios declarados:\n" + "\n".join(timeout_lines)
         synthesis_query = (
@@ -6910,7 +6970,11 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             f"Resultados visíveis deste ciclo:\n{visible_results_block}"
             f"{timeout_block}"
         )
-        await dispatch_squad_turn(
+        # Queue the synthesis before recording the handoff outcome, so a dispatch that fails does
+        # not leave the room saying the handoff returned while the coordinator never runs. A
+        # refused dispatch, such as a rejected tasks insert, leaves the handoff open, and the
+        # squad router's sweep runs this check again (complete_open_squad_handoff).
+        result = await dispatch_squad_turn(
             target_agent_id=thread.coordinator_agent_id,
             thread=thread,
             thread_store=thread_store,
@@ -6944,6 +7008,40 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
             bot_override=getattr(context, "bot", None),
         )
+        if not result.dispatched:
+            log.warning(
+                "squad_coordinator_synthesis_not_dispatched",
+                thread_id=ctx.squad_thread_id,
+                squad_task_id=ctx.squad_task_id,
+            )
+            return
+        # Record the outcome of each handoff whose destinations have all answered (D-074).
+        handoff_outcomes = {
+            ref.get("id"): ref.get("status")
+            for ref in readiness.evidence_refs
+            if ref.get("kind") == "handoff_event" and ref.get("status") in {"returned", "failed"}
+        }
+        for event in handoff_events:
+            handoff = event["payload"]
+            handoff_id = handoff.get("handoff_id")
+            if handoff_id not in handoff_outcomes or handoff_id in closed_ids:
+                continue
+            closed_ids.add(handoff_id)
+            await record_squad_handoff_event(
+                thread_store,
+                thread_id=ctx.squad_thread_id,
+                source_agent_id=str(handoff.get("source_agent_id") or thread.coordinator_agent_id),
+                destination_agent_ids=list(handoff.get("destination_agent_ids") or []),
+                reason=str(handoff.get("reason") or ""),
+                handoff_kind=str(handoff.get("handoff_kind") or "consult"),
+                context_policy=handoff.get("context_policy") or {},
+                deadline=handoff.get("deadline"),
+                return_criteria=list(handoff.get("return_criteria") or []),
+                status=str(handoff_outcomes[handoff_id]),
+                parent_message_id=handoff.get("parent_message_id"),
+                correlation_id=handoff.get("correlation_id"),
+                handoff_id=str(handoff_id),
+            )
     except Exception:
         log.exception(
             "squad_coordinator_synthesis_enqueue_failed",
@@ -7053,6 +7151,330 @@ async def _maybe_enqueue_squad_reply_synthesis(
         log.exception("squad_reply_synthesis_enqueue_failed", thread_id=ctx.squad_thread_id)
 
 
+async def _persist_squad_turn_result(
+    *,
+    ctx: QueryContext,
+    run_result: RunResult,
+    response_text: str,
+    runtime_task_id: int | None,
+    created_artifacts: list[str],
+    cost: float,
+    log_model: str,
+    cancelled: bool = False,
+    posted_by: str | None = None,
+) -> tuple[str | None, list[str]]:
+    """Post a squad turn's answer to its thread, resolve the obligations it answers and advance its task.
+
+    With ``cancelled`` the task result says ``cancelled`` and the task is cancelled. With
+    ``posted_by`` that sender posts the result for the executing agent, which is recorded as the
+    task's ``assigned_agent_id``.
+    Returns the posted message ref (``msg-<id>``) and the ids of the registered artifacts.
+    """
+    squad_message_id: str | None = None
+    squad_artifact_ids: list[str] = []
+    thread_id = ctx.squad_thread_id
+    if not thread_id:
+        return squad_message_id, squad_artifact_ids
+    try:
+        from koda.squads import get_squad_thread_store
+
+        store = get_squad_thread_store()
+        if store is not None:
+            squad_artifact_ids = await _register_squad_artifacts(
+                ctx=ctx,
+                runtime_task_id=runtime_task_id,
+                created_artifacts=created_artifacts,
+                run_result=run_result,
+            )
+            message_kind = "task_result" if ctx.squad_task_id else "agent_text"
+            correlation_id = ctx.delegation_request_id or ctx.squad_task_id or ctx.parent_message_id
+            reply_kind = "agent_result" if ctx.delegation_request_id else message_kind
+            executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
+            posted_id = await store.post_thread_message(
+                thread_id=thread_id,
+                from_agent=posted_by or executing_agent,
+                content=response_text,
+                message_type=message_kind,
+                metadata={
+                    **({"assigned_agent_id": executing_agent} if posted_by else {}),
+                    "query_cost_usd": cost,
+                    "provider": run_result.provider,
+                    "model": log_model,
+                    "squad_task_id": ctx.squad_task_id,
+                    "parent_message_id": ctx.parent_message_id,
+                    "reply_contract_version": "thread_reply.v1",
+                    "reply_kind": reply_kind,
+                    "in_reply_to": ctx.parent_message_id,
+                    "correlation_id": correlation_id,
+                    "payload": {
+                        "task_id": ctx.squad_task_id,
+                        "status": "cancelled" if cancelled else "failed" if run_result.error else "ok",
+                        "output_md": response_text,
+                        "artifact_ids": squad_artifact_ids,
+                        "cost_usd": cost,
+                    }
+                    if ctx.squad_task_id
+                    else {"markdown": response_text},
+                },
+                in_reply_to=ctx.parent_message_id,
+                correlation_id=str(correlation_id) if correlation_id else None,
+            )
+            squad_message_id = f"msg-{posted_id}"
+            try:
+                from koda.squads import get_thread_reply_service
+
+                reply_service = get_thread_reply_service(store)
+                if reply_service is not None:
+                    await reply_service.resolve_for_reply(
+                        thread_id=thread_id,
+                        reply_message_id=posted_id,
+                        from_agent=ctx.executing_agent_id or AGENT_ID or "default",
+                        in_reply_to=ctx.parent_message_id,
+                        correlation_id=str(correlation_id) if correlation_id else None,
+                    )
+            except Exception:
+                log.exception("squad_reply_obligation_resolve_failed", thread_id=ctx.squad_thread_id)
+            await _advance_squad_task_from_run(
+                ctx=ctx,
+                run_result=run_result,
+                response_text=response_text,
+                artifact_ids=squad_artifact_ids,
+                cancelled=cancelled,
+            )
+    except Exception:
+        log.exception("squad_post_process_message_persist_failed", thread_id=ctx.squad_thread_id)
+    return squad_message_id, squad_artifact_ids
+
+
+async def _cancel_squad_task_after_its_dependency_ended(
+    *,
+    ctx: QueryContext,
+    task: Any,
+    dependency: Any,
+    assignee: str,
+    coordinator: str,
+) -> None:
+    """Cancel a pending squad task that can never run, with a task result that says why.
+
+    Its assignee never ran, so the system posts the result for it.
+    """
+    ended = {"failed": "failed", "cancelled": "was cancelled", "escalated": "was escalated"}.get(
+        str(dependency.status), f"ended as {dependency.status}"
+    )
+    reason = f"Not run: this task depends on task {dependency.id} ({dependency.title}), which {ended}."
+    await _persist_squad_turn_result(
+        ctx=replace(
+            ctx,
+            executing_agent_id=assignee,
+            squad_task_id=task.id,
+            parent_message_id=str(task.metadata.get("coordination_parent_message_id") or "") or ctx.parent_message_id,
+            delegation_request_id=f"coord-{task.id}",
+            delegation_origin_agent_id=coordinator,
+        ),
+        run_result=RunResult(
+            provider="",
+            model="",
+            result=reason,
+            session_id="",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=True,
+            stop_reason="error",
+        ),
+        response_text=reason,
+        runtime_task_id=None,
+        created_artifacts=[],
+        cost=0.0,
+        log_model="",
+        cancelled=True,
+        posted_by="system",
+    )
+
+
+def _squad_turn_context_from_item(item: QueueItem) -> QueryContext:
+    """The squad identity of a turn that ended before its query context was built."""
+    return QueryContext(
+        provider="",
+        work_dir="",
+        model="",
+        session_id="",
+        provider_session_id=None,
+        system_prompt="",
+        agent_mode="",
+        permission_mode="",
+        max_turns=0,
+        dry_run=item.scheduled_dry_run,
+        executing_agent_id=item.executing_agent_id,
+        squad_thread_id=item.squad_thread_id,
+        squad_task_id=item.squad_task_id,
+        parent_message_id=item.parent_message_id,
+        delegation_chain=list(item.delegation_chain),
+        delegation_request_id=item.delegation_request_id,
+        delegation_origin_agent_id=item.delegation_origin_agent_id,
+        telegram_message_thread_id=item.telegram_message_thread_id,
+    )
+
+
+async def _record_failed_squad_task_turn(
+    *,
+    user_id: int,
+    context: BotContext,
+    ctx: QueryContext | None,
+    item: QueueItem | None,
+    run_result: RunResult | None,
+    error_message: str,
+    task_id: int,
+    cancelled: bool = False,
+) -> None:
+    """Record a squad task turn that a queue failure handler ends, as ``_post_process`` records a failed run.
+
+    Its failure is posted as a failed task_result and its squad task fails (with ``cancelled``,
+    both say cancelled), then its follow-ups run, so a handoff waiting on this destination
+    completes as failed and the coordinator synthesis, which discloses the failure, is queued
+    (D-074). A turn that failed before its query context was built is recorded from its queue
+    item. No worker lock is held here.
+    """
+    if ctx is None and item is not None:
+        ctx = _squad_turn_context_from_item(item)
+    if ctx is None or ctx.dry_run or not ctx.squad_thread_id or not ctx.squad_task_id:
+        return
+    try:
+        from koda.squads import get_squad_task_store
+
+        task_store = get_squad_task_store()
+        task = await task_store.get_task(ctx.squad_task_id) if task_store is not None else None
+    except Exception:
+        log.exception(
+            "squad_failed_turn_task_lookup_failed",
+            thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+        )
+        return
+    if task is None or task.status in {"done", "failed", "cancelled", "escalated"}:
+        # Already recorded, for example by _post_process before a later step of the turn failed. The
+        # worker ran that turn's follow-ups when it released the lock; if they were cut short, for
+        # example by a cancel while they ran, the squad router's sweep runs the task-cycle check
+        # again (complete_open_squad_handoff).
+        return
+    failed_run = RunResult(
+        provider=run_result.provider if run_result else ctx.provider,
+        model=run_result.model if run_result else ctx.model,
+        result=error_message,
+        session_id=(run_result.session_id if run_result else ctx.session_id) or "",
+        provider_session_id=None,
+        cost_usd=run_result.cost_usd if run_result else 0.0,
+        error=True,
+        stop_reason="error",
+    )
+    squad_message_id, artifact_ids = await _persist_squad_turn_result(
+        ctx=ctx,
+        run_result=failed_run,
+        response_text=error_message,
+        runtime_task_id=task_id,
+        created_artifacts=[],
+        cost=failed_run.cost_usd,
+        log_model=failed_run.model,
+        cancelled=cancelled,
+    )
+    await _dispatch_squad_follow_ups(
+        user_id=user_id,
+        context=context,
+        ctx=ctx,
+        response_text=error_message,
+        squad_message_id=squad_message_id,
+        artifact_ids=artifact_ids,
+    )
+
+
+async def _dispatch_squad_follow_ups(
+    *,
+    user_id: int,
+    context: BotContext,
+    ctx: QueryContext,
+    response_text: str,
+    squad_message_id: str | None,
+    artifact_ids: list[str],
+) -> None:
+    """Queue the squad turns a finished squad turn leads to: unblocked tasks and the coordinator synthesis.
+
+    Queueing a turn takes the per-user worker lock, so this must run after the
+    caller of ``_post_process`` has released it (D-019).
+    """
+    await _maybe_enqueue_unblocked_squad_tasks(
+        user_id=user_id,
+        context=context,
+        ctx=ctx,
+    )
+    await _maybe_enqueue_squad_coordinator_synthesis(
+        user_id=user_id,
+        context=context,
+        ctx=ctx,
+        response_text=response_text,
+        squad_message_id=squad_message_id,
+        artifact_ids=artifact_ids,
+    )
+    await _maybe_enqueue_squad_reply_synthesis(
+        user_id=user_id,
+        context=context,
+        ctx=ctx,
+        response_text=response_text,
+        squad_message_id=squad_message_id,
+    )
+
+
+async def complete_open_squad_handoff(*, thread_id: str, squad_task_id: str, handoff_id: str) -> None:
+    """Run the task-cycle check again for a handoff still open after its cycle's tasks ended (D-074).
+
+    The squad router's sweep calls this. The check that runs after a destination's turn can be
+    lost: to a graceful restart, a cancel while the turn's follow-ups run, or a refused dispatch,
+    and nothing else runs it again. It runs here as the follow-up of ``squad_task_id``, one of the
+    cycle's tasks, would, but without a turn: it queues nothing unless ``handoff_id`` is open in the
+    cycle it reads, and only the results posted to the room count. The check queues nothing once
+    the handoff has its outcome, and nothing is queued while this runtime shuts down: the next
+    runtime's sweep completes the handoff.
+    """
+    if _shutting_down:
+        return
+    from types import SimpleNamespace
+
+    from koda.squads import get_squad_task_store, get_squad_thread_store
+
+    thread_store = get_squad_thread_store()
+    task_store = get_squad_task_store()
+    if thread_store is None or task_store is None:
+        return
+    thread = await thread_store.get_thread(thread_id)
+    task = await task_store.get_task(squad_task_id)
+    if thread is None or task is None:
+        return
+    ctx = QueryContext(
+        provider="",
+        work_dir="",
+        model="",
+        session_id="",
+        provider_session_id=None,
+        system_prompt="",
+        agent_mode="",
+        permission_mode="",
+        max_turns=0,
+        executing_agent_id=task.assigned_agent_id,
+        squad_thread_id=thread_id,
+        squad_task_id=task.id,
+        parent_message_id=str(task.metadata.get("coordination_parent_message_id") or "") or None,
+        telegram_message_thread_id=thread.telegram_message_thread_id,
+    )
+    # No turn context: the dispatch uses this runtime's application and bot.
+    await _maybe_enqueue_squad_coordinator_synthesis(
+        user_id=int(thread.owner_user_id or 0),
+        context=cast(BotContext, SimpleNamespace(application=None, bot=None)),
+        ctx=ctx,
+        response_text="",
+        squad_message_id=None,
+        artifact_ids=[],
+        swept_handoff_id=handoff_id,
+    )
+
+
 async def _post_process(
     user_id: int,
     context: BotContext,
@@ -7068,8 +7490,16 @@ async def _post_process(
     final_status: str = "completed",
     response_text_override: str | None = None,
     delivery_outcome: DeliveryOutcome | None = None,
+    squad_follow_ups: list[Callable[[], Awaitable[None]]] | None = None,
 ) -> None:
-    """Update session, stats, log query, extract memories."""
+    """Update session, stats, log query, extract memories.
+
+    For a squad turn, add its follow-ups (``_dispatch_squad_follow_ups``) to
+    ``squad_follow_ups`` instead of queueing them: the caller holds the
+    per-user worker lock, and queueing a turn takes that lock again (D-019).
+    They are added as soon as the squad turn is recorded, so the caller runs
+    them once it has released the lock, even if a later step here fails.
+    """
     effective_model = run_result.model or model
 
     # Update session and stats
@@ -7114,91 +7544,27 @@ async def _post_process(
     response_text = response_text_override if response_text_override is not None else run_result.result
     squad_artifact_ids: list[str] = []
     if not dry_run and ctx is not None and ctx.squad_thread_id:
-        try:
-            from koda.squads import get_squad_thread_store
-
-            store = get_squad_thread_store()
-            if store is not None:
-                squad_artifact_ids = await _register_squad_artifacts(
+        squad_message_id, squad_artifact_ids = await _persist_squad_turn_result(
+            ctx=ctx,
+            run_result=run_result,
+            response_text=response_text,
+            runtime_task_id=task_id,
+            created_artifacts=list(delivery_outcome.created_artifacts) if delivery_outcome else [],
+            cost=cost,
+            log_model=log_model,
+        )
+        if squad_follow_ups is not None:
+            squad_follow_ups.append(
+                functools.partial(
+                    _dispatch_squad_follow_ups,
+                    user_id=user_id,
+                    context=context,
                     ctx=ctx,
-                    runtime_task_id=task_id,
-                    created_artifacts=list(delivery_outcome.created_artifacts) if delivery_outcome else [],
-                    run_result=run_result,
-                )
-                message_kind = "task_result" if ctx.squad_task_id else "agent_text"
-                correlation_id = ctx.delegation_request_id or ctx.squad_task_id or ctx.parent_message_id
-                reply_kind = "agent_result" if ctx.delegation_request_id else message_kind
-                posted_id = await store.post_thread_message(
-                    thread_id=ctx.squad_thread_id,
-                    from_agent=ctx.executing_agent_id or AGENT_ID or "default",
-                    content=response_text,
-                    message_type=message_kind,
-                    metadata={
-                        "query_cost_usd": cost,
-                        "provider": run_result.provider,
-                        "model": log_model,
-                        "squad_task_id": ctx.squad_task_id,
-                        "parent_message_id": ctx.parent_message_id,
-                        "reply_contract_version": "thread_reply.v1",
-                        "reply_kind": reply_kind,
-                        "in_reply_to": ctx.parent_message_id,
-                        "correlation_id": correlation_id,
-                        "payload": {
-                            "task_id": ctx.squad_task_id,
-                            "status": "failed" if run_result.error else "ok",
-                            "output_md": response_text,
-                            "artifact_ids": squad_artifact_ids,
-                            "cost_usd": cost,
-                        }
-                        if ctx.squad_task_id
-                        else {"markdown": response_text},
-                    },
-                    in_reply_to=ctx.parent_message_id,
-                    correlation_id=str(correlation_id) if correlation_id else None,
-                )
-                squad_message_id = f"msg-{posted_id}"
-                try:
-                    from koda.squads import get_thread_reply_service
-
-                    reply_service = get_thread_reply_service(store)
-                    if reply_service is not None:
-                        await reply_service.resolve_for_reply(
-                            thread_id=ctx.squad_thread_id,
-                            reply_message_id=posted_id,
-                            from_agent=ctx.executing_agent_id or AGENT_ID or "default",
-                            in_reply_to=ctx.parent_message_id,
-                            correlation_id=str(correlation_id) if correlation_id else None,
-                        )
-                except Exception:
-                    log.exception("squad_reply_obligation_resolve_failed", thread_id=ctx.squad_thread_id)
-                await _advance_squad_task_from_run(
-                    ctx=ctx,
-                    run_result=run_result,
                     response_text=response_text,
+                    squad_message_id=squad_message_id,
                     artifact_ids=squad_artifact_ids,
                 )
-        except Exception:
-            log.exception("squad_post_process_message_persist_failed", thread_id=ctx.squad_thread_id)
-        await _maybe_enqueue_unblocked_squad_tasks(
-            user_id=user_id,
-            context=context,
-            ctx=ctx,
-        )
-        await _maybe_enqueue_squad_coordinator_synthesis(
-            user_id=user_id,
-            context=context,
-            ctx=ctx,
-            response_text=response_text,
-            squad_message_id=squad_message_id,
-            artifact_ids=squad_artifact_ids,
-        )
-        await _maybe_enqueue_squad_reply_synthesis(
-            user_id=user_id,
-            context=context,
-            ctx=ctx,
-            response_text=response_text,
-            squad_message_id=squad_message_id,
-        )
+            )
         if ctx.delegation_request_id and ctx.delegation_origin_agent_id:
             try:
                 from koda.agents import get_message_bus
@@ -7867,6 +8233,15 @@ async def _execute_single_task(
                     context=context,
                     error_message=str(e),
                 )
+                await _record_failed_squad_task_turn(
+                    user_id=user_id,
+                    context=context,
+                    ctx=None,
+                    item=item,
+                    run_result=None,
+                    error_message=str(e),
+                    task_id=task_id,
+                )
                 return
 
             task_info.model = ctx.model
@@ -8082,22 +8457,33 @@ async def _execute_single_task(
 
                     # Lock user_data writes to avoid races with concurrent tasks
                     lock = _get_worker_lock(user_id)
-                    async with lock:
-                        await _post_process(
-                            user_id,
-                            context,
-                            run_result,
-                            item.query_text,
-                            ctx.work_dir,
-                            ctx.model,
-                            task_id=task_id,
-                            ctx=ctx,
-                            dry_run=ctx.dry_run,
-                            cacheable=not ctx.artifact_dossiers,
-                            final_status=final_status,
-                            response_text_override=delivered_response_text,
-                            delivery_outcome=delivery_outcome,
-                        )
+                    squad_follow_ups: list[Callable[[], Awaitable[None]]] = []
+                    try:
+                        async with lock:
+                            await _post_process(
+                                user_id,
+                                context,
+                                run_result,
+                                item.query_text,
+                                ctx.work_dir,
+                                ctx.model,
+                                task_id=task_id,
+                                ctx=ctx,
+                                dry_run=ctx.dry_run,
+                                cacheable=not ctx.artifact_dossiers,
+                                final_status=final_status,
+                                response_text_override=delivered_response_text,
+                                delivery_outcome=delivery_outcome,
+                                squad_follow_ups=squad_follow_ups,
+                            )
+                    finally:
+                        # Only after the lock is released, since queueing a follow-up turn takes it (D-019).
+                        # Also when a later step of _post_process failed: the squad turn is recorded by then,
+                        # and no other path runs its follow-ups. Awaited, not a background task, so the next
+                        # turn in this queue starts after the synthesis check has read the thread, as when it
+                        # ran under the lock.
+                        for follow_up in squad_follow_ups:
+                            await follow_up()
 
                     if not item.silent_response:
                         await _send_response(
@@ -8553,6 +8939,15 @@ async def _execute_single_task(
                 duration_ms=query_elapsed * 1000,
             )
             await _send_task_error(task_info, last_error or "unknown error", context, item)
+            await _record_failed_squad_task_turn(
+                user_id=user_id,
+                context=context,
+                ctx=ctx,
+                item=item,
+                run_result=run_result,
+                error_message=last_error or "unknown error",
+                task_id=task_id,
+            )
 
     except _RuntimeGuardrailError as e:
         error_str = str(e)
@@ -8580,6 +8975,15 @@ async def _execute_single_task(
         if RUNTIME_ENVIRONMENTS_ENABLED:
             await runtime.finalize_task(task_id=task_id, success=False, error_message=error_str)
         await _send_task_error(task_info, error_str, context, item)
+        await _record_failed_squad_task_turn(
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+            item=item,
+            run_result=run_result,
+            error_message=error_str,
+            task_id=task_id,
+        )
     except asyncio.CancelledError:
         cancellation_reason = task_info.error_message or "Cancelled by scheduler control."
         task_info.status = "cancelled"
@@ -8610,6 +9014,18 @@ async def _execute_single_task(
                 context=context,
                 error_message=cancellation_reason,
             )
+        # A cancelled destination of a handoff did not return, so its handoff fails and the
+        # coordinator synthesis discloses it (D-074).
+        await _record_failed_squad_task_turn(
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+            item=item,
+            run_result=run_result,
+            error_message=cancellation_reason,
+            task_id=task_id,
+            cancelled=True,
+        )
         raise
     except Exception as e:
         error_str = str(e)
@@ -8720,6 +9136,15 @@ async def _execute_single_task(
         if RUNTIME_ENVIRONMENTS_ENABLED:
             await runtime.finalize_task(task_id=task_id, success=False, error_message=error_str)
         await _send_task_error(task_info, error_str, context, item)
+        await _record_failed_squad_task_turn(
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+            item=item,
+            run_result=run_result,
+            error_message=error_str,
+            task_id=task_id,
+        )
     finally:
         if heartbeat_task:
             heartbeat_task.cancel()
@@ -8773,6 +9198,20 @@ async def _process_queue(user_id: int, context: BotContext) -> None:
             try:
                 if task_id is not None and task_id in _cancelled_task_ids:
                     _cancelled_task_ids.discard(task_id)
+                    reason = _cancelled_task_reasons.pop(task_id, "Cancelled by scheduler control.")
+                    if isinstance(raw_item, dict) and raw_item.get("squad_task_id"):
+                        # A destination cancelled before it ran is recorded as a cancelled run is, so
+                        # its handoff can complete (D-074).
+                        await _record_failed_squad_task_turn(
+                            user_id=user_id,
+                            context=context,
+                            ctx=None,
+                            item=_parse_queue_item(raw_item),
+                            run_result=None,
+                            error_message=reason,
+                            task_id=task_id,
+                            cancelled=True,
+                        )
                     continue
 
                 if task_id is None:

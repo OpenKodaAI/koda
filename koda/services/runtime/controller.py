@@ -2722,7 +2722,7 @@ class RuntimeController:
         if env_id is not None:
             self.store.update_environment(env_id, current_phase="cancel_requested", status="cancel_requested")
 
-        queued_cancelled = await cancel_queued_task(task_id)
+        queued_cancelled = await cancel_queued_task(task_id, reason=reason)
         if env is None:
             if not queued_cancelled:
                 # Light tasks run without a runtime environment. Once a worker

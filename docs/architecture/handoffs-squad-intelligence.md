@@ -27,6 +27,104 @@ Parallel handoff is represented either as one event with multiple
 Coordinator synthesis must see an explicit return, timeout, decline, or failure
 before treating handoff work as terminal.
 
+The coordinator engine records a handoff's destinations as the agents it gives
+a task. A task-less handoff gives each selected participant a task first. The
+post-turn task-cycle check (`_maybe_enqueue_squad_coordinator_synthesis`) then
+derives the outcome of a `requested` or `accepted` handoff once every
+destination has answered, through a visible task result for the cycle or a
+reply obligation it answered on the cycle's source message. The queue worker
+runs this check, like the other squad follow-ups, after it releases the
+per-user lock it holds for post-processing, because queueing the synthesis
+turn takes that lock again (D-019). It runs them once the turn's answer is
+recorded in the thread, even if a later post-processing step fails. The
+outcome is:
+
+- `returned` when every answer succeeded;
+- `failed` when a destination's task result has `payload.status` `failed` or
+  `cancelled`. Every way the queue ends a destination's turn without an
+  answer records one, and then runs the same check:
+  - a run that fails (a provider error, exhausted retries, a runtime
+    guardrail or an unexpected exception) and a turn that fails before its
+    run starts (a budget overrun, or an error while its query context is
+    prepared, such as a failed squad access check) get a failed task result
+    with the error and a failed task;
+  - a cancelled run (`/cancel <id>`, the dashboard cancel or scheduler
+    control) gets a cancelled task result with the cancellation reason and a
+    cancelled task. A turn cancelled while it still waits in the user's
+    queue (`cancel_queued_task`) gets the same result, posted when the queue
+    worker reaches and discards it;
+  - a pending task that depends on a task that failed, was cancelled or was
+    escalated can never run, so it is cancelled. Its assignee never ran, so
+    the result that names that task is posted by `system`, with the assignee
+    in `metadata.assigned_agent_id`; the gate counts it as the assignee's.
+
+  An answered reply obligation does not turn a failed result into
+  `returned`. The failure is added to the synthesis disclosures, so the
+  synthesis prompt names the agents that failed.
+
+The check queues the coordinator synthesis before it records the outcome, and
+tries once. A dispatch that fails (a rejected tasks insert, or any dispatch
+while the runtime shuts down) records one `[agent_dispatch_unavailable]` event
+and leaves the handoff open, rather than a `returned` handoff with no answer.
+
+Once the synthesis is queued, an event with that status and the same
+`handoff_id` is recorded once, and it supersedes the open event. Its
+idempotency key is the handoff id and status, and the handoff writer asks the
+thread store to deduplicate on it (`post_thread_message(..., dedupe=True)`);
+other posts store their idempotency key without deduplicating. A status-change
+event has a delivery status that matches it (`completed`, `failed`,
+`timed_out`, or `blocked`) and is not addressed to the destinations again. On
+the web, the dashboard delivery watcher leaves handoff cycles to this post-turn
+check, so it does not add a second synthesis. When every handoff of the cycle
+already has its outcome, the check returns without queueing anything, so it
+can run again for the same cycle.
+
+The check after a destination's turn can be lost: the dispatch is refused, the
+runtime restarts, or a cancel lands while the turn's follow-ups run (the
+follow-ups run before the turn's own answer is sent, so that answer, already in
+the room, is not sent to Telegram either). The squad router's sweep, which each
+runtime runs every `SQUAD_ROUTER_SWEEP_INTERVAL_S` (15 s by default), is the
+safety net (`SquadRouter._sweep_open_handoffs`). It finds each handoff that was
+requested in the last 24 h in an `open` thread with a coordinator, is still
+`requested` or `accepted`, whose cycle has a task, while no task of its thread
+is open and none of its cycle's tasks changed in the last 30 s. A handoff in a
+paused, completed or archived thread, or requested longer ago, is left alone,
+so an upgraded install does not answer old requests. Each sweep checks up to
+50 handoffs, oldest first, and the next sweep starts after the last one it
+checked, so handoffs the check cannot close (a destination task that ended
+without a result in the room, or a dispatch that keeps failing) do not keep
+it from the others. For each handoff the runtime takes a transaction advisory
+lock on its `handoff_id` (`pg_try_advisory_xact_lock`) and holds it until the
+check has queued the synthesis and recorded the outcome; a runtime that finds
+the lock taken skips the handoff, so two runtimes that sweep it at the same
+moment queue one synthesis. It then runs the same check
+(`complete_open_squad_handoff`) as the follow-up of the cycle's most recently
+changed task that the coordinator does not own, with the thread's owner as the
+user, but without a turn: it queues nothing unless that handoff is open among
+the cycle's events it reads, and only the results already posted to the room
+count, so the sweep never answers for a destination. The check reads the
+cycle's own messages from the database (the cycle's source message and every
+message whose `parent_message_id` names it, however far back in the room), so
+the handoff completes on the first sweep after a restart, even after the room
+has moved on. A runtime that is shutting down skips it, and the next runtime's
+sweep completes the handoff. While a dispatch keeps failing, each sweep records
+one more `[agent_dispatch_unavailable]` event.
+
+The check is not atomic yet (D-058, M2-E4-T3), and nothing stops a second
+dispatch of the synthesis, only a second outcome event. Its open-task read is
+per thread, not per cycle: it waits while any task of the thread is open,
+including a task from an earlier cycle, so a handoff completes only once every
+task of its thread has ended. It reads the thread's open tasks up to four
+times, 0.5 s apart, so a destination that finishes while a task is still open
+keeps checking for about 1.5 s. In one runtime the queue worker awaits the
+check before it starts the next turn, so one user's turns do not race. Under
+the supervisor, where each destination runs in its own runtime, two
+destinations that finish within about 1.5 s of each other can each queue a
+synthesis, and the room then gets two final answers. The sweep's 30 s wait
+keeps it away from the check after a destination's turn, and the advisory lock
+keeps two sweeps apart. Nothing times a handoff out yet. The reply-cycle path
+has no handoffs.
+
 ## Route Quality
 
 `SquadDeliveryRouteDecision` includes:

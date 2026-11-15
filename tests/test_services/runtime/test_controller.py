@@ -2662,9 +2662,12 @@ async def test_cancel_task_without_environment_discards_a_queued_task(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    """D-009: a queued light task is discarded on dequeue and stays reported as cancelled."""
+    """D-009: a queued light task is discarded on dequeue and stays reported as cancelled.
+
+    The queued task is a squad turn, so the worker records it as a cancelled run is (D-074).
+    """
     import asyncio
-    from unittest.mock import MagicMock, patch
+    from unittest.mock import AsyncMock, MagicMock, patch
 
     import koda.services.queue_manager as queue_manager
     import koda.services.runtime as runtime_package
@@ -2680,8 +2683,17 @@ async def test_cancel_task_without_environment_discards_a_queued_task(
 
     queue: asyncio.Queue[Any] = asyncio.Queue()
     monkeypatch.setitem(queue_manager._user_queues, user_id, queue)
+    # What enqueue_squad_agent_task queues for a squad destination.
+    squad_turn = {
+        "_dashboard_chat": True,
+        "squad_thread_id": "thread-1",
+        "squad_task_id": "task-qa",
+        "executing_agent_id": "QA",
+    }
     for tid in (running_id, queued_id):
-        await queue.put({"_task_id": tid, "chat_id": 79, "query_text": f"query {tid}"})
+        await queue.put(
+            {"_task_id": tid, "chat_id": 79, "query_text": f"query {tid}", **(squad_turn if tid == queued_id else {})}
+        )
         queue_manager._track_queued_task_id(user_id, tid)
     context = MagicMock()
     context.user_data = {}
@@ -2700,7 +2712,10 @@ async def test_cancel_task_without_environment_discards_a_queued_task(
             queue_manager._unregister_task(task_info)
 
     try:
-        with patch.object(queue_manager, "_execute_single_task", side_effect=_fake_execute):
+        with (
+            patch.object(queue_manager, "_execute_single_task", side_effect=_fake_execute),
+            patch.object(queue_manager, "_record_failed_squad_task_turn", AsyncMock()) as record_squad_turn,
+        ):
             worker = asyncio.create_task(queue_manager._process_queue(user_id, context))
             try:
                 await asyncio.wait_for(first_started.wait(), timeout=10)
@@ -2730,6 +2745,12 @@ async def test_cancel_task_without_environment_discards_a_queued_task(
         # The worker discarded the cancelled item, consumed its marker, and no
         # later observability sync reported it as queued again.
         assert executed == [running_id]
+        record_squad_turn.assert_awaited_once()
+        recorded = record_squad_turn.await_args.kwargs
+        assert recorded["item"].squad_task_id == "task-qa"
+        assert recorded["error_message"] == "Cancelled by /cancel command."
+        assert recorded["cancelled"] is True
+        assert recorded["task_id"] == queued_id
         assert queue.qsize() == 0
         assert queued_id not in queue_manager._cancelled_task_ids
         assert store.queue_items[queued_id]["status"] == "cancelled"

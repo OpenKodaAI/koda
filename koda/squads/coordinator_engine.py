@@ -13,7 +13,7 @@ import hashlib
 import json
 import uuid
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Literal, Protocol
 
 from koda.config import (
@@ -206,6 +206,9 @@ class CoordinationExecution:
     message_ids: list[str] = field(default_factory=list)
     delivery_status: str = "coordinating"
     schema_version: str = SQUAD_DELIVERY_SCHEMA_VERSION
+    # Set when the decision dispatched no task: the caller sends this to the
+    # coordinator so the user still gets a clarification or decline reply.
+    coordinator_query: str | None = None
 
     @property
     def dispatched_count(self) -> int:
@@ -667,6 +670,20 @@ class SquadCoordinatorEngine:
         decision = await self._planner.plan(planner_input)
         if decision.mode == "answer_self":
             return CoordinationExecution(coordinated=False, decision=decision)
+        if decision.mode in _COORDINATOR_REPLY_INSTRUCTIONS:
+            # ask_clarification and decline run no task: the coordinator answers the user (D-015).
+            decision = replace(decision, tasks=[])
+        elif decision.mode == "handoff" and not decision.tasks:
+            # A task-less handoff still goes to the planner's destinations, as real tasks (D-015).
+            decision = replace(
+                decision,
+                tasks=_handoff_tasks(
+                    decision,
+                    summaries=summaries,
+                    participant_ids=participant_ids,
+                    coordinator_agent_id=coordinator_agent_id,
+                ),
+            )
         self._policy.validate(
             decision,
             thread=thread,
@@ -680,6 +697,15 @@ class SquadCoordinatorEngine:
             decision=decision,
             parent_message_id=parent_message_id,
         )
+        if not decision.tasks:
+            # ask_clarification, decline or a handoff with no destination: nothing is
+            # dispatched here, so the caller must still route the turn (D-015).
+            return CoordinationExecution(
+                coordinated=False,
+                decision=decision,
+                message_ids=[f"msg-{decision_message_id}"],
+                coordinator_query=_coordinator_reply_query(decision, source_request=text),
+            )
         task_ids: list[str] = []
         pending_task_ids: list[str] = []
         dispatched_agents: list[str] = []
@@ -907,15 +933,35 @@ class SquadCoordinatorEngine:
 
 
 def _handoff_destinations(decision: CoordinationDecision, *, coordinator_agent_id: str) -> list[str]:
+    # Only agents with a task are contacted, so only they can reply and complete the handoff (D-074).
     seen: set[str] = set()
     out: list[str] = []
-    for agent_id in [*(task.agent_id for task in decision.tasks), *decision.selected_agents]:
+    for agent_id in (task.agent_id for task in decision.tasks):
         normalized = str(agent_id or "").strip()
         if not normalized or normalized == coordinator_agent_id or normalized in seen:
             continue
         seen.add(normalized)
         out.append(normalized)
     return out
+
+
+def _handoff_tasks(
+    decision: CoordinationDecision,
+    *,
+    summaries: list[CapabilitySummary],
+    participant_ids: list[str],
+    coordinator_agent_id: str,
+) -> list[CoordinationTask]:
+    summary_by_agent = {summary.agent_id: summary for summary in summaries}
+    destinations = [
+        agent_id
+        for agent_id in dict.fromkeys(str(agent or "").strip() for agent in decision.selected_agents)
+        if agent_id and agent_id != coordinator_agent_id and agent_id in participant_ids
+    ]
+    return [
+        _fallback_task_for_agent(agent_id=agent_id, summary=summary_by_agent.get(agent_id), proposal=None, index=index)
+        for index, agent_id in enumerate(destinations, start=1)
+    ]
 
 
 def _handoff_context_refs(decision: CoordinationDecision) -> list[str]:
@@ -1039,6 +1085,29 @@ def _render_task_request(*, task: CoordinationTask, source_request: str, task_id
             "contributed unless their task_result is visible.",
         ]
     )
+    return "\n".join(lines)
+
+
+_COORDINATOR_REPLY_INSTRUCTIONS: dict[str, str] = {
+    "ask_clarification": (
+        "Você decidiu pedir esclarecimentos antes de delegar. Responda ao usuário com uma pergunta objetiva "
+        "de esclarecimento sobre o pedido abaixo. Não delegue nem execute a tarefa ainda."
+    ),
+    "decline": (
+        "Você decidiu não atender este pedido. Responda ao usuário explicando de forma breve o motivo e, "
+        "se possível, o que ele pode fazer. Não delegue nem execute a tarefa."
+    ),
+}
+
+
+def _coordinator_reply_query(decision: CoordinationDecision, *, source_request: str) -> str | None:
+    instruction = _COORDINATOR_REPLY_INSTRUCTIONS.get(decision.mode)
+    if instruction is None:
+        return None
+    lines = [instruction]
+    if decision.reasoning_summary.strip():
+        lines.extend(["", f"Motivo da decisão: {decision.reasoning_summary.strip()}"])
+    lines.extend(["", "Pedido do usuário:", source_request.strip()])
     return "\n".join(lines)
 
 

@@ -1542,14 +1542,49 @@ async def post_dashboard_squad_thread_message_route(request: web.Request) -> web
                         "tasks": execution.task_ids,
                         "agents": execution.dispatched_agents,
                     }
-                    asyncio.create_task(
-                        _watch_dashboard_squad_delivery_synthesis(
-                            thread_id=thread_id,
-                            parent_message_id=f"msg-{message_id}",
-                            coordinator_agent_id=coordinator_id,
-                            application=request.app.get("telegram_application"),
+                    if execution.decision.mode != "handoff":
+                        # A handoff is synthesised by the post-turn path, which also records its
+                        # outcome; a second synthesiser here would post a second answer (D-074).
+                        asyncio.create_task(
+                            _watch_dashboard_squad_delivery_synthesis(
+                                thread_id=thread_id,
+                                parent_message_id=f"msg-{message_id}",
+                                coordinator_agent_id=coordinator_id,
+                                application=request.app.get("telegram_application"),
+                            )
                         )
+                    return web.json_response(
+                        {"messageId": message_id, "fromAgent": from_agent, "coordination": coordination_payload}
                     )
+                if execution.coordinator_query:
+                    # ask_clarification or decline: the coordinator answers the user itself, so the
+                    # turn is routed to it, not delegated (D-015).
+                    await record_squad_routing_decision(
+                        store,
+                        thread_id=thread_id,
+                        source="coordinator",
+                        targets=[coordinator_id],
+                        parent_message_id=f"msg-{message_id}",
+                        metadata={"mode": execution.decision.mode},
+                    )
+                    await dispatch_squad_turn(
+                        target_agent_id=coordinator_id,
+                        thread=resolved_thread,
+                        thread_store=store,
+                        query_text=execution.coordinator_query,
+                        parent_message_id=f"msg-{message_id}",
+                        metadata={
+                            "from_user": from_agent,
+                            "source": "coordinator",
+                            "delivery_intent": "execution",
+                        },
+                        application=request.app.get("telegram_application"),
+                        user_id=resolved_thread.owner_user_id,
+                        chat_id=resolved_thread.telegram_chat_id or 0,
+                        delegation_chain=["squad_router"],
+                        telegram_message_thread_id=resolved_thread.telegram_message_thread_id,
+                    )
+                    coordination_payload = {"mode": execution.decision.mode, "tasks": [], "agents": [coordinator_id]}
                     return web.json_response(
                         {"messageId": message_id, "fromAgent": from_agent, "coordination": coordination_payload}
                     )
