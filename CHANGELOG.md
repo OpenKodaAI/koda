@@ -127,6 +127,14 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   significant characters logs `bootstrap_code_seed_weak`. A seed the `/setup` field
   cannot take (1 to 12 characters from its alphabet) logs
   `bootstrap_code_seed_not_typeable`. (M1-E1-T17)
+- The `plugin_install` tool takes only `path`. It no longer reads `review_accepted`,
+  `approved`, `review_note` or `note`, and its error no longer tells the agent to
+  retry with them, so the model cannot accept the review of a `review_required`
+  package. Only an operator can, in the agent's Skills tab: the control-plane install
+  route now also takes the `package_hash` shown in the scan, refuses the install with
+  `skill.review_hash_mismatch` (409) when the files changed since, and records the
+  reviewer, hash, scanner version and verdict in the lock's `operator_review`.
+  (M1-E4-T3, D-031)
 
 ### Added
 

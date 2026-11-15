@@ -51,6 +51,7 @@ Skill package operations use the shared operational envelope. Common codes:
 - `skill.validation_failed`
 - `skill.scan_denied`
 - `skill.policy_denied`
+- `skill.review_hash_mismatch`
 - `skill.tool_conflict`
 - `skill.rollback_unavailable`
 

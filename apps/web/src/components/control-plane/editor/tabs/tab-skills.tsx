@@ -36,6 +36,7 @@ import {
   type CustomSkill,
 } from "@/lib/policy-serializers";
 import {
+  buildSkillPackageInstallBody,
   parseSkillPackageLocks,
   parseSkillRegistry,
   parseSkillScanResult,
@@ -278,12 +279,7 @@ export function TabSkills() {
     try {
       await skillPackageRequest(`${packageBasePath}/install`, {
         method: "POST",
-        body: JSON.stringify({
-          path: packagePath,
-          ...(packageScan?.decision === "review_required"
-            ? { review_accepted: true, review_note: reviewNote.trim() }
-            : {}),
-        }),
+        body: JSON.stringify(buildSkillPackageInstallBody(packagePath, packageScan, reviewNote)),
       });
       setPackageScan(null);
       setReviewAccepted(false);

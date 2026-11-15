@@ -3263,12 +3263,9 @@ async def _handle_plugin_install(params: dict, ctx: ToolContext) -> AgentToolRes
     from koda.skills._package import SkillPackageError, install_skill_package
 
     try:
-        result = install_skill_package(
-            path,
-            agent_id=AGENT_ID or "default",
-            review_accepted=bool(params.get("review_accepted") or params.get("approved")),
-            review_note=str(params.get("review_note") or params.get("note") or ""),
-        )
+        # The model never supplies a review: a review_required package installs only after an
+        # operator approves its package_hash through the control plane (D-031).
+        result = install_skill_package(path, agent_id=AGENT_ID or "default")
     except SkillPackageError as exc:
         error = dict(exc.error)
         scan = error.get("scan") if isinstance(error.get("scan"), dict) else {}

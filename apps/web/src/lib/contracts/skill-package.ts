@@ -179,6 +179,16 @@ export function skillPackageErrorMessage(raw: unknown, fallback = "Skill package
   return fallback;
 }
 
+/**
+ * Request body for the control-plane install route. A review_required package installs only
+ * with the operator's review bound to the package_hash shown in the scan; the backend refuses
+ * it when the files no longer match that hash.
+ */
+export function buildSkillPackageInstallBody(path: string, scan: SkillScanResult | null, reviewNote: string) {
+  if (scan?.decision !== "review_required") return { path };
+  return { path, review_accepted: true, review_note: reviewNote.trim(), package_hash: scan.package_hash };
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

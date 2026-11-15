@@ -285,8 +285,7 @@ def test_install_rejects_denied_scan(tmp_path: Path) -> None:
     assert exc.value.error["code"] == "skill.scan_denied"
 
 
-def test_review_required_install_requires_review_note(tmp_path: Path) -> None:
-    package_dir = _write_safe_package(tmp_path)
+def _make_review_required(package_dir: Path) -> None:
     manifest = package_dir / "koda-skill.yaml"
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace(
@@ -296,20 +295,56 @@ def test_review_required_install_requires_review_note(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(SkillPackageError) as exc:
-        install_skill_package(package_dir, agent_id="ATLAS", review_accepted=True)
 
-    assert exc.value.error["code"] == "skill.policy_denied"
+def test_review_required_install_needs_an_operator_review_bound_to_the_package_hash(tmp_path: Path) -> None:
+    package_dir = _write_safe_package(tmp_path)
+    _make_review_required(package_dir)
+    scan = scan_skill_package(package_dir, agent_id="ATLAS")
+    assert scan.decision == "review_required"
+
+    # Accepting with a note but without the reviewed package hash is not an operator review.
+    for kwargs in (
+        {"review_accepted": True},
+        {"review_accepted": True, "review_note": "Looks fine."},
+        {"review_note": "Looks fine.", "reviewed_package_hash": scan.package_hash},
+    ):
+        with pytest.raises(SkillPackageError) as exc:
+            install_skill_package(package_dir, agent_id="ATLAS", **kwargs)  # type: ignore[arg-type]
+        assert exc.value.error["code"] == "skill.policy_denied"
+        assert "review_accepted" not in exc.value.error["user_action"]
+        assert "review_accepted" not in exc.value.error["message"]
+    assert get_skill_package_lock("ATLAS", "safe_pack") is None
+
+    # A review of another package hash does not cover these files.
+    with pytest.raises(SkillPackageError) as exc:
+        install_skill_package(
+            package_dir,
+            agent_id="ATLAS",
+            review_accepted=True,
+            review_note="Reviewed an older copy.",
+            reviewed_package_hash="0" * 64,
+            reviewer="owner",
+        )
+    assert exc.value.error["code"] == "skill.review_hash_mismatch"
+    assert get_skill_package_lock("ATLAS", "safe_pack") is None
 
     result = install_skill_package(
         package_dir,
         agent_id="ATLAS",
         review_accepted=True,
         review_note="Local operator accepted network warning for tests.",
+        reviewed_package_hash=scan.package_hash,
+        reviewer="owner",
     )
 
+    review = result["lock"]["operator_review"]
     assert result["scan"]["decision"] == "review_required"
-    assert result["lock"]["operator_review"]["accepted"] is True
+    assert review["accepted"] is True
+    assert review["package_hash"] == scan.package_hash == result["lock"]["package_hash"]
+    assert review["scanner_version"] == scan.scanner_version
+    assert review["scan_decision"] == "review_required"
+    assert review["reviewer"] == "owner"
+    assert review["note"] == "Local operator accepted network warning for tests."
     assert result["lock"]["trust_summary"]["operator_review_accepted"] is True
 
 
@@ -344,6 +379,8 @@ tests:
         agent_id="ATLAS",
         review_accepted=True,
         review_note="Accepted in test.",
+        reviewed_package_hash=scan_skill_package(package_dir, agent_id="ATLAS").package_hash,
+        reviewer="owner",
     )
     lock = dict(result["lock"])
     lock.pop("operator_review", None)

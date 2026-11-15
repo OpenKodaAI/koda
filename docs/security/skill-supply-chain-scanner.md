@@ -41,10 +41,20 @@ permissions return `review_required`. Review does not bypass ExecutionPolicy or
 approval. It only allows package install to proceed when local operator policy
 accepts the risk.
 
-P3 requires `review_required` installs to include both `review_accepted=true`
-and a non-empty `review_note`. The note is recorded with install audit metadata
-and trust summary; it does not weaken scanner findings, ExecutionPolicy, or
-per-agent skill/package allowlists.
+A `review_required` package installs only after an operator accepts the review
+in the agent's Skills tab, which calls the operator-authenticated control-plane
+route `POST /api/control-plane/agents/{agent_id}/skills/packages/install` with
+`review_accepted=true`, a non-empty `review_note` and the `package_hash` the
+review screen showed next to the scanner version and verdict. The install scans
+the package again and refuses it with `skill.review_hash_mismatch` when the
+files no longer match that hash. The lock records the review in
+`operator_review`: the note, the time, the reviewer, the `package_hash`, the
+`scanner_version` and the scan decision. The review does not weaken scanner
+findings, ExecutionPolicy, or per-agent skill/package allowlists.
+
+The model cannot accept a review. The `plugin_install` tool takes only `path`,
+ignores any review fields in its call, and a `review_required` package fails
+with `skill.policy_denied` until an operator approves it (D-031).
 
 Imported or legacy locks with `decision=review_required` but no preserved
 `operator_review.accepted` evidence stay `blocked` and cannot become

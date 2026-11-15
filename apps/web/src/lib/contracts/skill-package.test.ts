@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildSkillPackageInstallBody,
   parseSkillPackageError,
   parseSkillPackageLocks,
   parseSkillRegistry,
@@ -146,5 +147,34 @@ describe("skill package contracts", () => {
 
     expect(parseSkillPackageError(payload)?.code).toBe("skill.scan_denied");
     expect(skillPackageErrorMessage(payload)).toContain("Resolve scanner findings");
+  });
+
+  it("binds a review_required install to the reviewed package hash", () => {
+    const scan = parseSkillScanResult({
+      schema_version: "skill_scan.v1",
+      decision: "review_required",
+      severity: "warning",
+      package_hash: "abc123",
+      scanner_version: "skill_package_scanner.v1",
+      package: {
+        schema_version: "koda_skill.v1",
+        id: "safe_pack",
+        name: "Safe Pack",
+        version: "1.0.0",
+        description: "",
+        author: "Koda Tests",
+      },
+    });
+
+    expect(buildSkillPackageInstallBody("/pkg", scan, "  Network is expected.  ")).toEqual({
+      path: "/pkg",
+      review_accepted: true,
+      review_note: "Network is expected.",
+      package_hash: "abc123",
+    });
+    expect(buildSkillPackageInstallBody("/pkg", scan ? { ...scan, decision: "allow" } : null, "")).toEqual({
+      path: "/pkg",
+    });
+    expect(buildSkillPackageInstallBody("/pkg", null, "note")).toEqual({ path: "/pkg" });
   });
 });

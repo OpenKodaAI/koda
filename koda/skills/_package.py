@@ -259,8 +259,17 @@ def install_skill_package(
     agent_id: str | None = None,
     review_accepted: bool = False,
     review_note: str = "",
+    reviewed_package_hash: str = "",
+    reviewer: str = "",
 ) -> dict[str, Any]:
-    """Install a scanned package and persist a `skill_lock.v1` payload."""
+    """Install a scanned package and persist a `skill_lock.v1` payload.
+
+    A ``review_required`` package installs only with an operator review: the
+    acceptance, a note and the ``package_hash`` the operator reviewed, which
+    must match the files being installed. Only the operator-authenticated
+    control-plane install route passes them; the model's ``plugin_install``
+    tool never does (D-031).
+    """
 
     normalized_agent = _normalize_agent_id(agent_id)
     scan = scan_skill_package(path, agent_id=normalized_agent)
@@ -280,7 +289,23 @@ def install_skill_package(
             payload={"scan": scan.to_dict()},
         )
     normalized_review_note = str(review_note or "").strip()
-    if scan.decision == "review_required" and (not review_accepted or not normalized_review_note):
+    normalized_reviewed_hash = str(reviewed_package_hash or "").strip()
+    if normalized_reviewed_hash and normalized_reviewed_hash != scan.package_hash:
+        _emit_package_metric(
+            agent_id=normalized_agent,
+            event="install_review_required",
+            decision=scan.decision,
+            recommendation_status="blocked",
+        )
+        raise SkillPackageError(
+            "skill.review_hash_mismatch",
+            "The package files changed after the review: their hash no longer matches the reviewed package_hash.",
+            category="policy_denied",
+            user_action="Scan the package again and review the new package hash.",
+            payload={"scan": scan.to_dict(), "reviewed_package_hash": normalized_reviewed_hash},
+        )
+    operator_review_accepted = bool(review_accepted and normalized_review_note and normalized_reviewed_hash)
+    if scan.decision == "review_required" and not operator_review_accepted:
         _emit_package_metric(
             agent_id=normalized_agent,
             event="install_review_required",
@@ -289,27 +314,35 @@ def install_skill_package(
         )
         raise SkillPackageError(
             "skill.policy_denied",
-            "Skill package requires explicit review before install.",
+            "Skill package requires an operator review before install.",
             category="policy_denied",
-            user_action="Review findings and retry with review_accepted=true and a review_note.",
+            user_action=(
+                "An operator must review the scanner findings and approve this package hash "
+                "in the agent's Skills tab of the control plane."
+            ),
             payload={"scan": scan.to_dict()},
         )
 
     previous_lock = get_skill_package_lock(normalized_agent, scan.package.id)
     lock = _build_lock(scan, normalized_agent, previous_lock=previous_lock)
-    if normalized_review_note:
+    if operator_review_accepted:
         lock["operator_review"] = {
             "accepted": True,
             "note": normalized_review_note,
             "accepted_at": _now_iso(),
+            "package_hash": scan.package_hash,
+            "scanner_version": scan.scanner_version,
+            "scan_decision": scan.decision,
+            "reviewer": str(reviewer or "").strip(),
         }
     lock["recommendation_status"] = _recommendation_status(lock)
     lock["trust_summary"] = _trust_summary(lock)
     lock["run_graph_evidence"] = _package_run_graph_node("skill_package.install", normalized_agent, lock)
     _persist_skill_package_lock(normalized_agent, lock)
     audit_details: dict[str, Any] = {"lock": _lock_summary(lock)}
-    if normalized_review_note:
+    if operator_review_accepted:
         audit_details["review_note"] = normalized_review_note
+        audit_details["operator_review"] = dict(lock["operator_review"])
     audit_details["run_graph_node"] = lock["run_graph_evidence"]
     _emit_package_audit("skill_package.install", normalized_agent, audit_details)
     _clear_tool_registry_cache()
