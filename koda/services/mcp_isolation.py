@@ -327,6 +327,14 @@ class DockerIsolation:
         # Pass env by name only: ``-e NAME`` makes the docker CLI copy the value
         # from its own environment, so secrets stay out of argv and off disk.
         server_env = _scrub_env(env)
+        # Names the docker CLI reads itself would reconfigure the CLI (daemon,
+        # context, config, credential helpers) instead of reaching only the
+        # container, so they are refused.
+        cli_names = sorted(name for name in server_env if _read_by_docker_cli(name))
+        if cli_names:
+            raise RuntimeError(
+                "docker isolation cannot pass env names the docker CLI reads itself: " + ", ".join(cli_names)
+            )
         for name in server_env:
             argv.extend(["-e", name])
         argv.append(constraints.docker_image)
@@ -383,6 +391,11 @@ _BLOCKED_ENV_NAMES: frozenset[str] = frozenset(
         "DYLD_FRAMEWORK_PATH",
     }
 )
+
+
+def _read_by_docker_cli(name: str) -> bool:
+    upper = name.upper()
+    return upper.startswith("DOCKER_") or upper in {"HOME", "PATH"}
 
 
 def _scrub_env(env: dict[str, str]) -> dict[str, str]:

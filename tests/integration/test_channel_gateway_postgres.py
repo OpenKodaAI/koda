@@ -47,6 +47,15 @@ async def _identity_statuses(dsn: str) -> list[str]:
     return [str(row["status"]) for row in rows]
 
 
+async def _unknown_sender_statuses(dsn: str) -> list[str]:
+    conn = await asyncpg.connect(dsn)
+    try:
+        rows = await conn.fetch(f'SELECT status FROM "{_SCHEMA}"."channel_unknown_senders" WHERE agent_id = $1', _AGENT)
+    finally:
+        await conn.close()
+    return [str(row["status"]) for row in rows]
+
+
 @pytest.fixture
 async def gateway_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[str]:
     await _clear(migrated_postgres)
@@ -90,14 +99,15 @@ async def test_control_plane_approval_survives_concurrent_message_handling(
 
     assert after.allowed is True
     assert await _identity_statuses(gateway_db) == ["allowed"]
+    # The queue entry the control plane resolved is not put back as pending.
+    assert await _unknown_sender_statuses(gateway_db) == ["resolved"]
 
 
-async def test_pairing_guesses_are_limited_per_sender(gateway_db: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gateway.secrets, "token_urlsafe", lambda _length: "PGCODE12")
+async def test_pairing_guesses_are_limited_per_sender(gateway_db: str) -> None:
     code = str(gateway.create_pairing_code(_AGENT, channel_type="telegram", created_by="owner")["code"])
 
     for index in range(gateway.PAIRING_MAX_FAILURES):
-        gateway.evaluate_incoming_message(_AGENT, _message(f"GUESS{index}"), legacy_allowed_user_ids=set())
+        gateway.evaluate_incoming_message(_AGENT, _message(f"GUESS{index:03d}"), legacy_allowed_user_ids=set())
     locked = gateway.evaluate_incoming_message(_AGENT, _message(code), legacy_allowed_user_ids=set())
     other = gateway.evaluate_incoming_message(_AGENT, _message(code, user_id="43"), legacy_allowed_user_ids=set())
 

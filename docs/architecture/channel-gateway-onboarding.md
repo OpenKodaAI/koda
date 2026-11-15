@@ -86,6 +86,8 @@ Required errors:
 - `channel.policy_denied`: blocked or revoked identity tried to route.
 - `channel.pairing_locked`: sender made too many failed pairing attempts and
   is locked out of pairing for a while; it stays queued for review.
+- `channel.gateway_unavailable`: the sender's identity could not be read from
+  the primary backend; the message is denied and nothing is written.
 - `channel.relay_failed`: approval relay or outbound channel response failed.
 
 ## API
@@ -111,15 +113,22 @@ All mutating routes require an operator session.
 - Blocked or revoked records override legacy allowlist compatibility.
 - A pairing code message allows the identity but does not enqueue that code
   text as a task. The user must send the task again after pairing.
-- A pairing attempt is a message that is exactly one code, or `/start CODE`;
-  one message tries one code. Codes expire after 15 minutes and work once. A
-  sender gets 5 failed attempts per 15 minutes; the fifth locks it out of
-  pairing for 15 minutes (`channel.pairing_locked`, event `pairing_locked_out`).
-  The counters live in the agent process.
+- A code is 8 letters and digits. A pairing attempt is a message that is
+  exactly one token of that shape, or `/start CODE`; one message tries one
+  code, and other messages are not attempts. Codes expire after 15 minutes and
+  work once. A sender (agent, channel type and user id, so one budget across
+  all its chats) gets 5 failed attempts per 15 minutes; the fifth locks it out
+  of pairing for 15 minutes (`channel.pairing_locked`, event
+  `pairing_locked_out`). The counters live in the agent process.
 - Unknown senders create a pending identity and create or update an
   unknown-sender queue item, then return a deny response. Message handling
   writes an identity only when its status changes, so it never overwrites an
-  approval, block or revoke written by the control plane.
+  approval, block or revoke written by the control plane. It re-reads the
+  identity before updating the queue item and skips it once the sender is no
+  longer pending, so a queue item the control plane resolved stays resolved.
+- If the identity read fails, the message is denied with
+  `channel.gateway_unavailable` (event `identity_read_failed`) and nothing is
+  written: a failed read is never treated as an unknown sender.
 - Slack and Discord adapters must only normalize `IncomingMessage` payloads.
   The central `ChannelManager` calls `channel_gateway.v1` and invokes the
   runtime callback only when the decision is allowed.

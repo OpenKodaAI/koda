@@ -122,6 +122,23 @@ def test_docker_wrap_passes_env_by_name_and_cap_drops(monkeypatch, tmp_path):
         assert "LD_PRELOAD" not in env
 
 
+@pytest.mark.parametrize("name", ["DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "DOCKER_CERT_PATH", "HOME", "PATH"])
+def test_docker_wrap_refuses_env_names_the_docker_cli_reads(name):
+    # ``-e NAME`` reads the value from the docker CLI's own environment, so these
+    # names would reconfigure the CLI (daemon, context, config, credential helpers)
+    # instead of reaching only the container.
+    with patch("koda.services.mcp_isolation.shutil.which", return_value="/usr/bin/docker"):
+        strategy = DockerIsolation()
+        with pytest.raises(RuntimeError, match=name) as excinfo:
+            strategy.wrap(
+                ["mcp-docker"],
+                {name: "tcp://remote:2375", "TOKEN": "abc"},
+                IsolationConstraints(network_mode="none"),
+            )
+    assert "tcp://remote:2375" not in str(excinfo.value)
+    assert "abc" not in str(excinfo.value)
+
+
 def test_blocked_env_is_scrubbed_in_isolated_strategies():
     with patch("koda.services.mcp_isolation.shutil.which", return_value="/usr/bin/bwrap"):
         strategy = BwrapIsolation()

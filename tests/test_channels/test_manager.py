@@ -380,7 +380,6 @@ class TestChannelManagerGatewayContracts:
         self, channel_type, adapter_cls, tmp_path, monkeypatch
     ):
         _isolate_gateway(monkeypatch, tmp_path)
-        monkeypatch.setattr(gateway.secrets, "token_urlsafe", lambda _length: "ABC12345")
         _manager, adapter, callback = self._manager_with_adapter(channel_type, adapter_cls)
         code = gateway.create_pairing_code("ATLAS", channel_type=channel_type, created_by="owner")
 

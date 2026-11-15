@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+import string
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -17,6 +18,10 @@ log = get_logger(__name__)
 
 CHANNEL_GATEWAY_SCHEMA_VERSION = "channel_gateway.v1"
 PAIRING_CODE_TTL_SECONDS = 15 * 60
+# Every code has this shape, so only a message of this shape is a pairing attempt
+# and ordinary short messages do not use up a sender's attempts.
+PAIRING_CODE_LENGTH = 8
+_PAIRING_CODE_ALPHABET = string.ascii_uppercase + string.digits
 # A sender gets this many failed pairing attempts per lockout window; the last
 # one locks the sender out of pairing for the window.
 PAIRING_MAX_FAILURES = 5
@@ -28,9 +33,12 @@ GatewayDecision = Literal["allow", "queue_for_pairing", "deny", "paired"]
 GatewaySeverity = Literal["info", "warning", "error"]
 
 _LAST_DECISIONS: dict[str, dict[str, Any]] = {}
-# Per-sender pairing limits, keyed by "<agent_id>:<identity_id>" (monotonic seconds).
+# Per-sender pairing limits, keyed by "<agent_id>:<channel_type>:<user_id>" so one
+# user has one budget across all its chats (monotonic seconds).
 _PAIRING_FAILURES: dict[str, list[float]] = {}
 _PAIRING_LOCKED_UNTIL: dict[str, float] = {}
+# Past this many senders, entries whose window has passed are pruned.
+_PAIRING_STATE_MAX = 10_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,7 +368,7 @@ def create_pairing_code(
     ttl_seconds: int = PAIRING_CODE_TTL_SECONDS,
 ) -> dict[str, Any]:
     normalized = _normalize_agent_id(agent_id)
-    code = secrets.token_urlsafe(5).replace("-", "").replace("_", "")[:8].upper()
+    code = "".join(secrets.choice(_PAIRING_CODE_ALPHABET) for _ in range(PAIRING_CODE_LENGTH))
     now = datetime.now(UTC)
     payload = {
         "schema_version": CHANNEL_GATEWAY_SCHEMA_VERSION,
@@ -509,7 +517,19 @@ def evaluate_incoming_message(
     )
 
     legacy_allowed = _coerce_int(identity.user_id) in set(legacy_allowed_user_ids or set())
-    existing = _identity_by_id(normalized, identity_id)
+    identities = _list_primary_identities(normalized)
+    if identities is None and _primary_backend(normalized) is not None:
+        # A failed read is not "no identity": deny without writing, so a transient
+        # failure never replaces an operator's approval, block or revoke.
+        return _identity_read_failed(normalized, identity, identity_id)
+    existing = next(
+        (
+            dict(item)
+            for item in identities or []
+            if isinstance(item, dict) and str(item.get("identity_id") or "") == identity_id
+        ),
+        None,
+    )
     raw_status = str((existing or {}).get("status") or "pending")
     status = cast(
         GatewayStatus,
@@ -570,7 +590,7 @@ def evaluate_incoming_message(
         )
 
     attempt = _pairing_attempt(message.text)
-    limiter_key = f"{normalized}:{identity_id}"
+    limiter_key = f"{normalized}:{identity.channel_type.lower()}:{identity.user_id}"
     pairing: dict[str, Any] | None = None
     locked_out = False
     if attempt:
@@ -642,7 +662,11 @@ def evaluate_incoming_message(
     if str((existing or {}).get("status") or "") != "pending":
         pending_record = _record_from_identity(normalized, identity, status="pending", source="unknown_sender")
         _persist_identity(normalized, pending_record)
-    _persist_unknown_sender(normalized, unknown_payload)
+    # Re-read before queueing: if the control plane approved or blocked the sender
+    # while this message was handled, it also resolved the queue entry, and
+    # writing it again would show a resolved sender as pending review.
+    if str((_identity_by_id(normalized, identity_id) or {}).get("status") or "") == "pending":
+        _persist_unknown_sender(normalized, unknown_payload)
     event_id = _append_event(
         normalized,
         "unknown_sender_queued",
@@ -681,6 +705,37 @@ def evaluate_incoming_message(
         reason_code=reason_code,
         event_id=event_id,
         error=error,
+    )
+
+
+def _identity_read_failed(agent_id: str, identity: ChannelIdentity, identity_id: str) -> ChannelGatewayDecision:
+    log.warning("channel_gateway_identity_read_failed", agent_id=agent_id, identity_id=identity_id)
+    reason_code = "channel.gateway_unavailable"
+    event_id = _append_event(
+        agent_id,
+        "identity_read_failed",
+        {"identity_id": identity_id, "status": "unavailable", "reason_code": reason_code},
+        severity="error",
+    )
+    return ChannelGatewayDecision(
+        schema_version=CHANNEL_GATEWAY_SCHEMA_VERSION,
+        decision="deny",
+        allowed=False,
+        identity_id=identity_id,
+        channel_type=identity.channel_type,
+        channel_id=identity.channel_id,
+        user_id=identity.user_id,
+        status="pending",
+        reason_code=reason_code,
+        event_id=event_id,
+        error=ChannelGatewayError(
+            code=reason_code,
+            category="dependency_unavailable",
+            message="The channel gateway could not read this sender's identity.",
+            retryable=True,
+            user_action="Send the message again; if it keeps failing, check the primary database.",
+            detail_ref="docs/operations/channel-gateway-runbook.md",
+        ),
     )
 
 
@@ -728,18 +783,23 @@ def denial_message_for_decision(decision: dict[str, Any] | None) -> str:
         return f"Access denied. Too many pairing attempts; wait {minutes} minutes before sending a pairing code again."
     if code == "channel.policy_denied":
         return "Access denied. This sender is blocked in the Koda channel gateway."
+    if code == "channel.gateway_unavailable":
+        return "Access denied. The Koda channel gateway could not check this sender; try again shortly."
     return "Access denied."
 
 
 def _pairing_attempt(text: str) -> str:
     """The one code a message offers: the whole message, or the argument of a
-    leading command such as ``/start CODE``. Any other message tries no code, so
-    one message is at most one guess.
+    leading command such as ``/start CODE``, when it has the shape of a code
+    (``PAIRING_CODE_LENGTH`` letters and digits). Any other message tries no code,
+    so one message is at most one guess and chit-chat is not a guess.
     """
     tokens = str(text or "").strip().upper().split()
     if tokens and tokens[0].startswith("/"):
         tokens = tokens[1:]
-    if len(tokens) != 1 or not (tokens[0].isascii() and tokens[0].isalnum()):
+    if len(tokens) != 1 or len(tokens[0]) != PAIRING_CODE_LENGTH:
+        return ""
+    if not all(char in _PAIRING_CODE_ALPHABET for char in tokens[0]):
         return ""
     return tokens[0]
 
@@ -762,9 +822,12 @@ def _record_pairing_failure(key: str, now: float) -> bool:
     if len(failures) >= PAIRING_MAX_FAILURES:
         _PAIRING_FAILURES.pop(key, None)
         _PAIRING_LOCKED_UNTIL[key] = now + PAIRING_LOCKOUT_SECONDS
+        if len(_PAIRING_LOCKED_UNTIL) > _PAIRING_STATE_MAX:
+            for stale in [k for k, until in _PAIRING_LOCKED_UNTIL.items() if until <= now]:
+                _PAIRING_LOCKED_UNTIL.pop(stale, None)
         return True
     _PAIRING_FAILURES[key] = failures
-    if len(_PAIRING_FAILURES) > 10_000:
+    if len(_PAIRING_FAILURES) > _PAIRING_STATE_MAX:
         for stale in [k for k, times in _PAIRING_FAILURES.items() if now - times[-1] >= PAIRING_LOCKOUT_SECONDS]:
             _PAIRING_FAILURES.pop(stale, None)
     return False
