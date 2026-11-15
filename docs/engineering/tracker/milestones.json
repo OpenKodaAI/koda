@@ -13,8 +13,8 @@
    "milestone": "M1",
    "name": "Segurança",
    "total": 68,
-   "done": 34,
-   "in_progress": 1,
+   "done": 35,
+   "in_progress": 0,
    "awaiting_evidence": 3,
    "remaining": 30
   },
@@ -22,8 +22,8 @@
    "milestone": "M2",
    "name": "Integridade de dados",
    "total": 24,
-   "done": 6,
-   "in_progress": 2,
+   "done": 8,
+   "in_progress": 0,
    "awaiting_evidence": 1,
    "remaining": 15
   },
@@ -31,8 +31,8 @@
    "milestone": "M3",
    "name": "Jornadas críticas quebradas",
    "total": 43,
-   "done": 13,
-   "in_progress": 2,
+   "done": 15,
+   "in_progress": 0,
    "awaiting_evidence": 3,
    "remaining": 25
   },
@@ -58,10 +58,10 @@
    "milestone": "M6",
    "name": "Completar funcionalidades",
    "total": 26,
-   "done": 9,
+   "done": 10,
    "in_progress": 0,
    "awaiting_evidence": 0,
-   "remaining": 17
+   "remaining": 16
   },
   {
    "milestone": "M7",
@@ -77,9 +77,9 @@
    "name": "UX e acessibilidade",
    "total": 32,
    "done": 6,
-   "in_progress": 0,
+   "in_progress": 3,
    "awaiting_evidence": 0,
-   "remaining": 26
+   "remaining": 23
   },
   {
    "milestone": "M9",

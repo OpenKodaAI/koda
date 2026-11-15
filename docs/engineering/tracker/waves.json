@@ -129,9 +129,16 @@
   {
    "wave": "W15",
    "name": "Onda 15",
-   "scope": "Segurança: scanner de pacotes com uma regra única e linear (D-326..D-329, segunda rodada); tabelas de aprovação em migration com BIGINT e agent_id (M2-E1-T1, aprovada) e fim do fallback em JSON, concessão revogada que não volta, expiração exata (M2-E1-T2, D-343..D-347); broadcast só para participantes, identidade de squad no servidor e recall rejeita user_id <= 0 (M1-E5-T2); API de runtime responde 400 a parâmetros inválidos (M3-E8-T4). Squads: delegação limitada (M3-E6-T4, aprovada), cadeia preservada no fallback pelo barramento e metadados de tarefa só do servidor (D-338, D-339, D-352..D-354). Design: tamanhos de fonte que agora se aplicam (D-330..D-334, aprovados), regras globais fora de camada, foco escondido no seletor de idioma, popovers sem nome e Escape (D-319, D-320, D-348..D-351)",
+   "scope": "Segurança: scanner de pacotes com uma regra única e linear (D-326..D-329, segunda rodada); tabelas de aprovação em migration com BIGINT e agent_id (M2-E1-T1, aprovada) e fim do fallback em JSON, concessão revogada que não volta, expiração exata (M2-E1-T2, D-343..D-347); broadcast só para participantes, identidade de squad no servidor e recall rejeita user_id <= 0 (M1-E5-T2); API de runtime responde 400 a parâmetros inválidos (M3-E8-T4). Squads: delegação limitada (M3-E6-T4, aprovada), cadeia preservada no fallback pelo barramento e metadados de tarefa só do servidor (D-338, D-339, D-352..D-354). Design: tamanhos de fonte que agora se aplicam (D-330..D-334, aprovados), regras globais fora de camada, foco escondido no seletor de idioma, popovers sem nome e Escape (D-319, D-320, D-348..D-351). Mesclado no lote 8: M2-E1-T1/T2, M3-E6-T4, SQ-D352, M1-E5-T2, M3-E8-T4, D-330..D-334, D-349..D-351; aprovados para o lote 9: M2-D366, SQ-D336",
+   "status": "final_review",
+   "ref": "d62e100, task/M2-D366, task/SQ-D336"
+  },
+  {
+   "wave": "W16",
+   "name": "Onda 16",
+   "scope": "Segurança: execuções filhas (M6-E2-T6, mesclado; somente leitura de verdade, dry-run herdado, custo contado na execução pai e no orçamento da sala: D-371..D-374 aprovados, D-385..D-389 em andamento); API de runtime sem caminhos do host em eventos, ambientes, terminais, artefatos e checkpoints, recusa de squad definitiva (D-355..D-359 aprovados, D-390..D-396 em andamento); scanner de pacotes, rodada de fechamento (D-326). Design: idioma renderizado no servidor, sem chaves cruas e sem erro de hidratação #418 (M8-E3-T1..T3, D-375..D-378)",
    "status": "implementing",
-   "ref": "task/SEC-D326, task/M2-E1-T2, task/M1-E5-T2, task/SQ-D352, task/M8-D349"
+   "ref": "task/M6-D385, task/RT-D390, task/SEC-D326, task/M8-E3"
   }
  ],
  "meta": [

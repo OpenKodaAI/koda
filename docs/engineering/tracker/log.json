@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L32",
+   "at": "2026-11-15 09:55",
+   "event": "Lote 8 mesclado (d62e100) com todos os gates verdes: 10.628 testes Python sem falhas, 484 Postgres, 1256 web, 101 Rust, e 9 de 9 testes no navegador (Escape no editor de rotinas fecha só o popover). Entraram: aprovações no Postgres com ids BIGINT e escopo por agente, sem fallback em JSON e com concessão revogada que não volta; execuções filhas limitadas às ferramentas da execução pai; delegação sem ciclos nem pingue-pongue, com a cadeia preservada em todos os caminhos; broadcast só para os participantes da sala e identidade da mensagem de squad decidida no servidor; resposta do navegador sem caminhos do host; tamanhos de fonte, cores de link e cursores que agora se aplicam. Aprovados para o lote 9: expiração das aprovações pendentes no reinício, confiabilidade de squads, modo somente leitura que bloqueia toda escrita e custo de execuções filhas contado na execução pai, eventos e ambientes do runtime sem caminhos do host. 102 de 347 tarefas do plano concluídas"
+  },
+  {
    "id": "L31",
    "at": "2026-11-15 08:20",
    "event": "Lote 7 mesclado (efe71f0) com os gates verdes: 10.488 testes Python (1 contaminação entre testes corrigida na integração), 449 Postgres, 1236 web. Entraram: restrições do MCP validadas também na partida e nos testes do painel; scanner de pacotes nega os.system, subprocess, exec e eval por alias e exige revisão para rotas de execução fora do import; pausa de squad por orçamento ou operador sem gastar as expirações da reivindicação; tokens de design definidos e contraste AA; diretório de runtime isolado por sessão de teste. Aprovados para o lote 8: tabelas de aprovação com BIGINT e agent_id (M2-E1-T1), delegação limitada contra ciclos, profundidade e pingue-pongue (M3-E6-T4) e tamanhos de fonte que agora se aplicam (D-330..D-334). O scanner (D-326) volta para uma segunda rodada com uma regra única e linear, porque seguir aliases um a um gerava regressões. 96 de 354 tarefas do plano concluídas"
