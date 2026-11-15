@@ -81,15 +81,14 @@ Learned from waves 2A–5 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-14 22:40 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 00:12 UTC. The progress tracker mirrors this list for the operator.)
 
-- WAVE-2A integration (`integrate/wave-2a`, `wf_1fa2157a-37f`): final round 3 of the credential-store coverage. Round 2: correctness approved; security asked for changes (minors only: Claude's project `.mcp.json` and Codex profile configs hold MCP secrets). After round 3, any remaining minor goes to TECHNICAL_DEBT; the permanent fix is ADR-002 confinement (AG-13/AG-14). Then the full gates, the merge and the records.
-- WAVE-5 (`wf_94cba2c7-f62`, resumed with the no-rework rules): M1-E7-T2 Python advisories, confirm reviews of round 2; M1-E7-T3 with M1-E7-T11 (Node advisories, relay limits), round 2; M1-E7-T6 (foreign files) and D-254 (orphaned guards), reviews.
-- WAVE-6 (`wf_1fd3a503-f5d` Python, `wf_71bac8b0-c06` web; base 669fe6b): M3-E6-T2 + M3-E6-T3 (squads), M3-E4-T6 + M3-E1-T5 (memory scanner, scheduler lease), M8-E1-T1..T3 (accessibility), M8-E5-T2 + M8-E2-T1 (one error and empty state, mobile nav). Two rounds at most each.
-- WAVE-7 (`wf_d9f147a2-300` auth, `wf_23e36b0c-5e3` core; base 06cde4d): M1-E1-T4 + T14 + T15; M1-E1-T5 then M1-E1-T13; M2-E5-T1 + M2-E2-T4; M4-E1-T6 + M4-E1-T9.
-- REF-OPENBOT (`wf_5b8818b4-313`, branch `task/REF-OPENBOT`): openbot.run as the operator-named reference for design, chat and agents. Visual, product, positioning and architecture sweeps, a Koda mapping, then REFERENCE_RESEARCH §3.8 and plan deltas, with a skeptic verify. Patterns only (PolyForm Noncommercial).
-- Awaiting the operator: ADR-002 OQ-1..OQ-12 (§13 sign-off), sent 2026-11-14 22:20 with recommendations.
-- Merged today after the last full record: ADR-002 (d21c2b3, M1-E2-T1 done) and WAVE-4 (06cde4d: M1-E1-T6, T7, T18 done; D-231..D-233 fixed).
+- WAVE-5 (`wf_94cba2c7-f62`): final rounds. M1-E7-T2 Python advisories (round 3 done; confirm reviews), M1-E7-T3 with M1-E7-T11 (round-2 confirm reviews), M1-E7-T6 (round 3 for one unresolved item), D-254 (round-2 confirm reviews). The integration follows: merge the four branches, run the full gates, merge.
+- WAVE-6 web (`wf_71bac8b0-c06`): M8-E1-T1..T3 accessibility (round 2); M8-E5-T2 + M8-E2-T1 (rounds done).
+- WAVE-6b (`wf_36851995-7f3`): M3-E6-T1, the squads deadlock root cause, with the M3-E6-T2/T3 leftovers; and D-259, scheduled-job dispatch across agents, with the memory leftovers. Two rounds.
+- WAVE-7 (`wf_d9f147a2-300` auth, `wf_23e36b0c-5e3` core): M1-E1-T4/T14/T15 round 2; M1-E1-T5 + T13 round-1 reviews; M2-E5-T1 + M2-E2-T4 round 2; M4-E1-T6 + T9 round-2 confirm reviews.
+- Awaiting the operator: ADR-002 OQ-1..OQ-12, and plan Q-25..Q-27 (§13 sign-off).
+- Merged since the last record: ADR-002 (d21c2b3), WAVE-4 (06cde4d), REF-OPENBOT (cee7b41), WAVE-2A (dae8c39).
 
 ## Pending findings for the plan (verified by the orchestrator)
 
