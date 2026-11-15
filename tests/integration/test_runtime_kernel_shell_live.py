@@ -42,6 +42,8 @@ from koda.services.tool_dispatcher import (
 
 pytestmark = [
     pytest.mark.rust_engine,
+    # Each test runs commands as a call that went through approval does.
+    pytest.mark.usefixtures("execution_approved"),
     pytest.mark.skipif(not Path("/proc/self/stat").exists(), reason="inspects process groups through /proc"),
 ]
 

@@ -95,6 +95,7 @@ class TestBlockedShellPattern:
         assert BLOCKED_SHELL_PATTERN.search(cmd) is None, f"Safe command blocked: {cmd}"
 
 
+@pytest.mark.usefixtures("execution_approved")
 class TestShellRunnerNewlineDefense:
     """Test shell_runner defense-in-depth against newline injection."""
 
@@ -155,6 +156,7 @@ class TestShellRunnerNewlineDefense:
 class TestCliRunnerUsesExec:
     """Test that cli_runner uses create_subprocess_exec, not shell."""
 
+    @pytest.mark.usefixtures("execution_approved")
     @pytest.mark.asyncio
     async def test_uses_subprocess_exec(self):
         from unittest.mock import AsyncMock, patch
@@ -173,6 +175,7 @@ class TestCliRunnerUsesExec:
         assert call_args == ("docker", "ps")
         assert "Exit 0" in result
 
+    @pytest.mark.usefixtures("execution_approved")
     @pytest.mark.asyncio
     async def test_shlex_split_preserves_quotes(self):
         from unittest.mock import AsyncMock, patch
@@ -243,6 +246,7 @@ class TestBlockedDockerPattern:
 class TestInformationDisclosure:
     """SEC-6: Verify that user-facing error messages do not leak internal details."""
 
+    @pytest.mark.usefixtures("execution_approved")
     @pytest.mark.asyncio
     async def test_blocked_shell_returns_generic_error(self):
         """Blocked shell commands must return a generic message, not the specific reason."""

@@ -224,9 +224,13 @@ def approved_context(mock_context):
     return mock_context
 
 
-@pytest.fixture(autouse=True)
-def _auto_approve_execution():
-    """Auto-set the execution_approved contextvar for all tests."""
+@pytest.fixture
+def execution_approved():
+    """Run the test inside an approved execution context, as ``with_approval`` and scheduled jobs do.
+
+    Opt-in only: the queue worker never sets this contextvar (D-011), so setting it for every
+    test hid that bug. Use it only for tests that model an approved context.
+    """
     from koda.utils.approval import _execution_approved
 
     token = _execution_approved.set(True)

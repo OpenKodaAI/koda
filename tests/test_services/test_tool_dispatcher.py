@@ -381,9 +381,10 @@ class TestSecurity:
 
 
 class TestSupervisedMode:
-    """Supervised mode no longer blocks writes in execute_tool() — approval
-    is handled at the agent loop level. These tests verify that execute_tool()
-    passes through to the handler regardless of mode."""
+    """Reads always pass in supervised mode. execute_tool() passes a supervised-mode write to its
+    handler only inside an approved execution context, which the write tests opt into with
+    ``execution_approved``; outside one it refuses the write (D-011,
+    test_approval_context_regression.py)."""
 
     @pytest.mark.asyncio
     async def test_write_passes_through_in_supervised(self):
@@ -402,9 +403,10 @@ class TestSupervisedMode:
             result = await execute_tool(call, ctx)
         assert result.success
 
+    @pytest.mark.usefixtures("execution_approved")
     @pytest.mark.asyncio
     async def test_http_post_passes_through_in_supervised(self):
-        """HTTP POST is no longer blocked at execute_tool level."""
+        """An approved supervised HTTP POST reaches the handler."""
         ctx = _make_ctx(agent_mode="supervised")
         call = AgentToolCall(
             tool="http_request",
@@ -569,9 +571,10 @@ class TestBrowserTools:
             result = await execute_tool(call, ctx)
         assert result.success
 
+    @pytest.mark.usefixtures("execution_approved")
     @pytest.mark.asyncio
     async def test_browser_supervised_write_passes_through(self):
-        """Browser write tools now pass through in supervised mode (approval in agent loop)."""
+        """An approved supervised browser write reaches the handler."""
         ctx = _make_ctx(agent_mode="supervised")
         call = AgentToolCall(tool="browser_click", params={"selector": "Submit"}, raw_match="")
         mock_bm = MagicMock()
@@ -745,9 +748,10 @@ class TestBrowserTools:
         assert result.success
         mock_bm.press_key.assert_called_once_with(ctx.user_id, "Escape", selector="input#search")
 
+    @pytest.mark.usefixtures("execution_approved")
     @pytest.mark.asyncio
     async def test_browser_hover_supervised_passes_through(self):
-        """Browser hover now passes through in supervised mode."""
+        """An approved supervised browser hover reaches the handler."""
         ctx = _make_ctx(agent_mode="supervised")
         call = AgentToolCall(tool="browser_hover", params={"selector": "Menu"}, raw_match="")
         mock_bm = MagicMock()
@@ -760,9 +764,10 @@ class TestBrowserTools:
             result = await execute_tool(call, ctx)
         assert result.success
 
+    @pytest.mark.usefixtures("execution_approved")
     @pytest.mark.asyncio
     async def test_browser_press_key_supervised_passes_through(self):
-        """Browser press_key now passes through in supervised mode."""
+        """An approved supervised browser press_key reaches the handler."""
         ctx = _make_ctx(agent_mode="supervised")
         call = AgentToolCall(tool="browser_press_key", params={"key": "Enter"}, raw_match="")
         mock_bm = MagicMock()

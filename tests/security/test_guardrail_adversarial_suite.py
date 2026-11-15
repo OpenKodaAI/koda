@@ -56,6 +56,7 @@ class SecurityScenario:
     forbidden_effect: str
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
@@ -500,6 +501,7 @@ async def test_background_shell_is_held_by_the_execution_policy_rule_that_holds_
     assert background_shell._processes == {}
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
@@ -541,6 +543,7 @@ async def test_background_shell_allowed_by_policy_reaches_the_approval_gate_of_s
     assert [call.kwargs["command"] for call in kernel.execute_command.await_args_list] == ["ls", "ls"]
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
@@ -576,6 +579,7 @@ async def test_background_shell_runs_allowed_command_through_runtime_kernel(
     assert output.output == "Exit 0:\nbuilt"
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
@@ -672,6 +676,7 @@ class _ProcessGroupKernel:
         }
 
 
+@pytest.mark.usefixtures("execution_approved")
 @pytest.mark.security
 @pytest.mark.guardrail
 @pytest.mark.asyncio
