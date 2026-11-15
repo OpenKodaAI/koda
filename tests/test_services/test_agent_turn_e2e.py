@@ -9,7 +9,9 @@ edges are replaced:
   ``claude`` entry of ``llm_runner._HTTP_PROVIDER_RUNNERS``, so capability
   checks, ``run_llm_streaming``, provider fallback, the agent tool loop and
   the retry loop above it are production code;
-* Telegram: ``tests.fakes.telegram.FakeBot`` records what is delivered.
+* Telegram: ``tests.fakes.telegram.FakeBot`` records what is delivered;
+* the response cache, in the runtime-environments scenario only: ``_StubCache``
+  holds one answer, so a cache hit runs without loading the cache's embedding model.
 
 No function on the orchestration path is patched; tests only set
 configuration (the retry back-off, the squad stores' database URL) and reset
@@ -51,7 +53,7 @@ _TABLES = (
     "scheduled_jobs",
 )
 _TURN_TIMEOUT_S = 30.0
-_USER_IDS = frozenset({910001, 910002, 910003, 910004, 910005, 910006})
+_USER_IDS = frozenset({910001, 910002, 910003, 910004, 910005, 910006, 910007})
 
 
 async def _drain_background_work() -> None:
@@ -293,6 +295,64 @@ async def test_success_delivers_the_answer_and_persists_the_completed_task(
     assert trace["runtime"]["status"] == "completed"
     assert trace["request"]["query_text"] == "What is the capital of France?"
     assert trace["assistant"]["response_text"] == "Paris is the capital of France."
+
+
+class _StubCache:
+    """The response cache, holding an answer for one question (the cache, like the provider, is an edge)."""
+
+    _initialized = True
+
+    def __init__(self, query: str, response: str) -> None:
+        self._query = query
+        self._response = response
+
+    async def lookup(self, query: str, user_id: int, **_kwargs: Any) -> Any:
+        from koda.services.cache_manager import CacheLookupResult
+
+        if query != self._query:
+            return None
+        return CacheLookupResult(
+            cache_id=1, response=self._response, match_type="exact", similarity=1.0, original_cost_usd=0.01
+        )
+
+    async def store(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+async def test_light_task_and_cache_hit_complete_with_runtime_environments_enabled(
+    agent_db: str, queue_state: None, application: FakeApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M6-E1-T8 (D-064): with ``RUNTIME_ENVIRONMENTS_ENABLED`` a light task gets no runtime environment.
+
+    It has no kernel-backed terminal, so the terminal check, which applies only to a task with an
+    environment, must not fail it after the provider answered. A question answered from the cache
+    runs no provider, and completes too.
+    """
+    from koda.services import cache_manager
+    from koda.services import queue_manager as qm
+
+    monkeypatch.setattr(qm, "RUNTIME_ENVIRONMENTS_ENABLED", True)
+    cached_answer = "Rome is the capital of Italy, and has been since 1871."
+    monkeypatch.setattr(
+        cache_manager, "get_cache_manager", lambda: _StubCache("What is the capital of Italy?", cached_answer)
+    )
+    user_id = chat_id = 910007
+    provider = StubProvider([ProviderTurn(text="Paris is the capital of France.", cost_usd=0.01)]).install(monkeypatch)
+
+    answered_id = await _send(application, user_id=user_id, chat_id=chat_id, text="What is the capital of France?")
+    await _wait_for_worker(user_id)
+    cached_id = await _send(
+        application, user_id=user_id, chat_id=chat_id, text="What is the capital of Italy?", message_id=2
+    )
+    await _wait_for_worker(user_id)
+
+    assert [call.query for call in provider.calls] == ["What is the capital of France?"]
+    for task_id in (answered_id, cached_id):
+        row = await _task_row(agent_db, task_id)
+        assert (row["status"], row["error_message"]) == ("completed", None)
+    bot: FakeBot = application.bot
+    answers = [message.text or "" for message in bot.visible(chat_id)]
+    assert [answer.split("\n")[0] for answer in answers] == ["Paris is the capital of France.", cached_answer]
 
 
 async def test_retryable_provider_error_is_retried_then_dead_lettered(

@@ -3977,6 +3977,15 @@ def _agent_turn_output_audit_payload(result: RunResult) -> dict[str, Any]:
         }
 
 
+def _requires_kernel_terminal(runtime_env_id: int | None, run_result: RunResult) -> bool:
+    """Whether a run must carry a kernel-backed terminal path (D-064).
+
+    Only a task with a runtime environment runs its provider on a kernel terminal: a light task
+    gets no environment, and a cache hit runs no provider.
+    """
+    return RUNTIME_ENVIRONMENTS_ENABLED and runtime_env_id is not None and run_result.stop_reason != "cache_hit"
+
+
 async def _run_fallback(
     ctx: QueryContext,
     item: QueueItem,
@@ -4009,7 +4018,20 @@ async def _run_fallback(
             )
 
     track_task = asyncio.create_task(_track_process())
+    runtime_terminal_id: int | None = None
+    runtime_terminal_path: str | None = None
     try:
+        if task_id is not None and RUNTIME_ENVIRONMENTS_ENABLED and ctx.runtime_env_id is not None:
+            from koda.services.runtime import get_runtime_controller
+
+            runtime_terminal_path = "kernel-stream://stdout"
+            runtime_terminal_id = await get_runtime_controller().register_terminal(
+                task_id=task_id,
+                terminal_kind="provider",
+                label=f"{ctx.provider} run",
+                path=runtime_terminal_path,
+                stream_path="kernel-stream://stdout",
+            )
         with contextlib.suppress(Exception):
             from koda.services import audit
 
@@ -4053,6 +4075,8 @@ async def _run_fallback(
             supports_native_resume=bool(result.get("supports_native_resume", ctx.supports_native_resume)),
             error_kind=str(result.get("error_kind", "")),
             retryable=bool(result.get("retryable", False)),
+            runtime_terminal_id=runtime_terminal_id,
+            runtime_terminal_path=runtime_terminal_path,
         )
         with contextlib.suppress(Exception):
             from koda.services import audit
@@ -7906,6 +7930,7 @@ async def _execute_single_task(
                     if RUNTIME_ENVIRONMENTS_ENABLED:
                         task_root = Path(runtime.runtime_root) / "tasks" / str(task_id)
                         task_root.mkdir(parents=True, exist_ok=True)
+                    if _requires_kernel_terminal(task_info.runtime_env_id, run_result):
                         runtime_terminal_path = str(run_result.runtime_terminal_path or "")
                         if not runtime_terminal_path.startswith(("kernel://", "kernel-stream://")):
                             raise RuntimeError("runtime terminal output requires a kernel-backed terminal path")

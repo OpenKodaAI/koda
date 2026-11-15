@@ -341,6 +341,11 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - `scripts/install.sh` stops with a clear message on Node older than 20, installs Node
   from NodeSource when it is missing, and picks the Docker apt repository from
   `/etc/os-release` (Debian, Ubuntu and derivatives). (M7-E2-T4)
+- With `RUNTIME_ENVIRONMENTS_ENABLED=true`, light tasks and answers from the response
+  cache complete. Before, every such task failed with "runtime terminal output requires
+  a kernel-backed terminal path" after the provider had answered. The kernel terminal is
+  now required only for a task with a runtime environment, and the non-streaming
+  provider run registers one as the streaming run does. (M6-E1-T8, D-064)
 
 
 ## [1.0.18] - 2026-05-20
