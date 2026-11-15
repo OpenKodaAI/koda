@@ -5,11 +5,15 @@ from __future__ import annotations
 import ast
 import contextlib
 import hashlib
+import importlib.abc
+import importlib.machinery
 import json
+import os
 import re
 import sys
 import tempfile
-from collections.abc import Iterator
+import types
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -596,14 +600,64 @@ def verify_skill_package_integrity(lock: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
+    """Compile a module from its source file, never reading or writing a bytecode cache."""
+
+    def get_code(self, fullname: str) -> types.CodeType:
+        path = self.get_filename(fullname)
+        return self.source_to_code(self.get_data(path), path)
+
+
+class _PackageSourceOnlyFinder(importlib.abc.MetaPathFinder):
+    """Load every module found in an installed package's directory from its source (D-273).
+
+    Bytecode caches are not part of the package hash, so a ``__pycache__`` entry planted next
+    to a package module must never run in place of the verified source: not while the
+    handlers register, and not later, when package code imports one of its modules at
+    tool-call time. The finder sits first on ``sys.meta_path`` for the rest of the process
+    once a package registers. It finds modules as ``PathFinder`` does and answers only for
+    those inside a package directory, so every other import goes on to the usual finders.
+    """
+
+    def __init__(self) -> None:
+        self._roots: tuple[str, ...] = ()
+
+    def add_root(self, package_dir: Path) -> None:
+        root = os.path.realpath(package_dir)
+        if root not in self._roots:
+            self._roots = (*self._roots, root)
+        if self not in sys.meta_path:
+            sys.meta_path.insert(0, self)
+
+    def find_spec(
+        self, fullname: str, path: Sequence[str] | None, target: types.ModuleType | None = None
+    ) -> importlib.machinery.ModuleSpec | None:
+        roots = self._roots
+        if not roots:
+            return None
+        spec = importlib.machinery.PathFinder.find_spec(fullname, path, target)
+        if spec is None or spec.origin is None or not isinstance(spec.loader, importlib.machinery.SourceFileLoader):
+            return None
+        origin = os.path.realpath(spec.origin)
+        if not any(origin.startswith(root + os.sep) for root in roots):
+            return None
+        spec.loader = _SourceOnlyLoader(fullname, spec.origin)
+        spec.cached = None
+        return spec
+
+
+_PACKAGE_SOURCE_ONLY_FINDER = _PackageSourceOnlyFinder()
+
+
 @contextlib.contextmanager
 def _source_only_imports() -> Iterator[None]:
     """Load package code from its source files only, while the handlers are registered.
 
     Bytecode caches are not part of the package hash, so Python must neither read a
     ``__pycache__`` entry next to the source (one planted there would run instead of the
-    verified source) nor write one. Both settings are process-wide and restored on exit, so
-    an import package code makes later, at tool-call time, uses Python's normal cache lookup.
+    verified source) nor write one. Both settings are process-wide and restored on exit;
+    modules found in a package's directory, then or at tool-call time, load from source
+    through ``_PackageSourceOnlyFinder``.
     """
 
     previous_dont_write, previous_prefix = sys.dont_write_bytecode, sys.pycache_prefix
@@ -693,6 +747,7 @@ def ensure_installed_package_tools_registered(
             prompt_section="",
             requires={"source": "skill_package"},
         )
+        _PACKAGE_SOURCE_ONLY_FINDER.add_root(manifest.plugin_dir)
         with _source_only_imports():
             err = registry.register(manifest)
         if err:
@@ -873,9 +928,10 @@ def _hash_package(
     for file_path in files:
         rel = _rel(package_dir, file_path)
         if not include_bytecode_caches and _is_bytecode_cache(rel):
-            # Bytecode caches change whenever Python imports the package and are not loaded
-            # while its handlers register (see _source_only_imports), so they are not part of
-            # the approved package. Every other file under __pycache__ is.
+            # Bytecode caches change whenever Python imports the package and package code
+            # never loads from them (see _source_only_imports and _PackageSourceOnlyFinder),
+            # so they are not part of the approved package. Every other file under
+            # __pycache__ is.
             continue
         try:
             content = file_path.read_bytes()

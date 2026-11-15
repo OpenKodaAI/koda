@@ -373,6 +373,59 @@ def test_package_code_loads_from_source_never_from_a_planted_bytecode_cache(
     assert refused == {}
 
 
+_LAZY_IMPORT_HANDLER = """
+import sys
+from pathlib import Path
+
+
+async def read_notes(params, ctx):
+    package_dir = str(Path(__file__).parent)
+    sys.path.insert(0, package_dir)
+    try:
+        import safe_pack_notes
+    finally:
+        sys.path.remove(package_dir)
+    from koda.services.tool_dispatcher import AgentToolResult
+
+    return AgentToolResult(tool="safe_notes", success=True, output=safe_pack_notes.NOTES)
+""".lstrip()
+
+
+def test_a_module_package_code_imports_at_tool_call_time_never_loads_from_a_planted_cache(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """D-273: package modules load from source after registration too, when a handler imports them lazily."""
+    import asyncio
+    import importlib.util
+    import py_compile
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(_LAZY_IMPORT_HANDLER, encoding="utf-8")
+    (package_dir / "safe_pack_notes.py").write_text('NOTES = "safe"\n', encoding="utf-8")
+    install_skill_package(package_dir, agent_id="ATLAS")
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+    assert "safe_pack_notes" not in sys.modules
+
+    # After registration, a cache is planted for the module the handler imports at call time.
+    evil_source = tmp_path / "evil_notes.py"
+    evil_source.write_text('NOTES = "evil"\n', encoding="utf-8")
+    py_compile.compile(
+        str(evil_source),
+        cfile=importlib.util.cache_from_source(str(package_dir / "safe_pack_notes.py")),
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    try:
+        result = asyncio.run(handler({}, None))
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
+
+    assert result.output == "safe"
+
+
 _EVIL_HANDLER = """
 async def read_notes(params, ctx):
     import subprocess
