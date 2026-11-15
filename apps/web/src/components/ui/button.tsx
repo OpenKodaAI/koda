@@ -59,12 +59,11 @@ const buttonVariants = cva(
         circle: "rounded-full",
       },
       mode: {
-        default:
-          "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-0",
-        icon: "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)] focus-visible:ring-offset-0",
+        // Focus is the global --focus-ring outline (apps/web/CLAUDE.md, Focus).
+        default: "",
+        icon: "",
         link: "h-auto rounded-none border-transparent bg-transparent p-0 text-[var(--text-primary)] hover:bg-transparent",
-        input:
-          "justify-start font-normal focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
+        input: "justify-start font-normal",
       },
       placeholder: {
         true: "text-[var(--text-quaternary)]",

@@ -52,7 +52,8 @@ const SelectTrigger = React.forwardRef<
       "flex w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-primary)]",
       "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
       "hover:border-[var(--border-strong)]",
-      "focus:outline-none focus-visible:border-[var(--focus-ring)] focus-visible:bg-[var(--panel)] focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
+      // The trigger is a button: the global --focus-ring outline is its ring.
+      "focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--panel)]",
       "data-[state=open]:border-[var(--border-strong)] data-[state=open]:bg-[var(--panel)]",
       "data-[placeholder]:text-[var(--text-quaternary)]",
       "disabled:cursor-not-allowed disabled:opacity-60",
@@ -168,7 +169,7 @@ const SelectContent = React.forwardRef<
       >
         <div className="border-b border-[var(--divider-hair)] px-2.5 py-2">
           <div
-            className="flex h-8 items-center gap-2 rounded-[var(--radius-input)] px-2.5 text-[var(--text-tertiary)] transition-[background-color,box-shadow] duration-150 focus-within:bg-[var(--panel-soft)] focus-within:shadow-[inset_0_0_0_1px_var(--border-strong)]"
+            className="flex h-8 items-center gap-2 rounded-[var(--radius-input)] px-2.5 text-[var(--text-tertiary)] transition-[background-color,box-shadow] duration-150 focus-within:bg-[var(--panel-soft)] focus-within:outline focus-within:-outline-offset-1 focus-within:outline-[color:var(--focus-ring)]"
             onPointerDown={(event) => event.stopPropagation()}
           >
             <Search size={13} className="shrink-0 text-[var(--text-quaternary)]" />

@@ -229,7 +229,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               }}
               placeholder={t("sessions.room.create.namePlaceholder", undefined)}
               maxLength={120}
-              className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[var(--font-size-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] focus:border-[color:var(--border-strong)] focus:bg-[var(--panel)] focus:shadow-[0_0_0_1px_var(--border-strong)]"
+              className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[var(--font-size-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] focus:border-[color:var(--focus-ring)] focus:bg-[var(--panel)] focus:shadow-[0_0_0_1px_var(--focus-ring)]"
             />
           </label>
 
@@ -242,7 +242,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                 </span>
               ) : null}
             </span>
-            <label className="flex h-9 w-full items-center gap-2 rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 transition-[border-color,background-color,box-shadow] duration-[120ms] focus-within:border-[color:var(--border-strong)] focus-within:bg-[var(--panel)] focus-within:shadow-[0_0_0_1px_var(--border-strong)]">
+            <label className="flex h-9 w-full items-center gap-2 rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 transition-[border-color,background-color,box-shadow] duration-[120ms] focus-within:border-[color:var(--focus-ring)] focus-within:bg-[var(--panel)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]">
               <Search
                 className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]"
                 strokeWidth={1.75}

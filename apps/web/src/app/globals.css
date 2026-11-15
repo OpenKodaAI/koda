@@ -1472,8 +1472,8 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .workspace-topbar__sidebar-toggle:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 0;
   background: var(--surface-hover);
   color: var(--text-primary);
 }
@@ -1636,6 +1636,8 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .tour-coachmark {
+  /* The global ring falls under 3:1 on the light glass card (M8-E1-T1). */
+  --focus-ring: var(--text-secondary);
   position: fixed;
   z-index: 110;
   pointer-events: auto;
@@ -2184,12 +2186,6 @@ button[aria-label="Open Next Dev Tools"] {
   color: #f0c86f;
 }
 
-.settings-warning-indicator:focus-visible {
-  outline: none;
-  box-shadow:
-    0 0 0 1px rgba(214, 164, 64, 0.28),
-    0 0 0 4px rgba(214, 164, 64, 0.08);
-}
 
 .settings-warning-indicator--active {
   border-color: rgba(214, 164, 64, 0.28);
@@ -2569,8 +2565,8 @@ button[aria-label="Open Next Dev Tools"] {
 }
 
 .action-button:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--text-primary) 90%, transparent);
+  outline: 1.5px solid color-mix(in srgb, var(--text-primary) 90%, transparent);
+  outline-offset: -1.5px;
 }
 
 .action-button:disabled {
@@ -3667,11 +3663,9 @@ button[aria-label="Open Next Dev Tools"] {
 
 .field-shell:focus,
 .field-shell:focus-visible {
-  border-color: var(--border-strong);
+  border-color: var(--focus-ring);
   outline: none;
-  box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--focus-ring) 70%, transparent),
-    0 8px 18px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 0 0 1px var(--focus-ring);
 }
 
 /* Range slider styling */
@@ -3722,6 +3716,11 @@ input[type="range"] {
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.24),
     inset 0 0 24px rgba(255, 255, 255, 0.14);
+}
+
+.agent-board-color-slider:focus-visible,
+.ui-slider:focus-visible {
+  box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
 .agent-board-color-slider:disabled {
@@ -5711,11 +5710,11 @@ input[type="range"]::-moz-range-thumb {
 .runtime-stage-shell__expand:focus-visible {
   background: var(--hover-tint);
   color: var(--text-primary);
-  outline: none;
 }
 
 .runtime-stage-shell__expand:focus-visible {
-  box-shadow: 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 0;
 }
 
 .runtime-stage__header,
@@ -6973,8 +6972,8 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .runtime-files-icon-button:focus-visible {
-  outline: none;
-  box-shadow: 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 0;
 }
 
 .runtime-files-icon-button--danger:hover {
@@ -7067,8 +7066,8 @@ input[type="range"]::-moz-range-thumb {
 
 .runtime-files-open-editor__main:focus-visible {
   border-radius: var(--radius-chip);
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
 }
 
 .runtime-files-open-editor__main svg,
@@ -7358,7 +7357,7 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .runtime-files-project-search__field:focus-within {
-  box-shadow: 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
   color: var(--text-secondary);
 }
 
@@ -7554,8 +7553,8 @@ input[type="range"]::-moz-range-thumb {
 
 .runtime-files-tab__main:focus-visible {
   border-radius: var(--radius-chip);
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--focus-ring);
+  outline: 1px solid var(--focus-ring);
+  outline-offset: -1px;
 }
 
 .runtime-files-tab__dot {
@@ -9562,9 +9561,13 @@ input[type="range"]::-moz-range-thumb {
   --overlay-modal-shadow: none;
 }
 
-/* The reset skips the element that holds keyboard focus, so focus rings drawn
-   with box-shadow (Tailwind `ring-*`, component focus rules) still paint. */
-html body *:not(:focus-visible),
+/* No box-shadow anywhere, except on a focused text-entry field (M8-E1-T1,
+   D-114). Those fields (input, textarea, select, contenteditable) lose the
+   global outline below, so their border and box-shadow ring are their focus
+   indicator. Every other control, and every focus-within wrapper, draws focus
+   with an outline. :where() keeps the reset at its original (0,0,2)
+   specificity. */
+html body *:where(:not(:is(input, textarea, select, [contenteditable="true"]):focus-visible)),
 html body *::before,
 html body *::after {
   box-shadow: none !important;
@@ -10365,9 +10368,7 @@ html body [contenteditable="true"]:focus-visible {
 .auth-input.auth-input:focus-visible {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--panel-soft) 60%, var(--panel) 40%);
-  box-shadow:
-    0 0 0 4px var(--accent-muted),
-    0 1px 0 rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 1px var(--accent);
   outline: none;
 }
 
@@ -10469,7 +10470,7 @@ html body [contenteditable="true"]:focus-visible {
 .bootstrap-code-input__cell:focus,
 .bootstrap-code-input__cell:focus-visible {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-muted);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 /* Filled (but unfocused) cells keep the neutral border — only the text

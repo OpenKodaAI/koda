@@ -517,7 +517,7 @@ export function RoomSettingsPanel({
                   "h-8 w-full truncate rounded-[var(--radius-input)] border border-transparent bg-transparent px-2.5 pr-8 font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)] outline-none",
                   "transition-[border-color,background-color,box-shadow] duration-[140ms] ease-[var(--ease-out-quart)]",
                   "hover:border-[color:var(--border-subtle)] hover:bg-[var(--panel-soft)]",
-                  "focus:border-[color:var(--border-strong)] focus:bg-[var(--panel-soft)] focus:shadow-[0_0_0_1px_var(--border-strong)]",
+                  "focus:border-[color:var(--focus-ring)] focus:bg-[var(--panel-soft)] focus:shadow-[0_0_0_1px_var(--focus-ring)]",
                   "disabled:cursor-wait disabled:opacity-80",
                   inline
                     ? "text-left text-[0.9375rem] leading-5"

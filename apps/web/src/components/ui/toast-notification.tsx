@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
@@ -130,10 +131,15 @@ function ToastItem({ toast }: { toast: Toast }) {
     >
       <div
         role="status"
-        style={{
-          background: `var(${meta.bgVar})`,
-          color: `var(${meta.fgVar})`,
-        }}
+        style={
+          {
+            background: `var(${meta.bgVar})`,
+            color: `var(${meta.fgVar})`,
+            // The global ring is under 3:1 on the dark tone fills; the
+            // toast's own text colour contrasts with its fill (M8-E1-T1).
+            "--focus-ring": `var(${meta.fgVar})`,
+          } as CSSProperties
+        }
         className={cn(
           "flex items-center gap-2 rounded-[var(--radius-pill)] py-1.5 pr-1.5 pl-3 shadow-[var(--shadow-floating)]",
           "text-[0.8125rem] leading-5",

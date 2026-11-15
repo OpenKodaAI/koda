@@ -173,7 +173,8 @@ export function CommandBar({
           isInline
             ? cn(
                 "rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] py-2",
-                isFocused && "border-[var(--border-strong)] bg-[var(--panel)]",
+                isFocused &&
+                  "border-[var(--focus-ring)] bg-[var(--panel)] outline outline-[color:var(--focus-ring)]",
               )
             : "border-b border-[var(--divider-hair)] bg-transparent py-3",
         )}
