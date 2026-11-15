@@ -697,9 +697,10 @@ textarea:disabled {
 }
 
 /* Form inputs handle focus by recoloring their own border; skip the global
-   outline so we don't paint an inner ring inside composer-style wrappers. */
-input:focus,
-input:focus-visible,
+   outline so we don't paint an inner ring inside composer-style wrappers.
+   Checkboxes and radios draw no ring of their own, so they keep it. */
+input:not([type="checkbox"], [type="radio"]):focus,
+input:not([type="checkbox"], [type="radio"]):focus-visible,
 textarea:focus,
 textarea:focus-visible,
 select:focus,
@@ -3661,10 +3662,12 @@ button[aria-label="Open Next Dev Tools"] {
   border-color: var(--border-strong);
 }
 
+/* A .field-shell input or textarea loses the global outline to the form-field
+   rule, so the box-shadow is its ring. A .field-shell button keeps the global
+   outline, because the reset nulls its box-shadow. */
 .field-shell:focus,
 .field-shell:focus-visible {
   border-color: var(--focus-ring);
-  outline: none;
   box-shadow: 0 0 0 1px var(--focus-ring);
 }
 
@@ -9591,8 +9594,8 @@ html body :focus-visible {
   outline-offset: 2px;
 }
 
-html body input:focus,
-html body input:focus-visible,
+html body input:not([type="checkbox"], [type="radio"]):focus,
+html body input:not([type="checkbox"], [type="radio"]):focus-visible,
 html body textarea:focus,
 html body textarea:focus-visible,
 html body select:focus,
@@ -9790,11 +9793,6 @@ html body [contenteditable="true"]:focus-visible {
   background: var(--tone-warning-bg-strong);
   color: var(--tone-warning-text);
   transform: none;
-}
-
-:where(html[data-theme="light"]) .settings-warning-indicator:focus-visible {
-  outline: 2px solid var(--tone-warning-border);
-  outline-offset: 2px;
 }
 
 :where(html[data-theme="light"]) .glass-table--sticky-last tbody tr:hover td:last-child,

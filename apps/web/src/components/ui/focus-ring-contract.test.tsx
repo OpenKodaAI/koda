@@ -1,9 +1,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { TagInputField } from "@/components/control-plane/shared/tag-input-field";
 import { RailSearch } from "@/components/sessions/rail/rail-search";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -149,6 +150,8 @@ const THEMES = {
 // The global rule removes the outline from these form fields, and the
 // flat-design reset must spare exactly them while they hold focus.
 const FORM_FIELDS = ["input", "textarea", "select", '[contenteditable="true"]'];
+// Checkboxes and radios are controls: they keep the global outline.
+const NATIVE_TEXT_INPUT = 'input:not([type="checkbox"], [type="radio"])';
 const RESET_ELEMENT_SELECTOR = `html body *:where(:not(:is(${FORM_FIELDS.join(", ")}):focus-visible))`;
 
 const PAINTED_BOX_SHADOW = /box-shadow:\s*(?!none)[^;]+;/;
@@ -216,12 +219,53 @@ describe("focus ring contract (M8-E1-T1)", () => {
         selector.replace(/^html body /, "").replace(/:focus(-visible)?$/, ""),
       ),
     );
-    expect([...fields]).toEqual(FORM_FIELDS);
+    expect([...fields]).toEqual([NATIVE_TEXT_INPUT, ...FORM_FIELDS.slice(1)]);
+  });
+
+  it("native checkboxes and radios keep the global outline", () => {
+    // They are controls, not text fields: nothing else draws their ring.
+    const removals = CSS_RULES.filter(({ body }) => /(^|[;\s])outline:\s*none/.test(body))
+      .flatMap(({ selectors }) => selectors)
+      .filter((selector) => /:focus(-visible)?$/.test(selector))
+      .map((selector) => selector.replace(/:focus(-visible)?$/, ""));
+    const host = document.createElement("div");
+    host.innerHTML = '<input type="checkbox"><input type="radio"><input type="text">';
+    document.body.append(host);
+    try {
+      const [checkbox, radio, text] = [...host.querySelectorAll("input")];
+      const matching = (element: Element) =>
+        removals.filter((selector) => element.matches(selector));
+      expect(matching(checkbox)).toEqual([]);
+      expect(matching(radio)).toEqual([]);
+      expect(matching(text).length).toBeGreaterThan(0);
+    } finally {
+      host.remove();
+    }
+  });
+
+  it("every focus outline is painted in --focus-ring", () => {
+    // .action-button draws a near-white or near-black ring (12:1 and up).
+    const allowed = new Map([
+      [".action-button:focus-visible", "color-mix(in srgb, var(--text-primary) 90%, transparent)"],
+    ]);
+    const offenders = CSS_RULES.filter(({ selectors }) => selectors.some((s) => /:focus/.test(s)))
+      .flatMap(({ selectors, body }) =>
+        [...body.matchAll(/(?:^|[;\s])outline(?:-color)?:\s*([^;]+);/g)]
+          .map(([, value]) => value.replace(/!important/, "").trim())
+          .filter((value) => !/^(none|0)$/.test(value))
+          .map((value) => value.replace(/^[\d.]+px\s+solid\s+/, ""))
+          .filter((colour) => colour !== "var(--focus-ring)")
+          .filter((colour) => !selectors.every((selector) => allowed.get(selector) === colour))
+          .map((colour) => `${selectors.join(", ")} -> ${colour}`),
+      );
+    expect(offenders).toEqual([]);
   });
 
   it("no focus rule on a non-field control swaps the outline for a box-shadow the reset nulls", () => {
-    // Form-field classes: the reset spares them while focused.
-    const formFieldClasses = [".field-shell", ".auth-input.auth-input", ".bootstrap-code-input__cell"];
+    // Classes only ever set on form fields: the reset spares them while
+    // focused. .field-shell is not one of them: it also sits on buttons (the
+    // ModelSelector trigger) and on wrappers.
+    const formFieldClasses = [".auth-input.auth-input", ".bootstrap-code-input__cell"];
     const offenders = CSS_RULES.filter(({ body }) => /(^|[;\s])outline:\s*(none|0)\s*;/.test(body))
       .filter(({ body }) => PAINTED_BOX_SHADOW.test(body))
       .flatMap(({ selectors }) => selectors)
@@ -251,6 +295,25 @@ describe("focus ring contract (M8-E1-T1)", () => {
     const wrapper = screen.getByRole("searchbox").closest("label");
     expect(wrapper?.className).toContain("focus-within:border-[color:var(--focus-ring)]");
     expect(wrapper?.className).toContain("focus-within:outline-[color:var(--focus-ring)]");
+  });
+
+  it("TagInputField frames its bare input with a focus-within ring", () => {
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <TagInputField label="Tags" values={[]} onChange={() => {}} />
+      </I18nProvider>,
+    );
+    const input = screen.getByRole("textbox");
+    expect(input.className).toContain("outline-none");
+    const wrapper = input.closest(".field-shell");
+    expect(wrapper, "the tag field keeps its .field-shell frame").not.toBe(input);
+    for (const required of [
+      "focus-within:border-[color:var(--focus-ring)]",
+      "focus-within:outline",
+      "focus-within:outline-[color:var(--focus-ring)]",
+    ]) {
+      expect(wrapper?.className.split(/\s+/)).toContain(required);
+    }
   });
 
   it("Input and Textarea paint a --focus-ring border and ring on focus", () => {
@@ -291,13 +354,18 @@ describe("focus ring contract (M8-E1-T1)", () => {
     }
   });
 
-  it("the toast sets --focus-ring to its own text colour", async () => {
+  it("the toast sets --focus-ring to its own text colour, at full opacity on focus", async () => {
     function Probe() {
       const { showToast } = useToast();
       return (
         <button
           type="button"
-          onClick={() => showToast("Saved", "success", { durationMs: 10_000 })}
+          onClick={() =>
+            showToast("Saved", "warning", {
+              durationMs: 10_000,
+              action: { label: "Undo", onClick: () => {} },
+            })
+          }
         >
           Show toast
         </button>
@@ -313,6 +381,21 @@ describe("focus ring contract (M8-E1-T1)", () => {
     );
     await userEvent.setup().click(screen.getByRole("button", { name: "Show toast" }));
     const toast = await screen.findByRole("status");
-    expect(toast.style.getPropertyValue("--focus-ring")).toBe("var(--tone-success-text)");
+    expect(toast.style.getPropertyValue("--focus-ring")).toBe("var(--tone-warning-text)");
+
+    // A dimmed button dims its own outline too (the dark warning ring falls
+    // to 2.93:1 at 70%), so every dimmed control returns to full opacity
+    // while it has keyboard focus.
+    const controls = within(toast).getAllByRole("button");
+    expect(controls).toHaveLength(2);
+    for (const control of controls) {
+      const classes = control.className.split(/\s+/);
+      const dimmed = classes.filter((name) => /^opacity-\d+$/.test(name) && name !== "opacity-100");
+      if (dimmed.length > 0) {
+        expect(classes, `${control.getAttribute("aria-label")} is ${dimmed[0]}`).toContain(
+          "focus-visible:opacity-100",
+        );
+      }
+    }
   });
 });
