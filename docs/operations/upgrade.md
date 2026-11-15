@@ -233,10 +233,14 @@ does, installs this commit's migrations on an empty schema, and fails
 when the two schemas differ. A change to the DDL of a migration that was
 already released, instead of a new migration, therefore fails the gate:
 upgraded installs would never run it. The gate also fails a migration
-added since the previous release that runs a plain `CREATE INDEX` on a
-table it lists as large (`scripts/migrations_gate.py`), because the
-build would block writes to that table during your upgrade; such an
-index is built with `CREATE INDEX CONCURRENTLY`.
+added since the previous release, or a statement in the DDL that startup
+runs after the migrations on every install, that builds a plain index on
+a table it lists as large (`scripts/migrations_gate.py`): a `CREATE INDEX`
+without `CONCURRENTLY`, or an `ALTER TABLE` adding a `UNIQUE`, `PRIMARY
+KEY` or `EXCLUDE` constraint, because the build would block writes to
+that table during your upgrade. Such an index is built with `CREATE
+INDEX CONCURRENTLY`, and a constraint then takes it over with `USING
+INDEX`.
 
 ## Step 2 — single-host restart
 

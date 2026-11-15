@@ -343,24 +343,8 @@ class KnowledgeV2PostgresBackend:
                             migration.version,
                         )
                     if self._vector_enabled:
-                        await conn.execute(
-                            f"""ALTER TABLE "{self._schema}"."knowledge_embeddings"
-                                   ADD COLUMN IF NOT EXISTS embedding_vector VECTOR({self._embedding_dimension})"""
-                        )
-                        await conn.execute(
-                            f"""ALTER TABLE "{self._schema}"."artifact_derivatives"
-                                   ADD COLUMN IF NOT EXISTS embedding_vector VECTOR({self._embedding_dimension})"""
-                        )
-                        await conn.execute(
-                            f"""CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_vector_hnsw
-                                   ON "{self._schema}"."knowledge_embeddings"
-                                USING hnsw (embedding_vector vector_cosine_ops)"""
-                        )
-                        await conn.execute(
-                            f"""CREATE INDEX IF NOT EXISTS idx_artifact_derivatives_vector_hnsw
-                                   ON "{self._schema}"."artifact_derivatives"
-                                USING hnsw (embedding_vector vector_cosine_ops)"""
-                        )
+                        for statement in self._unversioned_vector_statements():
+                            await conn.execute(statement)
                 finally:
                     await self._close_direct_connection(conn)
             except Exception:
@@ -572,6 +556,26 @@ class KnowledgeV2PostgresBackend:
 
     def _invalidate_query_caches(self) -> None:
         return None
+
+    def _unversioned_vector_statements(self) -> tuple[str, ...]:
+        """The DDL bootstrap runs after the migrations, when the vector extension is available.
+
+        It is not versioned, so it runs on every bootstrap of every install,
+        existing ones included; scripts/migrations_gate.py checks it too.
+        """
+        schema = self._schema
+        return (
+            f"""ALTER TABLE "{schema}"."knowledge_embeddings"
+                   ADD COLUMN IF NOT EXISTS embedding_vector VECTOR({self._embedding_dimension})""",
+            f"""ALTER TABLE "{schema}"."artifact_derivatives"
+                   ADD COLUMN IF NOT EXISTS embedding_vector VECTOR({self._embedding_dimension})""",
+            f"""CREATE INDEX IF NOT EXISTS idx_knowledge_embeddings_vector_hnsw
+                   ON "{schema}"."knowledge_embeddings"
+                USING hnsw (embedding_vector vector_cosine_ops)""",
+            f"""CREATE INDEX IF NOT EXISTS idx_artifact_derivatives_vector_hnsw
+                   ON "{schema}"."artifact_derivatives"
+                USING hnsw (embedding_vector vector_cosine_ops)""",
+        )
 
     def _migrations(self) -> tuple[_Migration, ...]:
         schema = self._schema
@@ -3702,9 +3706,29 @@ class KnowledgeV2PostgresBackend:
                     # here because the runner sends each statement on its
                     # own, outside a transaction. A failed concurrent build
                     # leaves an INVALID index that IF NOT EXISTS would keep,
-                    # so the next run drops it first.
+                    # so the next run drops it first. A build still running in
+                    # another bootstrap is INVALID too, until it ends: dropping
+                    # it would queue an ACCESS EXCLUSIVE lock that stalls every
+                    # audit write, and any statement waiting behind the build
+                    # holds a snapshot that the build's last phase waits for,
+                    # a deadlock. So while another backend builds an index on
+                    # audit_events, 049 fails this bootstrap at once, and runs
+                    # again at the next one. (The progress view hides the table
+                    # of another role's build, so this sees the builds of the
+                    # role in KNOWLEDGE_V2_POSTGRES_DSN, which Koda's processes
+                    # share; `koda migrate --dsn` with another role is not seen.)
                     f"""DO $$
+                        DECLARE
+                            builder INTEGER;
                         BEGIN
+                            SELECT p.pid INTO builder FROM pg_stat_progress_create_index p
+                            WHERE p.relid = '"{schema}"."audit_events"'::regclass
+                              AND p.pid <> pg_backend_pid()
+                            LIMIT 1;
+                            IF builder IS NOT NULL THEN
+                                RAISE EXCEPTION 'audit_events has an index being built by another backend (pid %)', builder
+                                    USING HINT = '049_audit_events_type_lookup runs again at the next bootstrap.';
+                            END IF;
                             IF EXISTS (
                                 SELECT 1 FROM pg_index i
                                 JOIN pg_class c ON c.oid = i.indexrelid

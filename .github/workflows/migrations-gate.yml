@@ -4,8 +4,9 @@ name: migrations-gate
 #
 # On an ephemeral Postgres the job builds two schemas:
 #   - gate_upgrade: the previous release's migrations (its own code and
-#     uv.lock, from the latest v* tag reachable from this commit), then this
-#     commit's migrations on top, as an operator upgrade runs them;
+#     uv.lock, from the latest v* tag reachable from this commit's parent, so
+#     never a tag on this commit), then this commit's migrations on top, as an
+#     operator upgrade runs them;
 #   - gate_fresh: this commit's migrations on an empty schema.
 # It then diffs their pg_dump --schema-only, with the schema name, pg_dump
 # comments and column order normalized (scripts/migrations_gate.py normalize).
@@ -13,8 +14,10 @@ name: migrations-gate
 # A PR that changes the DDL of a released migration, instead of adding a new
 # migration, changes the fresh install but not the upgraded one, so the diff
 # fails the job. The job also fails when a migration added since the previous
-# release runs a plain CREATE INDEX on a table scripts/migrations_gate.py lists
-# as large: it must use the online kind, CREATE INDEX CONCURRENTLY (ADR-028).
+# release, or bootstrap's unversioned DDL, builds a plain index (CREATE INDEX,
+# or an ALTER TABLE adding a UNIQUE, PRIMARY KEY or EXCLUDE constraint) on a
+# table scripts/migrations_gate.py lists as large: it must use the online kind,
+# CREATE INDEX CONCURRENTLY (ADR-028).
 #
 # This gate checks the migrations, not a deployment's database: operators run
 # `python -m koda migrate --check` against their own database before an
@@ -82,8 +85,10 @@ jobs:
         run: uv sync --locked
       - name: Find the previous release
         id: previous
+        # From HEAD^, not HEAD: dispatched on a release tag, HEAD's own tag is
+        # the release under test, and the gate would upgrade it to itself.
         run: |
-          tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD)"
+          tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^)"
           echo "previous release: $tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
       - name: Check out the previous release
@@ -95,7 +100,7 @@ jobs:
         run: |
           uv sync --locked
           uv run --locked python -m koda migrate --schema gate_upgrade
-      - name: Refuse a plain CREATE INDEX on a large table
+      - name: Refuse a plain index build on a large table
         run: |
           psql "$KNOWLEDGE_V2_POSTGRES_DSN" -At -c 'SELECT version FROM gate_upgrade.schema_migrations' \
             > "$RUNNER_TEMP/previous_versions.txt"

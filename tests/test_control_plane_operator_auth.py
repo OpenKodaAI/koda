@@ -185,6 +185,27 @@ def test_owner_registration_fault_leaves_no_owner_without_recovery_codes(operato
 
 
 @pytest.mark.postgres
+def test_owner_registration_fault_keeps_the_registration_token_not_the_setup_code(operator_db: Path) -> None:
+    """D-056: on the registration-token path the exchange consumed the setup code; the token stays usable."""
+    service = operator_auth_mod.OperatorAuthService()
+    bootstrap = service.issue_bootstrap_code(label="cli")
+    exchanged = service.exchange_bootstrap_code(bootstrap["code"])
+    owner = {"email": "cli@example.com", "password": STRONG_PASSWORD}
+
+    with (
+        injected_fault("cp_operator_recovery_codes", "INSERT", rows_before=3),
+        pytest.raises(Exception, match="injected fault"),
+    ):
+        service.register_owner(registration_token=exchanged["registration_token"], **owner)
+
+    assert service.has_owner() is False
+    with pytest.raises(ValueError, match="Setup code is invalid or expired"):
+        service.register_owner(bootstrap_code=bootstrap["code"], **owner)
+    payload = service.register_owner(registration_token=exchanged["registration_token"], **owner)
+    assert payload["operator"]["email"] == "cli@example.com"
+
+
+@pytest.mark.postgres
 def test_wrong_setup_code_fails_without_creating_owner(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     code = _bootstrap_file_code(service)
