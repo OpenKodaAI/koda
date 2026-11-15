@@ -92,18 +92,42 @@ their number as `unowned_jobs`.
 No migration assigns them, because nothing records which agent created
 them. Assign each job to the agent that should run it, with `psql`
 against the Koda database (for example
-`docker compose exec postgres psql -U <user> -d <database>`):
+`docker compose exec postgres psql -U <user> -d <database>`), while no
+worker without `--agent-id` runs.
+
+First close the job's open runs (`queued`, `retrying` or `running`,
+validation runs included). Each one carries the policy snapshot of the
+worker that created it, and an agent blocks a run whose snapshot is not
+its own. Left open, the first such run the agent claims ends `blocked`
+("Scheduled run blocked because the job policy changed after
+validation."), the job moves to `validation_pending` with no next run,
+its other queued and retrying runs end `blocked`, and the agent's bot
+tells the user the run was blocked. Close the runs, then assign the jobs,
+in one transaction:
 
 ```sql
+BEGIN;
+UPDATE knowledge_v2.scheduled_job_runs
+SET status = 'cancelled', lease_owner = NULL, lease_expires_at = NULL,
+    next_attempt_at = NULL,
+    error_message = 'Closed before assigning the job to an agent.'
+WHERE scheduled_job_id IN (12, 15)
+  AND status IN ('queued', 'retrying', 'running');
 UPDATE knowledge_v2.scheduled_jobs
 SET agent_id = 'AGENT_A'
 WHERE agent_id IS NULL AND id IN (12, 15);
+COMMIT;
 ```
 
 Use your schema name if you changed `KNOWLEDGE_V2_POSTGRES_SCHEMA`. That
-agent's next dispatch cycle picks the job up, as after an outage: it runs
-the occurrences still inside the catch-up window, and recovers any run of
-the job left `running` with an expired lease.
+agent's next dispatch cycle runs each active job under its own policy, as
+after an outage: from the job's next run time, it runs the occurrences
+still inside the catch-up window. The occurrences of the closed runs do
+not run. A job that was waiting for its validation stays
+`validation_pending`. Validate it from that agent's bot with
+`/jobs validate <id>`, then `/jobs activate <id>` once the validation
+passes. Do the same for a job that you assigned with its runs still open
+and that the agent moved to `validation_pending`.
 
 ## Step 2 (cluster) — blue/green drain
 

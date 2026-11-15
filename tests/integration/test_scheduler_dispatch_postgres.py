@@ -27,7 +27,8 @@ Pinned guarantees:
     carry their own agent's policy too. Jobs without an agent (created by a
     process started without AGENT_ID) are reported by every agent instead of
     being listed or queued there, and the scheduler snapshot counts only this
-    agent's jobs and runs.
+    agent's jobs and runs. The upgrade doc's procedure to assign such a job,
+    run as written, closes its runs and keeps it running under the agent.
   * ``POST /api/runtime/schedules`` queues a validation run for the new job
     instead of attempting an activation that the scheduler always rejects, and
     the queued validation activates the job when it passes (or leaves it
@@ -39,8 +40,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import re
 from collections.abc import AsyncIterator, Iterator
 from datetime import timedelta
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -705,6 +708,107 @@ async def test_each_agent_reports_the_jobs_without_an_agent_that_it_skips(schedu
     with _as_agent(None, _POLICY_A):
         assert scheduled_job_dispatcher.report_unowned_jobs() == []
         assert scheduled_jobs.get_scheduler_snapshot()["unowned_jobs"] == 0
+
+
+_POLICY_STANDALONE = {"approval_mode": "standalone-worker-policy"}
+_UPGRADE_DOC = Path(__file__).resolve().parents[2] / "docs" / "operations" / "upgrade.md"
+
+
+def _documented_assignment_sql(job_id: int) -> str:
+    """The SQL that docs/operations/upgrade.md gives to assign jobs without an agent, for one job."""
+    doc = _UPGRADE_DOC.read_text(encoding="utf-8")
+    section = doc.split("### Scheduled jobs without an agent", 1)[1].split("\n## ", 1)[0]
+    blocks = re.findall(r"```sql\n(.*?)```", section, flags=re.DOTALL)
+    assert blocks, "the section gives no SQL"
+    return "\n".join(blocks).replace("(12, 15)", f"({job_id})")
+
+
+async def _standalone_job_with_leftover_runs() -> int:
+    """An active hourly reminder of a standalone worker that died mid-send, with a catch-up run queued."""
+    from koda.services import scheduled_jobs
+
+    with _as_agent(None, _POLICY_STANDALONE):
+        job_id = await _active_reminder_job(_fake_application())
+        now = scheduled_jobs._utcnow()
+        running = scheduled_jobs.create_run(
+            scheduled_job_id=job_id,
+            scheduled_for=now - timedelta(hours=3),
+            trigger_reason=scheduled_jobs.RUN_TRIGGER_CATCHUP,
+        )
+        scheduled_jobs._touch_run(
+            running,
+            status=scheduled_jobs.RUN_STATUS_RUNNING,
+            lease_owner="standalone-host:1:dead",
+            lease_expires_at=scheduled_jobs._iso(now - timedelta(minutes=1)),
+        )
+        scheduled_jobs.create_run(
+            scheduled_job_id=job_id,
+            scheduled_for=now - timedelta(hours=2),
+            trigger_reason=scheduled_jobs.RUN_TRIGGER_CATCHUP,
+        )
+        scheduled_jobs._touch_job(job_id, next_run_at=scheduled_jobs._iso(now - timedelta(minutes=30)))
+    return job_id
+
+
+async def test_the_documented_assignment_of_a_job_without_an_agent_keeps_it_running(scheduler_db: str) -> None:
+    # The upgrade doc's procedure, run as written: the job's leftover runs carry the standalone
+    # worker's policy snapshot, so they must be closed before the job moves to the agent.
+    from koda.services import scheduled_jobs
+
+    job_id = await _standalone_job_with_leftover_runs()
+    conn = await asyncpg.connect(scheduler_db)
+    try:
+        await conn.execute(_documented_assignment_sql(job_id))
+    finally:
+        await conn.close()
+
+    application_a = _fake_application()
+    with _as_agent("AGENT_A", _POLICY_A):
+        for _ in range(3):
+            await _run_dispatch_cycle(application_a)
+
+    job = scheduled_jobs._get_job(job_id)
+    assert job is not None and job["agent_id"] == "AGENT_A"
+    assert job["status"] == scheduled_jobs.JOB_STATUS_ACTIVE
+    assert job["next_run_at"] is not None
+    assert _events(job_id, "run.blocked_by_policy") == []
+    # The next occurrence inside the catch-up window runs under the agent's policy.
+    assert _reminders_sent(application_a) == ["⏰ Reminder: Stretch break"]
+    [catch_up] = [run for run in _runs(job_id, scheduled_jobs.RUN_TRIGGER_CATCHUP) if run["status"] == "succeeded"]
+    assert catch_up["metadata"]["policy_snapshot"]["execution_policy"] == _POLICY_A
+
+
+async def test_a_job_assigned_with_its_runs_open_is_blocked_until_the_agent_revalidates_it(
+    scheduler_db: str,
+) -> None:
+    # What the upgrade doc says happens when the job's runs are left open: the agent blocks the
+    # first leftover run it claims, the job waits for validation with no next run, and its other
+    # runs end blocked. Validating and activating it from the agent's bot recovers it.
+    from koda.services import scheduled_jobs
+
+    job_id = await _standalone_job_with_leftover_runs()
+    scheduled_jobs._store().execute("UPDATE scheduled_jobs SET agent_id = ? WHERE id = ?", ("AGENT_A", job_id))
+
+    application_a = _fake_application()
+    with _as_agent("AGENT_A", _POLICY_A):
+        await _run_dispatch_cycle(application_a)
+        job = scheduled_jobs._get_job(job_id)
+        assert job is not None
+        assert (job["status"], job["next_run_at"]) == (scheduled_jobs.JOB_STATUS_VALIDATION_PENDING, None)
+        [blocked] = _events(job_id, "run.blocked_by_policy")
+        assert blocked["reason"] == "Scheduled run blocked because the job policy changed after validation."
+        statuses = {run["status"] for run in _runs(job_id, scheduled_jobs.RUN_TRIGGER_CATCHUP)}
+        assert statuses == {scheduled_jobs.RUN_STATUS_BLOCKED}
+        assert _reminders_sent(application_a) == []
+
+        # `/jobs validate <id>`, then `/jobs activate <id>` once the validation passes.
+        run_id, _ = scheduled_jobs.queue_validation_run(job_id, user_id=111, activate_on_success=False)
+        assert run_id is not None
+        await _run_dispatch_cycle(application_a)
+        assert scheduled_jobs.activate_job(job_id, 111) == (True, "Job activated.")
+    job = scheduled_jobs._get_job(job_id)
+    assert job is not None and job["status"] == scheduled_jobs.JOB_STATUS_ACTIVE
+    assert job["next_run_at"] is not None
 
 
 async def test_scheduler_snapshot_counts_only_this_agents_jobs_and_runs(scheduler_db: str) -> None:
