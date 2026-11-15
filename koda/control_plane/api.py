@@ -2515,7 +2515,7 @@ async def delete_dashboard_session_route(request: web.Request) -> web.Response:
 
 
 # The room metadata keys a client may set with ``metadata``. Every other key is the server's: the
-# budget sweep's flags (``budget_auto_paused``, ``budget_alert_80_sent``), the photo hash, the
+# budget sweep's flags (``budget_auto_paused``, ``budget_alert_80_sent``, ``budget_alert_80_cap``), the photo hash, the
 # Telegram title key, so a patch that names one is refused (D-075).
 _CLIENT_ROOM_METADATA_KEYS = frozenset({"photo_url"})
 

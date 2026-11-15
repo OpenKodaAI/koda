@@ -93,7 +93,10 @@ Before broad rollout, run these in canary:
   event per pause. A room reopened at its cap is paused again, with a new
   event; one reopened under its cap is no longer marked as paused by the
   budget, and a later overrun pauses it again. Paused rooms already alerted
-  do not keep the sweep from an open room at its cap.
+  do not keep the sweep from an open room at its cap. The 80% alert is sent
+  once per cap: a room whose cap is raised or lowered is alerted again at 80%
+  of the new cap. A room whose alert or pause event cannot be posted does not
+  stop the sweep for the rooms after it.
   A thread that is not `open`, or whose spend reached its cap, runs no agent
   turn on any path: web, Telegram, the inbox, unblocked tasks or synthesis,
   and the queue worker checks again when it takes a queued or recovered turn.

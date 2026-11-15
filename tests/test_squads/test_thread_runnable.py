@@ -639,3 +639,105 @@ async def test_the_budget_sweep_reaches_an_open_room_at_its_cap_behind_a_full_ba
     paused = await threads.get_thread(room.id)
     assert paused is not None and paused.status == "paused"
     assert len(_budget_events(await threads.thread_history(thread_id=room.id, limit=50))) == 1
+
+
+def _alert_events(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [m for m in history if (m.get("metadata") or {}).get("event_type") == "budget_80_percent"]
+
+
+def _budget_router(threads: SquadThreadStore, **kwargs: Any) -> Any:
+    from koda.squads.router import SquadRouter
+
+    task_store = AsyncMock()
+    task_store.sweep_expired_claims = AsyncMock(return_value=[])
+    return SquadRouter(task_store=task_store, thread_store=threads, **kwargs)
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_room_whose_budget_event_fails_does_not_stop_the_sweep_for_later_rooms(
+    threads: SquadThreadStore,
+) -> None:
+    """Each room of the budget sweep has its own error handling (D-340)."""
+    rooms = []
+    for title in ("failing room", "later room", "alert room"):
+        room = await threads.create_thread(
+            workspace_id="acme", squad_id="build", title=title, budget_usd_cap=Decimal("1.00")
+        )
+        rooms.append(room)
+    failing, later, alerted = rooms
+    # Selected in this order: the failing room changed first.
+    await _spend(threads, failing.id, "1.00")
+    await _spend(threads, later.id, "1.20")
+    await _spend(threads, alerted.id, "0.85")
+    post = threads.post_thread_message
+
+    async def post_or_fail(**kwargs: Any) -> int:
+        if kwargs["thread_id"] == failing.id:
+            raise RuntimeError("event store down")
+        return int(await post(**kwargs))
+
+    with patch.object(threads, "post_thread_message", post_or_fail):
+        report = await _budget_router(threads).sweep_once()
+
+    assert report.budget_auto_pauses == 1 and report.budget_alerts == 2
+    paused = await threads.get_thread(later.id)
+    assert paused is not None and paused.status == "paused"
+    assert len(_budget_events(await threads.thread_history(thread_id=later.id, limit=50))) == 1
+    assert len(_alert_events(await threads.thread_history(thread_id=alerted.id, limit=50))) == 1
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_legacy_truthy_alert_flag_is_read_the_same_by_the_query_and_the_sweep(
+    threads: SquadThreadStore,
+) -> None:
+    """A flag the query selects as not sent is alerted once, not skipped forever ahead of other rooms (D-340)."""
+    legacy = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="legacy room",
+        budget_usd_cap=Decimal("1.00"),
+        metadata={"budget_alert_80_sent": 1},
+    )
+    await _spend(threads, legacy.id, "0.85")
+    other = await threads.create_thread(
+        workspace_id="acme", squad_id="build", title="other room", budget_usd_cap=Decimal("1.00")
+    )
+    await _spend(threads, other.id, "0.90")
+    router = _budget_router(threads, batch_size=1)
+
+    assert (await router.sweep_once()).budget_alerts == 1
+    assert (await router.sweep_once()).budget_alerts == 1
+    assert (await router.sweep_once()).budget_alerts == 0
+    for room in (legacy, other):
+        assert len(_alert_events(await threads.thread_history(thread_id=room.id, limit=50))) == 1
+    reread = await threads.get_thread(legacy.id)
+    assert reread is not None and reread.metadata.get("budget_alert_80_sent") is True
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_after_a_cap_raise_crossing_80_percent_of_the_new_cap_alerts_once(threads: SquadThreadStore) -> None:
+    """The 80% alert is kept for the cap it was sent for (D-341)."""
+    room = await threads.create_thread(
+        workspace_id="acme", squad_id="build", title="room", budget_usd_cap=Decimal("1.00")
+    )
+    router = _budget_router(threads)
+    await _spend(threads, room.id, "0.85")
+    assert (await router.sweep_once()).budget_alerts == 1
+
+    pool = await threads._ensure_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f'UPDATE "{_schema()}"."squad_threads" SET budget_usd_cap = $2::numeric WHERE id = $1',
+            room.id,
+            Decimal("2.00"),
+        )
+    await _spend(threads, room.id, "1.20")
+    assert (await router.sweep_once()).budget_alerts == 0
+    await _spend(threads, room.id, "1.70")
+    assert (await router.sweep_once()).budget_alerts == 1
+    assert (await router.sweep_once()).budget_alerts == 0
+    alerts = _alert_events(await threads.thread_history(thread_id=room.id, limit=50))
+    assert [event["metadata"]["budget_usd_cap"] for event in reversed(alerts)] == [1.0, 2.0]

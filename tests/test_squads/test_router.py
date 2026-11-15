@@ -135,7 +135,9 @@ async def test_the_budget_sweep_posts_no_pause_event_when_its_pause_changed_no_r
                 "status": "open",
                 "budget_usd_cap": 1.0,
                 "cost_usd_accum": 1.0,
-                "metadata_json": {"budget_alert_80_sent": True},
+                # The query decides both: alerted at this cap, and at it (D-340).
+                "alert_80_sent": True,
+                "at_cap": True,
             }
         ]
     )
