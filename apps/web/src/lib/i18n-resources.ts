@@ -15837,6 +15837,8 @@ mutableResources["en-US"].translation.routines = {
     connectors: {
       description: "Integrations available to the agent during each run.",
       empty: "No connectors selected. Add one to expose its tools to this routine.",
+      unavailable: "Not available yet",
+      unavailableDescription: "Runs do not use connectors yet, so none can be added to a routine.",
       addAction: "Add connector",
       searchPlaceholder: "Search connectors",
       searchEmpty: "No connectors match your search.",
@@ -16018,6 +16020,8 @@ mutableResources["pt-BR"].translation.routines = {
     connectors: {
       description: "Integrações disponíveis para o agente durante cada execução.",
       empty: "Nenhum conector selecionado. Adicione um para expor suas ferramentas a esta rotina.",
+      unavailable: "Ainda não disponível",
+      unavailableDescription: "As execuções ainda não usam conectores, então não é possível adicioná-los a uma rotina.",
       addAction: "Adicionar conector",
       searchPlaceholder: "Buscar conectores",
       searchEmpty: "Nenhum conector corresponde à sua busca.",
@@ -16199,6 +16203,8 @@ mutableResources["es-ES"].translation.routines = {
     connectors: {
       description: "Integraciones disponibles para el agente durante cada ejecución.",
       empty: "Sin conectores seleccionados. Agrega uno para exponer sus herramientas a esta rutina.",
+      unavailable: "Aún no disponible",
+      unavailableDescription: "Las ejecuciones aún no usan conectores, así que no se pueden añadir a una rutina.",
       addAction: "Agregar conector",
       searchPlaceholder: "Buscar conectores",
       searchEmpty: "Ningún conector coincide con la búsqueda.",
@@ -16380,6 +16386,8 @@ mutableResources["fr-FR"].translation.routines = {
     connectors: {
       description: "Intégrations disponibles pour l'agent à chaque exécution.",
       empty: "Aucun connecteur sélectionné. Ajoutez-en un pour exposer ses outils à cette routine.",
+      unavailable: "Pas encore disponible",
+      unavailableDescription: "Les exécutions n'utilisent pas encore les connecteurs : impossible d'en ajouter à une routine.",
       addAction: "Ajouter un connecteur",
       searchPlaceholder: "Rechercher des connecteurs",
       searchEmpty: "Aucun connecteur ne correspond à votre recherche.",
@@ -16561,6 +16569,8 @@ mutableResources["de-DE"].translation.routines = {
     connectors: {
       description: "Integrationen, die dem Agenten bei jeder Ausführung zur Verfügung stehen.",
       empty: "Keine Konnektoren ausgewählt. Füge einen hinzu, damit seine Tools dieser Routine zur Verfügung stehen.",
+      unavailable: "Noch nicht verfügbar",
+      unavailableDescription: "Ausführungen verwenden noch keine Connectors, daher können einer Routine keine hinzugefügt werden.",
       addAction: "Konnektor hinzufügen",
       searchPlaceholder: "Konnektoren suchen",
       searchEmpty: "Kein Konnektor passt zur Suche.",

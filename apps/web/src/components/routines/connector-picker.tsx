@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Plug2, Plus, Search, X } from "lucide-react";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { listAvailableConnectors } from "@/lib/routines/connectors";
@@ -12,10 +13,23 @@ interface ConnectorPickerProps {
   value: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
+  /**
+   * Runs never read `payload.connectors` (TD-160, F-SCH-08), so the editor shows the picker
+   * disabled and labelled "Not available yet" until a backend consumes it. Whether to delete
+   * the stub is decided under Q-14 (M6-E3-T3).
+   */
+  unavailable?: boolean;
 }
 
-export function ConnectorPicker({ agentId, value, onChange, disabled = false }: ConnectorPickerProps) {
+export function ConnectorPicker({
+  agentId,
+  value,
+  onChange,
+  disabled: disabledProp = false,
+  unavailable = false,
+}: ConnectorPickerProps) {
   const { t } = useAppI18n();
+  const disabled = disabledProp || unavailable;
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -47,15 +61,24 @@ export function ConnectorPicker({ agentId, value, onChange, disabled = false }: 
 
   return (
     <div className="flex flex-col gap-3">
-      <p className="m-0 text-[0.8125rem] text-[var(--text-tertiary)]">
-        {t("routines.editor.connectors.description")}
-      </p>
+      {unavailable ? (
+        <InlineAlert tone="warning">
+          <p className="m-0 font-medium">{t("routines.editor.connectors.unavailable")}</p>
+          <p className="m-0 mt-0.5">{t("routines.editor.connectors.unavailableDescription")}</p>
+        </InlineAlert>
+      ) : (
+        <p className="m-0 text-[0.8125rem] text-[var(--text-tertiary)]">
+          {t("routines.editor.connectors.description")}
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {selectedConnectors.length === 0 ? (
-          <span className="text-[0.8125rem] text-[var(--text-quaternary)]">
-            {t("routines.editor.connectors.empty")}
-          </span>
+          unavailable ? null : (
+            <span className="text-[0.8125rem] text-[var(--text-quaternary)]">
+              {t("routines.editor.connectors.empty")}
+            </span>
+          )
         ) : (
           selectedConnectors.map((connector) => (
             <span

@@ -290,6 +290,30 @@ describe("RoutineEditor", () => {
     expect(onSubmit.mock.calls[0][0].timezone).toBe("America/Sao_Paulo");
   });
 
+  // TD-160, F-SCH-08: runs never read payload.connectors, so the picker must not suggest
+  // that connectors apply. It stays visible, disabled and labelled until a backend uses it.
+  it.each(SUPPORTED_LANGUAGES)("shows the connectors picker as not available yet in %s", async (language) => {
+    const unavailable = tr(language, "routines.editor.connectors.unavailable");
+    expect(unavailable).not.toBe("routines.editor.connectors.unavailable");
+
+    renderEditor({}, language);
+    fillBasics(language);
+    const next = tr(language, "routines.editor.actions.next");
+    fireEvent.click(await screen.findByRole("button", { name: next }));
+    fireEvent.click(await screen.findByRole("button", { name: next }));
+
+    expect(await screen.findByText(unavailable)).toBeInTheDocument();
+    expect(
+      screen.getByText(tr(language, "routines.editor.connectors.unavailableDescription")),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: tr(language, "routines.editor.connectors.addAction") }),
+    ).toBeDisabled();
+    const rendered = document.body.textContent ?? "";
+    expect(rendered).not.toContain(tr(language, "routines.editor.connectors.description"));
+    expect(rendered).not.toContain(tr(language, "routines.editor.connectors.empty"));
+  });
+
   describe("schedule step (D-080, D-081)", () => {
     function scheduledJob(overrides: Partial<CronJob>): CronJob {
       return {

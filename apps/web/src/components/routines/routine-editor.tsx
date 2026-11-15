@@ -716,6 +716,7 @@ function RefineStep({
           value={state.connectors}
           onChange={onConnectorsChange}
           disabled={disabled}
+          unavailable
         />
       ) : null}
 
