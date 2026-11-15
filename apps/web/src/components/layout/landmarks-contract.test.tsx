@@ -36,6 +36,7 @@ const H1_ALLOWED = [
   "components/layout/workspace-topbar.tsx",
   // Full-screen auth routes without the topbar.
   "components/auth/forgot-password-screen.tsx",
+  "components/auth/insecure-transport-screen.tsx",
   "components/auth/login-screen.tsx",
   "components/setup/step-create-account.tsx",
   "components/setup/step-recovery-codes.tsx",

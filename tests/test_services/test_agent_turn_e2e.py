@@ -587,14 +587,6 @@ def _awaited_coroutines(task: asyncio.Task[Any]) -> list[str]:
     return names
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=SquadFollowUpDeadlock,
-    reason=(
-        "D-019: _post_process holds the per-user worker lock while enqueue_squad_agent_task "
-        "reaches _ensure_queue_worker, which takes the same lock."
-    ),
-)
 async def test_squad_follow_up_is_enqueued_and_runs_under_the_real_worker_lock(
     agent_db: str,
     queue_state: None,
