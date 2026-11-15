@@ -8,6 +8,13 @@ export type ChannelDefinition = {
   gradientFrom: string;
   gradientTo: string;
   isOfficial: boolean;
+  /**
+   * Whether Koda runs this channel. Only Telegram is started by the runtime
+   * today; the other adapters are never started (D-017), so their cards read
+   * "Not available" and their credential forms are disabled. Flip to `true`
+   * once a channel is wired into worker startup.
+   */
+  available: boolean;
   helpUrl?: string;
   fields: {
     key: string;
@@ -27,6 +34,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     gradientFrom: "#0088cc",
     gradientTo: "#0077b5",
     isOfficial: true,
+    available: true,
     fields: [
       {
         key: "AGENT_TOKEN",
@@ -52,6 +60,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     gradientFrom: "#25D366",
     gradientTo: "#128C7E",
     isOfficial: true,
+    available: false,
     fields: [
       {
         key: "WHATSAPP_ACCESS_TOKEN",
@@ -91,6 +100,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     gradientFrom: "#5865F2",
     gradientTo: "#4752C4",
     isOfficial: true,
+    available: false,
     fields: [
       {
         key: "DISCORD_BOT_TOKEN",
@@ -109,6 +119,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     gradientFrom: "#4A154B",
     gradientTo: "#611F69",
     isOfficial: true,
+    available: false,
     fields: [
       {
         key: "SLACK_BOT_TOKEN",
@@ -141,6 +152,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     gradientFrom: "#6264A7",
     gradientTo: "#464EB8",
     isOfficial: true,
+    available: false,
     fields: [
       {
         key: "TEAMS_APP_ID",
@@ -166,6 +178,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     gradientFrom: "#06C755",
     gradientTo: "#00B900",
     isOfficial: true,
+    available: false,
     fields: [
       {
         key: "LINE_CHANNEL_SECRET",
@@ -191,6 +204,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     gradientFrom: "#0099FF",
     gradientTo: "#0077CC",
     isOfficial: true,
+    available: false,
     fields: [
       {
         key: "MESSENGER_PAGE_ACCESS_TOKEN",
@@ -223,6 +237,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     gradientFrom: "#3A76F0",
     gradientTo: "#2E5FBF",
     isOfficial: false,
+    available: false,
     fields: [
       {
         key: "SIGNAL_PHONE_NUMBER",
@@ -248,6 +263,7 @@ export const CHANNEL_CATALOG: ChannelDefinition[] = [
     gradientFrom: "#E4405F",
     gradientTo: "#C13584",
     isOfficial: false,
+    available: false,
     fields: [
       {
         key: "INSTAGRAM_PAGE_ACCESS_TOKEN",

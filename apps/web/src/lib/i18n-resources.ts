@@ -17635,12 +17635,50 @@ const channelCatalogLabels = {
   },
 };
 
+// D-017 (M6-E1-T2): only Telegram is started by the runtime; the other
+// channel cards read "Not available" and their credential forms are disabled.
+const channelCatalogUnavailableLabels: Record<
+  string,
+  { badge: string; title: string; description: string }
+> = {
+  "en-US": {
+    badge: "Not available",
+    title: "This channel is not available yet",
+    description:
+      "Koda does not run this channel yet, so it would never receive messages. Telegram is the only channel that works today.",
+  },
+  "pt-BR": {
+    badge: "Indisponível",
+    title: "Este canal ainda não está disponível",
+    description:
+      "O Koda ainda não executa este canal, então ele nunca receberia mensagens. Hoje, o Telegram é o único canal que funciona.",
+  },
+  "es-ES": {
+    badge: "No disponible",
+    title: "Este canal aún no está disponible",
+    description:
+      "Koda todavía no ejecuta este canal, así que nunca recibiría mensajes. Hoy, Telegram es el único canal que funciona.",
+  },
+  "fr-FR": {
+    badge: "Indisponible",
+    title: "Ce canal n'est pas encore disponible",
+    description:
+      "Koda n'exécute pas encore ce canal : il ne recevrait jamais de messages. Aujourd'hui, Telegram est le seul canal qui fonctionne.",
+  },
+  "de-DE": {
+    badge: "Nicht verfügbar",
+    title: "Dieser Kanal ist noch nicht verfügbar",
+    description:
+      "Koda betreibt diesen Kanal noch nicht, daher würde er nie Nachrichten empfangen. Telegram ist derzeit der einzige Kanal, der funktioniert.",
+  },
+};
+
 for (const [language, labels] of Object.entries(channelCatalogLabels)) {
   const translation = mutableResources[language]?.translation;
   if (!translation) continue;
   translation.controlPlane = {
     ...(translation.controlPlane ?? {}),
-    channelCatalog: labels,
+    channelCatalog: { ...labels, unavailable: channelCatalogUnavailableLabels[language] },
   };
 }
 
