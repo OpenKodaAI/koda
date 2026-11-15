@@ -287,7 +287,10 @@ class TestWorkflowStepsInAChildRun:
             "job_list": AsyncMock(return_value=AgentToolResult(tool="job_list", success=True, output="No jobs.")),
             "web_search": AsyncMock(return_value=AgentToolResult(tool="web_search", success=True, output="hits")),
         }
-        with patch("koda.services.tool_dispatcher._TOOL_HANDLERS", handlers):
+        with (
+            patch("koda.services.tool_dispatcher._TOOL_HANDLERS", handlers),
+            patch.dict("koda.services.tool_dispatcher._tool_rate_windows", clear=True),
+        ):
             run = await WorkflowEngine().run(wf, ctx)
 
         handlers["job_list"].assert_awaited_once()

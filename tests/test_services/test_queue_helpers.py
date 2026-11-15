@@ -1407,6 +1407,7 @@ class TestRuntimeTerminalCutover:
         with (
             patch("koda.services.queue_manager._run_with_provider_fallback", AsyncMock(return_value=done)),
             patch("koda.services.tool_dispatcher._TOOL_HANDLERS", handlers),
+            patch.dict("koda.services.tool_dispatcher._tool_rate_windows", clear=True),
         ):
             await _run_agent_loop(query_context, item, 111, 111, loop_context, initial)
 
