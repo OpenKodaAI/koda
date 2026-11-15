@@ -13,8 +13,8 @@
    "milestone": "M1",
    "name": "Segurança",
    "total": 68,
-   "done": 19,
-   "in_progress": 10,
+   "done": 26,
+   "in_progress": 3,
    "awaiting_evidence": 3,
    "remaining": 36
   },
@@ -40,8 +40,8 @@
    "milestone": "M4",
    "name": "Remoção de código morto",
    "total": 23,
-   "done": 2,
-   "in_progress": 6,
+   "done": 8,
+   "in_progress": 0,
    "awaiting_evidence": 0,
    "remaining": 15
   },
@@ -95,9 +95,9 @@
    "name": "Polimento e prontidão de release",
    "total": 5,
    "done": 0,
-   "in_progress": 0,
+   "in_progress": 1,
    "awaiting_evidence": 0,
-   "remaining": 5
+   "remaining": 4
   }
  ],
  "meta": [

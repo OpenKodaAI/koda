@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L25",
+   "at": "2026-11-15 03:15",
+   "event": "Lote 3 mesclado (d19f6ac) com gates verdes: 8540 testes Python, 303 Postgres, 1122 web. Entraram: saída de ferramentas tratada como dado não confiável, ferramentas desconhecidas como escrita, caminhos de plugin contidos, revisão de pacote só pelo operador e presa ao hash, pacote alterado recusado, cerca de 20 configurações mortas e endpoints legados removidos, 401 e tempo fixo de 300 ms no login e na recuperação de senha. Achado novo: o gate de política nega shell_execute e git_status sempre (D-278, ligado à aprovação de M3-E3-T1). Redator único em redesenho com corpus rotulado"
+  },
+  {
    "id": "L24",
    "at": "2026-11-15 02:45",
    "event": "Lote 2 mesclado (6a1b874) com gates verdes: 8482 testes Python, 299 Postgres, 1118 web. Entraram retenção de dados e search_path por conexão (ADR-040), /ready e backoff do supervisor, rótulos honestos de canais e modelos. 47 tarefas do plano concluídas. Lote 3 (segurança de ferramentas e pacotes, código morto, autenticação) com gates rodando. Iniciadas lanes de segredos (M1-E6), performance (M9, primeira) e transações (M2-E2); squads e scanner de memória seguem com correção durável"

@@ -73,9 +73,9 @@
   {
    "wave": "W7",
    "name": "Onda 7",
-   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), retenção e codecs do Postgres (M2-E5-T1, M2-E2-T4), código morto do knowledge e catálogo MCP duplicado (M4-E1-T6, T9). Mesclados: código morto e M1-E1-T4/T14/T15. Dados aprovados (próxima integração); M1-E1-T5/T13 na passada de correção",
-   "status": "in_review",
-   "ref": "task/M1-E1-*, task/M2-*, task/M4-*"
+   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), retenção e codecs do Postgres (M2-E5-T1, M2-E2-T4), código morto do knowledge e catálogo MCP duplicado (M4-E1-T6, T9). Tudo mesclado",
+   "status": "merged",
+   "ref": "5656abc, 6a1b874, d19f6ac"
   },
   {
    "wave": "W8",
@@ -88,8 +88,8 @@
    "wave": "W9",
    "name": "Onda 9",
    "scope": "Segurança de ferramentas e pacotes (M1-E4-T2, T3, T5, T11, T12), IDs de agente e tabelas por agente (M2-E3-T1, T2, T4), código morto (M4-E1-T1, T2, T3, T8, T10, T14). Aprovadas e no lote 3: segurança de ferramentas e pacotes, código morto",
-   "status": "in_review",
-   "ref": "task/M1-E4-*, task/M2-E3-T1, task/M4-E1-*"
+   "status": "merged",
+   "ref": "d19f6ac (lote 3); dados M2-E3 no lote 4"
   },
   {
    "wave": "W10",

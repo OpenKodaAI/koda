@@ -47,6 +47,12 @@
    "item": "shellcheck no install.sh (M7-E2-T4)",
    "kind": "infra",
    "detail": "O shellcheck não está disponível neste ambiente e o CI não tem esse passo; a tarefa fica em revisão até rodar"
+  },
+  {
+   "id": "B9",
+   "item": "Shell e git para agentes (M3-E3-T1, D-278)",
+   "kind": "approval",
+   "detail": "O gate de política nega shell_execute e git_status em qualquer configuração; corrigir isso liga o shell dos agentes, o que faz parte do pacote de aprovação de M3-E3-T1 (ADR-002)"
   }
  ],
  "meta": [
