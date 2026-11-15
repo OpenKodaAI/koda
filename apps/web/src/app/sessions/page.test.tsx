@@ -51,6 +51,18 @@ vi.mock("@/hooks/use-animated-presence", () => ({
 const THREAD_PAGE_SIZE = 24;
 const CHAT_TEXT_WAIT = 3_000;
 
+// The page re-renders while threads and messages load, and a re-render can
+// replace a node between a findBy* query resolving and the assertion on it
+// ("element could not be found in the document"). Querying and asserting in
+// one waitFor callback retries across re-renders instead.
+async function expectPresent(query: () => HTMLElement, timeout?: number) {
+  await waitFor(() => expect(query()).toBeInTheDocument(), timeout ? { timeout } : undefined);
+}
+
+async function expectInChatLog(text: string) {
+  await expectPresent(() => within(screen.getByRole("log")).getByText(text), CHAT_TEXT_WAIT);
+}
+
 const agentCatalog = [
   {
     id: "ATLAS",
@@ -406,16 +418,8 @@ describe("SessionsPage chat redesign", () => {
   it("shows sessions grouped by agent and loads the selected thread", async () => {
     renderSessionsPage();
 
-    expect(
-      await screen.findByRole("button", { name: /Alpha conversation/i }),
-    ).toBeInTheDocument();
-    expect(
-      await within(await screen.findByRole("log")).findByText(
-        "Everything shipped correctly.",
-        {},
-        { timeout: CHAT_TEXT_WAIT },
-      ),
-    ).toBeInTheDocument();
+    await expectPresent(() => screen.getByRole("button", { name: /Alpha conversation/i }));
+    await expectInChatLog("Everything shipped correctly.");
   }, 10_000);
 
   it("loads older regular session pages near the top and reuses them from cache", async () => {
@@ -483,14 +487,9 @@ describe("SessionsPage chat redesign", () => {
 
     renderSessionsPage();
 
-    let log = await screen.findByRole("log");
-    expect(
-      await within(log).findByText(
-        "Everything shipped correctly.",
-        {},
-        { timeout: CHAT_TEXT_WAIT },
-      ),
-    ).toBeInTheDocument();
+    await expectInChatLog("Everything shipped correctly.");
+    // The log the scroll handler is attached to, once the thread has rendered.
+    const log = screen.getByRole("log");
     const olderFetchCount = () =>
       vi.mocked(global.fetch).mock.calls.filter(([input]) => {
         const url = typeof input === "string" ? input : input.toString();
@@ -508,24 +507,13 @@ describe("SessionsPage chat redesign", () => {
     fireEvent.scroll(log);
 
     await waitFor(() => expect(olderFetchCount()).toBe(1));
-    expect(
-      await within(log).findByText("Old alpha context", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectInChatLog("Old alpha context");
 
     await user.click(screen.getByRole("button", { name: /Beta sync/i }));
-    expect(
-      await within(await screen.findByRole("log")).findByText(
-        "Here is the beta summary.",
-        {},
-        { timeout: CHAT_TEXT_WAIT },
-      ),
-    ).toBeInTheDocument();
+    await expectInChatLog("Here is the beta summary.");
 
     await user.click(screen.getByRole("button", { name: /Alpha conversation/i }));
-    log = await screen.findByRole("log");
-    expect(
-      await within(log).findByText("Old alpha context", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectInChatLog("Old alpha context");
     expect(olderFetchCount()).toBe(1);
   }, 10_000);
 
@@ -552,9 +540,7 @@ describe("SessionsPage chat redesign", () => {
 
     renderSessionsPage();
 
-    expect(
-      await screen.findByRole("status", { name: /Loading conversation/i }),
-    ).toBeInTheDocument();
+    await expectPresent(() => screen.getByRole("status", { name: /Loading conversation/i }));
 
     resolveDetail(
       new Response(JSON.stringify(sessionDetails["session-alpha"]), {
@@ -563,9 +549,7 @@ describe("SessionsPage chat redesign", () => {
       }),
     );
 
-    expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectInChatLog("Everything shipped correctly.");
   }, 10_000);
 
   it("does not start hidden conversation loading while a room is selected", async () => {
@@ -633,10 +617,8 @@ describe("SessionsPage chat redesign", () => {
 
     renderSessionsPage();
 
-    expect(await screen.findByText("Room first")).toBeInTheDocument();
-    expect(
-      await screen.findByRole("button", { name: /Alpha conversation/i }),
-    ).toBeInTheDocument();
+    await expectPresent(() => screen.getByText("Room first"));
+    await expectPresent(() => screen.getByRole("button", { name: /Alpha conversation/i }));
 
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -658,9 +640,7 @@ describe("SessionsPage chat redesign", () => {
   it("shows the contextual files panel only from real session artifacts", async () => {
     renderSessionsPage();
 
-    expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectInChatLog("Everything shipped correctly.");
     const contextPanel = screen.getByLabelText("Session details");
     expect(within(contextPanel).getByText("Files")).toBeInTheDocument();
     expect(within(contextPanel).getByText("release-notes.md")).toBeInTheDocument();
@@ -669,12 +649,8 @@ describe("SessionsPage chat redesign", () => {
   it("loads conversations even when the agent catalog is not hydrated yet", async () => {
     renderSessionsPage({ agents: [] });
 
-    expect(
-      await screen.findByRole("button", { name: /Alpha conversation/i }),
-    ).toBeInTheDocument();
-    expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectPresent(() => screen.getByRole("button", { name: /Alpha conversation/i }));
+    await expectInChatLog("Everything shipped correctly.");
   }, 10_000);
 
   it("does not rewrite the URL on mount when the query is already normalized", async () => {
@@ -682,9 +658,7 @@ describe("SessionsPage chat redesign", () => {
     currentSearchParams = new URLSearchParams(currentQueryString);
     renderSessionsPage();
 
-    expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectInChatLog("Everything shipped correctly.");
     expect(replaceMock).not.toHaveBeenCalled();
   }, 10_000);
 
@@ -692,24 +666,18 @@ describe("SessionsPage chat redesign", () => {
     const user = userEvent.setup();
     renderSessionsPage();
 
-    expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectInChatLog("Everything shipped correctly.");
 
     await user.click(screen.getByRole("button", { name: /Beta sync/i }));
 
-    expect(
-      await within(await screen.findByRole("log")).findByText("Here is the beta summary.", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectInChatLog("Here is the beta summary.");
   }, 10_000);
 
   it("starts a new conversation and sends a message via the composer", async () => {
     const user = userEvent.setup();
     renderSessionsPage();
 
-    expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectInChatLog("Everything shipped correctly.");
 
     const railNewButton = screen.getAllByRole("button", { name: /New conversation/i })[0];
     await user.click(railNewButton);
@@ -773,9 +741,7 @@ describe("SessionsPage chat redesign", () => {
     const user = userEvent.setup();
     renderSessionsPage();
 
-    expect(
-      await screen.findByRole("button", { name: /Alpha conversation/i }),
-    ).toBeInTheDocument();
+    await expectPresent(() => screen.getByRole("button", { name: /Alpha conversation/i }));
 
     const search = screen.getByPlaceholderText(/Search conversations/i);
     await user.type(search, "Beta");
@@ -792,9 +758,7 @@ describe("SessionsPage chat redesign", () => {
     const user = userEvent.setup();
     renderSessionsPage();
 
-    expect(
-      await screen.findByRole("button", { name: /Alpha conversation/i }),
-    ).toBeInTheDocument();
+    await expectPresent(() => screen.getByRole("button", { name: /Alpha conversation/i }));
     replaceMock.mockClear();
     const replaceState = vi.spyOn(window.history, "replaceState");
 
@@ -815,9 +779,7 @@ describe("SessionsPage chat redesign", () => {
   it("renders the composer model and agent indicator once a session is loaded", async () => {
     renderSessionsPage();
 
-    expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectInChatLog("Everything shipped correctly.");
 
     await waitFor(() => {
       expect(screen.getByText("claude-opus-4-6")).toBeInTheDocument();
@@ -859,9 +821,7 @@ describe("SessionsPage chat redesign", () => {
     vi.stubGlobal("EventSource", MockEventSource);
     const { queryClient } = renderSessionsPage();
 
-    expect(
-      await within(await screen.findByRole("log")).findByText("Everything shipped correctly.", {}, { timeout: CHAT_TEXT_WAIT }),
-    ).toBeInTheDocument();
+    await expectInChatLog("Everything shipped correctly.");
     await waitFor(() => {
       expect(
         sources.some((source) => source.url.includes("/sessions/session-alpha/stream") && source.onmessage),
@@ -929,7 +889,7 @@ describe("SessionsPage chat redesign", () => {
         ),
       ).toBe(true);
     });
-    expect(await screen.findByRole("button", { name: /Play audio/i })).toBeInTheDocument();
+    await expectPresent(() => screen.getByRole("button", { name: /Play audio/i }));
     expect(document.querySelector("audio")?.getAttribute("src")).toBe(
       "/api/runtime/artifacts/88/download?agent=ATLAS",
     );
@@ -983,7 +943,7 @@ describe("SessionsPage chat redesign", () => {
 
     const { queryClient } = renderSessionsPage();
 
-    expect(await screen.findByText("Need a quick update")).toBeInTheDocument();
+    await expectPresent(() => screen.getByText("Need a quick update"));
     await waitFor(() => {
       expect(
         sources.some((source) => source.url.includes("/sessions/session-alpha/stream") && source.onmessage),

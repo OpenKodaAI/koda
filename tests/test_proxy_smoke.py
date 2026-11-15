@@ -4,8 +4,9 @@ The CI docker-smoke jobs load ``packages/cli/release/bundle/proxy/nginx.conf`` i
 front of the Compose stack and run ``scripts/proxy_smoke.py check`` through it. The tests below hold
 that wiring in place and run the same checks through a real nginx here, in front of two stand-ins
 for the dashboard and the API. The stand-ins answer the way the real services do wherever the
-checks tell the two apart (apps/web/src/proxy.ts, the dashboard's auth routes and relay in
-apps/web/server.mjs; koda/control_plane/api.py), so a request routed to the wrong one fails.
+checks tell the two apart (apps/web/src/proxy.ts, the dashboard's auth routes, the relay in
+apps/web/src/lib/runtime-relay-server.mjs; koda/control_plane/api.py), so a request routed to the
+wrong one fails.
 
 The real-nginx tests need an nginx binary: ``KODA_TEST_NGINX``, else ``nginx`` on PATH or
 ``/usr/sbin/nginx``. Without one they skip. The docker smoke runs ``proxy_smoke.run_checks``
@@ -22,6 +23,7 @@ for every route either way.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import secrets
@@ -29,7 +31,7 @@ import shutil
 import socket
 import subprocess
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -283,13 +285,32 @@ def dashboard_app(stack: Stack) -> web.Application:
             return _json({"error": "Operator session is required."}, 401)
         return _json([])
 
-    async def relay(request: web.Request) -> web.WebSocketResponse:
+    def relay_page_origin(request: web.Request) -> str | None:
+        # dashboardOrigin in apps/web/src/lib/runtime-relay-server.mjs: the first X-Forwarded-Proto
+        # entry (ws and wss read as http and https), else http, then the Host, lowercased.
+        host = request.headers.get("Host", "")
+        if not host:
+            return None
+        proto = request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip().lower() or "http"
+        scheme = {"wss": "https", "ws": "http"}.get(proto, proto)
+        return f"{scheme}://{host.lower()}"
+
+    async def relay(request: web.Request) -> web.Response:
         stack.remember("dashboard", request)
-        socket_response = web.WebSocketResponse()
-        await socket_response.prepare(request)
-        # apps/web/server.mjs closes an unknown relay id with 4404 relay_not_found.
-        await socket_response.close(code=4404, message=b"relay_not_found")
-        return socket_response
+        connection = {token.strip().lower() for token in request.headers.get("Connection", "").split(",")}
+        if request.headers.get("Upgrade", "").lower() != "websocket" or "upgrade" not in connection:
+            # server.mjs refuses only in its "upgrade" event; a plain GET goes to Next.js, where
+            # proxy.ts answers 401 without a session (the smoke sends none to the relay).
+            response = _json({"error": "Operator session is required."}, 401)
+            response.headers["Cache-Control"] = "no-store"
+            return response
+        # authorizeRelayUpgrade and refuseUpgrade in apps/web/src/lib/runtime-relay-server.mjs, before
+        # any WebSocket work: 403 unless the Origin is the page's, then 404 for an unknown relay id
+        # (no relay is attached here), each with no body and `Connection: close`.
+        origin = request.headers.get("Origin")
+        expected = relay_page_origin(request)
+        status = 404 if origin is not None and expected is not None and origin.lower() == expected else 403
+        return web.Response(status=status, headers={"Connection": "close"})
 
     app = web.Application(middlewares=[require_host])
     app.router.add_get("/api/health", health)
@@ -455,6 +476,61 @@ async def _smoke(binary: str, workdir: Path, template: str) -> tuple[Stack, list
     return stack, results
 
 
+async def test_the_relay_check_tells_the_dashboard_relay_from_the_api() -> None:
+    """The relay check passes against the dashboard's relay and fails against the API, without nginx.
+
+    The relay refuses an upgrade for an unknown relay id before the handshake, with an empty 404 for
+    the page's Origin and an empty 403 for a foreign one; the API has no /api/runtime/relay/* route.
+    """
+    stack = Stack()
+    async with serve(dashboard_app(stack)) as dashboard, serve(api_app(stack)) as api:
+        detail = await asyncio.to_thread(proxy_smoke._relay_websocket, proxy_smoke.Proxy(f"http://{dashboard}"))
+        with pytest.raises(proxy_smoke.CheckFailed, match="expected the relay's empty 404"):
+            await asyncio.to_thread(proxy_smoke._relay_websocket, proxy_smoke.Proxy(f"http://{api}"))
+
+    assert detail.startswith("404 for an unknown relay id, 403 for a foreign Origin")
+    upgrades = [headers for upstream, _, path, headers in stack.seen if path.startswith("/api/runtime/relay/")]
+    assert [headers["Origin"] for headers in upgrades] == [f"http://{dashboard}", "http://evil.example"]
+    for headers in upgrades:
+        assert headers["Upgrade"] == "websocket"
+        assert headers["Connection"] == "Upgrade"
+        assert headers["Sec-WebSocket-Version"] == "13"
+        assert len(base64.b64decode(headers["Sec-WebSocket-Key"])) == 16
+
+
+class _DropsTheUpgrade(proxy_smoke.Proxy):
+    """Sends what a proxy location without the Upgrade headers forwards: no Upgrade, `Connection: close`."""
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        body: object | None = None,
+    ) -> proxy_smoke.Response:
+        kept = {name: value for name, value in (headers or {}).items() if name not in ("Upgrade", "Connection")}
+        return super().request(method, path, headers={**kept, "Connection": "close"}, body=body)
+
+
+async def test_the_relay_check_fails_when_the_upgrade_headers_are_dropped() -> None:
+    """Without the Upgrade headers a relay path is a plain request, so proxy.ts answers it, not the relay.
+
+    server.mjs refuses only upgrades; a plain GET goes to Next.js, where proxy.ts answers 401 without a
+    session. A proxy location that forwards no Upgrade (the bundled `/api/runtime/` one) fails the check.
+    """
+    stack = Stack()
+    async with serve(dashboard_app(stack)) as dashboard:
+        plain = await asyncio.to_thread(
+            proxy_smoke.Proxy(f"http://{dashboard}").request, "GET", f"{proxy_smoke.RELAY_PATH_PREFIX}unknown"
+        )
+        with pytest.raises(proxy_smoke.CheckFailed, match="got HTTP 401 .*Operator session is required"):
+            await asyncio.to_thread(proxy_smoke._relay_websocket, _DropsTheUpgrade(f"http://{dashboard}"))
+
+    assert (plain.status, plain.json()) == (401, {"error": "Operator session is required."})
+    assert plain.headers.get("Cache-Control") == "no-store"
+
+
 async def test_the_bundled_proxy_passes_the_smoke_in_a_real_nginx(nginx_binary: str, tmp_path: Path) -> None:
     stack, results = await _smoke(nginx_binary, tmp_path, TEMPLATE.read_text(encoding="utf-8"))
 
@@ -566,7 +642,7 @@ async def test_the_bundled_proxy_passes_the_largest_upload_in_a_real_nginx(nginx
     photo limit before nginx checks a declared length, and nginx reads a chunked body in that same
     location. Every request the dashboard gets answers 413 over 1 MiB before any upstream sees it,
     the photo routes without a token included: a client without a session cannot push large bodies
-    at the dashboard, which buffers them (up to 10 MiB in next 16.2.6) before any check. The
+    at the dashboard, which buffers them (up to 10 MiB in next 16.4.6) before any check. The
     dashboard's own photo upload, a cropped 512-pixel JPEG, fits within 1 MiB
     (tests/test_release_proxy_routing.py), and a client cannot ask for the upload location itself.
     """

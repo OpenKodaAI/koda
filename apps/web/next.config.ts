@@ -76,6 +76,12 @@ const securityHeaders = [
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   allowedDevOrigins: ["127.0.0.1", "localhost"],
+  // No image here needs the optimizer: every next/image src is an SVG, which
+  // next/image serves as-is, or is marked `unoptimized`. With the optimizer
+  // off, /_next/image answers 404 before it parses a URL or loads sharp, so
+  // that unauthenticated route and sharp's image decoders are no longer
+  // reachable. Resize any new raster image at build time instead.
+  images: { unoptimized: true },
   async headers() {
     return [
       {

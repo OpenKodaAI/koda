@@ -234,6 +234,15 @@ every field and the operator's profile.
   The dashboard's production build always sets `Secure` on its cookies; there is no switch
   for it (`ALLOW_INSECURE_COOKIES` only works in development). See
   [Plain HTTP](#plain-http) for what happens when the browser cannot keep them.
+- Runtime relays: the terminal, browser-snapshot and noVNC WebSockets at
+  `/api/runtime/relay/<id>` read the same cookie on the upgrade, before the handshake
+  (`apps/web/src/lib/runtime-relay-server.mjs`). A relay admits only the session that attached
+  it, and the token is never taken from the URL. The upgrade's `Origin` must also match the
+  `Host` header and `X-Forwarded-Proto` (403 otherwise): the `SameSite=Strict` cookie still
+  reaches a page on another origin of the same site. This is stricter than the check on other
+  changes (`apps/web/src/lib/request-origin.ts`), which also admits a matching `Referer` or
+  `Sec-Fetch-Site: same-origin` when the `Origin` does not match: a browser always sends `Origin`
+  with a WebSocket handshake, so the relay takes nothing else.
 - Revocation: logout revokes the current session. Password _change_ revokes every other
   session for the same user and keeps the initiating session alive. Password _reset_ via
   recovery code revokes **all** sessions for the user.
