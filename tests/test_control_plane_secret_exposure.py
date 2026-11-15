@@ -9,6 +9,8 @@ who wants to see a stored value must replace it.
 
 from __future__ import annotations
 
+import pytest
+
 from koda.services.provider_auth import (
     PROVIDER_API_KEY_ENV_KEYS,
     ProviderLoginSessionState,
@@ -152,3 +154,122 @@ def test_credential_template_field_strips_preview(monkeypatch):
     payload = manager_mod.ControlPlaneManager._integration_fields_payload(manager, "jira")
     secret_fields = [field for field in payload if field.get("storage") == "secret"]
     assert secret_fields == []
+
+
+# M1-E6-T5 (TD-077): the masked preview is no longer stored, and never returned.
+
+_LEGACY_PREVIEW = "sk********ef"
+
+
+def _legacy_secret_row(scope_id: str, secret_key: str) -> dict:
+    """A row written before M1-E6-T5, when the preview column held the masked value."""
+    return {
+        "id": 3,
+        "scope_id": scope_id,
+        "agent_id": None if scope_id == "global" else scope_id,
+        "secret_key": secret_key,
+        "encrypted_value": "enc:legacy",
+        "preview": _LEGACY_PREVIEW,
+        "updated_at": "2026-04-20T00:00:00+00:00",
+    }
+
+
+def test_secret_upserts_write_no_preview(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = _make_manager(monkeypatch)
+    manager._require_agent_row = lambda agent_id: (agent_id, None)  # type: ignore[attr-defined]
+    monkeypatch.setattr(manager_mod, "encrypt_secret", lambda value: f"enc:{len(value)}")
+    writes: list[tuple] = []
+
+    def _execute(query: str, params: tuple = ()) -> int:
+        if "cp_secret_values" in query:
+            writes.append(params)
+        return 1
+
+    monkeypatch.setattr(manager_mod, "execute", _execute)
+
+    manager_mod.ControlPlaneManager.upsert_global_secret_asset(
+        manager, "MY_GLOBAL_SECRET", {"value": "sk-global-abcdef"}, persist_sections=False
+    )
+    manager_mod.ControlPlaneManager.upsert_secret_asset(
+        manager, "AGENT_ONE", "MY_AGENT_SECRET", {"value": "sk-agent-abcdef"}
+    )
+
+    assert len(writes) == 2
+    for params in writes:
+        assert "" in params, params
+        assert not any(isinstance(p, str) and ("**" in p or p.startswith("sk")) for p in params), params
+
+
+def test_listings_and_snapshots_never_return_a_stored_preview(monkeypatch):
+    import koda.control_plane.manager as manager_mod
+
+    manager = _make_manager(monkeypatch)
+    manager._access_meta_map = lambda meta_key, sections=None: {}  # type: ignore[attr-defined]
+    manager._global_secret_usage_scope = lambda secret_key, sections=None: "agent_grant"  # type: ignore[attr-defined]
+    manager._system_settings_sections = lambda: {}  # type: ignore[attr-defined]
+    rows = [_legacy_secret_row("global", "MY_GLOBAL_SECRET"), _legacy_secret_row("AGENT_ONE", "MY_AGENT_SECRET")]
+    monkeypatch.setattr(
+        manager_mod,
+        "fetch_all",
+        lambda query, *args, **kwargs: rows[:1] if "scope_id = 'global'" in query else rows,
+    )
+
+    global_secrets = manager_mod.ControlPlaneManager._current_global_secrets(manager)
+    resolved = manager_mod.ControlPlaneManager._resolved_secret_values(
+        manager,
+        "AGENT_ONE",
+        resource_access_policy={"allowed_global_secret_keys": ["MY_GLOBAL_SECRET"]},
+        explicit_policy=True,
+    )
+    redacted = manager_mod.ControlPlaneManager._redact_snapshot_for_client(
+        manager, {"secrets": {"OLD_SECRET": {"scope": "agent", "encrypted_value": "x", "preview": _LEGACY_PREVIEW}}}
+    )
+
+    assert [secret["preview"] for secret in global_secrets] == [""]
+    assert {key: value["preview"] for key, value in resolved.items()} == {"MY_GLOBAL_SECRET": "", "MY_AGENT_SECRET": ""}
+    assert redacted is not None
+    assert redacted["secrets"]["OLD_SECRET"]["preview"] == ""
+
+
+@pytest.mark.postgres
+def test_new_and_updated_secrets_have_an_empty_preview_in_postgres(migrated_postgres, monkeypatch):
+    """G-PG: the stored row, not only the API payload, carries no preview."""
+    import koda.control_plane.manager as manager_mod
+    from koda.control_plane import database as control_plane_db
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    manager._require_agent_row = lambda agent_id: (agent_id, None)  # type: ignore[attr-defined]
+    monkeypatch.setattr(manager_mod, "encrypt_secret", lambda value: f"enc:{len(value)}")
+    keys = ("M1E6T5_GLOBAL_SECRET", "M1E6T5_AGENT_SECRET")
+    control_plane_db.execute(
+        "DELETE FROM cp_secret_values WHERE secret_key IN (?, ?)",
+        keys,
+    )
+    # An agent secret stored before the change, with its masked preview.
+    control_plane_db.execute(
+        """INSERT INTO cp_secret_values
+               (scope_id, agent_id, secret_key, encrypted_value, preview, created_at, updated_at)
+           VALUES ('M1E6T5_AGENT', 'M1E6T5_AGENT', ?, 'enc:legacy', ?, 'then', 'then')""",
+        (keys[1], _LEGACY_PREVIEW),
+    )
+    try:
+        manager_mod.ControlPlaneManager.upsert_global_secret_asset(
+            manager, keys[0], {"value": "sk-global-abcdef"}, persist_sections=False
+        )
+        manager_mod.ControlPlaneManager.upsert_secret_asset(
+            manager, "M1E6T5_AGENT", keys[1], {"value": "sk-agent-abcdef"}
+        )
+
+        rows = control_plane_db.fetch_all(
+            "SELECT scope_id, secret_key, encrypted_value, preview FROM cp_secret_values "
+            "WHERE secret_key IN (?, ?) ORDER BY secret_key",
+            keys,
+        )
+        assert [(row["scope_id"], row["encrypted_value"], row["preview"]) for row in rows] == [
+            ("M1E6T5_AGENT", "enc:15", ""),
+            ("global", "enc:16", ""),
+        ]
+    finally:
+        control_plane_db.execute("DELETE FROM cp_secret_values WHERE secret_key IN (?, ?)", keys)

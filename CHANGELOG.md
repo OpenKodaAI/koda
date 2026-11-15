@@ -127,6 +127,10 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   significant characters logs `bootstrap_code_seed_weak`. A seed the `/setup` field
   cannot take (1 to 12 characters from its alphabet) logs
   `bootstrap_code_seed_not_typeable`. (M1-E1-T17)
+- Secrets no longer keep a masked preview (their first and last two characters). New
+  and updated secrets store none. `GET /api/control-plane/system-settings` and the draft
+  and published snapshots in `GET /api/control-plane/agents/{agent_id}` return `preview`
+  as `""`, also for values stored before. (M1-E6-T5, TD-077)
 
 ### Added
 

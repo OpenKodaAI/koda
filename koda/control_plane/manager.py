@@ -3109,7 +3109,8 @@ class ControlPlaneManager:
                 == "agent_grant",
                 "usage_scope": self._global_secret_usage_scope(str(row["secret_key"]), sections=sections),
                 "description": _nonempty_text(secret_meta.get(str(row["secret_key"]).upper(), {}).get("description")),
-                "preview": str(row["preview"] or ""),
+                # A preview stored before M1-E6-T5 is never returned.
+                "preview": "",
                 "updated_at": str(row["updated_at"] or ""),
             }
             for row in rows
@@ -12162,7 +12163,8 @@ class ControlPlaneManager:
             (
                 normalized_secret_key,
                 encrypt_secret(value),
-                mask_secret(value),
+                # No masked preview is stored (M1-E6-T5); the column keeps its empty default.
+                "",
                 now,
                 now,
             ),
@@ -12509,7 +12511,8 @@ class ControlPlaneManager:
                 normalized,
                 normalized_secret_key,
                 encrypt_secret(value),
-                mask_secret(value),
+                # No masked preview is stored (M1-E6-T5); the column keeps its empty default.
+                "",
                 now,
                 now,
             ),
@@ -13451,7 +13454,7 @@ class ControlPlaneManager:
             resolved[secret_key] = {
                 "scope": scope,
                 "encrypted_value": str(row["encrypted_value"]),
-                "preview": str(row["preview"]),
+                "preview": "",
             }
         return resolved
 
@@ -13464,7 +13467,8 @@ class ControlPlaneManager:
             secret_payload = _safe_json_object(payload)
             secrets[str(secret_key)] = {
                 "scope": str(secret_payload.get("scope") or "agent"),
-                "preview": str(secret_payload.get("preview") or ""),
+                # Snapshots published before M1-E6-T5 still hold a masked preview; never return it.
+                "preview": "",
                 "present": True,
             }
         sanitized["secrets"] = secrets
