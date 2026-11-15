@@ -35,5 +35,7 @@ describe("ComposerToolbar agent picker (D-332)", () => {
     for (const option of options) expect(option.parentElement).toBe(listbox);
     expect(listbox.querySelector("ul, ol, li")).toBeNull();
     expect(within(listbox).getByRole("option", { name: "ATLAS" })).toHaveAttribute("aria-selected", "true");
+    // The popover is a Radix dialog: it needs a name too (axe aria-dialog-name).
+    expect(screen.getByRole("dialog", { name: "Agents" })).toContainElement(listbox);
   });
 });

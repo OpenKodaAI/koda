@@ -178,5 +178,7 @@ describe("RoomSettingsPanel", () => {
     expect(options).toHaveLength(3);
     for (const option of options) expect(option.parentElement).toBe(listbox);
     expect(listbox.querySelector("ul, ol, li")).toBeNull();
+    // The popover is a Radix dialog: it needs a name too (axe aria-dialog-name).
+    expect(screen.getByRole("dialog", { name: /^Role$/i })).toContainElement(listbox);
   });
 });

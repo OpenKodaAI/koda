@@ -1016,6 +1016,7 @@ function RoleSelect({
         align="end"
         sideOffset={6}
         className="w-[200px] p-1"
+        aria-label={t("sessions.room.settings.role", undefined)}
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
         {/* Options sit directly in the listbox (D-332): an li's listitem role

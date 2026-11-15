@@ -81,7 +81,7 @@ export function ComposerToolbar({
                   />
                 </button>
               </PopoverTrigger>
-              <PopoverContent align="end" sideOffset={8} className="w-72 p-1">
+              <PopoverContent align="end" sideOffset={8} className="w-72 p-1" aria-labelledby={headingId}>
                 <div
                   id={headingId}
                   className="px-2 pt-1.5 pb-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]"
