@@ -19,8 +19,9 @@ export function CommandBarModal() {
   const { t } = useAppI18n();
   const { agents } = useAgentCatalog();
   const router = useRouter();
-  const { stats } = useAgentStats();
   const [open, setOpen] = useState(false);
+  // The palette is mounted on every route; poll agent stats only while it is open.
+  const { stats } = useAgentStats(undefined, { enabled: open });
 
   const primaryAgentId = agents[0]?.id ?? null;
   const skills = useSkillsCatalog(primaryAgentId, open);

@@ -102,3 +102,16 @@ export function getControlPlaneMutationInvalidation(pathSegments: string[]) {
     paths: Array.from(paths),
   };
 }
+
+/**
+ * Whether a successful proxied mutation should revalidate the whole app layout.
+ * Chat sends, room posts and session edits change nothing the root layout
+ * renders (the agent catalog and the auth status), so they skip it.
+ */
+export function shouldRevalidateLayoutAfterMutation(pathSegments: string[]) {
+  const [root, scope, id, collection] = pathSegments;
+  if (root !== "dashboard") return true;
+  if (scope === "agents") return collection !== "sessions";
+  if (scope === "squads") return id !== "threads" && collection !== "threads";
+  return true;
+}
