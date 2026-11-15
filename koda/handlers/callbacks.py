@@ -1576,7 +1576,7 @@ async def callback_approval(update: Update, context: BotContext) -> None:
     pending = _PENDING_OPS.get(op_id)
     if not pending:
         with contextlib.suppress(Exception):
-            await query.edit_message_text("Operacao expirada ou invalida.")
+            await query.edit_message_text("Operacao expirada ou invalida. Solicite novamente.")
         return
 
     # Verify the pressing user is the same who initiated the operation
@@ -1684,7 +1684,7 @@ async def callback_agent_cmd_approval(update: Update, context: BotContext) -> No
     pending = _PENDING_AGENT_CMD_OPS.get(op_id)
     if not pending:
         with contextlib.suppress(Exception):
-            await query.edit_message_text("Operacao expirada ou invalida.")
+            await query.edit_message_text("Operacao expirada ou invalida. Solicite novamente.")
         return
 
     # Verify the pressing user is the same who initiated the operation

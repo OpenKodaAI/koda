@@ -190,15 +190,16 @@ async def update_approval_grant(grant_id: str, payload: dict[str, Any]) -> int:
     )
 
 
-async def load_approval_grants() -> dict[str, dict[str, Any]]:
+async def load_approval_grants(*, agent_id: str) -> dict[str, dict[str, Any]]:
+    """Return the live grants of ``agent_id``; grants of another agent, or with no agent, stay out (D-366)."""
     rows = _fetch_all(
         "load",
         """
         SELECT grant_id, payload_json, expires_at
           FROM approval_grants
-         WHERE expires_at > ?
+         WHERE agent_id = ? AND expires_at > ?
         """,
-        (time.time(),),
+        (agent_id, time.time()),
     )
     result: dict[str, dict[str, Any]] = {}
     for row in rows:

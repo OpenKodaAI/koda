@@ -30,12 +30,12 @@ def _no_primary_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Magi
     "call",
     [
         lambda: pending_approvals.save_pending_op("op1", {"user_id": 42, "op_type": "user"}, ttl_seconds=300),
-        lambda: pending_approvals.remove_pending_op("op1"),
+        lambda: pending_approvals.remove_pending_op("op1", agent_id="AGENT_A"),
         lambda: pending_approvals.remove_pending_ops(user_id=42),
         lambda: pending_approvals.cleanup_expired_ops(),
-        lambda: pending_approvals.load_pending_ops(),
+        lambda: pending_approvals.expire_pending_ops(agent_id="AGENT_A"),
     ],
-    ids=["save", "remove", "remove_matching", "cleanup", "load"],
+    ids=["save", "remove", "remove_matching", "cleanup", "expire"],
 )
 async def test_without_postgres_each_call_raises_is_logged_and_writes_no_file(
     call, tmp_path: Path, _no_primary_backend: MagicMock

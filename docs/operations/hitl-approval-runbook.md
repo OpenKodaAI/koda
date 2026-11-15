@@ -42,26 +42,18 @@ subset before resolving the approval.
 
 ## Persistence
 
-Pending approvals are Postgres-primary when the primary state backend is
-enabled. The JSON file at `{STATE_ROOT_DIR}/pending_approvals.json` remains the
-fallback and rollback path.
+Pending approvals and approval grants are stored in Postgres only, in the
+`pending_approvals` and `approval_grants` tables that migration
+`050_approval_tables` creates. A failed write is logged and nothing falls back
+to a file.
 
-The Postgres table is additive and created with `CREATE TABLE IF NOT EXISTS`:
-
-```sql
-CREATE TABLE IF NOT EXISTS pending_approvals (
-  op_id TEXT PRIMARY KEY,
-  op_type TEXT NOT NULL,
-  user_id INTEGER,
-  agent_id TEXT,
-  session_id TEXT,
-  chat_id INTEGER,
-  description TEXT,
-  created_at REAL NOT NULL,
-  expires_at REAL NOT NULL,
-  payload_json TEXT NOT NULL
-);
-```
+A pending approval lasts as long as the worker process that asked for it: its
+command, or the agent turn waiting on it, cannot be restored. On start, each
+worker deletes the pending approvals of its agent that its previous process
+left, with one `approval.pending_expired` audit event (reason `restart`) each,
+and a button pressed on one of them answers that the request expired and must
+be asked again. Approval grants survive a restart. Each worker loads only its
+own agent's grants.
 
 ## Operator Guidance
 
@@ -85,6 +77,6 @@ pnpm --filter koda-web exec vitest run src/components/sessions/chat/approval-pro
 
 ## Rollback
 
-Rollback is compatible: keep the JSON pending-approval fallback, stop sending
-`edit`/`respond` from the dashboard, and continue accepting legacy
+Rollback is compatible: stop sending `edit`/`respond` from the dashboard, and
+continue accepting legacy
 `approved`, `denied`, and `approved_scope` decisions.

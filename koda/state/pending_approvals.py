@@ -1,8 +1,10 @@
 """Pending approval persistence in Postgres, the only approval store.
 
 Stores pending approvals in the ``pending_approvals`` table (migration
-``050_approval_tables``) so approvals survive process restarts. asyncio.Event
-objects cannot be serialized, so callers must recreate them after loading.
+``050_approval_tables``). A pending approval cannot outlive its process: its
+handler, or the agent loop waiting on it, cannot be restored (D-163). Its row
+lets the next start of its agent's worker expire it with an audit row. Every
+agent shares the table, so each write names the rows of one agent.
 
 A failed read or write is logged and raised to the caller. Nothing falls back
 to a file: earlier releases wrote ``pending_approvals.json`` when a Postgres
@@ -51,16 +53,6 @@ def _fetch_all(action: str, query: str, params: tuple[Any, ...]) -> list[Any]:
 
 def _json_dumps(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
-
-
-def _json_loads(value: str | None) -> dict[str, Any]:
-    if not value:
-        return {}
-    try:
-        parsed = json.loads(value)
-    except Exception:
-        return {}
-    return parsed if isinstance(parsed, dict) else {}
 
 
 def _optional_chat_id(value: Any) -> int | None:
@@ -162,31 +154,40 @@ async def save_pending_op(
     )
 
 
-async def load_pending_ops() -> dict[str, dict[str, Any]]:
-    """Load all non-expired pending ops."""
-    rows = _fetch_all(
-        "load",
+async def expire_pending_ops(*, agent_id: str) -> int:
+    """Delete the live pending ops of ``agent_id``, with one ``approval.pending_expired`` audit row each.
+
+    A worker calls it once at startup, before it asks for any approval: the ops an
+    earlier process of its agent left cannot run, as their handlers cannot be restored
+    (D-163). Rows of another agent, or with no agent, are left as they are (D-366).
+    Returns how many ops expired.
+    """
+    return _execute(
+        "expire",
         """
-        SELECT op_id, payload_json, expires_at
-          FROM pending_approvals
-         WHERE expires_at > ?
+        WITH expired AS (
+            DELETE FROM pending_approvals
+             WHERE agent_id = ? AND expires_at > ?
+            RETURNING op_id, op_type, user_id, agent_id, session_id, chat_id
+        )
+        INSERT INTO audit_events (agent_id, timestamp, event_type, user_id, details_json)
+        SELECT agent_id, NOW(), 'approval.pending_expired', user_id,
+               jsonb_build_object(
+                   'op_id', op_id,
+                   'op_type', op_type,
+                   'session_id', session_id,
+                   'chat_id', chat_id,
+                   'reason', 'restart'
+               )
+          FROM expired
         """,
-        (time.time(),),
+        (agent_id, time.time()),
     )
-    result: dict[str, dict[str, Any]] = {}
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        op_id = str(row.get("op_id") or "")
-        payload = _json_loads(str(row.get("payload_json") or ""))
-        if op_id and payload:
-            result[op_id] = payload
-    return result
 
 
-async def remove_pending_op(op_id: str) -> None:
-    """Remove a single pending op from the persisted store."""
-    _execute("remove", "DELETE FROM pending_approvals WHERE op_id = ?", (op_id,))
+async def remove_pending_op(op_id: str, *, agent_id: str) -> int:
+    """Delete one pending op of ``agent_id``; an op of another agent is left in place. Returns the rows deleted."""
+    return _execute("remove", "DELETE FROM pending_approvals WHERE op_id = ? AND agent_id = ?", (op_id, agent_id))
 
 
 async def remove_pending_ops(

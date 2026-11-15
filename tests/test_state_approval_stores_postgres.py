@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
 import pytest
@@ -114,16 +115,12 @@ async def test_ids_above_int32_persist_and_survive_a_restart(
     # A restart: every pool is closed, and the next read opens new connections.
     close_shared_postgres_backends()
 
-    grants = await approval_grants.load_approval_grants()
-    ops = await pending_approvals.load_pending_ops()
+    grants = await approval_grants.load_approval_grants(agent_id="AGENT_A")
     assert grants["grant-big"]["user_id"] == _BIG_USER
     assert grants["grant-big"]["chat_id"] == _SUPERGROUP_CHAT
-    assert ops["op-big"]["user_id"] == _BIG_USER
-    assert ops["op-big"]["chat_id"] == _SUPERGROUP_CHAT
-    stored = await conn.fetchrow(
-        f'SELECT user_id, chat_id FROM "{schema}"."approval_grants" WHERE grant_id = $1', "grant-big"
-    )
-    assert (stored["user_id"], stored["chat_id"]) == (_BIG_USER, _SUPERGROUP_CHAT)
+    for table, key, row_id in (("approval_grants", "grant_id", "grant-big"), ("pending_approvals", "op_id", "op-big")):
+        stored = await conn.fetchrow(f'SELECT user_id, chat_id FROM "{schema}"."{table}" WHERE {key} = $1', row_id)
+        assert (stored["user_id"], stored["chat_id"]) == (_BIG_USER, _SUPERGROUP_CHAT)
     assert not (tmp_path / "approval_grants.json").exists(), "the grant fell back to the JSON file"
     assert not (tmp_path / "pending_approvals.json").exists(), "the pending op fell back to the JSON file"
 
@@ -137,7 +134,7 @@ async def test_using_a_grant_in_one_agent_leaves_another_agents_grants_intact(
     conn, schema = approval_db
     await approval_grants.save_approval_grant("grant-a", _scope_grant("AGENT_A"), ttl_seconds=600)
     # Agent A's worker loaded its grants at startup; agent B issued its grant afterwards.
-    approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants())
+    approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants(agent_id="AGENT_A"))
     await approval_grants.save_approval_grant("grant-b", _scope_grant("AGENT_B"), ttl_seconds=600)
 
     used = await approval.consume_agent_approval_grant(
@@ -170,7 +167,7 @@ async def test_a_failure_mid_write_leaves_the_grants_unchanged(
     monkeypatch.setattr(config_module, "STATE_ROOT_DIR", tmp_path)
     for grant_id, agent_id in (("grant-a1", "AGENT_A"), ("grant-a2", "AGENT_A"), ("grant-b", "AGENT_B")):
         await approval_grants.save_approval_grant(grant_id, _scope_grant(agent_id), ttl_seconds=600)
-    approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants())
+    approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants(agent_id="AGENT_A"))
     unchanged = await _grant_rows(conn, schema)
 
     with injected_fault("approval_grants", "UPDATE", rows_before=1), pytest.raises(asyncpg.PostgresError):
@@ -195,7 +192,7 @@ async def test_a_revoked_grant_stays_revoked_when_a_use_of_it_follows(approval_d
 
     conn, schema = approval_db
     await approval_grants.save_approval_grant("grant-a", _scope_grant("AGENT_A"), ttl_seconds=600)
-    approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants())
+    approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants(agent_id="AGENT_A"))
 
     # Another worker revokes it (a new session, say); this worker still holds it in memory.
     assert await approval_grants.remove_approval_grants(agent_id="AGENT_A", user_id=_USER) == 1
@@ -215,7 +212,7 @@ async def test_a_use_postgres_does_not_record_is_refused_and_memory_matches_the_
 
     conn, schema = approval_db
     await approval_grants.save_approval_grant("grant-a", _scope_grant("AGENT_A", uses=2), ttl_seconds=600)
-    approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants())
+    approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants(agent_id="AGENT_A"))
 
     async def remaining() -> tuple[int | None, int | None]:
         row = (await _grant_rows(conn, schema)).get("grant-a")
@@ -303,7 +300,7 @@ async def test_the_json_files_are_imported_once_at_startup(
 ) -> None:
     """M2-E1-T2: a grant an earlier release wrote to JSON is in Postgres after one boot, and only once."""
     import koda.config as config_module
-    from koda.state import approval_grants, approval_import, pending_approvals
+    from koda.state import approval_grants, approval_import
 
     conn, schema = approval_db
     monkeypatch.setattr(config_module, "STATE_ROOT_DIR", tmp_path)
@@ -341,10 +338,10 @@ async def test_the_json_files_are_imported_once_at_startup(
     # Every imported grant arrives expired, with one audit row: the file cannot tell a spent or
     # revoked grant from an unused one, so none of them authorizes anything.
     assert all(row["expires_at"] == 0 for row in rows.values())
-    assert await approval_grants.load_approval_grants() == {}
+    assert await approval_grants.load_approval_grants(agent_id="AGENT_A") == {}
     audited = {grant_id: audited_before[grant_id] + 1 for grant_id in grants}
     assert {grant_id: await _audited_grant_count(conn, schema, grant_id) for grant_id in grants} == audited
-    assert set(await pending_approvals.load_pending_ops()) == {"json-op"}
+    assert await _pending_op_ids(conn, schema) == {"json-op"}
     # Each file is kept, renamed.
     for name, content in seeded.items():
         assert not (tmp_path / name).exists()
@@ -423,7 +420,7 @@ async def test_a_grant_spent_before_the_upgrade_authorizes_nothing_after_the_imp
     await conn.execute(f'DELETE FROM "{schema}"."approval_grants" WHERE grant_id = $1', "json-spent")
     grants_file.write_text(seeded, encoding="utf-8")
     assert await approval_import.import_approval_json_files() == {"approval_grants.json": 1}
-    assert await approval_grants.load_approval_grants() == {}
+    assert await approval_grants.load_approval_grants(agent_id="AGENT_A") == {}
     assert await _use_in_supergroup(approval) is None
 
 
@@ -454,19 +451,22 @@ async def test_the_sql_expiry_filter_is_exact_to_the_second(postgres_url: str, m
         monkeypatch.setattr(approval_grants, "time", clock)
         monkeypatch.setattr(pending_approvals, "time", clock)
 
+        op = {"op_type": "agent_cmd", "user_id": _USER, "agent_id": "AGENT_A"}
         for name, ttl in (("in-10s", 10), ("10s-ago", -10)):
             await approval_grants.save_approval_grant(f"grant-{name}", _scope_grant("AGENT_A"), ttl_seconds=ttl)
-            await pending_approvals.save_pending_op(f"op-{name}", {"op_type": "agent_cmd", "user_id": _USER}, ttl)
+            await pending_approvals.save_pending_op(f"op-{name}", op, ttl)
+        await pending_approvals.save_pending_op("op-b-in-10s", op | {"agent_id": "AGENT_B"}, 10)
 
-        assert set(await approval_grants.load_approval_grants()) == {"grant-in-10s"}
-        assert set(await pending_approvals.load_pending_ops()) == {"op-in-10s"}
+        assert set(await approval_grants.load_approval_grants(agent_id="AGENT_A")) == {"grant-in-10s"}
+        # The startup expiry takes the live op only: the one 10 seconds from expiry.
+        assert await pending_approvals.expire_pending_ops(agent_id="AGENT_A") == 1
         await approval_grants.cleanup_expired_approval_grants()
         await pending_approvals.cleanup_expired_ops()
         assert [row["grant_id"] for row in await conn.fetch(f'SELECT grant_id FROM "{schema}"."approval_grants"')] == [
             "grant-in-10s"
         ]
         assert [row["op_id"] for row in await conn.fetch(f'SELECT op_id FROM "{schema}"."pending_approvals"')] == [
-            "op-in-10s"
+            "op-b-in-10s"
         ]
     finally:
         close_shared_postgres_backends()
@@ -624,3 +624,120 @@ async def test_legacy_grants_get_a_derived_agent_or_expire_with_an_audit_row(pos
     finally:
         await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
         await conn.close()
+
+
+def _approval_button(data: str) -> tuple[Any, Any]:
+    """A Telegram press of an approval button by user 111, an allowed user."""
+    query = AsyncMock()
+    query.data = data
+    update = MagicMock()
+    update.effective_user.id = 111
+    update.callback_query = query
+    update.message = None
+    context = MagicMock()
+    context.user_data = {}
+    return update, context
+
+
+async def _pending_op_ids(conn: Any, schema: str) -> set[str]:
+    return {str(row["op_id"]) for row in await conn.fetch(f'SELECT op_id FROM "{schema}"."pending_approvals"')}
+
+
+async def _expired_at_restart(conn: Any, schema: str, op_ids: set[str]) -> dict[str, tuple[str, str]]:
+    rows = await conn.fetch(
+        f"""SELECT agent_id, details_json FROM "{schema}"."audit_events"
+             WHERE event_type = 'approval.pending_expired' AND details_json ->> 'op_id' = ANY($1::text[])""",
+        sorted(op_ids),
+    )
+    return {
+        str(details["op_id"]): (str(row["agent_id"]), str(details["reason"]))
+        for row in rows
+        for details in [json.loads(row["details_json"])]
+    }
+
+
+async def test_approving_a_pending_op_left_by_a_restart_runs_nothing_and_tells_the_user(
+    approval_db: tuple[Any, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-163, D-368: a pending op cannot outlive its process, as its handler cannot be restored.
+
+    At startup the worker expires the pending ops its previous process left, with one audit
+    row each. Approving one then runs nothing, issues no grant and tells the user to ask
+    again. A grant issued before the restart still works (TD-043).
+    """
+    from koda.handlers.callbacks import callback_agent_cmd_approval, callback_approval
+    from koda.state import approval_grants, pending_approvals
+    from koda.utils import approval
+
+    conn, schema = approval_db
+    monkeypatch.setattr(approval, "AGENT_ID", "AGENT_A")
+    suffix = uuid.uuid4().hex[:8]
+    ops = {f"op-user-{suffix}": "user", f"op-agent-cmd-{suffix}": "agent_cmd"}
+    await approval_grants.save_approval_grant("grant-a", _scope_grant("AGENT_A"), ttl_seconds=600)
+    for op_id, op_type in ops.items():
+        await pending_approvals.save_pending_op(
+            op_id,
+            {"op_type": op_type, "user_id": 111, "chat_id": 111, "agent_id": "AGENT_A", "description": "/rm a.txt"},
+            ttl_seconds=300,
+        )
+
+    # A restart: memory is empty, every pool is closed, and startup reads what Postgres holds.
+    close_shared_postgres_backends()
+    monkeypatch.setattr(approval, "_persistence_loaded", False)
+    await approval._ensure_persistence_loaded()
+
+    buttons = {f"op-user-{suffix}": callback_approval, f"op-agent-cmd-{suffix}": callback_agent_cmd_approval}
+    for op_id, callback in buttons.items():
+        prefix = "approve:one" if callback is callback_approval else "acmd:ok"
+        update, context = _approval_button(f"{prefix}:{op_id}")
+        await callback(update, context)
+        update.callback_query.edit_message_text.assert_awaited_once_with(
+            "Operacao expirada ou invalida. Solicite novamente."
+        )
+
+    assert set(await _grant_rows(conn, schema)) == {"grant-a"}, "an expired request issued a grant"
+    assert not await _pending_op_ids(conn, schema) & set(ops)
+    assert await _expired_at_restart(conn, schema, set(ops)) == {op_id: ("AGENT_A", "restart") for op_id in ops}
+    used = await _use(approval)
+    assert used is not None and used["grant_id"] == "grant-a"
+
+
+async def test_startup_reads_only_this_agents_rows(
+    approval_db: tuple[Any, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-366: grants and pending ops of another agent, or of no agent, stay out of this worker."""
+    from koda.state import approval_grants, pending_approvals
+    from koda.utils import approval
+
+    conn, schema = approval_db
+    monkeypatch.setattr(approval, "AGENT_ID", "AGENT_A")
+    suffix = uuid.uuid4().hex[:8]
+    for grant_id, agent_id in (("grant-a", "AGENT_A"), ("grant-b", "AGENT_B"), ("grant-no-agent", "")):
+        await approval_grants.save_approval_grant(grant_id, _scope_grant(agent_id), ttl_seconds=600)
+    others = {f"op-b-{suffix}": "AGENT_B", f"op-no-agent-{suffix}": None}
+    for op_id, agent_id in others.items():
+        for_save = {"op_type": "agent_cmd", "user_id": 111, "chat_id": 111, "agent_id": agent_id}
+        await pending_approvals.save_pending_op(op_id, for_save, ttl_seconds=300)
+
+    monkeypatch.setattr(approval, "_persistence_loaded", False)
+    await approval._ensure_persistence_loaded()
+
+    assert set(approval._APPROVAL_GRANTS) == {"grant-a"}
+    assert approval._PENDING_OPS == {}
+    assert approval._PENDING_AGENT_CMD_OPS == {}
+    # Their own agent's worker expires them, or their TTL does: this worker leaves them as they are.
+    assert set(others) <= await _pending_op_ids(conn, schema)
+    assert await _expired_at_restart(conn, schema, set(others)) == {}
+
+
+async def test_removing_a_pending_op_of_another_agent_changes_nothing(approval_db: tuple[Any, str]) -> None:
+    """D-367: a pending op is removed by its id and its agent, as a grant is."""
+    from koda.state import pending_approvals
+
+    conn, schema = approval_db
+    await pending_approvals.save_pending_op("op-b", {"op_type": "agent_cmd", "agent_id": "AGENT_B"}, ttl_seconds=300)
+
+    assert await pending_approvals.remove_pending_op("op-b", agent_id="AGENT_A") == 0
+    assert await _pending_op_ids(conn, schema) == {"op-b"}
+    assert await pending_approvals.remove_pending_op("op-b", agent_id="AGENT_B") == 1
+    assert await _pending_op_ids(conn, schema) == set()

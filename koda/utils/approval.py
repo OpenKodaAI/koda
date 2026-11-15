@@ -45,7 +45,7 @@ from koda.state.approval_grants import (
 )
 from koda.state.pending_approvals import (
     cleanup_expired_ops,
-    load_pending_ops,
+    expire_pending_ops,
     remove_pending_op,
     remove_pending_ops,
     save_pending_op,
@@ -95,73 +95,28 @@ class ApprovalGrantNotSavedError(RuntimeError):
 
 
 async def _ensure_persistence_loaded() -> None:
-    """Lazy-load persisted pending ops into the in-memory dicts on first use."""
+    """Load this worker's grants and expire the pending ops its previous process left, once.
+
+    The worker calls it at startup. A pending op cannot run after a restart: its handler,
+    or the agent loop waiting on it, cannot be restored (D-163). So each one expires, with
+    an audit row, and approving it answers that it expired. Grants keep working across a
+    restart (TD-043). Rows of another agent, or with no agent, are left alone (D-366).
+    """
     global _persistence_loaded
     if _persistence_loaded:
         return
     _persistence_loaded = True
+    agent_id = AGENT_ID or "default"
     try:
-        # Restore user ops
-        persisted_user = await load_pending_ops()
-        for op_id, entry in persisted_user.items():
-            if op_id not in _PENDING_OPS and entry.get("op_type") == "user":
-                _PENDING_OPS[op_id] = {
-                    "user_id": entry.get("user_id"),
-                    "timestamp": entry.get("created_at", time.time()),
-                    "cmd_name": entry.get("description", ""),
-                    "args": "",
-                    "session_id": entry.get("session_id"),
-                    "chat_id": entry.get("chat_id"),
-                    "agent_id": entry.get("agent_id"),
-                    "requests": [
-                        _deserialize_agent_approval_request(item)
-                        for item in entry.get("requests") or []
-                        if isinstance(item, dict)
-                    ],
-                    "grants": [],
-                    "preview_text": str(entry.get("preview_text") or ""),
-                    # handler/update/context cannot be restored
-                    "handler": None,
-                    "update": None,
-                    "context": None,
-                    "_restored": True,
-                }
-            elif op_id not in _PENDING_AGENT_CMD_OPS and entry.get("op_type") == "agent_cmd":
-                _PENDING_AGENT_CMD_OPS[op_id] = {
-                    "user_id": entry.get("user_id"),
-                    "timestamp": entry.get("created_at", time.time()),
-                    "event": asyncio.Event(),
-                    "decision": None,
-                    "description": entry.get("description", ""),
-                    "agent_id": str(entry.get("agent_id") or AGENT_ID or "default"),
-                    "session_id": str(entry.get("session_id") or "") or None,
-                    "chat_id": entry.get("chat_id"),
-                    "requests": [
-                        _deserialize_agent_approval_request(item)
-                        for item in entry.get("requests") or []
-                        if isinstance(item, dict)
-                    ],
-                    "grants": [],
-                    "preview_text": str(entry.get("preview_text") or ""),
-                    "tool_id": entry.get("tool_id"),
-                    "original_params": (
-                        entry.get("original_params") if isinstance(entry.get("original_params"), dict) else {}
-                    ),
-                    "args_schema": entry.get("args_schema") if isinstance(entry.get("args_schema"), dict) else {},
-                    "risk_class": entry.get("risk_class"),
-                    "trace_id": entry.get("trace_id"),
-                    "run_graph_node_id": entry.get("run_graph_node_id"),
-                    "edited_params": None,
-                    "response_text": None,
-                    "rationale": None,
-                    "_restored": True,
-                }
-        persisted_grants = await load_approval_grants()
+        persisted_grants = await load_approval_grants(agent_id=agent_id)
         for grant_id, entry in persisted_grants.items():
             if grant_id not in _APPROVAL_GRANTS and isinstance(entry, dict):
                 _APPROVAL_GRANTS[grant_id] = entry
+        expired = await expire_pending_ops(agent_id=agent_id)
+        if expired:
+            log.info("pending_approvals_expired_at_startup", agent_id=agent_id, count=expired)
     except Exception:
-        log.warning("Failed to load persisted pending approvals", exc_info=True)
+        log.warning("Failed to load persisted approvals", exc_info=True)
 
 
 def _cleanup_stale_ops() -> None:
@@ -1203,10 +1158,11 @@ async def dispatch_approved_operation(op_id: str) -> None:
     pending = _PENDING_OPS.pop(op_id, None)
     if not pending:
         return
+    agent_id = str(pending.get("agent_id") or "").strip() or AGENT_ID or "default"
 
     # A row left behind expires with its TTL; the store logs the failure.
     with contextlib.suppress(Exception):
-        await remove_pending_op(op_id)
+        await remove_pending_op(op_id, agent_id=agent_id)
 
     handler = pending["handler"]
     original_update = pending["update"]
@@ -1214,7 +1170,6 @@ async def dispatch_approved_operation(op_id: str) -> None:
     grants = list(pending.get("grants") or [])
     requests = list(pending.get("requests") or [])
     user_id = int(pending.get("user_id") or 0)
-    agent_id = str(pending.get("agent_id") or "").strip() or AGENT_ID or "default"
     session_id = str(pending.get("session_id") or "").strip() or None
     chat_id = pending.get("chat_id")
 
@@ -1987,5 +1942,5 @@ def get_agent_cmd_decision(op_id: str) -> dict[str, Any] | None:
 
 def cleanup_agent_cmd_op(op_id: str) -> None:
     """Remove a completed agent-cmd op from the pending store."""
-    _PENDING_AGENT_CMD_OPS.pop(op_id, None)
-    _spawn_store_write(remove_pending_op(op_id))
+    op = _PENDING_AGENT_CMD_OPS.pop(op_id, None) or {}
+    _spawn_store_write(remove_pending_op(op_id, agent_id=str(op.get("agent_id") or AGENT_ID or "default")))

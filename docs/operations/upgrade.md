@@ -241,6 +241,14 @@ These changes apply with or without rules:
   reports `approval_json_import_error` and tries again on its next start.
   A failed approval write is now logged (`approval_grants_write_failed`,
   `pending_approvals_write_failed`) and no file is written.
+- **A pending approval ends when its worker restarts.** Its command, or the
+  agent turn waiting on it, cannot be restored. On start, each worker deletes
+  the pending approvals of its agent that its previous process left, with one
+  `approval.pending_expired` audit event (reason `restart`) each. Pressing a
+  button on one of them runs nothing and answers that the request expired and
+  must be asked again; before, approving one failed with an error. Approval
+  grants keep working across the restart. A worker loads only its own agent's
+  grants, and leaves the rows of other agents, and rows with no agent, alone.
 
 ## Step 1 — schema migration gate
 
