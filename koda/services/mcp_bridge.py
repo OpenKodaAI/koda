@@ -404,10 +404,12 @@ async def _lazy_start_mcp_server(server_key: str, agent_id: str) -> McpServerIns
     """Start an MCP server on-demand using catalog + connection config."""
     try:
         from koda.services.mcp_bootstrap import (
+            McpStartRefusedError,
             _catalog_isolation,
             _decrypt_connection_env,
             _load_agent_mcp_connections,
             _load_catalog_entry,
+            _record_start_refused,
         )
 
         catalog = _load_catalog_entry(server_key)
@@ -427,6 +429,11 @@ async def _lazy_start_mcp_server(server_key: str, agent_id: str) -> McpServerIns
         url = conn.get("url_override") or conn.get("url") or catalog.get("remote_url") or catalog.get("url")
         env_values = _decrypt_connection_env(conn)
         headers = conn.get("headers") if isinstance(conn.get("headers"), dict) else None
+        try:
+            isolation = _catalog_isolation(catalog)
+        except McpStartRefusedError as exc:
+            _record_start_refused(agent_id, server_key, str(exc))
+            raise
 
         instance = await mcp_server_manager.ensure_started(
             server_key=server_key,
@@ -436,7 +443,7 @@ async def _lazy_start_mcp_server(server_key: str, agent_id: str) -> McpServerIns
             url=url,
             env=env_values if env_values else None,
             headers=headers,
-            **_catalog_isolation(catalog),
+            **isolation,
         )
 
         # Also register the tools in the dispatcher

@@ -74,10 +74,43 @@ Before broad rollout, run these in canary:
 - Kill a worker after enqueue and ack; idempotency must prevent duplicate runs.
 - Force a provider timeout; router must emit sanitized `run_failed` or
   `task_result(status=failed)`.
-- Let a claimed task exceed `SQUAD_CLAIM_TTL_S`; router must return it to
-  `pending` and emit `claim_expired`.
+- Let a claimed task exceed `SQUAD_CLAIM_TTL_S` with no runtime holding its
+  turn; router must return it to `pending` with its planned assignee kept,
+  emit `claim_expired`, and dispatch the task to that assignee again. When the
+  claim expires a second time the router escalates the task: the system posts
+  a failed `task_result` that says so, the task ends `escalated`, and the
+  coordinator synthesis discloses it. A runtime renews the claim of each task
+  whose turn it has queued or is running on every router sweep, so a turn that
+  waits or runs longer than the TTL is neither dispatched twice nor escalated.
+  A squad turn requeued from the dead-letter queue stays a squad turn, and its
+  claim is renewed the same way. Claims of a paused or spent thread wait until
+  it is open again.
 - Exceed 80% and then 100% of a thread budget; router must emit alert and
-  auto-pause the thread.
+  auto-pause the thread (`budget_exceeded_auto_pause`, reason `budget`), one
+  event per pause. A room reopened at its cap is paused again, with a new
+  event; one reopened under its cap is no longer marked as paused by the
+  budget, and a later overrun pauses it again. Paused rooms already alerted
+  do not keep the sweep from an open room at its cap.
+  A thread that is not `open`, or whose spend reached its cap, runs no agent
+  turn on any path: web, Telegram, the inbox, unblocked tasks or synthesis,
+  and the queue worker checks again when it takes a queued or recovered turn.
+  A thread the worker or the queue cannot read runs no turn either. When the
+  worker's read of a queued turn's thread fails, it takes the turn again
+  after 2, 5, 15, 30 and 60 seconds before it refuses it; a thread that does
+  not exist refuses the turn at once, and a runtime API squad message to it
+  gets 404 (one to a paused or spent thread gets 409). When the queue worker
+  refuses a queued turn, or the unblocked-task follow-ups or the inbox are
+  refused a task's turn, the task's claim is released without counting an
+  expiry, so pauses never escalate a task, and the first router sweep after
+  the thread is open again under its cap dispatches the task again, without
+  waiting for `SQUAD_CLAIM_TTL_S` and without a `claim_expired` event. A
+  later claim of the task is a live one again: it is renewed, and its expiry
+  counts.
+  A dashboard post or Telegram topic message to such a thread is not routed;
+  the sender is told why. A dashboard room update may set only `photo_url` in
+  `metadata`; keys the server keeps, such as the budget flags, are refused.
+- Pause a room from the dashboard; the room must show a `thread_paused`
+  system event with reason `operator`.
 - Disable a Telegram bot admin permission; bind/strict checks must fail closed.
 
 ## Rollback

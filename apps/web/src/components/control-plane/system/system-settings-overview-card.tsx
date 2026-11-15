@@ -63,7 +63,7 @@ export function SystemSettingsOverviewCard({
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-muted)] p-4">
+        <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-4">
           <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
             <Cpu size={15} />
             {t("generated.controlPlane.providers_ativos_2647acba")}
@@ -76,7 +76,7 @@ export function SystemSettingsOverviewCard({
           </p>
         </div>
 
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-muted)] p-4">
+        <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-4">
           <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
             <Wrench size={15} />
             {t("generated.controlPlane.tools_do_core_e4b09683")}
@@ -87,7 +87,7 @@ export function SystemSettingsOverviewCard({
           </p>
         </div>
 
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-muted)] p-4">
+        <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-4">
           <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
             <ShieldCheck size={15} />
             {t("generated.controlPlane.recursos_compartilhados_06dad0e2")}
@@ -103,7 +103,7 @@ export function SystemSettingsOverviewCard({
           </p>
         </div>
 
-        <div className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-muted)] p-4">
+        <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-4">
           <div className="flex items-center gap-2 text-sm text-[var(--text-secondary)]">
             <Settings2 size={15} />
             {t("generated.controlPlane.integracoes_globais_bec133d4")}

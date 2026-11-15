@@ -266,6 +266,57 @@ async def test_requeue_dlq_entry_creates_fresh_task_and_appends_history():
 
 
 @pytest.mark.asyncio
+async def test_a_requeued_squad_turn_stays_a_squad_turn_and_its_claim_is_renewed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from koda.services import queue_manager as qm
+
+    for name in ("_user_queues", "_queue_workers", "_user_queue_task_ids", "_user_tasks", "_squad_turn_claims"):
+        monkeypatch.setattr(qm, name, {}, raising=False)
+    squad_task_id = "00000000-0000-0000-0000-0000000000f3"
+    entry = {
+        "id": 6,
+        "task_id": 45,
+        "user_id": 810,
+        "chat_id": -810,
+        "query_text": "Task request",
+        "metadata_json": json.dumps(
+            {
+                "queue_payload": {
+                    "_dashboard_chat": True,
+                    "chat_id": -810,
+                    "query_text": "Task request",
+                    "executing_agent_id": "QA",
+                    "squad_thread_id": "thread-9",
+                    "squad_task_id": squad_task_id,
+                    "parent_message_id": "msg-3",
+                    "delegation_chain": ["PM"],
+                    "delegation_request_id": f"coord-{squad_task_id}",
+                    "delegation_origin_agent_id": "PM",
+                },
+            }
+        ),
+    }
+    application = MagicMock()
+    application.user_data = defaultdict(dict)
+
+    with (
+        patch.object(qm, "create_task", return_value=78),
+        patch.object(qm, "dlq_mark_retried", return_value=True),
+        patch.object(qm, "_persist_runtime_queue_item", new_callable=AsyncMock),
+        patch.object(qm, "_sync_user_queue_observability"),
+        patch.object(qm, "_ensure_queue_worker", new_callable=AsyncMock),
+    ):
+        assert await qm.requeue_dlq_entry(entry, application=application, actor=111) == 78
+
+    # The turn runs in its room again, and this runtime renews its task's claim while it waits (D-097).
+    item = qm._parse_queue_item(qm.get_queue(810).get_nowait())
+    assert (item.squad_thread_id, item.squad_task_id, item.executing_agent_id) == ("thread-9", squad_task_id, "QA")
+    assert item.delegation_request_id == f"coord-{squad_task_id}"
+    assert qm.active_squad_turn_claims() == [(squad_task_id, "QA")]
+
+
+@pytest.mark.asyncio
 async def test_process_queue_survives_dispatch_failure_and_continues_fifo():
     from koda.services.queue_manager import (
         _process_queue,

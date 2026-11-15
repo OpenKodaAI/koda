@@ -480,3 +480,337 @@ async def test_two_runtimes_sweeping_the_same_handoff_at_once_queue_one_synthesi
 
     assert len(_final_syntheses(turn_stubs)) == 1
     assert await _handoff_statuses(threads, thread_id) == ["requested", "returned"]
+
+
+async def _expire_claim(tasks: SquadTaskStore, task_id: str) -> None:
+    """Move the task's claim deadline into the past, as a worker that went silent leaves it."""
+    pool = await tasks._ensure_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""UPDATE "{_schema()}"."squad_tasks"
+                   SET claim_expires_at = NOW() - INTERVAL '1 second'
+                 WHERE id = $1 AND status = 'claimed'""",
+            task_id,
+        )
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_an_expired_claim_is_dispatched_again_to_its_planned_assignee(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    _thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    await _expire_claim(tasks, task_ids["QA"])
+
+    report = await _router(threads, tasks).sweep_once()
+
+    assert [claim.task_id for claim in report.expired_claims] == [task_ids["QA"]]
+    qa_task = await tasks.get_task(task_ids["QA"])
+    assert qa_task is not None
+    # The planned assignee is kept and holds a fresh claim for the dispatched turn (D-097).
+    assert qa_task.status == "claimed"
+    assert qa_task.assigned_agent_id == "QA"
+    assert qa_task.metadata["claim_expiry_count"] == 1
+    [redispatch] = [call.kwargs for call in turn_stubs.await_args_list]
+    assert redispatch["target_agent_id"] == "QA"
+    assert redispatch["squad_task_id"] == task_ids["QA"]
+    assert redispatch["parent_message_id"] == parent
+    assert redispatch["delegation_request_id"] == f"coord-{task_ids['QA']}"
+    assert f"Task request [review] {task_ids['QA']}" in redispatch["query_text"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_claim_that_expires_again_is_escalated_and_the_handoff_completes_as_failed(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    await _finish_turn(thread_id=thread_id, parent=parent, task_id=task_ids["FE"], agent_id="FE")
+    router = _router(threads, tasks)
+
+    for _ in range(2):
+        await _expire_claim(tasks, task_ids["QA"])
+        await router.sweep_once()
+
+    qa_task = await tasks.get_task(task_ids["QA"])
+    assert qa_task is not None
+    assert qa_task.status == "escalated"
+    assert qa_task.assigned_agent_id == "QA"
+    # The system posts QA's result, which says why, so the coordinator synthesis discloses it.
+    history = await threads.thread_history(thread_id=thread_id, limit=100)
+    [qa_result] = [
+        row
+        for row in history
+        if row["type"] == "task_result" and (row.get("metadata") or {}).get("squad_task_id") == task_ids["QA"]
+    ]
+    assert qa_result["from"] == "system"
+    assert qa_result["metadata"]["assigned_agent_id"] == "QA"
+    assert qa_result["metadata"]["payload"]["status"] == "failed"
+    assert "expired 2 times" in qa_result["content"]
+    [synthesis] = _final_syntheses(turn_stubs)
+    assert synthesis["target_agent_id"] == "PM"
+    assert "Timeouts/bloqueios declarados:\n- QA: failed" in synthesis["query_text"]
+    assert await _handoff_statuses(threads, thread_id) == ["requested", "failed"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_paused_thread_keeps_its_expired_claims_until_it_reopens(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    thread_id, _parent, task_ids = await _start_handoff(threads, tasks)
+    await threads.update_thread_status(thread_id, "paused")
+    await _expire_claim(tasks, task_ids["QA"])
+    router = _router(threads, tasks)
+
+    assert (await router.sweep_once()).expired_claims == []
+    qa_task = await tasks.get_task(task_ids["QA"])
+    assert qa_task is not None and qa_task.status == "claimed"
+    assert turn_stubs.await_count == 0
+
+    await threads.update_thread_status(thread_id, "open")
+    assert [claim.task_id for claim in (await router.sweep_once()).expired_claims] == [task_ids["QA"]]
+    assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA"]
+
+
+async def _leave_a_stale_task_of_an_earlier_cycle(tasks: SquadTaskStore, thread_id: str) -> str:
+    """A task of an earlier cycle of the room that its worker started and never finished.
+
+    It is ``in_progress``, so no claim of it expires and nothing ends it.
+    """
+    stale = await tasks.create_task(
+        thread_id=thread_id,
+        title="Old work",
+        assigner_agent_id="PM",
+        assigned_agent_id="UX",
+        metadata={"coordination_parent_message_id": "msg-earlier-cycle"},
+    )
+    claimed = await tasks.claim_task(task_id=stale.id, agent_id="UX")
+    await tasks.update_task_status(task_id=stale.id, new_status="in_progress", agent_id="UX")
+    return claimed.id
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_stale_open_task_of_an_earlier_cycle_does_not_hold_a_later_handoff(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    stale_id = await _leave_a_stale_task_of_an_earlier_cycle(tasks, thread_id)
+
+    await _finish_turn(thread_id=thread_id, parent=parent, task_id=task_ids["FE"], agent_id="FE")
+    assert _final_syntheses(turn_stubs) == []
+    await _finish_turn(thread_id=thread_id, parent=parent, task_id=task_ids["QA"], agent_id="QA")
+
+    # The check reads this cycle's tasks only (D-287).
+    [synthesis] = _final_syntheses(turn_stubs)
+    assert synthesis["target_agent_id"] == "PM"
+    assert await _handoff_statuses(threads, thread_id) == ["requested", "returned"]
+    stale = await tasks.get_task(stale_id)
+    assert stale is not None and stale.status == "in_progress"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_the_sweep_completes_a_handoff_beside_a_stale_open_task_of_an_earlier_cycle(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    thread_id, _parent, _task_ids = await _strand_handoff(threads, tasks)
+    await _leave_a_stale_task_of_an_earlier_cycle(tasks, thread_id)
+
+    assert await _sweep(_router(threads, tasks)) == 1
+
+    assert len(_final_syntheses(turn_stubs)) == 1
+    assert await _handoff_statuses(threads, thread_id) == ["requested", "returned"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_list_tasks_reads_one_coordination_cycle(stores: tuple[SquadThreadStore, SquadTaskStore]) -> None:
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    await _leave_a_stale_task_of_an_earlier_cycle(tasks, thread_id)
+
+    cycle = await tasks.list_tasks(thread_id=thread_id, coordination_parent_message_id=parent)
+
+    assert sorted(task.id for task in cycle) == sorted(task_ids.values())
+
+
+@pytest.fixture
+def fresh_queues(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Module queue state of the runtime, empty for the test and restored after it."""
+    from koda.services import queue_manager as qm
+
+    for name in ("_user_queues", "_queue_workers", "_user_queue_task_ids", "_user_tasks", "_squad_turn_claims"):
+        monkeypatch.setattr(qm, name, {}, raising=False)
+
+
+async def _queue_turn_here(*, thread_id: str, task_id: str, agent_id: str, parent: str) -> None:
+    """Queue the task's turn on this runtime's per-user queue, behind turns that keep it waiting."""
+    from collections import defaultdict
+    from types import SimpleNamespace
+
+    from koda.services import queue_manager as qm
+
+    with (
+        patch.object(qm, "create_task", MagicMock(return_value=601)),
+        patch.object(qm, "_persist_runtime_queue_item", AsyncMock()),
+        patch.object(qm, "_ensure_queue_worker", AsyncMock()),
+    ):
+        await qm.enqueue_squad_agent_task(
+            application=SimpleNamespace(user_data=defaultdict(dict), bot=None),
+            user_id=42,
+            chat_id=-42,
+            query_text="task request",
+            executing_agent_id=agent_id,
+            squad_thread_id=thread_id,
+            squad_task_id=task_id,
+            parent_message_id=parent,
+        )
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_task_whose_turn_waits_or_runs_here_keeps_its_claim_past_its_ttl(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock, fresh_queues: None
+) -> None:
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    from koda.services import queue_manager as qm
+
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    await _queue_turn_here(thread_id=thread_id, task_id=task_ids["QA"], agent_id="QA", parent=parent)
+    router = _router(threads, tasks)
+
+    # The turn waits behind others in the serial per-user queue for longer than the claim TTL.
+    await _expire_claim(tasks, task_ids["QA"])
+    assert (await router.sweep_once()).expired_claims == []
+    waiting = await tasks.get_task(task_ids["QA"])
+    assert waiting is not None and waiting.status == "claimed" and waiting.assigned_agent_id == "QA"
+    assert waiting.claim_expires_at is not None and waiting.claim_expires_at > datetime.now(UTC)
+
+    # The turn itself runs for longer than the claim TTL.
+    async def _long_turn(*_args: Any, **_kwargs: Any) -> None:
+        await _expire_claim(tasks, task_ids["QA"])
+        assert (await router.sweep_once()).expired_claims == []
+
+    with patch.object(qm, "_execute_single_task", AsyncMock(side_effect=_long_turn)) as execute:
+        await qm._process_queue(42, SimpleNamespace(user_data={}, bot=None, application=None))
+    execute.assert_awaited_once()
+
+    # The task was never dispatched a second time, nor escalated, while its turn was alive here.
+    assert turn_stubs.await_count == 0
+    running = await tasks.get_task(task_ids["QA"])
+    assert running is not None and running.status == "claimed"
+    assert "claim_expiry_count" not in running.metadata
+
+    # Once no turn of it is queued or running here, its claim expires as a silent worker's does.
+    await _expire_claim(tasks, task_ids["QA"])
+    assert [claim.task_id for claim in (await router.sweep_once()).expired_claims] == [task_ids["QA"]]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_pauses_that_catch_a_queued_turn_never_escalate_its_task_and_a_reopen_dispatches_it_again(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock, fresh_queues: None
+) -> None:
+    from types import SimpleNamespace
+
+    from koda.services import queue_manager as qm
+
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    router = _router(threads, tasks)
+
+    for cycle in (1, 2):
+        # QA's turn waits in this runtime's queue when the operator pauses the room, so the worker
+        # refuses it when it takes it.
+        await _queue_turn_here(thread_id=thread_id, task_id=task_ids["QA"], agent_id="QA", parent=parent)
+        await threads.update_thread_status(thread_id, "paused")
+        with (
+            patch.object(qm, "_execute_single_task", AsyncMock()) as execute,
+            patch.object(qm, "update_task_status", MagicMock()),
+            patch.object(qm, "_update_runtime_queue_status", MagicMock()),
+        ):
+            await qm._process_queue(42, SimpleNamespace(user_data={}, bot=None, application=None))
+        execute.assert_not_awaited()
+
+        # The refused claim is not an expiry: the task is neither dispatched nor escalated while
+        # the room is paused, and the first sweep after the reopen, well within the claim TTL,
+        # dispatches it to QA again.
+        assert (await router.sweep_once()).expired_claims == []
+        assert turn_stubs.await_count == cycle - 1
+        await threads.update_thread_status(thread_id, "open")
+        await router.sweep_once()
+        assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA"] * cycle
+        assert turn_stubs.await_args_list[-1].kwargs["squad_task_id"] == task_ids["QA"]
+        qa_task = await tasks.get_task(task_ids["QA"])
+        assert qa_task is not None and qa_task.status == "claimed" and qa_task.assigned_agent_id == "QA"
+        assert int(qa_task.metadata.get("claim_expiry_count") or 0) == 0
+
+    # No worker went silent, so the room shows no claim expiry and no escalation.
+    history = await threads.thread_history(thread_id=thread_id, limit=100)
+    assert [row for row in history if (row.get("metadata") or {}).get("event_type") == "claim_expired"] == []
+    assert [row for row in history if row["type"] == "task_result"] == []
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_dependent_task_claimed_in_a_paused_room_is_dispatched_after_the_reopen_without_an_expiry(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    from collections import defaultdict
+    from types import SimpleNamespace
+
+    from koda.services.queue_manager import _maybe_enqueue_unblocked_squad_tasks
+
+    threads, tasks = stores
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        telegram_chat_id=-100,
+        participants=[("PM", "coordinator"), ("FE", "worker"), ("QA", "worker")],
+    )
+    review = await tasks.create_task(
+        thread_id=thread.id, title="Review", assigner_agent_id="PM", assigned_agent_id="QA"
+    )
+    build = await tasks.create_task(
+        thread_id=thread.id, title="Build", assigner_agent_id="PM", assigned_agent_id="FE", depends_on=[review.id]
+    )
+    await tasks.claim_task(task_id=review.id, agent_id="QA")
+    await tasks.update_task_status(task_id=review.id, new_status="in_progress", agent_id="QA")
+    # The operator pauses the room while QA's turn runs; QA finishes, and its follow-ups claim the
+    # dependent task for FE, whose turn the queue refuses because the room is paused.
+    await threads.update_thread_status(thread.id, "paused")
+    await tasks.update_task_status(task_id=review.id, new_status="done", agent_id="QA")
+    context = MagicMock(application=SimpleNamespace(user_data=defaultdict(dict), bot=None), bot=None)
+    await _maybe_enqueue_unblocked_squad_tasks(
+        user_id=42,
+        context=context,
+        ctx=_ctx(thread_id=thread.id, task_id=review.id, agent_id="QA", parent="msg-1"),
+    )
+
+    # The refusal is not an expiry: the first sweep after the reopen, well within the claim TTL,
+    # dispatches the task to FE again, with no claim_expired event and no expiry counted.
+    router = _router(threads, tasks)
+    assert (await router.sweep_once()).expired_claims == []
+    await threads.update_thread_status(thread.id, "open")
+    [claim] = (await router.sweep_once()).expired_claims
+    assert claim.task_id == build.id and claim.refused is True
+    assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["FE"]
+    redispatched = await tasks.get_task(build.id)
+    assert redispatched is not None and redispatched.status == "claimed"
+    assert int(redispatched.metadata.get("claim_expiry_count") or 0) == 0
+    assert "claim_refused" not in redispatched.metadata
+    history = await threads.thread_history(thread_id=thread.id, limit=100)
+    assert [row for row in history if (row.get("metadata") or {}).get("event_type") == "claim_expired"] == []

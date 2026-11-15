@@ -248,14 +248,18 @@ export function AgentSwitcher({
         closeMenu();
       }
     };
+    // Capture phase, ahead of a dialog's own Escape listener (useEscapeToClose), and marked
+    // handled, so Escape here closes only this menu and not the dialog around it (D-277).
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeMenu();
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeMenu();
     };
     window.addEventListener("mousedown", handlePointerDown);
-    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keydown", handleKeyDown, true);
     return () => {
       window.removeEventListener("mousedown", handlePointerDown);
-      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keydown", handleKeyDown, true);
     };
   }, [open]);
 

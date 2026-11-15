@@ -240,6 +240,8 @@ async def test_lazy_start_passes_the_catalog_isolation_settings_to_the_server():
         ),
         patch("koda.services.mcp_bridge.mcp_server_manager") as mock_manager,
         patch("koda.services.mcp_bridge.register_mcp_tools_for_agent"),
+        # The mount check reads agents' published state roots; none here.
+        patch("koda.control_plane.manager.get_control_plane_manager", return_value=MagicMock()),
     ):
         mock_manager.ensure_started = AsyncMock(return_value=instance)
         await _lazy_start_mcp_server("github", "agent-1")
@@ -596,3 +598,43 @@ def test_tool_dispatcher_infer_category_mcp():
     # Non-MCP tools should not return "mcp"
     assert _infer_tool_category("file_read") != "mcp"
     assert _infer_tool_category("web_search") != "mcp"
+
+
+@pytest.mark.asyncio
+async def test_lazy_start_refuses_a_stored_mount_of_the_state_directory(monkeypatch, tmp_path):
+    """D-316: a catalog row saved before mounts were validated is not started lazily either."""
+    import koda.config as config
+    from koda.services.mcp_bridge import _lazy_start_mcp_server
+
+    monkeypatch.setattr(config, "STATE_ROOT_DIR", tmp_path / "state")
+    control_plane = MagicMock()
+    catalog = {
+        "server_key": "legacy",
+        "transport_type": "stdio",
+        "command": ["mcp-legacy"],
+        "isolation_profile": "bwrap",
+        "isolation_constraints": {"mounts": [{"host": str(tmp_path / "state"), "container": "/state"}]},
+    }
+    with (
+        patch("koda.services.mcp_bootstrap._load_catalog_entry", return_value=catalog),
+        patch(
+            "koda.services.mcp_bootstrap._load_agent_mcp_connections",
+            return_value=[{"server_key": "legacy", "enabled": True}],
+        ),
+        patch("koda.services.mcp_bridge.mcp_server_manager") as mock_manager,
+        patch("koda.services.mcp_bridge.register_mcp_tools_for_agent"),
+        patch("koda.control_plane.manager.get_control_plane_manager", return_value=control_plane),
+        patch("koda.services.mcp_bootstrap.log") as bootstrap_log,
+    ):
+        mock_manager.ensure_started = AsyncMock()
+        with pytest.raises(RuntimeError, match="refused to start.*sensitive host path"):
+            await _lazy_start_mcp_server("legacy", "agent-1")
+
+    mock_manager.ensure_started.assert_not_awaited()
+    events = [call.args[0] for call in bootstrap_log.warning.call_args_list]
+    assert events == ["mcp_server_start_refused"]
+    control_plane._record_mcp_runtime_state.assert_called_once()
+    status = control_plane._record_mcp_runtime_state.call_args
+    assert status.args == ("agent-1", "legacy")
+    assert status.kwargs["success"] is False
+    assert "refused to start" in status.kwargs["error"]

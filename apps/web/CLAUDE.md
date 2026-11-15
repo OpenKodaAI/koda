@@ -31,8 +31,8 @@ Before non-trivial work under `apps/web/`, also:
 
 ## Identity
 
-- **Dark-first, canonical state.** Light mode still works but is secondary. Never treat dark as an alternative.
-- **Inspiration**: claude.ai, claude.com/product/overview, claude.com/product/claude-code. Refined minimalism, hair dividers, flat panels, accent warm.
+- **Both themes are first-class; the default follows the system.** `DEFAULT_THEME_PREFERENCE` is `"system"` ([`components/providers/theme.ts`](src/components/providers/theme.ts)): the app renders dark or light from `prefers-color-scheme` until the user pins one (`html[data-theme]`). The palette below lists the dark values; every light token has its own value in `:root`. Check every change in both themes.
+- **Inspiration**: claude.ai, claude.com/product/overview, claude.com/product/claude-code. Refined minimalism, hair dividers, flat panels, monochrome accent.
 - **Compact, minimalist, low-density-by-default.** Prefer "suspenso" (floating) content over nested card-in-card containers.
 
 ## Color palette (dark canonical)
@@ -40,19 +40,21 @@ Before non-trivial work under `apps/web/`, also:
 Tokens live in [`apps/web/src/app/globals.css`](src/app/globals.css):
 
 - `--canvas: #0C0C0C`, `--shell: #121212`, `--panel: #161616`, `--panel-soft: #141414`, `--panel-strong: #1F1F1F`.
-- `--accent: #D97757` (Claude warm). Reserved for **single CTA per screen** (New session, Run, Submit) and focus rings. Never decorative, never for arbitrary highlights.
+- `--accent: #FFFFFF` dark / `#000000` light (monochrome), with `--accent-text` (`#000000` / `#FFFEFB`) on it and `--accent-hover`. Reserved for the **single CTA per screen** (New session, Run, Submit). Never decorative, never for arbitrary highlights, and never the focus indicator: focus uses `--focus-ring` (see Focus).
 - `--border-subtle: #1F1F1F`, `--border-strong: #2A2A2A`, `--divider-hair: rgba(255,255,255,0.04)`.
-- Text: `--text-primary: #F5F5F5`, `--text-secondary: #B8B8B8`, `--text-tertiary: #9A9A9A`, `--text-quaternary: #6A6A6A`.
-- Tones: `--tone-{success,info,warning,danger,retry,neutral}-{bg,bg-strong,border,text,dot,muted}` — use `bg` for soft, `bg-strong` for solid appearance only.
+- Text: `--text-primary: #F5F5F5`, `--text-secondary: #B8B8B8`, `--text-tertiary: #9A9A9A` (light `#615b54`), `--text-quaternary: #8A8A8A` (light `#655e57`). `--text-quaternary` is text, so it keeps 4.5:1 on every surface token text sits on and on the modal and floating glass (D-267). Two backgrounds take it lower, so text on them uses `--text-tertiary` or stronger: the pressed fills (`--surface-hover-strong`, `--surface-tint-strong`), and a `--hover-tint` highlight on the modal glass (4.37:1 in light), such as the command palette's active option or a hovered row in a dialog. `src/components/ui/focus-ring-contract.test.tsx` checks it, the palette's active option included.
+- In light, holding 4.5:1 on the modal glass leaves `--text-quaternary` (5.96:1 on the canvas) almost as dark as `--text-tertiary` (6.26:1), so light shows three visible text steps, not four. That is the chosen trade-off: a quaternary text that fails AA is worse than a lost step.
+- Tones: `--tone-{success,info,warning,danger,retry,neutral}-{bg,bg-strong,border,text,dot,muted}` — use `bg` for soft, `bg-strong` for solid appearance only. There is no `-tint` step; a soft tone fill is `-bg`.
+- **Only defined tokens.** Every `var(--name)` in a component, helper or `globals.css`, and every Tailwind v4 shorthand that compiles to one (`bg-(--name)`, `border-(color:--name)`), must name a custom property the app defines (`globals.css`, an inline style, a Tailwind `[--name:value]` property or next/font's `variable`); only Radix's `--radix-*` and Tailwind's `--tw-*` come from libraries. An undefined `var()` invalidates its whole declaration (a background turns transparent) and nothing reports it, and a `var(--hook, fallback)` that nothing sets is dead: write the value. `src/lib/token-reference-contract.test.ts` enforces this. The surface names are `--canvas`, `--shell`, `--panel`, `--panel-soft`, `--panel-strong` and the `--surface-*` family; there is no `--surface-canvas`, `--surface-base` or `--panel-muted`.
 
 **Hair dividers over borders.** `border-t border-[color:var(--divider-hair)]` between list rows instead of card wrappers.
 
 ## Typography
 
-- Stack (body): `-apple-system, BlinkMacSystemFont, var(--font-inter), "Segoe UI", Roboto, system-ui, sans-serif` — macOS users get SF Pro natively; Inter as fallback.
+- Stack (body): `var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif` — Inter (loaded by next/font in [`app/layout.tsx`](src/app/layout.tsx)) on every platform; the system fonts are fallbacks only. Body size `0.875rem` (`0.8125rem` under 768px), line-height 1.3.
 - `font-feature-settings: "cv11", "ss01", "ss03"`, `letter-spacing: -0.014em`.
 - Mono: JetBrains Mono for eyebrows, timestamps, tabular numbers. Eyebrow tracking `0.12em` uppercase.
-- Scale: 12 / 13 / 14 (base) / 15 / 17 / 22 / 32 (display-sm) / 44 (display hero).
+- Scale: 12 / 13 / 14 (base) / 15 / 17 / 22 / 32 (display-sm) / 44 (display hero), as `--font-size-{xs,sm,base,md,lg,xl,display-sm,display}`. New and touched text stays on the scale; older arbitrary sizes (`text-[10px]`, `text-[0.6875rem]`, …) are legacy and move to it when their component is touched. A font-size token in a Tailwind class needs the `length:` hint (`text-[length:var(--font-size-sm)]`): `text-[var(--font-size-sm)]` compiles to `color:`, not `font-size:`. Tailwind's `text-xs` (12px) and `text-sm` (14px) are on the scale. The global `.eyebrow` class sets 10.5px outside any layer, so it overrides every size utility on its element: a touched eyebrow drops the class for `font-mono text-xs font-medium uppercase tracking-[var(--tracking-mono)]` (the command palette's group headings).
 - Display weight: 500. Never bold headlines; tracking `-0.04em` for display.
 - Hero greeting pattern: `var(--font-size-display)` (44px), `var(--tracking-display)`, weight 500.
 
@@ -60,7 +62,8 @@ Tokens live in [`apps/web/src/app/globals.css`](src/app/globals.css):
 
 - Spacing scale multiples of 4 (tokens `--space-1`…`--space-24`).
 - Radius tokens: `--radius-chip: 8` · `--radius-panel-sm: 10` · `--radius-panel: 12` · `--radius-shell: 14` · `--radius-input: 14` · `--radius-pill: 999`.
-- Shadows barely-there: `--shadow-xs: 0 1px 0 rgba(0,0,0,0.25)`, `--shadow-floating: 0 8px 28px rgba(0,0,0,0.45)`. No stacked `inset + outer` shadows.
+- New and touched components use the radius tokens (`rounded-[var(--radius-panel)]`, …) rather than Tailwind's `rounded-lg` / `rounded-xl` or raw values such as `rounded-[22px]`; a text field takes `--radius-input`. The raw radii elsewhere are legacy.
+- **No shadows paint.** The flat-design reset near the bottom of `globals.css` (`box-shadow: none !important` on every element and pseudo-element, except a focused form field) nulls them all, and the light `--shadow-*` tokens are `none`. Depth comes from borders, the surface steps and the glass overlays. Do not add `shadow-*` utilities or `box-shadow` rules: they never paint.
 
 ### Focus (mandatory)
 
@@ -69,7 +72,7 @@ Tokens live in [`apps/web/src/app/globals.css`](src/app/globals.css):
   - **Controls that are not form fields** (buttons, links, the Select trigger, menu options, tabs, native checkboxes and radios): the global 2px `--focus-ring` outline. It is unlayered CSS, so Tailwind `outline-none` / `outline-hidden` (in `@layer utilities`) cannot remove it, and the flat-design reset nulls box-shadow on these elements, so `ring-*` / `shadow-*` focus utilities on them never paint. Do not add them; the contract test scans every component and fails on a `focus:`/`focus-visible:` `ring-*`, `shadow-*`, `outline-none` or `outline-hidden` utility outside a form field. To restyle a control's ring, set `outline` / `outline-offset` in a component rule, in `--focus-ring`.
   - **Form fields** (`input` other than checkboxes and radios, `textarea`, `select`, `[contenteditable="true"]`): the global `!important` rule removes their outline, so each draws its own ring with box-shadow. `.field-shell` draws it for the fields it styles; on a `<button>` (the ModelSelector trigger) it leaves the global outline in place. Text fields recolor their border to `--focus-ring` (or `--accent` on the auth screens) and add a 1px ring of the same colour; every range input, `.ui-slider` or not, adds a 2px `--focus-ring` ring (`input[type="range"]:focus-visible`). The flat-design reset near the bottom of `globals.css` is `html body *:where(:not(:is(input, textarea, select, [contenteditable="true"]):focus-visible))`: it spares only these fields while they hold focus, so their ring paints. Keep their focused state free of decorative shadows, because the reset no longer hides them there.
   - **Wrappers that frame a bare field** (search boxes, composers, `TagInputField`): the reset nulls the wrapper's box-shadow, so draw the ring with an outline: `focus-within:border-[color:var(--focus-ring)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]` (add `focus-within:-outline-offset-1` on a borderless wrapper). Never `focus-within:shadow-*` or `focus-within:ring-*`.
-  - **Dimmed controls**: opacity dims the outline or ring painted inside the element too. A control dimmed with an `opacity-*` utility (the toast buttons, the inheriting EffortPicker slider and number field) adds `focus-visible:opacity-100`; a dimmed group around focusable controls (the inheriting EffortPicker tabs) adds `has-[:focus-visible]:opacity-100`. The contract test checks the toast and the inheriting EffortPicker; it does not find dimmed controls elsewhere.
+  - **Dimmed controls**: opacity dims the outline or ring painted inside the element too. A control dimmed with an `opacity-*` utility (the toast buttons, the inheriting EffortPicker slider and number field) adds `focus-visible:opacity-100`; a dimmed group around focusable controls (the inheriting EffortPicker tabs) adds `has-[:focus-visible]:opacity-100`. The contract test checks the toast, the inheriting EffortPicker and the dimmed session surfaces (the pending user message, a submitted ui-form, the system_event row and the room composer while it submits); it does not find dimmed controls elsewhere.
 - Do not widen the box-shadow reset or raise its specificity, and do not add another `box-shadow: none !important` that matches a focused form field. Never use a translucent token such as `--accent-muted` as the only focus indicator.
 
 ### Glass-blur (mandatory for every overlay)
@@ -90,7 +93,7 @@ Rules:
 - Do not stack a floating panel inside another floating panel — glass-on-glass blurs the wrong layer (the parent panel's bg). If a popover needs a sub-popover, render both as siblings via Portal.
 - The `!important` on `backdrop-filter` exists because Tailwind v4's backdrop utilities and downstream theme resets historically shadowed the rule. Keep it.
 
-The contract is enforced by `tests/test_glass_blur_contract.py` (Python) and the unit test in `apps/web/src/app/__tests__/glass-blur.test.ts`. Both must pass.
+The contract is enforced by the unit test in [`src/lib/glass-blur-contract.test.ts`](src/lib/glass-blur-contract.test.ts).
 
 ### Overlay enter/exit animation (mandatory)
 
@@ -153,7 +156,7 @@ Rules:
 
 Primitives live under `apps/web/src/components/ui/` and `apps/web/src/components/dashboard/`.
 
-- **Button** heights: `lg` 36 / `md` 32 / `sm` 28. Radius `--radius-panel-sm`. Variants: `primary`, `accent`, `mono`, `destructive`, `secondary`, `outline`, `ghost`, `dim`, `foreground`.
+- **Button** ([`ui/button.tsx`](src/components/ui/button.tsx)) heights: `lg` 44 (`h-11`) / `md` 40 (`h-10`) / `sm` 36 (`h-9`); `icon` is 40 square. Radius `--radius-panel-sm`. Variants: `primary`, `accent`, `mono`, `destructive`, `secondary`, `outline`, `dashed`, `ghost`, `dim`, `foreground`, `inverse`.
 - **Input / Textarea / Select**: default `h-9` (36px), radius `--radius-input` (14px), bg `--panel-soft`. On focus, Input and Textarea turn their border `--focus-ring` and add a 1px `--focus-ring` ring (`focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]`); the Select trigger is a button, so its ring is the global outline.
 - **SoftTabs** ([`ui/soft-tabs.tsx`](src/components/ui/soft-tabs.tsx)): outer `h-9 p-0.5 rounded-pill`, inner buttons `h-8 px-3`.
 - **Tooltip**: `max-w-220`, `text-[0.75rem]`, radius-chip 8. Glass surface — `--overlay-floating-bg` + `--overlay-floating-filter`.

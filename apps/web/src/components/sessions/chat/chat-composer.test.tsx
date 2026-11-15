@@ -83,4 +83,28 @@ describe("ChatComposer", () => {
 
     expect(onAgentChange).toHaveBeenCalledWith("ATLAS");
   });
+
+  it("names its combobox (D-282)", () => {
+    renderComposer();
+    // aria-input-field-name: a combobox needs an accessible name.
+    expect(screen.getByRole("combobox", { name: /Send a message/i })).toBeInTheDocument();
+  });
+
+  it("a disabled composer dims only its input, not the send hint (D-282)", () => {
+    renderComposer({ disabled: true, agentId: null });
+    expect(screen.getByRole("textbox")).toBeDisabled();
+    // The composer is disabled until an agent is chosen, which is the common
+    // empty state of /sessions. Opacity on an ancestor drops the
+    // --text-quaternary hint below 4.5:1 (axe color-contrast).
+    const dimmed = (element: Element) => {
+      const found: string[] = [];
+      for (let node: Element | null = element; node; node = node.parentElement) {
+        const dim = (node.getAttribute("class") ?? "").split(/\s+/).find((name) => /^opacity-\d+$/.test(name));
+        if (dim && dim !== "opacity-100") found.push(`${node.tagName.toLowerCase()} ${dim}`);
+      }
+      return found;
+    };
+    expect(dimmed(screen.getByText(/to send/i))).toEqual([]);
+    expect(dimmed(screen.getByRole("textbox")).length).toBeGreaterThan(0);
+  });
 });

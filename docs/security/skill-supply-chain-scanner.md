@@ -28,7 +28,16 @@ The scanner denies:
 - secret-looking files or literal credentials
 - install scripts or lifecycle hooks
 - dangerous imports or calls such as `subprocess`, `eval`, `exec`, and
-  `os.system`
+  `os.system`, and the standard modules these run a command through
+  (`posix`, `nt`, `_posixsubprocess`, `_winapi`); a call is matched as written
+  and as every name an import in the same file binds it to (after
+  `import os as o`, `from os import system as s` or `from os import *`,
+  `o.system`, `s` and `system` are `os.system`; after `import subprocess as sp`,
+  `sp.run` is `subprocess.run`; after `import builtins as b`, a `b.exec` or
+  `b.eval` call is `builtins.exec` or `builtins.eval`, denied like `exec` and
+  `eval`), and a literal module name passed to `__import__` (also as
+  `builtins.__import__` or `importlib.__import__`) or `importlib.import_module`,
+  as the first argument or as `name=`, counts as an import (D-323)
 - unknown permissions
 - `secret_access`, `code_execution`, `destructive_write`, or `unknown` risk
   without an explicit review path
@@ -40,6 +49,10 @@ Network writes, private network access, low-confidence metadata, or broad write
 permissions return `review_required`. Review does not bypass ExecutionPolicy or
 approval. It only allows package install to proceed when local operator policy
 accepts the risk.
+
+So does a Python file that uses a way to run code that the verified-bytes
+guarantee (see Load-Time Integrity) does not cover, reported as
+`python.exec_from_file` with the name it uses (D-311).
 
 A `review_required` package installs only after an operator accepts the review
 in the agent's Skills tab, which calls the operator-authenticated control-plane
@@ -82,7 +95,8 @@ operator reinstalls and reviews the package to load it again.
 The check reads each package file once, and the code that runs is the bytes it
 hashed, never a later read of the files, so a file rewritten after the check
 does not run (D-292). The handlers compile from those bytes, and from the time
-a package registers, for the rest of the process, so does every module file
+a package registers until it is unregistered or uninstalled (after that every
+module file there is refused, see below), so does every module file
 inside its directory, however package code loads it, while the handlers
 register or later, at tool-call time: an `import` statement,
 `importlib.util.spec_from_file_location` or a `SourceFileLoader` of its own all
@@ -91,18 +105,107 @@ end in `SourceFileLoader.get_code`, which for those files reads neither a
 the path the module is loaded from, under the package directory, not by where
 a symlink there points: a file or a directory in the package swapped for a
 symlink after the check, to a file outside the package or to another package
-file, still runs the bytes hashed at that path. A module file that was not
-hashed, for example one added after the check, is refused with an
-`ImportError`. A compiled module inside a package's directory (a `.pyc` without
+file, still runs the bytes hashed at that path. Only when no bytes were hashed
+at that path is a module looked up by its real path in the same package too:
+a directory symlink inside the package that points inside it (`alias -> real`)
+is allowed, the hash covers its files once, at `real/`, and a module or a
+declared handler reached through `alias/` runs the bytes hashed at its real
+path (D-309); a symlink out of the package is denied at scan. A module file
+that was not hashed at its path or at its real path, for example one added
+after the check, is refused with an `ImportError`. A compiled module inside a package's directory (a `.pyc` without
 its source, an extension module) and a module in an archive there (a `.zip`
 that package code puts on `sys.path` or opens with `zipimport`) are refused
 too, because Python would read them from disk when they load: package code
 loads from its verified `.py` sources only.
 
+### Load routes the verified bytes cover, and the ones left to the scanner
+
+The guarantee holds for code that reaches `SourceFileLoader.get_code` or one of
+the refused loaders above (D-311). Covered, for a file inside the package
+directory:
+
+- the declared handlers, which the plugin registry compiles from the verified
+  bytes itself;
+- `import` and `from ... import` statements, `importlib.import_module` and
+  `__import__`, through the path finders, including a directory package code
+  adds to `sys.path`;
+- `importlib.util.spec_from_file_location`, `importlib.machinery.SourceFileLoader`
+  used directly, and its `exec_module` and `load_module`;
+- `runpy.run_module`, which loads through the same loaders (the scanner still
+  flags `runpy`, for `run_path`);
+- refused rather than run: a `.pyc` without its source
+  (`SourcelessFileLoader`), an extension module (`ExtensionFileLoader`) and a
+  module in an archive (`zipimport`).
+
+Every other way to run code compiles or loads what it reads at call time, so it
+is left to the scanner, which flags these standard routes as
+`python.exec_from_file` (review required), by the names below:
+
+- `runpy` (`run_path` compiles a file it reads itself);
+- the builtin `compile`, called with its three arguments (source, filename and
+  mode, or through `*` or `**`) or passed on as a value, `compile` reached
+  through `builtins`, and `exec` or `eval` reached through `builtins` and passed
+  on rather than called (a call to `exec` or `eval`, bare or through
+  `builtins`, is denied); a call with fewer arguments, such as
+  `re.compile('a+')` imported as `compile`, cannot be the builtin and is not
+  flagged;
+- `source_to_code`, a loader's compile step, called on bytes the code read
+  itself (for example on a `SourceFileLoader` instance), whose code object can
+  then run through `types.FunctionType` or a function's `__code__`;
+- interpreters, debuggers, profilers and runners that run source text: `code`,
+  `codeop`, `bdb`, `pdb`, `profile`, `cProfile`, `trace`, `timeit`, `doctest`;
+- code objects or calls made from bytes: `marshal`, `pickle`, `_pickle`,
+  `shelve`, `CodeType`;
+- the import machinery's own loaders: `importlib.abc`, `importlib._bootstrap`,
+  `importlib._bootstrap_external`, `_frozen_importlib`,
+  `_frozen_importlib_external`, `_imp`, `SourcelessFileLoader` and
+  `ExtensionFileLoader` used directly (a file outside the package loads from
+  disk), any class that defines `exec_module`, `create_module`, `load_module`
+  or `source_to_code` (a loader of its own), and a class with a base that
+  defines `get_code` (a `SourceFileLoader` subclass that replaces it; only a
+  loader's `exec_module` calls `get_code`, so a class with no base, such as
+  `class Country` with a `get_code` method, is not flagged);
+- `site` (it runs the `import` lines of `.pth` files);
+- native code: `ctypes`, `_ctypes`;
+- another interpreter, which imports from disk without the guarantee:
+  `multiprocessing`, `ProcessPoolExecutor`, `os.exec*`, `os.spawn*`,
+  `os.posix_spawn*`, `os.popen`, `pty.spawn`,
+  `asyncio.create_subprocess_*` and the event loop's `subprocess_exec` and
+  `subprocess_shell` (`subprocess`, `os.system`, and `posix`, `nt`,
+  `_posixsubprocess` and `_winapi` imported at all, are denied).
+
+The scanner matches names as the code writes them and as every name an import
+in the same file binds them to, so a rebinding (`import json as o` in another
+function) adds a match and never hides one (after `import builtins as b`,
+`b.compile` is `builtins.compile`; after `import os as o`, `o.execv` is
+`os.execv`; after `from os import *`, `popen` is `os.popen`), including a
+literal module name passed to `importlib.import_module` or `__import__`
+(`__import__('os').execv` is `os.execv`); a name bound by an assignment or
+computed at run time is not seen. A package module named after one of the
+modules above (a `code.py` imported as `import code`) is flagged as well:
+whether that import loads the package's module or the standard one depends on
+which was imported first in the process, so give the package's module another
+name. Code loaded from a file outside the package directory, for
+example one package code writes and then imports, runs from that file like any
+other module outside a package.
+
 A registered package changed on disk keeps running the bytes that were
 verified, and is checked again whenever it registers again: `plugin_reload`
 reloads a package from its lock, which hashes the files first, and the plugin
 registry never reloads a skill package from its files.
+
+Unregistering a skill package (on uninstall, and before it registers again on
+install, reinstall, rollback or `plugin_reload`) maps its directory to no
+verified bytes and removes from `sys.modules` every module loaded from under
+it: a module whose file lies there, the modules package code imported under its
+own names included, and a namespace package (a directory without
+`__init__.py`) whose path lies there, which would otherwise hand back its old
+submodules. An import after a reinstall or a rollback runs the bytes verified
+for that registration rather than a module object kept from before, and until
+the package registers again, every module file in its directory is refused
+with an `ImportError`, whether package code still running asks for it (a call
+in flight, a task the package started) or the new registration was refused
+because the files changed: nothing there is read from disk (D-310).
 
 A rollback restores the previous lock, not the previous files. When the files
 on disk no longer hash to that revision's `package_hash`, for example because

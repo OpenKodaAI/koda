@@ -175,3 +175,67 @@ test("edit: Enter in the interval field on Schedule moves to Refine without savi
   await expect(dialog.getByRole("button", { name: "Delete routine" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Save changes" })).toBeFocused();
 });
+
+// D-277: Escape inside the Schedule step's timezone popover also reached the editor's own
+// Escape handler and closed the whole editor, losing the edits. It must close only the popover;
+// with no popover open, Escape still closes the editor.
+test("create: Escape in the timezone popover keeps the editor and its edits; a second Escape closes it", async ({
+  page,
+}) => {
+  const writes = await openRoutines(page);
+
+  await page.getByRole("button", { name: "New routine" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expectStep(dialog, "Basics");
+  await dialog.getByPlaceholder("e.g., Daily code review").fill("Nightly digest");
+  await dialog.getByPlaceholder("Describe what the agent should do on each run").fill("Summarize the day");
+  await dialog.getByRole("button", { name: "Next" }).click();
+  await expectStep(dialog, "Schedule");
+
+  await dialog.getByRole("button", { name: /Timezone/ }).click();
+  const search = page.getByPlaceholder("Buscar fuso horário");
+  await expect(search).toBeFocused();
+  await search.press("Escape");
+  await expect(search).toHaveCount(0);
+  await page.waitForTimeout(400);
+  await expect(dialog).toBeVisible();
+  await expectStep(dialog, "Schedule");
+  await dialog.getByRole("button", { name: "Back" }).click();
+  await expect(dialog.getByPlaceholder("e.g., Daily code review")).toHaveValue("Nightly digest");
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  expect(writes).toEqual([]);
+});
+
+// D-277: the Basics step's agent menu closed on Escape from a window listener that ran after the
+// editor's own Escape handler and did not mark the event handled, so that Escape also closed the
+// editor and lost the edits. It must close only the menu; the next Escape closes the editor.
+test("create: Escape in the agent menu keeps the editor and its edits; a second Escape closes it", async ({
+  page,
+}) => {
+  const writes = await openRoutines(page);
+
+  await page.getByRole("button", { name: "New routine" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expectStep(dialog, "Basics");
+  await dialog.getByPlaceholder("e.g., Daily code review").fill("Nightly digest");
+  await dialog.getByPlaceholder("Describe what the agent should do on each run").fill("Summarize the day");
+
+  const agentTrigger = dialog.getByRole("button", { name: "Select agent" });
+  await agentTrigger.click();
+  await expect(page.getByRole("listbox")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(agentTrigger).toHaveAttribute("aria-expanded", "false");
+  await page.waitForTimeout(400);
+  await expect(dialog).toBeVisible();
+  await expectStep(dialog, "Basics");
+  await expect(dialog.getByPlaceholder("e.g., Daily code review")).toHaveValue("Nightly digest");
+  await expect(dialog.getByPlaceholder("Describe what the agent should do on each run")).toHaveValue(
+    "Summarize the day",
+  );
+
+  await page.keyboard.press("Escape");
+  await expect(dialog).toHaveCount(0);
+  expect(writes).toEqual([]);
+});

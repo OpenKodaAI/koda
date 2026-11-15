@@ -398,6 +398,7 @@ async def route_squad_supergroup_message(update: Update, context: BotContext) ->
     from koda.squads import (
         get_squad_thread_store,
         get_telegram_binding_service,
+        squad_thread_turn_refusal,
         sync_thread_participants_from_squad,
     )
 
@@ -420,6 +421,16 @@ async def route_squad_supergroup_message(update: Update, context: BotContext) ->
             chat_id=chat.id,
             thread_squad=thread.squad_id,
             binding_squad=binding.squad_id,
+        )
+        return
+    if (refusal := squad_thread_turn_refusal(thread)) is not None:
+        # A paused, closed or spent thread runs no turn, so the message is not routed: no planner
+        # call, no task or claim that would run later without warning. The user is told why, as the
+        # dashboard tells an operator (D-075).
+        log.info("squad_inbound_thread_not_runnable", thread_id=thread.id, chat_id=chat.id, reason=refusal)
+        await message.reply_text(
+            f"Squad thread '{thread.id}' is not running agent turns ({refusal}), so this message was not "
+            "routed. Ask an operator to reopen it."
         )
         return
     participants = await sync_thread_participants_from_squad(thread_store, thread=thread)

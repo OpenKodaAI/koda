@@ -66,7 +66,7 @@ jump ahead of high-severity items in a later milestone just because of their mil
 | `TD-NNN` | Debt item in TECHNICAL_DEBT.md Part 2 |
 | `SM-NN` | Runtime-smoke defect FEATURE_MATRIX.md §3.4 `D-NN` (renamed here to avoid a clash with `D-NNN`) |
 | `J-NN` | Journey in FEATURE_MATRIX.md §3.2 |
-| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-32 are added in section 5. |
+| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-33 are added in section 5. |
 | `P<n>` | Design principle in REFERENCE_RESEARCH.md §6 |
 | `ADR-NNN` | Entry in DECISIONS.md |
 | `R-NN` | Entry in REMAINING_RISKS.md |
@@ -289,6 +289,7 @@ in `koda/knowledge`). Both are cheap to leave; revisit only if the code is touch
 | Q-30 | `MEMORY_SIMILARITY_DEDUP_THRESHOLD` is an operator-visible per-agent memory-policy field (editor, agent spec, memory profiles, system settings) that nothing reads | Remove the field with a changelog entry: it never had an effect | open (§13: removes an operator-visible setting) | M4-E1-T2 follow-up |
 | Q-31 | `/jobs`, the job tools, the `/cron` wrappers and the runtime schedule API act only on the bot's own agent's jobs (D-259); jobs with `agent_id` NULL are no longer listed under every agent | Keep the per-agent scope: it is the isolation D-259 requires; `docs/operations/upgrade.md` explains how to assign old jobs | default applied (rollback: revert the scoping of `_get_job` / `list_jobs`) | M3-E4-T6 lane |
 | Q-32 | Stdio MCP servers no longer inherit Koda's environment (D-300), including proxy and CA variables (`HTTP(S)_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`) and `TMPDIR` | Keep the minimal environment (the MCP SDK's default); a server behind a proxy sets these in its own connection env, as the changelog says | default applied (rollback: add the names to the inherited set in `koda/services/mcp_isolation.py`) | SEC-D300 lane |
+| Q-33 | When the isolation tool a stored MCP profile needs (bwrap, sandbox-exec, docker) is missing, `select_isolation_strategy` silently runs the server with native isolation, so the stored network mode and mounts are not enforced (D-324) | Fail closed: refuse to start the server ("refused to start: isolation <kind> unavailable") unless that server or the deployment explicitly opts in to running without the sandbox, and report the effective isolation in the server status | pending operator approval (§13: changes externally visible security behaviour); the fallback is unchanged until then | SEC-D321 review |
 
 ### 5.2 Approvals required
 
@@ -1809,12 +1810,12 @@ Owner AIM (SEC) · Risk med · Gate none · **ready** · Deps —
 - **Tests:** G-PG · **Evidence:** —
 
 #### M3-E6-T5 · Budget pause enforced; expired claims redispatched
-Owner AIM · Risk med · Gate none · **ready** · Deps —
+Owner AIM · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-075, D-097, F-SQD-19, F-SQD-15, F-SQD-18; P25 (the pause reason is visible)
 - **Files:** `koda/squads/router.py` (~388), `koda/squads/tasks.py` (~478), `koda/squads/dispatch.py`, `koda/control_plane/api.py` (~2414)
 - **Do:** gate `dispatch_squad_turn` and `enqueue_squad_agent_task` on `status == 'open'` and on cost being under the cap. Keep the planned assignee, and redispatch or escalate a claim that expires. The budget auto-pause already posts `budget_exceeded_auto_pause` (`router.py` ~399). Post the same kind of `system_event`, with metadata reason `"operator"`, when the operator pauses a thread through `update_thread_status` (`api.py` ~2414), so the room says why nothing runs (P25; REFERENCE_RESEARCH §3.8, stated waiting reasons).
 - **Done when:** a paused thread runs no turns, and an expired claim progresses. A pause, by the budget or by the operator, leaves exactly one system event that names its reason.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 7": a paused, spent or unreadable room runs no turn on any path, queued turns at pickup and DLQ requeues included (G-PG `tests/test_squads/test_thread_runnable.py`); a pause, by the operator or the budget, leaves exactly one system event that names its reason; the budget sweep reaches every open room at its cap behind a full batch of paused rooms; an expired claim is redispatched and then escalated, while a claim refused at pickup, in the unblocked follow-ups or in the inbox is released without counting an expiry, so two pause and reopen cycles never escalate a task and the first sweep after a reopen dispatches it again (`test_handoff_completion.py`, `test_tasks.py`); live and DLQ-requeued turns renew their claims (`test_queue_resilience.py`); a client cannot set server-owned room metadata (`test_control_plane_dashboard_api.py`)
 
 #### M3-E6-T6 · Live room events stay connected
 Owner FE (BE) · Risk low · Gate none · **ready** · Deps —
@@ -3267,12 +3268,12 @@ Owner UX · Risk low · Gate none · **done** · Deps —
 - **Tests:** web tests · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": one error state and one error.tsx factory (f54b2b3); approved in WAVE-6 review
 
 #### M8-E5-T3 · Tokens adopted; design guide synced
-Owner UX · Risk med · Gate none · **ready** · Deps —
+Owner UX · Risk med · Gate none · **done** · Deps —
 - **Addresses:** TD-133, TD-132
 - **Files:** `globals.css`, components that use `--surface-base`, `--surface-canvas`, `--tone-*-tint` or `--panel-muted`, `apps/web/CLAUDE.md`, `apps/web/AGENTS.md`
 - **Do:** define or replace the undefined tokens, reduce the arbitrary font sizes and raw radii in the touched areas, and make the design guide match the code (accent, button heights, shadows, fonts, theme default, test paths).
 - **Done when:** no undefined token is referenced, and the guide's statements are true.
-- **Tests:** a token-reference lint; web tests · **Evidence:** —
+- **Tests:** a token-reference lint; web tests · **Evidence:** VALIDATION_REPORT.md "Integration batch 7": `src/lib/token-reference-contract.test.ts` fails on any `var()` that names an undefined custom property (53 references before the fix, none after), including Tailwind v4 shorthands; `apps/web/CLAUDE.md` matches the code (accent, button heights, shadows, fonts, theme default, test paths); raw radii and sizes under 12px moved to tokens in the touched components only, the rest stays with M8-E5-T10, T12 and T13
 
 #### M8-E5-T4 · Split `globals.css`, first slice
 Owner UX · Risk med · Gate none · **pending** · Deps M4-E3-T1

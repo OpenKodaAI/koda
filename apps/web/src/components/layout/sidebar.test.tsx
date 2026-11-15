@@ -81,6 +81,27 @@ describe("Sidebar", () => {
     expect(screen.getByRole("complementary")).toHaveAttribute("aria-label", "Barra lateral");
   });
 
+  it("hides the brand mark from the brand link's name, which the link's aria-label gives (D-282)", () => {
+    // An <img alt="Koda"> beside the visible "Koda" fails axe's
+    // image-redundant-alt on every page.
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <AppTourProvider
+          pathname="/control-plane/system"
+          mobileNavOpen={false}
+          onMobileNavOpenChange={() => {}}
+        >
+          <Sidebar mobileOpen={false} onMobileOpenChange={() => {}} collapsed={false} />
+        </AppTourProvider>
+      </I18nProvider>,
+    );
+
+    const brand = screen.getByRole("link", { name: "Koda" });
+    const mark = brand.querySelector("img");
+    expect(mark).not.toBeNull();
+    expect(mark).toHaveAttribute("alt", "");
+  });
+
   it("does not keep Agents active when General settings is selected", () => {
     const agentsItem: SidebarNavItem = {
       href: "/control-plane",

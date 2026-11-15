@@ -17,7 +17,7 @@ from __future__ import annotations
 import contextlib
 import importlib
 import json as _json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import asyncpg
@@ -73,6 +73,18 @@ async def runtime_db(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) ->
         yield migrated_postgres
     finally:
         close_shared_postgres_backends()
+
+
+@pytest.fixture(autouse=True)
+def _restore_agent_id() -> Iterator[None]:
+    """``_build_store`` sets ``koda.config.AGENT_ID``; put it back so later test modules see the session's id."""
+    import koda.config as config_mod
+    import koda.services.runtime.postgres_store as ps_mod
+
+    saved = config_mod.AGENT_ID
+    yield
+    config_mod.AGENT_ID = saved
+    importlib.reload(ps_mod)
 
 
 def _build_store(agent_id: str):

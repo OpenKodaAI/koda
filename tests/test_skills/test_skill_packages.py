@@ -136,6 +136,224 @@ def test_scan_denies_dangerous_python_and_unknown_risk(tmp_path: Path) -> None:
     assert "tool.risk.unknown" in finding_ids
 
 
+_RUN_PATH_HANDLER = """
+import runpy
+from pathlib import Path
+
+
+async def read_notes(params, ctx):
+    return runpy.run_path(str(Path(__file__).with_name("safe_pack_notes.py")))["NOTES"]
+""".lstrip()
+_STUB_HANDLER = "\n\nasync def read_notes(params, ctx):\n    return None\n"
+
+
+_EXEC_FROM_FILE_CASES = [
+    (_RUN_PATH_HANDLER, "runpy"),
+    ("from runpy import run_path\n" + _STUB_HANDLER, "runpy"),
+    ("code = compile(open(__file__).read(), __file__, 'exec')\n" + _STUB_HANDLER, "compile"),
+    ("import marshal\n" + _STUB_HANDLER, "marshal"),
+    ("import pickle\n" + _STUB_HANDLER, "pickle"),
+    (
+        "import importlib.machinery\nL = importlib.machinery.SourcelessFileLoader\n" + _STUB_HANDLER,
+        "SourcelessFileLoader",
+    ),
+    ("from importlib.machinery import ExtensionFileLoader\n" + _STUB_HANDLER, "ExtensionFileLoader"),
+    ("import importlib.abc\n" + _STUB_HANDLER, "importlib.abc"),
+    ("from importlib import _bootstrap_external\n" + _STUB_HANDLER, "importlib._bootstrap_external"),
+    ("class Loader:\n    def exec_module(self, module):\n        pass\n" + _STUB_HANDLER, "exec_module"),
+    ("import site\n" + _STUB_HANDLER, "site"),
+    ("import ctypes\n" + _STUB_HANDLER, "ctypes"),
+    ("import code\n" + _STUB_HANDLER, "code"),
+    ("import timeit\n" + _STUB_HANDLER, "timeit"),
+    ("from multiprocessing import Process\n" + _STUB_HANDLER, "multiprocessing"),
+    ("import os, sys\nos.execv(sys.executable, [sys.executable, __file__])\n" + _STUB_HANDLER, "os.execv"),
+    ("import asyncio\nasyncio.create_subprocess_exec('python')\n" + _STUB_HANDLER, "asyncio.create_subprocess_exec"),
+    # A star import binds the module's names (D-323).
+    ("from os import *\npopen('id')\n" + _STUB_HANDLER, "os.popen"),
+    ("from os import *\nexecv('/bin/sh', ['sh'])\n" + _STUB_HANDLER, "os.execv"),
+    # A SourceFileLoader's own source_to_code, called on bytes the code read itself.
+    (
+        "import importlib.machinery, types\n"
+        "loader = importlib.machinery.SourceFileLoader('n', __file__)\n"
+        "c = loader.source_to_code(open(__file__, 'rb').read(), __file__)\n"
+        "types.FunctionType(c, {})()\n" + _STUB_HANDLER,
+        "source_to_code",
+    ),
+    # The call routes through an import alias or a literal __import__ (posix and _posixsubprocess are
+    # denied as imports, and a builtins.exec call is denied, D-323).
+    ("import builtins as b\nrun = b.exec\n" + _STUB_HANDLER, "builtins.exec"),
+    ("from builtins import compile as c\n" + _STUB_HANDLER, "builtins.compile"),
+    ("import os as o, sys\no.execv(sys.executable, [sys.executable, __file__])\n" + _STUB_HANDLER, "os.execv"),
+    ("import sys\n__import__('os').execv(sys.executable, [sys.executable])\n" + _STUB_HANDLER, "os.execv"),
+    # The builtin compile passed on rather than called, and a loader subclass that replaces get_code.
+    ("from functools import partial\nrun = partial(compile, mode='exec')\n" + _STUB_HANDLER, "compile"),
+    (
+        "from importlib.machinery import SourceFileLoader\n\n\nclass L(SourceFileLoader):\n"
+        "    def get_code(self, fullname):\n        return None\n" + _STUB_HANDLER,
+        "get_code",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("handler_source", "route"),
+    _EXEC_FROM_FILE_CASES,
+    ids=[f"{index}-{route}" for index, (_, route) in enumerate(_EXEC_FROM_FILE_CASES)],
+)
+def test_a_package_that_runs_code_from_a_file_outside_the_import_system_needs_review(
+    tmp_path: Path, handler_source: str, route: str
+) -> None:
+    """D-311: these routes never reach SourceFileLoader.get_code, so never the verified bytes: they need review."""
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(handler_source, encoding="utf-8")
+    (package_dir / "safe_pack_notes.py").write_text('NOTES = "safe"\n', encoding="utf-8")
+
+    scan = scan_skill_package(package_dir, agent_id="ATLAS")
+
+    assert scan.decision == "review_required"
+    routes = [finding.message for finding in scan.findings if finding.id == "python.exec_from_file"]
+    assert len(routes) == 1
+    assert routes[0].endswith(f": {route}")
+
+
+_DANGEROUS_CALL = "python.dangerous_call"
+_DANGEROUS_IMPORT = "python.dangerous_import"
+# The direct forms first, then the same calls through an import alias, a rebinding, a star import, a
+# literal __import__ or a standard backend module (D-323).
+_DANGEROUS_CODE_CASES = [
+    ("import os\nos.system('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    (
+        "import subprocess\nsubprocess.run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    ("import os as o\no.system('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    ("from os import system as s\ns('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    ("from os import system\nsystem('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    ("from os import *\nsystem('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    ("__import__('os').system('id')\n", {(_DANGEROUS_CALL, "os.system")}),
+    (
+        "def f():\n    import os as o\n    o.system('id')\n\n\ndef g():\n    import json as o\n    return o\n",
+        {(_DANGEROUS_CALL, "os.system")},
+    ),
+    ("import posix\nposix.system('id')\n", {(_DANGEROUS_IMPORT, "posix"), (_DANGEROUS_CALL, "posix.system")}),
+    ("import nt\nnt.system('id')\n", {(_DANGEROUS_IMPORT, "nt"), (_DANGEROUS_CALL, "nt.system")}),
+    ("from posix import system as s\ns('id')\n", {(_DANGEROUS_IMPORT, "posix"), (_DANGEROUS_CALL, "posix.system")}),
+    ("import posix, sys\nposix.execv(sys.executable, [sys.executable])\n", {(_DANGEROUS_IMPORT, "posix")}),
+    ("import _posixsubprocess\n", {(_DANGEROUS_IMPORT, "_posixsubprocess")}),
+    (
+        "import _posixsubprocess as p\np.fork_exec()\n",
+        {(_DANGEROUS_IMPORT, "_posixsubprocess"), (_DANGEROUS_CALL, "_posixsubprocess.fork_exec")},
+    ),
+    (
+        "from _winapi import CreateProcess as c\nc()\n",
+        {(_DANGEROUS_IMPORT, "_winapi"), (_DANGEROUS_CALL, "_winapi.CreateProcess")},
+    ),
+    (
+        "import subprocess as sp\nsp.run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "from subprocess import run as r\nr(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "m = __import__('subprocess')\nm.run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess")},
+    ),
+    # A literal import through builtins or importlib, or with the module as the name keyword.
+    (
+        "__import__('subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "from builtins import __import__ as i\ni('subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "import builtins\nbuiltins.__import__('subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "import importlib\nimportlib.__import__('subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "__import__(name='subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "import importlib\nimportlib.import_module(name='subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    # exec and eval, as written and through builtins.
+    ("exec('1')\n", {(_DANGEROUS_CALL, "exec")}),
+    ("import builtins as b\nb.exec(open(__file__).read())\n", {(_DANGEROUS_CALL, "builtins.exec")}),
+    ("from builtins import exec as e\ne('1')\n", {(_DANGEROUS_CALL, "builtins.exec")}),
+    ("import builtins as b\nb.eval('1')\n", {(_DANGEROUS_CALL, "builtins.eval")}),
+]
+
+
+@pytest.mark.parametrize(
+    ("handler_source", "expected"),
+    _DANGEROUS_CODE_CASES,
+    ids=[str(index) for index in range(len(_DANGEROUS_CODE_CASES))],
+)
+def test_a_dangerous_call_or_import_is_denied_through_an_alias_or_a_backend_module(
+    tmp_path: Path, handler_source: str, expected: set[tuple[str, str]]
+) -> None:
+    """D-323: an alias or a backend module of os.system or subprocess gets the direct form's finding and deny."""
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(handler_source + _STUB_HANDLER, encoding="utf-8")
+
+    scan = scan_skill_package(package_dir, agent_id="ATLAS")
+
+    assert scan.decision == "deny"
+    dangerous = [finding for finding in scan.findings if finding.id in {_DANGEROUS_CALL, _DANGEROUS_IMPORT}]
+    assert {(finding.id, finding.message.rsplit(": ", 1)[-1]) for finding in dangerous} == expected
+    assert len(dangerous) == len(expected)
+    assert {finding.severity for finding in dangerous} == {"error"}
+
+
+def test_a_package_that_uses_os_only_for_paths_still_installs(tmp_path: Path) -> None:
+    """D-323: os.path through an import, an alias or a from-import, and a local system(), are not dangerous."""
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(
+        "import os\nimport os.path as osp\nfrom os import path\nfrom os.path import join as j\n\n\n"
+        "def system(name):\n    return name\n\n\n"
+        "async def read_notes(params, ctx):\n"
+        "    from koda.services.tool_dispatcher import AgentToolResult\n\n"
+        "    notes = j(osp.dirname(__file__), path.basename(os.path.join('a', 'b')), system('c'))\n"
+        '    return AgentToolResult(tool="safe_notes", success=True, output=notes)\n',
+        encoding="utf-8",
+    )
+
+    result = install_skill_package(package_dir, agent_id="ATLAS")
+
+    assert result["lock"]["scan_summary"]["decision"] == "allow"
+    assert get_skill_package_lock("ATLAS", "safe_pack")["package_id"] == "safe_pack"
+
+
+_NOT_EXEC_FROM_FILE_CASES = [
+    "class Country:\n    def get_code(self):\n        return 'BR'\n",
+    "from re import compile\nP = compile('a+')\n",
+    "import re\nP = re.compile('a+', re.IGNORECASE)\n",
+]
+
+
+@pytest.mark.parametrize("handler_source", _NOT_EXEC_FROM_FILE_CASES)
+def test_ordinary_code_that_shares_a_name_with_a_code_running_route_is_not_flagged(
+    tmp_path: Path, handler_source: str
+) -> None:
+    """D-311: a get_code method on a class that is not a loader, or a regex compile, needs no review."""
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(handler_source + _STUB_HANDLER, encoding="utf-8")
+
+    scan = scan_skill_package(package_dir, agent_id="ATLAS")
+
+    assert [finding.message for finding in scan.findings if finding.id == "python.exec_from_file"] == []
+    assert scan.decision == "allow"
+
+
 def test_install_uninstall_and_runtime_skill_merge_use_lock_fallback(tmp_path: Path) -> None:
     from koda.services.metrics import SKILL_PACKAGE_EVENTS
 
@@ -707,6 +925,174 @@ def test_a_package_path_swapped_for_a_symlink_after_registration_runs_the_bytes_
         sys.modules.pop("safe_pack_notes", None)
 
     assert result.output == "safe"
+
+
+@pytest.mark.parametrize("handler_through", ["real", "alias"])
+def test_a_module_or_handler_reached_through_a_directory_symlink_in_the_package_runs_the_bytes_hashed_at_its_real_path(
+    tmp_path: Path, plugin_registry: object, handler_through: str
+) -> None:
+    """D-309: a directory symlink inside the package is allowed; what loads through it runs the bytes of its target."""
+    import asyncio
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    real = package_dir / "real"
+    real.mkdir()
+    (real / "handlers.py").write_text(
+        _LAZY_IMPORT_HANDLER.replace("Path(__file__).parent)", 'Path(__file__).parent.parent / "alias")'),
+        encoding="utf-8",
+    )
+    (real / "safe_pack_notes.py").write_text('NOTES = "safe"\n', encoding="utf-8")
+    (package_dir / "alias").symlink_to("real", target_is_directory=True)
+    manifest = package_dir / "koda-skill.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "handler: handlers.read_notes", f"handler: {handler_through}.handlers.read_notes"
+        ),
+        encoding="utf-8",
+    )
+    install_skill_package(package_dir, agent_id="ATLAS")
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+
+    (real / "safe_pack_notes.py").write_text('NOTES = "changed after registration"\n', encoding="utf-8")
+    try:
+        result = asyncio.run(handler({}, None))
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
+
+    assert result.output == "safe"
+
+
+def test_a_reinstalled_package_imports_its_new_bytes_and_an_uninstalled_one_leaves_no_module_and_no_bytes_behind(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """D-310: unregistering a package drops every module loaded from under it, and its root maps to no bytes."""
+    import asyncio
+
+    from koda.plugins.registry import PluginRegistry
+    from koda.skills import _package
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(_LAZY_IMPORT_HANDLER, encoding="utf-8")
+    notes = package_dir / "safe_pack_notes.py"
+    notes.write_text('NOTES = "first install"\n', encoding="utf-8")
+    root = str(package_dir.resolve())
+
+    def call_handler() -> object:
+        handler = plugin_registry.get_handler("safe_notes")  # type: ignore[attr-defined]
+        assert handler is not None
+        return asyncio.run(handler({}, None)).output
+
+    try:
+        install_skill_package(package_dir, agent_id="ATLAS")
+        first = call_handler()
+        notes.write_text('NOTES = "reinstalled"\n', encoding="utf-8")
+        install_skill_package(package_dir, agent_id="ATLAS")
+        second = call_handler()
+        uninstall_skill_package("ATLAS", "safe_pack")
+        left_behind = [
+            name
+            for name, module in list(sys.modules.items())
+            if str(getattr(module, "__file__", "") or "").startswith(root)
+        ]
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
+
+    assert first == "first install"
+    assert second == "reinstalled"
+    assert left_behind == []
+    assert _package._PACKAGE_SOURCE_ONLY_CODE._package_file(str(notes)) == ({}, "safe_pack_notes.py")
+
+
+_NAMESPACE_IMPORT_HANDLER = """
+import sys
+from pathlib import Path
+
+
+async def read_notes(params, ctx):
+    package_dir = str(Path(__file__).parent)
+    sys.path.insert(0, package_dir)
+    try:
+        from safe_ns_pkg import notes
+    finally:
+        sys.path.remove(package_dir)
+    from koda.services.tool_dispatcher import AgentToolResult
+
+    return AgentToolResult(tool="safe_notes", success=True, output=notes.NOTES)
+"""
+
+
+def test_a_namespace_package_in_the_package_imports_its_new_bytes_after_a_reinstall_and_a_rollback(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """D-310: a namespace package (no __init__.py, so no __file__) under the root is dropped too."""
+    import asyncio
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(_NAMESPACE_IMPORT_HANDLER, encoding="utf-8")
+    (package_dir / "safe_ns_pkg").mkdir()
+    notes = package_dir / "safe_ns_pkg" / "notes.py"
+    notes.write_text('NOTES = "first install"\n', encoding="utf-8")
+
+    def call_handler() -> object:
+        handler = plugin_registry.get_handler("safe_notes")  # type: ignore[attr-defined]
+        assert handler is not None
+        return asyncio.run(handler({}, None)).output
+
+    try:
+        install_skill_package(package_dir, agent_id="ATLAS")
+        first = call_handler()
+        notes.write_text('NOTES = "reinstalled"\n', encoding="utf-8")
+        install_skill_package(package_dir, agent_id="ATLAS")
+        second = call_handler()
+        notes.write_text('NOTES = "first install"\n', encoding="utf-8")
+        rollback_skill_package("ATLAS", "safe_pack")
+        rolled_back = call_handler()
+    finally:
+        sys.modules.pop("safe_ns_pkg", None)
+        sys.modules.pop("safe_ns_pkg.notes", None)
+
+    assert (first, second, rolled_back) == ("first install", "reinstalled", "first install")
+
+
+@pytest.mark.parametrize("ending", ["uninstall", "reregister_with_modified_files"])
+def test_package_code_still_running_after_its_package_is_unregistered_never_loads_unverified_bytes(
+    tmp_path: Path, plugin_registry: object, ending: str
+) -> None:
+    """D-310: an unregistered package's root maps to no bytes: a later lazy import there is refused, not read."""
+    import asyncio
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(_LAZY_IMPORT_HANDLER, encoding="utf-8")
+    notes = package_dir / "safe_pack_notes.py"
+    notes.write_text('NOTES = "safe"\n', encoding="utf-8")
+    install_skill_package(package_dir, agent_id="ATLAS")
+    # A call in flight, or a task the package started, holds the handler past the end of its registration.
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+
+    if ending == "uninstall":
+        uninstall_skill_package("ATLAS", "safe_pack")
+        notes.write_text('NOTES = "changed on disk"\n', encoding="utf-8")
+    else:
+        notes.write_text('NOTES = "changed on disk"\n', encoding="utf-8")
+        refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+        assert refused["safe_pack"]["status"] == "modified"
+    try:
+        with pytest.raises(ImportError, match="not a verified file"):
+            asyncio.run(handler({}, None))
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
 
 
 _ZIP_IMPORT_HANDLER = """
