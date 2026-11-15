@@ -16,9 +16,10 @@ script (standard library only, under ``python -I``). The watchdog:
   died, whatever the signal) or when it receives SIGTERM, SIGINT or SIGHUP itself
   (:func:`stop_owned`): SIGTERM to the group, up to a grace period for the command to
   exit, then SIGKILL to the group, which also ends members that ignore SIGTERM. A
-  command that has left the group gets SIGKILL alone, after the grace period;
+  command that has left the group (``setsid()``, ``setpgid(0, 0)``) gets that SIGTERM and
+  SIGKILL sent to it alone;
 * sends the group that SIGKILL as well when the command exits by itself, so nothing it
-  started is left behind;
+  started in the group is left behind;
 * then removes ``cleanup_dir`` if one was given (a killed owner's atexit handlers never
   run), and exits with the command's status, dying by the same signal when the command
   did, so the owner sees the returncode it would see without the watchdog.
@@ -33,8 +34,10 @@ and blocks reading a pipe that only the watchdog holds. It does two things:
   gone, whatever the signal, and it then sends SIGKILL to its whole group, itself
   included. This works the same on Linux and macOS, also for what the command started,
   and it covers ``pkill -9 python``, which kills the watchdog with pytest but leaves the
-  shell. The command keeps running only after a kill that picks out both the watchdog
-  and the anchor, or the anchor alone just before the watchdog dies.
+  shell. It reaches only its group: a process that has left the group, the command
+  included, keeps running if the watchdog dies. A process that stays in the group keeps
+  running only after a kill that picks out both the watchdog and the anchor, or the
+  anchor alone just before the watchdog dies.
 
 The parent check cannot be fooled by pid reuse: while the owner lives it is the
 watchdog's parent, and once it dies the watchdog is reparented to init or a subreaper,
@@ -80,9 +83,12 @@ def spawn_owned(
     command inherits its working directory, environment and standard streams. The
     returned process is the watchdog: it exits when the command does, with its status.
     ``cleanup_dir`` is removed, with its contents, once the command and every process in
-    its group are gone; pass only a directory this process created for the command.
+    its group are gone; pass only a directory this process created for the command. A
+    relative ``cleanup_dir`` is taken relative to this process's working directory, not to
+    ``cwd``.
     """
-    watchdog = [sys.executable, "-I", str(_WATCHDOG), str(os.getpid()), cleanup_dir or "", *command]
+    cleanup = os.path.abspath(cleanup_dir) if cleanup_dir else ""
+    watchdog = [sys.executable, "-I", str(_WATCHDOG), str(os.getpid()), cleanup, *command]
     return subprocess.Popen(watchdog, start_new_session=True, **popen_kwargs)
 
 
@@ -99,10 +105,19 @@ def stop_owned(proc: subprocess.Popen[Any]) -> None:
 
 
 def _signal_group(group: int, signum: int) -> None:
-    # The anchor is not reaped yet, so ``group`` cannot name another group. ESRCH means no
-    # member is alive (a system may not count the anchor once it is a zombie).
-    with contextlib.suppress(ProcessLookupError):
+    # The anchor is not reaped yet, so ``group`` cannot name another group. These errors
+    # mean no member is left that this process may signal: ESRCH, or EPERM on macOS, whose
+    # killpg skips zombies and fails with EPERM when the anchor's zombie is all that is left.
+    with contextlib.suppress(ProcessLookupError, PermissionError):
         os.killpg(group, signum)
+
+
+def _terminate_if_outside(child: subprocess.Popen[bytes], group: int) -> None:
+    # The command is not reaped yet, so its pid still names it. A command that has left
+    # ``group`` is out of reach of the group's SIGTERM.
+    with contextlib.suppress(ProcessLookupError):
+        if os.getpgid(child.pid) != group:
+            child.terminate()
 
 
 def _exit_with(status: int) -> NoReturn:
@@ -135,6 +150,7 @@ def _watch(owner: int, cleanup_dir: str, command: list[str]) -> NoReturn:
         while child.poll() is None:
             if stop_requested or os.getppid() != owner:
                 _signal_group(anchor.pid, signal.SIGTERM)
+                _terminate_if_outside(child, anchor.pid)
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     child.wait(timeout=_GRACE_SECONDS)
                 break
