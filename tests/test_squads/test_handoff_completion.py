@@ -576,6 +576,57 @@ async def test_a_paused_thread_keeps_its_expired_claims_until_it_reopens(
     assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA"]
 
 
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_pause_between_the_sweep_and_the_redispatch_never_counts_an_expiry(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """The claim a redispatch takes in a room paused after the sweep is released, not left to expire (D-338)."""
+    from koda.squads import SquadTurnDispatchResult, squad_thread_turn_refusal
+
+    threads, tasks = stores
+    thread_id, _parent, task_ids = await _start_handoff(threads, tasks)
+
+    async def dispatch(**kwargs: Any) -> SquadTurnDispatchResult:
+        # As the queue does when it takes the turn: a room that cannot run now gets no turn.
+        refusal = squad_thread_turn_refusal(await threads.get_thread(kwargs["thread"].id))
+        return SquadTurnDispatchResult(
+            target_agent_id=kwargs["target_agent_id"],
+            transport="local_queue",
+            dispatched=refusal is None,
+            error=refusal,
+        )
+
+    turn_stubs.side_effect = dispatch
+    sweep = tasks.sweep_expired_claims
+
+    async def sweep_then_pause(**kwargs: Any) -> Any:
+        expired = await sweep(**kwargs)
+        if expired:
+            await threads.update_thread_status(thread_id, "paused")
+        return expired
+
+    router = _router(threads, tasks)
+    await _expire_claim(tasks, task_ids["QA"])
+    with patch.object(tasks, "sweep_expired_claims", sweep_then_pause):
+        [claim] = (await router.sweep_once()).expired_claims
+    assert claim.task_id == task_ids["QA"]
+    assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA"]
+
+    # The refused redispatch is no expiry: the paused room keeps the task, and the first sweep
+    # after the reopen, well within the claim TTL, dispatches it to QA again.
+    assert (await router.sweep_once()).expired_claims == []
+    await threads.update_thread_status(thread_id, "open")
+    [again] = (await router.sweep_once()).expired_claims
+    assert again.task_id == task_ids["QA"] and again.refused is True
+    assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA", "QA"]
+    qa_task = await tasks.get_task(task_ids["QA"])
+    assert qa_task is not None and qa_task.status == "claimed" and qa_task.assigned_agent_id == "QA"
+    # Only the silent worker's expiry counts, not the pause.
+    assert qa_task.metadata["claim_expiry_count"] == 1
+    assert "claim_refused" not in qa_task.metadata
+
+
 async def _leave_a_stale_task_of_an_earlier_cycle(tasks: SquadTaskStore, thread_id: str) -> str:
     """A task of an earlier cycle of the room that its worker started and never finished.
 

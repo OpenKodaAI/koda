@@ -7837,19 +7837,27 @@ async def redispatch_expired_squad_claim(*, task_id: str) -> str:
 
     The squad router's sweep calls this after it reverted the claim to ``pending``, with the
     assignee kept. On the first expiry the assignee claims the task again and its task request is
-    dispatched to it again; a refused dispatch leaves that claim to expire too. On a later expiry
-    the task is escalated to the coordinator: the system posts a failed task result for the
-    assignee that says so, the task ends ``escalated``, and its follow-ups run, so its dependents
-    are cancelled and the coordinator synthesis, which discloses the escalation, is queued once
-    the cycle's tasks have ended. A task whose dependencies are not all done is left pending for
-    the dependency path to dispatch. Returns ``redispatched``, ``escalated`` or ``skipped``.
+    dispatched to it again. A dispatch the room refuses because it was paused or spent after the
+    sweep releases that claim without counting an expiry (D-338); another failed dispatch leaves
+    the claim to expire, and that expiry counts. On a later expiry the task is escalated to the
+    coordinator: the system posts a failed task result for the assignee that says so, the task
+    ends ``escalated``, and its follow-ups run, so its dependents are cancelled and the
+    coordinator synthesis, which discloses the escalation, is queued once the cycle's tasks have
+    ended. A task whose dependencies are not all done is left pending for the dependency path to
+    dispatch. Returns ``redispatched``, ``escalated`` or ``skipped``.
     """
     if _shutting_down:
         return "skipped"
     from types import SimpleNamespace
 
     from koda.config import SQUAD_CLAIM_TTL_S
-    from koda.squads import TaskClaimConflictError, dispatch_squad_turn, get_squad_task_store, get_squad_thread_store
+    from koda.squads import (
+        TaskClaimConflictError,
+        dispatch_squad_turn,
+        get_squad_task_store,
+        get_squad_thread_store,
+        squad_thread_turn_refusal,
+    )
 
     thread_store = get_squad_thread_store()
     task_store = get_squad_task_store()
@@ -7895,7 +7903,19 @@ async def redispatch_expired_squad_claim(*, task_id: str) -> str:
             delegation_origin_agent_id=coordinator,
             telegram_message_thread_id=thread.telegram_message_thread_id,
         )
-        return "redispatched" if result.dispatched else "skipped"
+        if result.dispatched:
+            return "redispatched"
+        # A room paused or spent after the sweep refused the turn: the fresh claim is released
+        # without counting an expiry, as the other refusal paths release theirs, and the first
+        # sweep after the room can run again dispatches the task again (D-338).
+        try:
+            current = await thread_store.get_thread(thread.id)
+        except Exception:
+            log.exception("squad_claim_redispatch_thread_read_failed", thread_id=thread.id, squad_task_id=claimed.id)
+            current = None
+        if current is None or squad_thread_turn_refusal(current) is not None:
+            await _release_refused_squad_task_claim(squad_task_id=claimed.id, agent_id=assignee)
+        return "skipped"
     reason = (
         f"Not completed: the claim of task {task.id} ({task.title}) by {assignee} expired {expiries} times, "
         f"so the task is escalated to the coordinator {coordinator}."

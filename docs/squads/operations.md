@@ -102,11 +102,12 @@ Before broad rollout, run these in canary:
   after 2, 5, 15, 30 and 60 seconds before it refuses it; a thread that does
   not exist refuses the turn at once, and a runtime API squad message to it
   gets 404 (one to a paused or spent thread gets 409). When the queue worker
-  refuses a queued turn, or the unblocked-task follow-ups or the inbox are
-  refused a task's turn, the task's claim is released without counting an
-  expiry, so pauses never escalate a task, and the first router sweep after
-  the thread is open again under its cap dispatches the task again, without
-  waiting for `SQUAD_CLAIM_TTL_S` and without a `claim_expired` event. A
+  refuses a queued turn, or the unblocked-task follow-ups, the inbox or the
+  router's dispatch of a task whose claim expired are refused a task's turn,
+  the task's claim is released without counting an expiry, so pauses never
+  escalate a task, and the first router sweep after the thread is open again
+  under its cap dispatches the task again, without waiting for
+  `SQUAD_CLAIM_TTL_S` and without a `claim_expired` event. A
   later claim of the task is a live one again: it is renewed, and its expiry
   counts.
   A dashboard post or Telegram topic message to such a thread is not routed;
