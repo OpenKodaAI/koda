@@ -37,7 +37,7 @@ from .dashboard_service import (
     list_dashboard_execution_summaries,
     list_dashboard_schedules,
 )
-from .manager import GeneralPayloadValidationError, get_control_plane_manager
+from .manager import AgentIdConflictError, GeneralPayloadValidationError, get_control_plane_manager
 from .onboarding import load_control_plane_openapi_spec, render_setup_page
 from .operator_auth import OperatorAuthContext, OperatorAuthService, get_operator_auth_service
 from .settings import (
@@ -400,6 +400,8 @@ async def control_plane_error_middleware(
 ) -> web.StreamResponse:
     try:
         return await handler(request)
+    except AgentIdConflictError as exc:
+        return web.json_response({"error": str(exc)}, status=409)
     except KeyError:
         return web.json_response({"error": "agent or asset not found"}, status=404)
     except ValueError as exc:

@@ -173,6 +173,13 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - The OpenAPI document no longer marks four session-protected control-plane routes
   as public: the two OAuth callbacks, the OAuth relay and onboarding readiness.
   (M0-E3-T1)
+- Creating or cloning an agent with an id that is already taken answers 409 with
+  `{"error": "agent id MY_AGENT already exists"}`. Ids are compared after
+  normalisation, so `my-agent` collides with `My Agent`. Before, create answered 201
+  with the existing agent, and clone copied the source's sections, documents and
+  assets into it. Without an `id`, the server now generates one from `display_name`
+  (`NOVO_AGENTE`, then `NOVO_AGENTE_2`) and allocates the health port; the dashboard
+  no longer picks either. (M2-E3-T1, D-055)
 
 ### Removed
 

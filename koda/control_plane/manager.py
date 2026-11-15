@@ -11,9 +11,11 @@ import os
 import re
 import threading
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -306,6 +308,14 @@ _PROVIDER_DOWNLOAD_PROVIDER_IDS: frozenset[str] = frozenset({"kokoro", "superton
 
 class _ProviderDownloadCancelled(RuntimeError):
     """Internal signal used to stop provider downloads cooperatively."""
+
+
+class AgentIdConflictError(Exception):
+    """An agent with this id, after normalisation, already exists. The API answers 409."""
+
+    def __init__(self, agent_id: str) -> None:
+        self.agent_id = agent_id
+        super().__init__(f"agent id {agent_id} already exists")
 
 
 class GeneralPayloadValidationError(ValueError):
@@ -1085,6 +1095,21 @@ def _normalize_agent_id(agent_id: str) -> str:
     if not normalized:
         raise ValueError("agent_id must contain at least one alphanumeric character")
     return normalized
+
+
+def _generated_agent_id_candidates(display_name: str) -> Iterator[str]:
+    """Yield ids for an agent created without one: the display name, then ``_2``, ``_3``..."""
+    ascii_name = unicodedata.normalize("NFKD", display_name).encode("ascii", "ignore").decode("ascii")
+    try:
+        base = _normalize_agent_id(ascii_name)[:48].strip("_")
+    except ValueError:
+        base = ""
+    base = base or "AGENT"
+    yield base
+    suffix = 2
+    while True:
+        yield f"{base}_{suffix}"
+        suffix += 1
 
 
 def _slug(value: str) -> str:
@@ -9895,43 +9920,59 @@ class ControlPlaneManager:
         return endpoint
 
     def create_agent(self, payload: dict[str, Any]) -> dict[str, Any]:
-        agent_id = _normalize_agent_id(str(payload.get("id") or ""))
-        display_name = str(payload.get("display_name") or agent_id.replace("_", " "))
-        storage_namespace = str(payload.get("storage_namespace") or _slug(agent_id))
-        appearance = _safe_json_object(payload.get("appearance"))
-        runtime_endpoint = self._normalize_runtime_endpoint_for_agent(
-            agent_id,
-            _safe_json_object(payload.get("runtime_endpoint")),
+        """Create an agent, or raise ``AgentIdConflictError`` when its id is taken.
+
+        Without an ``id`` the server generates one from ``display_name``
+        (``_generated_agent_id_candidates``) and allocates the health port.
+        """
+        requested_id = str(payload.get("id") or "").strip()
+        candidates: Iterable[str] = (
+            [_normalize_agent_id(requested_id)]
+            if requested_id
+            else _generated_agent_id_candidates(str(payload.get("display_name") or ""))
         )
+        appearance = _safe_json_object(payload.get("appearance"))
         metadata = _safe_json_object(payload.get("metadata"))
         status = _normalize_status(str(payload.get("status") or "paused"))
         workspace_id, squad_id = self._resolve_agent_organization(
             _safe_json_object(payload.get("organization")) or None
         )
-        now = now_iso()
-        execute(
-            """
-            INSERT INTO cp_agent_definitions (
-                id, display_name, status, appearance_json, storage_namespace, runtime_endpoint_json,
-                applied_version, desired_version, metadata_json, workspace_id, squad_id, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
-            ON CONFLICT (id) DO NOTHING
-            """,
-            (
+        for agent_id in candidates:
+            display_name = str(payload.get("display_name") or agent_id.replace("_", " "))
+            storage_namespace = str(payload.get("storage_namespace") or _slug(agent_id))
+            runtime_endpoint = self._normalize_runtime_endpoint_for_agent(
                 agent_id,
-                display_name,
-                status,
-                json_dump(appearance),
-                storage_namespace,
-                json_dump(runtime_endpoint),
-                json_dump(metadata),
-                workspace_id,
-                squad_id,
-                now,
-                now,
-            ),
-        )
-        return self.get_agent(agent_id) or {}
+                _safe_json_object(payload.get("runtime_endpoint")),
+            )
+            now = now_iso()
+            inserted = fetch_one(
+                """
+                INSERT INTO cp_agent_definitions (
+                    id, display_name, status, appearance_json, storage_namespace, runtime_endpoint_json,
+                    applied_version, desired_version, metadata_json, workspace_id, squad_id, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
+                ON CONFLICT (id) DO NOTHING
+                RETURNING id
+                """,
+                (
+                    agent_id,
+                    display_name,
+                    status,
+                    json_dump(appearance),
+                    storage_namespace,
+                    json_dump(runtime_endpoint),
+                    json_dump(metadata),
+                    workspace_id,
+                    squad_id,
+                    now,
+                    now,
+                ),
+            )
+            if inserted is not None:
+                return self.get_agent(agent_id) or {}
+            if requested_id:
+                raise AgentIdConflictError(agent_id)
+        raise AssertionError("unreachable: generated agent id candidates never run out")
 
     def update_agent(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         normalized, current = self._require_agent_row(agent_id)
@@ -10004,19 +10045,20 @@ class ControlPlaneManager:
         source = self.get_agent(agent_id)
         if source is None:
             raise KeyError(agent_id)
-        target_id = _normalize_agent_id(str(payload.get("id") or ""))
+        # Raises AgentIdConflictError before anything is copied when the id is taken.
         cloned = self.create_agent(
             {
-                "id": target_id,
+                "id": payload.get("id"),
                 "display_name": payload.get("display_name") or f"{source['display_name']} Copy",
                 "appearance": source.get("appearance"),
-                "storage_namespace": payload.get("storage_namespace") or _slug(target_id),
+                "storage_namespace": payload.get("storage_namespace"),
                 "runtime_endpoint": source.get("runtime_endpoint"),
                 "status": payload.get("status") or "paused",
                 "metadata": source.get("metadata"),
                 "organization": payload["organization"] if "organization" in payload else source.get("organization"),
             }
         )
+        target_id = str(cloned["id"])
         for section, data in source.get("sections", {}).items():
             self.put_section(target_id, section, {"data": data})
         for kind, content in source.get("documents", {}).items():
