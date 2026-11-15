@@ -26,6 +26,10 @@ log = get_logger(__name__)
 
 _DEFAULT_INTERVAL_S = 30.0
 _DEFAULT_BATCH_SIZE = 50
+# A handoff whose cycle's tasks changed less than this long ago is left to the task-cycle check
+# that runs after its last destination's turn, so the sweep does not queue a second synthesis
+# beside it.
+_HANDOFF_COMPLETION_GRACE_S = 30.0
 
 
 def _decode_json_object(value: Any) -> dict[str, Any]:
@@ -55,6 +59,7 @@ class SweepReport:
     dead_letters_reported: int = 0
     budget_alerts: int = 0
     budget_auto_pauses: int = 0
+    open_handoffs_checked: int = 0
 
     @property
     def reverted_count(self) -> int:
@@ -153,6 +158,11 @@ class SquadRouter:
             budget_alerts, budget_pauses = await self._sweep_budgets()
         except Exception:
             log.exception("squad_router_budget_sweep_failed")
+        open_handoffs = 0
+        try:
+            open_handoffs = await self._sweep_open_handoffs()
+        except Exception:
+            log.exception("squad_router_open_handoff_sweep_failed")
         return SweepReport(
             expired_claims=expired,
             auto_elections=elections,
@@ -161,6 +171,7 @@ class SquadRouter:
             dead_letters_reported=dead_letters,
             budget_alerts=budget_alerts,
             budget_auto_pauses=budget_pauses,
+            open_handoffs_checked=open_handoffs,
         )
 
     async def _sweep_auto_elections(self) -> list[AutoElection]:
@@ -404,6 +415,66 @@ class SquadRouter:
                 )
                 pauses += 1
         return alerts, pauses
+
+    async def _sweep_open_handoffs(self) -> int:
+        """Run the task-cycle check again for each handoff left open after its cycle's tasks ended (D-074).
+
+        A handoff is checked when it is still ``requested`` or ``accepted``, its cycle has a task,
+        no task of its thread is open (the check waits for every open task of the thread), and its
+        cycle's tasks have not changed for ``_HANDOFF_COMPLETION_GRACE_S``. The check runs as the
+        follow-up of the cycle's most recently changed task that the coordinator does not own.
+        """
+        if self._thread_store is None:
+            return 0
+        pool = await self._thread_store._ensure_pool()  # noqa: SLF001
+        schema = self._thread_store._schema  # noqa: SLF001
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT h.thread_id, cycle.task_id
+                      FROM "{schema}"."squad_messages" AS h
+                      JOIN "{schema}"."squad_threads" AS th ON th.id = h.thread_id
+                      CROSS JOIN LATERAL (
+                          SELECT t.id AS task_id
+                            FROM "{schema}"."squad_tasks" AS t
+                           WHERE t.thread_id = h.thread_id
+                             AND t.metadata_json->>'handoff_correlation_id' = h.correlation_id
+                             AND t.assigned_agent_id IS DISTINCT FROM th.coordinator_agent_id
+                        ORDER BY t.updated_at DESC
+                           LIMIT 1
+                      ) AS cycle
+                     WHERE h.thread_id IS NOT NULL
+                       AND h.message_type = 'system_event'
+                       AND h.metadata_json->>'event_type' = 'handoff_event'
+                       AND h.metadata_json->'payload'->>'status' IN ('requested', 'accepted')
+                       AND NOT EXISTS (
+                           SELECT 1
+                             FROM "{schema}"."squad_messages" AS c
+                            WHERE c.thread_id = h.thread_id
+                              AND c.metadata_json->>'event_type' = 'handoff_event'
+                              AND c.metadata_json->'payload'->>'handoff_id'
+                                  = h.metadata_json->'payload'->>'handoff_id'
+                              AND c.metadata_json->'payload'->>'status' NOT IN ('requested', 'accepted')
+                       )
+                       AND NOT EXISTS (
+                           SELECT 1
+                             FROM "{schema}"."squad_tasks" AS o
+                            WHERE o.thread_id = h.thread_id
+                              AND (
+                                  o.status IN ('pending', 'claimed', 'in_progress', 'blocked')
+                                  OR (o.metadata_json->>'handoff_correlation_id' = h.correlation_id
+                                      AND o.updated_at > NOW() - make_interval(secs => $1))
+                              )
+                       )
+                  ORDER BY h.id ASC
+                     LIMIT $2""",
+                float(_HANDOFF_COMPLETION_GRACE_S),
+                self._batch_size,
+            )
+        from koda.services.queue_manager import complete_open_squad_handoff
+
+        for row in rows:
+            await complete_open_squad_handoff(thread_id=str(row["thread_id"]), squad_task_id=str(row["task_id"]))
+        return len(rows)
 
     async def _emit_system_event(
         self,

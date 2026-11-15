@@ -293,3 +293,33 @@ async def test_destinations_finishing_together_record_one_returned_event(
 
     rows = _handoff_rows(await threads.thread_history(thread_id=thread_id, limit=100))
     assert [row["metadata"]["payload"]["status"] for row in rows] == ["requested", "returned"]
+
+
+@pytest.mark.parametrize(
+    ("status", "ending"),
+    [("failed", "which failed."), ("cancelled", "which was cancelled."), ("escalated", "which was escalated.")],
+)
+async def test_a_task_whose_dependency_ended_is_cancelled_by_the_system_with_a_reason_that_reads(
+    status: str, ending: str
+) -> None:
+    from types import SimpleNamespace
+
+    from koda.services import queue_manager as qm
+
+    task = SimpleNamespace(id="task-review", metadata={"coordination_parent_message_id": "msg-1"})
+    dependency = SimpleNamespace(id="task-build", title="Build", status=status)
+    with patch.object(qm, "_persist_squad_turn_result", AsyncMock(return_value=(None, []))) as persist:
+        await qm._cancel_squad_task_after_its_dependency_ended(
+            ctx=_ctx(thread_id="thread-1", task_id="task-build", agent_id="FE", parent="msg-1"),
+            task=task,
+            dependency=dependency,
+            assignee="QA",
+            coordinator="PM",
+        )
+
+    kwargs = persist.await_args.kwargs
+    assert kwargs["response_text"] == f"Not run: this task depends on task task-build (Build), {ending}"
+    assert kwargs["cancelled"] is True
+    # The result is for QA's task, but QA never ran, so the system posts it.
+    assert kwargs["ctx"].executing_agent_id == "QA"
+    assert kwargs["posted_by"] == "system"

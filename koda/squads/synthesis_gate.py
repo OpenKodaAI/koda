@@ -196,12 +196,13 @@ def _reply_outcomes(result_messages: list[Mapping[str, Any]], reply_obligations:
     """Map each agent that answered to ``returned``, or to ``failed`` when all its results failed.
 
     A cancelled result, from a cancelled run or a task that could not run, is a failure too.
-    An answered reply obligation counts only for an agent with no result: a failed run answers
-    its obligation too, so the obligation must not hide the failed result (D-074).
+    A result another sender posts for a task's assignee (``metadata.assigned_agent_id``) is the
+    assignee's. An answered reply obligation counts only for an agent with no result: a failed
+    run answers its obligation too, so the obligation must not hide the failed result (D-074).
     """
     outcomes: dict[str, str] = {}
     for msg in result_messages:
-        agent = _string(msg.get("from") or msg.get("from_agent"))
+        agent = _string(_dict(msg.get("metadata")).get("assigned_agent_id") or msg.get("from") or msg.get("from_agent"))
         if not agent or _string(msg.get("type") or msg.get("message_type")) not in _REPLY_MESSAGE_TYPES:
             continue
         if outcomes.get(agent) != "returned":

@@ -1444,6 +1444,8 @@ _heavy_task_semaphore = asyncio.Semaphore(MAX_HEAVY_TASKS_GLOBAL)
 _browser_task_semaphore = asyncio.Semaphore(MAX_BROWSER_TASKS_GLOBAL)
 _agent_id_label = AGENT_ID or "default"
 _cancelled_task_ids: set[int] = set()
+# The reason given for each cancelled queued task, recorded when the worker discards it.
+_cancelled_task_reasons: dict[int, str] = {}
 
 
 async def _cancel_pending_task(task: asyncio.Task[Any] | None) -> None:
@@ -2086,9 +2088,10 @@ async def _ensure_queue_worker(user_id: int, context: BotContext) -> None:
             _queue_workers[user_id] = asyncio.create_task(_process_queue(user_id, context))
 
 
-async def cancel_queued_task(task_id: int) -> bool:
+async def cancel_queued_task(task_id: int, *, reason: str = "Cancelled by scheduler control.") -> bool:
     """Mark a queued task as cancelled so the worker discards it on dequeue.
 
+    A discarded squad turn is recorded with ``reason``, as a cancelled run is.
     Returns False when the task is not waiting in an in-memory queue, for
     example because a worker already dequeued it and it is running. Callers
     must then cancel the active execution with ``cancel_active_task_execution``.
@@ -2097,6 +2100,7 @@ async def cancel_queued_task(task_id: int) -> bool:
         if task_id in task_ids:
             _untrack_queued_task_id(user_id, task_id)
             _cancelled_task_ids.add(task_id)
+            _cancelled_task_reasons[task_id] = reason
             _set_queue_depth_metric()
             return True
     return False
@@ -6880,10 +6884,6 @@ async def _maybe_enqueue_unblocked_squad_tasks(
         return 0
 
 
-# Waits before each retry of a coordinator synthesis dispatch that failed.
-_SQUAD_SYNTHESIS_DISPATCH_RETRY_DELAYS_S = (1.0, 2.0)
-
-
 async def _maybe_enqueue_squad_coordinator_synthesis(
     *,
     user_id: int,
@@ -6991,6 +6991,15 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                     first_line = next((line.strip() for line in content.splitlines() if line.strip()), "")
                     if first_line:
                         confirmed_results.append(f"- {agent} / {task_id}: {first_line[:500]}")
+        closed_ids = {
+            event["payload"].get("handoff_id")
+            for event in handoff_events
+            if str(event["payload"].get("status") or "").lower() not in {"requested", "accepted"}
+        }
+        if handoff_events and {event["payload"].get("handoff_id") for event in handoff_events} <= closed_ids:
+            # Every handoff of the cycle has its outcome, which is recorded only once the synthesis
+            # is queued, so running the check again queues nothing.
+            return
         if not any(ctx.squad_task_id and f"/ {ctx.squad_task_id}:" in item for item in visible_results):
             visible_results.append(f"{executing_agent} / {ctx.squad_task_id}:\n{response_text[:1500]}")
             result_messages.append(
@@ -7038,49 +7047,43 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         )
         # Queue the synthesis before recording the handoff outcome, so a dispatch that fails does
         # not leave the room saying the handoff returned while the coordinator never runs. A
-        # refused dispatch, such as a rejected tasks insert, is tried again.
-        dispatched = False
-        for delay in (0.0, *_SQUAD_SYNTHESIS_DISPATCH_RETRY_DELAYS_S):
-            if delay:
-                await asyncio.sleep(delay)
-            result = await dispatch_squad_turn(
-                target_agent_id=thread.coordinator_agent_id,
-                thread=thread,
-                thread_store=thread_store,
-                query_text=synthesis_query,
-                parent_message_id=squad_message_id or ctx.parent_message_id,
-                metadata={
-                    "kind": "task_result",
-                    "from_agent": executing_agent,
-                    "thread_id": ctx.squad_thread_id,
-                    "squad_id": thread.squad_id,
-                    "parent_message_id": squad_message_id or ctx.parent_message_id,
-                    "telegram_chat_id": thread.telegram_chat_id,
-                    "telegram_message_thread_id": ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
-                    "user_id": user_id or thread.owner_user_id,
-                    "chat_id": thread.telegram_chat_id or 0,
-                    "delivery_intent": "final_synthesis",
-                    "idempotency_key": synthesis_idempotency_key,
-                    "payload": {
-                        "task_id": ctx.squad_task_id,
-                        "status": "ok",
-                        "output_md": response_text,
-                        "artifact_ids": artifact_ids,
-                    },
+        # refused dispatch, such as a rejected tasks insert, leaves the handoff open, and the
+        # squad router's sweep runs this check again (complete_open_squad_handoff).
+        result = await dispatch_squad_turn(
+            target_agent_id=thread.coordinator_agent_id,
+            thread=thread,
+            thread_store=thread_store,
+            query_text=synthesis_query,
+            parent_message_id=squad_message_id or ctx.parent_message_id,
+            metadata={
+                "kind": "task_result",
+                "from_agent": executing_agent,
+                "thread_id": ctx.squad_thread_id,
+                "squad_id": thread.squad_id,
+                "parent_message_id": squad_message_id or ctx.parent_message_id,
+                "telegram_chat_id": thread.telegram_chat_id,
+                "telegram_message_thread_id": ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+                "user_id": user_id or thread.owner_user_id,
+                "chat_id": thread.telegram_chat_id or 0,
+                "delivery_intent": "final_synthesis",
+                "idempotency_key": synthesis_idempotency_key,
+                "payload": {
+                    "task_id": ctx.squad_task_id,
+                    "status": "ok",
+                    "output_md": response_text,
+                    "artifact_ids": artifact_ids,
                 },
-                application=getattr(context, "application", None),
-                user_id=user_id or int(thread.owner_user_id or 0),
-                chat_id=int(thread.telegram_chat_id or 0),
-                delegation_chain=[executing_agent],
-                delegation_request_id=synthesis_idempotency_key,
-                delegation_origin_agent_id=executing_agent,
-                telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
-                bot_override=getattr(context, "bot", None),
-            )
-            if result.dispatched:
-                dispatched = True
-                break
-        if not dispatched:
+            },
+            application=getattr(context, "application", None),
+            user_id=user_id or int(thread.owner_user_id or 0),
+            chat_id=int(thread.telegram_chat_id or 0),
+            delegation_chain=[executing_agent],
+            delegation_request_id=synthesis_idempotency_key,
+            delegation_origin_agent_id=executing_agent,
+            telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+            bot_override=getattr(context, "bot", None),
+        )
+        if not result.dispatched:
             log.warning(
                 "squad_coordinator_synthesis_not_dispatched",
                 thread_id=ctx.squad_thread_id,
@@ -7092,11 +7095,6 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             ref.get("id"): ref.get("status")
             for ref in readiness.evidence_refs
             if ref.get("kind") == "handoff_event" and ref.get("status") in {"returned", "failed"}
-        }
-        closed_ids = {
-            event["payload"].get("handoff_id")
-            for event in handoff_events
-            if str(event["payload"].get("status") or "").lower() not in {"requested", "accepted"}
         }
         for event in handoff_events:
             handoff = event["payload"]
@@ -7238,10 +7236,13 @@ async def _persist_squad_turn_result(
     cost: float,
     log_model: str,
     cancelled: bool = False,
+    posted_by: str | None = None,
 ) -> tuple[str | None, list[str]]:
     """Post a squad turn's answer to its thread, resolve the obligations it answers and advance its task.
 
-    With ``cancelled`` the task result says ``cancelled`` and the task is cancelled.
+    With ``cancelled`` the task result says ``cancelled`` and the task is cancelled. With
+    ``posted_by`` that sender posts the result for the executing agent, which is recorded as the
+    task's ``assigned_agent_id``.
     Returns the posted message ref (``msg-<id>``) and the ids of the registered artifacts.
     """
     squad_message_id: str | None = None
@@ -7263,12 +7264,14 @@ async def _persist_squad_turn_result(
             message_kind = "task_result" if ctx.squad_task_id else "agent_text"
             correlation_id = ctx.delegation_request_id or ctx.squad_task_id or ctx.parent_message_id
             reply_kind = "agent_result" if ctx.delegation_request_id else message_kind
+            executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
             posted_id = await store.post_thread_message(
                 thread_id=thread_id,
-                from_agent=ctx.executing_agent_id or AGENT_ID or "default",
+                from_agent=posted_by or executing_agent,
                 content=response_text,
                 message_type=message_kind,
                 metadata={
+                    **({"assigned_agent_id": executing_agent} if posted_by else {}),
                     "query_cost_usd": cost,
                     "provider": run_result.provider,
                     "model": log_model,
@@ -7326,8 +7329,14 @@ async def _cancel_squad_task_after_its_dependency_ended(
     assignee: str,
     coordinator: str,
 ) -> None:
-    """Cancel a pending squad task that can never run, with a task result from its assignee that says why."""
-    reason = f"Not run: this task depends on task {dependency.id} ({dependency.title}), which {dependency.status}."
+    """Cancel a pending squad task that can never run, with a task result that says why.
+
+    Its assignee never ran, so the system posts the result for it.
+    """
+    ended = {"failed": "failed", "cancelled": "was cancelled", "escalated": "was escalated"}.get(
+        str(dependency.status), f"ended as {dependency.status}"
+    )
+    reason = f"Not run: this task depends on task {dependency.id} ({dependency.title}), which {ended}."
     await _persist_squad_turn_result(
         ctx=replace(
             ctx,
@@ -7353,6 +7362,7 @@ async def _cancel_squad_task_after_its_dependency_ended(
         cost=0.0,
         log_model="",
         cancelled=True,
+        posted_by="system",
     )
 
 
@@ -7416,8 +7426,10 @@ async def _record_failed_squad_task_turn(
         )
         return
     if task is None or task.status in {"done", "failed", "cancelled", "escalated"}:
-        # Already recorded, for example by _post_process before a later step of the turn failed; the
-        # worker ran that turn's follow-ups when it released the lock.
+        # Already recorded, for example by _post_process before a later step of the turn failed. The
+        # worker ran that turn's follow-ups when it released the lock; if they were cut short, for
+        # example by a cancel while they ran, the squad router's sweep runs the task-cycle check
+        # again (complete_open_squad_handoff).
         return
     failed_run = RunResult(
         provider=run_result.provider if run_result else ctx.provider,
@@ -7482,6 +7494,56 @@ async def _dispatch_squad_follow_ups(
         ctx=ctx,
         response_text=response_text,
         squad_message_id=squad_message_id,
+    )
+
+
+async def complete_open_squad_handoff(*, thread_id: str, squad_task_id: str) -> None:
+    """Run the task-cycle check again for a handoff still open after its cycle's tasks ended (D-074).
+
+    The squad router's sweep calls this. The check that runs after a destination's turn can be
+    lost: to a graceful restart, a cancel while the turn's follow-ups run, or a refused dispatch,
+    and nothing else runs it again. It runs here as the follow-up of ``squad_task_id``, one of the
+    cycle's tasks, would. The check queues nothing once the handoff has its outcome, and nothing
+    is queued while this runtime shuts down: the next runtime's sweep completes the handoff.
+    """
+    if _shutting_down:
+        return
+    from types import SimpleNamespace
+
+    from koda.squads import get_squad_task_store, get_squad_thread_store
+
+    thread_store = get_squad_thread_store()
+    task_store = get_squad_task_store()
+    if thread_store is None or task_store is None:
+        return
+    thread = await thread_store.get_thread(thread_id)
+    task = await task_store.get_task(squad_task_id)
+    if thread is None or task is None:
+        return
+    ctx = QueryContext(
+        provider="",
+        work_dir="",
+        model="",
+        session_id="",
+        provider_session_id=None,
+        system_prompt="",
+        agent_mode="",
+        permission_mode="",
+        max_turns=0,
+        executing_agent_id=task.assigned_agent_id,
+        squad_thread_id=thread_id,
+        squad_task_id=task.id,
+        parent_message_id=str(task.metadata.get("coordination_parent_message_id") or "") or None,
+        telegram_message_thread_id=thread.telegram_message_thread_id,
+    )
+    # No turn context: the dispatch uses this runtime's application and bot.
+    await _maybe_enqueue_squad_coordinator_synthesis(
+        user_id=int(thread.owner_user_id or 0),
+        context=cast(BotContext, SimpleNamespace(application=None, bot=None)),
+        ctx=ctx,
+        response_text="",
+        squad_message_id=None,
+        artifact_ids=[],
     )
 
 
@@ -9210,6 +9272,20 @@ async def _process_queue(user_id: int, context: BotContext) -> None:
             try:
                 if task_id is not None and task_id in _cancelled_task_ids:
                     _cancelled_task_ids.discard(task_id)
+                    reason = _cancelled_task_reasons.pop(task_id, "Cancelled by scheduler control.")
+                    if isinstance(raw_item, dict) and raw_item.get("squad_task_id"):
+                        # A destination cancelled before it ran is recorded as a cancelled run is, so
+                        # its handoff can complete (D-074).
+                        await _record_failed_squad_task_turn(
+                            user_id=user_id,
+                            context=context,
+                            ctx=None,
+                            item=_parse_queue_item(raw_item),
+                            run_result=None,
+                            error_message=reason,
+                            task_id=task_id,
+                            cancelled=True,
+                        )
                     continue
 
                 if isinstance(raw_item, dict):
