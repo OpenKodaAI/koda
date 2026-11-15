@@ -357,3 +357,34 @@ async def test_escalate_emits_audit_event(stores: tuple[SquadThreadStore, SquadT
     assert kwargs["details"]["task_id"] == task.id
     assert kwargs["details"]["reason"] == "provider down"
     assert kwargs["details"]["thread_id"] == tid
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_new_claim_of_a_task_whose_earlier_claim_was_refused_is_renewed_and_counted(
+    stores: tuple[SquadThreadStore, SquadTaskStore],
+) -> None:
+    """A refused claim the task leaves another way does not mark the next claim refused (D-097)."""
+    threads, tasks = stores
+    tid = await _seed_thread(threads)
+    task = await tasks.create_task(thread_id=tid, title="t", assigner_agent_id="PM", assigned_agent_id="FE")
+    await tasks.claim_task(task_id=task.id, agent_id="FE")
+    # A worker refused its turn in a paused room; a coordinator then moved it back to pending.
+    assert await tasks.release_refused_claim(task_id=task.id, agent_id="FE") is True
+    await tasks.update_task_status(task_id=task.id, new_status="pending", agent_id="FE")
+
+    claimed = await tasks.claim_task(task_id=task.id, agent_id="FE", ttl_seconds=60)
+
+    assert "claim_refused" not in claimed.metadata
+    # The live turn renews the new claim, and an expiry of it counts as one.
+    assert await tasks.renew_claims(claims=[(task.id, "FE")], ttl_seconds=60) == 1
+    pool = await tasks._ensure_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f'UPDATE "{_schema()}"."squad_tasks" SET claim_expires_at = NOW() - INTERVAL \'1 second\' WHERE id = $1',
+            task.id,
+        )
+    [expired] = await tasks.sweep_expired_claims()
+    assert expired.task_id == task.id
+    assert expired.refused is False
+    assert expired.expiry_count == 1

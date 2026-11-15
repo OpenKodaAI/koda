@@ -1258,8 +1258,12 @@ async def post_dashboard_squad_thread_message_route(request: web.Request) -> web
         return access_resp
     if access is None:
         return web.json_response({"error": "thread access unavailable"}, status=503)
-    if access.thread.status != "open":
-        return web.json_response({"error": f"thread is {access.thread.status}"}, status=409)
+    from koda.squads import squad_thread_turn_refusal
+
+    # A room that is not open, or whose spend reached its budget cap, runs no turn, so the post
+    # is refused with the reason rather than stored for a dispatch that is refused (D-075).
+    if (refusal := squad_thread_turn_refusal(access.thread)) is not None:
+        return web.json_response({"error": refusal}, status=409)
     raw_from = payload.get("from_agent")
     ctx = _request_auth_context(request)
     from_agent = f"operator:{ctx.username}" if ctx is not None else "operator"
@@ -2510,6 +2514,12 @@ async def delete_dashboard_session_route(request: web.Request) -> web.Response:
     return web.json_response({"ok": True, "deleted": deleted})
 
 
+# The room metadata keys a client may set with ``metadata``. Every other key is the server's: the
+# budget sweep's flags (``budget_auto_paused``, ``budget_alert_80_sent``), the photo hash, the
+# Telegram title key, so a patch that names one is refused (D-075).
+_CLIENT_ROOM_METADATA_KEYS = frozenset({"photo_url"})
+
+
 async def patch_dashboard_room_route(request: web.Request) -> web.Response:
     """Patch room metadata (title, coordinator, status)."""
     if (resp := _authorize_request(request)) is not None:
@@ -2545,6 +2555,11 @@ async def patch_dashboard_room_route(request: web.Request) -> web.Response:
         else:
             metadata_patch["photo_url"] = str(photo).strip()
     if isinstance(payload.get("metadata"), dict):
+        server_keys = sorted(str(key) for key in payload["metadata"] if str(key) not in _CLIENT_ROOM_METADATA_KEYS)
+        if server_keys:
+            return web.json_response(
+                {"error": f"room metadata cannot be set by a client: {', '.join(server_keys)}"}, status=400
+            )
         for key, value in payload["metadata"].items():
             metadata_patch[str(key)] = value
 
@@ -2567,11 +2582,29 @@ async def patch_dashboard_room_route(request: web.Request) -> web.Response:
     if new_status is not None:
         new_status = str(new_status).strip()
         try:
-            await thread_store.update_thread_status(thread_id, new_status)
+            _updated, previous_status = await thread_store.transition_thread_status(thread_id, new_status)
         except KeyError:
             return web.json_response({"error": "thread not found"}, status=404)
         except ValueError as exc:
             return web.json_response({"error": str(exc)}, status=400)
+        if new_status == "paused" and previous_status == "open":
+            # The room says why it stopped, as the budget auto-pause does (D-075). Only the change
+            # that found the room open under the row lock posts it, so concurrent pauses, or a
+            # pause racing the budget sweep's, post one event.
+            auth = _request_auth_context(request)
+            paused_by = f"operator:{auth.username}" if auth is not None else "operator"
+            metadata = {"event_type": "thread_paused", "reason": "operator", "paused_by": paused_by}
+            try:
+                await thread_store.post_thread_message(
+                    thread_id=thread_id,
+                    from_agent="system",
+                    content=f"[thread_paused] thread paused by {paused_by}",
+                    message_type="system_event",
+                    metadata=metadata,
+                )
+                await thread_store.notify_event(thread_id=thread_id, event_type="thread_paused", data=metadata)
+            except Exception:
+                log.exception("dashboard_room_pause_event_failed", thread_id=thread_id)
 
     return web.json_response({"ok": True})
 

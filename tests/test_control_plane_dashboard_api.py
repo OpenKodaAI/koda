@@ -7,6 +7,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiohttp import web
 
 from koda.control_plane import api as control_plane_api
 from koda.control_plane.dashboard_service import _serialize_execution_summary
@@ -338,3 +339,154 @@ def test_serialize_execution_summary_exposes_feedback_and_provenance() -> None:
     assert payload["source_ref_count"] == 1
     assert payload["winning_source_count"] == 1
     assert payload["provenance_source"] == "episode"
+
+
+def _room_store(*, status: str) -> AsyncMock:
+    """A room store whose status change reports the status it found under the row lock.
+
+    ``get_thread`` keeps answering the status the room had first, as a read taken before a
+    concurrent change does.
+    """
+    store = AsyncMock()
+    current = {"status": status}
+
+    async def _transition(thread_id: str, new_status: str) -> tuple[SimpleNamespace, str]:
+        previous = current["status"]
+        current["status"] = new_status
+        return SimpleNamespace(id=thread_id, status=new_status), previous
+
+    store.get_thread = AsyncMock(return_value=SimpleNamespace(id="thread-1", status=status))
+    store.transition_thread_status = AsyncMock(side_effect=_transition)
+    store.post_thread_message = AsyncMock(return_value=7)
+    store.notify_event = AsyncMock()
+    return store
+
+
+async def _patch_room_status(store: AsyncMock, status: str) -> web.Response:
+    request = _JsonRequest(match_info={"thread_id": "thread-1"}, payload={"status": status})
+    with (
+        patch("koda.control_plane.api._authorize_request", return_value=None),
+        patch(
+            "koda.control_plane.api._request_auth_context",
+            return_value=control_plane_api.OperatorAuthContext(
+                auth_kind="session",
+                subject_type="operator",
+                user_id="usr_1",
+                username="owner",
+                email="owner@example.com",
+                display_name="Owner",
+            ),
+        ),
+        patch("koda.squads.threads.get_squad_thread_store", return_value=store),
+    ):
+        return await control_plane_api.patch_dashboard_room_route(request)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+async def test_an_operator_pause_posts_a_system_event_with_reason_operator() -> None:
+    store = _room_store(status="open")
+
+    response = await _patch_room_status(store, "paused")
+
+    assert response.status == 200
+    store.transition_thread_status.assert_awaited_once_with("thread-1", "paused")
+    kwargs = store.post_thread_message.await_args.kwargs
+    assert kwargs["thread_id"] == "thread-1"
+    assert kwargs["from_agent"] == "system"
+    assert kwargs["message_type"] == "system_event"
+    assert kwargs["metadata"]["event_type"] == "thread_paused"
+    assert kwargs["metadata"]["reason"] == "operator"
+    assert kwargs["metadata"]["paused_by"] == "operator:owner"
+    store.notify_event.assert_awaited_once()
+    assert store.notify_event.await_args.kwargs["event_type"] == "thread_paused"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("current", "requested"), [("paused", "paused"), ("paused", "open"), ("open", "completed")])
+async def test_a_room_status_change_that_is_not_a_pause_posts_no_pause_event(current: str, requested: str) -> None:
+    store = _room_store(status=current)
+
+    response = await _patch_room_status(store, requested)
+
+    assert response.status == 200
+    store.transition_thread_status.assert_awaited_once_with("thread-1", requested)
+    store.post_thread_message.assert_not_awaited()
+    store.notify_event.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_operator_pauses_post_one_pause_event() -> None:
+    # Both requests read the room open before either paused it; only the real open -> paused
+    # transition posts the event.
+    store = _room_store(status="open")
+
+    first = await _patch_room_status(store, "paused")
+    second = await _patch_room_status(store, "paused")
+
+    assert (first.status, second.status) == (200, 200)
+    assert store.transition_thread_status.await_count == 2
+    store.post_thread_message.assert_awaited_once()
+    store.notify_event.assert_awaited_once()
+
+
+async def _patch_room(store: AsyncMock, payload: dict[str, object]) -> web.Response:
+    request = _JsonRequest(match_info={"thread_id": "thread-1"}, payload=payload)
+    with (
+        patch("koda.control_plane.api._authorize_request", return_value=None),
+        patch("koda.squads.threads.get_squad_thread_store", return_value=store),
+    ):
+        return await control_plane_api.patch_dashboard_room_route(request)  # type: ignore[arg-type]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("key", ["budget_auto_paused", "budget_alert_80_sent", "photo_hash", "telegram_title_key"])
+async def test_a_room_patch_refuses_metadata_the_server_owns(key: str) -> None:
+    store = _room_store(status="paused")
+
+    response = await _patch_room(store, {"title": "Room", "metadata": {key: False}})
+
+    # A client cannot clear the budget sweep's flags, or any other key the server keeps, so the
+    # whole patch is refused and nothing changes.
+    assert response.status == 400
+    assert key in json.loads(response.text)["error"]
+    store.update_thread.assert_not_awaited()
+    store.transition_thread_status.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_room_patch_sets_the_metadata_a_client_may_set() -> None:
+    store = _room_store(status="open")
+
+    response = await _patch_room(store, {"metadata": {"photo_url": "https://example.com/room.png"}})
+
+    assert response.status == 200
+    assert store.update_thread.await_args.kwargs["metadata_patch"] == {"photo_url": "https://example.com/room.png"}
+
+
+@pytest.mark.asyncio
+async def test_a_post_to_an_open_room_at_its_budget_cap_is_refused_with_the_reason() -> None:
+    from decimal import Decimal
+
+    thread = SimpleNamespace(
+        id="thread-1",
+        status="open",
+        budget_usd_cap=Decimal("1.00"),
+        cost_usd_accum=Decimal("1.00"),
+    )
+    store = AsyncMock()
+    request = _JsonRequest(match_info={"thread_id": "thread-1"}, payload={"content": "Ship the page"})
+    with (
+        patch("koda.control_plane.api._authorize_request", return_value=None),
+        patch(
+            "koda.control_plane.api._dashboard_squad_thread_access",
+            AsyncMock(return_value=(SimpleNamespace(thread=thread), None)),
+        ),
+        patch("koda.squads.get_squad_thread_store", return_value=store),
+    ):
+        response = await control_plane_api.post_dashboard_squad_thread_message_route(request)  # type: ignore[arg-type]
+
+    # The room is open, but its spend reached the cap, so no turn would run: the operator is told
+    # why instead of the message being stored for a dispatch that is refused.
+    assert response.status == 409
+    assert "budget cap" in json.loads(response.text)["error"]
+    store.post_thread_message.assert_not_awaited()
