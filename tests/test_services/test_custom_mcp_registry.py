@@ -8,7 +8,6 @@ from koda.integrations.custom_mcp_registry import (
     CustomServerPayload,
     ValidationError,
     _payload_from_claude_desktop,
-    compute_validation_signature,
     normalize_server_key,
     validate_payload,
 )
@@ -108,14 +107,6 @@ def test_validate_rejects_header_outside_allowlist():
     )
     with pytest.raises(ValidationError):
         validate_payload(payload)
-
-
-def test_validate_signature_when_secret_provided():
-    payload = _payload()
-    secret = b"test-secret"
-    validate_payload(payload, secret_key=secret)
-    assert payload.metadata["validation_signature"]
-    assert payload.metadata["validation_signature"] == compute_validation_signature(payload, secret)
 
 
 def test_claude_desktop_parser_handles_stdio_entry():

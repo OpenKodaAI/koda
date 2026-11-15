@@ -157,22 +157,28 @@ class PluginRegistry:
         return self.register(new_manifest)
 
     def _load_handler(self, plugin_dir: Path, handler_path: str) -> ToolHandler | None:
-        """Load a handler function from a plugin module."""
+        """Load a handler function from a plugin module.
+
+        The handler file must resolve inside *plugin_dir*; an absolute path, a
+        traversal or a symlink out of the plugin is rejected before anything is
+        imported. ``sys.path`` is left untouched.
+        """
+        from koda.skills._package import _safe_child_path
+
         parts = handler_path.rsplit(".", 1)
         if len(parts) != 2:
             return None
         module_path, func_name = parts
+        file_path = _safe_child_path(plugin_dir, f"{module_path.replace('.', '/')}.py")
+        if file_path is None:
+            log.warning("plugin_handler_path_rejected", handler=handler_path, plugin_dir=str(plugin_dir))
+            return None
         # Create a unique module name to avoid conflicts
         plugin_name = plugin_dir.name
         module_name = f"_koda_plugin_{plugin_name}.{module_path}"
-        # Add plugin dir to sys.path temporarily
-        plugin_dir_str = str(plugin_dir)
-        if plugin_dir_str not in sys.path:
-            sys.path.insert(0, plugin_dir_str)
         try:
             if module_name in sys.modules:
                 del sys.modules[module_name]
-            file_path = plugin_dir / f"{module_path.replace('.', '/')}.py"
             spec = importlib.util.spec_from_file_location(module_name, file_path)
             if spec is None or spec.loader is None:
                 return None
@@ -186,6 +192,3 @@ class PluginRegistry:
         except Exception as e:
             log.warning("plugin_handler_load_failed", handler=handler_path, error=str(e))
             return None
-        finally:
-            if plugin_dir_str in sys.path:
-                sys.path.remove(plugin_dir_str)

@@ -228,9 +228,9 @@ describe("LoginScreen rate limiting (ADR-038)", () => {
   });
 
   it.each(SUPPORTED_LANGUAGES)("keeps a locked account on the generic error in %s", async (language) => {
-    // The per-account lockout answers exactly like a wrong password: not a 429.
+    // The per-account lockout answers exactly like a wrong password (401): not a 429.
     (requestJson as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new ApiError("Invalid credentials.", 400),
+      new ApiError("Invalid credentials.", 401),
     );
 
     await submitLogin(language);

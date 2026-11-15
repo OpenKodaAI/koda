@@ -67,18 +67,7 @@ async def capture_snapshot(scope_id: int, work_dir: str) -> dict[str, Any]:
     except Exception:
         pass
 
-    # 4. Webhook registrations
-    try:
-        from koda.config import WEBHOOK_ENABLED  # type: ignore[attr-defined]
-
-        if WEBHOOK_ENABLED:
-            from koda.services.webhook_manager import webhook_manager  # type: ignore[import-untyped]
-
-            snapshot["subsystems"]["webhooks"] = {"registrations": webhook_manager.list_webhooks()}
-    except Exception:
-        pass
-
-    # 5. Workflows
+    # 4. Workflows
     try:
         from koda.config import WORKFLOW_ENABLED  # type: ignore[attr-defined]
 

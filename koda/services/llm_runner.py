@@ -13,7 +13,6 @@ from types import ModuleType
 from typing import Any, cast
 
 from koda.config import (
-    AGENT_ID,
     AVAILABLE_PROVIDERS,
     CODEX_FIRST_CHUNK_TIMEOUT,
     FIRST_CHUNK_TIMEOUT,
@@ -79,8 +78,6 @@ def _native_runner(provider: str) -> ModuleType:
         raise KeyError(f"No native runner registered for provider {provider!r}")
     return importlib.import_module(module_path)
 
-
-_agent_id_label = AGENT_ID or "default"
 
 _COMMON_RETRY_PATTERN = re.compile(
     r"overloaded|rate.limit|too many requests|connection|timeout|temporarily unavailable|503|529",
@@ -284,30 +281,6 @@ async def get_provider_health_snapshot() -> dict[str, dict[str, Any]]:
             "resume_turn": await get_provider_capabilities(provider, "resume_turn"),
         }
         snapshot[provider] = summarize_provider_health(provider, turn_capabilities)
-    return snapshot
-
-
-async def warm_provider_capabilities() -> dict[str, dict[str, Any]]:
-    """Warm provider compatibility checks and publish health/audit metrics."""
-    snapshot = await get_provider_health_snapshot()
-    from koda.services import audit, metrics
-
-    state_map = {"unavailable": 0, "degraded": 1, "ready": 2}
-    for provider, provider_snapshot in snapshot.items():
-        for turn_mode, turn_snapshot in provider_snapshot["turn_modes"].items():
-            metrics.PROVIDER_COMPATIBILITY_STATE.labels(
-                agent_id=_agent_id_label,
-                provider=provider,
-                turn_mode=turn_mode,
-            ).set(state_map[turn_snapshot["status"]])
-            audit.emit_task_lifecycle(
-                f"system.provider_{turn_snapshot['status']}",
-                provider=provider,
-                turn_mode=turn_mode,
-                checked_via=turn_snapshot["checked_via"],
-                warnings=turn_snapshot["warnings"],
-                errors=turn_snapshot["errors"],
-            )
     return snapshot
 
 

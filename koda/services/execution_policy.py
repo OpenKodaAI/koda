@@ -120,7 +120,6 @@ from koda.config import (
     PLUGIN_SYSTEM_ENABLED,
     SHELL_ENABLED,
     SNAPSHOT_ENABLED,
-    WEBHOOK_ENABLED,
     WORKFLOW_ENABLED,
 )
 from koda.knowledge.task_policy_defaults import default_execution_policy
@@ -226,7 +225,6 @@ def _configured_feature_flags() -> dict[str, bool]:
         "browser_network": BROWSER_NETWORK_INTERCEPTION_ENABLED,
         "browser_session": BROWSER_SESSION_PERSISTENCE_ENABLED,
         "snapshots": SNAPSHOT_ENABLED,
-        "webhooks": WEBHOOK_ENABLED,
         "fileops": FILEOPS_ENABLED,
         "shell": SHELL_ENABLED,
         "git": GIT_ENABLED,
@@ -243,7 +241,6 @@ _FEATURE_FLAG_SETTINGS: dict[str, tuple[tuple[str, str], ...]] = {
     "browser_network": (("BROWSER_NETWORK_INTERCEPTION_ENABLED", "false"),),
     "browser_session": (("BROWSER_SESSION_PERSISTENCE_ENABLED", "false"),),
     "snapshots": (("SNAPSHOT_ENABLED", "false"),),
-    "webhooks": (("WEBHOOK_ENABLED", "false"),),
     "fileops": (("FILEOPS_ENABLED", "true"),),
     "shell": (("SHELL_ENABLED", "true"),),
     "git": (("GIT_ENABLED", "true"),),

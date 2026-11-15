@@ -763,28 +763,6 @@
     }
   ],
   "paths": {
-    "/": {
-      "get": {
-        "summary": "Setup landing",
-        "description": "Registered in the Koda server route table. This broad OpenAPI entry documents availability, auth boundary, path parameters, and generic payload shape; detailed domain schemas are documented where the contract is stable.",
-        "tags": [
-          "Setup"
-        ],
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "HTML setup/dashboard response.",
-            "content": {
-              "text/html": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/control-plane/_diag/persistence": {
       "get": {
         "summary": "Get diag persistence",
@@ -9313,30 +9291,6 @@
         }
       }
     },
-    "/api/control-plane/onboarding/bootstrap": {
-      "post": {
-        "summary": "Apply initial onboarding configuration",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Provider, access, and optional agent configured"
-          }
-        },
-        "tags": [
-          "Onboarding"
-        ],
-        "description": "Stable Koda control-plane route. See linked architecture and runbook docs for domain behavior."
-      }
-    },
     "/api/control-plane/onboarding/first-task": {
       "post": {
         "summary": "Create a safe first task for onboarding",
@@ -11377,26 +11331,9 @@
           "Reference"
         ]
       }
-    },
-    "/setup": {
-      "get": {
-        "summary": "Dashboard setup compatibility bridge",
-        "security": [],
-        "responses": {
-          "200": {
-            "description": "Compatibility page that points operators to the Next.js dashboard setup flow"
-          }
-        },
-        "tags": [
-          "Setup"
-        ]
-      }
     }
   },
   "tags": [
-    {
-      "name": "Setup"
-    },
     {
       "name": "Health"
     },

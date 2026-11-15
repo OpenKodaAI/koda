@@ -128,9 +128,6 @@ class StubProvider:
             )
         )
         collector = metadata_collector if metadata_collector is not None else {}
-        if process_holder is not None:
-            # Same registration as the real HTTP adapters: no subprocess, only the task.
-            process_holder["task"] = asyncio.current_task()
         try:
             if turn.text:
                 yield turn.text
@@ -140,9 +137,6 @@ class StubProvider:
         except asyncio.CancelledError:
             self.cancelled_turns += 1
             raise
-        finally:
-            if process_holder is not None:
-                process_holder.pop("task", None)
         if turn.error is not None:
             collector.update(
                 error=True,

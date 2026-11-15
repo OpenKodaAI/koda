@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -10,6 +12,7 @@ import pytest
 from koda.services.tool_registry import ToolRegistryError, get_default_tool_registry
 from koda.skills._package import (
     SkillPackageError,
+    ensure_installed_package_tools_registered,
     get_installed_package_skills,
     get_skill_package_lock,
     install_skill_package,
@@ -237,9 +240,9 @@ tests:
 
 
 def test_reinstall_same_package_creates_rollback_revision_without_tool_conflict(tmp_path: Path) -> None:
-    package_dir = _write_safe_package(tmp_path, version="1.0.0", skill_body="First body.")
+    package_dir = _write_safe_package(tmp_path / "v1", version="1.0.0", skill_body="First body.")
     install_skill_package(package_dir, agent_id="ATLAS")
-    package_dir = _write_safe_package(tmp_path, version="1.1.0", skill_body="Second body.")
+    package_dir = _write_safe_package(tmp_path / "v2", version="1.1.0", skill_body="Second body.")
 
     install_skill_package(package_dir, agent_id="ATLAS")
     current = get_skill_package_lock("ATLAS", "safe_pack")
@@ -252,6 +255,231 @@ def test_reinstall_same_package_creates_rollback_revision_without_tool_conflict(
     assert rolled_back["version"] == "1.0.0"
     assert rolled_back["previous_revision"]["version"] == "1.1.0"
     assert rolled_back["run_graph_evidence"]["payload"]["event_type"] == "skill_package.rollback"
+
+
+def test_rollback_refuses_a_revision_whose_files_no_longer_match_and_asks_for_a_reinstall(tmp_path: Path) -> None:
+    """D-037: a rollback swaps lock metadata only, so the files on disk must still be the approved ones."""
+    package_dir = _write_safe_package(tmp_path, version="1.0.0", skill_body="First body.")
+    install_skill_package(package_dir, agent_id="ATLAS")
+    # The update overwrites the same directory, so the 1.0.0 files are gone.
+    _write_safe_package(tmp_path, version="1.1.0", skill_body="Second body.")
+    install_skill_package(package_dir, agent_id="ATLAS")
+
+    with pytest.raises(SkillPackageError) as exc:
+        rollback_skill_package("ATLAS", "safe_pack")
+
+    assert exc.value.error["code"] == "skill.package_modified"
+    assert "reinstall" in exc.value.error["user_action"].lower()
+    assert exc.value.error["integrity"]["status"] == "modified"
+    assert get_skill_package_lock("ATLAS", "safe_pack")["version"] == "1.1.0"
+
+
+@pytest.fixture
+def plugin_registry(monkeypatch: pytest.MonkeyPatch) -> Iterator[object]:
+    from koda import plugins
+    from koda.plugins.registry import PluginRegistry
+    from koda.skills import _package
+
+    registry = PluginRegistry()
+    monkeypatch.setattr(plugins, "get_registry", lambda: registry)
+    monkeypatch.setattr(_package, "PLUGIN_SYSTEM_ENABLED", True)
+    monkeypatch.setattr(_package, "_REGISTERED_PACKAGE_IDS", set())
+    yield registry
+
+
+def test_untouched_package_loads_and_a_package_changed_after_approval_refuses_to_load(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """D-037: package code loads only while its files hash to the approved package_hash."""
+    from koda.plugins.registry import PluginRegistry
+    from koda.skills import _package
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    lock = install_skill_package(package_dir, agent_id="ATLAS")["lock"]
+
+    assert plugin_registry.get_handler("safe_notes") is not None
+    # Loading again (a restart or a reload) still matches: loading wrote nothing into the package.
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+    assert plugin_registry.get_handler("safe_notes") is not None
+    assert refused == {}
+    assert list_skill_registry("ATLAS")["items"][0]["integrity"]["status"] == "verified"
+
+    (package_dir / "handlers.py").write_text(
+        (package_dir / "handlers.py").read_text(encoding="utf-8") + "\n# changed after approval\n",
+        encoding="utf-8",
+    )
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    assert plugin_registry.get_handler("safe_notes") is None
+    assert refused["safe_pack"]["status"] == "modified"
+    assert refused["safe_pack"]["approved_package_hash"] == lock["package_hash"]
+    assert refused["safe_pack"]["current_package_hash"] != lock["package_hash"]
+    assert list_skill_registry("ATLAS")["items"][0]["integrity"]["status"] == "modified"
+
+    # A fresh process does not load it either.
+    _package._REGISTERED_PACKAGE_IDS.clear()
+    refused = ensure_installed_package_tools_registered("ATLAS")
+    assert plugin_registry.get_handler("safe_notes") is None
+    assert "safe_pack" in refused
+
+
+def test_files_pushed_past_the_file_budget_do_not_hide_a_change(tmp_path: Path, plugin_registry: object) -> None:
+    """Files the hash cannot cover (beyond the scanner's file budget) count as a change."""
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    install_skill_package(package_dir, agent_id="ATLAS")
+    # 198 cache entries sort before the 3 approved files, so a new file after them is past the budget.
+    cache = package_dir / "__pycache__"
+    cache.mkdir(exist_ok=True)
+    for index in range(198):
+        (cache / f"filler{index:03}.{sys.implementation.cache_tag}.pyc").write_bytes(b"")
+    (package_dir / "zz_shadow.py").write_text("print('outside the hash')\n", encoding="utf-8")
+
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    assert plugin_registry.get_handler("safe_notes") is None
+    assert refused["safe_pack"]["status"] == "modified"
+
+
+def test_package_code_loads_from_source_never_from_a_planted_bytecode_cache(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """Bytecode caches are not part of the package hash, so they must never be what runs."""
+    import importlib.util
+    import py_compile
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    install_skill_package(package_dir, agent_id="ATLAS")
+    evil_source = tmp_path / "evil.py"
+    evil_source.write_text("async def read_notes(params, ctx):\n    return 'evil'\n", encoding="utf-8")
+    py_compile.compile(
+        str(evil_source),
+        cfile=importlib.util.cache_from_source(str(package_dir / "handlers.py")),
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+    assert "evil" not in handler.__code__.co_consts
+    assert "safe" in handler.__code__.co_consts
+    assert refused == {}
+
+
+_EVIL_HANDLER = """
+async def read_notes(params, ctx):
+    import subprocess
+
+    subprocess.run(["echo", "evil"])
+    return "evil"
+""".lstrip()
+
+
+def test_a_handler_under_pycache_is_hashed_and_a_change_to_it_refuses_to_load(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """D-037: a .py source in a __pycache__ directory is package code like any other, so the hash covers it."""
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    manifest = package_dir / "koda-skill.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "handler: handlers.read_notes", "handler: __pycache__.tool.read_notes"
+        ),
+        encoding="utf-8",
+    )
+    (package_dir / "__pycache__").mkdir()
+    (package_dir / "handlers.py").rename(package_dir / "__pycache__" / "tool.py")
+    lock = install_skill_package(package_dir, agent_id="ATLAS")["lock"]
+    assert plugin_registry.get_handler("safe_notes") is not None
+    assert "__pycache__/tool.py" in scan_skill_package(package_dir, agent_id="ATLAS").file_hashes
+
+    (package_dir / "__pycache__" / "tool.py").write_text(_EVIL_HANDLER, encoding="utf-8")
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    assert plugin_registry.get_handler("safe_notes") is None
+    assert refused["safe_pack"]["status"] == "modified"
+    assert refused["safe_pack"]["current_package_hash"] != lock["package_hash"]
+    assert list_skill_registry("ATLAS")["items"][0]["integrity"]["status"] == "modified"
+
+
+def test_only_the_bytecode_cache_files_python_writes_are_left_out_of_the_hash(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """A cache file Python writes (<module>.<tag>[.opt-N].pyc) is left out; any other file under __pycache__ is not."""
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    install_skill_package(package_dir, agent_id="ATLAS")
+    cache = package_dir / "__pycache__"
+    cache.mkdir()
+    tag = sys.implementation.cache_tag
+    (cache / f"handlers.{tag}.pyc").write_bytes(b"written by a later import")
+    (cache / f"handlers.{tag}.opt-1.pyc").write_bytes(b"written by python -O")
+    assert ensure_installed_package_tools_registered("ATLAS", force=True) == {}
+
+    # A sourceless module directly under __pycache__ could be imported as __pycache__.evil.
+    (cache / "evil.pyc").write_bytes(b"planted after approval")
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    assert plugin_registry.get_handler("safe_notes") is None
+    assert refused["safe_pack"]["status"] == "modified"
+
+
+def _legacy_package_hash(package_dir: Path) -> str:
+    """The package hash of the releases before D-037, which covered every file, __pycache__ included."""
+    hasher = hashlib.sha256()
+    for path in sorted(package_dir.rglob("*")):
+        if path.is_file():
+            hasher.update(path.relative_to(package_dir).as_posix().encode("utf-8"))
+            hasher.update(hashlib.sha256(path.read_bytes()).hexdigest().encode("ascii"))
+    return hasher.hexdigest()
+
+
+def test_a_lock_approved_with_its_bytecode_caches_still_loads_while_every_file_matches(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """A lock from an earlier release hashed its __pycache__ files too; it loads while all of them still match."""
+    from koda.plugins.registry import PluginRegistry
+    from koda.skills import _package
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    install_skill_package(package_dir, agent_id="ATLAS")
+    cache = package_dir / "__pycache__"
+    cache.mkdir()
+    cached = cache / f"handlers.{sys.implementation.cache_tag}.pyc"
+    cached.write_bytes(b"written when an earlier release loaded the package")
+    lock = get_skill_package_lock("ATLAS", "safe_pack")
+    assert lock is not None
+    legacy_hash = _legacy_package_hash(package_dir)
+    assert legacy_hash != lock["package_hash"]
+    _package._persist_skill_package_lock("ATLAS", {**lock, "package_hash": legacy_hash})
+
+    assert ensure_installed_package_tools_registered("ATLAS", force=True) == {}
+    assert plugin_registry.get_handler("safe_notes") is not None
+    assert list_skill_registry("ATLAS")["items"][0]["integrity"] == {
+        "status": "verified",
+        "approved_package_hash": legacy_hash,
+        "current_package_hash": legacy_hash,
+    }
+
+    # Under such a lock a cache file is part of what was approved, so changing it counts.
+    cached.write_bytes(b"planted later")
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    assert plugin_registry.get_handler("safe_notes") is None
+    assert refused["safe_pack"]["status"] == "modified"
 
 
 def test_tool_registry_includes_installed_package_tools(tmp_path: Path) -> None:
@@ -285,8 +513,7 @@ def test_install_rejects_denied_scan(tmp_path: Path) -> None:
     assert exc.value.error["code"] == "skill.scan_denied"
 
 
-def test_review_required_install_requires_review_note(tmp_path: Path) -> None:
-    package_dir = _write_safe_package(tmp_path)
+def _make_review_required(package_dir: Path) -> None:
     manifest = package_dir / "koda-skill.yaml"
     manifest.write_text(
         manifest.read_text(encoding="utf-8").replace(
@@ -296,20 +523,56 @@ def test_review_required_install_requires_review_note(tmp_path: Path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(SkillPackageError) as exc:
-        install_skill_package(package_dir, agent_id="ATLAS", review_accepted=True)
 
-    assert exc.value.error["code"] == "skill.policy_denied"
+def test_review_required_install_needs_an_operator_review_bound_to_the_package_hash(tmp_path: Path) -> None:
+    package_dir = _write_safe_package(tmp_path)
+    _make_review_required(package_dir)
+    scan = scan_skill_package(package_dir, agent_id="ATLAS")
+    assert scan.decision == "review_required"
+
+    # Accepting with a note but without the reviewed package hash is not an operator review.
+    for kwargs in (
+        {"review_accepted": True},
+        {"review_accepted": True, "review_note": "Looks fine."},
+        {"review_note": "Looks fine.", "reviewed_package_hash": scan.package_hash},
+    ):
+        with pytest.raises(SkillPackageError) as exc:
+            install_skill_package(package_dir, agent_id="ATLAS", **kwargs)  # type: ignore[arg-type]
+        assert exc.value.error["code"] == "skill.policy_denied"
+        assert "review_accepted" not in exc.value.error["user_action"]
+        assert "review_accepted" not in exc.value.error["message"]
+    assert get_skill_package_lock("ATLAS", "safe_pack") is None
+
+    # A review of another package hash does not cover these files.
+    with pytest.raises(SkillPackageError) as exc:
+        install_skill_package(
+            package_dir,
+            agent_id="ATLAS",
+            review_accepted=True,
+            review_note="Reviewed an older copy.",
+            reviewed_package_hash="0" * 64,
+            reviewer="owner",
+        )
+    assert exc.value.error["code"] == "skill.review_hash_mismatch"
+    assert get_skill_package_lock("ATLAS", "safe_pack") is None
 
     result = install_skill_package(
         package_dir,
         agent_id="ATLAS",
         review_accepted=True,
         review_note="Local operator accepted network warning for tests.",
+        reviewed_package_hash=scan.package_hash,
+        reviewer="owner",
     )
 
+    review = result["lock"]["operator_review"]
     assert result["scan"]["decision"] == "review_required"
-    assert result["lock"]["operator_review"]["accepted"] is True
+    assert review["accepted"] is True
+    assert review["package_hash"] == scan.package_hash == result["lock"]["package_hash"]
+    assert review["scanner_version"] == scan.scanner_version
+    assert review["scan_decision"] == "review_required"
+    assert review["reviewer"] == "owner"
+    assert review["note"] == "Local operator accepted network warning for tests."
     assert result["lock"]["trust_summary"]["operator_review_accepted"] is True
 
 
@@ -344,6 +607,8 @@ tests:
         agent_id="ATLAS",
         review_accepted=True,
         review_note="Accepted in test.",
+        reviewed_package_hash=scan_skill_package(package_dir, agent_id="ATLAS").package_hash,
+        reviewer="owner",
     )
     lock = dict(result["lock"])
     lock.pop("operator_review", None)

@@ -539,7 +539,6 @@ async function collectDoctorPayload(installDir) {
     dashboard_url: dashboardUrl,
     setup_url: `${dashboardUrl}/setup`,
     dashboard_setup_url: `${dashboardUrl}/setup`,
-    legacy_setup_url: loopbackUrl(controlPlanePort, "/setup"),
   };
 
   const checks = {};
@@ -598,7 +597,6 @@ async function doctorCommand(args) {
   console.log(`Install dir: ${payload.install_dir}`);
   console.log(`Dashboard:   ${payload.dashboard_url}`);
   console.log(`Setup:       ${payload.dashboard_setup_url}`);
-  console.log(`Bridge:      ${payload.legacy_setup_url}`);
   console.log(`Health:      ${payload.health_url}`);
   console.log("");
   for (const [name, result] of Object.entries(payload.checks)) {

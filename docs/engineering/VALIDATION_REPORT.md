@@ -611,3 +611,35 @@ Gates at a908497 (`int/b2`):
 - `pytest --cov=koda`: 8482 passed, 34 skipped, 171 xfailed; 67 % coverage.
 - `pytest -m postgres`: 299 passed, 2 skipped, 2 xfailed. This ran before a908497, which changes only OpenAPI and one test.
 - Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 185 files and 1118 tests passed; `pnpm build:web` ok.
+
+## Integration batch 3 (2026-11-15, `int/b3`, rule 10 lean lanes)
+
+Lanes:
+- M1-E4-T2/T5/T12 (tool security):
+  - Tool results are wrapped in an `<untrusted_data>` frame with protocol tags escaped.
+  - MCP tool names, descriptions and parameters are sanitised and capped. The confirm review covered the major found in review: unsanitised tool names.
+  - Uncatalogued tools are write tools.
+  - Plugin handler paths are contained and `sys.path` is untouched.
+- M1-E4-T3/T11 (packages):
+  - Only the operator-authenticated route accepts a review, bound to the package hash, and Postgres records the approval.
+  - A package whose files changed after approval refuses to load, `__pycache__` sources included. The confirm review covered the major found in review: the hash skipped those sources.
+  - D-273 records the cache gap left at tool-call time.
+- M4-E1-T1/T10/T14 and M4-E1-T2/T3/T8 (dead code), removed:
+  - legacy queue items, the per-user semaphore, startup_validator, the webhook and event_wait tools, and the missing-table writes;
+  - 20 unread keys, service shims and no-op fallbacks;
+  - the 410 endpoint, the HTML setup page, the unverified MCP HMAC and the legacy import.
+  - A snapshot test pins `/health`. MEMORY_SIMILARITY_DEDUP_THRESHOLD is kept for Q-30.
+- M1-E1-T5/T13 (auth, after its old-format rounds and a lean fix pass):
+  - A wrong password answers 401.
+  - Every rejected sign-in and password recovery takes a fixed 300 ms floor from the read body, with the same work in every case.
+  - `apps/web/CLAUDE.md` is corrected.
+
+At integration: three merge conflicts were resolved, keeping both sides (`tests/test_phase0_contract_docs.py`, CHANGELOG.md and the `api.py` imports). Recorded: D-269 to D-273, D-278 (the policy gate denies `shell_execute` and `git_status`; now on M3-E3-T1), Q-30, and CHANGELOG entries for the security and auth lanes.
+
+Gates at 75fa194 (`int/b3`):
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: 747 files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 348 source files.
+- `pytest --cov=koda`: 8540 passed, 34 skipped, 171 xfailed; 68 % coverage.
+- `pytest -m postgres`: 303 passed, 2 skipped, 2 xfailed.
+- Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 186 files and 1122 tests passed; `pnpm build:web` ok.

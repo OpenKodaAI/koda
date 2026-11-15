@@ -167,9 +167,9 @@ normal dashboard flow is unaffected.
 Outside `/api/control-plane/*` the middleware checks only the two cluster-mode deploy hooks that
 change state, `POST /cluster/drain` and `POST /cluster/undrain`
 ([Cluster mode](../operations/cluster-mode.md)), with the same bearer check: without a valid
-token they answer `401` and change nothing. The supervisor's other routes (`/`, `/setup`,
-`/health`, `/openapi/control-plane.json` and `GET /cluster/status`) answer without a
-session. `tests/test_control_plane_auth_matrix.py` sends a request to every route the supervisor
+token they answer `401` and change nothing. The supervisor's other routes (`/health`,
+`/openapi/control-plane.json` and `GET /cluster/status`) answer without a session. The API
+serves no page at `/` or `/setup`; the setup screen is the dashboard's `/setup`. `tests/test_control_plane_auth_matrix.py` sends a request to every route the supervisor
 registers, through its own middleware stack, without a session and with one. It fails when a
 route answers without a session and the OpenAPI document does not let that operation through
 without a token. It also fails when the routes that answer without a session differ, by path or
@@ -366,8 +366,14 @@ it up, the next request is allowed after the window divided by the budget:
 
 Plus the per-address general bucket (`CONTROL_PLANE_RATE_LIMIT`, default 120/min) and
 the stricter auth-failure bucket (`CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT`, default 5/min
-triggered on any 401/403). A value below 1 refuses every request that bucket covers, with
-`Retry-After: 60`, and the control plane logs `control_plane_rate_limit_refuses_every_request`
+triggered on any 401/403). A rejected sign-in is a `401` whatever the reason (`AuthError` in
+`koda/control_plane/operator_auth.py`), so failed logins spend this bucket as well as the
+`POST /auth/login` budget above; a login request without an identifier or a password is a
+`400` and does not. This bucket is charged after the request has been answered, and once it
+is empty it turns the next 401 or 403 into a `429`. That request has still been handled, so
+what limits password guesses before the password is checked is the `POST /auth/login` budget
+and the per-account lockout below. A value below 1 refuses every request that bucket covers,
+with `Retry-After: 60`, and the control plane logs `control_plane_rate_limit_refuses_every_request`
 at startup. An exhausted bucket returns `429` with `Retry-After` set to the
 whole seconds, rounded up, until the bucket that refused the request takes the next one:
 `Retry-After: 30` for login after a burst, `360` for recovery, `120` for setup. A bucket
@@ -450,14 +456,33 @@ message would reveal that the account exists.
 
 ## Side-channel mitigations
 
-- Planned, not yet in place (timing floor pending M1-E1-T13): every auth-failure path pads
-  to a 300 ms floor (`_FAILURE_TIMING_FLOOR_SECONDS`) so the caller cannot distinguish
-  `user not found` from `wrong password` from `invalid recovery code` by response time.
-  Today the constant is `0.0` and nothing applies it: a login for an unknown identifier or a
-  locked account fails before any password hash is checked, so it answers faster than a
-  wrong password for an existing account.
+- Every rejected sign-in takes the same time, so the response time does not tell which
+  accounts exist. A login for an unknown identifier, or for a locked or disabled account,
+  checks the password against a dummy Argon2 hash, the work a wrong password does. The login
+  route then answers no rejected sign-in sooner than 300 ms after it has read the request
+  (`_FAILURE_TIMING_FLOOR_SECONDS` in `koda/control_plane/operator_auth.py`), and it waits
+  without blocking the control plane's other requests. The floor counts from when the request
+  body has arrived, so a client that sends its body slowly cannot use it up before its
+  credentials are checked. The floor is fixed: a rejection whose own work takes longer than
+  300 ms answers as soon as that work ends. Only a wrong password for an existing account
+  records the failed attempt, a database write of a few to a few tens of milliseconds. When the
+  Argon2 check and that write together take longer than 300 ms (a slow or busy host), such a
+  rejection answers later than an unknown identifier by at most the time of that write.
+- Every rejected password recovery takes the same time too. On
+  `POST /auth/password/recover`, an unknown identifier, a locked account and an existing
+  account with a wrong recovery code all do the same work: they look up the account's active
+  recovery codes (none, for an unknown identifier) and compare the SHA-256 hash of the code
+  typed against them, and none of them computes an Argon2 hash. All three answer the same
+  `400`, and the route answers every rejected recovery (a new password the policy refuses
+  included) no sooner than the same 300 ms floor after it has read the request. On top of
+  that, the route's per-client budget (10 requests an hour, see
+  [Rate limits](#rate-limits-bucket-budgets)) slows down a caller who probes identifiers
+  through it.
 - Responses use a single generic error (`"Invalid credentials."`, or equivalent) without
-  leaking whether the identifier exists. The i18n layer binds every failure mode (wrong
+  leaking whether the identifier exists. A rejected sign-in answers
+  `401 {"error": "Invalid credentials."}` for a wrong password, an unknown identifier and a
+  locked or disabled account alike, and the dashboard's login route answers with the same
+  status and message. The i18n layer binds every failure mode (wrong
   password, unknown user, locked account, invalid recovery code) to the same message in
   every language. Two answers get their own message, because neither depends on the account:
   the per-client `429`, which shows the wait since it is the same for every identifier (see

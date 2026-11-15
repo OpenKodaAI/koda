@@ -1196,6 +1196,48 @@ class TestAgentLoop:
         )
 
     @pytest.mark.asyncio
+    async def test_uncatalogued_plugin_tool_meets_the_confidence_and_blocked_write_gates(self):
+        """A legacy plugin tool with no catalog entry is a write: no plan blocks it and skips later reads."""
+        ctx = _make_ctx(knowledge_hits=[{"source_label": "README.md", "freshness": "fresh"}])
+        item = _make_item()
+        context = _make_context()
+        initial = _make_result(
+            result=(
+                '<agent_cmd tool="legacy_plugin_send">{"to": "ops"}</agent_cmd>'
+                '<agent_cmd tool="browser_screenshot">{}</agent_cmd>'
+            ),
+        )
+        resume_result = _make_result(result="Write blocked.", cost_usd=0.01)
+        plugin_handler = AsyncMock()
+        mock_screenshot = AsyncMock()
+        registry = MagicMock()
+        registry.get_handler.return_value = plugin_handler
+        registry.get_tool_def.return_value = None
+
+        with (
+            patch(
+                "koda.services.queue_manager._run_with_provider_fallback",
+                new_callable=AsyncMock,
+                return_value=resume_result,
+            ),
+            patch("koda.services.tool_dispatcher.PLUGIN_SYSTEM_ENABLED", True),
+            patch("koda.plugins.get_registry", return_value=registry),
+            patch("koda.skills._package.ensure_installed_package_tools_registered"),
+            patch("koda.services.tool_dispatcher._TOOL_HANDLERS", {"browser_screenshot": mock_screenshot}),
+        ):
+            result = await _run_agent_loop(ctx, item, 111, 111, context, initial)
+
+        assert result.result == "Write blocked."
+        assert ctx.confidence_reports[-1]["blocked"] is True
+        plugin_handler.assert_not_awaited()
+        mock_screenshot.assert_not_awaited()
+        assert any(
+            step["tool"] == "browser_screenshot"
+            and "Skipped because a previous write step was blocked or denied." in step["output"]
+            for step in result.tool_execution_trace
+        )
+
+    @pytest.mark.asyncio
     async def test_scheduled_job_create_with_action_plan_and_evidence_executes(self):
         ctx = _make_ctx(knowledge_hits=[{"source_label": "README.md", "freshness": "fresh"}])
         item = _make_item()

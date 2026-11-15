@@ -20,8 +20,6 @@ defense.
 
 from __future__ import annotations
 
-import hashlib
-import hmac
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -169,7 +167,7 @@ def normalize_server_key(slug: str) -> str:
     return f"{CUSTOM_SERVER_PREFIX}{cleaned}"
 
 
-def validate_payload(payload: CustomServerPayload, *, secret_key: bytes | None = None) -> None:
+def validate_payload(payload: CustomServerPayload) -> None:
     """Validate a custom server payload, raising :class:`ValidationError`."""
     key = payload.server_key
     if not _KEY_FORMAT_RE.match(key):
@@ -213,27 +211,6 @@ def validate_payload(payload: CustomServerPayload, *, secret_key: bytes | None =
 
     if payload.auth_strategy not in {"no_auth", "api_key", "oauth", "connection_string", "dual_token"}:
         raise ValidationError(f"unsupported auth_strategy: {payload.auth_strategy!r}")
-
-    # Stamp a HMAC signature on the load-bearing fields so any later runtime
-    # tampering with the DB row is detectable.
-    if secret_key is not None:
-        signature = compute_validation_signature(payload, secret_key)
-        payload.metadata["validation_signature"] = signature
-
-
-def compute_validation_signature(payload: CustomServerPayload, secret: bytes) -> str:
-    body = json_dump(
-        {
-            "server_key": payload.server_key,
-            "transport_type": payload.transport_type,
-            "command": payload.command,
-            "args": payload.args,
-            "url": payload.url,
-            "env_keys": sorted(str(field_def.get("key") or "") for field_def in payload.env_schema),
-            "auth_strategy": payload.auth_strategy,
-        }
-    )
-    return hmac.new(secret, body.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def validate_stdio_command(command: list[Any]) -> list[str]:
@@ -329,11 +306,10 @@ def upsert_custom_server(
     *,
     agent_id: str | None = None,
     owner_user_id: str | None = None,
-    secret_key: bytes | None = None,
 ) -> dict[str, Any]:
     """Persist a custom server (system-wide if ``agent_id`` is None)."""
     payload.server_key = normalize_server_key(payload.server_key)
-    validate_payload(payload, secret_key=secret_key)
+    validate_payload(payload)
 
     now = now_iso()
     if agent_id is None:
@@ -367,7 +343,6 @@ def import_claude_desktop_json(
     *,
     agent_id: str | None = None,
     owner_user_id: str | None = None,
-    secret_key: bytes | None = None,
 ) -> ImportResult:
     """Import a Claude Desktop / cursor.config.json compatible payload.
 
@@ -407,7 +382,6 @@ def import_claude_desktop_json(
                 payload,
                 agent_id=agent_id,
                 owner_user_id=owner_user_id,
-                secret_key=secret_key,
             )
             if existed_before:
                 result.updated.append(saved["server_key"])
@@ -534,7 +508,6 @@ def _upsert_system_row(
     headers_schema_json = json_dump(payload.headers_schema)
     metadata_json = json_dump(metadata)
     isolation_constraints_json = json_dump(payload.isolation_constraints)
-    validation_signature = metadata.get("validation_signature")
 
     execute(
         """
@@ -586,7 +559,7 @@ def _upsert_system_row(
             isolation_constraints_json,
             owner_user_id,
             payload.source,
-            validation_signature,
+            None,
             headers_schema_json,
             payload.auth_strategy,
         ),
@@ -613,7 +586,6 @@ def _upsert_user_row(
     runtime_constraints_json = json_dump(payload.runtime_constraints)
     oauth_config_json = json_dump(payload.oauth_config)
     isolation_constraints_json = json_dump(payload.isolation_constraints)
-    validation_signature = payload.metadata.get("validation_signature")
 
     execute(
         """
@@ -664,7 +636,7 @@ def _upsert_user_row(
             runtime_constraints_json,
             payload.source,
             metadata_json,
-            validation_signature,
+            None,
             now,
             now,
         ),
@@ -678,8 +650,16 @@ def _upsert_user_row(
     return _serialize_user_row(row)
 
 
-def _serialize_system_row(row: dict[str, Any]) -> dict[str, Any]:
+def _row_metadata(row: dict[str, Any]) -> Any:
     metadata = json_load(str(row.get("metadata_json") or "{}"), {})
+    # Rows written before TD-038 also carry the unverified HMAC here; it is not returned.
+    if isinstance(metadata, dict):
+        metadata.pop("validation_signature", None)
+    return metadata
+
+
+def _serialize_system_row(row: dict[str, Any]) -> dict[str, Any]:
+    metadata = _row_metadata(row)
     return {
         "server_key": str(row.get("server_key") or ""),
         "display_name": str(row.get("display_name") or ""),
@@ -698,7 +678,6 @@ def _serialize_system_row(row: dict[str, Any]) -> dict[str, Any]:
         "source": str(row.get("source") or "manual"),
         "owner_user_id": row.get("owner_user_id"),
         "metadata": metadata,
-        "validation_signature": row.get("validation_signature"),
         "created_at": str(row.get("created_at") or ""),
         "updated_at": str(row.get("updated_at") or ""),
     }
@@ -725,8 +704,7 @@ def _serialize_user_row(row: dict[str, Any]) -> dict[str, Any]:
         "scope": "agent",
         "source": str(row.get("source") or "manual"),
         "owner_user_id": row.get("owner_user_id"),
-        "metadata": json_load(str(row.get("metadata_json") or "{}"), {}),
-        "validation_signature": row.get("validation_signature"),
+        "metadata": _row_metadata(row),
         "created_at": str(row.get("created_at") or ""),
         "updated_at": str(row.get("updated_at") or ""),
     }

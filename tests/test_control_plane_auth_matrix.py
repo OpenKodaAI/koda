@@ -45,7 +45,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from koda.control_plane import api as control_plane_api
-from koda.control_plane import rate_limit
+from koda.control_plane import operator_auth, rate_limit
 from koda.control_plane.operator_auth import OperatorAuthContext
 from koda.control_plane.supervisor import ControlPlaneSupervisor
 
@@ -84,8 +84,6 @@ SUPERVISOR_INTERNAL_ROUTES = frozenset(
 # docs/security/authentication.md).
 ANONYMOUS_ROOT_ROUTES = frozenset(
     {
-        ("GET", "/"),
-        ("GET", "/setup"),
         ("GET", "/health"),
         ("GET", "/ready"),
         ("GET", "/openapi/control-plane.json"),
@@ -146,10 +144,14 @@ class _StubAuthService:
         )
 
 
-def _build_supervisor_app() -> web.Application:
+def _build_supervisor_app_without_probe() -> web.Application:
     with patch("koda.control_plane.supervisor.get_control_plane_manager", return_value=object()):
         supervisor = ControlPlaneSupervisor()
-    app = supervisor.build_app()
+    return supervisor.build_app()
+
+
+def _build_supervisor_app() -> web.Application:
+    app = _build_supervisor_app_without_probe()
     app.middlewares.append(_answer_in_place_of_handler)
     return app
 
@@ -388,6 +390,25 @@ def test_root_routes_answering_without_credentials_are_the_pinned_set(route_matr
     assert problems == [], "\n".join(problems)
 
 
+# M4-E1-T8: the 410 stub for the old combined onboarding call and the HTML page that pointed
+# operators to the dashboard's /setup (with the / redirect to it) are gone.
+REMOVED_ROUTES = frozenset(
+    {
+        ("POST", "/api/control-plane/onboarding/bootstrap"),
+        ("GET", "/setup"),
+        ("GET", "/"),
+    }
+)
+
+
+def test_removed_routes_are_not_registered_or_documented(route_matrix: RouteMatrix) -> None:
+    registered = sorted(_with_head_twins(REMOVED_ROUTES) & set(route_matrix.probes))
+    assert registered == []
+    spec = json.loads(OPENAPI_PATH.read_text(encoding="utf-8"))
+    documented = sorted(path for _method, path in REMOVED_ROUTES if path in spec["paths"])
+    assert documented == []
+
+
 def test_supervisor_internal_routes_are_registered_and_left_out_of_openapi(route_matrix: RouteMatrix) -> None:
     openapi = _openapi_public_operations()
     for key in SUPERVISOR_INTERNAL_ROUTES:
@@ -438,6 +459,43 @@ def test_cluster_drain_endpoints_require_an_operator_session(route_matrix: Route
         assert probe.anonymous_body == UNAUTHORIZED_BODY
         assert probe.operator_reached == probe.identity
     assert cluster[("GET", "/cluster/status")].public
+
+
+class _RejectingLoginService(_StubAuthService):
+    """Rejects every sign-in, as the real service does for any bad credential."""
+
+    def login(self, *, identifier: str, password: str) -> dict[str, Any]:
+        raise operator_auth.AuthError("Invalid credentials.")
+
+
+async def test_a_failed_login_is_a_401_that_spends_the_auth_failure_bucket() -> None:
+    """D-135: the public login route answers rejected credentials like any other auth failure.
+
+    Through the supervisor stack, the 401 reaches the rate limiter, which charges it to the
+    stricter auth-failure bucket; with a budget of 2 the third rejected sign-in is a 429.
+    """
+    app = _build_supervisor_app_without_probe()
+    login = "/api/control-plane/auth/login"
+    body = {"identifier": "owner@example.com", "password": "wrong-password-XX"}
+
+    rate_limit.clear_limiters()
+    try:
+        with (
+            patch.object(control_plane_api, "_auth_service", _RejectingLoginService),
+            patch.object(rate_limit, "CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", 2),
+            patch.object(rate_limit, "emit_security") as audit,
+        ):
+            async with TestClient(TestServer(app)) as client:
+                responses = [await client.post(login, json=body) for _ in range(3)]
+                statuses = [response.status for response in responses]
+                first_body = await responses[0].json()
+    finally:
+        rate_limit.clear_limiters()
+
+    assert statuses == [401, 401, 429]
+    assert first_body == {"error": "Invalid credentials."}
+    charged = [call.kwargs for call in audit.call_args_list if call.args == ("security.control_plane_auth_failure",)]
+    assert [(fields["path"], fields["status"]) for fields in charged] == [(login, 401)] * 3
 
 
 async def _unreachable_handler(_request: web.Request) -> web.Response:

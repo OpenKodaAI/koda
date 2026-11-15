@@ -8,6 +8,7 @@ import functools
 import hashlib
 import json
 import mimetypes
+import time
 import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
@@ -38,8 +39,14 @@ from .dashboard_service import (
     list_dashboard_schedules,
 )
 from .manager import GeneralPayloadValidationError, get_control_plane_manager
-from .onboarding import load_control_plane_openapi_spec, render_setup_page
-from .operator_auth import OperatorAuthContext, OperatorAuthService, get_operator_auth_service
+from .onboarding import load_control_plane_openapi_spec
+from .operator_auth import (
+    AuthError,
+    OperatorAuthContext,
+    OperatorAuthService,
+    get_operator_auth_service,
+    pad_failed_login,
+)
 from .settings import (
     AGENT_SECTIONS,
     DOCUMENT_KINDS,
@@ -400,6 +407,8 @@ async def control_plane_error_middleware(
 ) -> web.StreamResponse:
     try:
         return await handler(request)
+    except AuthError as exc:
+        return web.json_response({"error": str(exc)}, status=401)
     except KeyError:
         return web.json_response({"error": "agent or asset not found"}, status=404)
     except ValueError as exc:
@@ -470,14 +479,6 @@ async def list_agents(request: web.Request) -> web.Response:
             "has_more": offset + len(page) < total,
         }
     )
-
-
-async def setup_landing(request: web.Request) -> web.Response:
-    raise web.HTTPFound("/setup")
-
-
-async def setup_page(request: web.Request) -> web.Response:
-    return web.Response(text=render_setup_page(request), content_type="text/html")
 
 
 # What onboarding/status tells a caller without an operator credential.
@@ -581,20 +582,6 @@ async def onboarding_first_task(request: web.Request) -> web.Response:
             },
             status=503,
         )
-
-
-async def onboarding_bootstrap(request: web.Request) -> web.Response:
-    return web.json_response(
-        {
-            "error": "onboarding_bootstrap_removed",
-            "message": (
-                "The combined onboarding bootstrap is no longer used. "
-                "Create the owner account via /api/control-plane/auth/register-owner, "
-                "then configure providers/agents/integrations from the dashboard."
-            ),
-        },
-        status=410,
-    )
 
 
 def _extract_request_origin(request: web.Request) -> tuple[str | None, str | None]:
@@ -703,13 +690,18 @@ async def auth_delete_profile_photo(request: web.Request) -> web.Response:
 
 async def auth_password_recover(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
-    return web.json_response(
-        _auth_service().reset_password_with_recovery_code(
+    # Like a rejected sign-in, every rejected recovery takes the same time from here (D-136).
+    started = time.monotonic()
+    try:
+        result = _auth_service().reset_password_with_recovery_code(
             identifier=str(payload.get("identifier") or ""),
             recovery_code=str(payload.get("recovery_code") or ""),
             new_password=str(payload.get("new_password") or ""),
         )
-    )
+    except ValueError:
+        await pad_failed_login(started)
+        raise
+    return web.json_response(result)
 
 
 async def auth_password_change(request: web.Request) -> web.Response:
@@ -740,12 +732,18 @@ async def auth_recovery_codes_regenerate(request: web.Request) -> web.Response:
 
 async def auth_login(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
-    return web.json_response(
-        _auth_service().login(
+    # The floor counts from here, so a client that holds its body back cannot use it up (D-136).
+    started = time.monotonic()
+    try:
+        session = _auth_service().login(
             identifier=str(payload.get("identifier") or ""),
             password=str(payload.get("password") or ""),
         )
-    )
+    except AuthError:
+        # Every rejected sign-in takes the same time, whichever check rejected it (D-136).
+        await pad_failed_login(started)
+        raise
+    return web.json_response(session)
 
 
 async def auth_logout(request: web.Request) -> web.Response:
@@ -3496,7 +3494,14 @@ async def revoke_channel_gateway_identity_route(request: web.Request) -> web.Res
 def _skill_package_error_status(code: str) -> int:
     if code == "skill.validation_failed":
         return 400
-    if code in {"skill.scan_denied", "skill.policy_denied", "skill.tool_conflict", "skill.rollback_unavailable"}:
+    if code in {
+        "skill.scan_denied",
+        "skill.policy_denied",
+        "skill.review_hash_mismatch",
+        "skill.package_modified",
+        "skill.tool_conflict",
+        "skill.rollback_unavailable",
+    }:
         return 409
     return 500
 
@@ -3570,12 +3575,18 @@ async def install_skill_package_route(request: web.Request) -> web.Response:
             },
             status=400,
         )
+    # The operator review is bound to the package_hash the operator saw in the scan, and
+    # records who accepted it. The auth middleware already authenticated the operator.
+    auth = _request_auth_context(request)
+    reviewer = (auth.username or auth.email or auth.display_name or auth.auth_kind) if auth else ""
     try:
         result = install_skill_package(
             package_path,
             agent_id=request.match_info["agent_id"],
             review_accepted=bool(payload.get("review_accepted")),
             review_note=str(payload.get("review_note") or ""),
+            reviewed_package_hash=str(payload.get("package_hash") or ""),
+            reviewer=str(reviewer or ""),
         )
     except SkillPackageError as exc:
         response = skill_package_error_response(exc)
@@ -5228,13 +5239,10 @@ def setup_control_plane_routes(app: web.Application) -> None:
     # OAuth relay for CLI-based provider auth inside Docker
     app.router.add_get("/api/control-plane/oauth-relay/{session_id}", oauth_relay_handler)
 
-    app.router.add_get("/", setup_landing)
-    app.router.add_get("/setup", setup_page)
     app.router.add_get("/openapi/control-plane.json", control_plane_openapi)
     app.router.add_get("/api/control-plane/onboarding/status", onboarding_status)
     app.router.add_get("/api/control-plane/onboarding/readiness", onboarding_readiness)
     app.router.add_post("/api/control-plane/onboarding/first-task", onboarding_first_task)
-    app.router.add_post("/api/control-plane/onboarding/bootstrap", onboarding_bootstrap)
     app.router.add_get("/api/control-plane/auth/status", auth_status)
     app.router.add_post("/api/control-plane/auth/bootstrap/exchange", auth_bootstrap_exchange)
     app.router.add_post("/api/control-plane/auth/bootstrap/codes", auth_issue_bootstrap_code)

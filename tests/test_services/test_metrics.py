@@ -18,8 +18,6 @@ from koda.services.metrics import (
     KNOWLEDGE_MISSES,
     KNOWLEDGE_RECALL_DURATION,
     MEMORY_RECALL_DURATION,
-    OPS_BENCHMARK_DURATION,
-    OPS_BENCHMARK_RUNS,
     PROCEDURAL_HITS,
     PROCEDURAL_MISSES,
     PROVIDER_ADAPTER_CONTRACT_ERRORS_TOTAL,
@@ -92,8 +90,6 @@ class TestMetricsExist:
         assert ROUTE_OUTCOME_EVENTS is not None
         assert SKILL_PACKAGE_EVENTS is not None
         assert RELEASE_BLOCKERS is not None
-        assert OPS_BENCHMARK_RUNS is not None
-        assert OPS_BENCHMARK_DURATION is not None
 
     def test_counter_increment(self):
         REQUESTS_TOTAL.labels(agent_id="test", status="completed").inc()
@@ -143,8 +139,6 @@ class TestMetricsExist:
             severity="high",
             status="failing",
         ).set(1)
-        OPS_BENCHMARK_RUNS.labels(mode="quick", status="passed").inc()
-        OPS_BENCHMARK_DURATION.labels(mode="quick").observe(0.25)
 
 
 class TestMetricCatalog:

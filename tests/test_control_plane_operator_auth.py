@@ -8,9 +8,13 @@ DB-free and run without Postgres.
 
 from __future__ import annotations
 
+import asyncio
 import io
+import json
+import statistics
+import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -19,6 +23,8 @@ from unittest.mock import MagicMock
 import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 
 from koda.control_plane import api as control_plane_api
 from koda.control_plane import bootstrap_file as bootstrap_file_mod
@@ -441,15 +447,15 @@ def test_login_lockout_applies_after_repeated_failures(
     monkeypatch.setattr(operator_auth_mod, "CONTROL_PLANE_OPERATOR_LOGIN_MAX_FAILURES", 2)
     monkeypatch.setattr(operator_auth_mod, "CONTROL_PLANE_OPERATOR_LOGIN_LOCKOUT_SECONDS", 60)
 
-    with pytest.raises(ValueError, match="Invalid credentials"):
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
         service.login(identifier="owner", password="wrong")
 
-    with pytest.raises(ValueError, match="Invalid credentials"):
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
         service.login(identifier="owner", password="wrong")
 
     # After lockout, even the correct password returns the same generic error,
     # never "temporarily locked" — avoid leaking lock state to the caller.
-    with pytest.raises(ValueError, match="Invalid credentials"):
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
         service.login(identifier="owner", password=STRONG_PASSWORD)
 
 
@@ -458,8 +464,494 @@ def test_login_never_reveals_account_disabled(operator_db: Path) -> None:
     service = operator_auth_mod.OperatorAuthService()
     payload = _create_owner(service)
     control_plane_db.execute("UPDATE cp_operator_users SET disabled = 1 WHERE id = ?", (payload["operator"]["id"],))
-    with pytest.raises(ValueError, match="Invalid credentials"):
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
         service.login(identifier="owner", password=STRONG_PASSWORD)
+
+
+@pytest.mark.postgres
+def test_login_rejects_an_unknown_identifier_like_a_wrong_password(operator_db: Path) -> None:
+    service = operator_auth_mod.OperatorAuthService()
+    _create_owner(service)
+
+    for identifier, password in (("nobody@example.com", STRONG_PASSWORD), ("owner", "wrong-password-XX")):
+        with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
+            service.login(identifier=identifier, password=password)
+
+
+@pytest.mark.parametrize(("identifier", "password"), [("", STRONG_PASSWORD), ("  ", STRONG_PASSWORD), ("owner", "")])
+def test_login_without_an_identifier_or_password_is_a_malformed_request(identifier: str, password: str) -> None:
+    """A missing field stays a 400, not an auth failure: no credential was checked (D-135)."""
+    service = operator_auth_mod.OperatorAuthService()
+
+    with pytest.raises(ValueError, match=r"^Identifier and password are required\.$") as caught:
+        service.login(identifier=identifier, password=password)
+
+    assert not isinstance(caught.value, operator_auth_mod.AuthError)
+
+
+async def test_error_middleware_answers_rejected_credentials_with_401() -> None:
+    """D-135: an AuthError is a 401, so the auth-failure rate-limit bucket (401/403) counts it."""
+
+    async def rejected(_request: web.Request) -> web.Response:
+        raise operator_auth_mod.AuthError("Invalid credentials.")
+
+    async def malformed(_request: web.Request) -> web.Response:
+        raise ValueError("Identifier and password are required.")
+
+    app = web.Application(middlewares=[control_plane_api.control_plane_error_middleware])
+    app.router.add_post("/rejected", rejected)
+    app.router.add_post("/malformed", malformed)
+
+    async with TestClient(TestServer(app)) as client:
+        unauthorized = await client.post("/rejected")
+        bad_request = await client.post("/malformed")
+
+        assert unauthorized.status == 401
+        assert await unauthorized.json() == {"error": "Invalid credentials."}
+        assert bad_request.status == 400
+        assert await bad_request.json() == {"error": "Identifier and password are required."}
+
+
+@pytest.mark.postgres
+async def test_failed_logins_answer_401_on_the_supervisor_stack_and_spend_the_auth_failure_bucket(
+    operator_db: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-135 end to end on the :8090 middleware stack, with the real service and Argon2 hashes.
+
+    A wrong password and an unknown identifier answer the same 401, and the stricter
+    auth-failure bucket counts both: with a budget of 2, the third failure is a 429.
+    """
+    from koda.control_plane import rate_limit
+    from koda.control_plane.supervisor import ControlPlaneSupervisor
+
+    service = operator_auth_mod.OperatorAuthService()
+    _create_owner(service)
+    monkeypatch.setattr(control_plane_api, "_auth_service", lambda: service)
+    monkeypatch.setattr(rate_limit, "CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", 2)
+    audit: list[dict[str, Any]] = []
+    monkeypatch.setattr(rate_limit, "emit_security", lambda event, **fields: audit.append({"event": event, **fields}))
+    monkeypatch.setattr("koda.control_plane.supervisor.get_control_plane_manager", lambda: object())
+    app = ControlPlaneSupervisor().build_app()
+    attempts = [
+        {"identifier": "owner", "password": "wrong-password-XX"},
+        {"identifier": "nobody@example.com", "password": STRONG_PASSWORD},
+        {"identifier": "owner", "password": "wrong-password-XX"},
+    ]
+
+    rate_limit.clear_limiters()
+    try:
+        async with TestClient(TestServer(app)) as client:
+            responses = [await client.post("/api/control-plane/auth/login", json=attempt) for attempt in attempts]
+            statuses = [response.status for response in responses]
+            bodies = [await response.json() for response in responses]
+    finally:
+        rate_limit.clear_limiters()
+
+    assert statuses == [401, 401, 429]
+    assert bodies[:2] == [{"error": "Invalid credentials."}] * 2
+    assert int(responses[2].headers["Retry-After"]) >= 1
+    failures = [entry for entry in audit if entry["event"] == "security.control_plane_auth_failure"]
+    assert [(entry["path"], entry["status"]) for entry in failures] == [("/api/control-plane/auth/login", 401)] * 3
+
+
+class _SpyHasher:
+    """Stands in for the Argon2 hasher: records the hashes it makes and checks, and rejects every password."""
+
+    def __init__(self) -> None:
+        self.created: list[str] = []
+        self.checked: list[str] = []
+
+    def hash(self, password: str) -> str:
+        self.created.append(f"spy-hash-{len(self.created)}")
+        return self.created[-1]
+
+    def verify(self, password_hash: str, password: str) -> bool:
+        self.checked.append(password_hash)
+        raise VerifyMismatchError
+
+
+@pytest.fixture()
+def spy_hasher(monkeypatch: pytest.MonkeyPatch) -> Iterator[_SpyHasher]:
+    spy = _SpyHasher()
+    monkeypatch.setattr(operator_auth_mod, "_password_hasher", lambda: spy)
+    operator_auth_mod._dummy_password_hash.cache_clear()
+    yield spy
+    operator_auth_mod._dummy_password_hash.cache_clear()
+
+
+@pytest.mark.parametrize(
+    ("row", "stored_hash_checked"),
+    [
+        pytest.param(None, False, id="unknown-identifier"),
+        pytest.param({"id": "7", "password_hash": "stored-hash", "disabled": 1}, False, id="disabled"),
+        pytest.param(
+            {"id": "7", "password_hash": "stored-hash", "locked_until": "2999-01-01T00:00:00+00:00"},
+            False,
+            id="locked",
+        ),
+        pytest.param({"id": "7", "password_hash": "stored-hash"}, True, id="wrong-password"),
+    ],
+)
+def test_every_rejected_login_checks_one_password_hash(
+    monkeypatch: pytest.MonkeyPatch,
+    spy_hasher: _SpyHasher,
+    row: dict[str, Any] | None,
+    stored_hash_checked: bool,
+) -> None:
+    """D-136: a rejection that never reaches the stored hash checks a dummy one instead.
+
+    Every rejected sign-in therefore does the same Argon2 work, whether or not the account exists.
+    """
+    monkeypatch.setattr(operator_auth_mod, "fetch_one", lambda query, params=(): row)
+    monkeypatch.setattr(operator_auth_mod, "execute", lambda query, params=(): 1)
+    monkeypatch.setattr(operator_auth_mod, "emit_security", lambda *args, **kwargs: None)
+
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
+        operator_auth_mod.OperatorAuthService().login(identifier="owner", password="wrong-password-XX")
+
+    assert spy_hasher.checked == (["stored-hash"] if stored_hash_checked else spy_hasher.created)
+    assert len(spy_hasher.checked) == 1
+    # The dummy hash is made on the first sign-in whichever path it takes, so the first unknown
+    # identifier after a restart does not pay for it alone.
+    assert len(spy_hasher.created) == 1
+
+
+class _StubLoginService:
+    """Accepts `owner`, treats an empty password as malformed and rejects everyone else."""
+
+    def login(self, *, identifier: str, password: str) -> dict[str, Any]:
+        if not password:
+            raise ValueError("Identifier and password are required.")
+        if identifier != "owner":
+            raise operator_auth_mod.AuthError("Invalid credentials.")
+        return {"ok": True, "session_token": "stub-session"}
+
+
+def _login_app() -> web.Application:
+    """The login route behind the error and auth middlewares, without the rate limiter."""
+    app = web.Application(
+        middlewares=[
+            control_plane_api.control_plane_error_middleware,
+            control_plane_api.control_plane_auth_middleware,
+        ]
+    )
+    app.router.add_post("/api/control-plane/auth/login", control_plane_api.auth_login)
+    return app
+
+
+async def _timed_login(client: TestClient, identifier: str, password: str) -> tuple[int, float]:
+    started = time.perf_counter()
+    response = await client.post("/api/control-plane/auth/login", json={"identifier": identifier, "password": password})
+    await response.read()
+    return response.status, time.perf_counter() - started
+
+
+async def test_the_login_route_pads_only_rejected_sign_ins_to_the_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-136: a rejected sign-in answers no sooner than the floor; other answers are not held back."""
+    monkeypatch.setattr(control_plane_api, "_auth_service", _StubLoginService)
+    floor = operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS
+
+    async with TestClient(TestServer(_login_app())) as client:
+        rejected = await _timed_login(client, "nobody@example.com", "wrong-password-XX")
+        accepted = await _timed_login(client, "owner", "wrong-password-XX")
+        malformed = await _timed_login(client, "owner", "")
+
+    assert rejected[0] == 401
+    assert rejected[1] >= floor
+    assert accepted[0] == 200
+    assert accepted[1] < floor
+    assert malformed[0] == 400
+    assert malformed[1] < floor
+
+
+async def test_the_floor_counts_from_when_the_sign_in_has_been_read(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-136: a client that holds its body back does not use up the floor before its sign-in is checked.
+
+    The headers and the start of the body go out at once, the rest 400 ms later. The rejection
+    still waits the whole floor after the body has arrived, so the answer never shows the raw
+    time the rejection took, which differs between rejection paths.
+    """
+    monkeypatch.setattr(control_plane_api, "_auth_service", _StubLoginService)
+    floor = operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS
+    held_back = 0.4
+    body = json.dumps({"identifier": "nobody@example.com", "password": "wrong-password-XX"}).encode()
+
+    async def slow_body() -> AsyncIterator[bytes]:
+        yield body[:10]
+        await asyncio.sleep(held_back)
+        yield body[10:]
+
+    async with TestClient(TestServer(_login_app())) as client:
+        started = time.perf_counter()
+        response = await client.post(
+            "/api/control-plane/auth/login", data=slow_body(), headers={"Content-Type": "application/json"}
+        )
+        await response.read()
+        elapsed = time.perf_counter() - started
+
+    assert response.status == 401
+    assert elapsed >= held_back + floor, f"{elapsed * 1000:.1f} ms"
+
+
+class _SlowHasher:
+    """Stands in for the Argon2 hasher on a host so busy that one check outlasts the floor."""
+
+    def __init__(self, check_seconds: float) -> None:
+        self.check_seconds = check_seconds
+
+    def hash(self, password: str) -> str:
+        return "slow-hash"
+
+    def verify(self, password_hash: str, password: str) -> bool:
+        time.sleep(self.check_seconds)
+        raise VerifyMismatchError
+
+
+def _stand_in_operator_table(monkeypatch: pytest.MonkeyPatch, owner: dict[str, Any], write_seconds: float) -> list[Any]:
+    """Serve `owner` from a stand-in for cp_operator_users; every write blocks for `write_seconds`.
+
+    The owner's row never changes, so every wrong password for it takes the same path: check the
+    stored hash, then write the failure count. Returns the parameters of each write.
+    """
+    writes: list[Any] = []
+
+    def fetch_one(query: str, params: Any = ()) -> dict[str, Any] | None:
+        return owner if owner["username"] in params else None
+
+    def execute(query: str, params: Any = ()) -> int:
+        time.sleep(write_seconds)
+        writes.append(params)
+        return 1
+
+    monkeypatch.setattr(operator_auth_mod, "fetch_one", fetch_one)
+    monkeypatch.setattr(operator_auth_mod, "execute", execute)
+    monkeypatch.setattr(operator_auth_mod, "emit_security", lambda *args, **kwargs: None)
+    monkeypatch.setattr(control_plane_api, "_auth_service", operator_auth_mod.OperatorAuthService)
+    return writes
+
+
+@pytest.mark.parametrize(
+    "check_seconds",
+    [
+        pytest.param(0.17, id="write-pushes-past-the-floor"),
+        pytest.param(0.25, id="check-outlasts-the-floor"),
+    ],
+)
+async def test_a_rejection_that_outlasts_the_floor_answers_when_its_work_ends(
+    monkeypatch: pytest.MonkeyPatch,
+    check_seconds: float,
+) -> None:
+    """D-136: the floor is fixed, so what work past it can show is the failure-count write, never a whole floor.
+
+    Each Argon2 check takes `check_seconds` against a 200 ms floor, and the failure-count write
+    that only a wrong password for an existing account does takes 40 ms. An unknown identifier
+    answers at the floor or when its check ends, whichever is later; the owner answers at most
+    the write's 40 ms after it (170 ms: 200 against 210 ms; 250 ms: 250 against 290 ms). Waiting
+    to the next multiple of the floor instead would turn that write into a whole extra floor
+    whenever it pushes the owner's answer past a multiple (200 against 400 ms), and the unknown
+    identifier's check past the floor into a whole one too (400 instead of 250 ms). The bounds
+    leave a loaded host room for its wake-up delays and still sit short of what that rule would
+    answer: the unknown identifier within half a floor of its own work, and the owner less than
+    halfway from the write to a whole floor after it.
+    """
+    floor = 0.2
+    write_seconds = 0.04
+    monkeypatch.setattr(operator_auth_mod, "_FAILURE_TIMING_FLOOR_SECONDS", floor)
+    monkeypatch.setattr(operator_auth_mod, "_password_hasher", lambda: _SlowHasher(check_seconds=check_seconds))
+    operator_auth_mod._dummy_password_hash.cache_clear()
+    owner = {"id": "7", "username": "owner", "password_hash": "slow-hash"}
+    writes = _stand_in_operator_table(monkeypatch, owner, write_seconds=write_seconds)
+    durations: dict[str, list[float]] = {"owner": [], "nobody@example.com": []}
+
+    try:
+        async with TestClient(TestServer(_login_app())) as client:
+            for _ in range(3):
+                for identifier, measured in durations.items():
+                    status, elapsed = await _timed_login(client, identifier, "wrong-password-XX")
+                    assert status == 401
+                    measured.append(elapsed)
+    finally:
+        operator_auth_mod._dummy_password_hash.cache_clear()
+
+    assert len(writes) == 3
+    for identifier, measured in durations.items():
+        assert min(measured) >= floor, f"{identifier}: {[round(value * 1000) for value in measured]} ms"
+    known, unknown = (statistics.median(measured) for measured in durations.values())
+    assert unknown < max(floor, check_seconds) + floor / 2, f"median unknown {unknown * 1000:.1f} ms"
+    assert known - unknown < (write_seconds + floor) / 2, (
+        f"median owner {known * 1000:.1f} ms, unknown {unknown * 1000:.1f} ms"
+    )
+
+
+@pytest.mark.slow
+async def test_failed_logins_take_the_floor_whether_or_not_the_identifier_exists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """D-136, measured over HTTP: 1,000 failed sign-ins each for the owner and an unknown identifier.
+
+    Every attempt takes at least the 300 ms floor, and the two medians differ by less than 10 ms.
+    The service and its Argon2 hashes are real; only cp_operator_users is stood in for, so the
+    test needs no Postgres and runs in the plain `pytest` gate. Every owner attempt is a wrong
+    password: it checks the stored hash and writes the failure count, a write the stand-in makes
+    take 15 ms, more than the medians may differ by. An unknown identifier checks the dummy hash
+    and writes nothing.
+
+    Argon2 runs with cheap parameters so that the work stays inside the floor and the test
+    measures the floor itself: with the defaults one check on a loaded host takes longer than
+    300 ms (450 ms to 1.4 s on 4 cores at a load of 10). That case is
+    `test_a_rejection_that_outlasts_the_floor_answers_when_its_work_ends`, and that every
+    rejection checks one hash, the dummy one included, is
+    `test_every_rejected_login_checks_one_password_hash`.
+    """
+    floor = operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS
+    cheap_hasher = PasswordHasher(time_cost=1, memory_cost=8192, parallelism=1)
+    monkeypatch.setattr(operator_auth_mod, "_password_hasher", lambda: cheap_hasher)
+    operator_auth_mod._dummy_password_hash.cache_clear()
+    owner = {"id": "7", "username": "owner", "password_hash": cheap_hasher.hash(STRONG_PASSWORD)}
+    writes = _stand_in_operator_table(monkeypatch, owner, write_seconds=0.015)
+    durations: dict[str, list[float]] = {"owner": [], "nobody@example.com": []}
+
+    try:
+        async with TestClient(TestServer(_login_app())) as client:
+            for _ in range(1000):
+                for identifier, measured in durations.items():
+                    status, elapsed = await _timed_login(client, identifier, "wrong-password-XX")
+                    assert status == 401
+                    assert elapsed >= floor, f"{identifier}: {elapsed * 1000:.1f} ms"
+                    measured.append(elapsed)
+    finally:
+        operator_auth_mod._dummy_password_hash.cache_clear()
+
+    assert len(writes) == 1000
+    known, unknown = (statistics.median(measured) for measured in durations.values())
+    assert abs(known - unknown) < 0.010, f"median owner {known * 1000:.1f} ms, unknown {unknown * 1000:.1f} ms"
+
+
+class _StubRecoveryService:
+    """Accepts the recovery code `GOOD-CODE` and rejects every other one."""
+
+    def reset_password_with_recovery_code(self, *, identifier: str, recovery_code: str, new_password: str) -> Any:
+        if recovery_code != "GOOD-CODE":
+            raise ValueError("Invalid identifier or recovery code.")
+        return {"ok": True}
+
+
+def _recover_app() -> web.Application:
+    """The password-recovery route behind the error and auth middlewares, without the rate limiter."""
+    app = web.Application(
+        middlewares=[
+            control_plane_api.control_plane_error_middleware,
+            control_plane_api.control_plane_auth_middleware,
+        ]
+    )
+    app.router.add_post("/api/control-plane/auth/password/recover", control_plane_api.auth_password_recover)
+    return app
+
+
+async def _timed_recovery(client: TestClient, identifier: str, recovery_code: str) -> tuple[int, float]:
+    started = time.perf_counter()
+    response = await client.post(
+        "/api/control-plane/auth/password/recover",
+        json={"identifier": identifier, "recovery_code": recovery_code, "new_password": ANOTHER_STRONG_PASSWORD},
+    )
+    await response.read()
+    return response.status, time.perf_counter() - started
+
+
+async def test_the_recovery_route_pads_only_rejected_recoveries_to_the_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-136: a rejected password recovery answers no sooner than the floor; a recovery that works is not held back."""
+    monkeypatch.setattr(control_plane_api, "_auth_service", _StubRecoveryService)
+    floor = operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS
+
+    async with TestClient(TestServer(_recover_app())) as client:
+        rejected = await _timed_recovery(client, "owner", "WRONG-CODE")
+        accepted = await _timed_recovery(client, "owner", "GOOD-CODE")
+
+    assert rejected[0] == 400
+    assert rejected[1] >= floor
+    assert accepted[0] == 200
+    assert accepted[1] < floor
+
+
+_RECOVERY_OWNER = {"id": "7", "username": "owner", "email": "owner@example.com", "recovery_generation": "g1"}
+
+
+def _stand_in_recovery_tables(monkeypatch: pytest.MonkeyPatch, row: dict[str, Any] | None) -> list[Any]:
+    """Serve `row` from a stand-in for cp_operator_users, with one active recovery code `REAL-CODE` for it.
+
+    Returns the parameters of each look-up of active recovery codes.
+    """
+    code_lookups: list[Any] = []
+    real_code = {"id": "c1", "code_hash": operator_auth_mod._hash_secret("REAL-CODE")}
+
+    def fetch_all(query: str, params: Any = ()) -> list[dict[str, Any]]:
+        code_lookups.append(params)
+        return [real_code] if row is not None and params == (row["id"], row["recovery_generation"]) else []
+
+    monkeypatch.setattr(operator_auth_mod, "fetch_one", lambda query, params=(): row)
+    monkeypatch.setattr(operator_auth_mod, "fetch_all", fetch_all)
+    monkeypatch.setattr(operator_auth_mod, "execute", lambda query, params=(): 1)
+    monkeypatch.setattr(operator_auth_mod, "emit_security", lambda *args, **kwargs: None)
+    return code_lookups
+
+
+_REJECTED_RECOVERIES = [
+    pytest.param(None, "REAL-CODE", id="unknown-identifier"),
+    pytest.param({**_RECOVERY_OWNER, "locked_until": "2999-01-01T00:00:00+00:00"}, "REAL-CODE", id="locked"),
+    pytest.param(_RECOVERY_OWNER, "WRONG-CODE", id="wrong-code"),
+]
+
+
+@pytest.mark.parametrize(("row", "recovery_code"), _REJECTED_RECOVERIES)
+def test_every_rejected_recovery_does_the_same_work(
+    monkeypatch: pytest.MonkeyPatch,
+    spy_hasher: _SpyHasher,
+    row: dict[str, Any] | None,
+    recovery_code: str,
+) -> None:
+    """D-136: an unknown identifier and a locked account look up and compare recovery codes like a wrong code does.
+
+    None of them makes or checks an Argon2 hash, so none answers slower than the others.
+    """
+    code_lookups = _stand_in_recovery_tables(monkeypatch, row)
+
+    with pytest.raises(ValueError, match=r"^Invalid identifier or recovery code\.$"):
+        operator_auth_mod.OperatorAuthService().reset_password_with_recovery_code(
+            identifier="owner",
+            recovery_code=recovery_code,
+            new_password=ANOTHER_STRONG_PASSWORD,
+        )
+
+    assert len(code_lookups) == 1
+    assert spy_hasher.created == []
+    assert spy_hasher.checked == []
+
+
+async def test_rejected_recoveries_take_the_floor_whichever_the_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-136, measured over HTTP: an unknown identifier, a locked account and a wrong code answer at the floor.
+
+    The service and its hasher are real; only the operator tables are stood in for. The cases take
+    turns, so a load burst slows them alike. Every attempt takes at least the 300 ms floor, and
+    each median stays within half a floor of it. That they do the same work, and so answer alike,
+    is `test_every_rejected_recovery_does_the_same_work`.
+    """
+    floor = operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS
+    monkeypatch.setattr(control_plane_api, "_auth_service", operator_auth_mod.OperatorAuthService)
+    durations: dict[str, list[float]] = {str(case.id): [] for case in _REJECTED_RECOVERIES}
+
+    async with TestClient(TestServer(_recover_app())) as client:
+        for _ in range(5):
+            for case in _REJECTED_RECOVERIES:
+                row, recovery_code = case.values
+                _stand_in_recovery_tables(monkeypatch, row)
+                status, elapsed = await _timed_recovery(client, "owner", recovery_code)
+                assert status == 400
+                assert elapsed >= floor, f"{case.id}: {elapsed * 1000:.1f} ms"
+                durations[str(case.id)].append(elapsed)
+
+    medians = {case: statistics.median(measured) for case, measured in durations.items()}
+    assert max(medians.values()) < floor * 1.5, {case: round(median * 1000, 1) for case, median in medians.items()}
 
 
 @pytest.mark.postgres
@@ -509,7 +1001,7 @@ def test_recovery_code_resets_password_and_invalidates_all(
             new_password=STRONG_PASSWORD,
         )
     # Old password no longer works.
-    with pytest.raises(ValueError, match="Invalid credentials"):
+    with pytest.raises(operator_auth_mod.AuthError, match=r"^Invalid credentials\.$"):
         service.login(identifier="owner", password=STRONG_PASSWORD)
     # New password does.
     logged_in = service.login(identifier="owner", password=ANOTHER_STRONG_PASSWORD)
@@ -618,7 +1110,8 @@ async def test_password_recover_route_accepts_lowercase_compact_code(
             "/api/control-plane/auth/login",
             json={"identifier": "owner", "password": STRONG_PASSWORD},
         )
-        assert stale.status == 400
+        assert stale.status == 401
+        assert await stale.json() == {"error": "Invalid credentials."}
         fresh = await client.post(
             "/api/control-plane/auth/login",
             json={"identifier": "owner", "password": ANOTHER_STRONG_PASSWORD},
@@ -1145,23 +1638,24 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 @pytest.mark.parametrize(
     "path",
     [
-        _REPO_ROOT / "docs" / "security" / "authentication.md",
-        _REPO_ROOT / "apps" / "web" / "CLAUDE.md",
-        _REPO_ROOT / "docs" / "install" / "vps.md",
+        pytest.param(_REPO_ROOT / "docs" / "security" / "authentication.md", id="security/authentication.md"),
+        pytest.param(_REPO_ROOT / "apps" / "web" / "CLAUDE.md", id="web/CLAUDE.md"),
+        pytest.param(_REPO_ROOT / "docs" / "install" / "vps.md", id="install/vps.md"),
     ],
-    ids=lambda path: f"{path.parent.name}/{path.name}",
 )
-def test_docs_mark_the_login_timing_floor_as_pending(path: Path) -> None:
-    """D-136: nothing pads failed logins to a time floor yet, so no doc may say they take equal time.
+def test_docs_state_the_login_timing_floor(path: Path) -> None:
+    """D-136: failed logins and recoveries are padded to a fixed 300 ms floor, and no doc still calls it pending.
 
-    An unknown identifier or a locked account fails before any password hash is checked, so it
-    answers faster than a wrong password. M1-E1-T13 adds the floor, then updates these docs and
-    this test.
+    Only the login and password-recovery routes are padded, so no doc may claim that every auth
+    failure takes equal time. The mandatory web guide is checked too.
     """
-    assert operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS == 0.0
+    assert operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS == 0.3
     text = " ".join(path.read_text(encoding="utf-8").split())
 
-    assert "timing floor pending M1-E1-T13" in text
+    assert "300 ms" in text
+    assert "timing floor pending M1-E1-T13" not in text
     assert "All auth-failure paths pad" not in text
     assert "neutralize timing" not in text
     assert "deliberately slowed" not in text
+    assert "recovery is not padded" not in text
+    assert "next multiple" not in text

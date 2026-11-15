@@ -1,36 +1,6 @@
 """Prometheus metrics for the Telegram coding agent runtime."""
 
-try:
-    from prometheus_client import Counter, Gauge, Histogram
-except ModuleNotFoundError:  # pragma: no cover - exercised in lean test envs
-
-    class _MetricChild:
-        def inc(self, amount: float = 1.0) -> None:
-            return
-
-        def observe(self, value: float) -> None:
-            return
-
-        def set(self, value: float) -> None:
-            return
-
-    class _MetricFactory:
-        def __init__(self, *args: object, **kwargs: object) -> None:
-            return
-
-        def labels(self, **kwargs: object) -> _MetricChild:
-            return _MetricChild()
-
-        def inc(self, amount: float = 1.0) -> None:
-            return
-
-        def observe(self, value: float) -> None:
-            return
-
-        def set(self, value: float) -> None:
-            return
-
-    Counter = Gauge = Histogram = _MetricFactory  # type: ignore[misc,assignment]
+from prometheus_client import Counter, Gauge, Histogram
 
 # --- Request metrics ---
 REQUESTS_TOTAL = Counter(
@@ -186,19 +156,6 @@ RELEASE_BLOCKERS = Gauge(
     "koda_release_blockers",
     "Current release blocker view derived from release_quality.v1",
     ["agent_id", "gate_id", "severity", "status"],
-)
-
-OPS_BENCHMARK_RUNS = Counter(
-    "koda_ops_benchmark_runs_total",
-    "Ops benchmark executions by mode and status",
-    ["mode", "status"],
-)
-
-OPS_BENCHMARK_DURATION = Histogram(
-    "koda_ops_benchmark_duration_seconds",
-    "Ops benchmark wall-clock duration",
-    ["mode"],
-    buckets=(0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60),
 )
 
 WORKSPACE_IMPORT_SCANS_TOTAL = Counter(
@@ -532,11 +489,6 @@ RUNTIME_RESOURCE_CPU_PERCENT = Gauge(
 RUNTIME_RESOURCE_RSS_BYTES = Gauge(
     "koda_runtime_resource_rss_bytes",
     "Latest sampled RSS bytes for a runtime environment",
-)
-
-RUNTIME_WORKTREE_DISK_BYTES = Gauge(
-    "koda_runtime_worktree_disk_bytes",
-    "Latest sampled disk usage for a runtime worktree",
 )
 
 RUNTIME_WS_CLIENTS_ACTIVE = Gauge(

@@ -127,6 +127,39 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   significant characters logs `bootstrap_code_seed_weak`. A seed the `/setup` field
   cannot take (1 to 12 characters from its alphabet) logs
   `bootstrap_code_seed_not_typeable`. (M1-E1-T17)
+- The `plugin_install` tool takes only `path`. It no longer reads `review_accepted`,
+  `approved`, `review_note` or `note`, and its error no longer tells the agent to
+  retry with them, so the model cannot accept the review of a `review_required`
+  package. Only an operator can, in the agent's Skills tab: the control-plane install
+  route now also takes the `package_hash` shown in the scan, refuses the install with
+  `skill.review_hash_mismatch` (409) when the files changed since, and records the
+  reviewer, hash, scanner version and verdict in the lock's `operator_review`.
+  (M1-E4-T3, D-031)
+- Skill package code loads only while its files still hash to the approved
+  `package_hash`. A package changed after approval is not loaded: the runtime logs
+  `skill_package_modified_not_loaded`, `plugin_reload` says the package changed, and
+  the skills registry and the Skills tab report `integrity.status: modified`. While
+  the runtime registers a package's handlers they load from their `.py` sources only,
+  never from a bytecode cache, and the package hash no longer covers the cache files
+  Python writes into `__pycache__` (`<module>.<tag>.pyc`); every other file there is
+  still hashed. A package approved by an earlier release, whose hash covered those
+  cache files too, keeps loading while every file still matches. A rollback whose
+  files no longer match its revision (an update that overwrote the same directory) is
+  refused with `skill.package_modified` (409) and asks for a reinstall.
+  (M1-E4-T11, D-037)
+- Tool results reach the model inside an `<untrusted_data>` frame, with protocol tags in
+  tool output escaped, so a fetched page or file cannot close the frame or issue a tool
+  call. Third-party MCP tool names, descriptions and parameters are sanitised and
+  capped. (M1-E4-T2, D-025)
+- Tools that are not in the catalog and are not skill-package tools count as write tools,
+  so dry-run, supervised mode and the confidence gate apply to them. (M1-E4-T5, D-132)
+- Plugin handler paths must stay inside the plugin, on register and on reload, and
+  loading a handler no longer changes `sys.path`. (M1-E4-T12, D-138)
+- A wrong password at sign-in answers 401 instead of 400. Every rejected sign-in and
+  password recovery takes at least 300 ms from when its body is read, with the same
+  work whether the account exists, is locked or the secret is wrong. (M1-E1-T5,
+  M1-E1-T13, D-135, D-136)
+
 
 ### Added
 
@@ -205,6 +238,54 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - The repository no longer tracks two third-party JavaScript bundles at its root, or
   another project's `CHANGELOG.md`. Neither was in the npm package or the images.
   (M1-E7-T6, D-128, D-084)
+- Agents no longer have the `webhook_register`, `webhook_unregister`, `webhook_list`
+  and `event_wait` tools, and the `WEBHOOK_ENABLED`, `WEBHOOK_MAX_REGISTRATIONS` and
+  `WEBHOOK_TIMEOUT_MAX` settings are gone. No route ever delivered an event to a
+  registered webhook, so `event_wait` always timed out. An agent whose tool policy
+  still lists one of these tools fails validation with "unknown core tools" until the
+  id is removed from its tool policy JSON. (M4-E1-T10, D-067)
+- Twenty configuration keys that nothing read are gone. Setting one never had an effect,
+  and it is now ignored without a warning: `INTER_AGENT_MESSAGE_TIMEOUT`,
+  `WORKFLOW_MAX_PARALLEL`, `RUNTIME_PTY_ENABLED`, `RUNTIME_BUNDLE_RETENTION_DAYS`,
+  `RUNTIME_LOCAL_UI_BIND`, `RUNTIME_ATTACH_IDLE_TIMEOUT_SECONDS`,
+  `RUNTIME_BROWSER_DISPLAY_BASE`, `RUNTIME_PTY_CHUNK_BYTES`, `RUNTIME_PTY_BACKPRESSURE_KB`,
+  `RUNTIME_LOOP_MAX_CYCLES`, `RUNTIME_LOOP_MAX_RETRIES_PER_PHASE`,
+  `RUNTIME_LOOP_NO_CHANGE_LIMIT`, `RUNTIME_CHECKPOINT_MAX_UNTRACKED_BYTES`,
+  `SNAPSHOT_MAX_SIZE_MB`, `PLUGIN_DIRS`, `PLUGIN_MAX_EXECUTION_TIMEOUT`,
+  `MEMORY_LEXICAL_CANDIDATES`, and `KNOWLEDGE_V2_NEO4J_URI`, `_USER` and `_PASSWORD`.
+  The control-plane system settings no longer offer four of them in their `runtime`
+  section (`runtime_pty_enabled`, `runtime_local_ui_bind`,
+  `runtime_attach_idle_timeout_seconds`, `runtime_browser_display_base`); a value saved
+  there before now shows under `additional_env_vars`. `PLUGIN_SANDBOX_ENABLED` stays
+  until M1-E4-T4. (M4-E1-T2, TD-003, D-194)
+- `DASHBOARD_ENABLED` is gone with the in-process stats aggregator it switched on, which
+  recorded tool runs that nothing read; the dashboard reads its data from Postgres.
+  Three Prometheus metrics that were never exported are gone. `scripts/ops_benchmark.py`
+  recorded `koda_ops_benchmark_runs_total` and `koda_ops_benchmark_duration_seconds`
+  only inside its own process, which serves no `/metrics` and pushes nowhere; it no
+  longer records them, and its output and exit codes are unchanged. Nothing set
+  `koda_runtime_worktree_disk_bytes`. The `KodaOpsBenchmarkFailed` alert in
+  `docs/operations/alerts.yml` and the "Ops benchmark" panel of the bundled Grafana
+  dashboard, which could never show data, are gone with them. `/health` reports the
+  same fields and breakers. (M4-E1-T3, TD-057, TD-058)
+- `POST /api/control-plane/onboarding/bootstrap` is gone: it has answered `410
+  onboarding_bootstrap_removed` since the setup wizard stopped using it, and now answers
+  `404`. Create the owner with `POST /api/control-plane/auth/register-owner`. The control
+  plane (`:8090`) no longer serves the HTML page at `/setup` that pointed to the
+  dashboard, or the `/` redirect to it; the setup screen is the dashboard's `/setup`.
+  `scripts/doctor.py` drops `legacy_setup_url` from its payload and `koda doctor` its
+  "Bridge" line. (M4-E1-T8, TD-071)
+- `CONTROL_PLANE_AUTO_IMPORT` is gone with the import it switched on, which read agents
+  from a root `.env` and a sibling `koda-dashboard` checkout and was off by default.
+  (M4-E1-T8, TD-070)
+- Custom MCP servers no longer carry `validation_signature`: the HMAC was stored and
+  returned but never checked. New and updated servers store no signature. The custom
+  server list and the MCP catalog no longer return it, neither as a field nor inside
+  `metadata`, where servers saved before this change still hold a copy until they are
+  next updated. (M4-E1-T8, TD-038)
+- The `artifact_evidence_nodes` write path is gone: no schema ever created that table, so
+  every write failed. (M4-E1-T14, D-260)
+
 
 ### Fixed
 

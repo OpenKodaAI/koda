@@ -598,7 +598,6 @@ def run_doctor(
         "dashboard_url": dashboard_url,
         "dashboard_setup_url": f"{dashboard_url.rstrip('/')}/setup",
         "setup_url": f"{dashboard_url.rstrip('/')}/setup",
-        "legacy_setup_url": f"{base_url.rstrip('/')}/setup",
     }
 
 

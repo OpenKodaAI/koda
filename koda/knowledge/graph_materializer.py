@@ -1,4 +1,4 @@
-"""Materialize knowledge and artifact evidence into a persisted graph efficiently."""
+"""Materialize knowledge into a persisted graph efficiently."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 
 from koda.knowledge.repository import KnowledgeRepository
-from koda.knowledge.types import ArtifactEvidenceNode, GraphEntity, GraphRelation, KnowledgeEntry
+from koda.knowledge.types import GraphEntity, GraphRelation, KnowledgeEntry
 
 _ISSUE_KEY_RE = re.compile(r"\b([A-Z][A-Z0-9]+-\d+)\b")
 _PATH_RE = re.compile(r"(?:[A-Za-z0-9_.-]+/)+[A-Za-z0-9_.-]+")
@@ -36,7 +36,6 @@ class KnowledgeGraphMaterializer:
         self._repository = repository
         self._agent_id = agent_id
         self._entry_fingerprints: dict[str, str] = {}
-        self._artifact_fingerprints: dict[str, str] = {}
 
     def materialize_entries(self, entries: list[KnowledgeEntry]) -> None:
         entities: list[GraphEntity] = []
@@ -50,44 +49,6 @@ class KnowledgeGraphMaterializer:
             entities.extend(materialized.entities)
             relations.extend(materialized.relations)
         self._repository.batch_upsert_graph(entities=entities, relations=relations)
-
-    def materialize_artifacts(self, nodes: list[ArtifactEvidenceNode], relations: list[GraphRelation]) -> None:
-        fresh_nodes = []
-        fresh_entities = []
-        fresh_relations = list(relations)
-        for node in nodes:
-            fingerprint = _fingerprint_parts(
-                [
-                    node.evidence_key,
-                    node.modality.value,
-                    node.label,
-                    node.extracted_text,
-                    node.source_path,
-                    node.source_url,
-                    node.trust_level,
-                    str(node.metadata.get("source_hash") or ""),
-                ]
-            )
-            if self._artifact_fingerprints.get(node.evidence_key) == fingerprint:
-                continue
-            self._artifact_fingerprints[node.evidence_key] = fingerprint
-            fresh_nodes.append(node)
-            fresh_entities.append(
-                GraphEntity(
-                    entity_key=f"artifact_evidence:{node.evidence_key}",
-                    entity_type="artifact_evidence",
-                    label=node.label,
-                    agent_id=node.agent_id or self._agent_id,
-                    source_kind="artifact",
-                    metadata={
-                        "modality": node.modality.value,
-                        "task_id": node.task_id,
-                        "artifact_id": node.artifact_id,
-                    },
-                )
-            )
-        self._repository.batch_upsert_artifact_evidence(fresh_nodes)
-        self._repository.batch_upsert_graph(entities=fresh_entities, relations=fresh_relations)
 
     def _materialize_entry(self, entry: KnowledgeEntry) -> _MaterializedEntry:
         fingerprint = _fingerprint_parts(

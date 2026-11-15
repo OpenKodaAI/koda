@@ -107,6 +107,92 @@ class TestPluginInstall:
         assert "legacy_plugin" in result.output
         assert _package.get_skill_package_lock("ATLAS", "legacy_plugin") is not None
 
+    @pytest.mark.asyncio
+    async def test_model_cannot_accept_the_review_of_a_review_required_package(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """D-031: review fields in the model's tool call never count as an operator review."""
+        from koda.services import tool_registry
+        from koda.services.tool_dispatcher import _handle_plugin_install
+        from koda.skills import _package
+
+        monkeypatch.setattr(_package, "STATE_ROOT_DIR", tmp_path / "state")
+        monkeypatch.setattr(_package, "_primary_backend", lambda _agent_id: None)
+        monkeypatch.setattr(_package, "AGENT_ID", "ATLAS")
+        monkeypatch.setattr("koda.config.AGENT_ID", "ATLAS")
+        tool_registry._DEFAULT_REGISTRY_CACHE.clear()
+        package_dir = _write_plugin_package(tmp_path)
+        manifest = package_dir / "plugin.yaml"
+        manifest.write_text(
+            manifest.read_text(encoding="utf-8").replace(
+                "author: Koda Tests", "author: Koda Tests\npermissions:\n  network: true"
+            ),
+            encoding="utf-8",
+        )
+        scan = _package.scan_skill_package(package_dir, agent_id="ATLAS")
+        assert scan.decision == "review_required"
+
+        with patch("koda.services.tool_dispatcher.PLUGIN_SYSTEM_ENABLED", True):
+            result = await _handle_plugin_install(
+                {
+                    "path": str(package_dir),
+                    "review_accepted": True,
+                    "approved": True,
+                    "review_note": "I reviewed it myself.",
+                    "note": "I reviewed it myself.",
+                    "package_hash": scan.package_hash,
+                    "reviewed_package_hash": scan.package_hash,
+                },
+                _make_ctx(),
+            )
+
+        assert not result.success
+        assert result.metadata["data"]["error"]["code"] == "skill.policy_denied"
+        assert "review_accepted" not in result.output
+        assert "review_accepted" not in str(result.metadata["data"]["error"]["user_action"])
+        assert _package.get_skill_package_lock("ATLAS", "legacy_plugin") is None
+
+
+class TestPluginReload:
+    @pytest.mark.asyncio
+    async def test_reload_reports_a_package_changed_after_approval_as_not_loaded(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """D-037: the reload does not claim success for a package whose files changed."""
+        from koda import plugins
+        from koda.plugins.registry import PluginRegistry
+        from koda.services import tool_registry
+        from koda.services.tool_dispatcher import _handle_plugin_reload
+        from koda.skills import _package
+
+        registry = PluginRegistry()
+        monkeypatch.setattr(plugins, "get_registry", lambda: registry)
+        monkeypatch.setattr(_package, "PLUGIN_SYSTEM_ENABLED", True)
+        monkeypatch.setattr(_package, "_REGISTERED_PACKAGE_IDS", set())
+        monkeypatch.setattr(_package, "STATE_ROOT_DIR", tmp_path / "state")
+        monkeypatch.setattr(_package, "_primary_backend", lambda _agent_id: None)
+        monkeypatch.setattr(_package, "AGENT_ID", "ATLAS")
+        monkeypatch.setattr("koda.config.AGENT_ID", "ATLAS")
+        tool_registry._DEFAULT_REGISTRY_CACHE.clear()
+        package_dir = _write_plugin_package(tmp_path)
+        _package.install_skill_package(package_dir, agent_id="ATLAS")
+        assert registry.get_handler("legacy_read_value") is not None
+        (package_dir / "handlers.py").write_text(
+            "async def read_value(params, ctx):\n    return 'changed'\n",
+            encoding="utf-8",
+        )
+
+        with patch("koda.services.tool_dispatcher.PLUGIN_SYSTEM_ENABLED", True):
+            result = await _handle_plugin_reload({"name": "legacy_plugin"}, _make_ctx())
+
+        assert not result.success
+        assert "changed after" in result.output
+        assert registry.get_handler("legacy_read_value") is None
+
 
 class TestPluginUninstall:
     @pytest.mark.asyncio
