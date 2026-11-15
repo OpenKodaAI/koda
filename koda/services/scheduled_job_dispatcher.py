@@ -368,6 +368,7 @@ async def start_scheduler_dispatcher(application: Any) -> None:
         return
     _dispatcher_application = application
     recover_expired_leases()
+    report_unowned_jobs()
     if _dispatcher_task and not _dispatcher_task.done():
         return
     _dispatcher_task = asyncio.create_task(_dispatcher_loop(application))
@@ -531,38 +532,78 @@ def recover_expired_leases() -> int:
     return recovered + refreshed
 
 
+def _unowned_job_ids() -> list[int]:
+    """Live jobs without an agent, which a process with an agent id never runs (none without one)."""
+    jobs = _jobs()
+    if not jobs.AGENT_ID:
+        return []
+    rows = _store().fetch_all(
+        "SELECT id FROM scheduled_jobs WHERE agent_id IS NULL AND status != ? ORDER BY id ASC",
+        (jobs.JOB_STATUS_ARCHIVED,),
+    )
+    return [int(row["id"]) for row in rows]
+
+
+def report_unowned_jobs() -> list[int]:
+    """Log the jobs this agent skips because they have no agent, and return their ids.
+
+    A job created by a process started without AGENT_ID has no agent. Each agent materializes, claims
+    and recovers only its own jobs, so no supervised agent runs such a job until an operator assigns it
+    (docs/operations/upgrade.md).
+    """
+    job_ids = _unowned_job_ids()
+    if job_ids:
+        log.warning(
+            "scheduler_unowned_jobs_skipped",
+            agent_id=_jobs().AGENT_ID,
+            count=len(job_ids),
+            job_ids=job_ids[:50],
+            reason="These jobs have no agent_id; assign each to the agent that should run it.",
+        )
+    return job_ids
+
+
 def get_scheduler_snapshot() -> dict[str, Any]:
-    """Return a lightweight scheduler operational snapshot."""
+    """Return a lightweight scheduler operational snapshot of this agent's jobs and runs."""
     jobs = _jobs()
     now = jobs._utcnow()
+    # This agent's rows only: the metrics carry this agent's label, and it dispatches only its own jobs.
     active_jobs = _store().fetch_val(
-        "SELECT COUNT(*) FROM scheduled_jobs WHERE status IN (?, ?, ?, ?, ?)",
+        "SELECT COUNT(*) FROM scheduled_jobs WHERE status IN (?, ?, ?, ?, ?) AND agent_id IS NOT DISTINCT FROM ?",
         (
             jobs.JOB_STATUS_VALIDATION_PENDING,
             jobs.JOB_STATUS_VALIDATED,
             jobs.JOB_STATUS_ACTIVE,
             jobs.JOB_STATUS_PAUSED,
             jobs.JOB_STATUS_FAILED_OPEN,
+            jobs.AGENT_ID,
         ),
     )
     due_runs = _store().fetch_val(
         """
-        SELECT COUNT(*) FROM scheduled_job_runs
-        WHERE status IN (?, ?) AND COALESCE(next_attempt_at, scheduled_for) <= ?
+        SELECT COUNT(*) FROM scheduled_job_runs r
+        JOIN scheduled_jobs j ON j.id = r.scheduled_job_id
+        WHERE r.status IN (?, ?) AND COALESCE(r.next_attempt_at, r.scheduled_for) <= ?
+          AND j.agent_id IS NOT DISTINCT FROM ?
         """,
-        (jobs.RUN_STATUS_QUEUED, jobs.RUN_STATUS_RETRYING, jobs._iso(now)),
+        (jobs.RUN_STATUS_QUEUED, jobs.RUN_STATUS_RETRYING, jobs._iso(now), jobs.AGENT_ID),
     )
     leased_runs = _store().fetch_val(
-        "SELECT COUNT(*) FROM scheduled_job_runs WHERE lease_expires_at IS NOT NULL AND lease_expires_at >= ?",
-        (jobs._iso(now),),
+        """
+        SELECT COUNT(*) FROM scheduled_job_runs r
+        JOIN scheduled_jobs j ON j.id = r.scheduled_job_id
+        WHERE r.lease_expires_at IS NOT NULL AND r.lease_expires_at >= ?
+          AND j.agent_id IS NOT DISTINCT FROM ?
+        """,
+        (jobs._iso(now), jobs.AGENT_ID),
     )
     failed_open_jobs = _store().fetch_val(
-        "SELECT COUNT(*) FROM scheduled_jobs WHERE status = ?",
-        (jobs.JOB_STATUS_FAILED_OPEN,),
+        "SELECT COUNT(*) FROM scheduled_jobs WHERE status = ? AND agent_id IS NOT DISTINCT FROM ?",
+        (jobs.JOB_STATUS_FAILED_OPEN, jobs.AGENT_ID),
     )
     validation_pending_jobs = _store().fetch_val(
-        "SELECT COUNT(*) FROM scheduled_jobs WHERE status = ?",
-        (jobs.JOB_STATUS_VALIDATION_PENDING,),
+        "SELECT COUNT(*) FROM scheduled_jobs WHERE status = ? AND agent_id IS NOT DISTINCT FROM ?",
+        (jobs.JOB_STATUS_VALIDATION_PENDING, jobs.AGENT_ID),
     )
     snapshot = jobs.SchedulerSnapshot(
         active_jobs=int(active_jobs),
@@ -571,6 +612,7 @@ def get_scheduler_snapshot() -> dict[str, Any]:
         failed_open_jobs=int(failed_open_jobs),
         validation_pending_jobs=int(validation_pending_jobs),
         dispatcher_running=bool(_dispatcher_task and not _dispatcher_task.done()),
+        unowned_jobs=len(_unowned_job_ids()),
     )
     try:
         from koda.services.metrics import SCHEDULED_ACTIVE_JOBS, SCHEDULED_DUE_RUNS, SCHEDULED_LEASED_RUNS

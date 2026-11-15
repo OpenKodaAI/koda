@@ -19,7 +19,12 @@ Pinned guarantees:
     agent's jobs, through its own bot and under its own policy, so a job's
     policy snapshot never flips between agents. Lease recovery is scoped the
     same way: only the owning agent's process, which knows whether the dispatch
-    still runs, recovers its runs.
+    still runs, recovers its runs. An agent's bot, tools and runtime API never
+    list, validate or run another agent's job, so manual and validation runs
+    carry their own agent's policy too. Jobs without an agent (created by a
+    process started without AGENT_ID) are reported by every agent instead of
+    being listed or queued there, and the scheduler snapshot counts only this
+    agent's jobs and runs.
   * ``POST /api/runtime/schedules`` queues a validation run for the new job
     instead of attempting an activation that the scheduler always rejects, and
     the queued validation activates the job when it passes (or leaves it
@@ -549,6 +554,127 @@ async def test_another_agents_process_never_recovers_a_run_this_agent_still_disp
     assert finished_run["lease_recovery_count"] == 0
     assert _reminders_sent(application_a) == ["⏰ Reminder: Stretch break"]
     application_b.bot.send_message.assert_not_called()
+
+
+async def test_an_agent_never_lists_validates_or_runs_another_agents_job(scheduler_db: str) -> None:
+    # One Telegram user talks to agent A's and agent B's bots. Agent A's bot, tools and runtime API
+    # must not act on agent B's job: a run or validation queued there would carry agent A's policy,
+    # and agent B's drift check would then block the run and deactivate agent B's job.
+    from koda.services import scheduled_jobs
+    from koda.services.scheduler import cancel_user_jobs, list_user_jobs
+
+    application_b = _fake_application()
+    with _as_agent("AGENT_B", _POLICY_B):
+        job_b = await _active_reminder_job(application_b)
+    validated_b = scheduled_jobs._get_job(job_b)
+    assert validated_b is not None
+    hash_b = validated_b["policy_snapshot_hash"]
+
+    with _as_agent("AGENT_A", _POLICY_A):
+        assert scheduled_jobs.list_jobs(111) == []
+        assert list_user_jobs(None, 111) == []
+        assert scheduled_jobs.get_job(job_b, 111) is None
+        assert scheduled_jobs.list_job_runs(job_b, 111) == []
+        assert scheduled_jobs.queue_validation_run(job_b, user_id=111, activate_on_success=False) == (
+            None,
+            "Job not found.",
+        )
+        assert scheduled_jobs.run_job_now(job_b, 111) == (None, "Job not found.")
+        assert scheduled_jobs.pause_job(job_b, 111) == (False, "Job not found.")
+        assert cancel_user_jobs(None, 111) == 0
+        # Internal callers without a user cannot queue a run under this agent's policy either.
+        assert scheduled_jobs.queue_validation_run(job_b) == (None, "Job not found.")
+        with pytest.raises(ValueError):
+            scheduled_jobs.create_run(scheduled_job_id=job_b, trigger_reason=scheduled_jobs.RUN_TRIGGER_MANUAL_RUN)
+        assert (await _run_dispatch_cycle(_fake_application()))["claimed"] == 0
+
+    job_after = scheduled_jobs._get_job(job_b)
+    assert job_after is not None
+    assert job_after["status"] == scheduled_jobs.JOB_STATUS_ACTIVE
+    assert job_after["policy_snapshot_hash"] == hash_b
+    assert _runs(job_b, scheduled_jobs.RUN_TRIGGER_MANUAL_RUN) == []
+    assert len(_runs(job_b, scheduled_jobs.RUN_TRIGGER_MANUAL_TEST)) == 1
+
+    # Agent B's own bot runs it now, under agent B's policy, and the job stays active.
+    with _as_agent("AGENT_B", _POLICY_B):
+        run_id, _ = scheduled_jobs.run_job_now(job_b, 111)
+        assert run_id is not None
+        await _run_dispatch_cycle(application_b)
+    [manual_run] = _runs(job_b, scheduled_jobs.RUN_TRIGGER_MANUAL_RUN)
+    assert manual_run["status"] == scheduled_jobs.RUN_STATUS_SUCCEEDED, manual_run.get("error_message")
+    assert manual_run["metadata"]["policy_snapshot"]["execution_policy"] == _POLICY_B
+    job_final = scheduled_jobs._get_job(job_b)
+    assert job_final is not None and job_final["status"] == scheduled_jobs.JOB_STATUS_ACTIVE
+    assert _reminders_sent(application_b) == ["⏰ Reminder: Stretch break"]
+
+
+async def _unowned_and_owned_jobs() -> tuple[int, int]:
+    """A job created by a process without AGENT_ID (a standalone worker) and one of agent A."""
+    with _as_agent(None, _POLICY_A):
+        unowned_job = await _active_reminder_job(_fake_application())
+    with _as_agent("AGENT_A", _POLICY_A):
+        owned_job = await _active_reminder_job(_fake_application())
+    return unowned_job, owned_job
+
+
+async def test_an_agent_never_lists_or_queues_a_run_for_a_job_without_an_agent(scheduler_db: str) -> None:
+    # No supervised agent runs a job without an agent, so none lists it as its own (the bot, the
+    # dashboard) or accepts a run for it that nothing would ever claim.
+    from koda.services import scheduled_jobs
+    from koda.state.dashboard_store import DashboardStore
+
+    unowned_job, owned_job = await _unowned_and_owned_jobs()
+
+    with _as_agent("AGENT_A", _POLICY_A):
+        assert scheduled_jobs.run_job_now(unowned_job, 111) == (None, "Job not found.")
+        assert [job["id"] for job in scheduled_jobs.list_jobs(111)] == [owned_job]
+    assert _runs(unowned_job, scheduled_jobs.RUN_TRIGGER_MANUAL_RUN) == []
+    assert [item["id"] for item in DashboardStore().list_schedules("AGENT_A")] == [owned_job]
+    assert DashboardStore().list_schedules("AGENT_B") == []
+
+
+async def test_each_agent_reports_the_jobs_without_an_agent_that_it_skips(scheduler_db: str) -> None:
+    from koda.services import scheduled_job_dispatcher, scheduled_jobs
+
+    unowned_job, _owned_job = await _unowned_and_owned_jobs()
+
+    with _as_agent("AGENT_A", _POLICY_A), patch.object(scheduled_job_dispatcher, "log") as log:
+        assert scheduled_job_dispatcher.report_unowned_jobs() == [unowned_job]
+        assert scheduled_jobs.get_scheduler_snapshot()["unowned_jobs"] == 1
+    log.warning.assert_called_once()
+    assert log.warning.call_args.args == ("scheduler_unowned_jobs_skipped",)
+    assert log.warning.call_args.kwargs["job_ids"] == [unowned_job]
+
+    # A process without an agent id (the standalone worker) owns them: nothing to report there.
+    with _as_agent(None, _POLICY_A):
+        assert scheduled_job_dispatcher.report_unowned_jobs() == []
+        assert scheduled_jobs.get_scheduler_snapshot()["unowned_jobs"] == 0
+
+
+async def test_scheduler_snapshot_counts_only_this_agents_jobs_and_runs(scheduler_db: str) -> None:
+    from koda.services import scheduled_job_runtime, scheduled_jobs
+    from koda.services.metrics import SCHEDULED_DUE_RUNS, SCHEDULED_LEASED_RUNS
+
+    with _as_agent("AGENT_B", _POLICY_B):
+        # Two jobs of agent B wait in validation: one validation run is claimed (a live lease) and the
+        # other is due. Agent B is down, so agent A's process must not report either as its own.
+        for text in ("Drink water", "Stand up"):
+            scheduled_jobs.create_reminder_job(
+                user_id=111, chat_id=333, trigger_type="interval", schedule_expr="3600", text=text
+            )
+        with patch.object(scheduled_job_runtime, "_dispatch_run", AsyncMock()):
+            assert len(scheduled_jobs._claim_due_runs(limit=1)) == 1
+        snapshot_b = scheduled_jobs.get_scheduler_snapshot()
+    with _as_agent("AGENT_A", _POLICY_A):
+        snapshot_a = scheduled_jobs.get_scheduler_snapshot()
+
+    assert (snapshot_a["active_jobs"], snapshot_a["due_runs"], snapshot_a["leased_runs"]) == (0, 0, 0)
+    assert snapshot_a["validation_pending_jobs"] == 0
+    assert (snapshot_b["active_jobs"], snapshot_b["due_runs"], snapshot_b["leased_runs"]) == (2, 1, 1)
+    assert snapshot_b["validation_pending_jobs"] == 2
+    assert SCHEDULED_DUE_RUNS.labels(agent_id="AGENT_A")._value.get() == 0
+    assert SCHEDULED_LEASED_RUNS.labels(agent_id="AGENT_A")._value.get() == 0
+    assert SCHEDULED_DUE_RUNS.labels(agent_id="AGENT_B")._value.get() == 1
 
 
 class _AllowRuntimeAccess:

@@ -72,6 +72,39 @@ Releases from before this check ignore the table, so rolling back needs no
 extra step. Keep the key file in place either way: those releases create a
 new key when the file is missing.
 
+### Scheduled jobs without an agent
+
+Each agent worker materializes, claims, recovers and dispatches only its
+own agent's scheduled jobs, through its own bot and under its own policy.
+Its `/jobs` command, job tools and runtime API actions also act only on
+that agent's jobs. The scheduler entry of its `/health` payload and its
+`koda_scheduled_*` metrics count only that agent's jobs and runs.
+
+A job created by a worker started without `--agent-id` (no `AGENT_ID`)
+has no agent: its `scheduled_jobs.agent_id` is NULL, and only a worker
+started the same way runs it. The supervisor always starts workers with
+`--agent-id`. After a move from a standalone worker to supervised agents,
+no worker runs these jobs and the dashboard lists them under no agent.
+Each agent worker logs `scheduler_unowned_jobs_skipped` with their ids
+when its dispatcher starts, and its `/health` scheduler entry reports
+their number as `unowned_jobs`.
+
+No migration assigns them, because nothing records which agent created
+them. Assign each job to the agent that should run it, with `psql`
+against the Koda database (for example
+`docker compose exec postgres psql -U <user> -d <database>`):
+
+```sql
+UPDATE knowledge_v2.scheduled_jobs
+SET agent_id = 'AGENT_A'
+WHERE agent_id IS NULL AND id IN (12, 15);
+```
+
+Use your schema name if you changed `KNOWLEDGE_V2_POSTGRES_SCHEMA`. That
+agent's next dispatch cycle picks the job up, as after an outage: it runs
+the occurrences still inside the catch-up window, and recovers any run of
+the job left `running` with an expired lease.
+
 ## Step 2 (cluster) — blue/green drain
 
 For a multi-supervisor deployment (`KODA_CLUSTER_MODE=cluster`):

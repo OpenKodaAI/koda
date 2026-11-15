@@ -1688,11 +1688,13 @@ class DashboardStore:
                    verification_policy_json, notification_policy_json, dry_run_required,
                    created_at, updated_at
             FROM scheduled_jobs
-            WHERE COALESCE(agent_id, ?) = ? AND status != 'archived'
+            WHERE agent_id = ? AND status != 'archived'
             ORDER BY COALESCE(next_run_at, updated_at) ASC, id DESC
             LIMIT ? OFFSET ?
             """,
-            (scope, scope, max(1, int(limit)), max(0, int(offset))),
+            # Only this agent's jobs: a job without an agent is run by no agent, so it is not listed
+            # as any agent's (each agent reports it as unowned instead).
+            (scope, max(1, int(limit)), max(0, int(offset))),
         )
         items: list[dict[str, Any]] = []
         for row in rows:
