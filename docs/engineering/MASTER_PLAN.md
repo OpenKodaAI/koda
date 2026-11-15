@@ -1098,12 +1098,12 @@ Owner SEC (AIM) · Risk med · Gate none · **done** · Deps —
 - **Tests:** unit tests; G-PG squad tests · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": elect, demote, Telegram bind and unbind, router_tick and thread create are a `squad_admin` category that only the squad's current coordinator or a workspace-scoped operator passes; a non-coordinator cannot elect itself and a messaging grant no longer grants admin; the agent tools have no force flags; Telegram bind runs the /squad_bind checks through the Bot API
 
 #### M1-E5-T2 · Scope broadcast, squad identity and recall users
-Owner SEC · Risk low · Gate none · **ready** · Deps —
+Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-040, D-134, D-137, F-SQD-06
 - **Files:** `koda/agents/postgres_message_bus.py` (~647), `koda/services/runtime/api.py` (~1510), `rust/koda-memory-engine/src/main.rs` (~1061)
 - **Do:** broadcast only to the current thread's participants, never to pseudo-agents. Derive squad message identity on the server. Recall rejects `user_id <= 0`.
 - **Done when:** each probe is rejected.
-- **Tests:** unit tests; G-PG; G-RS · **Evidence:** —
+- **Tests:** unit tests; G-PG; G-RS · **Evidence:** VALIDATION_REPORT.md "Integration batch 8": `agent_broadcast` reaches only the active participants of the current squad thread and never a pseudo-agent; a runtime squad message runs as the thread's owner and chat and lists any caller identity it ignores; recall with `user_id <= 0` is refused by the Rust engine and, before the RPC, by the Python client (unit, G-PG and G-RS tests)
 
 #### M1-E5-T3 · Channel gateway pairing limits and persistence
 Owner SEC · Risk low · Gate none · **done** · Deps —
@@ -1314,7 +1314,7 @@ Owner SEC (REV) · Risk low · Gate none · **pending** · Deps M1-E2-T2, M1-E2-
 #### M2-E1 — Approval storage
 
 #### M2-E1-T1 · Approval tables in the registry, with agent-scoped writes
-Owner BE (SEC) · Risk med · Gate none · **ready** · Deps —
+Owner BE (SEC) · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-059, D-060, TD-006 (part), TD-119 (part), F-GOV-07, R-17
 - **Files:** `koda/state/pending_approvals.py` (~63-73), `koda/state/approval_grants.py` (~93, ~298), `_migrations()` in `koda/knowledge/v2/postgres_backend.py` (~536)
 - **Do:** create both tables in a numbered migration with BIGINT user and chat ids plus `agent_id`. Remove the runtime DDL. Replace the unscoped `replace_approval_grants` delete-and-reinsert with per-grant upsert and delete, scoped by `agent_id` and run in a transaction.
@@ -1325,15 +1325,15 @@ Owner BE (SEC) · Risk med · Gate none · **ready** · Deps —
   - using a grant in agent A leaves agent B's grants intact;
   - a crash mid-write leaves the grants unchanged;
   - on a seeded copy with legacy rows, each row either has a derived `agent_id` or is expired with an audit row, and none matches a second agent.
-- **Tests:** G-PG store tests (none exist today); G · **Evidence:** —
+- **Tests:** G-PG store tests (none exist today); G · **Evidence:** VALIDATION_REPORT.md "Integration batch 8": migration `050_approval_tables` creates both tables with BIGINT user and chat ids, `agent_id` and DOUBLE PRECISION times, and the runtime DDL is gone; an id above 2^31 survives a restart, using a grant in one agent leaves another agent's grants intact, an injected fault mid-write leaves every row unchanged, and legacy rows get a derived agent or expire with one audit row each (G-PG `tests/test_state_approval_stores_postgres.py`)
 
 #### M2-E1-T2 · Retire JSON approval fallbacks
-Owner BE · Risk low · Gate none · **pending** · Deps M2-E1-T1
+Owner BE · Risk low · Gate none · **done** · Deps M2-E1-T1
 - **Addresses:** TD-043 (part), ARCHITECTURE_AUDIT §8.8 (JSON fallbacks), D-059 (lost overflow entries)
 - **Files:** `koda/state/pending_approvals.py`, `koda/state/approval_grants.py`, `STATE_ROOT_DIR` handling
 - **Do:** on startup, import any `approval_grants.json` entries into Postgres once. Rename the file `*.migrated` instead of deleting it. Remove the fallback write path.
 - **Done when:** a seeded JSON grant appears in Postgres after one boot, and no code writes approval JSON.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 8": approval JSON files are imported into Postgres once at startup and renamed `*.migrated`; a second boot imports nothing; no code writes approval JSON (AST test `tests/test_approval_json_retired.py`); a failed write raises and is logged; a revoked grant stays revoked after a partial use, and a use Postgres does not record runs nothing (G-PG)
 
 #### M2-E2 — Transactions and migrations
 
@@ -1352,6 +1352,7 @@ Owner BE (OPS, review REV) · Risk high · Gate none · **pending** · Deps M2-E
 - **Do:** only the control plane and `koda migrate` apply DDL. Workers wait, with a bounded timeout, until the schema version is current. Two migration kinds (ADR-028):
   - **Transactional (default).** One transaction under `pg_advisory_xact_lock`, with `SET LOCAL lock_timeout` set to the lock budget (default 5 s). If the lock cannot be taken in time, the migration fails cleanly and is retried at the next start.
   - **Online (non-transactional).** For `CREATE INDEX CONCURRENTLY` and batched backfills. It runs under a session-level `pg_advisory_lock`, one statement at a time. Each statement must be idempotent (`IF NOT EXISTS`; an `INVALID` index left by a failed build is dropped and rebuilt). Backfills run in batches that each commit within the lock budget. The migration is recorded as applied only after every statement succeeds.
+- **Confirmed again (M2-E1-T1 review):** bootstrap runs migration statements in autocommit with no advisory lock, so several processes that start together can run the same migration at once.
 - **Done when:**
   - concurrent boots of 3 processes apply each migration exactly once;
   - a failing transactional migration rolls back completely;
@@ -1802,12 +1803,12 @@ Owner AIM · Risk med · Gate none · **done** · Deps —
 - **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 5": synthesis runs once per cycle after a handoff completes; failures, cancels and budget stops record a result and cascade to dependents
 
 #### M3-E6-T4 · Bounded delegation and `agent_send`
-Owner AIM (SEC) · Risk med · Gate none · **ready** · Deps —
+Owner AIM (SEC) · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-095, D-096, D-185 (unbounded `_delegation_data`), F-SQD-07, F-SQD-06, R-27; P25 (the limit is visible)
 - **Files:** `koda/agents/postgres_message_bus.py` (~477), `koda/services/tool_dispatcher.py` (~3396), the inbox dispatcher
 - **Do:** carry the full delegation chain and depth in request metadata, and enforce both in the inbox dispatcher before enqueueing. Apply a hop limit to `agent_send` in squad threads. Store a delegation result only when a local waiter exists, or in a TTL map. When a limit rejects a delegation in a squad thread, post one `system_event` whose metadata names the limit (cycle, depth or hop count), so the room can say why the work stopped (P25; M6-E2-T7 renders it).
 - **Done when:** an A→B→C→A cycle is rejected, depth is capped, and A↔B ping-pong stops at the limit. Each rejection in a squad thread leaves exactly one system event that names its limit.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 8": delegation requests and `agent_send` carry their chain; an A->B->C->A cycle, the depth cap and A<->B ping-pong are each refused at the sender and at the inbox dispatcher, and each refusal in a squad thread posts one `delegation_limit_reached` event naming its limit; a delegation result is kept only for a local waiter (G-PG `tests/test_squads/test_delegation_limits.py`)
 
 #### M3-E6-T5 · Budget pause enforced; expired claims redispatched
 Owner AIM · Risk med · Gate none · **done** · Deps —
@@ -1891,12 +1892,12 @@ Owner FE · Risk med · Gate none (Q-15 default, ADR-020) · **ready** · Deps �
 - **Tests:** web route and component tests; G; changelog entry (503) · **Evidence:** —
 
 #### M3-E8-T4 · Runtime API rejects bad parameters and hides local paths
-Owner BE (SEC) · Risk low · Gate none · **ready** · Deps —
+Owner BE (SEC) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** F-MON-15 (500 on non-numeric parameters; local paths in the browser payload)
 - **Files:** `koda/services/runtime/api.py` (`_parse_positive_int` and its callers, ~229-231)
 - **Do:** every numeric query parameter that `_parse_positive_int` reads returns 400 on a bad value. The browser payload returns paths relative to the task workspace, never absolute host paths.
 - **Done when:** a route test sends a non-numeric value to every parameter that uses the parser and gets 400, and the browser payload contains no absolute path.
-- **Tests:** route tests; G · **Evidence:** —
+- **Tests:** route tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 8": every numeric query parameter of the runtime parser answers 400 (route test over HTTP and WebSocket); the browser payload of GET browser, POST attach/browser, the browser WebSocket snapshot and the sessions' browser rows is an explicit projection of named fields with task-relative paths (`tests/test_services/runtime/test_api_browser_payload.py`); runtime events and other routes are D-357 and D-358
 
 #### M3-E9 — Journey acceptance
 
@@ -2803,12 +2804,12 @@ Owner UX (FE, SEC) · Risk med · Gate none · **pending** · Deps M3-E3-T2
 - **Tests:** web tests; G-PG · **Evidence:** —
 
 #### M6-E2-T6 · Child runs never exceed parent capabilities
-Owner AIM (SEC) · Risk med · Gate none · **ready** · Deps —
+Owner AIM (SEC) · Risk med · Gate none · **done** · Deps —
 - **Addresses:** P7, F-ORC-14
 - **Files:** `koda/services/child_runs.py`, the policy envelope
 - **Do:** verify and enforce that a child's tools, grants and memory and messaging rights are a subset of the parent's.
 - **Done when:** a child asking for a tool its parent lacks is denied, and the test proves it.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 8": a child run gets the parent's capability envelope at spawn, a tool outside it is denied before the policy gate (`child_run_capability_denied`), a child without an envelope gets no tools, the child cannot act as another agent, and task-kind rules bind it as they bind the parent (`tests/test_services/test_agent_loop.py::TestChildRunCapabilities`, `test_child_runs.py`)
 
 #### M6-E2-T7 · Squad activity, metrics and task actions in the rooms UI
 Owner FE (AIM) · Risk med · Gate none · **ready** · Deps —

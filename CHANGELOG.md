@@ -319,6 +319,15 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   passed to `__import__`, `builtins.__import__`, `importlib.__import__` or
   `importlib.import_module`. Importing `posix`, `nt`, `_posixsubprocess` or `_winapi` is
   denied as well. A package that uses `os` only for `os.path` still installs. (D-323)
+- Squad agents can no longer delegate in a cycle, past `INTER_AGENT_MAX_DELEGATION_DEPTH`,
+  or answer each other with `agent_send` without end: each delegation and message carries
+  its chain of agents on every dispatch path, the receiving inbox refuses it past a limit,
+  and the room shows one `delegation_limit_reached` event that names the limit. (M3-E6-T4,
+  D-095, D-096, D-352)
+- An agent's squad task tools may set only `notes` and `progress` in a task's metadata; the
+  claim bookkeeping and other server-owned keys are refused. (D-339)
+- A child run (Delegate Task) can use only the tools its parent run has, and cannot act as
+  another agent. (M6-E2-T6)
 
 
 ### Added
@@ -640,6 +649,21 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   redundant logo alt text. (D-282)
 - Web: dimmed session surfaces (a pending message, a submitted form, a system event row, a
   submitting room composer) keep a full-strength focus ring. (D-281)
+- Squads: a delegation sent outside a squad thread fails at once with a reason instead of
+  waiting for its timeout; a delegation result is kept in memory only while its delegator
+  waits, and the Postgres bus logs a result it could not store as
+  `delegation_result_persist_failed`. A room paused between the router's sweep and a
+  redispatch no longer counts a claim expiry. (D-353, D-185, D-354, D-338)
+- Web: font-size classes and size, weight, colour, cursor and opacity utilities on links,
+  buttons and inputs now apply; the global reset rules sit in the base layer and every
+  arbitrary `text-[var(--x)]` names its type. (D-330, D-331, D-349)
+- Web: the composer agent picker, the room role picker, the empty command palette and the
+  routine editor popovers expose valid names and structure to assistive technology, the open
+  language switcher leaves the rest of the page inert, and the routine editor adds no second
+  banner landmark. (D-332, D-333, D-319, D-348, D-350)
+- Web: the agent editor step rail shows translated step names; Escape in the agent catalog's
+  popovers and the model selector closes only that popover; Tailwind no longer emits rules
+  for classes that appear only in tests. (D-334, D-320, D-351)
 
 
 ## [1.0.18] - 2026-05-20

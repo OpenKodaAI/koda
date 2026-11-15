@@ -49,6 +49,8 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 - Orphaned processes (2026-11-14 18:55): five session guards from killed pytest runs and a reviewer's `node server.mjs` were still running, some for 9 h with deleted binaries held open (D-254). After each wave the orchestrator checks for `koda-security-service` and `node server.mjs` processes whose parent is init and whose sockets and ports nobody uses, stops them, and removes merged worktrees and finished review scratch dirs. This freed 7 GB on 2026-11-14 (6.9 → 14 GB free).
 - Outbound web access is restricted: reference-product research relies on search results; anything not verifiable is marked as such.
 - Shared Rust build directory (2026-11-15 03:27): cargo records path-crate sources with relative paths and judges them fresh by file times alone, so with one `CARGO_TARGET_DIR` a checkout whose files are older than another checkout's latest build silently reuses that build. Batch 4's first gate run errored on all 8786 tests because it reused the M5-E3-T8 lane's `koda-security-core` (no `redact_value`). Rules: the shared directory (`../koda-wt/.shared-target-w6`) serves only lanes whose `rust/` matches main; a lane that changes `rust/` passes `target: ../koda-wt/.target-<id>` to the lane script; integration gates use `../koda-wt/.target-int` and touch the checkout's Rust sources first (`int-gates.sh`). After any `rust/` merge, rebuild the shared guard once from a main-based checkout with its Rust sources touched.
+- Stub-backed browser specs (`pnpm --filter koda-web test:e2e:stub`) need `KODA_E2E_CHROMIUM_PATH=/opt/pw-browsers/chromium` here (the pinned Playwright wants another headless shell), and non-default `KODA_STUB_WEB_PORT`/`KODA_STUB_CONTROL_PLANE_PORT` when a lane may run the same spec.
+- Pytest never builds the Rust memory engine, so a lane that changes only `rust/koda-memory-engine` can share the lane build directory; the directory rule is about the crates pytest builds (the security guard and the bot gateway).
 - Container restarts stop every background task (workflows, monitors, gate runs) and Postgres. Recovery: `service postgresql start`; resume each workflow with its original `args` and `resumeFromRunId` (completed agents replay from cache; the interrupted agent reruns, so save and restore any half-finished edit in its worktree first); re-arm the monitors.
 
 ## Current phase
@@ -88,12 +90,12 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-15 08:05 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 09:55 UTC. The progress tracker mirrors this list for the operator.)
 
-- Integration batch 7 merged: FIX-D276, SEC-D316 + SEC-D321, SEC-D311 + SEC-D323, M3-E6-T5 (two rounds), M8-E5-T3.
-- Approved, waiting for integration batch 8: M2-E1-T1 (approval tables, D-059, D-060), M8-D330 (D-330 to D-334), M3-E6-T4 (bounded delegation, D-095, D-096, D-185).
-- Lean lanes running: SEC-D326 (scanner static routes, D-326 to D-329), M1-E5-T2 + M3-E8-T4 (broadcast scope, squad identity, recall users, runtime API parameters), M2-E1-T2 (+ D-343 to D-345, D-347), M8-D349 (D-319, D-320, D-348 to D-351), SQ-D352 (D-338, D-339, D-352 to D-354).
-- Awaiting the operator: Q-33 (MCP isolation fallback, D-324), ADR-002 OQ-1..OQ-12 and plan Q-25..Q-31; the web Docker image build; shellcheck for `scripts/install.sh`; actionlint and a first GitHub Actions run of `migrations-gate.yml`.
+- Integration batch 8 merged: M2-E1-T1 + M2-E1-T2, M6-E2-T6, M3-E6-T4 + SQ-D352, M1-E5-T2 + M3-E8-T4, M8-D330 + M8-D349.
+- Approved, waiting for integration batch 9: M2-D366 (D-163, D-366, D-367, D-370), SQ-D336 (D-336, D-337, D-340 to D-342, D-361, D-363), M6-D371 (D-371 to D-374), RT-D357 (D-355, D-357 to D-359).
+- Lean lanes running: SEC-D326 closure round (scanner, D-326 to D-329), M8-E3 (M8-E3-T1 to T3, D-375 to D-378), M6-D385 (D-385 to D-389), RT-D390 (D-390, D-392 to D-396, live-view design note).
+- Awaiting the operator: Q-33 (MCP isolation fallback, D-324); M3-E3-T1 (needs-approval gate, which blocks the cross-process dashboard approvals of M3-E3-T2); ADR-002 OQ-1..OQ-12 and plan Q-25..Q-31; the web Docker image build; shellcheck for `scripts/install.sh`; actionlint and a first GitHub Actions run of `migrations-gate.yml`.
 
 ## Pending findings for the plan (verified by the orchestrator)
 

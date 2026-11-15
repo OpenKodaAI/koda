@@ -780,3 +780,52 @@ Gates at 1f3830c (`int/b7`), then the test fix 22b7653:
 - `pytest -m postgres`: 449 passed, 2 skipped.
 - Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 197 files and 1236 tests passed; `pnpm build:web` ok.
 - Rust: not run, because the batch changes no file under `rust/` or `proto/` (`git diff 8ea9010..HEAD -- rust proto` is empty).
+
+## Integration batch 8 (2026-11-15, `int/b8`, rule 10 lean lanes)
+
+Lanes (each lane built on the approved branch it extends, merged at its tip):
+- M2-E1-T1, then M2-E1-T2 (approvals):
+  - Migration `050_approval_tables` creates both tables with BIGINT ids, `agent_id` and DOUBLE PRECISION times, and the runtime DDL is gone.
+  - Grant writes are per grant and scoped by agent; a revoked grant stays revoked; a use is recorded before the action runs.
+  - Postgres is the only store; approval JSON is imported once and renamed.
+- M6-E2-T6 (child runs): a child runs inside its parent's capability envelope and cannot act as another agent.
+- M3-E6-T4, then SQ-D352 (squads):
+  - Delegation and `agent_send` carry their chain on every dispatch path, so cycles, depth and hops are refused with one room event.
+  - Agents may set only `notes` and `progress` in task metadata.
+  - A delegation outside a thread fails at once.
+- M1-E5-T2 with M3-E8-T4 (two rounds; Rust memory engine):
+  - Broadcast reaches only the thread's participants.
+  - Squad message identity comes from the thread.
+  - Recall refuses `user_id <= 0`.
+  - Numeric parameters answer 400, and the browser payload is an explicit projection.
+- M8-E5-T3 (batch 7), then M8-D330 and M8-D349 (design system):
+  - Font-size classes and control utilities apply, and element defaults sit in the base layer.
+  - Pickers, the palette and the routine popovers are valid and named.
+  - The language switcher leaves the page inert, and Tailwind skips test files.
+
+At integration:
+- Conflicts resolved keeping both sides:
+  - `CHANGELOG.md`;
+  - `apps/web/src/components/routines/routine-editor.test.tsx`: batch 7's D-277 Escape test plus the D-333 and D-348 tests. The file passes, 35 tests.
+- Browser check: `pnpm --filter koda-web test:e2e:stub` on the production build passed 9 of 9. That includes Escape in the timezone popover and in the agent menu keeping the editor and its edits (D-277 with D-320), and the D-330 and D-331 cascade specs. It needs `KODA_E2E_CHROMIUM_PATH=/opt/pw-browsers/chromium`.
+- Recorded:
+  - D-343 to D-380, with the fixed ones marked;
+  - R-17 resolved and R-27 bounded;
+  - M2-E1-T1, M2-E1-T2, M6-E2-T6, M3-E6-T4, M1-E5-T2 and M3-E8-T4 done;
+  - the confirmed migration-lock gap under M2-E2-T2;
+  - CHANGELOG entries for every lane.
+
+Gates at eaece17 (`int/b8`):
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: all files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 351 source files.
+- `pytest --cov=koda`: 10628 passed, 0 failed, 34 skipped, 175 xfailed; 71 % coverage.
+- `pytest -m postgres`: 484 passed, 2 skipped.
+- Web:
+  - `pnpm lint:web`: 0 errors and 40 warnings.
+  - `pnpm test:web`: 200 files and 1256 tests passed.
+  - `pnpm build:web`: ok.
+- Rust (on `../koda-wt/.target-int`):
+  - `cargo fmt --all --check`: ok.
+  - `cargo clippy --workspace --all-targets -- -D warnings`: clean.
+  - `cargo test --workspace`: 22 suites, 101 passed, 0 failed, 3 ignored.
