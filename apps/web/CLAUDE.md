@@ -20,6 +20,14 @@ If `obsidian read` is unavailable in this agent session, use:
 ```
 
 Persist durable preferences, project facts, and handoffs in `60_Memory/`.
+Record task handoffs in the daily note or a session note. Do not store secrets
+or raw environment values.
+
+Before non-trivial work under `apps/web/`, also:
+
+1. Read the root operational guide, [`../../CLAUDE.md`](../../CLAUDE.md), from the main repository root.
+2. Search Obsidian for task-specific context before asking the user to repeat it.
+3. Inspect the relevant component, route, hook, API, and tests before editing.
 
 ## Identity
 
@@ -209,11 +217,13 @@ Subscribers to polled queries must never cause visible re-renders or flicker. In
 
 ## Required validation (web)
 
-Every change under `apps/web/` must pass:
+Every change under `apps/web/` must pass, run from the repository root:
 
 - `pnpm lint:web`
 - `pnpm test:web`
 - `pnpm build:web`
+
+Run narrower tests during implementation when possible.
 
 ## Auth screens (`/setup`, `/login`, `/forgot-password`, `/settings/account`)
 

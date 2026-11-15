@@ -38,7 +38,7 @@ Public product and contributor documentation lives in [`docs/`](docs/README.md).
 - [`koda/__main__.py`](koda/__main__.py) is the runtime entrypoint and registers Telegram handlers.
 - [`koda/config.py`](koda/config.py) is the central source for environment-driven behavior, prompt composition, and namespaced paths.
 - [`koda/services/queue_manager.py`](koda/services/queue_manager.py) is the orchestration spine from queued work through provider execution to response delivery.
-- Runtime prompt templates exposed to end users via `/skill` live in `koda/skills`.
+- The `/skill` command serves the agent's control-plane custom skills and its enabled skill packages; `koda/skills` holds only the code that registers, selects and loads them.
 - Per-agent runtime prompt behavior is derived from control-plane documents and the compiled runtime prompt contract, not repository prompt files.
 - Setup / login / recovery contract is documented in [`docs/security/authentication.md`](docs/security/authentication.md). Changes to [`koda/control_plane/operator_auth.py`](koda/control_plane/operator_auth.py), [`koda/control_plane/password_policy.py`](koda/control_plane/password_policy.py), [`koda/control_plane/bootstrap_file.py`](koda/control_plane/bootstrap_file.py), or the web auth routes must update that document and the matching tests in the same change.
 
