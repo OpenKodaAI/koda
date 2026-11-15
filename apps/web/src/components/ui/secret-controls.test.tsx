@@ -22,4 +22,21 @@ describe("secret controls", () => {
     );
     expect(input.type).toBe("password");
   });
+
+  it("looks and behaves disabled when disabled, including the reveal toggle", async () => {
+    const user = userEvent.setup();
+    render(
+      <SecretInput value="draft-secret" onChange={() => undefined} placeholder="Cole o segredo" disabled />,
+    );
+
+    const input = screen.getByPlaceholderText("Cole o segredo") as HTMLInputElement;
+    expect(input).toBeDisabled();
+    expect(input.className).toContain("disabled:opacity-60");
+    expect(input.className).toContain("disabled:cursor-not-allowed");
+
+    const reveal = screen.getByRole("button", { name: /visualizar valor|view value/i });
+    expect(reveal).toBeDisabled();
+    await user.click(reveal);
+    expect(input.type).toBe("password");
+  });
 });

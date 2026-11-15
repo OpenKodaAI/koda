@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { useAgentEditor } from "@/hooks/use-agent-editor";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import {
@@ -131,6 +132,11 @@ function ChannelCard({
   const vs = connected ? "connected" as const : "disconnected" as const;
   const channelLabel = t(channel.labelKey);
   const channelTagline = t(channel.taglineKey);
+  const statusLabel = !channel.available
+    ? t("controlPlane.channelCatalog.unavailable.badge")
+    : connected
+      ? t("generated.controlPlane.conectado_e04915ac")
+      : t("generated.controlPlane.desconectado_c3597850");
 
   return (
     <button
@@ -143,7 +149,7 @@ function ChannelCard({
         "border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)]",
         "hover:bg-[var(--surface-hover)]",
       )}
-      aria-label={`${channelLabel} — ${connected ? t("generated.controlPlane.conectado_e04915ac") : t("generated.controlPlane.desconectado_c3597850")}`}
+      aria-label={`${channelLabel} — ${statusLabel}`}
     >
       <div
         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg transition-colors"
@@ -165,7 +171,13 @@ function ChannelCard({
         </div>
       </div>
       <div className="flex shrink-0 items-center">
-        <IntegrationCardStatusIndicator status={vs} />
+        {channel.available ? (
+          <IntegrationCardStatusIndicator status={vs} />
+        ) : (
+          <Badge variant="outline" size="sm">
+            {statusLabel}
+          </Badge>
+        )}
       </div>
     </button>
   );
@@ -187,7 +199,8 @@ export function ChannelConnectionArea() {
     const result: Record<string, boolean> = {};
     for (const channel of CHANNEL_CATALOG) {
       const requiredFields = channel.fields.filter((f) => f.required);
-      result[channel.key] = requiredFields.length > 0 && requiredFields.every(
+      // A channel Koda never starts cannot be connected, whatever is stored.
+      result[channel.key] = channel.available && requiredFields.length > 0 && requiredFields.every(
         (f) => secretKeys.has(f.key.toUpperCase()),
       );
     }
@@ -201,7 +214,9 @@ export function ChannelConnectionArea() {
 
   // Effective connected state per channel
   const getConnected = useCallback(
-    (channelKey: string) => localOverrideMap[channelKey] ?? serverConnectedMap[channelKey] ?? false,
+    (channelKey: string) =>
+      Boolean(CHANNEL_CATALOG.find((channel) => channel.key === channelKey)?.available) &&
+      (localOverrideMap[channelKey] ?? serverConnectedMap[channelKey] ?? false),
     [localOverrideMap, serverConnectedMap],
   );
 

@@ -13,40 +13,53 @@ from koda.logging_config import get_logger
 log = get_logger(__name__)
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_SCOPE_RE = re.compile(r"^(task|user):([0-9]+)$")
+
+
+def snapshot_scope(*, task_id: int | None, user_id: int) -> str:
+    """Return the explicit snapshot scope: ``task:<id>`` inside a task, else ``user:<id>``.
+
+    Task and user ids share one number space, so a bare id would let a task
+    read the snapshots of a user with the same id (F-SKL-14).
+    """
+    return f"task:{task_id}" if task_id else f"user:{user_id}"
 
 
 class SnapshotStore:
     def __init__(self) -> None:
         self._base_dir: str = ""
 
-    def _get_dir(self, scope_id: int) -> str:
+    def _get_dir(self, scope: str) -> str:
         from koda.config import IMAGE_TEMP_DIR
 
+        match = _SCOPE_RE.match(scope)
+        if match is None:
+            raise ValueError(f"invalid snapshot scope {scope!r}; expected 'task:<id>' or 'user:<id>'")
         base = self._base_dir or str(IMAGE_TEMP_DIR)
-        d = os.path.join(base, "snapshots", str(scope_id))
+        d = os.path.join(base, "snapshots", f"{match.group(1)}-{match.group(2)}")
         os.makedirs(d, mode=0o700, exist_ok=True)
         return d
 
-    async def save(self, scope_id: int, name: str, snapshot_data: dict[str, Any]) -> str | None:
+    async def save(self, scope: str, name: str, snapshot_data: dict[str, Any]) -> str | None:
         """Save snapshot to disk. Returns error or None."""
         if not _NAME_RE.match(name):
             return "Invalid name. Use alphanumeric, hyphens, underscores (1-64 chars)."
-        d = self._get_dir(scope_id)
+        d = self._get_dir(scope)
         path = os.path.join(d, f"{name}.json")
         try:
             with open(path, "w") as f:
                 json.dump(snapshot_data, f, default=str, indent=2)
             os.chmod(path, 0o600)
-            log.info("snapshot_saved", name=name, scope_id=scope_id)
+            log.info("snapshot_saved", name=name, scope=scope)
             return None
         except Exception as e:
             return f"Error saving snapshot: {e}"
 
-    def load(self, scope_id: int, name: str) -> dict[str, Any] | str:
+    def load(self, scope: str, name: str) -> dict[str, Any] | str:
         """Load snapshot from disk. Returns data dict or error string."""
         if not _NAME_RE.match(name):
             return "Invalid snapshot name."
-        d = self._get_dir(scope_id)
+        d = self._get_dir(scope)
         path = os.path.join(d, f"{name}.json")
         if not os.path.isfile(path):
             return f"Snapshot '{name}' not found."
@@ -57,9 +70,9 @@ class SnapshotStore:
         except Exception as e:
             return f"Error loading snapshot: {e}"
 
-    def list_snapshots(self, scope_id: int) -> list[dict[str, Any]]:
+    def list_snapshots(self, scope: str) -> list[dict[str, Any]]:
         """List saved snapshots."""
-        d = self._get_dir(scope_id)
+        d = self._get_dir(scope)
         results = []
         for fname in sorted(os.listdir(d)):
             if not fname.endswith(".json"):
@@ -77,23 +90,23 @@ class SnapshotStore:
             )
         return results
 
-    def delete(self, scope_id: int, name: str) -> str | None:
+    def delete(self, scope: str, name: str) -> str | None:
         """Delete a snapshot. Returns error or None."""
         if not _NAME_RE.match(name):
             return "Invalid name."
-        d = self._get_dir(scope_id)
+        d = self._get_dir(scope)
         path = os.path.join(d, f"{name}.json")
         if not os.path.isfile(path):
             return f"Snapshot '{name}' not found."
         os.remove(path)
         return None
 
-    def diff(self, scope_id: int, name_a: str, name_b: str) -> dict[str, Any] | str:
+    def diff(self, scope: str, name_a: str, name_b: str) -> dict[str, Any] | str:
         """Compare two snapshots. Returns diff dict or error."""
-        a = self.load(scope_id, name_a)
+        a = self.load(scope, name_a)
         if isinstance(a, str):
             return a
-        b = self.load(scope_id, name_b)
+        b = self.load(scope, name_b)
         if isinstance(b, str):
             return b
 

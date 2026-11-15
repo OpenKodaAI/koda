@@ -17635,12 +17635,135 @@ const channelCatalogLabels = {
   },
 };
 
+// D-017 (M6-E1-T2): only Telegram is started by the runtime; the other
+// channel cards read "Not available" and their credential forms are disabled.
+const channelCatalogUnavailableLabels: Record<
+  string,
+  { badge: string; title: string; description: string }
+> = {
+  "en-US": {
+    badge: "Not available",
+    title: "This channel is not available yet",
+    description:
+      "Koda does not run this channel yet, so it would never receive messages. Telegram is the only channel that works today.",
+  },
+  "pt-BR": {
+    badge: "Indisponível",
+    title: "Este canal ainda não está disponível",
+    description:
+      "O Koda ainda não executa este canal, então ele nunca receberia mensagens. Hoje, o Telegram é o único canal que funciona.",
+  },
+  "es-ES": {
+    badge: "No disponible",
+    title: "Este canal aún no está disponible",
+    description:
+      "Koda todavía no ejecuta este canal, así que nunca recibiría mensajes. Hoy, Telegram es el único canal que funciona.",
+  },
+  "fr-FR": {
+    badge: "Indisponible",
+    title: "Ce canal n'est pas encore disponible",
+    description:
+      "Koda n'exécute pas encore ce canal : il ne recevrait jamais de messages. Aujourd'hui, Telegram est le seul canal qui fonctionne.",
+  },
+  "de-DE": {
+    badge: "Nicht verfügbar",
+    title: "Dieser Kanal ist noch nicht verfügbar",
+    description:
+      "Koda betreibt diesen Kanal noch nicht, daher würde er nie Nachrichten empfangen. Telegram ist derzeit der einzige Kanal, der funktioniert.",
+  },
+};
+
 for (const [language, labels] of Object.entries(channelCatalogLabels)) {
   const translation = mutableResources[language]?.translation;
   if (!translation) continue;
   translation.controlPlane = {
     ...(translation.controlPlane ?? {}),
-    channelCatalog: labels,
+    channelCatalog: { ...labels, unavailable: channelCatalogUnavailableLabels[language] },
+  };
+}
+
+// F-ADM-06 (M6-E3-T5): the video and music generation functions only raise,
+// so their default-model slots are locked with this label.
+const modelFunctionUnavailableLabels: Record<string, { badge: string; description: string }> = {
+  "en-US": {
+    badge: "Not available yet",
+    description: "Not available yet: Koda cannot generate this yet. A saved default is kept but never used.",
+  },
+  "pt-BR": {
+    badge: "Ainda não disponível",
+    description:
+      "Ainda não disponível: o Koda ainda não gera este tipo de conteúdo. Um padrão salvo é mantido, mas nunca é usado.",
+  },
+  "es-ES": {
+    badge: "Aún no disponible",
+    description:
+      "Aún no disponible: Koda todavía no genera este tipo de contenido. Un valor predeterminado guardado se conserva, pero nunca se usa.",
+  },
+  "fr-FR": {
+    badge: "Pas encore disponible",
+    description:
+      "Pas encore disponible : Koda ne génère pas encore ce type de contenu. Une valeur par défaut enregistrée est conservée mais jamais utilisée.",
+  },
+  "de-DE": {
+    badge: "Noch nicht verfügbar",
+    description:
+      "Noch nicht verfügbar: Koda kann diese Inhalte noch nicht erzeugen. Ein gespeicherter Standard bleibt erhalten, wird aber nie verwendet.",
+  },
+};
+
+for (const [language, labels] of Object.entries(modelFunctionUnavailableLabels)) {
+  const translation = mutableResources[language]?.translation;
+  if (!translation) continue;
+  translation.controlPlane = {
+    ...(translation.controlPlane ?? {}),
+    modelFunctions: { unavailable: labels },
+  };
+}
+
+// D-116 (M6-E1-T9): applying a proposal only marks its ledger-only effects as
+// applied; no executor changes prompts, skills, policy or memory yet.
+const improvementProposalLabels: Record<
+  string,
+  { accept: string; reviewDescription: string; status: { applied: string } }
+> = {
+  "en-US": {
+    accept: "Accept (recorded)",
+    reviewDescription:
+      "Validate, accept, or roll back approved proposals. Accepting records the decision; it does not change the agent.",
+    status: { applied: "accepted (recorded)" },
+  },
+  "pt-BR": {
+    accept: "Aceitar (registrado)",
+    reviewDescription:
+      "Valide, aceite ou reverta propostas aprovadas. Aceitar registra a decisão; não altera o agente.",
+    status: { applied: "aceita (registrada)" },
+  },
+  "es-ES": {
+    accept: "Aceptar (registrado)",
+    reviewDescription:
+      "Valida, acepta o revierte propuestas aprobadas. Aceptar registra la decisión; no cambia el agente.",
+    status: { applied: "aceptada (registrada)" },
+  },
+  "fr-FR": {
+    accept: "Accepter (enregistré)",
+    reviewDescription:
+      "Validez, acceptez ou annulez les propositions approuvées. Accepter enregistre la décision ; cela ne modifie pas l'agent.",
+    status: { applied: "acceptée (enregistrée)" },
+  },
+  "de-DE": {
+    accept: "Annehmen (protokolliert)",
+    reviewDescription:
+      "Genehmigte Vorschläge validieren, annehmen oder zurücksetzen. Annehmen protokolliert die Entscheidung; der Agent wird nicht geändert.",
+    status: { applied: "angenommen (protokolliert)" },
+  },
+};
+
+for (const [language, labels] of Object.entries(improvementProposalLabels)) {
+  const translation = mutableResources[language]?.translation;
+  if (!translation) continue;
+  translation.evaluations = {
+    ...(translation.evaluations ?? {}),
+    proposals: labels,
   };
 }
 

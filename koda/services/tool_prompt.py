@@ -599,10 +599,12 @@ Reusable code snippets saved by the user. Before generating code from scratch, c
     if SNAPSHOT_ENABLED:
         sections.append("""
 ### Environment Snapshots
-Save and restore complete agent environment state for debugging and reproducibility.
+Save named snapshots of the agent environment and load or compare them for debugging.
+Snapshots are kept per task (or per user outside a task).
 
 - `snapshot_save` — Save a named snapshot. Params: `{"name": "before-deploy"}`
-- `snapshot_restore` — Load a saved snapshot (inspection only). Params: `{"name": "before-deploy"}`
+- `snapshot_restore` — Load a saved snapshot for inspection; it does not restore any state.
+  Params: `{"name": "before-deploy"}`
 - `snapshot_list` — List saved snapshots. Params: `{}`
 - `snapshot_diff` — Compare two snapshots. Params: `{"from": "before-deploy", "to": "after-deploy"}`
 - `snapshot_delete` — Delete a snapshot. Params: `{"name": "old-snapshot"}`
