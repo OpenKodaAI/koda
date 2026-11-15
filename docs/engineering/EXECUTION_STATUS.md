@@ -14,9 +14,11 @@ iteration.
 6. Never mark a task `done` without recorded evidence (command + result).
 7. **Update the progress tracker at the end of every iteration** (the operator follows it): https://claude.ai/artifact/28r7JGEPHunFQ9VwFygpph (a dashboard). Its data are the JSON files in `docs/engineering/tracker/` (milestones, phases, waves, blockers, log; `index.html` is the page). Edit the files to match the records, upload each changed file to the artifact as an asset, point its `datasets/<id>` document at the new `/_blob/<id>` with fresh `updated` and `edit` stamps, delete the replaced asset, append a `log` row for each event, and commit the files with the records.
 
-## Workflow rules (no rework, no over-engineering) — 2026-11-14
+## Workflow rules (no rework, no over-engineering) — 2026-11-14, revised 2026-11-15
 
-Learned from waves 2A–5 and the ADR-002 rounds. Every workflow script follows them.
+Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows them. Rule 10 replaces rules 1–3 for task lanes; rules 1–3 still apply to design documents (ADRs).
+
+**Why rule 10 (measured 2026-11-15 01:05 from the workflow journals):** across waves 5–7, agents spent 906 minutes implementing and 859 reviewing. Wave 5 started 18:59 and was still in round 3 at 01:05. Each task went through 2–3 implement-review rounds plus a leftovers round. Most findings after round 1 were minors or problems that predate the diff. Implementers and every reviewer each ran the full test suites. The Workflow tool runs at most 2 agents at once per workflow on this 4-CPU machine, so in multi-lane workflows one lane's reviews waited for another lane's implementer.
 
 1. **Bounded review loops that end on a review.** Each task has at most 3 rounds of implement, then two-lens review. Never stop on a fix that no reviewer has seen.
 2. **Only substantive findings reopen a round.** A critical, major or minor finding reopens a round; a nit alone does not. Nits are fixed when a round is running anyway, or recorded. After the last round, remaining minors become tracked items: a TECHNICAL_DEBT entry, or an acceptance criterion with a named test on the owning plan task.
@@ -27,6 +29,7 @@ Learned from waves 2A–5 and the ADR-002 rounds. Every workflow script follows 
 7. **Never stop and resume a running workflow to change its prompts.** Resume reuses only the unchanged prefix of agent calls, so completed agents after the first changed call run again. Prompt changes apply to the next workflow.
 8. **Lane balance.** Capacity allowing, from WAVE-6 on each wave includes, besides the security lane, at least one agent-journey task (M3: squads, memory, governed tools) and one design or UX task (M8: design system, accessibility).
 9. **Gates per task, full gates per integration.** A task runs the gates its change touches (web-only tasks: web gates plus browser evidence, no pytest); the integration branch runs every CLAUDE.md gate once before the merge.
+10. **Lean lane (the default from 2026-11-15).** One workflow per lane (the per-workflow cap is 2 concurrent agents). Each lane runs: implement → one review → one fix pass. The fix pass fixes every finding, nits included, without another review. Only a critical or major finding adds one confirm review, scoped to those findings. Problems that predate the diff and fall outside the Done-when go in the review's out_of_scope list, which the orchestrator triages into TECHNICAL_DEBT or the plan; they do not reopen the lane. Implementers and reviewers run only the tests of the modules they touch (plus lint and types); the full CLAUDE.md gates run once, at integration. Each approved lane merges on its own, without waiting for the rest of its wave. Script: `lean-lane` (`workflows/scripts/lean-lane-wf_367d777a-dce.js` in the session directory), launched once per lane with `args`.
 
 ## Environment facts
 
@@ -81,15 +84,14 @@ Learned from waves 2A–5 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-15 01:20 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 01:10 UTC. The progress tracker mirrors this list for the operator.)
 
-- WAVE-5 (`wf_94cba2c7-f62`): round 3 for M1-E7-T3 with T11, M1-E7-T6 and D-254; M1-E7-T2 approved. The integration follows: merge the four branches, run the full gates, merge.
-- WAVE-6 web (`wf_71bac8b0-c06`, done): M8-E5-T2 + M8-E2-T1 approved. M8-E1-T1..T3 ended with one major (keyboard focus hidden behind the Home command bar) and minors; leftovers round `wf_8ffea544-16c` fixes them before integration.
-- WAVE-6b (`wf_36851995-7f3`): M3-E6-T1 squads deadlock root cause with the M3-E6-T2/T3 leftovers; D-259 scheduled-job dispatch with the memory leftovers (round 2: manual and validation runs must take the job agent's policy snapshot).
-- WAVE-7 auth (`wf_d9f147a2-300`): M1-E1-T5 + T13 round 2. WAVE-7 core (`wf_23e36b0c-5e3`, done) left minors; leftovers round `wf_b20c1233-8b4` covers M2-E2-T4 (schema through a startup search_path instead of a run-time SQL rewriter, pooler note), M2-E5-T1 (retention record without the bridge loop, one report per deployment per day), M4-E1-T6 (PRIMARY branch test, OFF-mode change recorded) and the M1-E1-T14 bootstrap file (seed with '=', undecodable file, atomic write).
-- WAVE-8 (`wf_f5891b55-639`, base f345140): M3-E1-T3/T6/T7/T8 routines; M6-E1-T2/T10, M6-E3-T5/T6, M6-E1-T9 honest labels; M7-E1-T1/T2/T4, M7-E2-T4 health and reliability.
+- WAVE-5 (`wf_94cba2c7-f62`): final reviews of round 3 (M1-E7-T3 with T11, M1-E7-T6, D-254); M1-E7-T2 approved. Merge follows as soon as it ends.
+- WAVE-6 web: M8-E5-T2 + M8-E2-T1 approved and ready to merge. M8-E1-T1..T3 fix pass `wf_8ffea544-16c` (keyboard focus hidden behind the Home command bar, faint rings, language switcher exit, one h1 on /sessions).
+- WAVE-6b (`wf_36851995-7f3`): M3-E6-T1 squads deadlock root cause with the M3-E6-T2/T3 leftovers; D-259 scheduled-job dispatch (manual and validation runs must take the job agent's policy snapshot).
+- WAVE-7 auth (`wf_d9f147a2-300`): M1-E1-T5 + T13 round 2. WAVE-7 fix passes, one lean lane each (rule 10): M2-E2-T4 + M2-E5-T1 (schema through a startup search_path instead of a run-time SQL rewriter; retention record; one report per deployment per day) `wf_babf7dde-90d`, M4-E1-T6 `wf_75e96ba1-3cd`, M1-E1-T14 bootstrap file `wf_302c9dbf-4f2`.
+- WAVE-8, one lean lane each (base f345140): M3-E1-T3/T6/T7/T8 routines `wf_be283964-996`; M6-E1-T2/T9/T10, M6-E3-T5/T6 honest labels `wf_918e8026-8ae`; M7-E1-T1/T2/T4, M7-E2-T4 health and reliability `wf_367d777a-dce`.
 - Awaiting the operator: ADR-002 OQ-1..OQ-12, and plan Q-25..Q-27 (§13 sign-off).
-- Merged since the last record: none (records and tracker only).
 
 ## Pending findings for the plan (verified by the orchestrator)
 

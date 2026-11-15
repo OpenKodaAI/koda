@@ -1,13 +1,18 @@
 {
  "rows": [
   {
+   "id": "L20",
+   "at": "2026-11-15 01:08",
+   "event": "Processo mais enxuto (regra 10): cada lane roda em seu próprio workflow (o limite é de 2 agentes simultâneos por workflow, e as lanes estavam esperando umas pelas outras), uma revisão só, uma passada de correção sem nova rodada de revisão, e a suíte completa de testes só na integração. Medido: nas ondas 5 a 7, 906 min de implementação e 859 min de revisão. 6 lanes relançadas assim (ondas 7 e 8)"
+  },
+  {
    "id": "L19",
-   "at": "2026-11-15 01:20",
+   "at": "2026-11-15 01:03",
    "event": "Onda 8 iniciada: rotinas (M3), rótulos honestos de funções indisponíveis (M6, primeira onda) e saúde/confiabilidade (M7, primeira onda). Onda 6 web: estados de erro e navegação mobile aprovados; acessibilidade em rodada de pendências"
   },
   {
    "id": "L18",
-   "at": "2026-11-15 01:05",
+   "at": "2026-11-15 01:00",
    "event": "Onda 7: lanes de dados (M2) e código morto (M4) terminaram as rodadas de revisão; as pendências menores (schema do Postgres sem reescrita de SQL, registro da retenção, teste do modo OFF, arquivo de bootstrap) estão sendo corrigidas antes da integração, para não virar débito"
   },
   {
