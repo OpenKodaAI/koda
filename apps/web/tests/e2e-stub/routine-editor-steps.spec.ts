@@ -64,7 +64,7 @@ async function openRoutines(page: Page): Promise<string[]> {
 }
 
 async function expectStep(dialog: Locator, label: "Basics" | "Schedule" | "Refine"): Promise<void> {
-  await expect(dialog.locator("header").getByText(label, { exact: true })).toBeVisible();
+  await expect(dialog.locator("#routine-editor-title + p").getByText(label, { exact: true })).toBeVisible();
 }
 
 // Clicking Next on the Schedule step must only move to Refine. A form submission would send
