@@ -5,27 +5,27 @@
    "name": "Base de testes e rede de segurança",
    "total": 25,
    "done": 10,
-   "in_progress": 0,
+   "in_progress": 2,
    "awaiting_evidence": 0,
-   "remaining": 15
+   "remaining": 13
   },
   {
    "milestone": "M1",
    "name": "Segurança",
    "total": 68,
    "done": 19,
-   "in_progress": 7,
+   "in_progress": 10,
    "awaiting_evidence": 3,
-   "remaining": 39
+   "remaining": 36
   },
   {
    "milestone": "M2",
    "name": "Integridade de dados",
    "total": 24,
-   "done": 0,
+   "done": 2,
    "in_progress": 5,
    "awaiting_evidence": 0,
-   "remaining": 19
+   "remaining": 17
   },
   {
    "milestone": "M3",
@@ -50,16 +50,16 @@
    "name": "Consolidação de arquitetura",
    "total": 61,
    "done": 0,
-   "in_progress": 0,
+   "in_progress": 1,
    "awaiting_evidence": 0,
-   "remaining": 61
+   "remaining": 60
   },
   {
    "milestone": "M6",
    "name": "Completar funcionalidades",
    "total": 26,
-   "done": 0,
-   "in_progress": 5,
+   "done": 5,
+   "in_progress": 0,
    "awaiting_evidence": 0,
    "remaining": 21
   },
@@ -67,9 +67,9 @@
    "milestone": "M7",
    "name": "Confiabilidade e operação",
    "total": 20,
-   "done": 0,
-   "in_progress": 4,
-   "awaiting_evidence": 0,
+   "done": 3,
+   "in_progress": 0,
+   "awaiting_evidence": 1,
    "remaining": 16
   },
   {
@@ -86,9 +86,9 @@
    "name": "Performance e manutenibilidade",
    "total": 20,
    "done": 0,
-   "in_progress": 0,
+   "in_progress": 3,
    "awaiting_evidence": 0,
-   "remaining": 20
+   "remaining": 17
   },
   {
    "milestone": "M10",

@@ -86,14 +86,22 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-15 02:10 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 02:45 UTC. The progress tracker mirrors this list for the operator.)
 
-- Merged since the last record, all gates green: WAVE-5 and the WAVE-7 auth lane B1 (`int/w5`, merge 5656abc; pytest 8418 passed, Postgres 275, web 1104 tests, pnpm audits clean). 37 plan tasks are done.
-- Integration batch 2 on `int/b2` (M2-E2-T4 + M2-E5-T1 data, M7-E1-T1/T2/T4 + M7-E2-T4 reliability, M6-E1-T2/T9/T10 + M6-E3-T5/T6 honest labels): the first gate run found the shared venv behind the wave-5 lock (fixed with `uv sync --locked`) and `/ready` missing from OpenAPI and the pinned anonymous routes (fixed in a908497). The full gates run again before the merge.
-- Approved and waiting for batch 3: M1-E4-T2/T5/T12 (tool output framing, unknown tools are writes, plugin paths), M4-E1-T1/T10/T14 (dead core helpers, webhook tools, missing-table writes), M3-E1-T3/T6/T7/T8 (routines; the routine-editor footer fix runs as a follow-up, `wf_12853b9d-e40`).
-- Lean lanes running: M1-E4-T3/T11 `wf_86f447cd-1f9` (fix pass, hash skipped `__pycache__` sources); M2-E3-T1/T2/T4 `wf_4e92c024-9b5`; M4-E1-T2/T3/T8 `wf_1b87f931-6b8`; M1-E1-T5/T13 fix pass `wf_88c09b69-231` (recovery timing, floor rule, web guide); M0-E2-T4/T5 + D-265 test isolation `wf_71da1b06-bb8`; M5-E3-T8 one redactor `wf_472e2c70-deb`.
-- Old-format runs on their last round: WAVE-6 web M8-E1-T1..T3 `wf_8ffea544-16c`; WAVE-6b squads and scheduler `wf_36851995-7f3` (a lean pass with a labelled PT-BR/EN corpus follows for the memory scanner).
-- Awaiting the operator: ADR-002 OQ-1..OQ-12 and plan Q-25..Q-29; the web Docker image build (no Docker daemon here); shellcheck on `scripts/install.sh` (not available in this environment; CI has no shellcheck step yet).
+- Merged since the last record, all gates green: integration batch 2 (merge 6a1b874; pytest 8482, Postgres 299, web 1118): M2-E2-T4 + M2-E5-T1, M7-E1-T1/T2/T4 + M7-E2-T4, M6-E1-T2/T9/T10 + M6-E3-T5/T6. 47 plan tasks are done.
+- Integration batch 3 on `int/b3`, full gates running: M1-E4-T2/T5/T12, M1-E4-T3/T11, M4-E1-T1/T10/T14, M4-E1-T2/T3/T8, M1-E1-T5/T13.
+- Lean lanes running:
+  - M3-E1 routines: Enter-key follow-up `wf_0f024746-863`.
+  - M2-E3-T1/T2/T4 (fix pass) `wf_4e92c024-9b5`.
+  - M0-E2-T4/T5 + D-265 `wf_71da1b06-bb8`.
+  - M5-E3-T8 one redactor (fix and confirm) `wf_472e2c70-deb`.
+  - M3-E6 durable handoff completion `wf_6d48935b-ff1`.
+  - M3-E4-T6 labelled scanner corpus + D-259 docs `wf_bb34e487-139`.
+  - M1-E6-T2/T3/T5 `wf_3e7f0f54-6c6`.
+  - M9-E1-T4 + M9-E2-T1/T2 `wf_0cf21be6-722`.
+  - M2-E2-T1/T5 `wf_9d4cfae9-a5e`.
+- Old-format run on its last round: WAVE-6 web M8-E1-T1..T3 `wf_8ffea544-16c`.
+- Awaiting the operator: ADR-002 OQ-1..OQ-12 and plan Q-25..Q-31; the web Docker image build; shellcheck for `scripts/install.sh`.
 
 ## Pending findings for the plan (verified by the orchestrator)
 

@@ -2,9 +2,9 @@
  "rows": [
   {
    "id": "B1",
-   "item": "Decisões do operador: ADR-002 (OQ-1 a OQ-12) e plano (Q-25 a Q-29)",
+   "item": "Decisões do operador: ADR-002 (OQ-1 a OQ-12) e plano (Q-25 a Q-31)",
    "kind": "approval",
-   "detail": "Cada uma com recomendação e impacto: governança dos agentes, failover que pergunta antes, perguntas estruturadas, configs MCP de projeto, efeitos colaterais do modo OFF do knowledge (padrão aplicado, reversível) e republicação da v1.0.18 no npm (recomendação: publicar a próxima versão)"
+   "detail": "Cada uma com recomendação e impacto: governança dos agentes, failover que pergunta antes, perguntas estruturadas, configs MCP de projeto, efeitos colaterais do modo OFF do knowledge (padrão aplicado, reversível) e republicação da v1.0.18 no npm (recomendação: publicar a próxima versão); remover o campo de memória que nada lê (Q-30) e o escopo por agente dos comandos de jobs (Q-31, padrão aplicado)"
   },
   {
    "id": "B2",
@@ -41,6 +41,12 @@
    "item": "Docker indisponível neste ambiente",
    "kind": "infra",
    "detail": "Build de imagens e smoke tests ficam para o CI (M1-E1-T16, AG-02, imagens da onda 5)"
+  },
+  {
+   "id": "B8",
+   "item": "shellcheck no install.sh (M7-E2-T4)",
+   "kind": "infra",
+   "detail": "O shellcheck não está disponível neste ambiente e o CI não tem esse passo; a tarefa fica em revisão até rodar"
   }
  ],
  "meta": [

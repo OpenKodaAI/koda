@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L24",
+   "at": "2026-11-15 02:45",
+   "event": "Lote 2 mesclado (6a1b874) com gates verdes: 8482 testes Python, 299 Postgres, 1118 web. Entraram retenção de dados e search_path por conexão (ADR-040), /ready e backoff do supervisor, rótulos honestos de canais e modelos. 47 tarefas do plano concluídas. Lote 3 (segurança de ferramentas e pacotes, código morto, autenticação) com gates rodando. Iniciadas lanes de segredos (M1-E6), performance (M9, primeira) e transações (M2-E2); squads e scanner de memória seguem com correção durável"
+  },
+  {
    "id": "L23",
    "at": "2026-11-15 02:10",
    "event": "Lote de integração 2 (dados, confiabilidade e rótulos honestos) mesclado no branch de integração. A primeira rodada de gates achou o ambiente Python compartilhado desatualizado em relação às dependências da onda 5 (corrigido) e a rota /ready fora do OpenAPI (corrigido); os gates rodam de novo. Aprovadas para o lote 3: segurança de ferramentas (M1-E4-T2/T5/T12), código morto (M4-E1-T1/T10/T14) e rotinas (M3-E1). Iniciadas: infraestrutura de testes (M0) e a primeira tarefa de arquitetura (M5, um único redator de segredos)"

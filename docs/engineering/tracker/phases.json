@@ -33,7 +33,7 @@
    "phase": "Fase 4",
    "name": "Segurança, infraestrutura e dados",
    "status": "in_progress",
-   "note": "Segurança (M1): 19 tarefas concluídas, mais 5 em lanes; dados (M2) no lote 2 e na onda 9; confiabilidade (M7) no lote 2"
+   "note": "Segurança (M1): 19 concluídas e 13 em lanes; dados (M2) com retenção e search_path mesclados; confiabilidade (M7) mesclada no lote 2; performance (M9) começou"
   },
   {
    "seq": "5",

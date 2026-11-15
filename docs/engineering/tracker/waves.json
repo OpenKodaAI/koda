@@ -81,14 +81,14 @@
    "wave": "W8",
    "name": "Onda 8",
    "scope": "Rotinas de ponta a ponta (M3-E1-T3, T6, T7, T8), rótulos honestos para o que ainda não funciona (M6-E1-T2, T9, T10, M6-E3-T5, T6), saúde e confiabilidade (M7-E1-T1, T2, T4, M7-E2-T4)",
-   "status": "implementing",
-   "ref": "task/M3-E1-T3, task/M6-E1-T2, task/M7-E1-T1"
+   "status": "merged",
+   "ref": "6a1b874 (lote 2); rotinas no lote 4"
   },
   {
    "wave": "W9",
    "name": "Onda 9",
-   "scope": "Segurança de ferramentas e pacotes (M1-E4-T2, T3, T5, T11, T12), IDs de agente e tabelas por agente (M2-E3-T1, T2, T4), código morto (M4-E1-T1, T2, T3, T8, T10, T14)",
-   "status": "implementing",
+   "scope": "Segurança de ferramentas e pacotes (M1-E4-T2, T3, T5, T11, T12), IDs de agente e tabelas por agente (M2-E3-T1, T2, T4), código morto (M4-E1-T1, T2, T3, T8, T10, T14). Aprovadas e no lote 3: segurança de ferramentas e pacotes, código morto",
+   "status": "in_review",
    "ref": "task/M1-E4-*, task/M2-E3-T1, task/M4-E1-*"
   },
   {
@@ -97,6 +97,13 @@
    "scope": "Infraestrutura de testes (M0-E2-T4, T5 e isolamento do diretório de estado), arquitetura (M5-E3-T8 um único redator)",
    "status": "implementing",
    "ref": "task/M0-E2-T4, task/M5-E3-T8"
+  },
+  {
+   "wave": "W11",
+   "name": "Onda 11",
+   "scope": "Segredos (M1-E6-T2, T3, T5), performance (M9-E1-T4, M9-E2-T1, T2), transações e gate de migrations (M2-E2-T1, T5)",
+   "status": "implementing",
+   "ref": "task/M1-E6-T2, task/M9-E1-T4, task/M2-E2-T1"
   }
  ],
  "meta": [
