@@ -1401,6 +1401,116 @@ class TestAgentLoop:
         assert step["output"] == "Human approval required before execution."
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("edit", ["leaves_the_grant_scope", "still_needs_confirmation", "within_scope_and_policy"])
+    async def test_an_edited_call_uses_the_peeked_grant_only_within_its_scope_and_policy(self, edit):
+        """D-370: a grant peeked for the original call is used for the edited call only if it covers it.
+
+        Under this policy the peeked grant does not lift the original call's confirmation, so the
+        call asks for approval, and the operator edits it. The grant is consumed for the edited call
+        only when the edited call is within the grant's scope and the policy accepts the grant for
+        it; otherwise nothing is consumed or run, and the call asks for approval again.
+        """
+        from koda.services import execution_policy
+        from koda.services.tool_dispatcher import AgentToolResult
+
+        ctx = _make_ctx(knowledge_hits=[{"source_label": "README.md", "freshness": "fresh"}])
+        item = _make_item()
+        context = _make_context()
+        initial = _make_result(
+            result=(
+                "<action_plan>"
+                "<summary>Add the cron job</summary>"
+                "<assumptions>User wants a daily backup</assumptions>"
+                "<evidence>I inspected the project docs first</evidence>"
+                "<sources>README.md</sources>"
+                "<risk>Wrong schedule would create noisy automation</risk>"
+                "<success>The cron job is listed after creation</success>"
+                "</action_plan>"
+                '<agent_cmd tool="job_create">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
+            ),
+            tool_uses=[{"name": "Read", "input": {"file_path": "/tmp/README.md"}}],
+        )
+        edited_params = {"expression": "0 4 * * *", "command": "echo hi"}
+        peeked: dict = {}
+
+        def _peek(**kwargs):
+            envelope = kwargs["envelope"]
+            peeked.update(
+                grant_id="grant-peeked",
+                user_id=111,
+                agent_id=kwargs["agent_id"],
+                session_id=kwargs["session_id"],
+                chat_id=kwargs["chat_id"],
+                # An exact grant covers only the original parameters; a scope grant covers the edit too.
+                kind="approve_once" if edit == "leaves_the_grant_scope" else "approve_scope",
+                remaining_uses=3,
+                max_uses=3,
+                exact_fingerprint=f"{envelope.resource_scope_fingerprint}:{envelope.params_fingerprint}",
+                scope_fingerprint=envelope.resource_scope_fingerprint,
+            )
+            return dict(peeked)
+
+        real_policy = execution_policy.evaluate_execution_policy
+
+        def _policy(tool_id, params, **kwargs):
+            grant = kwargs.get("approval_grant") or {}
+            edited = params.get("expression") == edited_params["expression"]
+            if grant.get("grant_id") == "grant-peeked" and not (edited and edit == "within_scope_and_policy"):
+                kwargs["approval_grant"] = None  # the policy still asks for confirmation with this grant
+            return real_policy(tool_id, params, **kwargs)
+
+        async def _edit(*_args, **kwargs):
+            from koda.utils.approval import _PENDING_AGENT_CMD_OPS
+
+            event = asyncio.Event()
+            event.set()
+            _PENDING_AGENT_CMD_OPS["op-edited"] = {
+                "user_id": 111,
+                "timestamp": time.time(),
+                "event": event,
+                "decision": "edited",
+                "edited_params": dict(edited_params),
+                "agent_id": str(kwargs.get("agent_id") or "default"),
+                "requests": list(kwargs.get("requests") or []),
+                "grants": [],
+            }
+            return "op-edited"
+
+        with (
+            patch(
+                "koda.services.queue_manager._run_with_provider_fallback",
+                new_callable=AsyncMock,
+                return_value=_make_result(result="Done.", cost_usd=0.01),
+            ),
+            patch("koda.services.execution_policy.AGENT_EXECUTION_POLICY", SCHEDULER_EXECUTION_POLICY),
+            patch("koda.services.queue_manager.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.execution_policy.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.execution_policy.evaluate_execution_policy", side_effect=_policy),
+            patch("koda.utils.approval.peek_agent_approval_grant", side_effect=_peek),
+            patch("koda.utils.approval.request_agent_cmd_approval", new_callable=AsyncMock, side_effect=_edit),
+            patch(
+                "koda.utils.approval.consume_agent_approval_grant",
+                new_callable=AsyncMock,
+                side_effect=lambda **_kwargs: dict(peeked),
+            ) as consume,
+            patch("koda.services.tool_dispatcher._handle_job_create", new_callable=AsyncMock) as mock_add,
+            patch.dict("koda.services.tool_dispatcher._TOOL_HANDLERS", {"job_create": mock_add}, clear=True),
+        ):
+            mock_add.return_value = AgentToolResult(tool="job_create", success=True, output="Job created.")
+            result = await _run_agent_loop(ctx, item, 111, 111, context, initial)
+
+        [step] = [step for step in result.tool_execution_trace if step["tool"] == "job_create"]
+        if edit == "within_scope_and_policy":
+            assert consume.await_count == 1
+            assert mock_add.await_count == 1
+            assert mock_add.await_args.args[0] == edited_params
+        else:
+            assert consume.await_count == 0, "a grant that does not cover the edited call was consumed"
+            assert mock_add.await_count == 0
+            assert step["output"] == "Human approval required before execution."
+
+    @pytest.mark.asyncio
     async def test_code_change_requires_post_write_verification_before_finalize(self):
         ctx = _make_ctx(
             task_kind="code_change",

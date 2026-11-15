@@ -5008,7 +5008,36 @@ async def _run_agent_loop(
                                 if _is_write_tool(call.tool, call.params):
                                     skip_following_reads = True
                                 continue
-                            if policy_evaluation.requires_confirmation:
+                            if approval_grant is not None:
+                                # D-370: the grant peeked for the original call did not lift its
+                                # confirmation. It is used for the edited call only within its
+                                # scope and its policy; otherwise nothing is consumed and the
+                                # edited call asks for approval again.
+                                if (
+                                    match_agent_approval_grant(
+                                        [approval_grant],
+                                        envelope=policy_evaluation.envelope,
+                                        approval_scope=requested_scope,
+                                        session_id=str(context.user_data.get("session_id") or "").strip() or None,
+                                        chat_id=chat_id,
+                                    )
+                                    is None
+                                ):
+                                    approval_grant = None
+                                policy_evaluation = evaluate_execution_policy(
+                                    call.tool,
+                                    policy_params,
+                                    task_kind=ctx.task_kind,
+                                    effective_policy=ctx.effective_policy,
+                                    confidence_report=confidence_report.to_dict()
+                                    if confidence_report is not None and _is_write_tool(call.tool, call.params)
+                                    else None,
+                                    approval_grant=approval_grant,
+                                    known_tool=is_known_tool(call.tool),
+                                )
+                                if policy_evaluation.requires_confirmation:
+                                    approval_grant = None
+                            elif policy_evaluation.requires_confirmation:
                                 policy_evaluation = evaluate_execution_policy(
                                     call.tool,
                                     policy_params,
