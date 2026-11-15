@@ -101,7 +101,7 @@ markers = [
     "eval: multi-provider evaluation (tools quality, etc.)",
     "audio_fixtures: requires audio fixtures and ffmpeg",
     "acoustic: real Kokoro+Whisper acoustic round-trip (gated by KODA_TEST_ACOUSTIC=1)",
-    "slow: long-running test (>60s); nothing deselects it, so it runs in plain pytest and every CI pytest job",
+    "slow: long-running test (>60s); nothing deselects it, so it runs in every full python-tests job (plain pytest)",
     "local_only: only runs on developer machines; skipped in CI",
     "flags: parametrized over feature flags",
     "security: adversarial guardrail and permission-boundary tests",
