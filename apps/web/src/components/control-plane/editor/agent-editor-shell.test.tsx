@@ -1,8 +1,12 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentEditorShell } from "@/components/control-plane/editor/agent-editor-shell";
 import { ToastProvider } from "@/hooks/use-toast";
+import { SUPPORTED_LANGUAGES } from "@/lib/i18n";
+import { resources } from "@/lib/i18n-resources";
 import type {
   ControlPlaneAgent,
   ControlPlaneCoreCapabilities,
@@ -228,6 +232,9 @@ describe("AgentEditorShell", () => {
 
     const identidadeStep = screen.getByRole("button", { name: /Identidade/i });
     expect(identidadeStep).toHaveAttribute("data-state", "active");
+    // D-334: the rail rendered its i18n keys (tl() looks up literals, not keys).
+    expect(identidadeStep).toHaveTextContent(/^Identidade$/);
+    expect(screen.queryByText(/controlPlane\.agentEditor\.steps\./)).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Próximo" }));
 
@@ -306,5 +313,27 @@ describe("AgentEditorShell", () => {
 
     expect(screen.getByDisplayValue("Sr. Frontend Developer")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Salvar" })).not.toBeInTheDocument();
+  });
+});
+
+describe("agent editor step rail copy (D-334)", () => {
+  it("finds every step rail key in every locale catalog", () => {
+    const source = readFileSync(resolve(__dirname, "agent-editor-shell.tsx"), "utf8");
+    const keys = [...new Set([...source.matchAll(/"(controlPlane\.agentEditor\.steps\.[\w.]+)"/g)].map(([, key]) => key))];
+    expect(keys.length).toBeGreaterThanOrEqual(8 * 4);
+    const missing = SUPPORTED_LANGUAGES.flatMap((language) =>
+      keys
+        .filter((key) => {
+          const value = key
+            .split(".")
+            .reduce<unknown>(
+              (node, part) => (node && typeof node === "object" ? (node as Record<string, unknown>)[part] : undefined),
+              resources[language].translation,
+            );
+          return typeof value !== "string" || value.trim() === "";
+        })
+        .map((key) => `${language} ${key}`),
+    );
+    expect(missing).toEqual([]);
   });
 });

@@ -355,7 +355,7 @@ function ActiveStepRenderer({
 
 function InnerShell() {
   const { state, persistDraft, discardDraft, applyAgentLifecycle } = useAgentEditor();
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const router = useRouter();
   const { runAction, isPending, getStatus } = useAsyncAction();
   const { activeTab, setActiveTab } = useTabNavigation([...STEP_KEYS], {
@@ -537,7 +537,7 @@ function InnerShell() {
                               : "text-[var(--text-tertiary)]",
                         )}
                       >
-                        {tl(step.label)}
+                        {t(step.label)}
                       </span>
 
                       {step.dirty ? (
