@@ -1,87 +1,57 @@
-"""Tests for the scoped approval-grants persistence layer."""
+"""The approval-grant store has one backend, Postgres; without it every call fails visibly (M2-E1-T2).
+
+Round trips against a real database are in tests/test_state_approval_stores_postgres.py.
+"""
 
 from __future__ import annotations
 
-import json
-import time
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
-from koda.state.approval_grants import (
-    cleanup_expired_approval_grants,
-    load_approval_grants,
-    remove_approval_grant,
-    save_approval_grant,
-    update_approval_grant,
-)
+from koda.state import approval_grants
+
+pytestmark = [pytest.mark.real_approval_store]
 
 
 @pytest.fixture(autouse=True)
-def _isolate_state(tmp_path, monkeypatch):
+def _no_primary_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     import koda.config as config_module
 
     monkeypatch.setattr(config_module, "STATE_ROOT_DIR", tmp_path)
-    monkeypatch.setattr(config_module, "STATE_BACKEND", "sqlite")
+    monkeypatch.setattr(approval_grants, "get_primary_state_backend", lambda **_kwargs: None)
+    log = MagicMock()
+    monkeypatch.setattr(approval_grants, "log", log)
+    return log
 
 
-@pytest.mark.asyncio
-async def test_save_and_load_round_trip():
-    await save_approval_grant(
-        "grant-1",
-        {
-            "user_id": 42,
-            "agent_id": "agent-a",
-            "kind": "approve_scope",
-            "remaining_uses": 10,
-            "max_uses": 10,
-        },
-        ttl_seconds=300,
-    )
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: approval_grants.save_approval_grant("grant-1", {"user_id": 42, "agent_id": "AGENT_A"}, 300),
+        lambda: approval_grants.update_approval_grant("grant-1", {"user_id": 42, "agent_id": "AGENT_A"}),
+        lambda: approval_grants.remove_approval_grant("grant-1", agent_id="AGENT_A"),
+        lambda: approval_grants.remove_approval_grants(agent_id="AGENT_A", user_id=42),
+        lambda: approval_grants.cleanup_expired_approval_grants(),
+        lambda: approval_grants.load_approval_grants(),
+    ],
+    ids=["save", "update", "remove", "remove_matching", "cleanup", "load"],
+)
+async def test_without_postgres_each_call_raises_is_logged_and_writes_no_file(
+    call, tmp_path: Path, _no_primary_backend: MagicMock
+) -> None:
+    with pytest.raises(RuntimeError, match="approval_grants_primary_backend_unavailable"):
+        await call()
 
-    grants = await load_approval_grants()
-    assert grants["grant-1"]["user_id"] == 42
-    assert grants["grant-1"]["agent_id"] == "agent-a"
-    assert grants["grant-1"]["remaining_uses"] == 10
-    assert grants["grant-1"]["expires_at"] > grants["grant-1"]["created_at"]
-
-
-@pytest.mark.asyncio
-async def test_update_and_remove_round_trip():
-    expires_at = time.time() + 60
-    await update_approval_grant(
-        "grant-2",
-        {"grant_id": "grant-2", "user_id": 9, "agent_id": "agent-b", "remaining_uses": 2, "expires_at": expires_at},
-    )
-    assert (await load_approval_grants())["grant-2"]["expires_at"] == expires_at
-
-    # Another agent cannot remove it.
-    await remove_approval_grant("grant-2", agent_id="agent-a")
-    assert "grant-2" in await load_approval_grants()
-
-    await remove_approval_grant("grant-2", agent_id="agent-b")
-
-    assert "grant-2" not in await load_approval_grants()
+    assert _no_primary_backend.exception.called
+    assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.asyncio
-async def test_cleanup_removes_expired_entries(tmp_path):
+async def test_outside_postgres_mode_each_write_raises(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import koda.config as config_module
 
-    fp = config_module.STATE_ROOT_DIR / "approval_grants.json"
-    fp.parent.mkdir(parents=True, exist_ok=True)
-    now = time.time()
-    fp.write_text(
-        json.dumps(
-            {
-                "alive": {"grant_id": "alive", "expires_at": now + 600},
-                "dead": {"grant_id": "dead", "expires_at": now - 100},
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    await cleanup_expired_approval_grants()
-
-    payload = json.loads(fp.read_text(encoding="utf-8"))
-    assert "alive" in payload
-    assert "dead" not in payload
+    monkeypatch.setattr(config_module, "STATE_BACKEND", "sqlite")
+    with pytest.raises(RuntimeError, match="approval_grants_primary_mode_required"):
+        await approval_grants.save_approval_grant("grant-1", {"user_id": 42, "agent_id": "AGENT_A"}, 300)
+    assert list(tmp_path.iterdir()) == []

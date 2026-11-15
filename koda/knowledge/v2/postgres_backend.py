@@ -155,6 +155,89 @@ class _Migration:
     statements: tuple[str, ...]
 
 
+def approval_grant_legacy_rule_sql(schema: str) -> tuple[str, str]:
+    """The statements that give each legacy grant (blank ``agent_id``) one agent, or expire it.
+
+    Migration ``050_approval_tables`` runs them on the grants an earlier release
+    stored, and :mod:`koda.state.approval_import` on the grants it imports from
+    the retired JSON file. Both touch only grants with a blank ``agent_id``,
+    and the second only those it has not expired yet, so a rerun audits no
+    grant twice.
+    """
+    return (
+        # Every agent shares approval_grants, and a grant applies
+        # only to the agent in its agent_id (D-060). A legacy grant
+        # with a blank agent_id gets the agent that its stored scope
+        # (the approval request that issued it, its session) or its
+        # chat binding (the agent whose tasks ran in its chat)
+        # names, when exactly one agent is named. A session naming
+        # 'KODA' names no agent: 027 wrote 'KODA' into every older
+        # session, whichever agent owned it. Its payload, which
+        # the worker loads and matches on, gets the same agent. The
+        # CASEs keep a payload that is not a JSON object from
+        # failing the migration.
+        f"""UPDATE "{schema}"."approval_grants" AS g
+                   SET agent_id = derived.agent_id,
+                       payload_json = CASE
+                           WHEN NOT pg_input_is_valid(g.payload_json, 'jsonb') THEN g.payload_json
+                           WHEN jsonb_typeof(g.payload_json::jsonb) <> 'object' THEN g.payload_json
+                           ELSE jsonb_set(g.payload_json::jsonb, '{{agent_id}}', to_jsonb(derived.agent_id))::text
+                       END
+                  FROM (
+                        SELECT candidates.grant_id, MIN(candidates.agent_id) AS agent_id
+                          FROM (
+                                SELECT legacy.grant_id, request.agent_id
+                                  FROM "{schema}"."approval_grants" AS legacy
+                                  JOIN "{schema}"."pending_approvals" AS request
+                                    ON request.op_id = CASE
+                                           WHEN pg_input_is_valid(legacy.payload_json, 'jsonb')
+                                           THEN legacy.payload_json::jsonb ->> 'issued_by_op_id'
+                                       END
+                                 WHERE btrim(legacy.agent_id) = ''
+                                UNION
+                                SELECT legacy.grant_id, sess.agent_id
+                                  FROM "{schema}"."approval_grants" AS legacy
+                                  JOIN "{schema}"."sessions" AS sess
+                                    ON sess.user_id = legacy.user_id
+                                   AND sess.session_id = legacy.session_id
+                                   AND sess.agent_id <> 'KODA'
+                                 WHERE btrim(legacy.agent_id) = ''
+                                UNION
+                                SELECT legacy.grant_id, task.agent_id
+                                  FROM "{schema}"."approval_grants" AS legacy
+                                  JOIN "{schema}"."tasks" AS task
+                                    ON task.user_id = legacy.user_id
+                                   AND task.chat_id = legacy.chat_id
+                                 WHERE btrim(legacy.agent_id) = ''
+                               ) AS candidates
+                         WHERE btrim(COALESCE(candidates.agent_id, '')) <> ''
+                         GROUP BY candidates.grant_id
+                        HAVING COUNT(DISTINCT candidates.agent_id) = 1
+                       ) AS derived
+                 WHERE g.grant_id = derived.grant_id""",
+        # Every other legacy grant expires, so the user approves
+        # again on next use, with one audit row per grant. One
+        # statement, so a rerun after a failed bootstrap audits no
+        # grant twice.
+        f"""WITH expired AS (
+                    UPDATE "{schema}"."approval_grants"
+                       SET expires_at = 0
+                     WHERE btrim(agent_id) = '' AND expires_at <> 0
+                 RETURNING grant_id, user_id, session_id, chat_id
+                )
+                INSERT INTO "{schema}"."audit_events" (agent_id, timestamp, event_type, user_id, details_json)
+                SELECT 'global', NOW(), 'approval.grant_expired', user_id,
+                       jsonb_build_object(
+                           'grant_id', grant_id,
+                           'session_id', session_id,
+                           'chat_id', chat_id,
+                           'reason', 'legacy_grant_without_agent',
+                           'migration', '050_approval_tables'
+                       )
+                  FROM expired""",
+    )
+
+
 class KnowledgeV2PostgresBackend:
     """Single place for Postgres schema management, persistence, and primary reads."""
 
@@ -3793,76 +3876,7 @@ class KnowledgeV2PostgresBackend:
                     f"""ALTER TABLE "{schema}"."approval_grants"
                            ALTER COLUMN user_id TYPE BIGINT,
                            ALTER COLUMN chat_id TYPE BIGINT""",
-                    # Every agent shares approval_grants, and a grant applies
-                    # only to the agent in its agent_id (D-060). A legacy grant
-                    # with a blank agent_id gets the agent that its stored scope
-                    # (the approval request that issued it, its session) or its
-                    # chat binding (the agent whose tasks ran in its chat)
-                    # names, when exactly one agent is named. A session naming
-                    # 'KODA' names no agent: 027 wrote 'KODA' into every older
-                    # session, whichever agent owned it. Its payload, which
-                    # the worker loads and matches on, gets the same agent. The
-                    # CASEs keep a payload that is not a JSON object from
-                    # failing the migration.
-                    f"""UPDATE "{schema}"."approval_grants" AS g
-                           SET agent_id = derived.agent_id,
-                               payload_json = CASE
-                                   WHEN NOT pg_input_is_valid(g.payload_json, 'jsonb') THEN g.payload_json
-                                   WHEN jsonb_typeof(g.payload_json::jsonb) <> 'object' THEN g.payload_json
-                                   ELSE jsonb_set(g.payload_json::jsonb, '{{agent_id}}', to_jsonb(derived.agent_id))::text
-                               END
-                          FROM (
-                                SELECT candidates.grant_id, MIN(candidates.agent_id) AS agent_id
-                                  FROM (
-                                        SELECT legacy.grant_id, request.agent_id
-                                          FROM "{schema}"."approval_grants" AS legacy
-                                          JOIN "{schema}"."pending_approvals" AS request
-                                            ON request.op_id = CASE
-                                                   WHEN pg_input_is_valid(legacy.payload_json, 'jsonb')
-                                                   THEN legacy.payload_json::jsonb ->> 'issued_by_op_id'
-                                               END
-                                         WHERE btrim(legacy.agent_id) = ''
-                                        UNION
-                                        SELECT legacy.grant_id, sess.agent_id
-                                          FROM "{schema}"."approval_grants" AS legacy
-                                          JOIN "{schema}"."sessions" AS sess
-                                            ON sess.user_id = legacy.user_id
-                                           AND sess.session_id = legacy.session_id
-                                           AND sess.agent_id <> 'KODA'
-                                         WHERE btrim(legacy.agent_id) = ''
-                                        UNION
-                                        SELECT legacy.grant_id, task.agent_id
-                                          FROM "{schema}"."approval_grants" AS legacy
-                                          JOIN "{schema}"."tasks" AS task
-                                            ON task.user_id = legacy.user_id
-                                           AND task.chat_id = legacy.chat_id
-                                         WHERE btrim(legacy.agent_id) = ''
-                                       ) AS candidates
-                                 WHERE btrim(COALESCE(candidates.agent_id, '')) <> ''
-                                 GROUP BY candidates.grant_id
-                                HAVING COUNT(DISTINCT candidates.agent_id) = 1
-                               ) AS derived
-                         WHERE g.grant_id = derived.grant_id""",
-                    # Every other legacy grant expires, so the user approves
-                    # again on next use, with one audit row per grant. One
-                    # statement, so a rerun after a failed bootstrap audits no
-                    # grant twice.
-                    f"""WITH expired AS (
-                            UPDATE "{schema}"."approval_grants"
-                               SET expires_at = 0
-                             WHERE btrim(agent_id) = '' AND expires_at <> 0
-                         RETURNING grant_id, user_id, session_id, chat_id
-                        )
-                        INSERT INTO "{schema}"."audit_events" (agent_id, timestamp, event_type, user_id, details_json)
-                        SELECT 'global', NOW(), 'approval.grant_expired', user_id,
-                               jsonb_build_object(
-                                   'grant_id', grant_id,
-                                   'session_id', session_id,
-                                   'chat_id', chat_id,
-                                   'reason', 'legacy_grant_without_agent',
-                                   'migration', '050_approval_tables'
-                               )
-                          FROM expired""",
+                    *approval_grant_legacy_rule_sql(schema),
                 ),
             ),
         )

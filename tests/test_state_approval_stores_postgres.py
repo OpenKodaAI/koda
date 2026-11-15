@@ -170,17 +170,15 @@ async def test_using_a_grant_in_one_agent_leaves_another_agents_grants_intact(
 
 
 async def test_a_failure_mid_write_leaves_the_grants_unchanged(
-    approval_db: tuple[Any, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch, session_state_root: Path
+    approval_db: tuple[Any, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import koda.config as config_module
     from koda.state import approval_grants
     from koda.utils import approval
 
     conn, schema = approval_db
-    # The failed write falls back to the JSON file, which belongs in this test's own state root.
+    # A failed write falls back to nothing: no file appears in the state root.
     monkeypatch.setattr(config_module, "STATE_ROOT_DIR", tmp_path)
-    shared_file = session_state_root / "approval_grants.json"
-    shared_before = shared_file.read_bytes() if shared_file.exists() else None
     for grant_id, agent_id in (("grant-a1", "AGENT_A"), ("grant-a2", "AGENT_A"), ("grant-b", "AGENT_B")):
         await approval_grants.save_approval_grant(grant_id, _scope_grant(agent_id), ttl_seconds=600)
     approval._APPROVAL_GRANTS.update(await approval_grants.load_approval_grants())
@@ -194,7 +192,83 @@ async def test_a_failure_mid_write_leaves_the_grants_unchanged(
         await _drain_tasks_started_since(before)
 
     assert await _grant_rows(conn, schema) == unchanged
-    assert (shared_file.read_bytes() if shared_file.exists() else None) == shared_before
+    assert list(tmp_path.iterdir()) == []
+
+
+async def _audited_grant_count(conn: Any, schema: str, grant_id: str) -> int:
+    return int(
+        await conn.fetchval(
+            f"""SELECT count(*) FROM "{schema}"."audit_events"
+                 WHERE event_type = 'approval.grant_expired' AND details_json ->> 'grant_id' = $1""",
+            grant_id,
+        )
+    )
+
+
+async def test_the_json_files_are_imported_once_at_startup(
+    approval_db: tuple[Any, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M2-E1-T2: a grant an earlier release wrote to JSON is in Postgres after one boot, and only once."""
+    import koda.config as config_module
+    from koda.state import approval_grants, approval_import, pending_approvals
+
+    conn, schema = approval_db
+    monkeypatch.setattr(config_module, "STATE_ROOT_DIR", tmp_path)
+    now = time.time()
+    times = {"created_at": now, "expires_at": now + 600}
+    pending = {"json-op": {"op_id": "json-op", "op_type": "agent_cmd", "user_id": 9101, "agent_id": "AGENT_B"} | times}
+    grants = {
+        "json-a": _scope_grant("AGENT_A") | {"grant_id": "json-a"} | times,
+        # No agent: the approval request that issued it names agent B.
+        "json-request": _scope_grant("")
+        | {"grant_id": "json-request", "user_id": 9101, "chat_id": None, "issued_by_op_id": "json-op"}
+        | times,
+        # No agent, and nothing names one: it expires, with an audit row.
+        "json-orphan-m2e1t2": _scope_grant("")
+        | {"grant_id": "json-orphan-m2e1t2", "user_id": 9102, "chat_id": 9102000}
+        | times,
+    }
+    seeded = {"pending_approvals.json": json.dumps(pending), "approval_grants.json": json.dumps(grants)}
+    for name, content in seeded.items():
+        (tmp_path / name).write_text(content, encoding="utf-8")
+    audited_before = await _audited_grant_count(conn, schema, "json-orphan-m2e1t2")
+
+    assert await approval_import.import_approval_json_files() == {
+        "pending_approvals.json": 1,
+        "approval_grants.json": 3,
+    }
+
+    rows = await _grant_rows(conn, schema)
+    assert {grant_id: row["agent_id"] for grant_id, row in rows.items()} == {
+        "json-a": "AGENT_A",
+        "json-request": "AGENT_B",
+        "json-orphan-m2e1t2": "",
+    }
+    assert rows["json-a"]["remaining_uses"] == 3
+    assert set(await approval_grants.load_approval_grants()) == {"json-a", "json-request"}
+    assert set(await pending_approvals.load_pending_ops()) == {"json-op"}
+    assert await _audited_grant_count(conn, schema, "json-orphan-m2e1t2") == audited_before + 1
+    # Each file is kept, renamed.
+    for name, content in seeded.items():
+        assert not (tmp_path / name).exists()
+        assert (tmp_path / f"{name}.migrated").read_text(encoding="utf-8") == content
+
+    # The next boot finds no file and imports nothing.
+    imported = await _grant_rows(conn, schema)
+    assert await approval_import.import_approval_json_files() == {}
+
+    # A file seen again (an import that stopped before its rename) adds no row, changes none,
+    # audits no grant twice, and is renamed beside the first copy.
+    for name, content in seeded.items():
+        (tmp_path / name).write_text(content, encoding="utf-8")
+    assert await approval_import.import_approval_json_files() == {
+        "pending_approvals.json": 0,
+        "approval_grants.json": 0,
+    }
+    assert await _grant_rows(conn, schema) == imported
+    assert await _audited_grant_count(conn, schema, "json-orphan-m2e1t2") == audited_before + 1
+    for name in seeded:
+        assert len(list(tmp_path.glob(f"{name}*.migrated"))) == 2
 
 
 _LEGACY_GRANTS_DDL = """CREATE TABLE "{schema}"."approval_grants" (

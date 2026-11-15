@@ -377,6 +377,13 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 
 ### Removed
 
+- The approval JSON fallback. Approval requests and grants are kept in Postgres only;
+  a failed write is logged and returned to the caller instead of going to
+  `approval_grants.json` or `pending_approvals.json`, which no code read back. At
+  startup the worker imports each of those files still in `STATE_ROOT_DIR` once, a
+  grant keeping its agent (one without an agent follows the migration
+  `050_approval_tables` rule), and renames it `<name>.migrated`; nothing is deleted.
+  (M2-E1-T2, TD-043 part)
 - `GRPC_TLS_ENABLED`, with `GRPC_TLS_CA_CERT`, `GRPC_TLS_CLIENT_CERT` and
   `GRPC_TLS_CLIENT_KEY`. The switch moved every internal gRPC channel to TLS, but only
   the security and memory sidecars served TLS, so it broke the runtime-kernel, artifact,

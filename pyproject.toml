@@ -97,6 +97,7 @@ filterwarnings = []
 markers = [
     "real_policy_gate: run dispatcher tests against the real central execution-policy gate",
     "real_cli_contract_probe: run the real provider CLI contract probe (against fake CLI output)",
+    "real_approval_store: run against the approval store itself, which raises without Postgres",
     "postgres: requires a real Postgres instance (POSTGRES_TEST_DSN env)",
     "rust_engine: spawns a real Rust gRPC engine binary",
     "chaos: failure injection / fault-tolerance test",

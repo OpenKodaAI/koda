@@ -809,6 +809,16 @@ def main() -> None:
 
         await loop_supervisor.start_loop("temp_cleanup", start_temp_cleanup_loop)
 
+        # Postgres is the only approval store: import the JSON files earlier
+        # releases fell back to, once, and rename them *.migrated.
+        from koda.state.approval_import import import_approval_json_files
+
+        try:
+            await import_approval_json_files()
+        except Exception:
+            noncritical_startup_issues.append("approval_json_import_error")
+            log.exception("approval_json_import_error")
+
         # Start periodic approval cleanup to prevent stale ops accumulation
         from koda.utils.approval import start_approval_cleanup
 

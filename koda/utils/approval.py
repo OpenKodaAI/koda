@@ -76,7 +76,7 @@ def check_execution_approved() -> bool:
     return _execution_approved.get()
 
 
-# Pending operations store (in-memory, lost on restart)
+# Pending operations and grants, in memory; Postgres keeps them across a restart
 
 _PENDING_OPS: dict[str, dict[str, Any]] = {}
 _APPROVAL_GRANTS: dict[str, dict[str, Any]] = {}
@@ -174,6 +174,19 @@ def _cleanup_stale_approval_grants() -> None:
     ]
     for grant_id in expired:
         _APPROVAL_GRANTS.pop(grant_id, None)
+
+
+def _spawn_store_write(write: Coroutine[Any, Any, Any]) -> None:
+    """Run a Postgres write in the background; the store logs a failure, and nothing falls back to a file."""
+
+    async def _run() -> None:
+        with contextlib.suppress(Exception):
+            await write
+
+    try:
+        asyncio.get_running_loop().create_task(_run())
+    except RuntimeError:
+        write.close()
 
 
 def _serialize_agent_approval_request(request: dict[str, Any]) -> dict[str, Any]:
@@ -277,8 +290,11 @@ async def revoke_scoped_approval_state(
     session_id: str | None,
     chat_id: int | None = None,
 ) -> None:
-    await remove_pending_ops(user_id=user_id, agent_id=agent_id, session_id=session_id, chat_id=chat_id)
-    await remove_approval_grants(user_id=user_id, agent_id=agent_id, session_id=session_id, chat_id=chat_id)
+    """Revoke the matching pending ops and grants in memory, then in Postgres.
+
+    A failed Postgres delete is raised to the caller, so a revocation that would
+    not survive a restart is not reported as done.
+    """
     for grant_id, grant in list(_APPROVAL_GRANTS.items()):
         if int(grant.get("user_id") or 0) != user_id:
             continue
@@ -309,6 +325,8 @@ async def revoke_scoped_approval_state(
         if chat_id is not None and int(pending.get("chat_id") or 0) != chat_id:
             continue
         _PENDING_AGENT_CMD_OPS.pop(op_id, None)
+    await remove_pending_ops(user_id=user_id, agent_id=agent_id, session_id=session_id, chat_id=chat_id)
+    await remove_approval_grants(user_id=user_id, agent_id=agent_id, session_id=session_id, chat_id=chat_id)
 
 
 # READ/WRITE classifiers
@@ -1131,21 +1149,23 @@ async def _show_approval_keyboard(
     }
     user_data["_pending_op_id"] = op_id
 
-    # Persist to disk
-    await save_pending_op(
-        op_id,
-        {
-            "user_id": user_id,
-            "chat_id": chat_id,
-            "session_id": session_id,
-            "agent_id": agent_id,
-            "description": f"/{cmd_name} {raw_args}".strip(),
-            "op_type": "user",
-            "requests": [_serialize_agent_approval_request(item) for item in requests or []],
-            "preview_text": preview_text or "",
-        },
-        APPROVAL_TIMEOUT,
-    )
+    # Persist in Postgres so the request survives a restart. Without its row it
+    # still works in this process; the store logs the failure.
+    with contextlib.suppress(Exception):
+        await save_pending_op(
+            op_id,
+            {
+                "user_id": user_id,
+                "chat_id": chat_id,
+                "session_id": session_id,
+                "agent_id": agent_id,
+                "description": f"/{cmd_name} {raw_args}".strip(),
+                "op_type": "user",
+                "requests": [_serialize_agent_approval_request(item) for item in requests or []],
+                "preview_text": preview_text or "",
+            },
+            APPROVAL_TIMEOUT,
+        )
 
     desc = f"/{cmd_name} {raw_args}".strip()
     keyboard_rows: list[list[InlineKeyboardButton]] = [
@@ -1170,7 +1190,9 @@ async def dispatch_approved_operation(op_id: str) -> None:
     if not pending:
         return
 
-    await remove_pending_op(op_id)
+    # A row left behind expires with its TTL; the store logs the failure.
+    with contextlib.suppress(Exception):
+        await remove_pending_op(op_id)
 
     handler = pending["handler"]
     original_update = pending["update"]
@@ -1526,11 +1548,8 @@ def _issue_agent_approval_grants(
             "scope_fingerprint": resolved_envelope.resource_scope_fingerprint,
         }
         _APPROVAL_GRANTS[grant_id] = grant
-        try:
-            loop = asyncio.get_running_loop()
-            loop.create_task(save_approval_grant(grant_id, grant, ttl_seconds))
-        except RuntimeError:
-            pass
+        # Without its row the grant works in this process until a restart.
+        _spawn_store_write(save_approval_grant(grant_id, grant, ttl_seconds))
         grants.append(grant)
     return grants
 
@@ -1584,17 +1603,9 @@ def consume_agent_approval_grant(
         grant["remaining_uses"] = int(grant.get("remaining_uses") or 1) - 1
         if int(grant["remaining_uses"]) <= 0 or str(grant.get("kind") or "") == "approve_once":
             _APPROVAL_GRANTS.pop(grant_id, None)
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(remove_approval_grant(grant_id, agent_id=agent_id))
-            except RuntimeError:
-                pass
+            _spawn_store_write(remove_approval_grant(grant_id, agent_id=agent_id))
         else:
-            try:
-                loop = asyncio.get_running_loop()
-                loop.create_task(update_approval_grant(grant_id, dict(grant)))
-            except RuntimeError:
-                pass
+            _spawn_store_write(update_approval_grant(grant_id, dict(grant)))
         return dict(grant)
     return None
 
@@ -1712,8 +1723,11 @@ async def start_approval_cleanup() -> None:
         _cleanup_stale_ops()
         _cleanup_stale_agent_cmd_ops()
         _cleanup_stale_approval_grants()
-        await cleanup_expired_ops()
-        await cleanup_expired_approval_grants()
+        # The store logs a failure; the next pass tries again.
+        with contextlib.suppress(Exception):
+            await cleanup_expired_ops()
+        with contextlib.suppress(Exception):
+            await cleanup_expired_approval_grants()
 
 
 async def request_agent_cmd_approval(
@@ -1765,27 +1779,29 @@ async def request_agent_cmd_approval(
         "rationale": None,
     }
 
-    # Persist to disk
-    await save_pending_op(
-        op_id,
-        {
-            "user_id": user_id,
-            "description": description,
-            "op_type": "agent_cmd",
-            "agent_id": agent_id,
-            "session_id": session_id,
-            "chat_id": chat_id,
-            "requests": [_serialize_agent_approval_request(item) for item in requests or []],
-            "preview_text": preview_text or "",
-            "tool_id": tool_id,
-            "original_params": dict(original_params or {}),
-            "args_schema": dict(args_schema or {}),
-            "risk_class": risk_class,
-            "trace_id": trace_id,
-            "run_graph_node_id": run_graph_node_id,
-        },
-        APPROVAL_TIMEOUT,
-    )
+    # Persist in Postgres so the request survives a restart. Without its row it
+    # still works in this process; the store logs the failure.
+    with contextlib.suppress(Exception):
+        await save_pending_op(
+            op_id,
+            {
+                "user_id": user_id,
+                "description": description,
+                "op_type": "agent_cmd",
+                "agent_id": agent_id,
+                "session_id": session_id,
+                "chat_id": chat_id,
+                "requests": [_serialize_agent_approval_request(item) for item in requests or []],
+                "preview_text": preview_text or "",
+                "tool_id": tool_id,
+                "original_params": dict(original_params or {}),
+                "args_schema": dict(args_schema or {}),
+                "risk_class": risk_class,
+                "trace_id": trace_id,
+                "run_graph_node_id": run_graph_node_id,
+            },
+            APPROVAL_TIMEOUT,
+        )
 
     keyboard = InlineKeyboardMarkup(
         [
@@ -1879,9 +1895,4 @@ def get_agent_cmd_decision(op_id: str) -> dict[str, Any] | None:
 def cleanup_agent_cmd_op(op_id: str) -> None:
     """Remove a completed agent-cmd op from the pending store."""
     _PENDING_AGENT_CMD_OPS.pop(op_id, None)
-    # Fire-and-forget persistence removal; tolerate missing event loop.
-    try:
-        loop = asyncio.get_running_loop()
-        loop.create_task(remove_pending_op(op_id))
-    except RuntimeError:
-        pass
+    _spawn_store_write(remove_pending_op(op_id))

@@ -1,17 +1,20 @@
-"""Scoped approval-grant persistence with primary-backend support.
+"""Scoped approval-grant persistence in Postgres, the only approval store.
 
 Migration ``050_approval_tables`` creates the ``approval_grants`` table. Every
 agent shares it, so each write names one grant of one agent: saving or using a
 grant upserts that grant's row, and removing one deletes it, scoped by its
 ``agent_id``. Each write is a single statement, which Postgres runs as one
 transaction: a failure leaves the row and every other row as they were.
+
+A failed read or write is logged and raised to the caller. Nothing falls back
+to a file: earlier releases wrote ``approval_grants.json`` when a Postgres write
+failed, and :mod:`koda.state.approval_import` imports that file once at startup.
 """
 
 from __future__ import annotations
 
 import json
 import time
-from pathlib import Path
 from typing import Any
 
 import koda.config as config_module
@@ -21,38 +24,30 @@ from koda.state.primary import get_primary_state_backend, primary_execute, prima
 log = get_logger(__name__)
 
 
-def _file_path() -> Path:
-    return config_module.STATE_ROOT_DIR / "approval_grants.json"
+def _require_primary() -> None:
+    if config_module.STATE_BACKEND != "postgres":
+        raise RuntimeError("approval_grants_primary_mode_required")
+    if get_primary_state_backend(agent_id=config_module.AGENT_ID) is None:
+        raise RuntimeError("approval_grants_primary_backend_unavailable")
 
 
-def _primary_enabled() -> bool:
-    return (
-        config_module.STATE_BACKEND == "postgres"
-        and get_primary_state_backend(agent_id=config_module.AGENT_ID) is not None
-    )
-
-
-def _read_raw() -> dict[str, Any]:
-    fp = _file_path()
-    if not fp.exists():
-        return {}
+def _execute(action: str, query: str, params: tuple[Any, ...]) -> int:
+    """Run one write and return its row count; a failure is logged and raised."""
     try:
-        data = json.loads(fp.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
+        _require_primary()
+        return int(run_coro_sync(primary_execute(query, params, agent_id=config_module.AGENT_ID)) or 0)
     except Exception:
-        log.warning("approval_grants: failed to read %s", fp, exc_info=True)
-        return {}
+        log.exception("approval_grants_write_failed", action=action)
+        raise
 
 
-def _write_raw(data: dict[str, Any]) -> None:
-    fp = _file_path()
+def _fetch_all(action: str, query: str, params: tuple[Any, ...]) -> list[Any]:
     try:
-        fp.parent.mkdir(parents=True, exist_ok=True)
-        tmp = fp.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data, ensure_ascii=False, default=str), encoding="utf-8")
-        tmp.replace(fp)
+        _require_primary()
+        return list(run_coro_sync(primary_fetch_all(query, params, agent_id=config_module.AGENT_ID)) or [])
     except Exception:
-        log.warning("approval_grants: failed to write %s", fp, exc_info=True)
+        log.exception("approval_grants_read_failed", action=action)
+        raise
 
 
 def _json_dumps(value: Any) -> str:
@@ -69,23 +64,6 @@ def _json_loads(value: str | None) -> dict[str, Any]:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _grant_filter_matches(
-    entry: dict[str, Any],
-    *,
-    user_id: int | None = None,
-    agent_id: str | None = None,
-    session_id: str | None = None,
-    chat_id: int | None = None,
-) -> bool:
-    if user_id is not None and int(entry.get("user_id") or 0) != user_id:
-        return False
-    if agent_id is not None and str(entry.get("agent_id") or "") != agent_id:
-        return False
-    if session_id is not None and str(entry.get("session_id") or "") != session_id:
-        return False
-    return chat_id is None or int(entry.get("chat_id") or 0) == chat_id
-
-
 def _optional_chat_id(value: Any) -> int | None:
     if value is None:
         return None
@@ -95,37 +73,67 @@ def _optional_chat_id(value: Any) -> int | None:
         return None
 
 
+def _row_params(grant_id: str, entry: dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        grant_id,
+        int(entry.get("user_id") or 0),
+        str(entry.get("agent_id") or ""),
+        str(entry.get("session_id") or "") or None,
+        _optional_chat_id(entry.get("chat_id")),
+        float(entry.get("created_at") or 0),
+        float(entry.get("expires_at") or 0),
+        _json_dumps(entry),
+    )
+
+
 def _primary_upsert(grant_id: str, entry: dict[str, Any]) -> None:
     """Insert or update one grant; an existing row of another agent is left unchanged."""
-    run_coro_sync(
-        primary_execute(
+    _execute(
+        "upsert",
+        """
+        INSERT INTO approval_grants (
+            grant_id, user_id, agent_id, session_id, chat_id, created_at, expires_at, payload_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(grant_id) DO UPDATE SET
+            user_id = excluded.user_id,
+            session_id = excluded.session_id,
+            chat_id = excluded.chat_id,
+            created_at = excluded.created_at,
+            expires_at = excluded.expires_at,
+            payload_json = excluded.payload_json
+        WHERE approval_grants.agent_id = excluded.agent_id
+        """,
+        _row_params(grant_id, entry),
+    )
+
+
+def import_approval_grants(entries: dict[str, Any]) -> int:
+    """Insert grants read from the retired JSON file; a grant already stored is left as it is.
+
+    Each grant keeps its ``agent_id``. Returns how many rows were inserted.
+    """
+    inserted = 0
+    for grant_id, entry in entries.items():
+        if not isinstance(entry, dict) or not str(grant_id):
+            continue
+        try:
+            params = _row_params(str(grant_id), dict(entry, grant_id=str(grant_id)))
+        except (TypeError, ValueError):
+            log.warning("approval_grants_import_entry_skipped", grant_id=str(grant_id))
+            continue
+        inserted += _execute(
+            "import",
             """
             INSERT INTO approval_grants (
                 grant_id, user_id, agent_id, session_id, chat_id, created_at, expires_at, payload_json
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(grant_id) DO UPDATE SET
-                user_id = excluded.user_id,
-                session_id = excluded.session_id,
-                chat_id = excluded.chat_id,
-                created_at = excluded.created_at,
-                expires_at = excluded.expires_at,
-                payload_json = excluded.payload_json
-            WHERE approval_grants.agent_id = excluded.agent_id
+            ON CONFLICT(grant_id) DO NOTHING
             """,
-            (
-                grant_id,
-                int(entry.get("user_id") or 0),
-                str(entry.get("agent_id") or ""),
-                str(entry.get("session_id") or "") or None,
-                _optional_chat_id(entry.get("chat_id")),
-                entry["created_at"],
-                entry["expires_at"],
-                _json_dumps(entry),
-            ),
-            agent_id=config_module.AGENT_ID,
+            params,
         )
-    )
+    return inserted
 
 
 async def save_approval_grant(grant_id: str, payload: dict[str, Any], ttl_seconds: int) -> None:
@@ -134,16 +142,7 @@ async def save_approval_grant(grant_id: str, payload: dict[str, Any], ttl_second
     entry["grant_id"] = grant_id
     entry["created_at"] = now
     entry["expires_at"] = now + ttl_seconds
-    if _primary_enabled():
-        try:
-            _primary_upsert(grant_id, entry)
-            return
-        except Exception:
-            log.warning("approval_grants: failed to persist in primary backend", exc_info=True)
-
-    store = _read_raw()
-    store[grant_id] = entry
-    _write_raw(store)
+    _primary_upsert(grant_id, entry)
 
 
 async def update_approval_grant(grant_id: str, payload: dict[str, Any]) -> None:
@@ -151,79 +150,37 @@ async def update_approval_grant(grant_id: str, payload: dict[str, Any]) -> None:
     created_at = float(payload.get("created_at") or time.time())
     expires_at = float(payload.get("expires_at") or (created_at + 600))
     entry = dict(payload, grant_id=grant_id, created_at=created_at, expires_at=expires_at)
-    if _primary_enabled():
-        try:
-            _primary_upsert(grant_id, entry)
-            return
-        except Exception:
-            log.warning("approval_grants: failed to update in primary backend", exc_info=True)
-
-    store = _read_raw()
-    store[grant_id] = entry
-    _write_raw(store)
+    _primary_upsert(grant_id, entry)
 
 
 async def load_approval_grants() -> dict[str, dict[str, Any]]:
-    now = time.time()
-    if _primary_enabled():
-        try:
-            rows = (
-                run_coro_sync(
-                    primary_fetch_all(
-                        """
-                    SELECT grant_id, payload_json, expires_at
-                      FROM approval_grants
-                     WHERE expires_at > ?
-                    """,
-                        (now,),
-                        agent_id=config_module.AGENT_ID,
-                    )
-                )
-                or []
-            )
-            primary_result: dict[str, dict[str, Any]] = {}
-            for row in rows:
-                if not isinstance(row, dict):
-                    continue
-                grant_id = str(row.get("grant_id") or "")
-                payload = _json_loads(str(row.get("payload_json") or ""))
-                if grant_id and payload:
-                    primary_result[grant_id] = payload
-            return primary_result
-        except Exception:
-            log.warning("approval_grants: failed to load from primary backend", exc_info=True)
-
-    store = _read_raw()
+    rows = _fetch_all(
+        "load",
+        """
+        SELECT grant_id, payload_json, expires_at
+          FROM approval_grants
+         WHERE expires_at > ?
+        """,
+        (time.time(),),
+    )
     result: dict[str, dict[str, Any]] = {}
-    for grant_id, entry in store.items():
-        if not isinstance(entry, dict):
+    for row in rows:
+        if not isinstance(row, dict):
             continue
-        expires_at = entry.get("expires_at")
-        if isinstance(expires_at, (int, float)) and expires_at > now:
-            result[grant_id] = entry
+        grant_id = str(row.get("grant_id") or "")
+        payload = _json_loads(str(row.get("payload_json") or ""))
+        if grant_id and payload:
+            result[grant_id] = payload
     return result
 
 
 async def remove_approval_grant(grant_id: str, *, agent_id: str) -> None:
     """Delete one grant of ``agent_id``; a grant of another agent is left in place."""
-    if _primary_enabled():
-        try:
-            run_coro_sync(
-                primary_execute(
-                    "DELETE FROM approval_grants WHERE grant_id = ? AND agent_id = ?",
-                    (grant_id, agent_id),
-                    agent_id=config_module.AGENT_ID,
-                )
-            )
-            return
-        except Exception:
-            log.warning("approval_grants: failed to remove from primary backend", exc_info=True)
-
-    store = _read_raw()
-    entry = store.get(grant_id)
-    if isinstance(entry, dict) and str(entry.get("agent_id") or "") == agent_id:
-        del store[grant_id]
-        _write_raw(store)
+    _execute(
+        "remove",
+        "DELETE FROM approval_grants WHERE grant_id = ? AND agent_id = ?",
+        (grant_id, agent_id),
+    )
 
 
 async def remove_approval_grants(
@@ -234,61 +191,19 @@ async def remove_approval_grants(
     chat_id: int | None = None,
 ) -> int:
     """Delete the grants of ``agent_id`` that match every given filter."""
-    if _primary_enabled():
-        try:
-            clauses = ["agent_id = ?"]
-            params: list[Any] = [agent_id]
-            if user_id is not None:
-                clauses.append("user_id = ?")
-                params.append(user_id)
-            if session_id is not None:
-                clauses.append("session_id = ?")
-                params.append(session_id)
-            if chat_id is not None:
-                clauses.append("chat_id = ?")
-                params.append(chat_id)
-            query = "DELETE FROM approval_grants WHERE " + " AND ".join(clauses)
-            return int(
-                run_coro_sync(
-                    primary_execute(query, tuple(params), agent_id=config_module.AGENT_ID)  # type: ignore[arg-type]
-                )
-                or 0
-            )
-        except Exception:
-            log.warning("approval_grants: failed to bulk-remove from primary backend", exc_info=True)
-
-    store = _read_raw()
-    kept: dict[str, Any] = {}
-    removed = 0
-    for grant_id, entry in store.items():
-        if isinstance(entry, dict) and _grant_filter_matches(
-            entry,
-            user_id=user_id,
-            agent_id=agent_id,
-            session_id=session_id,
-            chat_id=chat_id,
-        ):
-            removed += 1
-            continue
-        kept[grant_id] = entry
-    if removed:
-        _write_raw(kept)
-    return removed
+    clauses = ["agent_id = ?"]
+    params: list[Any] = [agent_id]
+    if user_id is not None:
+        clauses.append("user_id = ?")
+        params.append(user_id)
+    if session_id is not None:
+        clauses.append("session_id = ?")
+        params.append(session_id)
+    if chat_id is not None:
+        clauses.append("chat_id = ?")
+        params.append(chat_id)
+    return _execute("remove_matching", "DELETE FROM approval_grants WHERE " + " AND ".join(clauses), tuple(params))
 
 
 async def cleanup_expired_approval_grants() -> None:
-    if _primary_enabled():
-        try:
-            run_coro_sync(
-                primary_execute(
-                    "DELETE FROM approval_grants WHERE expires_at <= ?",
-                    (time.time(),),
-                    agent_id=config_module.AGENT_ID,
-                )
-            )
-            return
-        except Exception:
-            log.warning("approval_grants: failed to cleanup primary backend grants", exc_info=True)
-
-    current = await load_approval_grants()
-    _write_raw(current)
+    _execute("cleanup", "DELETE FROM approval_grants WHERE expires_at <= ?", (time.time(),))
