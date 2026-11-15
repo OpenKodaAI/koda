@@ -1587,7 +1587,7 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
         target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"
 
         from koda.services.queue_manager import enqueue_squad_agent_task
-        from koda.squads import SquadThreadNotRunnableError
+        from koda.squads import SquadThreadNotFoundError, SquadThreadNotRunnableError
 
         try:
             task_id = await enqueue_squad_agent_task(
@@ -1605,6 +1605,8 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
                 telegram_message_thread_id=optional_int(squad_payload.get("telegram_message_thread_id")),
                 bot_override=_SilentRuntimeBot(),
             )
+        except SquadThreadNotFoundError as exc:
+            return web.json_response({"error": str(exc)}, status=404)
         except SquadThreadNotRunnableError as exc:
             # The thread is paused, closed or spent (D-075).
             return web.json_response({"error": str(exc)}, status=409)

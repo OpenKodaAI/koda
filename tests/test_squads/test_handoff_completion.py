@@ -759,3 +759,58 @@ async def test_pauses_that_catch_a_queued_turn_never_escalate_its_task_and_a_reo
     history = await threads.thread_history(thread_id=thread_id, limit=100)
     assert [row for row in history if (row.get("metadata") or {}).get("event_type") == "claim_expired"] == []
     assert [row for row in history if row["type"] == "task_result"] == []
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_dependent_task_claimed_in_a_paused_room_is_dispatched_after_the_reopen_without_an_expiry(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    from collections import defaultdict
+    from types import SimpleNamespace
+
+    from koda.services.queue_manager import _maybe_enqueue_unblocked_squad_tasks
+
+    threads, tasks = stores
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        telegram_chat_id=-100,
+        participants=[("PM", "coordinator"), ("FE", "worker"), ("QA", "worker")],
+    )
+    review = await tasks.create_task(
+        thread_id=thread.id, title="Review", assigner_agent_id="PM", assigned_agent_id="QA"
+    )
+    build = await tasks.create_task(
+        thread_id=thread.id, title="Build", assigner_agent_id="PM", assigned_agent_id="FE", depends_on=[review.id]
+    )
+    await tasks.claim_task(task_id=review.id, agent_id="QA")
+    await tasks.update_task_status(task_id=review.id, new_status="in_progress", agent_id="QA")
+    # The operator pauses the room while QA's turn runs; QA finishes, and its follow-ups claim the
+    # dependent task for FE, whose turn the queue refuses because the room is paused.
+    await threads.update_thread_status(thread.id, "paused")
+    await tasks.update_task_status(task_id=review.id, new_status="done", agent_id="QA")
+    context = MagicMock(application=SimpleNamespace(user_data=defaultdict(dict), bot=None), bot=None)
+    await _maybe_enqueue_unblocked_squad_tasks(
+        user_id=42,
+        context=context,
+        ctx=_ctx(thread_id=thread.id, task_id=review.id, agent_id="QA", parent="msg-1"),
+    )
+
+    # The refusal is not an expiry: the first sweep after the reopen, well within the claim TTL,
+    # dispatches the task to FE again, with no claim_expired event and no expiry counted.
+    router = _router(threads, tasks)
+    assert (await router.sweep_once()).expired_claims == []
+    await threads.update_thread_status(thread.id, "open")
+    [claim] = (await router.sweep_once()).expired_claims
+    assert claim.task_id == build.id and claim.refused is True
+    assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["FE"]
+    redispatched = await tasks.get_task(build.id)
+    assert redispatched is not None and redispatched.status == "claimed"
+    assert int(redispatched.metadata.get("claim_expiry_count") or 0) == 0
+    assert "claim_refused" not in redispatched.metadata
+    history = await threads.thread_history(thread_id=thread.id, limit=100)
+    assert [row for row in history if (row.get("metadata") or {}).get("event_type") == "claim_expired"] == []

@@ -1236,3 +1236,43 @@ async def test_runtime_cancel_reports_a_finished_task_as_a_conflict(tmp_path, ca
     else:
         assert payload == _CANCELLED_RESULT
     controller.cancel_task.assert_awaited_once_with(task_id=27, actor="runtime_api")  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("thread", "expected_status", "expected_error"),
+    [
+        (None, 404, "thread thread-404 not found"),
+        (SimpleNamespace(status="paused", budget_usd_cap=None, cost_usd_accum=0), 409, "thread is paused"),
+    ],
+)
+async def test_runtime_squad_message_to_a_missing_thread_is_not_found_and_to_a_paused_one_a_conflict(
+    tmp_path, thread, expected_status, expected_error
+):
+    """A mistyped thread id is not reported as a paused room, which a client would retry (D-075)."""
+    from collections import defaultdict
+
+    from koda.services.runtime.api import _runtime_send_session_message
+
+    controller = _ControllerStub(runtime_root=tmp_path / "runtime")
+    controller._application = SimpleNamespace(user_data=defaultdict(dict), bot=None)  # type: ignore[attr-defined]
+    thread_store = AsyncMock()
+    thread_store.get_thread = AsyncMock(return_value=thread)
+    request = _json_request(
+        task_id=0,
+        payload={"text": "Build the UI", "squad": {"thread_id": "thread-404", "target_agent_id": "FE"}},
+        headers={"X-Runtime-Token": "secret"},
+    )
+    create_task = MagicMock(return_value=1)
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+        patch("koda.squads.get_squad_thread_store", return_value=thread_store),
+        patch("koda.services.queue_manager.create_task", create_task),
+    ):
+        response = await _runtime_send_session_message(request)
+
+    assert response.status == expected_status
+    assert json.loads(response.text) == {"error": expected_error}
+    create_task.assert_not_called()

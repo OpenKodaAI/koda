@@ -93,10 +93,17 @@ Before broad rollout, run these in canary:
   turn on any path: web, Telegram, the inbox, unblocked tasks or synthesis,
   and the queue worker checks again when it takes a queued or recovered turn.
   A thread the worker or the queue cannot read runs no turn either. When the
-  worker refuses a queued turn, its task's claim is released without counting
-  an expiry, so pauses never escalate a task, and the first router sweep after
+  worker's read of a queued turn's thread fails, it takes the turn again
+  after 2, 5, 15, 30 and 60 seconds before it refuses it; a thread that does
+  not exist refuses the turn at once, and a runtime API squad message to it
+  gets 404 (one to a paused or spent thread gets 409). When the queue worker
+  refuses a queued turn, or the unblocked-task follow-ups or the inbox are
+  refused a task's turn, the task's claim is released without counting an
+  expiry, so pauses never escalate a task, and the first router sweep after
   the thread is open again under its cap dispatches the task again, without
-  waiting for `SQUAD_CLAIM_TTL_S` and without a `claim_expired` event.
+  waiting for `SQUAD_CLAIM_TTL_S` and without a `claim_expired` event. A
+  later claim of the task is a live one again: it is renewed, and its expiry
+  counts.
   A dashboard post or Telegram topic message to such a thread is not routed;
   the sender is told why. A dashboard room update may set only `photo_url` in
   `metadata`; keys the server keeps, such as the budget flags, are refused.

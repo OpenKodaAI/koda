@@ -330,6 +330,11 @@ class SquadTaskStore:
         ttl_seconds: int = 300,
         coordinator_override: bool = False,
     ) -> TaskDescriptor:
+        """Claim a pending task for ``agent_id``.
+
+        A new claim is a live one: a ``claim_refused`` mark left by an earlier claim whose turn a
+        worker refused is cleared, so the claim is renewed and its expiry counted (D-097).
+        """
         if not agent_id:
             raise ValueError("agent_id is required")
         token = str(uuid.uuid4())
@@ -342,6 +347,7 @@ class SquadTaskStore:
                            assigned_agent_id = $2,
                            claim_token = $3,
                            claim_expires_at = NOW() + ($4 || ' seconds')::interval,
+                           metadata_json = COALESCE(metadata_json, '{{}}'::jsonb) - 'claim_refused',
                            version = version + 1,
                            updated_at = NOW()
                      WHERE id = $1

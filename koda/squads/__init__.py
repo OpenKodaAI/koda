@@ -63,6 +63,7 @@ from koda.squads.delivery import (
     summarize_route_quality_history,
 )
 from koda.squads.dispatch import (
+    SquadThreadNotFoundError,
     SquadThreadNotRunnableError,
     SquadTurnDispatchResult,
     dispatch_squad_turn,
@@ -225,6 +226,7 @@ __all__ = [
     "SquadTaskStore",
     "SquadTelegramBinding",
     "SquadTelegramBindingService",
+    "SquadThreadNotFoundError",
     "SquadThreadNotRunnableError",
     "SquadThreadStore",
     "SquadTurnDispatchResult",

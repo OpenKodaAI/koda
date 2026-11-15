@@ -28,6 +28,10 @@ class SquadThreadNotRunnableError(RuntimeError):
     """The squad thread is not open, or its spend reached its budget cap, so it runs no agent turn (D-075)."""
 
 
+class SquadThreadNotFoundError(SquadThreadNotRunnableError):
+    """The squad thread does not exist, so it runs no agent turn; a retry cannot help (D-075)."""
+
+
 def squad_thread_turn_refusal(thread: Any) -> str | None:
     """Why ``thread`` runs no agent turn now, or None when it may run one (D-075).
 
