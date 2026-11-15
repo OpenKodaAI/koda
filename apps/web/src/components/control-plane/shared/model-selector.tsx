@@ -638,7 +638,7 @@ export function ModelSelector({
                       type="button"
                       onClick={() => setSearch("")}
                       aria-label={t("generated.controlPlane.limpar_busca_0bb288dc")}
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)] focus-visible:outline-none"
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)]"
                     >
                       <X size={12} />
                     </button>

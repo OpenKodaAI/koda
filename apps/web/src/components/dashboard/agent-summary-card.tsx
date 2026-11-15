@@ -121,7 +121,7 @@ export function AgentSummaryCard({
   );
 
   const classes = cn(
-    "group relative w-full rounded-lg border border-transparent bg-transparent px-3 text-left transition-colors duration-75 hover:border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] focus:outline-none focus-visible:ring-[1.5px] focus-visible:ring-inset focus-visible:ring-[var(--text-primary)]",
+    "group relative w-full rounded-lg border border-transparent bg-transparent px-3 text-left transition-colors duration-75 hover:border-[var(--border-subtle)] hover:bg-[var(--surface-hover)]",
     active && "border-[var(--border-subtle)] bg-[var(--surface-hover)]",
     className
   );

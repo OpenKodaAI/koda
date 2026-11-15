@@ -323,7 +323,7 @@ function CreatePopover({
       <button
         type="button"
         className={cn(
-          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[var(--text-primary)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-hover)] active:scale-[0.96] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
+          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[var(--text-primary)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-hover)] active:scale-[0.96]",
           open && "bg-[var(--surface-hover)]",
         )}
         aria-label={t("generated.controlPlane.criar_93c27e0c")}

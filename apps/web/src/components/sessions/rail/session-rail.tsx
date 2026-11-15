@@ -336,7 +336,6 @@ function SessionRailImpl({
                   "bg-[var(--panel-strong)] text-[var(--text-primary)]",
                   "transition-[background-color,transform] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                   "hover:bg-[var(--surface-hover)] active:scale-[0.96]",
-                  "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--shell)]",
                 )}
               >
                 <Plus className="icon-sm" strokeWidth={1.75} aria-hidden />
@@ -432,7 +431,7 @@ function SessionRailImpl({
                               <button
                                 type="button"
                                 onClick={() => onNewChat(agent.id)}
-                                className="flex min-h-9 w-full items-center gap-2 rounded-[var(--radius-panel-sm)] px-1.5 py-1 text-left transition-colors hover:bg-[var(--hover-tint)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel)]"
+                                className="flex min-h-9 w-full items-center gap-2 rounded-[var(--radius-panel-sm)] px-1.5 py-1 text-left transition-colors hover:bg-[var(--hover-tint)]"
                               >
                                 <AgentGlyph
                                   agentId={agent.id}
@@ -481,7 +480,6 @@ function SessionRailImpl({
                         "border border-[color:var(--border-strong)] bg-transparent",
                         "text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]",
                         "transition-colors duration-[120ms] hover:bg-[var(--hover-tint)]",
-                        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel)]",
                         "disabled:border-[color:var(--border-subtle)] disabled:text-[var(--text-quaternary)]",
                       )}
                     >

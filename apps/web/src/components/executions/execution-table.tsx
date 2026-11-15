@@ -185,7 +185,6 @@ export function ExecutionTable({
                       "group relative grid w-full items-center gap-4 px-4 py-3 text-left",
                       "border-b border-[color:var(--divider-hair)] last:border-b-0",
                       "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-                      "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] focus-visible:ring-inset",
                       onExecutionClick && "cursor-pointer",
                       isSelected
                         ? "bg-[var(--table-row-selected)]"
@@ -287,7 +286,6 @@ export function ExecutionTable({
                 className={cn(
                   "relative flex w-full flex-col gap-2 border-b border-[color:var(--divider-hair)] px-4 py-3 text-left",
                   "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] last:border-b-0",
-                  "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] focus-visible:ring-inset",
                   isSelected
                     ? "bg-[var(--hover-tint)]"
                     : onExecutionClick && "hover:bg-[var(--hover-tint)]",

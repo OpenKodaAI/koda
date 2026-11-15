@@ -1007,7 +1007,7 @@ export function RoomChatPane({
                         "border border-[color:var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)] opacity-0 shadow-[var(--shadow-xs)]",
                         "transition-[opacity,background-color,color,border-color] duration-[120ms]",
                         "hover:border-[color:var(--border-strong)] hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]",
-                        "focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                        "focus:opacity-100",
                         "group-hover:opacity-100",
                       )}
                       aria-label={t("sessions.room.reply.action", undefined)}

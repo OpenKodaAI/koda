@@ -406,7 +406,6 @@ function ChatThreadImpl({
               "pointer-events-auto !inline-flex !h-9 !w-9 !min-w-9 !max-w-9 shrink-0 items-center justify-center rounded-full",
               "border border-[color:var(--border-subtle)] bg-[color:var(--panel)] text-[var(--text-secondary)] shadow-[var(--shadow-floating)] backdrop-blur",
               "transition-[background-color,border-color,color,transform] duration-[140ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[color:var(--border-strong)] hover:bg-[color:var(--panel-strong)] hover:text-[var(--text-primary)] active:scale-[0.98]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
             )}
             style={{ width: 36, minWidth: 36, maxWidth: 36 }}
           >

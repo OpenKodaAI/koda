@@ -96,7 +96,6 @@ export function ChatHeader({
             className={cn(
               "hidden h-8 w-8 items-center justify-center rounded-[var(--radius-panel-sm)] lg:inline-flex",
               "text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
               contextPanelOpen && "bg-[var(--panel-soft)] text-[var(--text-primary)]",
             )}
           >

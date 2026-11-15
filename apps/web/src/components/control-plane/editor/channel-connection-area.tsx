@@ -139,7 +139,6 @@ function ChannelCard({
       className={cn(
         "group relative flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left transition-all duration-220",
         "cursor-pointer outline-none",
-        "focus-visible:ring-2 focus-visible:ring-[var(--focus-ring)]",
         "border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)]",
         "hover:bg-[var(--surface-hover)]",
       )}

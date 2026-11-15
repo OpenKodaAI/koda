@@ -142,7 +142,6 @@ function LiveRow({ row }: { row: RuntimeRoomRow }) {
         "group grid w-full items-center gap-4 border-b border-[color:var(--divider-hair)] px-3 py-2.5 text-left last:border-b-0",
         "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
         "hover:bg-[var(--hover-tint)] focus-visible:bg-[var(--hover-tint)]",
-        "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)] focus-visible:ring-inset",
         liveTableColumns,
       )}
     >

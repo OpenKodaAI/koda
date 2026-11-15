@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { TagInputField } from "@/components/control-plane/shared/tag-input-field";
@@ -106,12 +107,68 @@ function declaration(body: string, property: string): string {
   return match[1].trim();
 }
 
-function sourceFiles(dir: string): string[] {
+function sourceFiles(dir: string, pattern = /\.tsx$/): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
-    if (entry.isDirectory()) return sourceFiles(path);
-    return entry.name.endsWith(".tsx") && !entry.name.includes(".test.") ? [path] : [];
+    if (entry.isDirectory()) return sourceFiles(path, pattern);
+    return pattern.test(entry.name) && !entry.name.includes(".test.") ? [path] : [];
   });
+}
+
+// Focus utilities that never paint on a control that is not a form field:
+// the reset nulls its box-shadow (ring-*, shadow-*), and the unlayered global
+// outline beats outline-none / outline-hidden.
+const DEAD_FOCUS_UTILITY = /focus(?:-visible)?:(?:ring|shadow|outline-none|outline-hidden)[^\s"'`]*/g;
+// Elements whose focus ring is drawn with box-shadow, which the reset spares.
+const FIELD_ELEMENTS = new Set(["input", "textarea", "select", "Input", "Textarea"]);
+
+/** The JSX element whose attribute holds `node`, if any. */
+function owningElement(node: ts.Node): ts.JsxOpeningLikeElement | null {
+  for (let current = node.parent; current; current = current.parent) {
+    if (ts.isJsxAttribute(current)) {
+      const element = current.parent.parent;
+      return ts.isJsxOpeningElement(element) || ts.isJsxSelfClosingElement(element)
+        ? element
+        : null;
+    }
+    if (ts.isJsxElement(current) || ts.isJsxFragment(current) || ts.isFunctionLike(current)) {
+      return null;
+    }
+  }
+  return null;
+}
+
+function isFormField(element: ts.JsxOpeningLikeElement, source: ts.SourceFile): boolean {
+  if (FIELD_ELEMENTS.has(element.tagName.getText(source))) return true;
+  return element.attributes.properties.some(
+    (attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText(source) === "contentEditable",
+  );
+}
+
+/** Every dead focus utility in class strings outside form fields, as `file:line utility`. */
+function deadFocusUtilities(path: string, text = readFileSync(path, "utf8")): string[] {
+  if (!text.match(DEAD_FOCUS_UTILITY)) return [];
+  const source = ts.createSourceFile(path, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const found: string[] = [];
+  const visit = (node: ts.Node) => {
+    const literal =
+      ts.isStringLiteralLike(node) ||
+      ts.isTemplateHead(node) ||
+      ts.isTemplateMiddle(node) ||
+      ts.isTemplateTail(node);
+    if (literal) {
+      const element = owningElement(node);
+      if (!element || !isFormField(element, source)) {
+        const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));
+        for (const [utility] of node.text.matchAll(DEAD_FOCUS_UTILITY)) {
+          found.push(`${relative(SRC, path)}:${line + 1} ${utility}`);
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
 }
 
 // Every surface a focused control can sit on.
@@ -352,6 +409,29 @@ describe("focus ring contract (M8-E1-T1)", () => {
         /focus(-visible)?:(ring|shadow|outline-none|outline-hidden)/,
       );
     }
+  });
+
+  it("no control outside a form field carries focus ring, shadow or outline-none utilities", () => {
+    // They never paint (see DEAD_FOCUS_UTILITY), so they only mislead: a
+    // copied focus-visible:ring-[var(--accent)] still shows the grey outline.
+    const offenders = sourceFiles(SRC, /\.tsx?$/).flatMap((path) => deadFocusUtilities(path));
+    expect(offenders).toEqual([]);
+  });
+
+  it("the dead-utility scan skips form fields and still sees class constants", () => {
+    const probe = join(SRC, "components/ui/focus-probe.tsx");
+    const fixture = [
+      'const tab = "px-2 focus-visible:ring-2";',
+      'export const A = () => <input className="focus-visible:ring-1" />;',
+      'export const B = () => <div contentEditable className="focus:shadow-sm" />;',
+      'export const C = () => <button className={cn("x", "focus-visible:outline-none")} />;',
+      "export const D = () => <Link className={`a ${tab} focus:ring-[var(--accent)]`} />;",
+    ].join("\n");
+    expect(deadFocusUtilities(probe, fixture)).toEqual([
+      "components/ui/focus-probe.tsx:1 focus-visible:ring-2",
+      "components/ui/focus-probe.tsx:4 focus-visible:outline-none",
+      "components/ui/focus-probe.tsx:5 focus:ring-[var(--accent)]",
+    ]);
   });
 
   it("the toast sets --focus-ring to its own text colour, at full opacity on focus", async () => {

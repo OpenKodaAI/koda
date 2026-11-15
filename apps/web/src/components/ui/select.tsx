@@ -190,7 +190,7 @@ const SelectContent = React.forwardRef<
                 type="button"
                 onClick={() => setQuery("")}
                 aria-label={translate("generated.ui.clear_search_10bcbac4")}
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)] focus-visible:outline-none"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)]"
               >
                 <X size={12} />
               </button>

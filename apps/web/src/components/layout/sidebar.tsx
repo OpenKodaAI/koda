@@ -323,7 +323,6 @@ export function Sidebar({
               }}
               className={cn(
                 "inline-flex min-h-[34px] items-center justify-center gap-2 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel)] px-3 text-[13px] font-medium text-[var(--text-primary)] transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--panel-strong)]",
-                "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--sidebar-surface)]",
                 collapsed ? "lg:h-9 lg:w-9 lg:px-0" : "w-full",
               )}
               {...tourAnchor("shell.sidebar.new-session")}

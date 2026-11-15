@@ -344,7 +344,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               type="button"
               onClick={handleCancel}
               disabled={submitting}
-              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium text-[var(--text-secondary)] transition-colors duration-[120ms] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] disabled:opacity-60"
+              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium text-[var(--text-secondary)] transition-colors duration-[120ms] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60"
             >
               {t("common.cancel", undefined)}
             </button>
@@ -355,7 +355,6 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               className={cn(
                 "inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium",
                 "bg-[var(--accent)] text-[var(--accent-text)] transition-[background-color,color] duration-[120ms] hover:bg-[var(--accent-hover)]",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
                 "disabled:bg-[var(--panel-strong)] disabled:text-[var(--text-quaternary)]",
               )}
             >

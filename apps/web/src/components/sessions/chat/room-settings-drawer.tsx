@@ -770,7 +770,6 @@ export function RoomSettingsPanel({
                           "text-[0.75rem] font-medium tracking-[-0.005em] text-[var(--text-secondary)]",
                           "transition-[background-color,border-color,color] duration-[120ms] ease-[var(--ease-out-quart)]",
                           "hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
-                          "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
                         )}
                       >
                         <Plus className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
@@ -891,7 +890,6 @@ function ActionTile({
       disabled={disabled || busy}
       className={cn(
         "transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-        "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
         compact
           ? "inline-flex h-8 min-w-0 flex-1 items-center justify-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-transparent bg-transparent px-2 text-[0.75rem] font-medium"
           : "group flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-2 py-2.5 text-[0.75rem] font-medium hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)]",
@@ -999,7 +997,6 @@ function RoleSelect({
             "transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             "hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
             "data-[state=open]:border-[color:var(--border-strong)] data-[state=open]:bg-[var(--surface-hover)] data-[state=open]:text-[var(--text-primary)]",
-            "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
             "disabled:opacity-60",
           )}
         >

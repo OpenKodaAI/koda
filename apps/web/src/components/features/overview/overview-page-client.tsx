@@ -345,7 +345,6 @@ function OverviewPageContent() {
                         className={cn(
                           "inline-flex h-8 items-center gap-2 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-transparent px-3 text-[0.8125rem] font-medium text-[var(--text-secondary)]",
                           "transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
-                          "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
                         )}
                       >
                         <Icon className="h-3.5 w-3.5" aria-hidden="true" />

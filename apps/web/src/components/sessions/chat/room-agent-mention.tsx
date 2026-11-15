@@ -110,7 +110,7 @@ export function RoomAgentMentionBadge({
         <button
           type="button"
           onClick={() => onRemove(mention)}
-          className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]"
+          className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
           aria-label={`Remove @${mention.label}`}
         >
           <X className="h-2.5 w-2.5" strokeWidth={2} aria-hidden />

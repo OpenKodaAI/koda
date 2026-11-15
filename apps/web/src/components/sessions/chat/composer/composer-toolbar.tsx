@@ -62,7 +62,6 @@ export function ComposerToolbar({
                     "bg-[var(--panel)] px-1.5 py-0.5 text-[var(--text-secondary)]",
                     "transition-[border-color,background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                     "hover:border-[color:var(--border-strong)] hover:text-[var(--text-primary)]",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel-soft)]",
                   )}
                 >
                   {agentId ? (
