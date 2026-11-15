@@ -86,7 +86,8 @@ operator reinstalls and reviews the package to load it again.
 The check reads each package file once, and the code that runs is the bytes it
 hashed, never a later read of the files, so a file rewritten after the check
 does not run (D-292). The handlers compile from those bytes, and from the time
-a package registers until it is unregistered or uninstalled, so does every module file
+a package registers until it is unregistered or uninstalled (after that every
+module file there is refused, see below), so does every module file
 inside its directory, however package code loads it, while the handlers
 register or later, at tool-call time: an `import` statement,
 `importlib.util.spec_from_file_location` or a `SourceFileLoader` of its own all
@@ -128,12 +129,18 @@ directory:
   module in an archive (`zipimport`).
 
 Every other way to run code compiles or loads what it reads at call time, so it
-is left to the scanner, which flags these as `python.exec_from_file` (review
-required):
+is left to the scanner, which flags these standard routes as
+`python.exec_from_file` (review required), by the names below:
 
 - `runpy` (`run_path` compiles a file it reads itself);
-- `compile`, and `exec`, `eval` or `compile` reached through `builtins` (bare
-  `exec` and `eval` are denied);
+- the builtin `compile`, called with its three arguments (source, filename and
+  mode, or through `*` or `**`) or passed on as a value, and `exec`, `eval` or
+  `compile` reached through `builtins` (bare `exec` and `eval` are denied); a
+  call with fewer arguments, such as `re.compile('a+')` imported as `compile`,
+  cannot be the builtin and is not flagged;
+- `source_to_code`, a loader's compile step, called on bytes the code read
+  itself (for example on a `SourceFileLoader` instance), whose code object can
+  then run through `types.FunctionType` or a function's `__code__`;
 - interpreters, debuggers, profilers and runners that run source text: `code`,
   `codeop`, `bdb`, `pdb`, `profile`, `cProfile`, `trace`, `timeit`, `doctest`;
 - code objects or calls made from bytes: `marshal`, `pickle`, `_pickle`,
@@ -142,20 +149,30 @@ required):
   `importlib._bootstrap_external`, `_frozen_importlib`,
   `_frozen_importlib_external`, `_imp`, `SourcelessFileLoader` and
   `ExtensionFileLoader` used directly (a file outside the package loads from
-  disk), and any class that defines `get_code`, `exec_module`,
-  `create_module`, `load_module` or `source_to_code` (a loader of its own,
-  including a `SourceFileLoader` subclass that replaces `get_code`);
+  disk), any class that defines `exec_module`, `create_module`, `load_module`
+  or `source_to_code` (a loader of its own), and a class with a base that
+  defines `get_code` (a `SourceFileLoader` subclass that replaces it; only a
+  loader's `exec_module` calls `get_code`, so a class with no base, such as
+  `class Country` with a `get_code` method, is not flagged);
 - `site` (it runs the `import` lines of `.pth` files);
 - native code: `ctypes`, `_ctypes`;
 - another interpreter, which imports from disk without the guarantee:
   `multiprocessing`, `ProcessPoolExecutor`, `os.exec*`, `os.spawn*`,
-  `os.posix_spawn*`, `os.popen`, `pty.spawn`, `asyncio.create_subprocess_*`
-  and the event loop's `subprocess_exec` and `subprocess_shell` (`subprocess`
-  and `os.system` are denied).
+  `os.posix_spawn*`, `os.popen`, the same calls in `posix` (`posix.exec*`,
+  `posix.posix_spawn*`), `_posixsubprocess`, `pty.spawn`,
+  `asyncio.create_subprocess_*` and the event loop's `subprocess_exec` and
+  `subprocess_shell` (`subprocess` and `os.system` are denied).
 
-The scanner matches names as the code writes them, including a literal module
-name passed to `importlib.import_module` or `__import__`; a name computed at run
-time is not seen. Code loaded from a file outside the package directory, for
+The scanner matches names as the code writes them and as the name an import in
+the same file stands for (after `import builtins as b`, `b.exec` is
+`builtins.exec`; after `import os as o`, `o.execv` is `os.execv`), including a
+literal module name passed to `importlib.import_module` or `__import__`
+(`__import__('os').execv` is `os.execv`); a name bound by an assignment or
+computed at run time is not seen. A package module named after one of the
+modules above (a `code.py` imported as `import code`) is flagged as well:
+whether that import loads the package's module or the standard one depends on
+which was imported first in the process, so give the package's module another
+name. Code loaded from a file outside the package directory, for
 example one package code writes and then imports, runs from that file like any
 other module outside a package.
 
@@ -165,11 +182,17 @@ reloads a package from its lock, which hashes the files first, and the plugin
 registry never reloads a skill package from its files.
 
 Unregistering a skill package (on uninstall, and before it registers again on
-install, reinstall, rollback or `plugin_reload`) drops its directory from that
-lookup and removes from `sys.modules` every module whose file lies under it,
-the modules package code imported under its own names included, so an import
-after a reinstall runs the bytes verified for that install rather than a module
-object kept from before (D-310).
+install, reinstall, rollback or `plugin_reload`) maps its directory to no
+verified bytes and removes from `sys.modules` every module loaded from under
+it: a module whose file lies there, the modules package code imported under its
+own names included, and a namespace package (a directory without
+`__init__.py`) whose path lies there, which would otherwise hand back its old
+submodules. An import after a reinstall or a rollback runs the bytes verified
+for that registration rather than a module object kept from before, and until
+the package registers again, every module file in its directory is refused
+with an `ImportError`, whether package code still running asks for it (a call
+in flight, a task the package started) or the new registration was refused
+because the files changed: nothing there is read from disk (D-310).
 
 A rollback restores the previous lock, not the previous files. When the files
 on disk no longer hash to that revision's `package_hash`, for example because

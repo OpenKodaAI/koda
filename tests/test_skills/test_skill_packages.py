@@ -168,6 +168,28 @@ _EXEC_FROM_FILE_CASES = [
     ("from multiprocessing import Process\n" + _STUB_HANDLER, "multiprocessing"),
     ("import os, sys\nos.execv(sys.executable, [sys.executable, __file__])\n" + _STUB_HANDLER, "os.execv"),
     ("import asyncio\nasyncio.create_subprocess_exec('python')\n" + _STUB_HANDLER, "asyncio.create_subprocess_exec"),
+    # A SourceFileLoader's own source_to_code, called on bytes the code read itself.
+    (
+        "import importlib.machinery, types\n"
+        "loader = importlib.machinery.SourceFileLoader('n', __file__)\n"
+        "c = loader.source_to_code(open(__file__, 'rb').read(), __file__)\n"
+        "types.FunctionType(c, {})()\n" + _STUB_HANDLER,
+        "source_to_code",
+    ),
+    # The call routes through an import alias, the posix module or a literal __import__.
+    ("import builtins as b\nb.exec(open(__file__).read())\n" + _STUB_HANDLER, "builtins.exec"),
+    ("from builtins import compile as c\n" + _STUB_HANDLER, "builtins.compile"),
+    ("import os as o, sys\no.execv(sys.executable, [sys.executable, __file__])\n" + _STUB_HANDLER, "os.execv"),
+    ("import posix, sys\nposix.execv(sys.executable, [sys.executable, __file__])\n" + _STUB_HANDLER, "posix.execv"),
+    ("import sys\n__import__('os').execv(sys.executable, [sys.executable])\n" + _STUB_HANDLER, "os.execv"),
+    ("import _posixsubprocess\n" + _STUB_HANDLER, "_posixsubprocess"),
+    # The builtin compile passed on rather than called, and a loader subclass that replaces get_code.
+    ("from functools import partial\nrun = partial(compile, mode='exec')\n" + _STUB_HANDLER, "compile"),
+    (
+        "from importlib.machinery import SourceFileLoader\n\n\nclass L(SourceFileLoader):\n"
+        "    def get_code(self, fullname):\n        return None\n" + _STUB_HANDLER,
+        "get_code",
+    ),
 ]
 
 
@@ -190,6 +212,27 @@ def test_a_package_that_runs_code_from_a_file_outside_the_import_system_needs_re
     routes = [finding.message for finding in scan.findings if finding.id == "python.exec_from_file"]
     assert len(routes) == 1
     assert routes[0].endswith(f": {route}")
+
+
+_NOT_EXEC_FROM_FILE_CASES = [
+    "class Country:\n    def get_code(self):\n        return 'BR'\n",
+    "from re import compile\nP = compile('a+')\n",
+    "import re\nP = re.compile('a+', re.IGNORECASE)\n",
+]
+
+
+@pytest.mark.parametrize("handler_source", _NOT_EXEC_FROM_FILE_CASES)
+def test_ordinary_code_that_shares_a_name_with_a_code_running_route_is_not_flagged(
+    tmp_path: Path, handler_source: str
+) -> None:
+    """D-311: a get_code method on a class that is not a loader, or a regex compile, needs no review."""
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(handler_source + _STUB_HANDLER, encoding="utf-8")
+
+    scan = scan_skill_package(package_dir, agent_id="ATLAS")
+
+    assert [finding.message for finding in scan.findings if finding.id == "python.exec_from_file"] == []
+    assert scan.decision == "allow"
 
 
 def test_install_uninstall_and_runtime_skill_merge_use_lock_fallback(tmp_path: Path) -> None:
@@ -804,10 +847,10 @@ def test_a_module_or_handler_reached_through_a_directory_symlink_in_the_package_
     assert result.output == "safe"
 
 
-def test_a_reinstalled_package_imports_its_new_bytes_and_an_uninstalled_one_leaves_no_module_or_root_behind(
+def test_a_reinstalled_package_imports_its_new_bytes_and_an_uninstalled_one_leaves_no_module_and_no_bytes_behind(
     tmp_path: Path, plugin_registry: object
 ) -> None:
-    """D-310: unregistering a package drops its root and every module loaded from under it."""
+    """D-310: unregistering a package drops every module loaded from under it, and its root maps to no bytes."""
     import asyncio
 
     from koda.plugins.registry import PluginRegistry
@@ -843,7 +886,94 @@ def test_a_reinstalled_package_imports_its_new_bytes_and_an_uninstalled_one_leav
     assert first == "first install"
     assert second == "reinstalled"
     assert left_behind == []
-    assert _package._PACKAGE_SOURCE_ONLY_CODE._package_file(str(notes)) is None
+    assert _package._PACKAGE_SOURCE_ONLY_CODE._package_file(str(notes)) == ({}, "safe_pack_notes.py")
+
+
+_NAMESPACE_IMPORT_HANDLER = """
+import sys
+from pathlib import Path
+
+
+async def read_notes(params, ctx):
+    package_dir = str(Path(__file__).parent)
+    sys.path.insert(0, package_dir)
+    try:
+        from safe_ns_pkg import notes
+    finally:
+        sys.path.remove(package_dir)
+    from koda.services.tool_dispatcher import AgentToolResult
+
+    return AgentToolResult(tool="safe_notes", success=True, output=notes.NOTES)
+"""
+
+
+def test_a_namespace_package_in_the_package_imports_its_new_bytes_after_a_reinstall_and_a_rollback(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """D-310: a namespace package (no __init__.py, so no __file__) under the root is dropped too."""
+    import asyncio
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(_NAMESPACE_IMPORT_HANDLER, encoding="utf-8")
+    (package_dir / "safe_ns_pkg").mkdir()
+    notes = package_dir / "safe_ns_pkg" / "notes.py"
+    notes.write_text('NOTES = "first install"\n', encoding="utf-8")
+
+    def call_handler() -> object:
+        handler = plugin_registry.get_handler("safe_notes")  # type: ignore[attr-defined]
+        assert handler is not None
+        return asyncio.run(handler({}, None)).output
+
+    try:
+        install_skill_package(package_dir, agent_id="ATLAS")
+        first = call_handler()
+        notes.write_text('NOTES = "reinstalled"\n', encoding="utf-8")
+        install_skill_package(package_dir, agent_id="ATLAS")
+        second = call_handler()
+        notes.write_text('NOTES = "first install"\n', encoding="utf-8")
+        rollback_skill_package("ATLAS", "safe_pack")
+        rolled_back = call_handler()
+    finally:
+        sys.modules.pop("safe_ns_pkg", None)
+        sys.modules.pop("safe_ns_pkg.notes", None)
+
+    assert (first, second, rolled_back) == ("first install", "reinstalled", "first install")
+
+
+@pytest.mark.parametrize("ending", ["uninstall", "reregister_with_modified_files"])
+def test_package_code_still_running_after_its_package_is_unregistered_never_loads_unverified_bytes(
+    tmp_path: Path, plugin_registry: object, ending: str
+) -> None:
+    """D-310: an unregistered package's root maps to no bytes: a later lazy import there is refused, not read."""
+    import asyncio
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(_LAZY_IMPORT_HANDLER, encoding="utf-8")
+    notes = package_dir / "safe_pack_notes.py"
+    notes.write_text('NOTES = "safe"\n', encoding="utf-8")
+    install_skill_package(package_dir, agent_id="ATLAS")
+    # A call in flight, or a task the package started, holds the handler past the end of its registration.
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+
+    if ending == "uninstall":
+        uninstall_skill_package("ATLAS", "safe_pack")
+        notes.write_text('NOTES = "changed on disk"\n', encoding="utf-8")
+    else:
+        notes.write_text('NOTES = "changed on disk"\n', encoding="utf-8")
+        refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+        assert refused["safe_pack"]["status"] == "modified"
+    try:
+        with pytest.raises(ImportError, match="not a verified file"):
+            asyncio.run(handler({}, None))
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
 
 
 _ZIP_IMPORT_HANDLER = """

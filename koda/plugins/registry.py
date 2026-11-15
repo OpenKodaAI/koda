@@ -89,7 +89,7 @@ class PluginRegistry:
         for k in to_remove:
             del sys.modules[k]
         if manifest.sources is not None:
-            # A skill package: drop its root and the modules its code imported under its own names (D-310).
+            # A skill package: its files map to no bytes now, and the modules its code imported are dropped (D-310).
             from koda.skills._package import _PACKAGE_SOURCE_ONLY_CODE
 
             _PACKAGE_SOURCE_ONLY_CODE.remove_root(manifest.plugin_dir)

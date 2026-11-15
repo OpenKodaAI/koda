@@ -77,6 +77,7 @@ _EXEC_FROM_FILE_MODULES = frozenset(
         "_ctypes",
         # Another interpreter, which imports from disk.
         "multiprocessing",
+        "_posixsubprocess",
     }
 )
 _EXEC_FROM_FILE_NAMES = frozenset(
@@ -87,19 +88,28 @@ _EXEC_FROM_FILE_NAMES = frozenset(
         "ProcessPoolExecutor",
         "subprocess_exec",
         "subprocess_shell",
+        # A loader's compile step, called on bytes the code read itself.
+        "source_to_code",
     }
 )
-_EXEC_FROM_FILE_CALLS = frozenset({"compile", "builtins.compile", "builtins.exec", "builtins.eval"})
+# Matched by the name as written and by the name an import alias stands for. The builtin compile,
+# called bare, has a rule of its own (_exec_from_file_routes).
+_EXEC_FROM_FILE_CALLS = frozenset({"builtins.compile", "builtins.exec", "builtins.eval"})
 _EXEC_FROM_FILE_CALL_PREFIXES = (
     "os.exec",
     "os.spawn",
     "os.posix_spawn",
     "os.popen",
+    "posix.exec",
+    "posix.posix_spawn",
     "pty.spawn",
     "asyncio.create_subprocess_",
 )
 # A class that defines one of these is a loader of its own, which runs what it reads.
-_LOADER_METHODS = frozenset({"get_code", "exec_module", "create_module", "load_module", "source_to_code"})
+_LOADER_METHODS = frozenset({"exec_module", "create_module", "load_module", "source_to_code"})
+# Only a loader's exec_module calls get_code (and runpy, which is flagged), so a get_code method runs
+# what it returns only in a class that can inherit one: a class with a base, such as a SourceFileLoader subclass.
+_INHERITED_LOADER_METHODS = frozenset({"get_code"})
 _SECRET_RE = re.compile(
     r"(-----BEGIN [A-Z ]*PRIVATE KEY-----|"
     r"\b(?:api[_-]?key|secret|token|password)\b\s*[:=]\s*['\"][^'\"]{12,}|"
@@ -438,7 +448,7 @@ def uninstall_skill_package(agent_id: str | None, package_id: str) -> dict[str, 
     _unregister_plugin_if_present(package_id)
     package_path = str(lock.get("package_path") or "").strip()
     if package_path:
-        # Unregistering drops a registered package's root; this also drops one that never registered (D-310).
+        # Unregistering ends a registered package's root; this also covers one that never registered (D-310).
         _PACKAGE_SOURCE_ONLY_CODE.remove_root(Path(package_path))
     _clear_tool_registry_cache()
     _emit_package_metric(
@@ -699,7 +709,8 @@ class _PackageSourceOnlyCode:
     or a ``SourceFileLoader`` of its own). Every one of those ends in
     ``SourceFileLoader.get_code``, so once a package registers, that method compiles a file
     inside a package directory from the bytes its integrity check read and hashed, until the
-    package is unregistered or uninstalled (D-310), and refuses a file that was not hashed. A
+    package is unregistered or uninstalled (then every file there is refused until it registers
+    again, D-310), and refuses a file that was not hashed. A
     file is found by the path the loader was given, so a file or directory inside a package
     swapped for a symlink after the check still maps to the bytes hashed at that place. Only
     when no bytes were hashed at that path is it matched by its real path too: inside the
@@ -760,20 +771,38 @@ class _PackageSourceOnlyCode:
             zipimport.zipimporter.load_module = zip_load_module  # type: ignore[method-assign, assignment]
 
     def remove_root(self, package_dir: Path) -> None:
-        """Forget a package that is unregistered or uninstalled, and every module loaded from under it (D-310).
+        """End a package's registration: its files map to no bytes, and its modules are forgotten (D-310).
 
-        Its files no longer map to bytes verified for a registration that ended, and a module
-        package code imported under its own name is not kept, so the next import after a
-        reinstall loads the bytes verified then instead of returning the old module object.
+        The root stays, mapped to no verified bytes, so a file there is refused rather than read
+        from disk, by package code still running (a call in flight, a task it started) and after
+        a reinstall whose integrity check fails; ``add_root`` replaces it on the next verified
+        registration. Every module loaded from under the root leaves ``sys.modules``, a
+        namespace package there included (it has a ``__path__`` but no ``__file__``, and keeps
+        its submodules as attributes), so the next import after a reinstall or a rollback loads
+        the bytes verified then instead of returning the old module object.
         """
         roots = (os.path.join(os.path.abspath(package_dir), ""), os.path.join(os.path.realpath(package_dir), ""))
-        self._sources = {root: sources for root, sources in self._sources.items() if root not in roots}
+        self._sources = {**self._sources, **dict.fromkeys(roots, {})}
+
+        def under_root(path: object) -> bool:
+            return isinstance(path, str) and any(
+                os.path.join(candidate, "").startswith(roots)
+                for candidate in (os.path.abspath(path), os.path.realpath(path))
+            )
+
+        loaded_from_root = []
         for name, module in list(sys.modules.items()):
-            file = module.__dict__.get("__file__") if isinstance(module, types.ModuleType) else None
-            if isinstance(file, str) and (
-                os.path.abspath(file).startswith(roots) or os.path.realpath(file).startswith(roots)
-            ):
-                sys.modules.pop(name, None)
+            if not isinstance(module, types.ModuleType):
+                continue
+            try:
+                locations = [module.__dict__.get("__file__"), *(module.__dict__.get("__path__") or ())]
+            except Exception:
+                # A namespace package whose path cannot be recomputed (its parent is gone).
+                locations = [module.__dict__.get("__file__")]
+            if any(under_root(location) for location in locations):
+                loaded_from_root.append(name)
+        for name in loaded_from_root:
+            sys.modules.pop(name, None)
 
     def _package_file(self, path: str) -> tuple[dict[str, bytes], str] | None:
         """The verified bytes of the package *path* is in, and *path* under its root; None outside every package."""
@@ -1371,8 +1400,42 @@ def _scan_python_file(
 
 
 def _exec_from_file_routes(tree: ast.AST) -> set[str]:
-    """The names by which *tree* runs code past ``SourceFileLoader.get_code`` (D-311), as written."""
+    """The names by which *tree* runs code past ``SourceFileLoader.get_code`` (D-311).
+
+    A name is matched as written and as the name an import in the file stands for (after
+    ``import os as o``, ``o.execv`` is ``os.execv``), so an alias adds a match and never hides one.
+    """
     routes: set[str] = set()
+    aliases: dict[str, str] = {}
+    calls: dict[int, ast.Call] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            aliases.update((alias.asname, alias.name) for alias in node.names if alias.asname)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            aliases.update((alias.asname or alias.name, f"{node.module}.{alias.name}") for alias in node.names)
+        elif isinstance(node, ast.Call):
+            calls[id(node.func)] = node
+
+    def literal_import(call: ast.Call) -> tuple[str, str]:
+        """The module a literal ``__import__`` or ``importlib.import_module`` call imports, and the one it returns."""
+        first = call.args[0] if call.args else None
+        if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
+            return "", ""
+        functions = {_call_name(call.func), imported(call.func)}
+        if "importlib.import_module" in functions:
+            return first.value, first.value
+        if "__import__" in functions:
+            return first.value, first.value.split(".", 1)[0]
+        return "", ""
+
+    def imported(node: ast.AST) -> str:
+        """The dotted name *node* stands for through the file's imports, or "" when it does not name one."""
+        if isinstance(node, ast.Name):
+            return aliases.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            owner = imported(node.value)
+            return f"{owner}.{node.attr}" if owner else ""
+        return literal_import(node)[1] if isinstance(node, ast.Call) else ""
 
     def module(name: str) -> None:
         parts = name.split(".")
@@ -1382,9 +1445,24 @@ def _exec_from_file_routes(tree: ast.AST) -> set[str]:
             if prefix in _EXEC_FROM_FILE_MODULES
         )
 
-    def dotted(name: str) -> None:
-        if name in _EXEC_FROM_FILE_CALLS or name.startswith(_EXEC_FROM_FILE_CALL_PREFIXES):
-            routes.add(name)
+    def dotted(*names: str) -> None:
+        routes.update(
+            name for name in names if name in _EXEC_FROM_FILE_CALLS or name.startswith(_EXEC_FROM_FILE_CALL_PREFIXES)
+        )
+
+    def builtin_compile(call: ast.Call | None) -> bool:
+        """Whether a bare ``compile`` here can be the builtin: passed on, or called with its three arguments.
+
+        The builtin needs source, filename and mode, so a call with fewer (``re.compile('a+')``
+        imported as ``compile``) cannot compile a file; a call through ``*`` or ``**`` might.
+        """
+        if call is None:
+            return True
+        return (
+            len(call.args) + len(call.keywords) >= 3
+            or any(isinstance(arg, ast.Starred) for arg in call.args)
+            or any(keyword.arg is None for keyword in call.keywords)
+        )
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -1401,20 +1479,23 @@ def _exec_from_file_routes(tree: ast.AST) -> set[str]:
             name = node.id if isinstance(node, ast.Name) else node.attr
             if name in _EXEC_FROM_FILE_NAMES:
                 routes.add(name)
-            dotted(_call_name(node))
-        elif isinstance(node, ast.Call):
-            first = node.args[0] if node.args else None
+            dotted(_call_name(node), imported(node))
             if (
-                _call_name(node.func) in {"__import__", "importlib.import_module"}
-                and isinstance(first, ast.Constant)
-                and isinstance(first.value, str)
+                isinstance(node, ast.Name)
+                and node.id == "compile"
+                and isinstance(node.ctx, ast.Load)
+                and builtin_compile(calls.get(id(node)))
             ):
-                module(first.value)
+                routes.add("compile")
+        elif isinstance(node, ast.Call):
+            module(literal_import(node)[0])
         elif isinstance(node, ast.ClassDef):
+            inherits = any(not (isinstance(base, ast.Name) and base.id == "object") for base in node.bases)
             routes.update(
                 item.name
                 for item in node.body
-                if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef) and item.name in _LOADER_METHODS
+                if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef)
+                and (item.name in _LOADER_METHODS or (inherits and item.name in _INHERITED_LOADER_METHODS))
             )
     return routes
 
