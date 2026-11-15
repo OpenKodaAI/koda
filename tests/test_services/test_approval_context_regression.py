@@ -3,9 +3,11 @@
 The queue worker runs ``_run_agent_loop`` without setting the ``_execution_approved``
 contextvar, which only ``with_approval`` and scheduled jobs set. ``shell_execute`` and the
 ``git_*`` tools refuse to run without it, and so does a write in supervised mode, even when
-the execution policy allows the call. Each case drives the real agent loop and the real tool
-handler with the central policy gate stubbed to allow (only the provider, the runtime kernel
-and the git process are faked). Without an approval context the case is a strict xfail until
+the execution policy allows the call. Each case drives the real agent loop with the central
+policy gate stubbed to allow. The shell_execute and git_status cases run the real tool handler
+(only the provider, the runtime kernel and the git process are faked); the supervised_write
+case replaces the handler table with a stub job_create handler, since it checks that the call
+reaches a handler, not what job_create does. Without an approval context the case is a strict xfail until
 D-011 is fixed (M3-E3-T1); the same case inside the opt-in ``execution_approved`` fixture
 passes, which pins the contextvar as the only reason it fails.
 """

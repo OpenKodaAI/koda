@@ -387,16 +387,8 @@ class TestSupervisedMode:
     test_approval_context_regression.py)."""
 
     @pytest.mark.asyncio
-    async def test_write_passes_through_in_supervised(self):
-        """Write tools now execute in supervised mode (approval is in agent loop)."""
-        ctx = _make_ctx(agent_mode="supervised")
-        call = AgentToolCall(tool="web_search", params={"query": "test"}, raw_match="")
-        with patch("koda.services.http_client.search_web", new_callable=AsyncMock, return_value="results"):
-            result = await execute_tool(call, ctx)
-        assert result.success
-
-    @pytest.mark.asyncio
     async def test_read_allowed_in_supervised(self):
+        """A supervised-mode read (web_search) reaches its handler without an approval context."""
         ctx = _make_ctx(agent_mode="supervised")
         call = AgentToolCall(tool="web_search", params={"query": "test"}, raw_match="")
         with patch("koda.services.http_client.search_web", new_callable=AsyncMock, return_value="results"):

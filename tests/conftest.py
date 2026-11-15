@@ -49,7 +49,14 @@ os.environ.pop(f"{os.environ['AGENT_ID']}_STATE_ROOT_DIR", None)
 
 
 def _koda_paths_under(root: Path) -> list[str]:
-    """Return the module-level path settings (UPPER_CASE names) of loaded koda modules inside ``root``."""
+    """Return the module-level path settings (UPPER_CASE names) of loaded koda modules inside ``root``.
+
+    This does not watch the filesystem. It inspects only UPPER_CASE module attributes as they stand
+    when called, so it cannot see lowercase or instance-held paths (a store object holding a path,
+    ``_state_dir = Path.home() / ".koda-state"``), paths patched only for the length of one test,
+    or writes made by subprocesses. A check of the real directory itself would race with other
+    checkouts that still write there.
+    """
     found = []
     for name, module in list(sys.modules.items()):
         if module is None or not (name == "koda" or name.startswith("koda.")):
@@ -64,7 +71,10 @@ def _koda_paths_under(root: Path) -> list[str]:
 
 @pytest.fixture(scope="session", autouse=True)
 def session_state_root():
-    """This session's STATE_ROOT_DIR; fails the run if a loaded module points into the real one."""
+    """This session's STATE_ROOT_DIR; fails the run if a loaded module points into the real one.
+
+    The end-of-session check has the blind spots listed on :func:`_koda_paths_under`.
+    """
     yield _SESSION_STATE_ROOT
     leaked = _koda_paths_under(_REAL_STATE_ROOT)
     assert not leaked, f"Koda paths under the real state dir {_REAL_STATE_ROOT}: {leaked}"
