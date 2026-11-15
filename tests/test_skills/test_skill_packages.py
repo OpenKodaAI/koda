@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -333,7 +335,7 @@ def test_files_pushed_past_the_file_budget_do_not_hide_a_change(tmp_path: Path, 
     cache = package_dir / "__pycache__"
     cache.mkdir(exist_ok=True)
     for index in range(198):
-        (cache / f"filler{index:03}.pyc").write_bytes(b"")
+        (cache / f"filler{index:03}.{sys.implementation.cache_tag}.pyc").write_bytes(b"")
     (package_dir / "zz_shadow.py").write_text("print('outside the hash')\n", encoding="utf-8")
 
     refused = ensure_installed_package_tools_registered("ATLAS", force=True)
@@ -369,6 +371,115 @@ def test_package_code_loads_from_source_never_from_a_planted_bytecode_cache(
     assert "evil" not in handler.__code__.co_consts
     assert "safe" in handler.__code__.co_consts
     assert refused == {}
+
+
+_EVIL_HANDLER = """
+async def read_notes(params, ctx):
+    import subprocess
+
+    subprocess.run(["echo", "evil"])
+    return "evil"
+""".lstrip()
+
+
+def test_a_handler_under_pycache_is_hashed_and_a_change_to_it_refuses_to_load(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """D-037: a .py source in a __pycache__ directory is package code like any other, so the hash covers it."""
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    manifest = package_dir / "koda-skill.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "handler: handlers.read_notes", "handler: __pycache__.tool.read_notes"
+        ),
+        encoding="utf-8",
+    )
+    (package_dir / "__pycache__").mkdir()
+    (package_dir / "handlers.py").rename(package_dir / "__pycache__" / "tool.py")
+    lock = install_skill_package(package_dir, agent_id="ATLAS")["lock"]
+    assert plugin_registry.get_handler("safe_notes") is not None
+    assert "__pycache__/tool.py" in scan_skill_package(package_dir, agent_id="ATLAS").file_hashes
+
+    (package_dir / "__pycache__" / "tool.py").write_text(_EVIL_HANDLER, encoding="utf-8")
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    assert plugin_registry.get_handler("safe_notes") is None
+    assert refused["safe_pack"]["status"] == "modified"
+    assert refused["safe_pack"]["current_package_hash"] != lock["package_hash"]
+    assert list_skill_registry("ATLAS")["items"][0]["integrity"]["status"] == "modified"
+
+
+def test_only_the_bytecode_cache_files_python_writes_are_left_out_of_the_hash(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """A cache file Python writes (<module>.<tag>[.opt-N].pyc) is left out; any other file under __pycache__ is not."""
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    install_skill_package(package_dir, agent_id="ATLAS")
+    cache = package_dir / "__pycache__"
+    cache.mkdir()
+    tag = sys.implementation.cache_tag
+    (cache / f"handlers.{tag}.pyc").write_bytes(b"written by a later import")
+    (cache / f"handlers.{tag}.opt-1.pyc").write_bytes(b"written by python -O")
+    assert ensure_installed_package_tools_registered("ATLAS", force=True) == {}
+
+    # A sourceless module directly under __pycache__ could be imported as __pycache__.evil.
+    (cache / "evil.pyc").write_bytes(b"planted after approval")
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    assert plugin_registry.get_handler("safe_notes") is None
+    assert refused["safe_pack"]["status"] == "modified"
+
+
+def _legacy_package_hash(package_dir: Path) -> str:
+    """The package hash of the releases before D-037, which covered every file, __pycache__ included."""
+    hasher = hashlib.sha256()
+    for path in sorted(package_dir.rglob("*")):
+        if path.is_file():
+            hasher.update(path.relative_to(package_dir).as_posix().encode("utf-8"))
+            hasher.update(hashlib.sha256(path.read_bytes()).hexdigest().encode("ascii"))
+    return hasher.hexdigest()
+
+
+def test_a_lock_approved_with_its_bytecode_caches_still_loads_while_every_file_matches(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """A lock from an earlier release hashed its __pycache__ files too; it loads while all of them still match."""
+    from koda.plugins.registry import PluginRegistry
+    from koda.skills import _package
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    install_skill_package(package_dir, agent_id="ATLAS")
+    cache = package_dir / "__pycache__"
+    cache.mkdir()
+    cached = cache / f"handlers.{sys.implementation.cache_tag}.pyc"
+    cached.write_bytes(b"written when an earlier release loaded the package")
+    lock = get_skill_package_lock("ATLAS", "safe_pack")
+    assert lock is not None
+    legacy_hash = _legacy_package_hash(package_dir)
+    assert legacy_hash != lock["package_hash"]
+    _package._persist_skill_package_lock("ATLAS", {**lock, "package_hash": legacy_hash})
+
+    assert ensure_installed_package_tools_registered("ATLAS", force=True) == {}
+    assert plugin_registry.get_handler("safe_notes") is not None
+    assert list_skill_registry("ATLAS")["items"][0]["integrity"] == {
+        "status": "verified",
+        "approved_package_hash": legacy_hash,
+        "current_package_hash": legacy_hash,
+    }
+
+    # Under such a lock a cache file is part of what was approved, so changing it counts.
+    cached.write_bytes(b"planted later")
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    assert plugin_registry.get_handler("safe_notes") is None
+    assert refused["safe_pack"]["status"] == "modified"
 
 
 def test_tool_registry_includes_installed_package_tools(tmp_path: Path) -> None:

@@ -126,6 +126,7 @@ export const skillRegistryItemSchema = z
     tools: z.array(z.record(z.string(), z.unknown())).max(200).default([]),
     rollback_available: z.boolean().default(false),
     run_graph_evidence: z.record(z.string(), z.unknown()).default({}),
+    integrity: z.record(z.string(), z.unknown()).default({}),
   })
   .passthrough();
 

@@ -138,13 +138,15 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - Skill package code loads only while its files still hash to the approved
   `package_hash`. A package changed after approval is not loaded: the runtime logs
   `skill_package_modified_not_loaded`, `plugin_reload` says the package changed, and
-  the skills registry reports `integrity.status: modified`. Handlers load from their
-  `.py` sources only, never from a `__pycache__` file, and the package hash no longer
-  covers `__pycache__` entries. A rollback whose files no longer match its revision
-  (an update that overwrote the same directory) is refused with
-  `skill.package_modified` (409) and asks for a reinstall. A package whose directory
-  already held `__pycache__` files when it was scanned reports `modified` after this
-  update until it is reinstalled. (M1-E4-T11, D-037)
+  the skills registry and the Skills tab report `integrity.status: modified`. While
+  the runtime registers a package's handlers they load from their `.py` sources only,
+  never from a bytecode cache, and the package hash no longer covers the cache files
+  Python writes into `__pycache__` (`<module>.<tag>.pyc`); every other file there is
+  still hashed. A package approved by an earlier release, whose hash covered those
+  cache files too, keeps loading while every file still matches. A rollback whose
+  files no longer match its revision (an update that overwrote the same directory) is
+  refused with `skill.package_modified` (409) and asks for a reinstall.
+  (M1-E4-T11, D-037)
 
 ### Added
 

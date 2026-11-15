@@ -88,7 +88,8 @@ approved `package_hash` (an update that overwrote the same directory), return
 wanted version instead.
 
 A package whose files changed after approval is not loaded at all. The registry
-reports it with `integrity.status: modified`, and the runtime logs
+reports it with `integrity.status: modified`, the Skills tab's trust registry
+card says its tools are not loaded, and the runtime logs
 `skill_package_modified_not_loaded`. Reinstall it from a known-good source and
 review it again.
 

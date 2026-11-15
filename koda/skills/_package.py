@@ -47,6 +47,9 @@ _SECRET_RE = re.compile(
 )
 _VALID_PACKAGE_ID = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 _VALID_TOOL_ID = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
+# The name of a bytecode cache file Python writes into ``__pycache__``: ``<module>.<cache tag>.pyc``,
+# optionally with ``.opt-N`` before ``.pyc``. Its dotted stem cannot be imported as a module.
+_BYTECODE_CACHE_NAME = re.compile(r"^[^.]+\.[^.]+(\.opt-\d+)?\.pyc$")
 
 log = get_logger(__name__)
 _REGISTERED_PACKAGE_IDS: set[tuple[str, str]] = set()
@@ -580,6 +583,12 @@ def verify_skill_package_integrity(lock: dict[str, Any]) -> dict[str, Any]:
     findings: list[SkillScanFinding] = []
     if raw_path and Path(raw_path).is_dir():
         current, _ = _hash_package(Path(raw_path), findings)
+        if current != approved and not findings:
+            # Earlier releases hashed bytecode caches too. Such a lock still matches when every
+            # file, caches included, is the one that was approved.
+            legacy, _ = _hash_package(Path(raw_path), findings, include_bytecode_caches=True)
+            if legacy == approved:
+                current = legacy
     return {
         "status": "verified" if approved and current == approved and not findings else "modified",
         "approved_package_hash": approved,
@@ -589,11 +598,12 @@ def verify_skill_package_integrity(lock: dict[str, Any]) -> dict[str, Any]:
 
 @contextlib.contextmanager
 def _source_only_imports() -> Iterator[None]:
-    """Load package code from its source files only.
+    """Load package code from its source files only, while the handlers are registered.
 
     Bytecode caches are not part of the package hash, so Python must neither read a
     ``__pycache__`` entry next to the source (one planted there would run instead of the
-    verified source) nor write one. Both settings are process-wide and restored on exit.
+    verified source) nor write one. Both settings are process-wide and restored on exit, so
+    an import package code makes later, at tool-call time, uses Python's normal cache lookup.
     """
 
     previous_dont_write, previous_prefix = sys.dont_write_bytecode, sys.pycache_prefix
@@ -853,16 +863,19 @@ def _normalize_manifest_tool(item: Any) -> dict[str, Any]:
     }
 
 
-def _hash_package(package_dir: Path, findings: list[SkillScanFinding]) -> tuple[str, dict[str, str]]:
+def _hash_package(
+    package_dir: Path, findings: list[SkillScanFinding], *, include_bytecode_caches: bool = False
+) -> tuple[str, dict[str, str]]:
     files = _iter_package_files(package_dir, findings)
     package_hasher = hashlib.sha256()
     file_hashes: dict[str, str] = {}
     total_bytes = 0
     for file_path in files:
         rel = _rel(package_dir, file_path)
-        if "__pycache__" in Path(rel).parts:
-            # Bytecode caches change whenever Python imports the package and are never loaded
-            # (see _source_only_imports), so they are not part of the approved package.
+        if not include_bytecode_caches and _is_bytecode_cache(rel):
+            # Bytecode caches change whenever Python imports the package and are not loaded
+            # while its handlers register (see _source_only_imports), so they are not part of
+            # the approved package. Every other file under __pycache__ is.
             continue
         try:
             content = file_path.read_bytes()
@@ -895,6 +908,11 @@ def _hash_package(package_dir: Path, findings: list[SkillScanFinding]) -> tuple[
             )
         )
     return package_hasher.hexdigest(), file_hashes
+
+
+def _is_bytecode_cache(rel: str) -> bool:
+    parts = Path(rel).parts
+    return len(parts) >= 2 and parts[-2] == "__pycache__" and bool(_BYTECODE_CACHE_NAME.match(parts[-1]))
 
 
 def _iter_package_files(package_dir: Path, findings: list[SkillScanFinding]) -> list[Path]:
