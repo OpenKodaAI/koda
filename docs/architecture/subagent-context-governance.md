@@ -51,7 +51,8 @@ from task lineage and RunGraph data.
 Idempotency is keyed by parent task, parent attempt, tool-call signature, and
 child index. The database enforces `(agent_id, parent_task_id,
 idempotency_key)` and the in-process tool handler also prevents duplicate child
-task creation during a retry.
+task creation during a retry. The in-process map holds a child only while it
+runs: it is dropped when the child finishes, times out or is cancelled.
 
 ## Limits And Policy
 
@@ -86,6 +87,12 @@ the parent's dry-run flag and scheduled job and run ids, the child gets the
 dry-run prompt rules, a fresh provider turn and dry-run tools (writes are
 blocked), and its result lists the `dry_run` warning. The child never
 finalizes the parent's scheduled run.
+A child starts from a copy of its parent turn's context, so it inherits the
+parent's per-turn settings (such as `agent_mode`) and its total spend. The
+budget check (`MAX_TOTAL_BUDGET_USD`) therefore refuses a child once the
+parent's total reaches the budget, and when a child finishes its cost is added
+to the parent's total, so a parent cannot spend past its budget through
+children.
 Phase 3 fails closed for write, network-write, destructive, unknown, or
 unrecognized child toolsets until a stricter approval path is implemented.
 

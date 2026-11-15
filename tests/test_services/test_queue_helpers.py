@@ -1326,6 +1326,7 @@ class TestRuntimeTerminalCutover:
                 context_policy={},
                 toolset="read_only",
                 capabilities=capabilities,
+                **({"parent_user_data": parent_user_data} if parent_user_data is not None else {}),
             )
             await task
         return executed
@@ -1411,6 +1412,34 @@ class TestRuntimeTerminalCutover:
 
         assert seen_dry_run == [True]
         handlers["file_write"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_child_starts_from_its_parent_context_and_budget(self):
+        """D-374: the child sees its parent's settings and spends against the parent's budget."""
+        from koda.config import MAX_TOTAL_BUDGET_USD
+
+        parent_user_data = {
+            "provider": "claude",
+            "work_dir": "/tmp",
+            "session_id": "canon-1",
+            "agent_mode": "supervised",
+            "total_cost": MAX_TOTAL_BUDGET_USD,
+        }
+        executed = await self._started_child_raw_item(
+            {"agent_id": "default", "allowed_tool_ids": ["job_list"], "task_kind": "general"},
+            parent_user_data,
+        )
+        child_user_data = executed["user_data"]
+
+        # Not application.user_data[111] (total 0.0, no agent_mode): the parent's own turn context.
+        assert child_user_data["agent_mode"] == "supervised"
+        assert child_user_data["total_cost"] == MAX_TOTAL_BUDGET_USD
+        assert child_user_data is not parent_user_data  # the child's own keys stay in its copy
+
+        with pytest.raises(BudgetExceeded):
+            await _prepare_query_context(
+                SimpleNamespace(user_data=child_user_data), _parse_queue_item(executed["raw_item"]), user_id=111
+            )
 
     @pytest.mark.asyncio
     async def test_prepare_query_context_blocks_invalid_scheduled_workdir(self):

@@ -25,7 +25,7 @@ import subprocess
 import time
 import unicodedata
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -2321,6 +2321,7 @@ async def start_child_run_task(
     toolset: str,
     target_agent_id: str | None = None,
     capabilities: dict[str, Any] | None = None,
+    parent_user_data: Mapping[str, Any] | None = None,
     bot_override: Any | None = None,
     user_data_overlay: dict[str, Any] | None = None,
 ) -> tuple[int, asyncio.Task[None]]:
@@ -2329,6 +2330,11 @@ async def start_child_run_task(
     This uses normal task persistence and execution machinery, but does not
     enqueue behind the parent user's FIFO worker. Parent tasks wait for child
     results; putting children behind the same per-user FIFO would deadlock.
+
+    The child's context is a copy of ``parent_user_data``, the parent turn's own
+    context, so the child inherits the parent's per-turn settings and is checked
+    against the parent's spend; the parent adds the child's cost to its total
+    when the child finishes.
     """
 
     if _shutting_down:
@@ -2360,7 +2366,8 @@ async def start_child_run_task(
         child_run_id=child_run_id,
     )
     context = build_runtime_context(application, user_id, bot_override=bot_override)
-    context.user_data = dict(getattr(context, "user_data", {}) or {})
+    base_user_data = parent_user_data if parent_user_data is not None else getattr(context, "user_data", {})
+    context.user_data = dict(base_user_data or {})
     if provider:
         context.user_data["provider"] = provider
     if model:

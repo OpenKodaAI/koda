@@ -467,6 +467,18 @@ def _summarize_child_task(agent_id: str, child_run_id: str, child_task_id: int, 
     }
 
 
+def _count_child_cost_against_parent(ctx: Any, result: Mapping[str, Any]) -> None:
+    """Add a finished child's cost to its parent's total, the one the budget check reads (D-374).
+
+    The child spends from a copy of the parent's context, so without this its cost would never
+    reach the parent's total and a parent could spend past its budget through children.
+    """
+    cost = _float_or_none(result.get("cost_usd"))
+    user_data = getattr(ctx, "user_data", None)
+    if cost and isinstance(user_data, dict):
+        user_data["total_cost"] = float(user_data.get("total_cost") or 0.0) + cost
+
+
 async def _await_existing_child_task(child_task_id: int, timeout_seconds: int) -> None:
     from koda.services.queue_manager import get_task_info
 
@@ -578,6 +590,7 @@ async def _execute_one_child_request(
         toolset=toolset,
         target_agent_id=target_agent_id,
         capabilities=capabilities,
+        parent_user_data=getattr(ctx, "user_data", None),
         bot_override=getattr(ctx, "bot", None),
         user_data_overlay={
             "child_run_depth": _int(ctx.user_data.get("child_run_depth"), 0) + 1,
@@ -585,7 +598,8 @@ async def _execute_one_child_request(
             "child_run_id": child_run_id,
         },
     )
-    _IN_PROCESS_CHILD_TASKS[(parent_task_id, idempotency_key)] = child_task_id
+    in_process_key = (parent_task_id, idempotency_key)
+    _IN_PROCESS_CHILD_TASKS[in_process_key] = child_task_id
     await upsert_child_run(
         agent_id=agent_id,
         child_run_id=child_run_id,
@@ -635,8 +649,12 @@ async def _execute_one_child_request(
             error=error_envelope("subagent.cancelled", "Parent run cancelled the child run.", category="runtime"),
         )
         raise
+    finally:
+        # The child finished, timed out or was cancelled with its parent: drop it, so the map never grows.
+        _IN_PROCESS_CHILD_TASKS.pop(in_process_key, None)
 
     result = _summarize_child_task(agent_id, child_run_id, child_task_id, warnings)
+    _count_child_cost_against_parent(ctx, result)
     max_cost_usd = _float_or_none(request.get("max_cost_usd"))
     if max_cost_usd is not None and result.get("cost_usd") is not None and float(result["cost_usd"]) > max_cost_usd:
         result.setdefault("warnings", []).append("max_cost_usd_exceeded")
