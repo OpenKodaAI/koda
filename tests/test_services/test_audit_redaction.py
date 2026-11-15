@@ -1,6 +1,18 @@
-"""Tests for audit redaction logic in koda.services.audit."""
+"""Audit redaction: the shared redactor's string and payload rules, and the audit details."""
 
-from koda.services.audit import _prepare_details, _redact_string, _sanitize_payload
+from typing import Any
+
+from koda.security.redaction import redact_text, redact_value_with_paths
+from koda.services.audit import _prepare_details
+
+
+def _redact_string(text: str) -> tuple[str, bool]:
+    result = redact_text(text)
+    return result, result != text
+
+
+def _sanitize_payload(data: Any) -> tuple[Any, list[str]]:
+    return redact_value_with_paths(data)
 
 
 class TestRedactStringBearerTokens:

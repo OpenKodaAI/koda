@@ -16,10 +16,10 @@ from aiohttp import WSMsgType, web
 import koda.services.health as health_module
 from koda.config import AGENT_ID, RUNTIME_LOCAL_UI_TOKEN
 from koda.logging_config import get_logger
+from koda.security.redaction import redact_value
 from koda.services.metrics import RUNTIME_WS_CLIENTS_ACTIVE
 from koda.services.runtime.constants import MUTATION_BLOCKED_PHASES
 from koda.services.runtime.controller import get_runtime_controller
-from koda.services.runtime.redaction import redact_value
 from koda.services.runtime_access_service import RuntimeAccessService
 
 log = get_logger(__name__)

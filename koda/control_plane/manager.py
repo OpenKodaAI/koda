@@ -59,6 +59,7 @@ from koda.provider_models import (
     resolve_model_function_catalog,
     resolve_provider_function_model_catalog,
 )
+from koda.security.redaction import redact_value
 from koda.services.elevenlabs_catalog import (
     ELEVENLABS_DEFAULT_TTS_MODEL,
     canonicalize_elevenlabs_language,
@@ -124,7 +125,6 @@ from koda.services.provider_auth import (
     verify_provider_local_connection,
     verify_provider_subscription_login,
 )
-from koda.services.runtime.redaction import redact_value
 from koda.services.supertonic_manager import (
     SUPERTONIC_DEFAULT_LANGUAGE_ID,
     SUPERTONIC_DEFAULT_MODEL_ID,

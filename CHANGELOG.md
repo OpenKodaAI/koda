@@ -127,6 +127,15 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   significant characters logs `bootstrap_code_seed_weak`. A seed the `/setup` field
   cannot take (1 to 12 characters from its alphabet) logs
   `bootstrap_code_seed_not_typeable`. (M1-E1-T17)
+- One redactor, in process, masks secrets in audit details, runtime streams and store
+  rows, run graphs, eval exports, memory previews and structured logs. Its rules are the
+  union of the lists those paths kept apart, so each now also masks what the others did:
+  audit details mask `session` keys, URL credentials and 24-character tokens, as runtime
+  payloads did, and runtime payloads mask `credentials`, `access_key`, `private_key`,
+  `auth` and `recovery_code` keys, a key named exactly `code`, and `token=` values, as
+  audit, evals and the log rules did. Runtime redaction no longer calls the security
+  sidecar. Structured logs write `[REDACTED]` instead of `***`, also for an empty value,
+  under every key the redactor treats as sensitive, such as `session_id`. (M5-E3-T8)
 
 ### Added
 

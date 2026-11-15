@@ -1,4 +1,4 @@
-"""Extended tests for koda.services.runtime.redaction.
+"""Extended tests for the shared redactor (koda.security.redaction) on runtime payloads.
 
 The basic round-trip is already covered by test_redaction.py. This file pins:
 
@@ -17,7 +17,7 @@ import json
 
 import pytest
 
-from koda.services.runtime.redaction import redact_json_dumps, redact_value
+from koda.security.redaction import redact_json_dumps, redact_value
 
 # Plain content passes through unchanged
 

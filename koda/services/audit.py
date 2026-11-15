@@ -1,7 +1,6 @@
 """Fire-and-forget audit event emission."""
 
 import asyncio
-import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -14,30 +13,14 @@ from koda.knowledge.config import (
 )
 from koda.knowledge.v2.common import get_shared_postgres_backend
 from koda.logging_config import get_logger
+from koda.security.redaction import redact_value_with_paths
 
 log = get_logger(__name__)
 
 _dropped_events: int = 0
 
 TRACE_SCHEMA_VERSION = 1
-_REDACTED = "[REDACTED]"
 _MAX_AUDIT_TEXT_LEN = 12000
-
-_SENSITIVE_KEY_RE = re.compile(
-    r"(authorization|token|secret|password|passwd|cookie|api[_-]?key|access[_-]?key|credentials?)",
-    re.I,
-)
-_INLINE_SECRET_PATTERNS = (
-    re.compile(r"(?i)\b(authorization\s*:\s*)(bearer\s+[a-z0-9._\-]+)"),
-    re.compile(r"(?i)\b(bearer\s+)([a-z0-9._\-]+)"),
-    re.compile(
-        r"(?i)\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|passwd|cookie)\s*[=:]\s*)([^,\s]+)"
-    ),
-    re.compile(r"(?i)([?&](?:api[_-]?key|access[_-]?token|token|secret|password)=)([^&\s]+)"),
-    re.compile(
-        r"(?i)\b((?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password|passwd|cookie)\s*=\s*)([^,\s]+)"
-    ),
-)
 
 
 def _truncate_text(value: str) -> tuple[str, bool]:
@@ -46,57 +29,39 @@ def _truncate_text(value: str) -> tuple[str, bool]:
     return value[:_MAX_AUDIT_TEXT_LEN] + "\n… (truncated)", True
 
 
-def _redact_string(value: str) -> tuple[str, bool]:
-    redacted = value
-    changed = False
-    for pattern in _INLINE_SECRET_PATTERNS:
-        redacted, count = pattern.subn(rf"\1{_REDACTED}", redacted)
-        if count:
-            changed = True
-    truncated, was_truncated = _truncate_text(redacted)
-    return truncated, changed or was_truncated
-
-
-def _sanitize_payload(value: Any, path: str = "") -> tuple[Any, list[str]]:
+def _truncate_payload(value: Any, path: str = "") -> tuple[Any, list[str]]:
     if isinstance(value, dict):
-        sanitized: dict[str, Any] = {}
-        redacted_fields: list[str] = []
+        truncated: dict[str, Any] = {}
+        fields: list[str] = []
         for key, inner in value.items():
-            current_path = f"{path}.{key}" if path else key
-            if _SENSITIVE_KEY_RE.search(key):
-                sanitized[key] = _REDACTED
-                redacted_fields.append(current_path)
-                continue
-            clean_value, nested = _sanitize_payload(inner, current_path)
-            sanitized[key] = clean_value
-            redacted_fields.extend(nested)
-        return sanitized, redacted_fields
-
+            truncated[key], nested = _truncate_payload(inner, f"{path}.{key}" if path else key)
+            fields.extend(nested)
+        return truncated, fields
     if isinstance(value, list):
-        sanitized_items: list[Any] = []
-        nested_redactions: list[str] = []
+        items: list[Any] = []
+        fields = []
         for index, inner in enumerate(value):
-            clean_value, nested = _sanitize_payload(inner, f"{path}[{index}]")
-            sanitized_items.append(clean_value)
-            nested_redactions.extend(nested)
-        return sanitized_items, nested_redactions
-
+            item, nested = _truncate_payload(inner, f"{path}[{index}]")
+            items.append(item)
+            fields.extend(nested)
+        return items, fields
     if isinstance(value, str):
-        clean_value, changed = _redact_string(value)
-        return clean_value, [path] if changed and path else []
-
+        text, was_truncated = _truncate_text(value)
+        return text, [path] if was_truncated and path else []
     return value, []
 
 
 def _prepare_details(details: dict[str, Any]) -> dict[str, Any]:
-    sanitized_value, redacted_fields = _sanitize_payload(details)
-    sanitized = cast(dict[str, Any], sanitized_value)
-    if redacted_fields and isinstance(sanitized, dict) and "redactions" not in sanitized:
+    redacted_value, redacted_fields = redact_value_with_paths(details)
+    truncated_value, truncated_fields = _truncate_payload(redacted_value)
+    sanitized = cast(dict[str, Any], truncated_value)
+    fields = list(dict.fromkeys([*redacted_fields, *truncated_fields]))
+    if fields and isinstance(sanitized, dict) and "redactions" not in sanitized:
         sanitized = {
             **sanitized,
             "redactions": {
-                "count": len(redacted_fields),
-                "fields": redacted_fields,
+                "count": len(fields),
+                "fields": fields,
             },
         }
     return sanitized

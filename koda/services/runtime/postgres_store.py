@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from koda.config import AGENT_ID
+from koda.security.redaction import redact_json_dumps, redact_value
 from koda.services.provider_env import validate_runtime_path
-from koda.services.runtime.redaction import redact_json_dumps, redact_value
 from koda.state.primary import (
     primary_execute,
     primary_fetch_all,

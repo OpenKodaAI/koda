@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
-from koda.services.runtime.redaction import redact_value
+from koda.security.redaction import redact_value
 
 RUN_GRAPH_SCHEMA_VERSION = "run_graph.v1"
 RUN_REPLAY_SCHEMA_VERSION = "run_replay.v1"
