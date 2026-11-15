@@ -80,12 +80,18 @@ export function useBodyScrollLock(active: boolean) {
   }, [active]);
 }
 
+/**
+ * Close on Escape, unless another handler already took that Escape. A nested layer (Radix
+ * Popover, Select or Tooltip) dismisses itself from a capture-phase listener and calls
+ * `preventDefault()`, so Escape inside it closes only that layer (D-277). A custom nested
+ * menu that handles Escape itself must call `preventDefault()` too.
+ */
 export function useEscapeToClose(active: boolean, onClose: () => void) {
   useEffect(() => {
     if (!active || typeof document === "undefined") return undefined;
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape" && !event.defaultPrevented) onClose();
     }
 
     document.addEventListener("keydown", handleKeyDown);

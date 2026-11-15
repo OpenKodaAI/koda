@@ -415,6 +415,27 @@ describe("RoutineEditor", () => {
     expect(rendered).not.toContain(tr(language, "routines.editor.connectors.empty"));
   });
 
+  // D-277: Escape in the Schedule step's timezone popover also closed the whole editor, so the
+  // edits in progress were lost. It must close only the popover; a second Escape closes the editor.
+  it("closes only the timezone popover on Escape, and the editor on the next Escape", async () => {
+    const { onOpenChange } = renderEditor();
+    fillBasics();
+    fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /timezone/i }));
+    const search = await screen.findByPlaceholderText("Buscar fuso horário");
+
+    fireEvent.keyDown(search, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByPlaceholderText("Buscar fuso horário")).not.toBeInTheDocument());
+    expect(onOpenChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /back/i }));
+    expect(screen.getByPlaceholderText(/Daily code review/i)).toHaveValue("Nightly audit");
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   describe("schedule step (D-080, D-081)", () => {
     function scheduledJob(overrides: Partial<CronJob>): CronJob {
       return {
