@@ -1422,6 +1422,9 @@ async def test_postgres_backend_upsert_documents_uses_stable_content_hash(monkey
     captured_rows: list[tuple[object, ...]] = []
 
     class _Conn:
+        async def set_type_codec(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
         async def executemany(self, query: str, rows: list[tuple[object, ...]]) -> None:
             if '"knowledge_documents"' in query:
                 captured_rows.extend(rows)
@@ -1458,6 +1461,9 @@ async def test_postgres_backend_lists_trace_hits_with_single_connection(monkeypa
     connect_calls = 0
 
     class _Conn:
+        async def set_type_codec(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
         async def fetch(self, query: str, *args: object) -> list[dict[str, object]]:
             if '"retrieval_traces"' in query:
                 return [
@@ -1572,6 +1578,9 @@ async def test_postgres_backend_gets_retrieval_trace_by_id_directly(monkeypatch:
     class _Conn:
         def __init__(self) -> None:
             self.fetchrow_calls: list[tuple[str, tuple[object, ...]]] = []
+
+        async def set_type_codec(self, *_args: object, **_kwargs: object) -> None:
+            return None
 
         async def fetchrow(self, query: str, *args: object) -> dict[str, object] | None:
             self.fetchrow_calls.append((query, args))

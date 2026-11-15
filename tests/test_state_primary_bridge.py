@@ -211,111 +211,240 @@ def test_bridge_loop_rebuilds_on_pid_change() -> None:
     assert new_loop is sp._BRIDGE_LOOP
 
 
-def test_iso_string_to_datetime_strict() -> None:
-    """Parser handles strict ISO-8601; non-matching input returns ``None``."""
-    from datetime import datetime
+def test_timestamp_text_parser_reads_iso_8601_only() -> None:
+    """Legacy callers pass ISO-8601 text for TIMESTAMPTZ/TIMESTAMP parameters.
+    The codec parses it in Python; free-form text is refused, never guessed."""
+    from datetime import UTC, datetime
 
-    from koda.state.primary import _iso_string_to_datetime
+    import pytest
 
-    assert isinstance(_iso_string_to_datetime("2026-04-20T23:38:39.997821"), datetime)
-    iso_z = _iso_string_to_datetime("2026-04-20T23:38:39Z")
-    assert isinstance(iso_z, datetime) and iso_z.tzinfo is not None
+    from koda.state.primary import _parse_timestamp_text
+
+    assert _parse_timestamp_text("2026-04-20T23:38:39.997821") == datetime(2026, 4, 20, 23, 38, 39, 997821)
+    assert _parse_timestamp_text("2026-04-20T23:38:39Z") == datetime(2026, 4, 20, 23, 38, 39, tzinfo=UTC)
+    # Shapes Postgres's own parser accepted when the value was sent as text.
+    assert _parse_timestamp_text("2026-04-20 12:00:00+00") == datetime(2026, 4, 20, 12, tzinfo=UTC)
+    assert _parse_timestamp_text("2026-04-20") == datetime(2026, 4, 20)
+    assert _parse_timestamp_text(" infinity ") == datetime.max
+    assert _parse_timestamp_text("-infinity") == datetime.min
 
     for raw in (
         "sess-abc-123",
-        "2026-04-20",  # date-only, no time component
         "PIXIE_COPY",
         '{"created_at": "2026-04-20T12:00:00"}',
         "",
         "not a timestamp",
+        "now",
     ):
-        assert _iso_string_to_datetime(raw) is None, f"must not parse: {raw!r}"
+        with pytest.raises(TypeError):
+            _parse_timestamp_text(raw)
+
+
+class _FakeCodecConn:
+    def __init__(self, time_zone: str = "UTC") -> None:
+        self.codecs: dict[str, dict[str, object]] = {}
+        self._time_zone = time_zone
+
+    def get_settings(self) -> object:
+        return type("_Settings", (), {"TimeZone": self._time_zone})()
+
+    async def set_type_codec(
+        self,
+        type_name: str,
+        *,
+        encoder: object,
+        decoder: object,
+        schema: str,
+        format: str,
+    ) -> None:
+        self.codecs[type_name] = {
+            "encoder": encoder,
+            "decoder": decoder,
+            "schema": schema,
+            "format": format,
+        }
 
 
 def test_timestamptz_codec_accepts_strings_and_datetimes() -> None:
-    """The connection-scoped type codec accepts both ``datetime`` and strict
+    """The connection-scoped type codec accepts ``datetime``, ``date`` and
     ISO-8601 strings for TIMESTAMPTZ/TIMESTAMP columns so legacy callers
     (``_now_iso()`` returns ``str``) don't hit ``DataError`` on every insert.
     TEXT columns remain unaffected — the codec is registered against
     ``timestamptz``/``timestamp`` only.
 
-    The encoder returns the canonical Postgres text representation so
-    asyncpg's text-format wire protocol can pass it through untouched.
+    It uses asyncpg's ``tuple`` format: values travel in the binary wire
+    format (microseconds since 2000-01-01), so composites, ranges and arrays
+    that contain timestamps still decode (D-076).
     """
     import asyncio
-    from datetime import datetime
-    from typing import Any
+    from datetime import UTC, date, datetime, timedelta, timezone
 
     from koda.state.primary import _install_timestamptz_str_codec
 
-    class _FakeConn:
-        def __init__(self) -> None:
-            self.codecs: dict[str, dict[str, Any]] = {}
-
-        async def set_type_codec(
-            self,
-            type_name: str,
-            *,
-            encoder: Any,
-            decoder: Any,
-            schema: str,
-            format: str,
-        ) -> None:
-            self.codecs[type_name] = {
-                "encoder": encoder,
-                "decoder": decoder,
-                "schema": schema,
-                "format": format,
-            }
-
-    conn = _FakeConn()
+    conn = _FakeCodecConn(time_zone="America/Sao_Paulo")
     asyncio.run(_install_timestamptz_str_codec(conn))
 
-    assert "timestamptz" in conn.codecs
-    assert "timestamp" in conn.codecs
-    assert conn.codecs["timestamptz"]["format"] == "text"
+    assert {name: codec["format"] for name, codec in conn.codecs.items()} == {
+        "timestamptz": "tuple",
+        "timestamp": "tuple",
+    }
+    encode = conn.codecs["timestamptz"]["encoder"]
+    decode = conn.codecs["timestamptz"]["decoder"]
+    epoch = datetime(2000, 1, 1, tzinfo=UTC)
 
-    encoder = conn.codecs["timestamptz"]["encoder"]
+    def micros(value: datetime) -> tuple[int]:
+        return ((value - epoch) // timedelta(microseconds=1),)
 
-    dt = datetime(2026, 4, 20, 12, 0, 0)
-    encoded_dt = encoder(dt)
-    assert isinstance(encoded_dt, str)
-    assert encoded_dt.startswith("2026-04-20 12:00:00")
+    noon_utc = datetime(2026, 4, 20, 12, 0, tzinfo=UTC)
+    assert encode(noon_utc) == micros(noon_utc)
+    assert encode(datetime(2026, 4, 20, 9, 0, tzinfo=timezone(timedelta(hours=-3)))) == micros(noon_utc)
+    assert encode("2026-04-20T12:00:00+00:00") == micros(noon_utc)
+    # Naive text is read in the session TimeZone, as Postgres read it before.
+    assert encode("2026-04-20T09:00:00") == micros(noon_utc)
+    assert encode(datetime.max) == (2**63 - 1,)
+    assert encode(datetime.min) == (-(2**63),)
+    assert encode(date(2026, 4, 20)) == micros(datetime(2026, 4, 20).astimezone(UTC))
 
-    encoded_str = encoder("2026-04-20T23:38:39.997821")
-    assert isinstance(encoded_str, str)
-    assert encoded_str.startswith("2026-04-20 23:38:39")
+    assert decode(micros(noon_utc)) == noon_utc
+    assert decode(micros(noon_utc)).tzinfo is UTC
+    assert decode((2**63 - 1,)) == datetime.max
+    assert decode((-(2**63),)) == datetime.min
 
-    # Non-ISO strings fall through: Postgres's own parser decides (or rejects)
-    assert encoder("now") == "now"
+    encode_naive = conn.codecs["timestamp"]["encoder"]
+    decode_naive = conn.codecs["timestamp"]["decoder"]
+    naive_epoch = datetime(2000, 1, 1)
+    noon = datetime(2026, 4, 20, 12)
+    assert encode_naive(noon) == ((noon - naive_epoch) // timedelta(microseconds=1),)
+    # Postgres drops the offset of TIMESTAMP text; an aware datetime is refused.
+    assert encode_naive("2026-04-20T12:00:00+02:00") == encode_naive(datetime(2026, 4, 20, 12))
+    assert decode_naive(encode_naive(datetime(2026, 4, 20, 12))) == datetime(2026, 4, 20, 12)
 
-    # Reads decode Postgres ISO text to datetimes, like asyncpg's default codec
-    # (D-076): aware values in UTC, naive TIMESTAMP values unchanged.
-    from datetime import UTC
+    import pytest
 
-    decoder = conn.codecs["timestamptz"]["decoder"]
-    assert decoder("2026-04-20 09:00:00.5-03") == datetime(2026, 4, 20, 12, 0, 0, 500000, tzinfo=UTC)
-    assert decoder("2026-04-20 12:00:00").tzinfo is None
-    assert decoder("infinity") == datetime.max
-    assert decoder("-infinity") == datetime.min
+    with pytest.raises(TypeError):
+        encode_naive(noon_utc)
+    with pytest.raises(TypeError):
+        encode(12345)
 
 
-def test_timestamptz_codec_swallows_driver_errors() -> None:
-    """If asyncpg's ``set_type_codec`` fails (e.g. the connection is in an
-    unexpected state), we log and continue rather than raising. Callers that
-    still pass ISO strings will hit the original ``DataError`` — loud but
-    observable — instead of a silent crash inside the codec helper.
-    """
+def test_timestamptz_codec_install_raises_driver_errors() -> None:
+    """The codec is installed once, in the pool ``init`` hook. A failure must
+    reach asyncpg, which then discards the connection instead of pooling one
+    without the codec (where ISO-string parameters fail with ``DataError``
+    for the rest of its life)."""
     import asyncio
+
+    import pytest
 
     from koda.state.primary import _install_timestamptz_str_codec
 
     class _BoomConn:
         async def set_type_codec(self, *_args: object, **_kwargs: object) -> None:
-            raise RuntimeError("connection is in unexpected state")
+            raise RuntimeError("canceling statement due to statement timeout")
 
-    # Must not raise even though every codec registration fails.
-    asyncio.run(_install_timestamptz_str_codec(_BoomConn()))
+    with pytest.raises(RuntimeError, match="statement timeout"):
+        asyncio.run(_install_timestamptz_str_codec(_BoomConn()))
+
+
+def test_primary_sql_qualifies_known_tables_with_the_schema() -> None:
+    """The ``primary_*`` helpers schema-qualify table names instead of relying
+    on ``search_path``, which a connection pooler may refuse or drop (D-076).
+    Only names of tables in the schema change; literals, quoted identifiers,
+    comments, columns, functions and already-qualified names stay as written."""
+    from koda.state.primary import _schema_qualified
+
+    tables = {"tasks", "sessions", "query_history", "audit_events"}
+
+    def q(sql: str) -> str:
+        return _schema_qualified(sql, "knowledge_v2", tables)
+
+    assert q("SELECT * FROM tasks WHERE id = ?") == 'SELECT * FROM "knowledge_v2".tasks WHERE id = ?'
+    assert (
+        q("SELECT t.id FROM tasks t JOIN sessions s ON s.id = t.session_id")
+        == 'SELECT t.id FROM "knowledge_v2".tasks t JOIN "knowledge_v2".sessions s ON s.id = t.session_id'
+    )
+    assert (
+        q("SELECT tasks.id FROM Tasks LEFT JOIN sessions USING (session_id)")
+        == 'SELECT tasks.id FROM "knowledge_v2".Tasks LEFT JOIN "knowledge_v2".sessions USING (session_id)'
+    )
+    assert (
+        q("SELECT 1 WHERE EXISTS (SELECT 1 FROM audit_events WHERE event_type = 'from tasks')")
+        == "SELECT 1 WHERE EXISTS (SELECT 1 FROM \"knowledge_v2\".audit_events WHERE event_type = 'from tasks')"
+    )
+    assert (
+        q("INSERT INTO tasks (id) VALUES (?) ON CONFLICT (id) DO UPDATE SET id = excluded.id")
+        == 'INSERT INTO "knowledge_v2".tasks (id) VALUES (?) ON CONFLICT (id) DO UPDATE SET id = excluded.id'
+    )
+    assert (
+        q("UPDATE tasks SET status = s.status FROM sessions s WHERE s.id = tasks.session_id")
+        == 'UPDATE "knowledge_v2".tasks SET status = s.status FROM "knowledge_v2".sessions s'
+        " WHERE s.id = tasks.session_id"
+    )
+    assert (
+        q("DELETE FROM tasks USING sessions WHERE sessions.id = tasks.session_id")
+        == 'DELETE FROM "knowledge_v2".tasks USING "knowledge_v2".sessions WHERE sessions.id = tasks.session_id'
+    )
+    assert (
+        q("SELECT id FROM tasks WHERE status = 'queued' FOR UPDATE SKIP LOCKED")
+        == "SELECT id FROM \"knowledge_v2\".tasks WHERE status = 'queued' FOR UPDATE SKIP LOCKED"
+    )
+    assert (
+        q("TRUNCATE TABLE tasks; ALTER TABLE IF EXISTS sessions ADD COLUMN x TEXT")
+        == 'TRUNCATE TABLE "knowledge_v2".tasks; ALTER TABLE IF EXISTS "knowledge_v2".sessions ADD COLUMN x TEXT'
+    )
+    # Table lists: every listed table, and aliases stay unqualified.
+    assert (
+        q("TRUNCATE TABLE tasks, sessions RESTART IDENTITY CASCADE")
+        == 'TRUNCATE TABLE "knowledge_v2".tasks, "knowledge_v2".sessions RESTART IDENTITY CASCADE'
+    )
+    assert (
+        q("SELECT count(*) FROM tasks t, sessions s, other.audit_events WHERE s.id = t.session_id")
+        == 'SELECT count(*) FROM "knowledge_v2".tasks t, "knowledge_v2".sessions s, other.audit_events'
+        " WHERE s.id = t.session_id"
+    )
+    assert (
+        q("ALTER TABLE tasks ADD COLUMN s INT REFERENCES sessions(id) ON DELETE CASCADE, ADD COLUMN tasks INT")
+        == 'ALTER TABLE "knowledge_v2".tasks ADD COLUMN s INT REFERENCES "knowledge_v2".sessions(id)'
+        " ON DELETE CASCADE, ADD COLUMN tasks INT"
+    )
+    unchanged = [
+        'SELECT * FROM "tasks"',
+        "SELECT * FROM other.tasks",
+        "SELECT * FROM knowledge_v2.tasks",
+        "SELECT EXTRACT(EPOCH FROM created_at) FROM recent",
+        "SELECT value FROM jsonb_array_elements(?::jsonb)",
+        "SELECT 1 -- FROM tasks\n",
+        "SELECT 1 /* JOIN sessions */",
+        "SELECT $$ FROM tasks $$",
+        "SELECT E'it\\'s FROM tasks'",
+        "CREATE TEMP TABLE scratch (id INT)",
+    ]
+    for sql in unchanged:
+        assert q(sql) == sql, sql
+
+
+def test_primary_sql_qualifies_tables_the_helpers_create() -> None:
+    """Some stores create their table lazily through the helpers. The new table
+    goes into the backend schema, and later statements qualify it too."""
+    from koda.state.primary import _schema_qualified
+
+    tables = {"tasks"}
+    ddl = _schema_qualified(
+        "CREATE TABLE IF NOT EXISTS pending_approvals (op_id TEXT PRIMARY KEY, task_id INT REFERENCES tasks(id))",
+        'odd"schema',
+        tables,
+    )
+
+    assert ddl == (
+        'CREATE TABLE IF NOT EXISTS "odd""schema".pending_approvals '
+        '(op_id TEXT PRIMARY KEY, task_id INT REFERENCES "odd""schema".tasks(id))'
+    )
+    assert "pending_approvals" in tables
+    assert (
+        _schema_qualified("CREATE INDEX IF NOT EXISTS idx_op ON pending_approvals (op_id)", "s", tables)
+        == 'CREATE INDEX IF NOT EXISTS idx_op ON "s".pending_approvals (op_id)'
+    )
+    assert _schema_qualified("SELECT * FROM pending_approvals", "s", tables) == 'SELECT * FROM "s".pending_approvals'
 
 
 def test_get_shared_postgres_backend_clears_cache_on_pid_change() -> None:

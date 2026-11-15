@@ -184,6 +184,7 @@ class KnowledgeV2PostgresBackend:
         self._retry_base_seconds = max(0.05, float(retry_base_seconds))
         self._ready = False
         self._vector_enabled = False
+        self._table_names: set[str] = set()
         self._ensure_lock = asyncio.Lock()
         self._pool: Any | None = None
         self._asyncpg: Any | None = None
@@ -209,6 +210,15 @@ class KnowledgeV2PostgresBackend:
     @property
     def bootstrapped(self) -> bool:
         return self._ready
+
+    @property
+    def table_names(self) -> set[str]:
+        """Tables and views of the backend schema, loaded at bootstrap.
+
+        The ``koda.state.primary`` helpers schema-qualify these names in the
+        SQL they run, instead of relying on ``search_path`` (D-076).
+        """
+        return self._table_names
 
     async def start(self) -> bool:
         if not self.enabled:
@@ -357,6 +367,15 @@ class KnowledgeV2PostgresBackend:
                                    ON "{self._schema}"."artifact_derivatives"
                                 USING hnsw (embedding_vector vector_cosine_ops)"""
                         )
+                    self._table_names.update(
+                        str(row["relname"])
+                        for row in await conn.fetch(
+                            """SELECT c.relname FROM pg_catalog.pg_class c
+                                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                                WHERE n.nspname = $1 AND c.relkind IN ('r', 'p', 'v', 'm', 'f')""",
+                            self._schema,
+                        )
+                    )
                 finally:
                     await self._close_direct_connection(conn)
             except Exception:
@@ -392,21 +411,8 @@ class KnowledgeV2PostgresBackend:
             timeout=self._acquire_timeout_seconds,
             command_timeout=self._query_timeout_seconds,
             max_inactive_connection_lifetime=max(1, KNOWLEDGE_V2_POSTGRES_IDLE_TIMEOUT_SECONDS),
-            server_settings=self._session_server_settings(),
             init=self._init_connection,
         )
-
-    def _session_server_settings(self) -> dict[str, str]:
-        """Startup settings for the connections ``_connection()`` hands out.
-
-        ``search_path`` resolves unqualified table names (the
-        ``koda.state.primary`` helpers) to the backend schema, with ``public``
-        after it for the ``vector`` extension type. A startup setting survives
-        the ``RESET ALL`` asyncpg runs when a pooled connection is released, so
-        no query needs ``SET search_path`` first. ``DateStyle=ISO`` fixes the
-        timestamp text that the codec installed by ``_init_connection`` parses.
-        """
-        return {"search_path": f'"{self._schema}", public', "DateStyle": "ISO"}
 
     async def _init_connection(self, conn: Any) -> None:
         """Set a connection up once, when it opens (the pool ``init`` hook, ADR-012).
@@ -414,6 +420,8 @@ class KnowledgeV2PostgresBackend:
         asyncpg drops a connection's prepared-statement cache whenever a type
         codec changes, so the timestamp codec is installed here instead of per
         query, and every caller on the connection decodes timestamps alike.
+        A failure propagates: asyncpg then closes the connection, and the next
+        acquire opens a new one instead of reusing one without the codec.
         """
         from koda.state import primary as primary_state
 
@@ -463,7 +471,7 @@ class KnowledgeV2PostgresBackend:
         # connection rather than poisoning the cached pool. This happens
         # when a caller on a second event loop in the same process needs
         # DB access (worker main loop while bridge loop owns the pool).
-        conn = await self._open_direct_connection(server_settings=self._session_server_settings())
+        conn = await self._open_direct_connection()
         try:
             await self._init_connection(conn)
             yield conn
@@ -500,7 +508,7 @@ class KnowledgeV2PostgresBackend:
         except TypeError:
             return self._pool.acquire()
 
-    async def _open_direct_connection(self, *, server_settings: dict[str, str] | None = None) -> Any:
+    async def _open_direct_connection(self) -> Any:
         try:
             await asyncio.wait_for(
                 self._direct_connection_gate.acquire(),
@@ -518,7 +526,6 @@ class KnowledgeV2PostgresBackend:
                     self._dsn,
                     timeout=self._acquire_timeout_seconds,
                     command_timeout=self._query_timeout_seconds,
-                    server_settings=server_settings,
                 )
             except TypeError:
                 return await asyncpg.connect(self._dsn)

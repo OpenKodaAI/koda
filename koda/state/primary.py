@@ -5,23 +5,53 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import contextlib
+import functools
 import os
 import re
 import threading
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from typing import Any, cast
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import koda.config as config_module
 
-# Strict ISO-8601 datetime detector. We deliberately require at least
-# ``YYYY-MM-DDTHH:MM:SS`` (with optional fractional seconds and timezone)
-# so free-form text never gets coerced into a datetime. Legacy callers used
-# ``datetime.isoformat()`` which produces exactly this shape.
-_ISO_TIMESTAMP_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}"
-    r"(?:\.\d+)?"
-    r"(?:[Zz]|[+-]\d{2}:?\d{2})?$"
+# Parts of a statement whose text is not SQL to rewrite: string literals
+# (escape strings first, so a backslash-escaped quote does not end them),
+# quoted identifiers, dollar-quoted bodies and comments.
+_SQL_OPAQUE_RE = re.compile(
+    r"(?<!\w)[Ee]'(?:[^'\\]|\\.|'')*'"
+    r"|'(?:[^']|'')*'"
+    r'|"(?:[^"]|"")*"'
+    r"|\$(?P<tag>[A-Za-z_]\w*|)\$.*?\$(?P=tag)\$"
+    r"|--[^\n]*"
+    r"|/\*.*?\*/",
+    re.DOTALL,
 )
+# Bare names where a statement names tables: after FROM, USING, TRUNCATE and
+# TABLE a comma-separated list ("TRUNCATE a, b"; "FROM a x, b y", where an
+# alias counts only when a comma follows it, so "FROM a JOIN b" still sees
+# JOIN), after the other keywords one name. A name followed by "." is
+# already qualified, or is a column reference such as ``tasks.id``.
+_SQL_TABLE_ITEM = r"[A-Za-z_]\w*(?:\s+(?:AS\s+)?[A-Za-z_]\w*(?=\s*,))?"
+_SQL_TABLE_POSITION_RE = re.compile(
+    r"(?P<lead>\b(?P<keyword>FROM|USING|TRUNCATE(?:\s+TABLE)?|TABLE|JOIN|INTO|UPDATE|REFERENCES|ON)\s+"
+    r"(?:(?:ONLY|IF\s+NOT\s+EXISTS|IF\s+EXISTS)\s+)?)"
+    rf"(?P<names>{_SQL_TABLE_ITEM}(?:\s*,\s*{_SQL_TABLE_ITEM})*)\b(?!\s*\.)",
+    re.IGNORECASE,
+)
+_SQL_TABLE_LIST_KEYWORDS = ("FROM", "USING", "TRUNCATE", "TABLE")
+_SQL_ITEM_NAME_RE = re.compile(r"(?P<space>\s*)(?P<name>[A-Za-z_]\w*)(?P<rest>.*)", re.DOTALL)
+_SQL_CREATE_TABLE_RE = re.compile(
+    r"\bCREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>[A-Za-z_]\w*)\b(?!\s*\.)",
+    re.IGNORECASE,
+)
+
+# asyncpg's ``tuple`` format for timestamps: microseconds since 2000-01-01,
+# with the int64 extremes for +/-infinity, as in its default codec.
+_PG_EPOCH = datetime(2000, 1, 1)
+_PG_EPOCH_UTC = datetime(2000, 1, 1, tzinfo=UTC)
+_PG_INFINITY = 2**63 - 1
+_PG_NEGATIVE_INFINITY = -(2**63)
 
 _BRIDGE_LOOP: asyncio.AbstractEventLoop | None = None
 _BRIDGE_THREAD: threading.Thread | None = None
@@ -227,19 +257,91 @@ def _normalize_primary_value(value: Any) -> Any:
     return value
 
 
-def _iso_string_to_datetime(value: str) -> datetime | None:
-    """Parse a strict ISO-8601 datetime string, returning ``None`` on mismatch."""
-    if not _ISO_TIMESTAMP_RE.match(value):
-        return None
-    candidate = value
-    # Python's ``fromisoformat`` accepts ``+00:00`` but not the trailing ``Z``
-    # form used by many JSON encoders; normalize before parsing.
-    if candidate.endswith(("Z", "z")):
-        candidate = candidate[:-1] + "+00:00"
+def _schema_qualified(query: str, schema: str, tables: set[str]) -> str:
+    """Return ``query`` with each table of the backend schema schema-qualified.
+
+    The ``primary_*`` helpers run SQL that names tables without a schema. They
+    qualify it here instead of setting ``search_path`` on the connection,
+    which a pooler such as PgBouncer refuses as a startup parameter (D-076).
+    Only names in ``tables`` change, so columns, functions and CTEs stay as
+    written. A ``CREATE TABLE`` puts its table in the schema and adds the name
+    to ``tables``, for the stores that create their table on first use.
+    """
+    prefix = '"' + schema.replace('"', '""') + '".'
+
+    def _qualify_item(item: str) -> str:
+        parts = _SQL_ITEM_NAME_RE.match(item)
+        if parts is None or parts.group("name").lower() not in tables:
+            return item
+        return parts.group("space") + prefix + parts.group("name") + parts.group("rest")
+
+    def _qualify(match: re.Match[str]) -> str:
+        items = match.group("names").split(",")
+        if match.group("keyword").split()[0].upper() in _SQL_TABLE_LIST_KEYWORDS:
+            items = [_qualify_item(item) for item in items]
+        else:
+            items[0] = _qualify_item(items[0])
+        return match.group("lead") + ",".join(items)
+
+    chunks: list[str] = []
+    position = 0
+    for opaque in _SQL_OPAQUE_RE.finditer(query):
+        chunks.append(query[position : opaque.start()])
+        chunks.append(opaque.group(0))
+        position = opaque.end()
+    chunks.append(query[position:])
+    for index in range(0, len(chunks), 2):
+        for created in _SQL_CREATE_TABLE_RE.finditer(chunks[index]):
+            tables.add(created.group("name").lower())
+        chunks[index] = _SQL_TABLE_POSITION_RE.sub(_qualify, chunks[index])
+    return "".join(chunks)
+
+
+def _primary_sql(backend: Any, query: str) -> str:
+    """The statement a ``primary_*`` helper sends: schema-qualified, ``$n`` placeholders."""
+    schema = getattr(backend, "schema", None)
+    tables = getattr(backend, "table_names", None)
+    if isinstance(schema, str) and isinstance(tables, set):
+        query = _schema_qualified(query, schema, tables)
+    return _normalize_qmark_placeholders(query)
+
+
+def _parse_timestamp_text(value: str) -> datetime:
+    """Parse the ISO-8601 text legacy callers pass for timestamp parameters.
+
+    Accepts the shapes Postgres read when the value was sent as text
+    (``T`` or space separator, ``Z`` or numeric offsets, date only) and
+    ``infinity`` / ``-infinity``. Free-form text raises ``TypeError``, which
+    asyncpg reports as ``DataError``.
+    """
+    text = value.strip()
+    if text.lower() == "infinity":
+        return datetime.max
+    if text.lower() == "-infinity":
+        return datetime.min
     try:
-        return datetime.fromisoformat(candidate)
+        return datetime.fromisoformat(text)
     except ValueError:
-        return None
+        raise TypeError(f"timestamp parameter expects ISO-8601 text, got {value!r}") from None
+
+
+@functools.lru_cache(maxsize=32)
+def _time_zone(name: str) -> tzinfo:
+    try:
+        return ZoneInfo(name)
+    except (ValueError, ZoneInfoNotFoundError):
+        # A POSIX-style zone such as "<-03>+03" has no IANA entry.
+        return UTC
+
+
+def _session_time_zone(conn: Any) -> tzinfo:
+    get_settings = getattr(conn, "get_settings", None)
+    name = getattr(get_settings(), "TimeZone", None) if callable(get_settings) else None
+    return _time_zone(str(name or "UTC"))
+
+
+def _pg_microseconds(delta: timedelta) -> int:
+    return (delta.days * 86_400 + delta.seconds) * 1_000_000 + delta.microseconds
 
 
 async def _install_timestamptz_str_codec(conn: Any) -> None:
@@ -252,67 +354,84 @@ async def _install_timestamptz_str_codec(conn: Any) -> None:
     datetime.date or datetime.datetime instance, got 'str')``.
 
     Rather than rewrite every INSERT across the codebase, install a
-    connection-scoped type codec that accepts either ``datetime`` or a
-    strict ISO-8601 string (coerced in-place) and always decodes to
-    ``datetime`` on read. TEXT columns are unaffected — they keep storing
-    the original string — because this codec is registered only for the
-    ``timestamptz`` / ``timestamp`` Postgres types.
+    connection-scoped type codec that also accepts ISO-8601 strings and
+    always decodes to ``datetime`` on read. TEXT columns are unaffected —
+    they keep storing the original string — because this codec is
+    registered only for the ``timestamptz`` / ``timestamp`` Postgres types.
+
+    ``datetime`` and ``date`` values are encoded, and every value decoded,
+    exactly as asyncpg's default codec does: a naive value is the process's
+    local time, the max/min datetimes are +/-infinity, and a TIMESTAMP
+    refuses an aware value. Strings are read the way Postgres reads
+    timestamp text: with their offset, or else in the session TimeZone.
+    The ``tuple`` format keeps the binary wire format, so composites, ranges
+    and arrays that contain timestamps still decode.
 
     The shared backend installs it once per connection, when the connection
     opens (``KnowledgeV2PostgresBackend._init_connection``): the pool is
     shared with knowledge-backend queries, which need ``datetime`` values,
     and asyncpg drops the statement cache whenever a codec is set (D-076).
+    A failure is raised, so asyncpg discards the connection rather than
+    pooling one without the codec.
     """
 
-    def _encode(value: Any) -> str:
-        # Return the canonical Postgres textual representation so asyncpg's
-        # text-format wire protocol accepts it without additional conversion.
-        # Accept datetime, date, and ISO-8601 strings — asyncpg's default
-        # codec handles both datetime/date for TIMESTAMPTZ, so we must too
-        # to avoid breaking callers that pass ``datetime.date`` (e.g. cost
-        # dashboard period filters).
-        from datetime import date
-
-        if isinstance(value, datetime):
-            return value.isoformat(sep=" ")
-        if isinstance(value, date):
-            # date.isoformat() → "YYYY-MM-DD"; Postgres accepts that for
-            # TIMESTAMPTZ (implicit 00:00:00 UTC).
-            return value.isoformat()
+    def _encode_timestamptz(value: Any) -> tuple[int]:
         if isinstance(value, str):
-            parsed = _iso_string_to_datetime(value)
-            if parsed is not None:
-                return parsed.isoformat(sep=" ")
-            # Fall through: the string is not a recognized ISO-8601 timestamp.
-            # Let Postgres's own parser attempt to interpret it (e.g. "now",
-            # relative specs) and raise the usual error if it can't.
-            return value
-        raise TypeError(f"timestamptz column expects datetime, date, or ISO-8601 string, got {type(value).__name__}")
+            value = _parse_timestamp_text(value)
+            if value.tzinfo is None and value not in (datetime.max, datetime.min):
+                value = value.replace(tzinfo=_session_time_zone(conn))
+        elif not isinstance(value, datetime):
+            if not isinstance(value, date):
+                raise TypeError(f"timestamptz expects datetime, date or ISO-8601 text, got {type(value).__name__}")
+            value = datetime(value.year, value.month, value.day)
+        # A naive value never equals an aware one, so only naive max/min match.
+        if value == datetime.max:
+            return (_PG_INFINITY,)
+        if value == datetime.min:
+            return (_PG_NEGATIVE_INFINITY,)
+        return (_pg_microseconds(value.astimezone(UTC) - _PG_EPOCH_UTC),)
 
-    def _decode(value: str) -> datetime:
-        # Decode like asyncpg's default codec: TIMESTAMPTZ as an aware UTC
-        # datetime, TIMESTAMP as a naive one, and +/-infinity as the max/min
-        # datetime. The connection's ``DateStyle=ISO`` fixes the text form.
-        if value == "infinity":
-            return datetime.max
-        if value == "-infinity":
-            return datetime.min
-        parsed = datetime.fromisoformat(value)
-        return parsed if parsed.tzinfo is None else parsed.astimezone(UTC)
+    def _encode_timestamp(value: Any) -> tuple[int]:
+        if isinstance(value, str):
+            # Postgres ignores the offset in TIMESTAMP text.
+            value = _parse_timestamp_text(value).replace(tzinfo=None)
+        elif not isinstance(value, datetime):
+            if not isinstance(value, date):
+                raise TypeError(f"timestamp expects datetime, date or ISO-8601 text, got {type(value).__name__}")
+            value = datetime(value.year, value.month, value.day)
+        elif value.tzinfo is not None:
+            raise TypeError("timestamp without time zone expects a naive datetime, got an aware one")
+        if value == datetime.max:
+            return (_PG_INFINITY,)
+        if value == datetime.min:
+            return (_PG_NEGATIVE_INFINITY,)
+        return (_pg_microseconds(value - _PG_EPOCH),)
 
-    for type_name in ("timestamptz", "timestamp"):
-        # Codec registration is best-effort: if the driver can't install
-        # for a given type (e.g. connection already in use), fall back to
-        # default behavior. Callers that still pass ISO strings will hit
-        # the classic DataError — surfaced to the operator, not silent.
-        with contextlib.suppress(Exception):
-            await conn.set_type_codec(
-                type_name,
-                encoder=_encode,
-                decoder=_decode,
-                schema="pg_catalog",
-                format="text",
-            )
+    def _decoder(epoch: datetime) -> Any:
+        def _decode(value: tuple[int]) -> datetime:
+            microseconds = value[0]
+            if microseconds == _PG_INFINITY:
+                return datetime.max
+            if microseconds == _PG_NEGATIVE_INFINITY:
+                return datetime.min
+            return epoch + timedelta(microseconds=microseconds)
+
+        return _decode
+
+    await conn.set_type_codec(
+        "timestamptz",
+        encoder=_encode_timestamptz,
+        decoder=_decoder(_PG_EPOCH_UTC),
+        schema="pg_catalog",
+        format="tuple",
+    )
+    await conn.set_type_codec(
+        "timestamp",
+        encoder=_encode_timestamp,
+        decoder=_decoder(_PG_EPOCH),
+        schema="pg_catalog",
+        format="tuple",
+    )
 
 
 def _fail_missing_backend(operation: str) -> None:
@@ -341,7 +460,7 @@ async def primary_fetch_all(
         _fail_missing_backend("fetch_all")
         return []
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        rows = await conn.fetch(_normalize_qmark_placeholders(query), *tuple(params))
+        rows = await conn.fetch(_primary_sql(backend, query), *tuple(params))
     return [_normalize_primary_value(dict(row)) for row in rows]
 
 
@@ -356,7 +475,7 @@ async def primary_fetch_one(
         _fail_missing_backend("fetch_one")
         return None
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        row = await conn.fetchrow(_normalize_qmark_placeholders(query), *tuple(params))
+        row = await conn.fetchrow(_primary_sql(backend, query), *tuple(params))
     if row is None:
         return None
     return cast(dict[str, Any], _normalize_primary_value(dict(row)))
@@ -373,7 +492,7 @@ async def primary_fetch_val(
         _fail_missing_backend("fetch_val")
         return None
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        value = await conn.fetchval(_normalize_qmark_placeholders(query), *tuple(params))
+        value = await conn.fetchval(_primary_sql(backend, query), *tuple(params))
     return _normalize_primary_value(value)
 
 
@@ -388,7 +507,7 @@ async def primary_execute(
         _fail_missing_backend("execute")
         return 0
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        status = await conn.execute(_normalize_qmark_placeholders(query), *tuple(params))
+        status = await conn.execute(_primary_sql(backend, query), *tuple(params))
     try:
         return int(str(status).rsplit(" ", 1)[-1])
     except (TypeError, ValueError):
