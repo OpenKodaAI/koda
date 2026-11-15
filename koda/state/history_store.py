@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
+import koda.config as config_module
 from koda.config import AGENT_ID, POD_NAME
 from koda.logging_config import get_logger
+from koda.state import primary as primary_state
 from koda.state.primary import (
     postgres_primary_mode,
     primary_execute,
@@ -1419,47 +1422,122 @@ def dlq_mark_retried(dlq_id: int, *, metadata_json: str | None = None) -> bool:
         return False
 
 
-def run_maintenance() -> dict[str, Any]:
-    cutoff = (datetime.now(UTC).replace(tzinfo=None) - timedelta(days=90)).isoformat()
-    result: dict[str, Any] = {}
-    backend = _primary_backend()
-    if backend is not None:
-        try:
-            result["queries_deleted"] = int(
-                run_coro_sync(
-                    primary_execute(
-                        "DELETE FROM queries WHERE timestamp < ?",
-                        (cutoff,),
-                        agent_id=AGENT_ID,
-                    )
-                )
-                or 0
-            )
-            result["audit_log_deleted"] = int(
-                run_coro_sync(
-                    primary_execute(
-                        "DELETE FROM audit_log WHERE timestamp < ?",
-                        (cutoff,),
-                        agent_id=AGENT_ID,
-                    )
-                )
-                or 0
-            )
-            result["mode"] = "primary"
-        except Exception as exc:  # noqa: BLE001
-            log.warning("db_maintenance_error", error=str(exc))
-            result["error"] = str(exc)
-        return result
+# The daily retention job only reports for now: deletes wait until the
+# retention defaults are approved. Query history has no setting yet.
+# Retention applies to whole tables, so the counts cover every agent scope:
+# control-plane and squad scopes ("admin", "system", ...) and deleted agents.
+_QUERY_HISTORY_RETENTION_DAYS = 90
+_EXPIRED_ROWS_SQL = {
+    "query_history": "SELECT COUNT(*) FROM query_history WHERE timestamp < ?",
+    "audit_events": "SELECT COUNT(*) FROM audit_events WHERE timestamp < ?",
+}
+_MAINTENANCE_INTERVAL = timedelta(days=1)
+# A report that ends in error is not the day's run: it is tried again sooner.
+_MAINTENANCE_RETRY = timedelta(hours=1)
+_MAINTENANCE_REPORT_EVENT = "retention.report"
+# Transaction advisory lock a worker holds while it checks for and records the
+# day's report, so workers that start together record one report between them.
+# The second key is the deployment's schema: deployments sharing a database
+# under different schemas keep separate schedules and do not block each other.
+_MAINTENANCE_LOCK_CLASS = 0x6B726574  # "kret"
+# The deployment's last report, whichever worker recorded it
+# (idx_audit_events_type_time).
+_LAST_REPORT_SQL = "SELECT max(timestamp) FROM audit_events WHERE event_type = ?"
+# The report runs in one bridge call, given one bridge timeout for each step:
+# the lock connection, the last-report lookup, the two counts and the insert.
+_MAINTENANCE_BRIDGE_STEPS = 5
 
+
+async def _expired_rows_report() -> dict[str, Any]:
+    now = datetime.now(UTC)
+    windows = {
+        "query_history": _QUERY_HISTORY_RETENTION_DAYS,
+        "audit_events": int(config_module.AUDIT_RETENTION_DAYS),
+    }
+    result: dict[str, Any] = {"mode": "report_only"}
     try:
-        with _history_backend_removed() as conn:
-            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            result["wal_checkpoint"] = "ok"
-            row = conn.execute("PRAGMA integrity_check").fetchone()
-            result["integrity_check"] = row[0] if row else "unknown"
-            result["audit_log_deleted"] = conn.execute("DELETE FROM audit_log WHERE timestamp < ?", (cutoff,)).rowcount
-            result["queries_deleted"] = conn.execute("DELETE FROM queries WHERE timestamp < ?", (cutoff,)).rowcount
+        _primary_backend()
+        for table, days in windows.items():
+            cutoff = now - timedelta(days=days)
+            result[f"{table}_retention_days"] = days
+            result[f"{table}_cutoff"] = cutoff.isoformat()
+            expired = await primary_fetch_val(_EXPIRED_ROWS_SQL[table], (cutoff,), agent_id=AGENT_ID)
+            result[f"{table}_expired"] = int(expired or 0)
     except Exception as exc:  # noqa: BLE001
         log.warning("db_maintenance_error", error=str(exc))
         result["error"] = str(exc)
     return result
+
+
+def run_maintenance() -> dict[str, Any]:
+    """Daily retention job, report-only: count rows past retention, delete nothing.
+
+    Counts the ``query_history`` rows older than 90 days and the
+    ``audit_events`` rows older than ``AUDIT_RETENTION_DAYS``, under every
+    agent scope, comparing the TIMESTAMPTZ ``timestamp`` column with an aware
+    UTC cutoff. Failures, including an unavailable backend, come back as an
+    ``error`` entry.
+    """
+    return cast(dict[str, Any], run_coro_sync(_expired_rows_report()))
+
+
+async def _report_if_due() -> float:
+    """Take and record the day's report unless one is recorded; seconds to the next check."""
+    from koda.services.audit import AuditEvent, _insert_audit_primary
+
+    backend: Any = _primary_backend()
+    # A connection outside the pool, with the lock held for one transaction on
+    # it: a transaction lock ends at commit, also behind a transaction-pooling
+    # PgBouncer, where closing the client connection keeps the server session.
+    lock = await backend._open_direct_connection()  # noqa: SLF001 - controlled shared backend bridge
+    try:
+        async with lock.transaction():
+            if not await lock.fetchval(
+                "SELECT pg_try_advisory_xact_lock($1, hashtext($2))", _MAINTENANCE_LOCK_CLASS, backend.schema
+            ):
+                # Another worker is taking the report; its record sets the next check.
+                return _MAINTENANCE_RETRY.total_seconds()
+            last = await primary_fetch_val(_LAST_REPORT_SQL, (_MAINTENANCE_REPORT_EVENT,), agent_id=AGENT_ID)
+            if last:
+                wait = (datetime.fromisoformat(str(last)) + _MAINTENANCE_INTERVAL - datetime.now(UTC)).total_seconds()
+                if wait > 0:
+                    return min(wait, _MAINTENANCE_INTERVAL.total_seconds())
+            result = await _expired_rows_report()
+            if "error" in result:
+                return _MAINTENANCE_RETRY.total_seconds()
+            log.info("db_maintenance_complete", **result)
+            try:
+                await _insert_audit_primary(AuditEvent(event_type=_MAINTENANCE_REPORT_EVENT, details=dict(result)))
+            except Exception as exc:  # noqa: BLE001
+                log.warning("db_maintenance_report_not_recorded", error=str(exc))
+                return _MAINTENANCE_RETRY.total_seconds()
+            return _MAINTENANCE_INTERVAL.total_seconds()
+    finally:
+        await backend._close_direct_connection(lock)  # noqa: SLF001 - controlled shared backend bridge
+
+
+def run_maintenance_if_due() -> float:
+    """Run :func:`_report_if_due` from a sync caller; a failure is retried within the hour."""
+    budget = primary_state._BRIDGE_TIMEOUT_SECONDS * _MAINTENANCE_BRIDGE_STEPS  # noqa: SLF001 - same package
+    try:
+        return float(run_coro_sync(_report_if_due(), timeout=budget))
+    except Exception as exc:  # noqa: BLE001
+        log.warning("db_maintenance_error", error=str(exc))
+        return _MAINTENANCE_RETRY.total_seconds()
+
+
+async def run_maintenance_loop(*, sleep: Callable[[float], Awaitable[object]] = asyncio.sleep) -> None:
+    """Run the retention report once a day per deployment, under the lifecycle supervisor.
+
+    Every worker runs this loop, but the schedule is deployment-wide: each
+    report is recorded as a ``retention.report`` audit event, and a worker
+    reports only when no worker recorded one in the last day, checking under
+    a transaction advisory lock keyed by the schema, so workers that start
+    together do not both report. A
+    restart therefore does not push the next report back. Each report is
+    logged as ``db_maintenance_complete``; a report that ends in error is not
+    recorded and is tried again within the hour.
+    """
+    loop = asyncio.get_running_loop()
+    while True:
+        await sleep(await loop.run_in_executor(None, run_maintenance_if_due))

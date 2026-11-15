@@ -814,20 +814,11 @@ def main() -> None:
 
         await loop_supervisor.start_loop("approval_cleanup", start_approval_cleanup)
 
-        # Start periodic database maintenance (WAL checkpoint, integrity check, old row cleanup)
-        async def _db_maintenance_loop() -> None:
-            while True:
-                await asyncio.sleep(86400)  # 24 hours
-                try:
-                    from koda.state.history_store import run_maintenance
+        # Start the daily retention job. It is report-only: it logs how many
+        # query_history and audit_events rows are past retention and deletes none.
+        from koda.state.history_store import run_maintenance_loop
 
-                    loop = asyncio.get_running_loop()
-                    result = await loop.run_in_executor(None, run_maintenance)
-                    log.info("db_maintenance_complete", **result)
-                except Exception:
-                    log.exception("db_maintenance_loop_error")
-
-        await loop_supervisor.start_loop("db_maintenance", _db_maintenance_loop)
+        await loop_supervisor.start_loop("db_maintenance", run_maintenance_loop)
 
         log.info("post_init_checkpoint_before_db_start")
         # Start database pool if enabled. Bound it so a slow asyncpg pool

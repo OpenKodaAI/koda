@@ -79,7 +79,10 @@ docker compose exec postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
 - If the count of active connections is at `max_connections`, either:
   - Lower `KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE` per worker, OR
   - Raise Postgres `max_connections` and restart, OR
-  - Add pgbouncer in front (recommended at >50 workers).
+  - Add pgbouncer in front (recommended at >50 workers). It must forward the
+    `search_path` startup parameter the workers send: list `search_path` in
+    `track_extra_parameters`, never in `ignore_startup_parameters` (see
+    [Postgres settings](../config/reference.md#postgres)).
 
 **Prevention**: with `KODA_CLUSTER_MODE=cluster`, set
 `KNOWLEDGE_V2_POSTGRES_POOL_MAX_SIZE=ceil(MAX_CONCURRENCY/4)` so N
