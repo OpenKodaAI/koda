@@ -218,6 +218,7 @@ Subscribers to polled queries must never cause visible re-renders or flicker. In
 - No "loading..." text spinners or skeleton banners that flash on polling. Refetches are silent.
 - Do not introduce Framer Motion for a feature before trying CSS first.
 - Do not hardcode `rgba(255,255,255,0.X)` — use tokens (`--hover-tint`, `--divider-hair`, etc.).
+- No unlayered element rules in `globals.css`. Unlayered CSS beats every Tailwind utility, whatever its specificity, so a rule on a selector with no class or id (`a`, `button:active`, `input[type="range"]`, `::selection`, also inside `:where()` or `:is()`) goes in `@layer base`, where a utility on the element wins (D-349: `a { color: inherit }` had overridden every link colour utility). Only tokens, `!important` overrides and the focus indicator (`outline`/`box-shadow` on a `:focus-visible` selector) stay unlayered; `src/lib/form-control-font-contract.test.ts` enforces it.
 
 ## Before redesigning a route
 

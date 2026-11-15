@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 
 const CSS = readFileSync(resolve(__dirname, "../app/globals.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 
-type Rule = { selector: string; body: string; layers: string[] };
+type Rule = { selector: string; body: string; layers: string[]; atRules: string[] };
 
 /** Every style rule with the at-rule preludes that enclose it. */
 function rules(css: string): Rule[] {
@@ -28,7 +28,12 @@ function rules(css: string): Rule[] {
         continue;
       }
       const end = css.indexOf("}", index);
-      out.push({ selector: prelude, body: css.slice(index + 1, end), layers: stack.filter((at) => at.startsWith("@layer")) });
+      out.push({
+        selector: prelude,
+        body: css.slice(index + 1, end),
+        layers: stack.filter((at) => at.startsWith("@layer")),
+        atRules: [...stack],
+      });
       index = end;
       start = end + 1;
     } else if (char === "}") {
@@ -119,6 +124,98 @@ describe("form control fonts (D-331)", () => {
       ":where(button)",
       ":is(input):focus-visible",
       ":where(button, input, select, textarea)",
+    ]);
+  });
+});
+
+// D-349: the same mechanism as D-331 beyond fonts. Unlayered element rules beat every
+// layered Tailwind utility on the elements they match: `a { color: inherit }` overrode
+// every colour and decoration utility on links (the Home recents rendered in
+// --text-primary under text-[color:var(--text-secondary)]), `button { cursor: pointer }`
+// overrode cursor-* and disabled:cursor-not-allowed, and `button:active { opacity: .85 }`
+// every opacity utility while pressed. An element-level rule sits in @layer base.
+//
+// Element level: no class and no id, only type selectors, *, attributes, pseudo-classes,
+// pseudo-elements and combinators, also inside :where(), :is() and :not(). Allowed
+// unlayered: custom properties (tokens), !important declarations (deliberate overrides
+// such as the flat-design reset and reduced motion), and the focus indicator, which is
+// unlayered on purpose so outline-none cannot remove it (M8-E1-T1): outline,
+// outline-offset or box-shadow on a :focus or :focus-visible selector.
+
+const FOCUS_PROPERTIES = new Set(["outline", "outline-offset", "box-shadow"]);
+
+function isElementLevel(part: string): boolean {
+  return !/[.#]/.test(part.replace(/\[[^\]]*\]/g, ""));
+}
+
+function declarations(body: string): { property: string; important: boolean }[] {
+  return body
+    .split(";")
+    .map((declaration) => declaration.trim())
+    .filter((declaration) => declaration.includes(":"))
+    .map((declaration) => ({
+      property: declaration.slice(0, declaration.indexOf(":")).trim().toLowerCase(),
+      important: /!important\s*$/.test(declaration),
+    }));
+}
+
+/** Unlayered element-level rules, as "selector { property }", that would beat a utility. */
+function unlayeredElementRules(css: string): string[] {
+  const out: string[] = [];
+  for (const { selector, body, layers, atRules } of rules(css)) {
+    if (layers.length > 0 || atRules.some((at) => /^@(?:-webkit-)?keyframes\b/.test(at))) continue;
+    const parts = selectorParts(selector);
+    if (!parts.some(isElementLevel)) continue;
+    const focusOnly = parts.every((part) => /:focus(?:-visible)?$/.test(part));
+    for (const { property, important } of declarations(body)) {
+      if (property.startsWith("--") || important) continue;
+      if (focusOnly && FOCUS_PROPERTIES.has(property)) continue;
+      out.push(`${selector.replace(/\s+/g, " ")} { ${property} }`);
+    }
+  }
+  return out;
+}
+
+describe("element base rules (D-349)", () => {
+  it("sets nothing a utility can set from an unlayered element-level rule", () => {
+    expect(unlayeredElementRules(CSS)).toEqual([]);
+    for (const [selector, property] of [
+      ["a", "color"],
+      ["button", "cursor"],
+      ["button:active", "opacity"],
+    ]) {
+      const rule = rules(CSS).find(
+        ({ selector: list, body }) =>
+          selectorParts(list).includes(selector) && declarations(body).some((d) => d.property === property),
+      );
+      expect(rule?.layers, `${selector} { ${property} }`).toEqual(["@layer base"]);
+    }
+  });
+
+  it("the scan flags unlayered element rules and passes layered, class, token, important and focus ones", () => {
+    const css = [
+      "a { color: inherit; text-decoration: none; }",
+      "button:active, .card:active { opacity: .85; }",
+      ":where(button, nav a) { position: relative; }",
+      "input[type=\"range\"] { height: 6px; }",
+      "@media (hover: hover) { :where(button) svg { transform: scale(1.02); } }",
+      "@keyframes fade { from { opacity: 0; } to { opacity: 1; } }",
+      "@layer base { button { cursor: pointer; } }",
+      ".card a { color: red; }",
+      ":root { --canvas: #fff; }",
+      "html body * { box-shadow: none !important; }",
+      ":focus-visible { outline: 2px solid; outline-offset: 2px; }",
+      "input[type=\"range\"]:focus-visible { box-shadow: 0 0 0 2px; }",
+      ":focus-visible { color: red; }",
+    ].join("\n");
+    expect(unlayeredElementRules(css)).toEqual([
+      "a { color }",
+      "a { text-decoration }",
+      "button:active, .card:active { opacity }",
+      ":where(button, nav a) { position }",
+      "input[type=\"range\"] { height }",
+      ":where(button) svg { transform }",
+      ":focus-visible { color }",
     ]);
   });
 });
