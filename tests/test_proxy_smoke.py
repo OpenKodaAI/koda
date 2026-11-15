@@ -322,11 +322,7 @@ def dashboard_app(stack: Stack) -> web.Application:
 
 
 def api_app(stack: Stack) -> web.Application:
-    """koda/control_plane/api.py: bearer-token auth, a legacy /setup page, no /api/runtime/*."""
-
-    async def setup_page(request: web.Request) -> web.Response:
-        stack.remember("api", request)
-        return web.Response(text="<html><body>Koda control plane setup</body></html>", content_type="text/html")
+    """koda/control_plane/api.py: bearer-token auth, no /setup page, no /api/runtime/*."""
 
     async def openapi(request: web.Request) -> web.Response:
         stack.remember("api", request)
@@ -363,7 +359,6 @@ def api_app(stack: Stack) -> web.Application:
         return _json([])
 
     app = web.Application()
-    app.router.add_get("/setup", setup_page)
     app.router.add_get("/openapi/control-plane.json", openapi)
     app.router.add_route("*", "/api/control-plane/{path:.*}", control_plane)
     return app
@@ -591,8 +586,8 @@ async def test_the_smoke_rejects_the_previous_template(nginx_binary: str, tmp_pa
 
     failed = {result.name for result in results if not result.ok}
     assert failed == {
-        # /setup came from the API, browser calls reached the API without the cookie exchange, and the
-        # relay upgrade met the API, which has no /api/runtime/* routes.
+        # /setup went to the API, which has no such page; browser calls reached the API without the
+        # cookie exchange; and the relay upgrade met the API, which has no /api/runtime/* routes.
         "browser: GET /setup is the dashboard",
         "browser: API call without a session gets the dashboard's 401",
         "browser: owner registration with the bootstrap code",

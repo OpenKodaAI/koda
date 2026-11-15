@@ -895,20 +895,6 @@ async def _execute_tool_traced(
             severity="info" if result.success else "warning",
             payload={"tool": call.tool, "success": result.success, "output": result.output},
         )
-        try:
-            from koda.config import DASHBOARD_ENABLED as _DASHBOARD_ON
-
-            if _DASHBOARD_ON:
-                from koda.dashboard import get_aggregator
-
-                get_aggregator().record_tool_execution(
-                    tool=call.tool,
-                    success=result.success,
-                    duration_ms=_elapsed_ms,
-                    agent_id=_agent_id_label,
-                )
-        except Exception:
-            pass
         return result
     except TimeoutError:
         _elapsed_ms = (time.monotonic() - _start) * 1000

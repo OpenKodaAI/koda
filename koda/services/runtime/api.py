@@ -983,7 +983,8 @@ async def _runtime_artifact_download(request: web.Request) -> web.StreamResponse
     if not path.is_file():
         return web.json_response({"error": "artifact file not found"}, status=404)
 
-    metadata = artifact.get("metadata") if isinstance(artifact.get("metadata"), dict) else {}
+    raw_metadata = artifact.get("metadata")
+    metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
     mime_type = str(metadata.get("mime_type") or "").strip() or mimetypes.guess_type(str(path))[0]
     filename = _download_filename(artifact.get("label"), path.name)
     headers = {

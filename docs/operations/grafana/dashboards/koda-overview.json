@@ -178,19 +178,6 @@
       ],
       "title": "Skill package governance",
       "type": "timeseries"
-    },
-    {
-      "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "description": "Ops benchmark pass/fail and runtime duration. Source: koda_ops_benchmark_runs_total (Counter), koda_ops_benchmark_duration_seconds (Histogram).",
-      "fieldConfig": {"defaults": {"unit": "s"}},
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 48},
-      "id": 14,
-      "targets": [
-        {"expr": "sum by (mode, status) (rate(koda_ops_benchmark_runs_total[5m]))", "legendFormat": "{{mode}} {{status}} runs/s", "refId": "A"},
-        {"expr": "histogram_quantile(0.95, sum(rate(koda_ops_benchmark_duration_seconds_bucket[5m])) by (mode, le))", "legendFormat": "{{mode}} p95 duration", "refId": "B"}
-      ],
-      "title": "Ops benchmark",
-      "type": "timeseries"
     }
   ],
   "refresh": "30s",

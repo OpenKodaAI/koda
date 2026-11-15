@@ -102,7 +102,6 @@ CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE: Path = _resolve_path(
 CONTROL_PLANE_POLL_INTERVAL_SECONDS: float = float(os.environ.get("CONTROL_PLANE_POLL_INTERVAL_SECONDS", "5.0"))
 CONTROL_PLANE_RESTART_GRACE_SECONDS: float = float(os.environ.get("CONTROL_PLANE_RESTART_GRACE_SECONDS", "15.0"))
 CONTROL_PLANE_STARTUP_GRACE_SECONDS: float = float(os.environ.get("CONTROL_PLANE_STARTUP_GRACE_SECONDS", "2.0"))
-CONTROL_PLANE_AUTO_IMPORT: bool = os.environ.get("CONTROL_PLANE_AUTO_IMPORT", "false").lower() == "true"
 
 CONTROL_PLANE_RATE_LIMIT: int = int(os.environ.get("CONTROL_PLANE_RATE_LIMIT", "120"))
 CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT: int = int(os.environ.get("CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", "5"))
@@ -150,7 +149,3 @@ SECRET_KEY_RE = re.compile(
 
 def looks_like_secret_key(key: str) -> bool:
     return bool(SECRET_KEY_RE.search(str(key or "").strip().upper()))
-
-
-DASHBOARD_PATH = ROOT_DIR.parent / "koda-dashboard"
-DASHBOARD_AGENT_CONSTANTS_PATH = DASHBOARD_PATH / "src" / "lib" / "agent-constants.ts"

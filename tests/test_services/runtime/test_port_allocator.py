@@ -10,7 +10,7 @@ the same localhost port (e.g. dev servers, NoVNC streams). The contract is:
   * release_ports filters by env_id and purpose; mutates only matching rows.
   * Lock serializes concurrent allocate calls in the same process.
 
-We stub RuntimeStore with an in-memory fake; sockets are bound for real so
+We stub PostgresRuntimeStore with an in-memory fake; sockets are bound for real so
 the bind-test path is exercised against the OS.
 """
 
@@ -27,7 +27,7 @@ from koda.services.runtime.port_allocator import PortAllocator
 
 
 class _FakeStore:
-    """Minimal in-memory RuntimeStore stand-in for port-allocation tests."""
+    """Minimal in-memory PostgresRuntimeStore stand-in for port-allocation tests."""
 
     def __init__(self) -> None:
         self._next_id = 1

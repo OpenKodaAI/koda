@@ -69,27 +69,6 @@ def test_runtime_snapshot_exports_only_compiled_prompt_contract(monkeypatch):
     assert "SKILLS_JSON" not in snapshot.env
 
 
-def test_legacy_agent_discovery_uses_env_only(monkeypatch):
-    import koda.control_plane.manager as manager_mod
-
-    manager = object.__new__(manager_mod.ControlPlaneManager)
-
-    monkeypatch.setenv("AGENT_ID", "agent_b")
-
-    discovered = manager._discover_legacy_agent_ids(
-        {
-            "AGENT_A_AGENT_TOKEN": "token-a",
-            "AGENT_B_DEFAULT_PROVIDER": "claude",
-            "IGNORED_KEY": "value",
-        }
-    )
-
-    assert discovered == ["AGENT_A"]
-
-    monkeypatch.delenv("AGENT_ID", raising=False)
-    assert manager._discover_legacy_agent_ids({}) == []
-
-
 def test_runtime_snapshot_propagates_health_port_to_process_env(monkeypatch):
     """The worker reads HEALTH_PORT from env; the supervisor polls the URL
     from runtime.health_url. If the two disagree the supervisor's idle-check

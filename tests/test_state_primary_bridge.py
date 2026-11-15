@@ -75,15 +75,10 @@ def test_audit_run_coro_sync_delegates_to_primary() -> None:
     ``asyncio.run`` boundary. A separate bridge would leave the pool pinned
     to a closed loop → ``InterfaceError`` on the next insert.
     """
-    import inspect
-
     from koda.services import audit
+    from koda.state import primary
 
-    src = inspect.getsource(audit._run_coro_sync)
-    assert "run_coro_sync" in src
-    # The old implementation spun its own Thread. That approach bypassed the
-    # pool reset — guard against regressing.
-    assert "threading.Thread" not in src
+    assert audit.run_coro_sync is primary.run_coro_sync
 
 
 def test_history_store_scope_matches_cp_agent_definitions_case(monkeypatch) -> None:

@@ -130,9 +130,7 @@ def test_public_docs_cover_quickstart_and_vps() -> None:
 
 def test_openapi_document_contains_onboarding_paths() -> None:
     payload = json.loads((ROOT / "docs" / "openapi" / "control-plane.json").read_text(encoding="utf-8"))
-    assert "/setup" in payload["paths"]
     assert "/api/control-plane/onboarding/status" in payload["paths"]
-    assert "/api/control-plane/onboarding/bootstrap" in payload["paths"]
     assert "/api/control-plane/auth/status" in payload["paths"]
     assert "/api/control-plane/auth/bootstrap/exchange" in payload["paths"]
     assert "/api/control-plane/auth/register-owner" in payload["paths"]
@@ -1240,7 +1238,6 @@ def test_doctor_checks_dashboard_and_control_plane() -> None:
     assert "WEB_PORT" in doctor_text
     assert "dashboard_url" in doctor_text
     assert "dashboard_setup_url" in doctor_text
-    assert "legacy_setup_url" in doctor_text
     assert "/setup" in doctor_text
     assert "/setup?token=" not in doctor_text
     assert "CONTROL_PLANE_MASTER_KEY=" not in doctor_text

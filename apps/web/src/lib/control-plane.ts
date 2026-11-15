@@ -1176,7 +1176,6 @@ export type McpCustomServerEntry = {
   source: "manual" | "claude_desktop_json";
   owner_user_id?: string | null;
   metadata?: Record<string, unknown>;
-  validation_signature?: string | null;
   created_at?: string;
   updated_at?: string;
 };

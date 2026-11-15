@@ -1111,7 +1111,6 @@ BLOCKED_NPM_PATTERN: re.Pattern | None = re.compile(_blocked_npm, re.I) if _bloc
 INTER_AGENT_ENABLED: bool = _env("INTER_AGENT_ENABLED", "false").lower() == "true"
 SQUADS_ENABLED: bool = _env("SQUADS_ENABLED", "false").lower() == "true"
 INTER_AGENT_MAX_DELEGATION_DEPTH: int = int(_env("INTER_AGENT_MAX_DELEGATION_DEPTH", "3"))
-INTER_AGENT_MESSAGE_TIMEOUT: int = int(_env("INTER_AGENT_MESSAGE_TIMEOUT", "60"))
 # "memory" keeps the legacy in-process bus; "postgres" persists + delivers cross-process via LISTEN/NOTIFY.
 INTER_AGENT_BUS_BACKEND: str = (_env("INTER_AGENT_BUS_BACKEND", "memory") or "memory").strip().lower()
 SQUAD_MESSAGE_TIMEOUT_S: int = int(_env("SQUAD_MESSAGE_TIMEOUT_S", "300"))
@@ -1245,7 +1244,6 @@ if POSTGRES_ENV_DEFAULT:
 # --- Workflows ---
 WORKFLOW_ENABLED: bool = _env("WORKFLOW_ENABLED", "false").lower() == "true"
 WORKFLOW_MAX_STEPS: int = int(_env("WORKFLOW_MAX_STEPS", "50"))
-WORKFLOW_MAX_PARALLEL: int = int(_env("WORKFLOW_MAX_PARALLEL", "5"))
 
 # --- Channel integrations ---
 CHANNEL_WEBHOOK_BASE_URL: str = _env("CHANNEL_WEBHOOK_BASE_URL", "")
@@ -1678,13 +1676,11 @@ MAX_CONCURRENT_TASKS_GLOBAL: int = int(_env("MAX_CONCURRENT_TASKS_GLOBAL", "10")
 # --- Runtime environments / control plane ---
 RUNTIME_ENVIRONMENTS_ENABLED: bool = _env("RUNTIME_ENVIRONMENTS_ENABLED", "false").lower() == "true"
 RUNTIME_EVENT_STREAM_ENABLED: bool = _env("RUNTIME_EVENT_STREAM_ENABLED", "true").lower() == "true"
-RUNTIME_PTY_ENABLED: bool = _env("RUNTIME_PTY_ENABLED", "true").lower() == "true"
 RUNTIME_BROWSER_LIVE_ENABLED: bool = _env("RUNTIME_BROWSER_LIVE_ENABLED", "true").lower() == "true"
 RUNTIME_RECOVERY_ENABLED: bool = _env("RUNTIME_RECOVERY_ENABLED", "true").lower() == "true"
 RUNTIME_FRONTEND_API_ENABLED: bool = _env("RUNTIME_FRONTEND_API_ENABLED", "true").lower() == "true"
 RUNTIME_RETENTION_SUCCESS_HOURS: int = int(_env("RUNTIME_RETENTION_SUCCESS_HOURS", "24"))
 RUNTIME_RETENTION_FAILURE_HOURS: int = int(_env("RUNTIME_RETENTION_FAILURE_HOURS", "72"))
-RUNTIME_BUNDLE_RETENTION_DAYS: int = int(_env("RUNTIME_BUNDLE_RETENTION_DAYS", "7"))
 RUNTIME_HEARTBEAT_INTERVAL_SECONDS: int = int(_env("RUNTIME_HEARTBEAT_INTERVAL_SECONDS", "15"))
 
 # Per-task lease (crash-safe orchestration). Workers acquire a lease when
@@ -1700,7 +1696,6 @@ RUNTIME_STALE_AFTER_SECONDS: int = int(_env("RUNTIME_STALE_AFTER_SECONDS", "60")
 RUNTIME_RESOURCE_SAMPLE_INTERVAL_SECONDS: int = int(_env("RUNTIME_RESOURCE_SAMPLE_INTERVAL_SECONDS", "10"))
 RUNTIME_RECOVERY_SWEEP_INTERVAL_SECONDS: int = int(_env("RUNTIME_RECOVERY_SWEEP_INTERVAL_SECONDS", "120"))
 RUNTIME_CLEANUP_SWEEP_INTERVAL_SECONDS: int = int(_env("RUNTIME_CLEANUP_SWEEP_INTERVAL_SECONDS", "300"))
-RUNTIME_LOCAL_UI_BIND: str = _env("RUNTIME_LOCAL_UI_BIND", _env("HEALTH_BIND", "127.0.0.1"))
 RUNTIME_LOCAL_UI_TOKEN: str = _env_secret("RUNTIME_LOCAL_UI_TOKEN")
 # Host port the browser uses to reach the control plane. Docker Compose sets it
 # to the published port while the container itself always listens on 8090;
@@ -1711,21 +1706,11 @@ CONTROL_PLANE_PUBLIC_PORT: str = (
 RUNTIME_SUPERVISED_ATTACH_ENABLED: bool = _env("RUNTIME_SUPERVISED_ATTACH_ENABLED", "true").lower() == "true"
 
 RUNTIME_OPERATOR_SESSION_TTL_SECONDS: int = int(_env("RUNTIME_OPERATOR_SESSION_TTL_SECONDS", "1800"))
-RUNTIME_ATTACH_IDLE_TIMEOUT_SECONDS: int = int(_env("RUNTIME_ATTACH_IDLE_TIMEOUT_SECONDS", "900"))
 BROWSER_ALLOW_PRIVATE_NETWORK: bool = _bool_env("BROWSER_ALLOW_PRIVATE_NETWORK", False)
 RUNTIME_BROWSER_TRANSPORT: str = _env("RUNTIME_BROWSER_TRANSPORT", "novnc")
-RUNTIME_BROWSER_DISPLAY_BASE: int = int(_env("RUNTIME_BROWSER_DISPLAY_BASE", "90"))
 RUNTIME_BROWSER_VNC_BASE_PORT: int = int(_env("RUNTIME_BROWSER_VNC_BASE_PORT", "5900"))
 RUNTIME_BROWSER_NOVNC_BASE_PORT: int = int(_env("RUNTIME_BROWSER_NOVNC_BASE_PORT", "6900"))
-RUNTIME_PTY_CHUNK_BYTES: int = int(_env("RUNTIME_PTY_CHUNK_BYTES", "8192"))
-RUNTIME_PTY_BACKPRESSURE_KB: int = int(_env("RUNTIME_PTY_BACKPRESSURE_KB", "512"))
-RUNTIME_LOOP_MAX_CYCLES: int = int(_env("RUNTIME_LOOP_MAX_CYCLES", "12"))
-RUNTIME_LOOP_MAX_RETRIES_PER_PHASE: int = int(_env("RUNTIME_LOOP_MAX_RETRIES_PER_PHASE", "3"))
-RUNTIME_LOOP_NO_CHANGE_LIMIT: int = int(_env("RUNTIME_LOOP_NO_CHANGE_LIMIT", "2"))
 RUNTIME_SAVE_VERIFY_TIMEOUT_SECONDS: int = int(_env("RUNTIME_SAVE_VERIFY_TIMEOUT_SECONDS", "30"))
-RUNTIME_CHECKPOINT_MAX_UNTRACKED_BYTES: int = int(
-    _env("RUNTIME_CHECKPOINT_MAX_UNTRACKED_BYTES", str(500 * 1024 * 1024))
-)
 # Internal service kernels now run in Rust+gRPC only.
 INTERNAL_RPC_MODE: str = "rust"
 INTERNAL_RPC_DEADLINE_MS: int = int(_env("INTERNAL_RPC_DEADLINE_MS", "1500"))
@@ -1759,19 +1744,13 @@ BROWSER_SESSION_PERSISTENCE_ENABLED: bool = _env("BROWSER_SESSION_PERSISTENCE_EN
 BROWSER_SESSION_DIR: str = _env("BROWSER_SESSION_DIR", "")
 BROWSER_SESSION_MAX_AGE: int = int(_env("BROWSER_SESSION_MAX_AGE", "86400"))
 
-# --- Observability dashboard ---
-DASHBOARD_ENABLED: bool = _env("DASHBOARD_ENABLED", "false").lower() == "true"
-
 # --- Snapshots ---
 SNAPSHOT_ENABLED: bool = _env("SNAPSHOT_ENABLED", "false").lower() == "true"
-SNAPSHOT_MAX_SIZE_MB: int = int(_env("SNAPSHOT_MAX_SIZE_MB", "100"))
 SNAPSHOT_RETENTION_HOURS: int = int(_env("SNAPSHOT_RETENTION_HOURS", "168"))
 
 # --- Plugin system ---
 PLUGIN_SYSTEM_ENABLED: bool = _env("PLUGIN_SYSTEM_ENABLED", "false").lower() == "true"
-PLUGIN_DIRS: list[str] = [p.strip() for p in _env("PLUGIN_DIRS", "").split(",") if p.strip()]
 PLUGIN_SANDBOX_ENABLED: bool = _env("PLUGIN_SANDBOX_ENABLED", "true").lower() == "true"
-PLUGIN_MAX_EXECUTION_TIMEOUT: int = int(_env("PLUGIN_MAX_EXECUTION_TIMEOUT", "30"))
 
 # --- gRPC TLS ---
 GRPC_TLS_ENABLED: bool = _env("GRPC_TLS_ENABLED", "false").lower() == "true"

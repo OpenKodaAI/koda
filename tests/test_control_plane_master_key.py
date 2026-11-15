@@ -158,9 +158,8 @@ def test_worker_connection_env_uses_the_single_decrypt_helper(key_paths: SimpleN
         lambda: crypto.get_fernet(),
         lambda: crypto.encrypt_secret("value"),
         lambda: crypto.decrypt_secret("gAAAAA-not-reached"),
-        lambda: crypto.get_signing_key(),
     ],
-    ids=["get_fernet", "encrypt_secret", "decrypt_secret", "get_signing_key"],
+    ids=["get_fernet", "encrypt_secret", "decrypt_secret"],
 )
 def test_worker_gets_master_key_unavailable_and_leaves_no_file(key_paths: SimpleNamespace, operation: Any) -> None:
     with pytest.raises(crypto.MasterKeyUnavailable) as excinfo:
@@ -183,7 +182,7 @@ def test_present_key_loads_and_loose_permissions_are_tightened(key_paths: Simple
     _write_key(key_paths.key_file, key + b"\n", mode=0o644)
 
     assert crypto.decrypt_secret(crypto.encrypt_secret("round-trip")) == "round-trip"
-    assert crypto.get_signing_key() == key
+    assert crypto._load_master_key() == key
     assert _mode(key_paths.key_file) == 0o600
 
 
@@ -193,7 +192,7 @@ def test_key_readable_by_group_or_others_is_tightened(key_paths: SimpleNamespace
     key = Fernet.generate_key()
     _write_key(key_paths.key_file, key, mode=loose_mode)
 
-    assert crypto.get_signing_key() == key
+    assert crypto._load_master_key() == key
     # Group and other access go; the owner's bits stay as they were (nothing is added).
     assert _mode(key_paths.key_file) == loose_mode & 0o700
 
@@ -208,11 +207,11 @@ def test_key_mode_the_filesystem_ignores_is_logged_once(
     monkeypatch.setattr(crypto.log, "warning", lambda event, **kw: warnings.append((event, kw)))
     monkeypatch.setattr(Path, "chmod", lambda self, mode: None)
 
-    assert crypto.get_signing_key() == key
-    assert crypto.get_signing_key() == key
+    assert crypto._load_master_key() == key
+    assert crypto._load_master_key() == key
     # ensure_master_key clears the Fernet cache at every start; that must not re-arm the warning.
     crypto.clear_fernet_cache()
-    assert crypto.get_signing_key() == key
+    assert crypto._load_master_key() == key
     assert [event for event, _ in warnings] == ["control_plane_master_key_permissions_too_open"]
     assert warnings[0][1]["mode"] == "0o644"
 
@@ -230,8 +229,8 @@ def test_key_on_unchangeable_mount_is_used_and_exposure_logged(
 
     monkeypatch.setattr(Path, "chmod", _read_only)
 
-    assert crypto.get_signing_key() == key
-    assert crypto.get_signing_key() == key
+    assert crypto._load_master_key() == key
+    assert crypto._load_master_key() == key
     # Reported once per file and mode, although the key is read on every use.
     assert [event for event, _ in warnings] == ["control_plane_master_key_permissions_too_open"]
     assert warnings[0][1]["mode"] == "0o444"

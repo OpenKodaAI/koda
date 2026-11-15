@@ -1,4 +1,4 @@
-"""Effective sandbox policy checks for MCP and tool execution gates."""
+"""Effective sandbox policy evaluation, reported by the sandbox doctor."""
 
 from __future__ import annotations
 
@@ -94,10 +94,6 @@ _FORBIDDEN_MOUNT_PARTS: frozenset[str] = frozenset(
 )
 
 
-class SandboxPolicyDenied(ValueError):
-    """Raised when an effective sandbox policy is not safe to execute."""
-
-
 @dataclass(frozen=True, slots=True)
 class SandboxMount:
     """One normalized sandbox mount."""
@@ -116,7 +112,7 @@ class SandboxMount:
 
 @dataclass(frozen=True, slots=True)
 class SandboxEffectivePolicy:
-    """Normalized effective policy evaluated immediately before execution."""
+    """Normalized effective sandbox policy, as the sandbox doctor evaluates it."""
 
     isolation_kind: SandboxIsolationKind = "unknown"
     risk_class: McpRiskClass = "unknown"
@@ -215,7 +211,7 @@ class SandboxPolicyCheck:
 
 @dataclass(frozen=True, slots=True)
 class SandboxPolicyEvaluation:
-    """Deny-before-execute result for a sandbox effective policy."""
+    """Allow or deny verdict for a sandbox effective policy; nothing enforces it."""
 
     decision: SandboxDecisionKind
     policy: SandboxEffectivePolicy
@@ -258,7 +254,7 @@ def normalize_identity_status(value: Any) -> str:
 
 
 def evaluate_sandbox_effective_policy(policy: SandboxEffectivePolicy) -> SandboxPolicyEvaluation:
-    """Evaluate effective sandbox posture and deny unsafe execution."""
+    """Evaluate the effective sandbox posture: deny when any check fails."""
 
     checks = (
         _check_known_policy(policy),
@@ -271,17 +267,6 @@ def evaluate_sandbox_effective_policy(policy: SandboxEffectivePolicy) -> Sandbox
     )
     decision: SandboxDecisionKind = "allow" if all(check.ok for check in checks) else "deny"
     return SandboxPolicyEvaluation(decision=decision, policy=policy, checks=checks)
-
-
-def sandbox_policy_allows_execution(policy: SandboxEffectivePolicy) -> bool:
-    return evaluate_sandbox_effective_policy(policy).allowed
-
-
-def ensure_sandbox_policy_allows_execution(policy: SandboxEffectivePolicy) -> SandboxPolicyEvaluation:
-    evaluation = evaluate_sandbox_effective_policy(policy)
-    if not evaluation.allowed:
-        raise SandboxPolicyDenied(", ".join(evaluation.reason_codes))
-    return evaluation
 
 
 def _check_known_policy(policy: SandboxEffectivePolicy) -> SandboxPolicyCheck:

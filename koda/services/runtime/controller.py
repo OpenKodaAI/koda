@@ -74,9 +74,10 @@ from koda.services.metrics import (
 from koda.services.runtime.classifier import RuntimeClassification, classify_task
 from koda.services.runtime.events import RuntimeEventBroker
 from koda.services.runtime.port_allocator import PortAllocator
+from koda.services.runtime.postgres_store import PostgresRuntimeStore
 from koda.services.runtime.recovery_manager import RecoveryManager
-from koda.services.runtime.store import RuntimeStore
 from koda.state.history_store import create_task
+from koda.state.primary import get_primary_state_backend, postgres_primary_mode
 
 log = get_logger(__name__)
 
@@ -111,7 +112,11 @@ class RuntimeController:
         self.runtime_root = (runtime_root or RUNTIME_ROOT_DIR).resolve()
         self.runtime_root.mkdir(parents=True, exist_ok=True)
         (self.runtime_root / "tasks").mkdir(parents=True, exist_ok=True)
-        self.store = RuntimeStore()
+        if not postgres_primary_mode():
+            raise RuntimeError("runtime_primary_mode_required")
+        if get_primary_state_backend() is None:
+            raise RuntimeError("runtime_primary_backend_unavailable")
+        self.store = PostgresRuntimeStore()
         self.runtime_kernel = build_runtime_kernel_client(runtime_root=self.runtime_root, store=self.store)
         self.artifact_engine = build_artifact_engine_client(agent_id=AGENT_ID)
         self.events = RuntimeEventBroker(self.store, self.runtime_root)
@@ -3867,30 +3872,13 @@ class RuntimeController:
                 )
 
     async def run_recovery_sweep(self) -> None:
-        for action in self.recovery.recover_stale():
-            task_id = cast(int, action["task_id"])
-            env_id = cast(int, action["env_id"])
-            action_name = str(action["action"])
-            if action_name == "reattach":
-                await self.recover_task(task_id=task_id, actor="recovery_sweep")
-                RUNTIME_RECOVERIES_TOTAL.inc()
-                continue
-            if action_name == "reconstruct":
-                await self.recover_task(task_id=task_id, actor="recovery_sweep")
-                RUNTIME_RECOVERIES_TOTAL.inc()
-                continue
-            if action_name == "mark_recoverable_failed":
+        for stale in self.recovery.recover_stale():
+            orphan = bool(stale["orphan"])
+            if orphan:
                 RUNTIME_ORPHAN_ENVS.inc()
-                await self.recover_task(task_id=task_id, actor="recovery_sweep")
-                continue
-            await self.events.publish(
-                task_id=task_id,
-                env_id=env_id,
-                attempt=None,
-                phase=None,
-                event_type="recovery.failed",
-                payload=action,
-            )
+            await self.recover_task(task_id=cast(int, stale["task_id"]), actor="recovery_sweep")
+            if not orphan:
+                RUNTIME_RECOVERIES_TOTAL.inc()
 
     async def pin_environment(self, *, task_id: int, pinned: bool) -> bool:
         env = self.store.get_environment_by_task(task_id)

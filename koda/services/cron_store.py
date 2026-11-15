@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from koda.config import DEFAULT_WORK_DIR
-from koda.logging_config import get_logger
 from koda.services.scheduled_jobs import (
-    JOB_STATUS_ACTIVE,
     JOB_STATUS_ARCHIVED,
-    JOB_STATUS_PAUSED,
     _get_job,
     create_shell_command_job,
     delete_job,
@@ -21,23 +17,8 @@ from koda.services.scheduled_jobs import (
     resume_job,
     wake_dispatcher,
 )
-from koda.state.scheduler_store import get_scheduler_store
-
-log = get_logger(__name__)
 
 MAX_CRON_JOBS_PER_USER = 10
-
-
-def _store() -> Any:
-    return get_scheduler_store()
-
-
-def _payload(command: str, description: str) -> str:
-    return json.dumps({"command": command, "description": description}, ensure_ascii=True)
-
-
-def _status_from_enabled(enabled: bool) -> str:
-    return JOB_STATUS_ACTIVE if enabled else JOB_STATUS_PAUSED
 
 
 def create_cron_job(
@@ -76,45 +57,13 @@ def create_cron_job(
     return job_id
 
 
-def list_cron_jobs(user_id: int) -> list[tuple]:
-    """Return shell command jobs as (id, cron_expression, command, description, enabled)."""
-    jobs: list[tuple] = []
-    for row in list_jobs(user_id):
-        if str(row.get("job_type") or "") != "shell_command" or str(row.get("status") or "") == JOB_STATUS_ARCHIVED:
-            continue
-        payload = row.get("payload") or {}
-        jobs.append(
-            (
-                row["id"],
-                row["schedule_expr"],
-                payload.get("command", ""),
-                payload.get("description", ""),
-                1 if row["status"] == JOB_STATUS_ACTIVE else 0,
-            )
-        )
-    return jobs
-
-
-def get_cron_job(job_id: int) -> tuple | None:
-    """Return (id, user_id, chat_id, cron_expression, command, description, enabled, work_dir)."""
-    row = _get_job(job_id)
-    if (
-        not row
-        or str(row.get("job_type") or "") != "shell_command"
-        or str(row.get("status") or "") == JOB_STATUS_ARCHIVED
-    ):
-        return None
-    payload = row.get("payload") or {}
-    return (
-        row["id"],
-        row["user_id"],
-        row["chat_id"],
-        row["schedule_expr"],
-        payload.get("command", ""),
-        payload.get("description", ""),
-        1 if row["status"] == JOB_STATUS_ACTIVE else 0,
-        row["work_dir"],
-    )
+def list_cron_jobs(user_id: int) -> list[dict[str, Any]]:
+    """Return the user's shell command jobs that are not archived."""
+    return [
+        row
+        for row in list_jobs(user_id)
+        if str(row.get("job_type") or "") == "shell_command" and str(row.get("status") or "") != JOB_STATUS_ARCHIVED
+    ]
 
 
 def delete_cron_job(user_id: int, job_id: int) -> bool:
@@ -144,57 +93,3 @@ def toggle_cron_job(user_id: int, job_id: int, enabled: bool) -> bool:
         return ok
     ok, _ = pause_job(job_id, user_id)
     return ok
-
-
-def get_all_enabled_jobs() -> list[tuple]:
-    """Return active shell command jobs for restore flows."""
-    enabled: list[tuple] = []
-    for row in _store().fetch_all(
-        """
-        SELECT id, user_id, chat_id, schedule_expr, payload_json, work_dir
-        FROM scheduled_jobs
-        WHERE job_type = 'shell_command' AND status = ?
-        ORDER BY id
-        """,
-        (JOB_STATUS_ACTIVE,),
-    ):
-        payload = json.loads(str(row.get("payload_json") or "{}"))
-        enabled.append(
-            (
-                row["id"],
-                row["user_id"],
-                row["chat_id"],
-                row["schedule_expr"],
-                payload.get("command", ""),
-                payload.get("description", ""),
-                row["work_dir"],
-            )
-        )
-    return enabled
-
-
-def schedule_cron_task(
-    job_id: int,
-    agent: Any,
-    chat_id: int,
-    cron_expression: str,
-    command: str,
-    work_dir: str = "/tmp",
-) -> None:
-    """Compatibility no-op. The unified dispatcher wakes up and owns execution."""
-    wake_dispatcher()
-    log.info("cron_job_schedule_requested", job_id=job_id, expression=cron_expression)
-
-
-def cancel_cron_task(job_id: int) -> None:
-    """Compatibility no-op. The unified dispatcher reads state from the database."""
-    wake_dispatcher()
-    log.info("cron_job_cancel_requested", job_id=job_id)
-
-
-async def restore_all_jobs(agent: Any) -> int:
-    """Restore hook retained for startup compatibility."""
-    enabled = get_all_enabled_jobs()
-    wake_dispatcher()
-    log.info("cron_jobs_restored", migrated=0, enabled=len(enabled))
-    return len(enabled)

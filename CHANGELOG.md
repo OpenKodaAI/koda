@@ -231,6 +231,45 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   registered webhook, so `event_wait` always timed out. An agent whose tool policy
   still lists one of these tools fails validation with "unknown core tools" until the
   id is removed from its tool policy JSON. (M4-E1-T10, D-067)
+- Twenty configuration keys that nothing read are gone. Setting one never had an effect,
+  and it is now ignored without a warning: `INTER_AGENT_MESSAGE_TIMEOUT`,
+  `WORKFLOW_MAX_PARALLEL`, `RUNTIME_PTY_ENABLED`, `RUNTIME_BUNDLE_RETENTION_DAYS`,
+  `RUNTIME_LOCAL_UI_BIND`, `RUNTIME_ATTACH_IDLE_TIMEOUT_SECONDS`,
+  `RUNTIME_BROWSER_DISPLAY_BASE`, `RUNTIME_PTY_CHUNK_BYTES`, `RUNTIME_PTY_BACKPRESSURE_KB`,
+  `RUNTIME_LOOP_MAX_CYCLES`, `RUNTIME_LOOP_MAX_RETRIES_PER_PHASE`,
+  `RUNTIME_LOOP_NO_CHANGE_LIMIT`, `RUNTIME_CHECKPOINT_MAX_UNTRACKED_BYTES`,
+  `SNAPSHOT_MAX_SIZE_MB`, `PLUGIN_DIRS`, `PLUGIN_MAX_EXECUTION_TIMEOUT`,
+  `MEMORY_LEXICAL_CANDIDATES`, and `KNOWLEDGE_V2_NEO4J_URI`, `_USER` and `_PASSWORD`.
+  The control-plane system settings no longer offer four of them in their `runtime`
+  section (`runtime_pty_enabled`, `runtime_local_ui_bind`,
+  `runtime_attach_idle_timeout_seconds`, `runtime_browser_display_base`); a value saved
+  there before now shows under `additional_env_vars`. `PLUGIN_SANDBOX_ENABLED` stays
+  until M1-E4-T4. (M4-E1-T2, TD-003, D-194)
+- `DASHBOARD_ENABLED` is gone with the in-process stats aggregator it switched on, which
+  recorded tool runs that nothing read; the dashboard reads its data from Postgres.
+  Three Prometheus metrics that were never exported are gone. `scripts/ops_benchmark.py`
+  recorded `koda_ops_benchmark_runs_total` and `koda_ops_benchmark_duration_seconds`
+  only inside its own process, which serves no `/metrics` and pushes nowhere; it no
+  longer records them, and its output and exit codes are unchanged. Nothing set
+  `koda_runtime_worktree_disk_bytes`. The `KodaOpsBenchmarkFailed` alert in
+  `docs/operations/alerts.yml` and the "Ops benchmark" panel of the bundled Grafana
+  dashboard, which could never show data, are gone with them. `/health` reports the
+  same fields and breakers. (M4-E1-T3, TD-057, TD-058)
+- `POST /api/control-plane/onboarding/bootstrap` is gone: it has answered `410
+  onboarding_bootstrap_removed` since the setup wizard stopped using it, and now answers
+  `404`. Create the owner with `POST /api/control-plane/auth/register-owner`. The control
+  plane (`:8090`) no longer serves the HTML page at `/setup` that pointed to the
+  dashboard, or the `/` redirect to it; the setup screen is the dashboard's `/setup`.
+  `scripts/doctor.py` drops `legacy_setup_url` from its payload and `koda doctor` its
+  "Bridge" line. (M4-E1-T8, TD-071)
+- `CONTROL_PLANE_AUTO_IMPORT` is gone with the import it switched on, which read agents
+  from a root `.env` and a sibling `koda-dashboard` checkout and was off by default.
+  (M4-E1-T8, TD-070)
+- Custom MCP servers no longer carry `validation_signature`: the HMAC was stored and
+  returned but never checked. New and updated servers store no signature. The custom
+  server list and the MCP catalog no longer return it, neither as a field nor inside
+  `metadata`, where servers saved before this change still hold a copy until they are
+  next updated. (M4-E1-T8, TD-038)
 
 ### Fixed
 

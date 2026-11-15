@@ -37,19 +37,6 @@ class _Request:
         return self._body
 
 
-@pytest.mark.asyncio
-async def test_setup_page_renders_token_free_ui() -> None:
-    response = await control_plane_api.setup_page(_Request(query={"token": "bootstrap-token"}))
-
-    assert response.content_type == "text/html"
-    assert "Configuration moved into the dashboard" in response.text
-    assert "/control-plane" in response.text
-    assert "/openapi/control-plane.json" in response.text
-    assert "setup code" in response.text.lower()
-    assert "bootstrap-token" not in response.text
-    assert "localStorage" not in response.text
-
-
 def test_control_plane_authorization_fails_closed_without_token() -> None:
     with patch("koda.control_plane.operator_auth.CONTROL_PLANE_API_TOKENS", []):
         response = control_plane_api._authorize_request(_Request())
@@ -243,18 +230,6 @@ async def test_onboarding_first_task_requires_operator_session() -> None:
 
 
 @pytest.mark.asyncio
-async def test_onboarding_bootstrap_route_is_deprecated() -> None:
-    """/api/control-plane/onboarding/bootstrap was removed — the setup wizard
-    no longer bundles provider/agent setup into first-run. The endpoint must
-    return 410 Gone with a helpful migration message."""
-    response = await control_plane_api.onboarding_bootstrap(_Request(payload={}))
-    assert response.status == 410
-    body = json.loads(response.text)
-    assert body["error"] == "onboarding_bootstrap_removed"
-    assert "register-owner" in body["message"]
-
-
-@pytest.mark.asyncio
 async def test_control_plane_openapi_route_serves_spec() -> None:
     response = await control_plane_api.control_plane_openapi(_Request())
     payload = json.loads(response.text)
@@ -271,13 +246,10 @@ def test_setup_control_plane_routes_registers_onboarding_surfaces() -> None:
     control_plane_api.setup_control_plane_routes(app)
     canonicals = {route.resource.canonical for route in app.router.routes()}
 
-    assert "/" in canonicals
-    assert "/setup" in canonicals
     assert "/openapi/control-plane.json" in canonicals
     assert "/api/control-plane/onboarding/status" in canonicals
     assert "/api/control-plane/onboarding/readiness" in canonicals
     assert "/api/control-plane/onboarding/first-task" in canonicals
-    assert "/api/control-plane/onboarding/bootstrap" in canonicals
     assert "/api/control-plane/auth/status" in canonicals
     assert "/api/control-plane/auth/bootstrap/exchange" in canonicals
     assert "/api/control-plane/auth/bootstrap/codes" in canonicals
@@ -429,7 +401,7 @@ def test_doctor_script_reports_expected_checks() -> None:
 
     assert payload["ok"] is True
     assert payload["setup_url"].endswith("/setup")
-    assert payload["legacy_setup_url"].endswith("/setup")
+    assert "legacy_setup_url" not in payload
 
 
 @pytest.mark.asyncio
