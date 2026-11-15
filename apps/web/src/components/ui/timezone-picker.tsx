@@ -16,6 +16,8 @@ import { cn } from "@/lib/utils";
  * and older runtimes still get a working picker.
  */
 export interface TimezonePickerProps {
+  /** Names the popover and its list for assistive tech, usually the field's label. */
+  label: string;
   value: string;
   onValueChange: (next: string) => void;
   disabled?: boolean;
@@ -89,6 +91,7 @@ function normalize(text: string): string {
 export const TimezonePicker = React.forwardRef<HTMLButtonElement, TimezonePickerProps>(
   function TimezonePicker(
     {
+      label,
       value,
       onValueChange,
       disabled,
@@ -198,6 +201,7 @@ export const TimezonePicker = React.forwardRef<HTMLButtonElement, TimezonePicker
         <PopoverContent
           align="start"
           className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
+          aria-label={label}
         >
           <div className="flex items-center gap-2 border-b border-[var(--divider-hair)] px-3">
             <Search className="icon-sm shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
@@ -213,7 +217,7 @@ export const TimezonePicker = React.forwardRef<HTMLButtonElement, TimezonePicker
               autoCorrect="off"
             />
           </div>
-          <div ref={listRef} role="listbox" className="max-h-[18rem] overflow-y-auto py-1">
+          <div ref={listRef} role="listbox" aria-label={label} className="max-h-[18rem] overflow-y-auto py-1">
             {filtered.length === 0 ? (
               <div className="px-3 py-3 text-center text-[0.75rem] text-[color:var(--text-tertiary)]">
                 {emptyLabel}

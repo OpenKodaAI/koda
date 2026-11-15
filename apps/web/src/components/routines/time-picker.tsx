@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ChevronDown, Clock } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useAppI18n } from "@/hooks/use-app-i18n";
 import { cn } from "@/lib/utils";
 
 interface TimePickerProps {
@@ -28,6 +29,7 @@ function parseTime(value: string): { hour: number; minute: number } {
 }
 
 export function TimePicker({ value, onChange, disabled = false, className }: TimePickerProps) {
+  const { t } = useAppI18n();
   const [open, setOpen] = useState(false);
   const { hour, minute } = parseTime(value);
   const display = `${pad(hour)}:${pad(minute)}`;
@@ -69,7 +71,7 @@ export function TimePicker({ value, onChange, disabled = false, className }: Tim
           <ChevronDown className="icon-sm shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
         </button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[14rem] p-0">
+      <PopoverContent align="start" className="w-[14rem] p-0" aria-label={t("routines.editor.timeOfDay")}>
         <div className="grid grid-cols-2 divide-x divide-[var(--divider-hair)]">
           <div ref={hourListRef} className="max-h-[15rem] overflow-y-auto py-1">
             {HOURS.map((h) => {

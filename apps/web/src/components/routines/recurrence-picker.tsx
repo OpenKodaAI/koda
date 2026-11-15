@@ -297,6 +297,7 @@ export function RecurrencePicker({
               {t("routines.editor.timezone")}
             </span>
             <TimezonePicker
+              label={t("routines.editor.timezone")}
               value={value.timezone}
               onValueChange={(tz) => onChange(patch(value, { timezone: tz }))}
               disabled={disabled}
@@ -460,6 +461,7 @@ export function RecurrencePicker({
               {t("routines.editor.timezone")}
             </span>
             <TimezonePicker
+              label={t("routines.editor.timezone")}
               value={value.timezone}
               onValueChange={(tz) => onChange(patch(value, { timezone: tz }))}
               disabled={disabled}
