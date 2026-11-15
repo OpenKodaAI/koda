@@ -725,14 +725,15 @@ Squad administration tools (`squad_coordinator_elect`, `squad_coordinator_demote
 the squad's current coordinator; anyone else gets `Forbidden`. Operators elect the
 first coordinator from the control plane.
 
-- `squad_coordinator_elect` — Hand the coordinator seat to another agent.
+- `squad_coordinator_elect` — Hand the coordinator seat to another agent of the squad
+  (or an agent of its workspace that is in no squad).
   Params: `{"squad_id": "<id>", "agent_id": "PM", "reason": "..."}`
   Validation reads the real AgentSpec from the control plane; caller-provided
   tool lists are ignored.
 - `squad_coordinator_demote` — Demote the current coordinator. Params: `{"squad_id": "<id>", "reason": "..."}`
 - `squad_coordinator_get` — Show current coordinator + recent history.
   Params: `{"squad_id": "<id>", "history_limit": 5}`
-- `squad_router_tick` — Run one synchronous sweep that reverts expired claims to `pending`.
+- `squad_router_tick` — Run one synchronous sweep that reverts this squad's expired claims to `pending`.
   Admin tool — the router daemon does this periodically once started. Params: `{"squad_id": "<id>"}`
 
 ### Squad ↔ Telegram Binding

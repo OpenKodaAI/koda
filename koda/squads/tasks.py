@@ -454,9 +454,10 @@ class SquadTaskStore:
             deliverables=deliverables,
         )
 
-    async def sweep_expired_claims(self, *, batch_size: int = 50) -> list[ExpiredClaim]:
+    async def sweep_expired_claims(self, *, batch_size: int = 50, squad_id: str | None = None) -> list[ExpiredClaim]:
         """Atomically revert tasks past their claim TTL back to ``pending``.
 
+        With ``squad_id``, only the tasks of that squad's threads are swept.
         Returns a record per reverted task so callers can emit thread events
         or notify the prior assignee.
         """
@@ -469,6 +470,9 @@ class SquadTaskStore:
                          WHERE status = 'claimed'
                            AND claim_expires_at IS NOT NULL
                            AND claim_expires_at < NOW()
+                           AND ($2::text IS NULL OR thread_id IN (
+                               SELECT th.id FROM "{self._schema}"."squad_threads" AS th WHERE th.squad_id = $2
+                           ))
                          ORDER BY claim_expires_at ASC
                          LIMIT $1
                            FOR UPDATE SKIP LOCKED
@@ -485,6 +489,7 @@ class SquadTaskStore:
                  RETURNING t.id, t.thread_id, t.version,
                            expired.assigned_agent_id AS prior_agent""",
                 max(1, min(int(batch_size), 500)),
+                squad_id,
             )
         return [
             ExpiredClaim(

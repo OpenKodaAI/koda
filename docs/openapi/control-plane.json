@@ -11320,7 +11320,7 @@
     "/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/coordinator": {
       "put": {
         "summary": "Elect workspaces squads coordinator",
-        "description": "Operator election of the squad coordinator, scoped to the workspace that owns the squad. Body: agentId, optional reason and forceReplace. Agents reach election only as the squad's current coordinator, through the squad_coordinator_elect tool.",
+        "description": "Operator election of the squad coordinator, scoped to the workspace that owns the squad. Body: agentId, optional reason and forceReplace (a boolean). The agent must belong to the squad, or be an agent of its workspace that is in no squad. Agents reach election only as the squad's current coordinator, through the squad_coordinator_elect tool.",
         "tags": [
           "Workspaces"
         ],

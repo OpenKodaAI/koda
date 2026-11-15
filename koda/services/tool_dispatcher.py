@@ -4941,7 +4941,8 @@ async def _handle_squad_router_tick(params: dict, ctx: ToolContext) -> AgentTool
             success=False,
             output="Squad router unavailable: POSTGRES_URL is not configured.",
         )
-    report = await router.sweep_once()
+    # Only this squad's claims: the global sweeps would reach other squads and workspaces.
+    report = await router.sweep_squad_claims(str(squad_id))
     if report.reverted_count == 0:
         return AgentToolResult(
             tool="squad_router_tick",
@@ -5010,7 +5011,23 @@ async def _handle_squad_coordinator_elect(params: dict, ctx: ToolContext) -> Age
     try:
         from koda.control_plane.manager import get_control_plane_manager
 
-        agent_spec = get_control_plane_manager().get_agent_spec(agent_id)
+        manager = get_control_plane_manager()
+        is_member = manager.is_squad_member_agent(str(agent_id), str(squad_id))
+    except Exception as exc:
+        log.exception("squad_coordinator_membership_lookup_failed", squad_id=squad_id, agent_id=agent_id)
+        return AgentToolResult(
+            tool="squad_coordinator_elect",
+            success=False,
+            output=f"Forbidden: cannot check whether {agent_id!r} belongs to squad {squad_id!r}: {exc}",
+        )
+    if not is_member:
+        return AgentToolResult(
+            tool="squad_coordinator_elect",
+            success=False,
+            output=f"Forbidden: agent {agent_id!r} is not a member of squad {squad_id!r} or of its workspace",
+        )
+    try:
+        agent_spec = manager.get_agent_spec(agent_id)
     except Exception as exc:
         return AgentToolResult(
             tool="squad_coordinator_elect",
@@ -5061,7 +5078,12 @@ async def _handle_squad_coordinator_demote(params: dict, ctx: ToolContext) -> Ag
         return admin_err
 
     from koda.config import AGENT_ID
-    from koda.squads import CoordinatorNotFoundError, get_coordinator_service, get_squad_thread_store
+    from koda.squads import (
+        CoordinatorConflictError,
+        CoordinatorNotFoundError,
+        get_coordinator_service,
+        get_squad_thread_store,
+    )
 
     service = get_coordinator_service()
     if service is None:
@@ -5080,6 +5102,8 @@ async def _handle_squad_coordinator_demote(params: dict, ctx: ToolContext) -> Ag
             triggered_by=triggered_by,
             reason=reason,
             thread_store=get_squad_thread_store(),
+            # Re-checked under the row lock: the caller must still be the coordinator.
+            expected_coordinator_agent_id=_ctx_agent_id(ctx),
         )
     except CoordinatorNotFoundError:
         return AgentToolResult(
@@ -5087,6 +5111,8 @@ async def _handle_squad_coordinator_demote(params: dict, ctx: ToolContext) -> Ag
             success=False,
             output=f"Squad '{squad_id}' has no active coordinator.",
         )
+    except CoordinatorConflictError as exc:
+        return AgentToolResult(tool="squad_coordinator_demote", success=False, output=f"Forbidden: {exc}")
     return AgentToolResult(
         tool="squad_coordinator_demote",
         success=True,

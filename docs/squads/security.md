@@ -34,6 +34,12 @@ for election, or the squad's current coordinator, through the agent tools. The
 agent tools take no `force_replace` or `force`: a coordinator can only hand its
 own seat over, and `squad_telegram_bind` runs the `/squad_bind` supergroup,
 forum and admin checks against Telegram instead of trusting the caller.
+Election and the coordinator's own demotion re-check, under the coordinator row
+lock, that the caller still holds the seat, so a coordinator demoted or replaced
+after its check changes nothing. The elected agent must belong to the squad, or
+be an agent of the squad's workspace that is in no squad. `squad_router_tick`
+reverts only the expired claims of the coordinator's own squad; the other router
+sweeps cover every squad and run only in the background loop.
 
 Artifact updates require ownership and an `If-Match` style version check to
 prevent concurrent overwrites.

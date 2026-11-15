@@ -959,11 +959,14 @@ async def test_router_tick_empty_sweep(ctx: ToolContext, monkeypatch: pytest.Mon
     from koda.squads.router import SweepReport
 
     mock_router = AsyncMock()
-    mock_router.sweep_once = AsyncMock(return_value=SweepReport())
+    mock_router.sweep_squad_claims = AsyncMock(return_value=SweepReport())
     with patch("koda.squads.get_squad_router", return_value=mock_router):
         result = await _handle_squad_router_tick({"squad_id": "build"}, ctx)
     assert result.success
     assert "nothing expired" in result.output
+    # The tick sweeps the coordinator's own squad, never the global tables.
+    mock_router.sweep_squad_claims.assert_awaited_once_with("build")
+    mock_router.sweep_once.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1185,6 +1188,64 @@ async def test_squad_admin_tools_refuse_a_non_coordinator(
 
 
 @pytest.mark.asyncio
+async def test_coordinator_demote_names_the_caller_as_the_expected_coordinator(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.executing_agent_id = "PM"
+    mock_service = AsyncMock()
+    mock_service.demote = AsyncMock(return_value=_coordinator_state(coordinator_agent_id=None))
+    with (
+        patch("koda.squads.get_coordinator_service", return_value=mock_service),
+        patch("koda.squads.get_squad_thread_store", return_value=None),
+    ):
+        result = await _handle_squad_coordinator_demote({"squad_id": "build"}, ctx)
+    assert result.success
+    assert mock_service.demote.await_args.kwargs["expected_coordinator_agent_id"] == "PM"
+
+
+@pytest.mark.asyncio
+async def test_coordinator_demote_refuses_when_the_seat_changed(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    from koda.squads.coordinator import CoordinatorConflictError
+
+    ctx.executing_agent_id = "PM"
+    mock_service = AsyncMock()
+    conflict = CoordinatorConflictError("squad 'build' coordinator is 'OPS', not 'PM'")
+    mock_service.demote = AsyncMock(side_effect=conflict)
+    with (
+        patch("koda.squads.get_coordinator_service", return_value=mock_service),
+        patch("koda.squads.get_squad_thread_store", return_value=None),
+    ):
+        result = await _handle_squad_coordinator_demote({"squad_id": "build"}, ctx)
+    assert not result.success
+    assert "OPS" in result.output
+
+
+@pytest.mark.asyncio
+async def test_coordinator_elect_refuses_an_agent_outside_the_squad(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx.executing_agent_id = "PM"
+    mock_service = AsyncMock()
+    with (
+        patch("koda.control_plane.manager.get_control_plane_manager") as manager,
+        patch("koda.squads.get_coordinator_service", return_value=mock_service),
+        patch("koda.squads.get_squad_thread_store", return_value=None),
+    ):
+        manager.return_value.get_agent_spec.return_value = _eligible_spec()
+        manager.return_value.is_squad_member_agent.return_value = False
+        result = await _handle_squad_coordinator_elect({"squad_id": "build", "agent_id": "BETA_PM"}, ctx)
+    assert not result.success
+    assert result.output.startswith("Forbidden:")
+    manager.return_value.is_squad_member_agent.assert_called_once_with("BETA_PM", "build")
+    mock_service.elect.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_router_tick_requires_squad_id(ctx: ToolContext, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
     mock_router = AsyncMock()
@@ -1193,6 +1254,7 @@ async def test_router_tick_requires_squad_id(ctx: ToolContext, monkeypatch: pyte
     assert not result.success
     assert "squad_id" in result.output
     mock_router.sweep_once.assert_not_awaited()
+    mock_router.sweep_squad_claims.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -1721,7 +1783,7 @@ async def test_router_tick_reverts_summary(ctx: ToolContext, monkeypatch: pytest
     from koda.squads.tasks import ExpiredClaim
 
     mock_router = AsyncMock()
-    mock_router.sweep_once = AsyncMock(
+    mock_router.sweep_squad_claims = AsyncMock(
         return_value=SweepReport(
             expired_claims=[
                 ExpiredClaim(
@@ -1738,6 +1800,8 @@ async def test_router_tick_reverts_summary(ctx: ToolContext, monkeypatch: pytest
     assert result.success
     assert "reverted 1" in result.output
     assert "FE" in result.output
+    mock_router.sweep_squad_claims.assert_awaited_once_with("build")
+    mock_router.sweep_once.assert_not_awaited()
 
 
 @pytest.mark.asyncio

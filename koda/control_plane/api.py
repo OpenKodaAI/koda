@@ -946,6 +946,14 @@ async def put_squad_coordinator_route(request: web.Request) -> web.Response:
     if isinstance(authorized, web.Response):
         return authorized
     username, squad_id = authorized
+    force_replace = payload.get("forceReplace", payload.get("force_replace", False))
+    if not isinstance(force_replace, bool):
+        return web.json_response({"error": "forceReplace must be a boolean"}, status=400)
+    if not _manager().is_squad_member_agent(agent_id, squad_id):
+        return web.json_response(
+            {"error": f"agent {agent_id!r} is not a member of squad {squad_id!r} or of its workspace"},
+            status=400,
+        )
 
     from koda.squads import (
         CoordinatorConflictError,
@@ -964,7 +972,7 @@ async def put_squad_coordinator_route(request: web.Request) -> web.Response:
             agent_id=agent_id,
             triggered_by=f"operator:{username}",
             reason=reason,
-            force_replace=bool(payload.get("forceReplace", payload.get("force_replace", False))),
+            force_replace=force_replace,
             agent_spec=_manager().get_agent_spec(agent_id),
             thread_store=get_squad_thread_store(),
         )

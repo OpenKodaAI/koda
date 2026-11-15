@@ -158,3 +158,74 @@ def test_squad_coordinator_routes_are_registered() -> None:
     path = "/api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/coordinator"
     methods = {route.method for route in app.router.routes() if getattr(route.resource, "canonical", None) == path}
     assert {"PUT", "DELETE"} <= methods
+
+
+@pytest.mark.asyncio
+async def test_operator_cannot_elect_an_agent_outside_the_squad() -> None:
+    service = AsyncMock()
+    manager = _manager()
+    manager.is_squad_member_agent.return_value = False
+    request = _Request(match_info={"workspace_id": "acme", "squad_id": "build"}, payload={"agentId": "BETA_PM"})
+    with (
+        patch("koda.control_plane.api._manager", return_value=manager),
+        patch("koda.control_plane.api._require_auth_context", return_value=_operator()),
+        patch("koda.squads.get_squad_access_service", return_value=_access()),
+        patch("koda.squads.get_coordinator_service", return_value=service),
+        patch("koda.squads.get_squad_thread_store", return_value=None),
+    ):
+        response = await control_plane_api.put_squad_coordinator_route(request)  # type: ignore[arg-type]
+    assert response.status == 400
+    assert "BETA_PM" in json.loads(response.text)["error"]
+    manager.is_squad_member_agent.assert_called_once_with("BETA_PM", "build")
+    assert service.mock_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value", ["false", "true", 0, 1, None])
+async def test_operator_election_rejects_a_force_replace_that_is_not_a_boolean(value: object) -> None:
+    service = AsyncMock()
+    service.elect = AsyncMock(return_value=_state("OPS"))
+    request = _Request(
+        match_info={"workspace_id": "acme", "squad_id": "build"},
+        payload={"agentId": "OPS", "forceReplace": value},
+    )
+    with (
+        patch("koda.control_plane.api._manager", return_value=_manager()),
+        patch("koda.control_plane.api._require_auth_context", return_value=_operator()),
+        patch("koda.squads.get_squad_access_service", return_value=_access()),
+        patch("koda.squads.get_coordinator_service", return_value=service),
+        patch("koda.squads.get_squad_thread_store", return_value=None),
+    ):
+        response = await control_plane_api.put_squad_coordinator_route(request)  # type: ignore[arg-type]
+    assert response.status == 400
+    assert "forceReplace" in json.loads(response.text)["error"]
+    service.elect.assert_not_awaited()
+
+
+def test_squad_membership_of_an_elected_agent() -> None:
+    import koda.control_plane.manager as manager_mod
+
+    squads = {"build": {"id": "build", "workspace_id": "acme"}, "web": {"id": "web", "workspace_id": "acme"}}
+    agents = {
+        "PM": {"id": "PM", "workspace_id": "acme", "squad_id": "build"},
+        "LEAD": {"id": "LEAD", "workspace_id": "acme", "squad_id": None},
+        "WEB": {"id": "WEB", "workspace_id": "acme", "squad_id": "web"},
+        "BETA_PM": {"id": "BETA_PM", "workspace_id": "beta", "squad_id": "ops"},
+        "LONER": {"id": "LONER", "workspace_id": None, "squad_id": None},
+    }
+
+    def fetch_one(sql: str, params: tuple[object, ...]) -> object:
+        table = squads if "cp_workspace_squads" in sql else agents
+        return table.get(str(params[0]))
+
+    manager = object.__new__(manager_mod.ControlPlaneManager)
+    with patch.object(manager_mod, "fetch_one", fetch_one):
+        # A member of the squad, or an agent of its workspace that is in no squad.
+        assert manager.is_squad_member_agent("PM", "build") is True
+        assert manager.is_squad_member_agent("LEAD", "build") is True
+        # Another squad of the workspace, another workspace, no workspace, unknown agent or squad.
+        assert manager.is_squad_member_agent("WEB", "build") is False
+        assert manager.is_squad_member_agent("BETA_PM", "build") is False
+        assert manager.is_squad_member_agent("LONER", "build") is False
+        assert manager.is_squad_member_agent("GHOST", "build") is False
+        assert manager.is_squad_member_agent("PM", "missing") is False
