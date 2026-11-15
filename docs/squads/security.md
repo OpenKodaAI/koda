@@ -13,9 +13,11 @@ elected coordinator is no exception: its role adds coordination actions (writing
 while paused, reading history from before it joined, overriding task
 assignments) only on threads it takes part in, and it never opens a thread it is
 not party to. Private side-threads are visible only to their participants;
-workspace operators see redacted metadata by default. When a participant joins
-after messages already exist, history and prompt context are filtered by
-`joined_at`.
+workspace operators see redacted metadata by default. Squad membership sync
+(on inbound Telegram and dashboard messages) adds the current roster to squad
+threads only: a private thread keeps its explicit participant list. When a
+participant joins after messages already exist, history and prompt context are
+filtered by `joined_at`.
 
 Operator break-glass access to private content is disabled by default with
 `SQUAD_OPERATOR_BREAK_GLASS_ENABLED=false`. When enabled, callers must provide
