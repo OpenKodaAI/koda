@@ -708,22 +708,33 @@ def _stand_in_operator_table(monkeypatch: pytest.MonkeyPatch, owner: dict[str, A
     return writes
 
 
-async def test_a_rejection_that_outlasts_the_floor_waits_for_its_next_multiple(
+@pytest.mark.parametrize(
+    "check_seconds",
+    [
+        pytest.param(0.17, id="write-pushes-past-the-floor"),
+        pytest.param(0.25, id="check-outlasts-the-floor"),
+    ],
+)
+async def test_a_rejection_that_outlasts_the_floor_answers_when_its_work_ends(
     monkeypatch: pytest.MonkeyPatch,
+    check_seconds: float,
 ) -> None:
-    """D-136: when the work itself takes longer than the floor, the extra failure-count write still does not show.
+    """D-136: the floor is fixed, so what work past it can show is the failure-count write, never a whole floor.
 
-    Each Argon2 check takes 250 ms against a 200 ms floor. An unknown identifier does one check
-    (250 ms); a wrong password for the owner does one check and writes its failure count
-    (290 ms). Both answer at the next multiple of the floor, 400 ms, so they still take the same
-    time.
+    Each Argon2 check takes `check_seconds` against a 200 ms floor, and the failure-count write
+    that only a wrong password for an existing account does takes 40 ms. An unknown identifier
+    answers at the floor or when its check ends, whichever is later; the owner answers at most
+    the write's 40 ms after it (170 ms: 200 against 210 ms; 250 ms: 250 against 290 ms). Waiting
+    to the next multiple of the floor instead would turn that write into a whole extra floor
+    whenever it pushes the owner's answer past a multiple (200 against 400 ms).
     """
     floor = 0.2
+    write_seconds = 0.04
     monkeypatch.setattr(operator_auth_mod, "_FAILURE_TIMING_FLOOR_SECONDS", floor)
-    monkeypatch.setattr(operator_auth_mod, "_password_hasher", lambda: _SlowHasher(check_seconds=0.25))
+    monkeypatch.setattr(operator_auth_mod, "_password_hasher", lambda: _SlowHasher(check_seconds=check_seconds))
     operator_auth_mod._dummy_password_hash.cache_clear()
     owner = {"id": "7", "username": "owner", "password_hash": "slow-hash"}
-    writes = _stand_in_operator_table(monkeypatch, owner, write_seconds=0.04)
+    writes = _stand_in_operator_table(monkeypatch, owner, write_seconds=write_seconds)
     durations: dict[str, list[float]] = {"owner": [], "nobody@example.com": []}
 
     try:
@@ -738,9 +749,12 @@ async def test_a_rejection_that_outlasts_the_floor_waits_for_its_next_multiple(
 
     assert len(writes) == 3
     for identifier, measured in durations.items():
-        assert min(measured) >= 2 * floor, f"{identifier}: {[round(value * 1000) for value in measured]} ms"
+        assert min(measured) >= floor, f"{identifier}: {[round(value * 1000) for value in measured]} ms"
     known, unknown = (statistics.median(measured) for measured in durations.values())
-    assert abs(known - unknown) < 0.010, f"median owner {known * 1000:.1f} ms, unknown {unknown * 1000:.1f} ms"
+    assert unknown < max(floor, check_seconds) + 0.03, f"median unknown {unknown * 1000:.1f} ms"
+    assert known - unknown < write_seconds + 0.015, (
+        f"median owner {known * 1000:.1f} ms, unknown {unknown * 1000:.1f} ms"
+    )
 
 
 @pytest.mark.slow
@@ -759,7 +773,7 @@ async def test_failed_logins_take_the_floor_whether_or_not_the_identifier_exists
     Argon2 runs with cheap parameters so that the work stays inside the floor and the test
     measures the floor itself: with the defaults one check on a loaded host takes longer than
     300 ms (450 ms to 1.4 s on 4 cores at a load of 10). That case is
-    `test_a_rejection_that_outlasts_the_floor_waits_for_its_next_multiple`, and that every
+    `test_a_rejection_that_outlasts_the_floor_answers_when_its_work_ends`, and that every
     rejection checks one hash, the dummy one included, is
     `test_every_rejected_login_checks_one_password_hash`.
     """
@@ -785,6 +799,133 @@ async def test_failed_logins_take_the_floor_whether_or_not_the_identifier_exists
     assert len(writes) == 1000
     known, unknown = (statistics.median(measured) for measured in durations.values())
     assert abs(known - unknown) < 0.010, f"median owner {known * 1000:.1f} ms, unknown {unknown * 1000:.1f} ms"
+
+
+class _StubRecoveryService:
+    """Accepts the recovery code `GOOD-CODE` and rejects every other one."""
+
+    def reset_password_with_recovery_code(self, *, identifier: str, recovery_code: str, new_password: str) -> Any:
+        if recovery_code != "GOOD-CODE":
+            raise ValueError("Invalid identifier or recovery code.")
+        return {"ok": True}
+
+
+def _recover_app() -> web.Application:
+    """The password-recovery route behind the error and auth middlewares, without the rate limiter."""
+    app = web.Application(
+        middlewares=[
+            control_plane_api.control_plane_error_middleware,
+            control_plane_api.control_plane_auth_middleware,
+        ]
+    )
+    app.router.add_post("/api/control-plane/auth/password/recover", control_plane_api.auth_password_recover)
+    return app
+
+
+async def _timed_recovery(client: TestClient, identifier: str, recovery_code: str) -> tuple[int, float]:
+    started = time.perf_counter()
+    response = await client.post(
+        "/api/control-plane/auth/password/recover",
+        json={"identifier": identifier, "recovery_code": recovery_code, "new_password": ANOTHER_STRONG_PASSWORD},
+    )
+    await response.read()
+    return response.status, time.perf_counter() - started
+
+
+async def test_the_recovery_route_pads_only_rejected_recoveries_to_the_floor(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-136: a rejected password recovery answers no sooner than the floor; a recovery that works is not held back."""
+    monkeypatch.setattr(control_plane_api, "_auth_service", _StubRecoveryService)
+    floor = operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS
+
+    async with TestClient(TestServer(_recover_app())) as client:
+        rejected = await _timed_recovery(client, "owner", "WRONG-CODE")
+        accepted = await _timed_recovery(client, "owner", "GOOD-CODE")
+
+    assert rejected[0] == 400
+    assert rejected[1] >= floor
+    assert accepted[0] == 200
+    assert accepted[1] < floor
+
+
+_RECOVERY_OWNER = {"id": "7", "username": "owner", "email": "owner@example.com", "recovery_generation": "g1"}
+
+
+def _stand_in_recovery_tables(monkeypatch: pytest.MonkeyPatch, row: dict[str, Any] | None) -> list[Any]:
+    """Serve `row` from a stand-in for cp_operator_users, with one active recovery code `REAL-CODE` for it.
+
+    Returns the parameters of each look-up of active recovery codes.
+    """
+    code_lookups: list[Any] = []
+    real_code = {"id": "c1", "code_hash": operator_auth_mod._hash_secret("REAL-CODE")}
+
+    def fetch_all(query: str, params: Any = ()) -> list[dict[str, Any]]:
+        code_lookups.append(params)
+        return [real_code] if row is not None and params == (row["id"], row["recovery_generation"]) else []
+
+    monkeypatch.setattr(operator_auth_mod, "fetch_one", lambda query, params=(): row)
+    monkeypatch.setattr(operator_auth_mod, "fetch_all", fetch_all)
+    monkeypatch.setattr(operator_auth_mod, "execute", lambda query, params=(): 1)
+    monkeypatch.setattr(operator_auth_mod, "emit_security", lambda *args, **kwargs: None)
+    return code_lookups
+
+
+_REJECTED_RECOVERIES = [
+    pytest.param(None, "REAL-CODE", id="unknown-identifier"),
+    pytest.param({**_RECOVERY_OWNER, "locked_until": "2999-01-01T00:00:00+00:00"}, "REAL-CODE", id="locked"),
+    pytest.param(_RECOVERY_OWNER, "WRONG-CODE", id="wrong-code"),
+]
+
+
+@pytest.mark.parametrize(("row", "recovery_code"), _REJECTED_RECOVERIES)
+def test_every_rejected_recovery_does_the_same_work(
+    monkeypatch: pytest.MonkeyPatch,
+    spy_hasher: _SpyHasher,
+    row: dict[str, Any] | None,
+    recovery_code: str,
+) -> None:
+    """D-136: an unknown identifier and a locked account look up and compare recovery codes like a wrong code does.
+
+    None of them makes or checks an Argon2 hash, so none answers slower than the others.
+    """
+    code_lookups = _stand_in_recovery_tables(monkeypatch, row)
+
+    with pytest.raises(ValueError, match=r"^Invalid identifier or recovery code\.$"):
+        operator_auth_mod.OperatorAuthService().reset_password_with_recovery_code(
+            identifier="owner",
+            recovery_code=recovery_code,
+            new_password=ANOTHER_STRONG_PASSWORD,
+        )
+
+    assert len(code_lookups) == 1
+    assert spy_hasher.created == []
+    assert spy_hasher.checked == []
+
+
+async def test_rejected_recoveries_take_the_floor_whichever_the_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """D-136, measured over HTTP: an unknown identifier, a locked account and a wrong code answer alike.
+
+    The service and its hasher are real; only the operator tables are stood in for. Every attempt
+    takes at least the 300 ms floor, and the three medians differ by less than 10 ms.
+    """
+    floor = operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS
+    monkeypatch.setattr(control_plane_api, "_auth_service", operator_auth_mod.OperatorAuthService)
+    durations: dict[str, list[float]] = {}
+
+    async with TestClient(TestServer(_recover_app())) as client:
+        for case in _REJECTED_RECOVERIES:
+            row, recovery_code = case.values
+            _stand_in_recovery_tables(monkeypatch, row)
+            measured = durations.setdefault(str(case.id), [])
+            for _ in range(5):
+                status, elapsed = await _timed_recovery(client, "owner", recovery_code)
+                assert status == 400
+                assert elapsed >= floor, f"{case.id}: {elapsed * 1000:.1f} ms"
+                measured.append(elapsed)
+
+    medians = {case: statistics.median(measured) for case, measured in durations.items()}
+    assert max(medians.values()) - min(medians.values()) < 0.010, {
+        case: round(median * 1000, 1) for case, median in medians.items()
+    }
 
 
 @pytest.mark.postgres
@@ -1472,25 +1613,15 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
     "path",
     [
         pytest.param(_REPO_ROOT / "docs" / "security" / "authentication.md", id="security/authentication.md"),
-        pytest.param(
-            _REPO_ROOT / "apps" / "web" / "CLAUDE.md",
-            id="web/CLAUDE.md",
-            marks=pytest.mark.xfail(
-                strict=True,
-                reason=(
-                    "apps/web/CLAUDE.md still calls the timing floor pending (M1-E1-T13). Changing a CLAUDE.md "
-                    "needs the operator's approval; remove this mark with that edit."
-                ),
-            ),
-        ),
+        pytest.param(_REPO_ROOT / "apps" / "web" / "CLAUDE.md", id="web/CLAUDE.md"),
         pytest.param(_REPO_ROOT / "docs" / "install" / "vps.md", id="install/vps.md"),
     ],
 )
 def test_docs_state_the_login_timing_floor(path: Path) -> None:
-    """D-136: failed logins are padded to a 300 ms floor, and no doc still calls it pending.
+    """D-136: failed logins and recoveries are padded to a fixed 300 ms floor, and no doc still calls it pending.
 
-    Only the login route is padded, so no doc may claim that every auth failure takes equal time.
-    The mandatory web guide is checked too; it fails until its stale sentence is corrected.
+    Only the login and password-recovery routes are padded, so no doc may claim that every auth
+    failure takes equal time. The mandatory web guide is checked too.
     """
     assert operator_auth_mod._FAILURE_TIMING_FLOOR_SECONDS == 0.3
     text = " ".join(path.read_text(encoding="utf-8").split())
@@ -1500,3 +1631,5 @@ def test_docs_state_the_login_timing_floor(path: Path) -> None:
     assert "All auth-failure paths pad" not in text
     assert "neutralize timing" not in text
     assert "deliberately slowed" not in text
+    assert "recovery is not padded" not in text
+    assert "next multiple" not in text

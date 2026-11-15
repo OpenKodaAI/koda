@@ -32,11 +32,12 @@ function isInsecureTransportRefusal(error: unknown): boolean {
  * The auth contract (see `apps/web/CLAUDE.md`) folds every 4xx auth failure —
  * wrong password, unknown user, locked account, expired session — into ONE
  * generic message, so the message never tells a caller which accounts exist
- * (the control plane also pads every rejected sign-in to 300 ms, D-136). Two cases get
- * their own message: the per-client rate limit (429), which is the same for
- * every identifier and says how long to wait (ADR-038), and infrastructure
- * failures (5xx, no response, network error), so the operator can tell it
- * isn't their credentials.
+ * (the control plane also answers no rejected sign-in sooner than 300 ms after
+ * reading its body, and one whose own work takes longer as soon as that work
+ * ends, D-136). Two cases get their own message: the per-client rate limit
+ * (429), which is the same for every identifier and says how long to wait
+ * (ADR-038), and infrastructure failures (5xx, no response, network error),
+ * so the operator can tell it isn't their credentials.
  */
 function isUpstreamFailure(error: unknown): boolean {
   if (error instanceof ApiError) {

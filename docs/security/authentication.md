@@ -435,17 +435,21 @@ message would reveal that the account exists.
   (`_FAILURE_TIMING_FLOOR_SECONDS` in `koda/control_plane/operator_auth.py`), and it waits
   without blocking the control plane's other requests. The floor counts from when the request
   body has arrived, so a client that sends its body slowly cannot use it up before its
-  credentials are checked. On a host so busy that one Argon2 check takes longer than 300 ms,
-  a rejection waits until the next multiple of 300 ms instead (600 ms, 900 ms and so on).
-  Only a wrong password for an existing account records the failed attempt, and that extra
-  time shows only when it pushes an answer past one of those marks.
-- Password recovery is not padded. On `POST /auth/password/recover`, an unknown identifier
-  computes one Argon2 hash, while an existing account with a wrong recovery code is only
-  compared with its stored code hashes (SHA-256), and a locked one is refused before that. So
-  there an unknown identifier answers noticeably slower than an existing account, although
-  both get the same `400`. What slows down a caller who probes identifiers that way is the
-  route's per-client budget (10 requests an hour, see
-  [Rate limits](#rate-limits-bucket-budgets)).
+  credentials are checked. The floor is fixed: a rejection whose own work takes longer than
+  300 ms answers as soon as that work ends. Only a wrong password for an existing account
+  records the failed attempt, a database write of a few to a few tens of milliseconds. When the
+  Argon2 check and that write together take longer than 300 ms (a slow or busy host), such a
+  rejection answers later than an unknown identifier by at most the time of that write.
+- Every rejected password recovery takes the same time too. On
+  `POST /auth/password/recover`, an unknown identifier, a locked account and an existing
+  account with a wrong recovery code all do the same work: they look up the account's active
+  recovery codes (none, for an unknown identifier) and compare the SHA-256 hash of the code
+  typed against them, and none of them computes an Argon2 hash. All three answer the same
+  `400`, and the route answers every rejected recovery (a new password the policy refuses
+  included) no sooner than the same 300 ms floor after it has read the request. On top of
+  that, the route's per-client budget (10 requests an hour, see
+  [Rate limits](#rate-limits-bucket-budgets)) slows down a caller who probes identifiers
+  through it.
 - Responses use a single generic error (`"Invalid credentials."`, or equivalent) without
   leaking whether the identifier exists. A rejected sign-in answers
   `401 {"error": "Invalid credentials."}` for a wrong password, an unknown identifier and a

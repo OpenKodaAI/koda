@@ -696,13 +696,18 @@ async def auth_delete_profile_photo(request: web.Request) -> web.Response:
 
 async def auth_password_recover(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
-    return web.json_response(
-        _auth_service().reset_password_with_recovery_code(
+    # Like a rejected sign-in, every rejected recovery takes the same time from here (D-136).
+    started = time.monotonic()
+    try:
+        result = _auth_service().reset_password_with_recovery_code(
             identifier=str(payload.get("identifier") or ""),
             recovery_code=str(payload.get("recovery_code") or ""),
             new_password=str(payload.get("new_password") or ""),
         )
-    )
+    except ValueError:
+        await pad_failed_login(started)
+        raise
+    return web.json_response(result)
 
 
 async def auth_password_change(request: web.Request) -> web.Response:

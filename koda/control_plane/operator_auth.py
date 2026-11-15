@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
-import math
 import re
 import secrets
 import time
@@ -50,8 +49,9 @@ from .settings import (
 
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _BOOTSTRAP_INSERT_ATTEMPTS = 5
-# A rejected sign-in answers no sooner than this after the login route has read it, so the
-# response time does not tell which accounts exist (D-136). The route waits with `pad_failed_login`.
+# A rejected sign-in or password recovery answers no sooner than this after its route has read
+# it, so the response time does not tell which accounts exist (D-136). The routes wait with
+# `pad_failed_login`.
 _FAILURE_TIMING_FLOOR_SECONDS = 0.3
 _DISPLAY_NAME_MAX_LENGTH = 80
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
@@ -168,16 +168,13 @@ def _check_dummy_password(password: str) -> None:
 async def pad_failed_login(started: float) -> None:
     """Wait until ``_FAILURE_TIMING_FLOOR_SECONDS`` have passed since ``started`` (``time.monotonic()``).
 
-    The login route awaits this before it answers a rejected sign-in, so every rejection takes
-    the same time and the event loop keeps serving other requests meanwhile. When the sign-in's
-    own work already took longer than the floor (a host so busy that one Argon2 check outlasts
-    it), the wait runs to the next multiple of the floor instead. The failure-count write that
-    only a wrong password does then shows only when it pushes an answer past a multiple.
+    The login and password-recovery routes await this before they answer a rejection, so every
+    rejection takes the same time and the event loop keeps serving other requests meanwhile.
+    The floor is fixed: a rejection whose own work took longer answers as soon as it ends. On
+    login, what can then show is only the failure-count write that a wrong password for an
+    existing account does, never a whole extra floor.
     """
-    if _FAILURE_TIMING_FLOOR_SECONDS <= 0:
-        return
-    floors = max(1, math.ceil((time.monotonic() - started) / _FAILURE_TIMING_FLOOR_SECONDS))
-    deadline = started + floors * _FAILURE_TIMING_FLOOR_SECONDS
+    deadline = started + _FAILURE_TIMING_FLOOR_SECONDS
     while (remaining := deadline - time.monotonic()) > 0:
         await asyncio.sleep(remaining)
 
@@ -691,28 +688,22 @@ class OperatorAuthService:
             "SELECT * FROM cp_operator_users WHERE lower(username) = lower(?) OR lower(email) = lower(?)",
             (normalized_id, normalized_id),
         )
-        if not row:
-            # Constant-time-ish side-effect to prevent enumeration
-            _password_hasher().hash("dummy")
-            raise ValueError("Invalid identifier or recovery code.")
-
-        if row.get("locked_until") and not _is_expired(row["locked_until"]):
-            raise ValueError("Invalid identifier or recovery code.")
-
-        generation = str(row.get("recovery_generation") or "")
+        # An unknown identifier and a locked account look up and compare codes like a wrong code
+        # does, so every rejection does the same work; the route pads them all to the floor (D-136).
+        generation = str(row.get("recovery_generation") or "") if row else ""
         active_codes = fetch_all(
             """
             SELECT id, code_hash FROM cp_operator_recovery_codes
             WHERE user_id = ? AND consumed_at = '' AND generation = ?
             """,
-            (str(row["id"]), generation),
+            (str(row["id"]) if row else "", generation),
         )
         code_hash = _hash_secret(_normalize_recovery_code(recovery_code))
         code_row = next(
             (item for item in active_codes if compare_digest(str(item.get("code_hash") or ""), code_hash)),
             None,
         )
-        if not code_row:
+        if not row or (row.get("locked_until") and not _is_expired(row["locked_until"])) or not code_row:
             raise ValueError("Invalid identifier or recovery code.")
 
         self._validate_operator_password(
