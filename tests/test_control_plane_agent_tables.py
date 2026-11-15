@@ -5,8 +5,9 @@ per-agent rows. The legacy default-agent id repair and agent hard delete both
 read that list (M2-E3-T2, D-054, TD-079). The schema test enumerates every
 table with an ``agent_id`` column in the migrated database and fails when one
 is neither listed nor explicitly exempt, so a new per-agent table cannot be
-forgotten. Tables the runtime creates on first use, outside the migrations,
-are created from their own DDL before the enumeration.
+forgotten. ``artifact_objects``, which the artifact engine creates on first
+use outside the migrations, is created from its own DDL before the
+enumeration.
 """
 
 from __future__ import annotations
@@ -27,7 +28,6 @@ from koda.control_plane.agent_tables import (
     AGENT_ID_TABLE_EXEMPTIONS,
     PER_AGENT_TABLES,
 )
-from koda.state import approval_grants, pending_approvals
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -60,21 +60,13 @@ def _create_artifact_objects() -> None:
 
 
 @pytest.fixture()
-def runtime_created_tables(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
-    """Create the agent_id tables the runtime adds outside the migrations, as it does on first use."""
-    absent = [
-        table
-        for table in ("pending_approvals", "approval_grants", "artifact_objects")
-        if control_plane_db.fetch_one("SELECT to_regclass(?) AS oid", (table,))["oid"] is None
-    ]
-    for module in (pending_approvals, approval_grants):
-        monkeypatch.setattr(module, "_PRIMARY_SCHEMA_READY", False)
-        monkeypatch.setattr(module, "_primary_enabled", lambda: True)
-        module._ensure_primary_schema()
+def runtime_created_tables(migrated_postgres: str) -> Iterator[None]:
+    """Create the agent_id table the artifact engine adds outside the migrations, as it does on first use."""
+    absent = control_plane_db.fetch_one("SELECT to_regclass(?) AS oid", ("artifact_objects",))["oid"] is None
     _create_artifact_objects()
     yield
-    for table in absent:
-        control_plane_db.execute(f"DROP TABLE IF EXISTS {table}")
+    if absent:
+        control_plane_db.execute("DROP TABLE IF EXISTS artifact_objects")
 
 
 @pytest.mark.postgres
@@ -89,7 +81,7 @@ def test_every_agent_id_table_in_the_schema_is_listed_or_exempt() -> None:
     )
     live = {str(row["table_name"]) for row in rows}
     assert "cp_secret_values" in live, "the schema enumeration found no control-plane tables"
-    assert {"pending_approvals", "approval_grants", "artifact_objects"} <= live, "runtime tables were not created"
+    assert {"pending_approvals", "approval_grants", "artifact_objects"} <= live, "approval or artifact tables missing"
 
     classified = set(PER_AGENT_TABLES) | AGENT_ID_TABLE_EXEMPTIONS
     unclassified = sorted(live - classified)

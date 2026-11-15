@@ -11,8 +11,8 @@ from koda.state.approval_grants import (
     cleanup_expired_approval_grants,
     load_approval_grants,
     remove_approval_grant,
-    replace_approval_grants,
     save_approval_grant,
+    update_approval_grant,
 )
 
 
@@ -46,21 +46,19 @@ async def test_save_and_load_round_trip():
 
 
 @pytest.mark.asyncio
-async def test_replace_and_remove_round_trip():
-    await replace_approval_grants(
-        {
-            "grant-2": {
-                "grant_id": "grant-2",
-                "user_id": 9,
-                "agent_id": "agent-b",
-                "remaining_uses": 2,
-                "expires_at": time.time() + 60,
-            }
-        }
+async def test_update_and_remove_round_trip():
+    expires_at = time.time() + 60
+    await update_approval_grant(
+        "grant-2",
+        {"grant_id": "grant-2", "user_id": 9, "agent_id": "agent-b", "remaining_uses": 2, "expires_at": expires_at},
     )
+    assert (await load_approval_grants())["grant-2"]["expires_at"] == expires_at
+
+    # Another agent cannot remove it.
+    await remove_approval_grant("grant-2", agent_id="agent-a")
     assert "grant-2" in await load_approval_grants()
 
-    await remove_approval_grant("grant-2")
+    await remove_approval_grant("grant-2", agent_id="agent-b")
 
     assert "grant-2" not in await load_approval_grants()
 

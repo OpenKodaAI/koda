@@ -3754,6 +3754,114 @@ class KnowledgeV2PostgresBackend:
                            ON "{schema}"."audit_events" (event_type, timestamp DESC)""",
                 ),
             ),
+            _Migration(
+                "050_approval_tables",
+                (
+                    # Pending approvals and approval grants (koda/state/
+                    # pending_approvals.py, approval_grants.py). Earlier
+                    # releases created both tables at runtime with INTEGER
+                    # user and chat ids, so Telegram ids above 2^31 and
+                    # supergroup ids failed the insert (D-059). Widening
+                    # INTEGER to BIGINT loses no data, and the tables are
+                    # small, so the rewrite holds its lock briefly; on a fresh
+                    # schema the ALTERs change nothing.
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."pending_approvals" (
+                            op_id TEXT PRIMARY KEY,
+                            op_type TEXT NOT NULL,
+                            user_id BIGINT,
+                            agent_id TEXT,
+                            session_id TEXT,
+                            chat_id BIGINT,
+                            description TEXT,
+                            created_at REAL NOT NULL,
+                            expires_at REAL NOT NULL,
+                            payload_json TEXT NOT NULL
+                        )""",
+                    f"""CREATE TABLE IF NOT EXISTS "{schema}"."approval_grants" (
+                            grant_id TEXT PRIMARY KEY,
+                            user_id BIGINT NOT NULL,
+                            agent_id TEXT NOT NULL,
+                            session_id TEXT,
+                            chat_id BIGINT,
+                            created_at REAL NOT NULL,
+                            expires_at REAL NOT NULL,
+                            payload_json TEXT NOT NULL
+                        )""",
+                    f"""ALTER TABLE "{schema}"."pending_approvals"
+                           ALTER COLUMN user_id TYPE BIGINT,
+                           ALTER COLUMN chat_id TYPE BIGINT""",
+                    f"""ALTER TABLE "{schema}"."approval_grants"
+                           ALTER COLUMN user_id TYPE BIGINT,
+                           ALTER COLUMN chat_id TYPE BIGINT""",
+                    # Every agent shares approval_grants, and a grant applies
+                    # only to the agent in its agent_id (D-060). A legacy grant
+                    # with a blank agent_id gets the agent that its stored scope
+                    # (the approval request that issued it, its session) or its
+                    # chat binding (the agent whose tasks ran in its chat)
+                    # names, when exactly one agent is named. Its payload, which
+                    # the worker loads and matches on, gets the same agent. The
+                    # CASEs keep a payload that is not a JSON object from
+                    # failing the migration.
+                    f"""UPDATE "{schema}"."approval_grants" AS g
+                           SET agent_id = derived.agent_id,
+                               payload_json = CASE
+                                   WHEN NOT pg_input_is_valid(g.payload_json, 'jsonb') THEN g.payload_json
+                                   WHEN jsonb_typeof(g.payload_json::jsonb) <> 'object' THEN g.payload_json
+                                   ELSE jsonb_set(g.payload_json::jsonb, '{{agent_id}}', to_jsonb(derived.agent_id))::text
+                               END
+                          FROM (
+                                SELECT candidates.grant_id, MIN(candidates.agent_id) AS agent_id
+                                  FROM (
+                                        SELECT legacy.grant_id, request.agent_id
+                                          FROM "{schema}"."approval_grants" AS legacy
+                                          JOIN "{schema}"."pending_approvals" AS request
+                                            ON request.op_id = CASE
+                                                   WHEN pg_input_is_valid(legacy.payload_json, 'jsonb')
+                                                   THEN legacy.payload_json::jsonb ->> 'issued_by_op_id'
+                                               END
+                                         WHERE btrim(legacy.agent_id) = ''
+                                        UNION
+                                        SELECT legacy.grant_id, sess.agent_id
+                                          FROM "{schema}"."approval_grants" AS legacy
+                                          JOIN "{schema}"."sessions" AS sess
+                                            ON sess.user_id = legacy.user_id
+                                           AND sess.session_id = legacy.session_id
+                                         WHERE btrim(legacy.agent_id) = ''
+                                        UNION
+                                        SELECT legacy.grant_id, task.agent_id
+                                          FROM "{schema}"."approval_grants" AS legacy
+                                          JOIN "{schema}"."tasks" AS task
+                                            ON task.user_id = legacy.user_id
+                                           AND task.chat_id = legacy.chat_id
+                                         WHERE btrim(legacy.agent_id) = ''
+                                       ) AS candidates
+                                 WHERE btrim(COALESCE(candidates.agent_id, '')) <> ''
+                                 GROUP BY candidates.grant_id
+                                HAVING COUNT(DISTINCT candidates.agent_id) = 1
+                               ) AS derived
+                         WHERE g.grant_id = derived.grant_id""",
+                    # Every other legacy grant expires, so the user approves
+                    # again on next use, with one audit row per grant. One
+                    # statement, so a rerun after a failed bootstrap audits no
+                    # grant twice.
+                    f"""WITH expired AS (
+                            UPDATE "{schema}"."approval_grants"
+                               SET expires_at = 0
+                             WHERE btrim(agent_id) = '' AND expires_at <> 0
+                         RETURNING grant_id, user_id, session_id, chat_id
+                        )
+                        INSERT INTO "{schema}"."audit_events" (agent_id, timestamp, event_type, user_id, details_json)
+                        SELECT 'global', NOW(), 'approval.grant_expired', user_id,
+                               jsonb_build_object(
+                                   'grant_id', grant_id,
+                                   'session_id', session_id,
+                                   'chat_id', chat_id,
+                                   'reason', 'legacy_grant_without_agent',
+                                   'migration', '050_approval_tables'
+                               )
+                          FROM expired""",
+                ),
+            ),
         )
 
     async def upsert_skill_package_lock(self, agent_id: str, lock: dict[str, Any]) -> None:

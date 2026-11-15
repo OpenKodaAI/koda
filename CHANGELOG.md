@@ -442,6 +442,14 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 
 ### Fixed
 
+- Approval requests and grants for Telegram user and chat ids above 2^31, supergroup
+  chats included, are stored in Postgres and survive a restart. Before, the insert
+  overflowed an INTEGER column and the entry was lost on restart. Using a grant
+  rewrites only that grant; before, each partial use deleted every agent's grants and
+  re-inserted one worker's copy. Migration `050_approval_tables` creates both tables;
+  a stored grant without an agent gets the one agent its request, session or chat
+  names, or expires with an `approval.grant_expired` audit event. (M2-E1-T1, D-059,
+  D-060)
 - Automatic and web-created scheduled jobs run. Every reminder, interval and cron run
   used to be blocked as "policy snapshot is missing". Migration 047 adds the scheduler
   events table and the dispatch and validation columns that a real Postgres database

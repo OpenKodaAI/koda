@@ -40,8 +40,8 @@ from koda.state.approval_grants import (
     load_approval_grants,
     remove_approval_grant,
     remove_approval_grants,
-    replace_approval_grants,
     save_approval_grant,
+    update_approval_grant,
 )
 from koda.state.pending_approvals import (
     cleanup_expired_ops,
@@ -1586,13 +1586,13 @@ def consume_agent_approval_grant(
             _APPROVAL_GRANTS.pop(grant_id, None)
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(remove_approval_grant(grant_id))
+                loop.create_task(remove_approval_grant(grant_id, agent_id=agent_id))
             except RuntimeError:
                 pass
         else:
             try:
                 loop = asyncio.get_running_loop()
-                loop.create_task(replace_approval_grants(dict(_APPROVAL_GRANTS)))
+                loop.create_task(update_approval_grant(grant_id, dict(grant)))
             except RuntimeError:
                 pass
         return dict(grant)

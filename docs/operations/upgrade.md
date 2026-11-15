@@ -206,6 +206,14 @@ These changes apply with or without rules:
   `file_move` included, so it no longer covers a move from the same
   source to another destination. Scope grants issued before the upgrade
   no longer match, and their calls ask for approval again.
+- **Approval grants belong to one agent.** Migration `050_approval_tables`
+  creates `pending_approvals` and `approval_grants` with BIGINT user and
+  chat ids; earlier releases created them on first use with INTEGER ids.
+  A stored grant with a blank `agent_id` gets the agent that the approval
+  request that issued it, its session or its chat names, when exactly one
+  agent is named. Every other such grant expires, with one
+  `approval.grant_expired` audit event (scope `global`) each, and its call
+  asks for approval again. No grant without an agent applies to any agent.
 
 ## Step 1 — schema migration gate
 

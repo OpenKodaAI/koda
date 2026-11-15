@@ -1,7 +1,8 @@
 """Pending approval persistence with Postgres-primary support.
 
-Stores pending approvals in the primary state backend when Koda is running in
-Postgres mode, falling back to ``{STATE_ROOT_DIR}/pending_approvals.json`` so
+Stores pending approvals in the primary state backend's ``pending_approvals``
+table (migration ``050_approval_tables``) when Koda is running in Postgres
+mode, falling back to ``{STATE_ROOT_DIR}/pending_approvals.json`` so
 approvals survive process restarts in local/dev mode.  asyncio.Event objects
 cannot be serialized, so callers must recreate them after loading.
 
@@ -22,8 +23,6 @@ from koda.logging_config import get_logger
 from koda.state.primary import get_primary_state_backend, primary_execute, primary_fetch_all, run_coro_sync
 
 log = get_logger(__name__)
-
-_PRIMARY_SCHEMA_READY = False
 
 
 def _file_path() -> Path:
@@ -58,32 +57,6 @@ def _optional_chat_id(value: Any) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
-
-
-def _ensure_primary_schema() -> None:
-    global _PRIMARY_SCHEMA_READY
-    if _PRIMARY_SCHEMA_READY or not _primary_enabled():
-        return
-    run_coro_sync(
-        primary_execute(
-            """
-            CREATE TABLE IF NOT EXISTS pending_approvals (
-                op_id TEXT PRIMARY KEY,
-                op_type TEXT NOT NULL,
-                user_id INTEGER,
-                agent_id TEXT,
-                session_id TEXT,
-                chat_id INTEGER,
-                description TEXT,
-                created_at REAL NOT NULL,
-                expires_at REAL NOT NULL,
-                payload_json TEXT NOT NULL
-            )
-            """,
-            agent_id=config_module.AGENT_ID,
-        )
-    )
-    _PRIMARY_SCHEMA_READY = True
 
 
 def _entry_for_save(op_id: str, data: dict[str, Any], ttl_seconds: int) -> dict[str, Any]:
@@ -162,7 +135,6 @@ async def save_pending_op(
     entry = _entry_for_save(op_id, data, ttl_seconds)
     if _primary_enabled():
         try:
-            _ensure_primary_schema()
             run_coro_sync(
                 primary_execute(
                     """
@@ -211,7 +183,6 @@ async def load_pending_ops() -> dict[str, dict[str, Any]]:
     now = time.time()
     if _primary_enabled():
         try:
-            _ensure_primary_schema()
             rows = (
                 run_coro_sync(
                     primary_fetch_all(
@@ -253,7 +224,6 @@ async def remove_pending_op(op_id: str) -> None:
     """Remove a single pending op from the persisted store."""
     if _primary_enabled():
         try:
-            _ensure_primary_schema()
             run_coro_sync(
                 primary_execute(
                     "DELETE FROM pending_approvals WHERE op_id = ?",
@@ -280,7 +250,6 @@ async def remove_pending_ops(
 ) -> int:
     if _primary_enabled():
         try:
-            _ensure_primary_schema()
             clauses = []
             params: list[Any] = []
             if user_id is not None:
@@ -328,7 +297,6 @@ async def cleanup_expired_ops() -> None:
     """Remove all expired entries from the persisted store."""
     if _primary_enabled():
         try:
-            _ensure_primary_schema()
             run_coro_sync(
                 primary_execute(
                     "DELETE FROM pending_approvals WHERE expires_at <= ?",

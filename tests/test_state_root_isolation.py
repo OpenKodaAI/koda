@@ -49,5 +49,5 @@ async def test_approval_grants_are_written_in_the_session_state_root(session_sta
         mp.setattr(approval_grants, "_primary_enabled", lambda: False)
         await approval_grants.save_approval_grant("grant-d265", {"user_id": 111, "agent_id": "agent-a"}, 60)
         assert "grant-d265" in await approval_grants.load_approval_grants()
-        await approval_grants.remove_approval_grant("grant-d265")
+        await approval_grants.remove_approval_grant("grant-d265", agent_id="agent-a")
     assert path.is_file()

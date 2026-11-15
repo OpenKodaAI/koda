@@ -1,4 +1,11 @@
-"""Scoped approval-grant persistence with primary-backend support."""
+"""Scoped approval-grant persistence with primary-backend support.
+
+Migration ``050_approval_tables`` creates the ``approval_grants`` table. Every
+agent shares it, so each write names one grant of one agent: saving or using a
+grant upserts that grant's row, and removing one deletes it, scoped by its
+``agent_id``. Each write is a single statement, which Postgres runs as one
+transaction: a failure leaves the row and every other row as they were.
+"""
 
 from __future__ import annotations
 
@@ -12,8 +19,6 @@ from koda.logging_config import get_logger
 from koda.state.primary import get_primary_state_backend, primary_execute, primary_fetch_all, run_coro_sync
 
 log = get_logger(__name__)
-
-_PRIMARY_SCHEMA_READY = False
 
 
 def _file_path() -> Path:
@@ -90,40 +95,8 @@ def _optional_chat_id(value: Any) -> int | None:
         return None
 
 
-def _ensure_primary_schema() -> None:
-    global _PRIMARY_SCHEMA_READY
-    if _PRIMARY_SCHEMA_READY or not _primary_enabled():
-        return
-    backend = get_primary_state_backend(agent_id=config_module.AGENT_ID)
-    if backend is None:
-        return
-    run_coro_sync(
-        primary_execute(
-            """
-            CREATE TABLE IF NOT EXISTS approval_grants (
-                grant_id TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                agent_id TEXT NOT NULL,
-                session_id TEXT,
-                chat_id INTEGER,
-                created_at REAL NOT NULL,
-                expires_at REAL NOT NULL,
-                payload_json TEXT NOT NULL
-            )
-            """,
-            agent_id=config_module.AGENT_ID,
-        )
-    )
-    _PRIMARY_SCHEMA_READY = True
-
-
-def _primary_upsert(grant_id: str, payload: dict[str, Any], ttl_seconds: int) -> None:
-    _ensure_primary_schema()
-    now = time.time()
-    entry = dict(payload)
-    entry["grant_id"] = grant_id
-    entry["created_at"] = now
-    entry["expires_at"] = now + ttl_seconds
+def _primary_upsert(grant_id: str, entry: dict[str, Any]) -> None:
+    """Insert or update one grant; an existing row of another agent is left unchanged."""
     run_coro_sync(
         primary_execute(
             """
@@ -133,12 +106,12 @@ def _primary_upsert(grant_id: str, payload: dict[str, Any], ttl_seconds: int) ->
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(grant_id) DO UPDATE SET
                 user_id = excluded.user_id,
-                agent_id = excluded.agent_id,
                 session_id = excluded.session_id,
                 chat_id = excluded.chat_id,
                 created_at = excluded.created_at,
                 expires_at = excluded.expires_at,
                 payload_json = excluded.payload_json
+            WHERE approval_grants.agent_id = excluded.agent_id
             """,
             (
                 grant_id,
@@ -156,19 +129,36 @@ def _primary_upsert(grant_id: str, payload: dict[str, Any], ttl_seconds: int) ->
 
 
 async def save_approval_grant(grant_id: str, payload: dict[str, Any], ttl_seconds: int) -> None:
-    if _primary_enabled():
-        try:
-            _primary_upsert(grant_id, payload, ttl_seconds)
-            return
-        except Exception:
-            log.warning("approval_grants: failed to persist in primary backend", exc_info=True)
-
     now = time.time()
-    store = _read_raw()
     entry = dict(payload)
     entry["grant_id"] = grant_id
     entry["created_at"] = now
     entry["expires_at"] = now + ttl_seconds
+    if _primary_enabled():
+        try:
+            _primary_upsert(grant_id, entry)
+            return
+        except Exception:
+            log.warning("approval_grants: failed to persist in primary backend", exc_info=True)
+
+    store = _read_raw()
+    store[grant_id] = entry
+    _write_raw(store)
+
+
+async def update_approval_grant(grant_id: str, payload: dict[str, Any]) -> None:
+    """Persist a grant's new state, such as its remaining uses, keeping its creation and expiry times."""
+    created_at = float(payload.get("created_at") or time.time())
+    expires_at = float(payload.get("expires_at") or (created_at + 600))
+    entry = dict(payload, grant_id=grant_id, created_at=created_at, expires_at=expires_at)
+    if _primary_enabled():
+        try:
+            _primary_upsert(grant_id, entry)
+            return
+        except Exception:
+            log.warning("approval_grants: failed to update in primary backend", exc_info=True)
+
+    store = _read_raw()
     store[grant_id] = entry
     _write_raw(store)
 
@@ -177,7 +167,6 @@ async def load_approval_grants() -> dict[str, dict[str, Any]]:
     now = time.time()
     if _primary_enabled():
         try:
-            _ensure_primary_schema()
             rows = (
                 run_coro_sync(
                     primary_fetch_all(
@@ -215,14 +204,14 @@ async def load_approval_grants() -> dict[str, dict[str, Any]]:
     return result
 
 
-async def remove_approval_grant(grant_id: str) -> None:
+async def remove_approval_grant(grant_id: str, *, agent_id: str) -> None:
+    """Delete one grant of ``agent_id``; a grant of another agent is left in place."""
     if _primary_enabled():
         try:
-            _ensure_primary_schema()
             run_coro_sync(
                 primary_execute(
-                    "DELETE FROM approval_grants WHERE grant_id = ?",
-                    (grant_id,),
+                    "DELETE FROM approval_grants WHERE grant_id = ? AND agent_id = ?",
+                    (grant_id, agent_id),
                     agent_id=config_module.AGENT_ID,
                 )
             )
@@ -231,37 +220,33 @@ async def remove_approval_grant(grant_id: str) -> None:
             log.warning("approval_grants: failed to remove from primary backend", exc_info=True)
 
     store = _read_raw()
-    if grant_id in store:
+    entry = store.get(grant_id)
+    if isinstance(entry, dict) and str(entry.get("agent_id") or "") == agent_id:
         del store[grant_id]
         _write_raw(store)
 
 
 async def remove_approval_grants(
     *,
+    agent_id: str,
     user_id: int | None = None,
-    agent_id: str | None = None,
     session_id: str | None = None,
     chat_id: int | None = None,
 ) -> int:
+    """Delete the grants of ``agent_id`` that match every given filter."""
     if _primary_enabled():
         try:
-            _ensure_primary_schema()
-            clauses = []
-            params: list[Any] = []
+            clauses = ["agent_id = ?"]
+            params: list[Any] = [agent_id]
             if user_id is not None:
                 clauses.append("user_id = ?")
                 params.append(user_id)
-            if agent_id is not None:
-                clauses.append("agent_id = ?")
-                params.append(agent_id)
             if session_id is not None:
                 clauses.append("session_id = ?")
                 params.append(session_id)
             if chat_id is not None:
                 clauses.append("chat_id = ?")
                 params.append(chat_id)
-            if not clauses:
-                return 0
             query = "DELETE FROM approval_grants WHERE " + " AND ".join(clauses)
             return int(
                 run_coro_sync(
@@ -291,48 +276,9 @@ async def remove_approval_grants(
     return removed
 
 
-async def replace_approval_grants(grants: dict[str, dict[str, Any]]) -> None:
-    if _primary_enabled():
-        try:
-            _ensure_primary_schema()
-            run_coro_sync(primary_execute("DELETE FROM approval_grants", agent_id=config_module.AGENT_ID))
-            for grant_id, payload in grants.items():
-                if not isinstance(payload, dict):
-                    continue
-                created_at = float(payload.get("created_at") or time.time())
-                expires_at = float(payload.get("expires_at") or (created_at + 600))
-                run_coro_sync(
-                    primary_execute(
-                        """
-                        INSERT INTO approval_grants (
-                            grant_id, user_id, agent_id, session_id, chat_id, created_at, expires_at, payload_json
-                        )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            grant_id,
-                            int(payload.get("user_id") or 0),
-                            str(payload.get("agent_id") or ""),
-                            str(payload.get("session_id") or "") or None,
-                            _optional_chat_id(payload.get("chat_id")),
-                            created_at,
-                            expires_at,
-                            _json_dumps(dict(payload, grant_id=grant_id, created_at=created_at, expires_at=expires_at)),
-                        ),
-                        agent_id=config_module.AGENT_ID,
-                    )
-                )
-            return
-        except Exception:
-            log.warning("approval_grants: failed to replace primary backend grants", exc_info=True)
-
-    _write_raw(grants)
-
-
 async def cleanup_expired_approval_grants() -> None:
     if _primary_enabled():
         try:
-            _ensure_primary_schema()
             run_coro_sync(
                 primary_execute(
                     "DELETE FROM approval_grants WHERE expires_at <= ?",
