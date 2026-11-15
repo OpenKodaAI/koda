@@ -104,6 +104,8 @@ Before broad rollout, run these in canary:
   gets 404 (one to a paused or spent thread gets 409). When the queue worker
   refuses a queued turn, or the unblocked-task follow-ups, the inbox or the
   router's dispatch of a task whose claim expired are refused a task's turn,
+  whichever read refuses it (the dispatch's own, the local queue's, or the
+  runtime API's 409, which no other transport then delivers around),
   the task's claim is released without counting an expiry, so pauses never
   escalate a task, and the first router sweep after the thread is open again
   under its cap dispatches the task again, without waiting for

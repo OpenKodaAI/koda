@@ -209,12 +209,20 @@ class _SilentSquadDispatchBot:
 
 @dataclass(frozen=True)
 class SquadTurnDispatchResult:
+    """What became of one squad turn dispatch.
+
+    ``refused`` is set when the room refused the turn because it is paused, closed or spent,
+    whichever read found it so: the dispatch's own, the local queue's, or the runtime API's (its
+    409). Nothing was sent then, and the caller releases any claim it took for the turn (D-361).
+    """
+
     target_agent_id: str
     transport: str
     dispatched: bool
     message_id: str | None = None
     enqueued_task_id: int | None = None
     error: str | None = None
+    refused: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -224,6 +232,7 @@ class SquadTurnDispatchResult:
             "message_id": self.message_id,
             "enqueued_task_id": self.enqueued_task_id,
             "error": self.error,
+            "refused": self.refused,
         }
 
 
@@ -568,7 +577,7 @@ async def _dispatch_via_runtime_http(
     user_id: int | None,
     chat_id: int | None,
 ) -> SquadTurnDispatchResult:
-    from koda.control_plane.manager import get_control_plane_manager
+    from koda.control_plane.manager import RuntimeConflictError, get_control_plane_manager
 
     session_id = _runtime_http_session_id(
         thread_id=thread_id,
@@ -578,21 +587,39 @@ async def _dispatch_via_runtime_http(
         parent_message_id=parent_message_id,
     )
     manager = get_control_plane_manager()
-    result = await asyncio.to_thread(
-        manager.send_dashboard_squad_message,
-        target_agent_id,
-        text=query_text,
-        session_id=session_id,
-        squad_thread_id=thread_id,
-        squad_task_id=squad_task_id,
-        parent_message_id=parent_message_id,
-        delegation_chain=list(delegation_chain or []),
-        delegation_request_id=delegation_request_id,
-        delegation_origin_agent_id=delegation_origin_agent_id,
-        telegram_message_thread_id=telegram_message_thread_id,
-        user_id=user_id,
-        chat_id=chat_id,
-    )
+    try:
+        result = await asyncio.to_thread(
+            manager.send_dashboard_squad_message,
+            target_agent_id,
+            text=query_text,
+            session_id=session_id,
+            squad_thread_id=thread_id,
+            squad_task_id=squad_task_id,
+            parent_message_id=parent_message_id,
+            delegation_chain=list(delegation_chain or []),
+            delegation_request_id=delegation_request_id,
+            delegation_origin_agent_id=delegation_origin_agent_id,
+            telegram_message_thread_id=telegram_message_thread_id,
+            user_id=user_id,
+            chat_id=chat_id,
+        )
+    except RuntimeConflictError as exc:
+        # The runtime's own read found the thread paused, closed or spent (its 409): a refusal,
+        # which no other transport may deliver around (D-075, D-361).
+        log.info(
+            "squad_turn_refused",
+            thread_id=thread_id,
+            target_agent_id=target_agent_id,
+            squad_task_id=squad_task_id,
+            reason=str(exc),
+        )
+        return SquadTurnDispatchResult(
+            target_agent_id=target_agent_id,
+            transport="runtime_http",
+            dispatched=False,
+            error=str(exc),
+            refused=True,
+        )
     raw_task_id = result.get("task_id") if isinstance(result, dict) else None
     enqueued_task_id = int(raw_task_id) if isinstance(raw_task_id, int | str) and str(raw_task_id).isdigit() else None
     return SquadTurnDispatchResult(
@@ -628,7 +655,8 @@ async def dispatch_squad_turn(
     setting ``executing_agent_id`` on the queued item. When no runtime
     application is available, delivery falls back to the configured message bus.
     A thread that is not open, or whose spend reached its budget cap, gets no
-    turn: nothing is sent, and the result says why (D-075).
+    turn: nothing is sent, and the result says why and is ``refused``, whichever
+    read found it so (D-075, D-361).
     """
     thread_id = str(getattr(thread, "id", "") or "")
     refusal = squad_thread_turn_refusal(thread)
@@ -645,6 +673,7 @@ async def dispatch_squad_turn(
             transport="none",
             dispatched=False,
             error=refusal,
+            refused=True,
         )
     runtime_application = application or _runtime_application_or_none()
     resolved_user_id = int(user_id or getattr(thread, "owner_user_id", 0) or 0)
@@ -720,6 +749,7 @@ async def dispatch_squad_turn(
                 transport="local_queue",
                 dispatched=False,
                 error=str(exc),
+                refused=True,
             )
         except Exception as exc:
             await record_squad_dispatch_unavailable(

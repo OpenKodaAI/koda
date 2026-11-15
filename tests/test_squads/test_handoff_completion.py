@@ -595,6 +595,7 @@ async def test_a_pause_between_the_sweep_and_the_redispatch_never_counts_an_expi
             transport="none" if refusal else "local_queue",
             dispatched=refusal is None,
             error=refusal,
+            refused=refusal is not None,
         )
 
     turn_stubs.side_effect = dispatch
@@ -648,6 +649,7 @@ async def test_a_refused_redispatch_releases_its_claim_when_the_room_reopens_at_
             transport="none" if refusal else "local_queue",
             dispatched=refusal is None,
             error=refusal,
+            refused=refusal is not None,
         )
 
     turn_stubs.side_effect = refuse_then_reopen
@@ -672,6 +674,54 @@ async def test_a_refused_redispatch_releases_its_claim_when_the_room_reopens_at_
     assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA", "QA"]
     qa_task = await tasks.get_task(task_ids["QA"])
     assert qa_task is not None and qa_task.status == "claimed"
+    assert qa_task.metadata["claim_expiry_count"] == 1
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_pause_between_the_redispatch_read_and_the_queue_read_never_counts_an_expiry(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """The queue's own refusal releases the redispatch's claim too, whatever its transport (D-361)."""
+    from koda.services import queue_manager as qm
+    from koda.squads import SquadTurnDispatchResult
+    from koda.squads import dispatch as dispatch_mod
+
+    threads, tasks = stores
+    thread_id, _parent, task_ids = await _start_handoff(threads, tasks)
+    real_dispatch = dispatch_mod.dispatch_squad_turn
+    real_enqueue = qm.enqueue_squad_agent_task
+    results: list[SquadTurnDispatchResult] = []
+
+    async def dispatch(**kwargs: Any) -> SquadTurnDispatchResult:
+        result = await real_dispatch(application=MagicMock(), **kwargs)
+        results.append(result)
+        return result
+
+    async def pause_then_enqueue(**kwargs: Any) -> int:
+        # The operator pauses the room after the redispatch read it, before the queue's own read.
+        await threads.update_thread_status(thread_id, "paused")
+        return int(await real_enqueue(**kwargs))
+
+    turn_stubs.side_effect = dispatch
+    router = _router(threads, tasks)
+    await _expire_claim(tasks, task_ids["QA"])
+    with patch.object(qm, "enqueue_squad_agent_task", pause_then_enqueue):
+        [claim] = (await router.sweep_once()).expired_claims
+    assert claim.task_id == task_ids["QA"]
+    [refused] = results
+    assert refused.transport == "local_queue" and refused.dispatched is False
+    assert refused.refused is True and refused.error == "thread is paused"
+
+    # The first sweep after the reopen, well within the claim TTL, dispatches QA's task again.
+    await threads.update_thread_status(thread_id, "open")
+    with patch.object(qm, "enqueue_squad_agent_task", AsyncMock(return_value=7)):
+        [again] = (await router.sweep_once()).expired_claims
+    assert again.task_id == task_ids["QA"] and again.refused is True
+    assert results[-1].dispatched is True and results[-1].enqueued_task_id == 7
+    qa_task = await tasks.get_task(task_ids["QA"])
+    assert qa_task is not None and qa_task.status == "claimed" and qa_task.assigned_agent_id == "QA"
+    # Only the silent worker's expiry counts, not the pause.
     assert qa_task.metadata["claim_expiry_count"] == 1
 
 

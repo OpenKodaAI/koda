@@ -7838,8 +7838,9 @@ async def redispatch_expired_squad_claim(*, task_id: str) -> str:
     The squad router's sweep calls this after it reverted the claim to ``pending``, with the
     assignee kept. On the first expiry the assignee claims the task again and its task request is
     dispatched to it again. A dispatch the room refuses because it was paused or spent after the
-    sweep releases that claim without counting an expiry (D-338); another failed dispatch leaves
-    the claim to expire, and that expiry counts. On a later expiry the task is escalated to the
+    sweep, a ``refused`` result whichever read found it so, releases that claim without counting
+    an expiry (D-338, D-361); another failed dispatch leaves the claim to expire, and that expiry
+    counts. On a later expiry the task is escalated to the
     coordinator: the system posts a failed task result for the assignee that says so, the task
     ends ``escalated``, and its follow-ups run, so its dependents are cancelled and the
     coordinator synthesis, which discloses the escalation, is queued once the cycle's tasks have
@@ -7904,11 +7905,12 @@ async def redispatch_expired_squad_claim(*, task_id: str) -> str:
         )
         if result.dispatched:
             return "redispatched"
-        if result.transport == "none":
-            # The room, paused or spent after the sweep, refused the turn (dispatch_squad_turn
-            # sends nothing then): the fresh claim is released without counting an expiry, as the
-            # other refusal paths release theirs, and the first sweep after the room can run again
-            # dispatches the task again (D-338).
+        if result.refused:
+            # The room, paused or spent after the sweep, refused the turn, whichever read found it
+            # so: the dispatch's, the queue's or the runtime's. Nothing was sent, so the fresh
+            # claim is released without counting an expiry, as the other refusal paths release
+            # theirs, and the first sweep after the room can run again dispatches the task again
+            # (D-338, D-361).
             await _release_refused_squad_task_claim(squad_task_id=claimed.id, agent_id=assignee)
         return "skipped"
     reason = (
