@@ -42,6 +42,64 @@ _HIGH_RISK_CLASSES = frozenset({"secret_access", "code_execution", "destructive_
 _REVIEW_RISK_CLASSES = frozenset({"network_write", "low_risk_write"})
 _DANGEROUS_IMPORTS = frozenset({"subprocess", "pexpect"})
 _NETWORK_IMPORTS = frozenset({"socket", "requests", "httpx", "urllib", "paramiko"})
+# Standard ways to run code that never reach SourceFileLoader.get_code, so never the verified bytes
+# package code runs from (D-292): a package that uses one needs an operator review (D-311).
+_EXEC_FROM_FILE_MODULES = frozenset(
+    {
+        # run_path compiles a file it reads itself.
+        "runpy",
+        # Interpreters, debuggers, profilers and test runners that compile and run source text.
+        "code",
+        "codeop",
+        "bdb",
+        "pdb",
+        "profile",
+        "cProfile",
+        "trace",
+        "timeit",
+        "doctest",
+        # Code objects or calls made from bytes, such as a .pyc or a pickle read with open.
+        "marshal",
+        "pickle",
+        "_pickle",
+        "shelve",
+        # The import machinery's own loaders, which read their files themselves.
+        "importlib.abc",
+        "importlib._bootstrap",
+        "importlib._bootstrap_external",
+        "_frozen_importlib",
+        "_frozen_importlib_external",
+        "_imp",
+        # Runs the import lines of .pth files.
+        "site",
+        # Native code from a file.
+        "ctypes",
+        "_ctypes",
+        # Another interpreter, which imports from disk.
+        "multiprocessing",
+    }
+)
+_EXEC_FROM_FILE_NAMES = frozenset(
+    {
+        "SourcelessFileLoader",
+        "ExtensionFileLoader",
+        "CodeType",
+        "ProcessPoolExecutor",
+        "subprocess_exec",
+        "subprocess_shell",
+    }
+)
+_EXEC_FROM_FILE_CALLS = frozenset({"compile", "builtins.compile", "builtins.exec", "builtins.eval"})
+_EXEC_FROM_FILE_CALL_PREFIXES = (
+    "os.exec",
+    "os.spawn",
+    "os.posix_spawn",
+    "os.popen",
+    "pty.spawn",
+    "asyncio.create_subprocess_",
+)
+# A class that defines one of these is a loader of its own, which runs what it reads.
+_LOADER_METHODS = frozenset({"get_code", "exec_module", "create_module", "load_module", "source_to_code"})
 _SECRET_RE = re.compile(
     r"(-----BEGIN [A-Z ]*PRIVATE KEY-----|"
     r"\b(?:api[_-]?key|secret|token|password)\b\s*[:=]\s*['\"][^'\"]{12,}|"
@@ -1266,6 +1324,67 @@ def _scan_python_file(
                         file_path,
                     )
                 )
+    for route in sorted(_exec_from_file_routes(tree)):
+        risk_classes.add("code_execution")
+        findings.append(
+            _finding(
+                "python.exec_from_file",
+                "warning",
+                "code",
+                f"Runs code that does not load from the package's verified bytes, which requires review: {route}",
+                file_path,
+                "Load package modules with an import, or have an operator review this use.",
+            )
+        )
+
+
+def _exec_from_file_routes(tree: ast.AST) -> set[str]:
+    """The names by which *tree* runs code past ``SourceFileLoader.get_code`` (D-311), as written."""
+    routes: set[str] = set()
+
+    def module(name: str) -> None:
+        parts = name.split(".")
+        routes.update(
+            prefix
+            for prefix in (".".join(parts[:end]) for end in range(1, len(parts) + 1))
+            if prefix in _EXEC_FROM_FILE_MODULES
+        )
+
+    def dotted(name: str) -> None:
+        if name in _EXEC_FROM_FILE_CALLS or name.startswith(_EXEC_FROM_FILE_CALL_PREFIXES):
+            routes.add(name)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                module(alias.name)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            module(node.module)
+            for alias in node.names:
+                module(f"{node.module}.{alias.name}")
+                dotted(f"{node.module}.{alias.name}")
+                if alias.name in _EXEC_FROM_FILE_NAMES:
+                    routes.add(alias.name)
+        elif isinstance(node, ast.Name | ast.Attribute):
+            name = node.id if isinstance(node, ast.Name) else node.attr
+            if name in _EXEC_FROM_FILE_NAMES:
+                routes.add(name)
+            dotted(_call_name(node))
+        elif isinstance(node, ast.Call):
+            first = node.args[0] if node.args else None
+            if (
+                _call_name(node.func) in {"__import__", "importlib.import_module"}
+                and isinstance(first, ast.Constant)
+                and isinstance(first.value, str)
+            ):
+                module(first.value)
+        elif isinstance(node, ast.ClassDef):
+            routes.update(
+                item.name
+                for item in node.body
+                if isinstance(item, ast.FunctionDef | ast.AsyncFunctionDef) and item.name in _LOADER_METHODS
+            )
+    return routes
 
 
 def _classify_import(

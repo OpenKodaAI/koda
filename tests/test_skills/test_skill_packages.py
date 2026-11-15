@@ -136,6 +136,62 @@ def test_scan_denies_dangerous_python_and_unknown_risk(tmp_path: Path) -> None:
     assert "tool.risk.unknown" in finding_ids
 
 
+_RUN_PATH_HANDLER = """
+import runpy
+from pathlib import Path
+
+
+async def read_notes(params, ctx):
+    return runpy.run_path(str(Path(__file__).with_name("safe_pack_notes.py")))["NOTES"]
+""".lstrip()
+_STUB_HANDLER = "\n\nasync def read_notes(params, ctx):\n    return None\n"
+
+
+_EXEC_FROM_FILE_CASES = [
+    (_RUN_PATH_HANDLER, "runpy"),
+    ("from runpy import run_path\n" + _STUB_HANDLER, "runpy"),
+    ("code = compile(open(__file__).read(), __file__, 'exec')\n" + _STUB_HANDLER, "compile"),
+    ("import marshal\n" + _STUB_HANDLER, "marshal"),
+    ("import pickle\n" + _STUB_HANDLER, "pickle"),
+    (
+        "import importlib.machinery\nL = importlib.machinery.SourcelessFileLoader\n" + _STUB_HANDLER,
+        "SourcelessFileLoader",
+    ),
+    ("from importlib.machinery import ExtensionFileLoader\n" + _STUB_HANDLER, "ExtensionFileLoader"),
+    ("import importlib.abc\n" + _STUB_HANDLER, "importlib.abc"),
+    ("from importlib import _bootstrap_external\n" + _STUB_HANDLER, "importlib._bootstrap_external"),
+    ("class Loader:\n    def exec_module(self, module):\n        pass\n" + _STUB_HANDLER, "exec_module"),
+    ("import site\n" + _STUB_HANDLER, "site"),
+    ("import ctypes\n" + _STUB_HANDLER, "ctypes"),
+    ("import code\n" + _STUB_HANDLER, "code"),
+    ("import timeit\n" + _STUB_HANDLER, "timeit"),
+    ("from multiprocessing import Process\n" + _STUB_HANDLER, "multiprocessing"),
+    ("import os, sys\nos.execv(sys.executable, [sys.executable, __file__])\n" + _STUB_HANDLER, "os.execv"),
+    ("import asyncio\nasyncio.create_subprocess_exec('python')\n" + _STUB_HANDLER, "asyncio.create_subprocess_exec"),
+]
+
+
+@pytest.mark.parametrize(
+    ("handler_source", "route"),
+    _EXEC_FROM_FILE_CASES,
+    ids=[f"{index}-{route}" for index, (_, route) in enumerate(_EXEC_FROM_FILE_CASES)],
+)
+def test_a_package_that_runs_code_from_a_file_outside_the_import_system_needs_review(
+    tmp_path: Path, handler_source: str, route: str
+) -> None:
+    """D-311: these routes never reach SourceFileLoader.get_code, so never the verified bytes: they need review."""
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(handler_source, encoding="utf-8")
+    (package_dir / "safe_pack_notes.py").write_text('NOTES = "safe"\n', encoding="utf-8")
+
+    scan = scan_skill_package(package_dir, agent_id="ATLAS")
+
+    assert scan.decision == "review_required"
+    routes = [finding.message for finding in scan.findings if finding.id == "python.exec_from_file"]
+    assert len(routes) == 1
+    assert routes[0].endswith(f": {route}")
+
+
 def test_install_uninstall_and_runtime_skill_merge_use_lock_fallback(tmp_path: Path) -> None:
     from koda.services.metrics import SKILL_PACKAGE_EVENTS
 

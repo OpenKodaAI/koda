@@ -41,6 +41,10 @@ permissions return `review_required`. Review does not bypass ExecutionPolicy or
 approval. It only allows package install to proceed when local operator policy
 accepts the risk.
 
+So does a Python file that uses a way to run code that the verified-bytes
+guarantee (see Load-Time Integrity) does not cover, reported as
+`python.exec_from_file` with the name it uses (D-311).
+
 A `review_required` package installs only after an operator accepts the review
 in the agent's Skills tab, which calls the operator-authenticated control-plane
 route `POST /api/control-plane/agents/{agent_id}/skills/packages/install` with
@@ -98,6 +102,57 @@ its source, an extension module) and a module in an archive there (a `.zip`
 that package code puts on `sys.path` or opens with `zipimport`) are refused
 too, because Python would read them from disk when they load: package code
 loads from its verified `.py` sources only.
+
+### Load routes the verified bytes cover, and the ones left to the scanner
+
+The guarantee holds for code that reaches `SourceFileLoader.get_code` or one of
+the refused loaders above (D-311). Covered, for a file inside the package
+directory:
+
+- the declared handlers, which the plugin registry compiles from the verified
+  bytes itself;
+- `import` and `from ... import` statements, `importlib.import_module` and
+  `__import__`, through the path finders, including a directory package code
+  adds to `sys.path`;
+- `importlib.util.spec_from_file_location`, `importlib.machinery.SourceFileLoader`
+  used directly, and its `exec_module` and `load_module`;
+- `runpy.run_module`, which loads through the same loaders (the scanner still
+  flags `runpy`, for `run_path`);
+- refused rather than run: a `.pyc` without its source
+  (`SourcelessFileLoader`), an extension module (`ExtensionFileLoader`) and a
+  module in an archive (`zipimport`).
+
+Every other way to run code compiles or loads what it reads at call time, so it
+is left to the scanner, which flags these as `python.exec_from_file` (review
+required):
+
+- `runpy` (`run_path` compiles a file it reads itself);
+- `compile`, and `exec`, `eval` or `compile` reached through `builtins` (bare
+  `exec` and `eval` are denied);
+- interpreters, debuggers, profilers and runners that run source text: `code`,
+  `codeop`, `bdb`, `pdb`, `profile`, `cProfile`, `trace`, `timeit`, `doctest`;
+- code objects or calls made from bytes: `marshal`, `pickle`, `_pickle`,
+  `shelve`, `CodeType`;
+- the import machinery's own loaders: `importlib.abc`, `importlib._bootstrap`,
+  `importlib._bootstrap_external`, `_frozen_importlib`,
+  `_frozen_importlib_external`, `_imp`, `SourcelessFileLoader` and
+  `ExtensionFileLoader` used directly (a file outside the package loads from
+  disk), and any class that defines `get_code`, `exec_module`,
+  `create_module`, `load_module` or `source_to_code` (a loader of its own,
+  including a `SourceFileLoader` subclass that replaces `get_code`);
+- `site` (it runs the `import` lines of `.pth` files);
+- native code: `ctypes`, `_ctypes`;
+- another interpreter, which imports from disk without the guarantee:
+  `multiprocessing`, `ProcessPoolExecutor`, `os.exec*`, `os.spawn*`,
+  `os.posix_spawn*`, `os.popen`, `pty.spawn`, `asyncio.create_subprocess_*`
+  and the event loop's `subprocess_exec` and `subprocess_shell` (`subprocess`
+  and `os.system` are denied).
+
+The scanner matches names as the code writes them, including a literal module
+name passed to `importlib.import_module` or `__import__`; a name computed at run
+time is not seen. Code loaded from a file outside the package directory, for
+example one package code writes and then imports, runs from that file like any
+other module outside a package.
 
 A registered package changed on disk keeps running the bytes that were
 verified, and is checked again whenever it registers again: `plugin_reload`
