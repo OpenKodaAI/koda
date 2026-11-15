@@ -261,10 +261,16 @@ def test_the_docs_say_an_expired_setup_code_is_replaced() -> None:
         "The code expires `CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS` (default 900, so 15 minutes) after the file"
         " is written. The next status request after that, such as reloading `/setup`, replaces the expired file"
         " with a new code and a new banner (a seed is written again, with a fresh expiry). A file without both a"
-        " code line and a readable `expires_at`, such as an empty one left by a crash, never matches and is"
-        " replaced the same way, and a write that fails removes the file it started, so an expired or damaged"
-        " file does not lock setup. An install with an owner never writes the file." in guide
+        " code line and a readable `expires_at`, such as an empty one left by a crash or one that is not UTF-8,"
+        " never matches and is replaced the same way, so an expired or damaged file does not lock setup. The code"
+        " is the file's first line, whatever it holds (a seed may contain `=` or any other separator), and"
+        " `expires_at` is read from the lines after it. The file is published whole: the content goes to a `0600`"
+        " temp file in the same directory, is fsynced, then is hard-linked to `bootstrap.txt`, which fails when"
+        " that file already exists. Another replica never reads a half-written file, a code is announced only"
+        " when its file is the one on disk, and a write that fails leaves no file. An install with an owner never"
+        " writes the file." in guide
     )
+    assert "a write that fails removes the file it started" not in guide
     assert "so an expired code never locks setup" not in guide
 
 
@@ -447,11 +453,92 @@ def test_a_failed_write_leaves_no_file_behind(
 
     monkeypatch.setattr(bootstrap_file_mod.os, "write", _REAL_WRITE)
     assert not isolated_bootstrap.exists()
+    assert list(isolated_bootstrap.parent.iterdir()) == []
     assert "Koda setup code" not in capsys.readouterr().err
     # Once the disk has room again, the next status request writes a usable code.
     code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
     assert code is not None
     assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT) == code
+
+
+@pytest.mark.parametrize("seed", ["V0I3S1FaM01OUDRY=", "WB7K=QZ3M=NP4X", "setup_url=WB7K-QZ3M-NP4X"])
+def test_a_seed_with_an_equals_sign_is_read_back(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, seed: str
+) -> None:
+    """The code is the file's first line, whatever it holds; only the known key=value lines are fields."""
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", seed)
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap_file_mod, "log", log)
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT) == seed
+    written = isolated_bootstrap.read_text(encoding="utf-8")
+
+    assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT) == seed
+    # A valid file is kept: the next status request neither rewrites it nor calls it invalid.
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT) is None
+    assert isolated_bootstrap.read_text(encoding="utf-8") == written
+    assert not [call for call in log.warning.call_args_list if call.args == ("bootstrap_file_invalid_replaced",)]
+
+
+def test_a_file_that_is_not_utf8_is_replaced(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    isolated_bootstrap.parent.mkdir(parents=True, exist_ok=True)
+    isolated_bootstrap.write_bytes(b"\xff\xfeWB7K-QZ3M-NP4X\nexpires_at=2999-01-01T00:00:00+00:00\n")
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap_file_mod, "log", log)
+
+    assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT) is None
+    code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+
+    assert code is not None
+    assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT) == code
+    assert capsys.readouterr().err.count(code) == 1
+    assert [call for call in log.warning.call_args_list if call.args == ("bootstrap_file_invalid_replaced",)]
+
+
+def _open_fds() -> int:
+    return len(os.listdir("/proc/self/fd"))
+
+
+def test_a_seed_that_cannot_be_encoded_opens_no_file(isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A seed from a non-UTF-8 environment (a lone surrogate) fails before any file is created."""
+    monkeypatch.setattr(bootstrap_file_mod, "CONTROL_PLANE_BOOTSTRAP_CODE_SEED", "WB7K-QZ3M-NP4\udcff")
+    before = _open_fds()
+
+    with pytest.raises(UnicodeEncodeError):
+        bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+
+    assert _open_fds() == before
+    assert not isolated_bootstrap.exists()
+    assert list(isolated_bootstrap.parent.iterdir()) == []
+
+
+def test_another_replica_never_sees_a_partly_written_file(
+    isolated_bootstrap: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replica B's status request lands while replica A writes: every announced code is the file's code."""
+    seen_during_write: list[bool] = []
+    announced: list[str | None] = []
+
+    def write_with_a_second_replica(fd: int, data: bytes) -> int:
+        monkeypatch.setattr(bootstrap_file_mod.os, "write", _REAL_WRITE)
+        seen_during_write.append(isolated_bootstrap.exists())
+        announced.append(bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT))
+        return _REAL_WRITE(fd, data)
+
+    monkeypatch.setattr(bootstrap_file_mod.os, "write", write_with_a_second_replica)
+    announced.append(bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT))
+
+    # bootstrap.txt appears only once it holds the whole content.
+    assert seen_during_write == [False]
+    codes = [code for code in announced if code is not None]
+    assert len(codes) == 1
+    assert isolated_bootstrap.read_text(encoding="utf-8").splitlines()[0] == codes[0]
+    assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT) == codes[0]
+    assert capsys.readouterr().err.count("Koda setup code") == 1
+    assert os.stat(isolated_bootstrap).st_mode & 0o777 == 0o600
+    # No temp file is left beside it.
+    assert list(isolated_bootstrap.parent.iterdir()) == [isolated_bootstrap]
 
 
 def test_an_expired_seed_file_is_written_again_with_a_fresh_ttl(

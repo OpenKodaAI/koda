@@ -24,9 +24,14 @@ mechanisms, checked in priority order:
    15 minutes) after the file is written. The next status request after that, such as reloading
    `/setup`, replaces the expired file with a new code and a new banner (a seed is written again,
    with a fresh expiry). A file without both a code line and a readable `expires_at`, such as an
-   empty one left by a crash, never matches and is replaced the same way, and a write that fails
-   removes the file it started, so an expired or damaged file does not lock setup. An install with
-   an owner never writes the file.
+   empty one left by a crash or one that is not UTF-8, never matches and is replaced the same way,
+   so an expired or damaged file does not lock setup. The code is the file's first line, whatever
+   it holds (a seed may contain `=` or any other separator), and `expires_at` is read from the
+   lines after it. The file is published whole: the content goes to a `0600` temp file in the same
+   directory, is fsynced, then is hard-linked to `bootstrap.txt`, which fails when that file already
+   exists. Another replica never reads a half-written file, a code is announced only when its file
+   is the one on disk, and a write that fails leaves no file. An install with an owner never writes
+   the file.
 3. **Loopback trust (dev only)** — when `ALLOW_LOOPBACK_BOOTSTRAP=true` and the request comes
    from `127.0.0.1` / `::1` with no `X-Forwarded-For` hop, no code is required. This mode is
    refused at boot when `KODA_ENV=production`.

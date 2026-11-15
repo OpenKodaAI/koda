@@ -23,6 +23,8 @@ supported (in priority order):
    never carries it. The code expires `CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS` after
    the file is written; while no owner exists, the next status request replaces an
    expired file, or one without a code line and a readable expiry, with a new code.
+   The code is the file's first line (a seed may contain ``=``), and the file is
+   published whole, through a temp file and ``os.link``, so no replica reads it half written.
 
 The file is deleted automatically after the owner registers.
 """
@@ -33,6 +35,7 @@ import contextlib
 import os
 import secrets
 import sys
+import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -139,19 +142,20 @@ def _read_file_fields() -> tuple[str, datetime | None] | None:
         return None
     try:
         content = _BOOTSTRAP_FILE_PATH.read_text(encoding="utf-8").strip()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
+        # A file that is not UTF-8 holds no code we wrote: it is invalid and gets replaced.
         log.warning("bootstrap_file_read_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
         return None
     if not content:
         return None
-    lines = [line.strip() for line in content.splitlines() if line.strip()]
-    code = ""
+    # _render_bootstrap_file puts the code on the first line, whatever it holds (a seed may
+    # contain "=", as base64 padding does), and the key=value fields on the lines after it.
+    code, *field_lines = [line.strip() for line in content.splitlines() if line.strip()]
     expires_at: datetime | None = None
-    for line in lines:
-        if line.startswith("expires_at="):
-            expires_at = _parse_expires_at(line.split("=", 1)[1])
-        elif not code and "=" not in line:
-            code = line
+    for line in field_lines:
+        key, separator, value = line.partition("=")
+        if separator and key == "expires_at":
+            expires_at = _parse_expires_at(value)
     return code, expires_at
 
 
@@ -163,6 +167,33 @@ def _valid_code(fields: tuple[str, datetime | None] | None, now: datetime) -> st
     if not code or expires_at is None or expires_at <= now:
         return None
     return code
+
+
+def _publish_bootstrap_file(content: bytes) -> bool:
+    """Put ``content`` at the bootstrap path in one step; False when another writer published a file first.
+
+    The content goes to a 0600 temp file in the same directory and is fsynced, then
+    hard-linked to the bootstrap path: ``os.link`` fails when that path exists, as
+    ``O_EXCL`` would, and a reader never sees a partly written file. A failed or short
+    write raises; the temp file is always removed.
+    """
+    fd, temp_path = tempfile.mkstemp(dir=_BOOTSTRAP_FILE_PATH.parent, prefix=".bootstrap.", suffix=".tmp")
+    try:
+        try:
+            written = os.write(fd, content)
+            if written != len(content):
+                raise OSError(f"wrote {written} of {len(content)} bytes to {temp_path}")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        try:
+            os.link(temp_path, _BOOTSTRAP_FILE_PATH)
+        except FileExistsError:
+            return False
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_path)
+    return True
 
 
 def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> str | None:
@@ -182,8 +213,9 @@ def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> st
       as an empty file a crash left. With an env seed the new file holds the same seed
       with a fresh expiry.
 
-    A write that fails, or writes only part of the file, removes the file and raises,
-    so no code is announced that the file does not hold.
+    The file is published whole (``_publish_bootstrap_file``): another replica never sees
+    it partly written, and a code is announced only when this call's file is the one on
+    disk. A write that fails, or writes only part of the content, leaves no file and raises.
     """
     if has_owner:
         if _BOOTSTRAP_FILE_PATH.exists():
@@ -214,28 +246,10 @@ def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> st
     _BOOTSTRAP_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     code = CONTROL_PLANE_BOOTSTRAP_CODE_SEED or _generate_code()
     expires_at = now + timedelta(seconds=CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)
-    try:
-        fd = os.open(
-            str(_BOOTSTRAP_FILE_PATH),
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            0o600,
-        )
-    except FileExistsError:
-        return None
+    # Encode first: a seed that cannot be encoded raises before any file is created.
     content = _render_bootstrap_file(code, expires_at).encode()
-    try:
-        try:
-            written = os.write(fd, content)
-        finally:
-            os.close(fd)
-        if written != len(content):
-            raise OSError(f"wrote {written} of {len(content)} bytes to {_BOOTSTRAP_FILE_PATH}")
-    except BaseException:
-        # The file does not hold the code whole (a full disk, an I/O error): remove it, so the
-        # next status request writes a new one instead of keeping a file that never matches.
-        with contextlib.suppress(OSError):
-            _BOOTSTRAP_FILE_PATH.unlink()
-        raise
+    if not _publish_bootstrap_file(content):
+        return None
     with contextlib.suppress(OSError):
         os.chmod(str(_BOOTSTRAP_FILE_PATH), 0o600)
     if CONTROL_PLANE_BOOTSTRAP_CODE_SEED:
