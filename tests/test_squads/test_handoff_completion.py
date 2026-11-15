@@ -595,6 +595,7 @@ async def test_a_pause_between_the_sweep_and_the_redispatch_never_counts_an_expi
             transport="none" if refusal else "local_queue",
             dispatched=refusal is None,
             error=refusal,
+            refused=refusal is not None,
         )
 
     turn_stubs.side_effect = dispatch
@@ -648,6 +649,7 @@ async def test_a_refused_redispatch_releases_its_claim_when_the_room_reopens_at_
             transport="none" if refusal else "local_queue",
             dispatched=refusal is None,
             error=refusal,
+            refused=refusal is not None,
         )
 
     turn_stubs.side_effect = refuse_then_reopen
@@ -672,6 +674,54 @@ async def test_a_refused_redispatch_releases_its_claim_when_the_room_reopens_at_
     assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA", "QA"]
     qa_task = await tasks.get_task(task_ids["QA"])
     assert qa_task is not None and qa_task.status == "claimed"
+    assert qa_task.metadata["claim_expiry_count"] == 1
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_pause_between_the_redispatch_read_and_the_queue_read_never_counts_an_expiry(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """The queue's own refusal releases the redispatch's claim too, whatever its transport (D-361)."""
+    from koda.services import queue_manager as qm
+    from koda.squads import SquadTurnDispatchResult
+    from koda.squads import dispatch as dispatch_mod
+
+    threads, tasks = stores
+    thread_id, _parent, task_ids = await _start_handoff(threads, tasks)
+    real_dispatch = dispatch_mod.dispatch_squad_turn
+    real_enqueue = qm.enqueue_squad_agent_task
+    results: list[SquadTurnDispatchResult] = []
+
+    async def dispatch(**kwargs: Any) -> SquadTurnDispatchResult:
+        result = await real_dispatch(application=MagicMock(), **kwargs)
+        results.append(result)
+        return result
+
+    async def pause_then_enqueue(**kwargs: Any) -> int:
+        # The operator pauses the room after the redispatch read it, before the queue's own read.
+        await threads.update_thread_status(thread_id, "paused")
+        return int(await real_enqueue(**kwargs))
+
+    turn_stubs.side_effect = dispatch
+    router = _router(threads, tasks)
+    await _expire_claim(tasks, task_ids["QA"])
+    with patch.object(qm, "enqueue_squad_agent_task", pause_then_enqueue):
+        [claim] = (await router.sweep_once()).expired_claims
+    assert claim.task_id == task_ids["QA"]
+    [refused] = results
+    assert refused.transport == "local_queue" and refused.dispatched is False
+    assert refused.refused is True and refused.error == "thread is paused"
+
+    # The first sweep after the reopen, well within the claim TTL, dispatches QA's task again.
+    await threads.update_thread_status(thread_id, "open")
+    with patch.object(qm, "enqueue_squad_agent_task", AsyncMock(return_value=7)):
+        [again] = (await router.sweep_once()).expired_claims
+    assert again.task_id == task_ids["QA"] and again.refused is True
+    assert results[-1].dispatched is True and results[-1].enqueued_task_id == 7
+    qa_task = await tasks.get_task(task_ids["QA"])
+    assert qa_task is not None and qa_task.status == "claimed" and qa_task.assigned_agent_id == "QA"
+    # Only the silent worker's expiry counts, not the pause.
     assert qa_task.metadata["claim_expiry_count"] == 1
 
 
@@ -913,3 +963,367 @@ async def test_a_dependent_task_claimed_in_a_paused_room_is_dispatched_after_the
     assert "claim_refused" not in redispatched.metadata
     history = await threads.thread_history(thread_id=thread.id, limit=100)
     assert [row for row in history if (row.get("metadata") or {}).get("event_type") == "claim_expired"] == []
+
+
+class _DelegatePlanner:
+    async def plan(self, planner_input: CoordinationPlannerInput) -> CoordinationDecision:
+        return CoordinationDecision(
+            mode="delegate",
+            confidence=0.86,
+            reasoning_summary="FE builds it.",
+            tasks=[CoordinationTask(key="build", title="Build", agent_id="FE", kind="frontend", objective="Build it")],
+            selected_agents=["FE"],
+            final_response_strategy="coordinator_synthesis_after_all_task_results",
+        )
+
+
+def _refusing_dispatch() -> Callable[..., Awaitable[Any]]:
+    """As dispatch_squad_turn does: a room that cannot run now gets no turn, and the result is refused."""
+    from koda.squads import SquadTurnDispatchResult, squad_thread_turn_refusal
+
+    async def dispatch(**kwargs: Any) -> SquadTurnDispatchResult:
+        refusal = squad_thread_turn_refusal(kwargs["thread"])
+        return SquadTurnDispatchResult(
+            target_agent_id=kwargs["target_agent_id"],
+            transport="none" if refusal else "local_queue",
+            dispatched=refusal is None,
+            error=refusal,
+            refused=refusal is not None,
+        )
+
+    return dispatch
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_delegate_synthesis_refused_by_a_paused_room_runs_once_after_the_reopen(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """A cycle with no handoff records its refused synthesis, and the router runs it once (D-336)."""
+    threads, tasks = stores
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        participants=[("PM", "coordinator"), ("FE", "worker")],
+    )
+    user_msg_id = await threads.post_thread_message(
+        thread_id=thread.id, from_agent="user:alice", content="Ship the page", message_type="user_input"
+    )
+    parent = f"msg-{user_msg_id}"
+    execution = await SquadCoordinatorEngine(
+        thread_store=threads, task_store=tasks, planner=_DelegatePlanner()
+    ).coordinate_user_input(
+        text="Ship the page",
+        thread=thread,
+        participants=await threads.list_participants(thread_id=thread.id),
+        coordinator_agent_id="PM",
+        capability_hints={},
+        semantic_result=_semantic_result(),
+        dispatch=AsyncMock(return_value=None),
+        parent_message_id=parent,
+    )
+    [fe_task_id] = execution.task_ids
+    assert _handoff_rows(await threads.thread_history(thread_id=thread.id, limit=100)) == []
+    turn_stubs.side_effect = _refusing_dispatch()
+
+    # The operator pauses the room while FE's turn runs; FE finishes, and its synthesis is refused.
+    await threads.update_thread_status(thread.id, "paused")
+    await _finish_turn(thread_id=thread.id, parent=parent, task_id=fe_task_id, agent_id="FE")
+    [refused] = _final_syntheses(turn_stubs)
+    assert refused["target_agent_id"] == "PM"
+
+    router = _router(threads, tasks)
+    await router.sweep_once()
+    assert len(_final_syntheses(turn_stubs)) == 1
+
+    await threads.update_thread_status(thread.id, "open")
+    await router.sweep_once()
+    await router.sweep_once()
+    syntheses = _final_syntheses(turn_stubs)
+    assert len(syntheses) == 2
+    rerun = syntheses[1]
+    assert rerun["target_agent_id"] == "PM"
+    assert rerun["metadata"]["idempotency_key"] == refused["metadata"]["idempotency_key"]
+    assert rerun["delegation_request_id"] == refused["delegation_request_id"]
+    assert "FE / " in rerun["query_text"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_pending_task_of_an_earlier_cycle_is_not_enqueued_when_a_later_cycles_dependency_completes(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """The unblocked-task follow-up reads the finished task's cycle only (D-337)."""
+    from koda.services.queue_manager import _maybe_enqueue_unblocked_squad_tasks
+
+    threads, tasks = stores
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        participants=[("PM", "coordinator"), ("FE", "worker"), ("QA", "worker"), ("UX", "worker")],
+    )
+    earlier = await tasks.create_task(
+        thread_id=thread.id,
+        title="Old work",
+        assigner_agent_id="PM",
+        assigned_agent_id="UX",
+        metadata={"coordination_parent_message_id": "msg-earlier"},
+    )
+    build = await tasks.create_task(
+        thread_id=thread.id,
+        title="Build",
+        assigner_agent_id="PM",
+        assigned_agent_id="FE",
+        metadata={"coordination_parent_message_id": "msg-later"},
+    )
+    review = await tasks.create_task(
+        thread_id=thread.id,
+        title="Review",
+        assigner_agent_id="PM",
+        assigned_agent_id="QA",
+        depends_on=[build.id],
+        metadata={"coordination_parent_message_id": "msg-later"},
+    )
+    await tasks.claim_task(task_id=build.id, agent_id="FE")
+    await tasks.update_task_status(task_id=build.id, new_status="in_progress", agent_id="FE")
+    await tasks.update_task_status(task_id=build.id, new_status="done", agent_id="FE")
+    bus = AsyncMock()
+    bus.send = AsyncMock(return_value="msg-9")
+
+    with patch("koda.agents.get_message_bus", return_value=bus):
+        dispatched = await _maybe_enqueue_unblocked_squad_tasks(
+            user_id=42,
+            context=MagicMock(application=None, bot=None),
+            ctx=_ctx(thread_id=thread.id, task_id=build.id, agent_id="FE", parent="msg-later"),
+        )
+
+    assert dispatched == 1
+    assert [call.kwargs["to_agent"] for call in bus.send.await_args_list] == ["QA"]
+    left = await tasks.get_task(earlier.id)
+    assert left is not None and left.status == "pending"
+    claimed = await tasks.get_task(review.id)
+    assert claimed is not None and claimed.status == "claimed"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_task_an_agent_created_on_a_cycle_task_is_unblocked_and_an_agent_tasks_finish_stays_in_its_scope(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """A task with no cycle id, as squad_task_create makes it, is in every cycle's scope (D-337).
+
+    Its own finish reads only the tasks with no cycle id, so it does not reach another cycle.
+    """
+    from koda.services.queue_manager import _maybe_enqueue_unblocked_squad_tasks
+
+    threads, tasks = stores
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        participants=[("PM", "coordinator"), ("FE", "worker"), ("QA", "worker"), ("UX", "worker")],
+    )
+    earlier = await tasks.create_task(
+        thread_id=thread.id,
+        title="Old work",
+        assigner_agent_id="PM",
+        assigned_agent_id="UX",
+        metadata={"coordination_parent_message_id": "msg-earlier"},
+    )
+    build = await tasks.create_task(
+        thread_id=thread.id,
+        title="Build",
+        assigner_agent_id="PM",
+        assigned_agent_id="FE",
+        metadata={"coordination_parent_message_id": "msg-later"},
+    )
+    # As squad_task_create creates it: agents set no cycle metadata (D-339).
+    review = await tasks.create_task(
+        thread_id=thread.id, title="Review", assigner_agent_id="FE", assigned_agent_id="QA", depends_on=[build.id]
+    )
+    await tasks.claim_task(task_id=build.id, agent_id="FE")
+    await tasks.update_task_status(task_id=build.id, new_status="in_progress", agent_id="FE")
+    await tasks.update_task_status(task_id=build.id, new_status="done", agent_id="FE")
+    bus = AsyncMock()
+    bus.send = AsyncMock(return_value="msg-9")
+    context = MagicMock(application=None, bot=None)
+
+    with patch("koda.agents.get_message_bus", return_value=bus):
+        dispatched = await _maybe_enqueue_unblocked_squad_tasks(
+            user_id=42,
+            context=context,
+            ctx=_ctx(thread_id=thread.id, task_id=build.id, agent_id="FE", parent="msg-later"),
+        )
+        assert dispatched == 1
+        claimed = await tasks.get_task(review.id)
+        assert claimed is not None and claimed.status == "claimed" and claimed.assigned_agent_id == "QA"
+
+        await tasks.update_task_status(task_id=review.id, new_status="in_progress", agent_id="QA")
+        await tasks.update_task_status(task_id=review.id, new_status="done", agent_id="QA")
+        dispatched = await _maybe_enqueue_unblocked_squad_tasks(
+            user_id=42, context=context, ctx=_ctx(thread_id=thread.id, task_id=review.id, agent_id="QA", parent="")
+        )
+
+    assert dispatched == 0
+    assert [call.kwargs["to_agent"] for call in bus.send.await_args_list] == ["QA"]
+    left = await tasks.get_task(earlier.id)
+    assert left is not None and left.status == "pending"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_tasks_an_agent_created_on_a_failed_cycle_task_are_cancelled_with_their_dependents(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """A failed cycle task cancels the tasks with no cycle id that depend on it, and theirs (D-337)."""
+    from koda.services.queue_manager import _maybe_enqueue_unblocked_squad_tasks
+
+    threads, tasks = stores
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        participants=[("PM", "coordinator"), ("FE", "worker"), ("QA", "worker"), ("UX", "worker")],
+    )
+    build = await tasks.create_task(
+        thread_id=thread.id,
+        title="Build",
+        assigner_agent_id="PM",
+        assigned_agent_id="FE",
+        metadata={"coordination_parent_message_id": "msg-later"},
+    )
+    review = await tasks.create_task(
+        thread_id=thread.id, title="Review", assigner_agent_id="FE", assigned_agent_id="QA", depends_on=[build.id]
+    )
+    docs = await tasks.create_task(
+        thread_id=thread.id, title="Docs", assigner_agent_id="QA", assigned_agent_id="UX", depends_on=[review.id]
+    )
+    await tasks.claim_task(task_id=build.id, agent_id="FE")
+    await tasks.update_task_status(task_id=build.id, new_status="in_progress", agent_id="FE")
+    await tasks.update_task_status(task_id=build.id, new_status="failed", agent_id="FE")
+
+    await _maybe_enqueue_unblocked_squad_tasks(
+        user_id=42,
+        context=MagicMock(application=None, bot=None),
+        ctx=_ctx(thread_id=thread.id, task_id=build.id, agent_id="FE", parent="msg-later"),
+    )
+
+    for task_id in (review.id, docs.id):
+        ended = await tasks.get_task(task_id)
+        assert ended is not None and ended.status == "cancelled"
+    turn_stubs.assert_not_awaited()
+
+
+async def _refuse_a_delegate_synthesis(
+    threads: SquadThreadStore, tasks: SquadTaskStore, turn_stubs: AsyncMock
+) -> tuple[str, int]:
+    """A delegate cycle whose synthesis the paused room refused; returns the thread and the event's id."""
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        participants=[("PM", "coordinator"), ("FE", "worker")],
+    )
+    user_msg_id = await threads.post_thread_message(
+        thread_id=thread.id, from_agent="user:alice", content="Ship the page", message_type="user_input"
+    )
+    parent = f"msg-{user_msg_id}"
+    execution = await SquadCoordinatorEngine(
+        thread_store=threads, task_store=tasks, planner=_DelegatePlanner()
+    ).coordinate_user_input(
+        text="Ship the page",
+        thread=thread,
+        participants=await threads.list_participants(thread_id=thread.id),
+        coordinator_agent_id="PM",
+        capability_hints={},
+        semantic_result=_semantic_result(),
+        dispatch=AsyncMock(return_value=None),
+        parent_message_id=parent,
+    )
+    [fe_task_id] = execution.task_ids
+    turn_stubs.side_effect = _refusing_dispatch()
+    await threads.update_thread_status(thread.id, "paused")
+    await _finish_turn(thread_id=thread.id, parent=parent, task_id=fe_task_id, agent_id="FE")
+    assert len(_final_syntheses(turn_stubs)) == 1
+    [event] = [
+        row
+        for row in await threads.thread_history(thread_id=thread.id, limit=100)
+        if (row.get("metadata") or {}).get("event_type") == "synthesis_refused"
+    ]
+    return thread.id, int(event["id"])
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_refused_synthesis_whose_retry_was_cut_off_runs_once_after_its_lease(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """A retry cancelled, or lost to a crash, mid-dispatch is taken again once its lease ends (D-336)."""
+    threads, tasks = stores
+    thread_id, event_id = await _refuse_a_delegate_synthesis(threads, tasks, turn_stubs)
+    await threads.update_thread_status(thread_id, "open")
+    router = _router(threads, tasks)
+
+    async def cancelled(**kwargs: Any) -> Any:
+        # stop() cancels the router task while the retry's dispatch runs.
+        raise asyncio.CancelledError
+
+    turn_stubs.side_effect = cancelled
+    with pytest.raises(asyncio.CancelledError):
+        await router.sweep_once()
+    assert len(_final_syntheses(turn_stubs)) == 2
+
+    # Within its lease the retry is left to the runtime that took it.
+    turn_stubs.side_effect = _refusing_dispatch()
+    assert (await router.sweep_once()).refused_syntheses_retried == 0
+    assert len(_final_syntheses(turn_stubs)) == 2
+
+    # Once the lease has ended, as after a restart, the synthesis runs once.
+    pool = await threads._ensure_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""UPDATE "{_schema()}"."squad_messages"
+                   SET metadata_json = metadata_json || jsonb_build_object(
+                           'retry_started_at', extract(epoch FROM NOW()) - 86400)
+                 WHERE id = $1""",
+            event_id,
+        )
+    assert (await router.sweep_once()).refused_syntheses_retried == 1
+    assert (await router.sweep_once()).refused_syntheses_retried == 0
+    syntheses = _final_syntheses(turn_stubs)
+    assert len(syntheses) == 3
+    assert syntheses[2]["metadata"]["idempotency_key"] == syntheses[0]["metadata"]["idempotency_key"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_synthesis_refused_longer_ago_than_the_retry_window_is_not_read_by_the_sweep(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """The sweep reads only recent synthesis_refused events, on the created_at index (D-336)."""
+    threads, tasks = stores
+    thread_id, event_id = await _refuse_a_delegate_synthesis(threads, tasks, turn_stubs)
+    pool = await threads._ensure_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""UPDATE "{_schema()}"."squad_messages"
+                   SET created_at = NOW() - INTERVAL '30 days'
+                 WHERE id = $1""",
+            event_id,
+        )
+    await threads.update_thread_status(thread_id, "open")
+
+    assert (await _router(threads, tasks).sweep_once()).refused_syntheses_retried == 0
+    assert len(_final_syntheses(turn_stubs)) == 1

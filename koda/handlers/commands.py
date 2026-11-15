@@ -48,6 +48,7 @@ from koda.services.elevenlabs_catalog import (
     elevenlabs_tts_models,
 )
 from koda.services.queue_manager import (
+    DLQRequeueRefusedError,
     active_processes,
     agent_start_time,
     enqueue,
@@ -3864,12 +3865,16 @@ async def cmd_dlq(update: Update, context: BotContext) -> None:
         if application is None:
             await update.message.reply_text("DLQ retry is unavailable because the application context is missing.")
             return
-        new_task_id = await requeue_dlq_entry(
-            entry,
-            application=application,
-            actor=update.effective_user.id,
-            bot_override=context.bot,
-        )
+        try:
+            new_task_id = await requeue_dlq_entry(
+                entry,
+                application=application,
+                actor=update.effective_user.id,
+                bot_override=context.bot,
+            )
+        except DLQRequeueRefusedError as exc:
+            await update.message.reply_text(f"DLQ #{dlq_id} was not requeued: {exc}")
+            return
         await update.message.reply_text(
             f"DLQ #{dlq_id} reprocessada com sucesso para o usuario {entry['user_id']} como tarefa #{new_task_id}."
         )

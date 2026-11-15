@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections import defaultdict
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -301,6 +302,8 @@ async def test_a_requeued_squad_turn_stays_a_squad_turn_and_its_claim_is_renewed
     application.user_data = defaultdict(dict)
 
     with (
+        # No task store: the requeue cannot tell whether the task ended, so it runs (D-342).
+        patch("koda.squads.get_squad_task_store", return_value=None),
         patch.object(qm, "create_task", return_value=78),
         patch.object(qm, "dlq_mark_retried", return_value=True),
         patch.object(qm, "_persist_runtime_queue_item", new_callable=AsyncMock),
@@ -314,6 +317,90 @@ async def test_a_requeued_squad_turn_stays_a_squad_turn_and_its_claim_is_renewed
     assert (item.squad_thread_id, item.squad_task_id, item.executing_agent_id) == ("thread-9", squad_task_id, "QA")
     assert item.delegation_request_id == f"coord-{squad_task_id}"
     assert qm.active_squad_turn_claims() == [(squad_task_id, "QA")]
+
+
+def _squad_turn_dlq_entry(squad_task_id: str) -> dict[str, Any]:
+    return {
+        "id": 7,
+        "task_id": 46,
+        "user_id": 811,
+        "chat_id": -811,
+        "query_text": "Task request",
+        "metadata_json": json.dumps(
+            {
+                "queue_payload": {
+                    "_dashboard_chat": True,
+                    "chat_id": -811,
+                    "query_text": "Task request",
+                    "executing_agent_id": "QA",
+                    "squad_thread_id": "thread-9",
+                    "squad_task_id": squad_task_id,
+                    "parent_message_id": "msg-3",
+                },
+            }
+        ),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["done", "failed", "escalated", "cancelled"])
+async def test_the_requeue_of_a_terminal_squad_tasks_turn_is_refused(
+    monkeypatch: pytest.MonkeyPatch, status: str
+) -> None:
+    """A turn whose task already ended would run in its room again and post a second result (D-342)."""
+    from koda.services import queue_manager as qm
+
+    for name in ("_user_queues", "_queue_workers", "_user_queue_task_ids", "_user_tasks", "_squad_turn_claims"):
+        monkeypatch.setattr(qm, name, {}, raising=False)
+    squad_task_id = "00000000-0000-0000-0000-0000000000f4"
+    task_store = AsyncMock()
+    task_store.get_task = AsyncMock(return_value=SimpleNamespace(id=squad_task_id, status=status))
+    application = MagicMock()
+    application.user_data = defaultdict(dict)
+
+    with (
+        patch("koda.squads.get_squad_task_store", return_value=task_store),
+        patch.object(qm, "create_task", return_value=79) as create,
+        patch.object(qm, "dlq_mark_retried", return_value=True) as mark_retried,
+        patch.object(qm, "_persist_runtime_queue_item", new_callable=AsyncMock),
+        patch.object(qm, "_sync_user_queue_observability"),
+        patch.object(qm, "_ensure_queue_worker", new_callable=AsyncMock),
+        pytest.raises(qm.DLQRequeueRefusedError, match=f"squad task {squad_task_id} is already {status}"),
+    ):
+        await qm.requeue_dlq_entry(_squad_turn_dlq_entry(squad_task_id), application=application, actor=111)
+
+    task_store.get_task.assert_awaited_once_with(squad_task_id)
+    create.assert_not_called()
+    mark_retried.assert_not_called()
+    assert qm.get_queue(811).empty()
+
+
+@pytest.mark.asyncio
+async def test_the_requeue_of_a_live_squad_tasks_turn_still_runs(monkeypatch: pytest.MonkeyPatch) -> None:
+    from koda.services import queue_manager as qm
+
+    for name in ("_user_queues", "_queue_workers", "_user_queue_task_ids", "_user_tasks", "_squad_turn_claims"):
+        monkeypatch.setattr(qm, name, {}, raising=False)
+    squad_task_id = "00000000-0000-0000-0000-0000000000f5"
+    task_store = AsyncMock()
+    task_store.get_task = AsyncMock(return_value=SimpleNamespace(id=squad_task_id, status="claimed"))
+    application = MagicMock()
+    application.user_data = defaultdict(dict)
+
+    with (
+        patch("koda.squads.get_squad_task_store", return_value=task_store),
+        patch.object(qm, "create_task", return_value=80),
+        patch.object(qm, "dlq_mark_retried", return_value=True),
+        patch.object(qm, "_persist_runtime_queue_item", new_callable=AsyncMock),
+        patch.object(qm, "_sync_user_queue_observability"),
+        patch.object(qm, "_ensure_queue_worker", new_callable=AsyncMock),
+    ):
+        assert (
+            await qm.requeue_dlq_entry(_squad_turn_dlq_entry(squad_task_id), application=application, actor=111) == 80
+        )
+
+    item = qm._parse_queue_item(qm.get_queue(811).get_nowait())
+    assert (item.squad_thread_id, item.squad_task_id) == ("thread-9", squad_task_id)
 
 
 @pytest.mark.asyncio

@@ -35,6 +35,13 @@ _HANDOFF_COMPLETION_GRACE_S = 30.0
 # A handoff requested longer ago than this is not swept: the sweep completes a check lost to a
 # restart, a cancel or a refused dispatch, not a request nobody answered long ago.
 _HANDOFF_COMPLETION_MAX_AGE_S = 24 * 3600.0
+# A refused synthesis a runtime took for its retry is taken again by any runtime once this long
+# has passed, so a retry cut off by a cancel or a crash does not leave it unrun (D-336). It is
+# well above the time a retry takes, whose dispatch waits at most 20 s for the runtime API.
+_SYNTHESIS_RETRY_LEASE_S = 300.0
+# A synthesis refused longer ago than this is not retried, so the sweep reads only recent events,
+# on the created_at index, not the whole of squad_messages (D-336).
+_SYNTHESIS_RETRY_MAX_AGE_S = 7 * 24 * 3600.0
 
 
 def _decode_json_object(value: Any) -> dict[str, Any]:
@@ -65,6 +72,7 @@ class SweepReport:
     budget_alerts: int = 0
     budget_auto_pauses: int = 0
     open_handoffs_checked: int = 0
+    refused_syntheses_retried: int = 0
 
     @property
     def reverted_count(self) -> int:
@@ -210,6 +218,11 @@ class SquadRouter:
             open_handoffs = await self._sweep_open_handoffs()
         except Exception:
             log.exception("squad_router_open_handoff_sweep_failed")
+        refused_syntheses = 0
+        try:
+            refused_syntheses = await self._sweep_refused_syntheses()
+        except Exception:
+            log.exception("squad_router_refused_synthesis_sweep_failed")
         return SweepReport(
             expired_claims=expired,
             auto_elections=elections,
@@ -219,6 +232,7 @@ class SquadRouter:
             budget_alerts=budget_alerts,
             budget_auto_pauses=budget_pauses,
             open_handoffs_checked=open_handoffs,
+            refused_syntheses_retried=refused_syntheses,
         )
 
     async def _sweep_auto_elections(self) -> list[AutoElection]:
@@ -404,23 +418,40 @@ class SquadRouter:
         return len(rows)
 
     async def _sweep_budgets(self) -> tuple[int, int]:
+        """Alert each room at 80% of its budget cap once per cap, and pause each open room at its cap.
+
+        The query decides both for every room it reads, so the loop acts on the same answer: the
+        80% alert counts as sent only when ``budget_alert_80_sent`` is ``true`` (JSON true or the
+        string) for the cap it was sent at, ``budget_alert_80_cap``; a raised or lowered cap is
+        alerted again at 80% of the new cap (D-341), and a flag left by older code with no cap
+        counts for the current one. Each room has its own error handling, so a room whose event
+        cannot be posted does not keep the rooms after it from their alert or pause (D-340). A
+        room's alert and pause are independent: a room whose alert fails is still paused at its
+        cap, and its ``updated_at`` is bumped so it goes behind the rooms after it.
+        """
         if self._thread_store is None:
             return 0, 0
         pool = await self._thread_store._ensure_pool()  # noqa: SLF001
         schema = self._thread_store._schema  # noqa: SLF001
-        # Only the rooms the sweep still acts on: those not yet alerted at 80%, and open rooms at
-        # their cap. A paused room already alerted is left out, so however many there are, an
-        # open room at its cap is always reached.
+        alert_sent = """(COALESCE(metadata_json->>'budget_alert_80_sent', 'false') = 'true'
+                         AND CASE jsonb_typeof(metadata_json->'budget_alert_80_cap')
+                                 WHEN 'number' THEN (metadata_json->>'budget_alert_80_cap')::numeric = budget_usd_cap
+                                 ELSE metadata_json->'budget_alert_80_cap' IS NULL
+                             END)"""
+        # Only the rooms the sweep still acts on: those not yet alerted at 80% of their cap, and
+        # open rooms at their cap. A paused room already alerted is left out, so however many
+        # there are, an open room at its cap is always reached.
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                f"""SELECT id, status, budget_usd_cap, cost_usd_accum, metadata_json
+                f"""SELECT id, status, budget_usd_cap, cost_usd_accum,
+                           {alert_sent} AS alert_80_sent,
+                           cost_usd_accum >= budget_usd_cap AS at_cap
                       FROM "{schema}"."squad_threads"
                      WHERE budget_usd_cap IS NOT NULL
                        AND budget_usd_cap > 0
                        AND cost_usd_accum >= budget_usd_cap * 0.8
                        AND (
-                           (status IN ('open', 'paused')
-                            AND COALESCE(metadata_json->>'budget_alert_80_sent', 'false') <> 'true')
+                           (status IN ('open', 'paused') AND NOT {alert_sent})
                            OR (status = 'open' AND cost_usd_accum >= budget_usd_cap)
                        )
                      ORDER BY updated_at ASC
@@ -430,12 +461,23 @@ class SquadRouter:
         alerts = 0
         pauses = 0
         for row in rows:
-            metadata = _decode_json_object(row["metadata_json"])
             thread_id = str(row["id"])
-            cost = float(row["cost_usd_accum"] or 0)
-            cap = float(row["budget_usd_cap"] or 0)
-            ratio = cost / cap if cap > 0 else 0.0
-            if ratio >= 0.8 and not metadata.get("budget_alert_80_sent"):
+            try:
+                alerted, paused = await self._sweep_room_budget(pool, schema, row)
+            except Exception:
+                log.exception("squad_router_budget_room_failed", thread_id=thread_id)
+                continue
+            alerts += alerted
+            pauses += paused
+        return alerts, pauses
+
+    async def _sweep_room_budget(self, pool: Any, schema: str, row: Any) -> tuple[int, int]:
+        thread_id = str(row["id"])
+        cost = float(row["cost_usd_accum"] or 0)
+        cap = float(row["budget_usd_cap"] or 0)
+        alerts = 0
+        if not row["alert_80_sent"]:
+            try:
                 await self._emit_system_event(
                     thread_id=thread_id,
                     event_type="budget_80_percent",
@@ -445,42 +487,53 @@ class SquadRouter:
                 async with pool.acquire() as conn:
                     await conn.execute(
                         f"""UPDATE "{schema}"."squad_threads"
-                               SET metadata_json = metadata_json || '{{"budget_alert_80_sent": true}}'::jsonb,
+                               SET metadata_json = metadata_json || jsonb_build_object(
+                                       'budget_alert_80_sent', true, 'budget_alert_80_cap', budget_usd_cap),
                                    updated_at = NOW()
                              WHERE id = $1""",
                         thread_id,
                     )
-                alerts += 1
-            # An open thread at its cap runs no turn, so it is paused, and the room told why, each
-            # time it is open there: a room an operator reopened at its cap is paused again. Only
-            # the UPDATE that paused it posts the event, so a pause that won the race (the
-            # operator's, or another runtime's sweep) is not announced twice.
-            if ratio >= 1.0 and row["status"] == "open":
-                async with pool.acquire() as conn:
-                    paused = await conn.execute(
-                        f"""UPDATE "{schema}"."squad_threads"
-                               SET status = 'paused',
-                                   metadata_json = metadata_json || '{{"budget_auto_paused": true}}'::jsonb,
-                                   updated_at = NOW()
-                             WHERE id = $1
-                               AND status = 'open'""",
-                        thread_id,
-                    )
-                if paused != "UPDATE 1":
-                    continue
-                await self._emit_system_event(
-                    thread_id=thread_id,
-                    event_type="budget_exceeded_auto_pause",
-                    content=f"[budget_exceeded_auto_pause] thread paused at ${cost:.4f} of ${cap:.4f}",
-                    metadata={
-                        "event_type": "budget_exceeded_auto_pause",
-                        "reason": "budget",
-                        "cost_usd": cost,
-                        "budget_usd_cap": cap,
-                    },
-                )
-                pauses += 1
-        return alerts, pauses
+                alerts = 1
+            except Exception:
+                # The room is still paused below when it is at its cap, and goes behind the rooms
+                # after it, so rooms whose alert keeps failing do not fill every batch (D-340).
+                log.exception("squad_router_budget_alert_failed", thread_id=thread_id)
+                with suppress(Exception):
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            f'UPDATE "{schema}"."squad_threads" SET updated_at = NOW() WHERE id = $1',
+                            thread_id,
+                        )
+        # An open thread at its cap runs no turn, so it is paused, and the room told why, each
+        # time it is open there: a room an operator reopened at its cap is paused again. Only
+        # the UPDATE that paused it posts the event, so a pause that won the race (the
+        # operator's, or another runtime's sweep) is not announced twice.
+        if not (row["at_cap"] and row["status"] == "open"):
+            return alerts, 0
+        async with pool.acquire() as conn:
+            paused = await conn.execute(
+                f"""UPDATE "{schema}"."squad_threads"
+                       SET status = 'paused',
+                           metadata_json = metadata_json || '{{"budget_auto_paused": true}}'::jsonb,
+                           updated_at = NOW()
+                     WHERE id = $1
+                       AND status = 'open'""",
+                thread_id,
+            )
+        if paused != "UPDATE 1":
+            return alerts, 0
+        await self._emit_system_event(
+            thread_id=thread_id,
+            event_type="budget_exceeded_auto_pause",
+            content=f"[budget_exceeded_auto_pause] thread paused at ${cost:.4f} of ${cap:.4f}",
+            metadata={
+                "event_type": "budget_exceeded_auto_pause",
+                "reason": "budget",
+                "cost_usd": cost,
+                "budget_usd_cap": cap,
+            },
+        )
+        return alerts, 1
 
     async def _sweep_open_handoffs(self) -> int:
         """Run the task-cycle check again for each handoff left open after its cycle's tasks ended (D-074).
@@ -569,6 +622,88 @@ class SquadRouter:
                 )
                 checked += 1
         return checked
+
+    async def _sweep_refused_syntheses(self) -> int:
+        """Run each coordinator synthesis a room refused again once the room can run (D-336).
+
+        A cycle with no handoff records its refused synthesis as a ``synthesis_refused`` system
+        event with ``retry_status`` ``pending``. For each one recorded in the last
+        ``_SYNTHESIS_RETRY_MAX_AGE_S`` in a room that is open and under its cap, a runtime takes it
+        (``running``, with ``retry_started_at``) with one conditional UPDATE, so two runtimes do
+        not run it both, and runs the synthesis check again. A synthesis refused again is
+        ``pending`` until the room can run again; otherwise it is ``done``, so it runs at most
+        once. A ``running`` retry that has not ended after ``_SYNTHESIS_RETRY_LEASE_S``, because
+        the router task was cancelled or the runtime stopped mid-retry, is taken again.
+        Returns the number of syntheses run again.
+        """
+        if self._thread_store is None:
+            return 0
+        pool = await self._thread_store._ensure_pool()  # noqa: SLF001
+        schema = self._thread_store._schema  # noqa: SLF001
+        # Pending, or taken by a retry whose lease has ended; {lease} is the lease's parameter.
+        retry_due = """(m.metadata_json->>'retry_status' = 'pending'
+                         OR (m.metadata_json->>'retry_status' = 'running'
+                             AND COALESCE((m.metadata_json->>'retry_started_at')::double precision, 0)
+                                 < extract(epoch FROM NOW()) - {lease}))"""
+        async with pool.acquire() as conn:
+            rows = await conn.fetch(
+                f"""SELECT m.id, m.thread_id, m.metadata_json
+                      FROM "{schema}"."squad_messages" AS m
+                      JOIN "{schema}"."squad_threads" AS th ON th.id = m.thread_id
+                     WHERE m.created_at > NOW() - make_interval(secs => $2)
+                       AND m.message_type = 'system_event'
+                       AND m.metadata_json->>'event_type' = 'synthesis_refused'
+                       AND {retry_due.format(lease="$3")}
+                       AND th.status = 'open'
+                       AND (th.budget_usd_cap IS NULL
+                            OR th.budget_usd_cap <= 0
+                            OR th.cost_usd_accum < th.budget_usd_cap)
+                  ORDER BY m.id ASC
+                     LIMIT $1""",
+                self._batch_size,
+                float(_SYNTHESIS_RETRY_MAX_AGE_S),
+                float(_SYNTHESIS_RETRY_LEASE_S),
+            )
+        from koda.services.queue_manager import retry_refused_squad_synthesis
+
+        retried = 0
+        for row in rows:
+            async with pool.acquire() as conn:
+                taken = await conn.execute(
+                    f"""UPDATE "{schema}"."squad_messages" AS m
+                           SET metadata_json = m.metadata_json || jsonb_build_object(
+                                   'retry_status', 'running', 'retry_started_at', extract(epoch FROM NOW()))
+                         WHERE m.id = $1
+                           AND {retry_due.format(lease="$2")}""",
+                    int(row["id"]),
+                    float(_SYNTHESIS_RETRY_LEASE_S),
+                )
+            if taken != "UPDATE 1":
+                # Another runtime runs it.
+                continue
+            metadata = _decode_json_object(row["metadata_json"])
+            outcome = "done"
+            try:
+                outcome = await retry_refused_squad_synthesis(
+                    thread_id=str(row["thread_id"]),
+                    squad_task_id=str(metadata.get("squad_task_id") or ""),
+                    executing_agent_id=str(metadata.get("executing_agent_id") or ""),
+                    parent_message_id=str(metadata.get("parent_message_id") or "") or None,
+                    squad_message_id=str(metadata.get("squad_message_id") or "") or None,
+                    artifact_ids=[str(item) for item in metadata.get("artifact_ids") or []],
+                )
+            except Exception:
+                log.exception("squad_router_refused_synthesis_retry_failed", thread_id=str(row["thread_id"]))
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    f"""UPDATE "{schema}"."squad_messages"
+                           SET metadata_json = metadata_json || jsonb_build_object('retry_status', $2::text)
+                         WHERE id = $1""",
+                    int(row["id"]),
+                    "pending" if outcome == "refused" else "done",
+                )
+            retried += 1
+        return retried
 
     async def _emit_system_event(
         self,

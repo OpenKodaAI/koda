@@ -318,6 +318,14 @@ class AgentIdConflictError(Exception):
         super().__init__(f"agent id {agent_id} already exists")
 
 
+class RuntimeConflictError(ValueError):
+    """The runtime answered 409: it refused the request in its current state.
+
+    For a squad turn, the room is paused, closed or spent, so the turn is refused, not failed
+    (D-075, D-361).
+    """
+
+
 class GeneralPayloadValidationError(ValueError):
     """Raised when ``put_general_system_settings`` payload fails structural validation.
 
@@ -4116,6 +4124,8 @@ class ControlPlaneManager:
                     self._wake_dashboard_runtime(agent_id)
                     self._wait_for_dashboard_runtime_api(runtime_base_url, runtime_token)
                     continue
+                if exc.code == 409:
+                    raise RuntimeConflictError(f"runtime rejected dashboard message: {message}") from exc
                 if 400 <= exc.code < 500:
                     raise ValueError(f"runtime rejected dashboard message: {message}") from exc
                 raise RuntimeError(message) from exc

@@ -143,6 +143,25 @@ class TestCmdDlq:
             assert "#77" in call_text
 
     @pytest.mark.asyncio
+    async def test_dlq_retry_of_a_terminal_squad_tasks_turn_tells_the_operator_why(self, mock_update, mock_context):
+        from koda.services.queue_manager import DLQRequeueRefusedError
+
+        mock_context.args = ["retry", "1"]
+        entry_dict = {"id": 1, "task_id": 10, "user_id": 111, "retry_eligible": 1, "metadata_json": "{}"}
+        refusal = DLQRequeueRefusedError("squad task t-1 is already escalated; its turn is not run again")
+        with (
+            patch("koda.handlers.commands.auth_check", return_value=True),
+            patch("koda.handlers.commands.dlq_get_dict", return_value=entry_dict),
+            patch("koda.handlers.commands.requeue_dlq_entry", new_callable=AsyncMock, side_effect=refusal),
+        ):
+            from koda.handlers.commands import cmd_dlq
+
+            await cmd_dlq(mock_update, mock_context)
+            mock_update.message.reply_text.assert_called_once_with(
+                "DLQ #1 was not requeued: squad task t-1 is already escalated; its turn is not run again"
+            )
+
+    @pytest.mark.asyncio
     async def test_dlq_retry_not_eligible(self, mock_update, mock_context):
         mock_context.args = ["retry", "1"]
         entry_dict = {

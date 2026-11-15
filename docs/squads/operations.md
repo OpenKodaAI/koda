@@ -86,14 +86,20 @@ Before broad rollout, run these in canary:
   whose turn it has queued or is running on every router sweep, so a turn that
   waits or runs longer than the TTL is neither dispatched twice nor escalated.
   A squad turn requeued from the dead-letter queue stays a squad turn, and its
-  claim is renewed the same way. Claims of a paused or spent thread wait until
-  it is open again.
+  claim is renewed the same way. The requeue of a turn whose task already
+  ended (done, failed, cancelled or escalated) is refused, so the room gets
+  no second result, and `/dlq retry` tells the operator why. Claims of a
+  paused or spent thread wait until it is open again.
 - Exceed 80% and then 100% of a thread budget; router must emit alert and
   auto-pause the thread (`budget_exceeded_auto_pause`, reason `budget`), one
   event per pause. A room reopened at its cap is paused again, with a new
   event; one reopened under its cap is no longer marked as paused by the
   budget, and a later overrun pauses it again. Paused rooms already alerted
-  do not keep the sweep from an open room at its cap.
+  do not keep the sweep from an open room at its cap. The 80% alert is sent
+  once per cap: a room whose cap is raised or lowered is alerted again at 80%
+  of the new cap. A room whose alert or pause event cannot be posted does not
+  stop the sweep for the rooms after it; a room whose alert fails is still
+  paused at its cap, and goes behind the rooms after it in the next sweep.
   A thread that is not `open`, or whose spend reached its cap, runs no agent
   turn on any path: web, Telegram, the inbox, unblocked tasks or synthesis,
   and the queue worker checks again when it takes a queued or recovered turn.
@@ -104,12 +110,23 @@ Before broad rollout, run these in canary:
   gets 404 (one to a paused or spent thread gets 409). When the queue worker
   refuses a queued turn, or the unblocked-task follow-ups, the inbox or the
   router's dispatch of a task whose claim expired are refused a task's turn,
+  whichever read refuses it (the dispatch's own, the local queue's, or the
+  runtime API's 409, which no other transport then delivers around),
   the task's claim is released without counting an expiry, so pauses never
   escalate a task, and the first router sweep after the thread is open again
   under its cap dispatches the task again, without waiting for
   `SQUAD_CLAIM_TTL_S` and without a `claim_expired` event. A
   later claim of the task is a live one again: it is renewed, and its expiry
-  counts.
+  counts. A coordinator synthesis the room refuses in a cycle with no handoff
+  is recorded as one `synthesis_refused` system event, and the first router
+  sweep after the room can run again runs it, with the same idempotency key,
+  at most once; a handoff cycle's synthesis is retried by the open-handoff
+  sweep. A retry cut off by a shutdown or a crash is taken again after 5
+  minutes. A synthesis refused more than 7 days ago is not retried. A
+  finished task unblocks only the pending tasks of its own coordination cycle
+  and the tasks agents created with `squad_task_create`, which belong to no
+  cycle; a pending task of an earlier cycle is not dispatched, and a task an
+  agent created unblocks only other tasks agents created.
   A dashboard post or Telegram topic message to such a thread is not routed;
   the sender is told why. A dashboard room update may set only `photo_url` in
   `metadata`; keys the server keeps, such as the budget flags, are refused.
@@ -121,7 +138,10 @@ Before broad rollout, run these in canary:
   request and `agent_send` message carries the whole chain of agents that led
   to it, ending with its sender, and every entry counts, the router's included.
   A `squad_reply` or synthesis turn keeps the chain on every path that delivers
-  it: the local queue, the runtime API and the bus fallback.
+  it: the local queue, the runtime API and the bus fallback. It keeps its
+  correlation on each of them too: the reply obligation's key or the
+  synthesis idempotency key as its delegation request id, and the agent that
+  asked.
   The sender's tool refuses the cycle, the depth or the hop count, and the
   receiving inbox refuses the same before it queues a turn, whichever runtime
   sent it: the inbox adds the sender to a chain that does not end with it, so
