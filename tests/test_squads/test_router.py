@@ -5,8 +5,9 @@ from __future__ import annotations
 import asyncio
 import os
 from collections.abc import AsyncIterator
-from contextlib import suppress
-from unittest.mock import AsyncMock
+from contextlib import asynccontextmanager, suppress
+from typing import Any
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -15,6 +16,12 @@ from koda.squads.router import SquadRouter, SweepReport
 from koda.squads.tasks import ExpiredClaim, SquadTaskStore
 from koda.squads.threads import SquadThreadStore
 from tests.postgres_fixtures import reset_squad_runtime_tables
+
+# A store mock whose pool is not async leaves "coroutine ... was never awaited" behind (D-289).
+pytestmark = [
+    pytest.mark.filterwarnings("error:coroutine .* was never awaited:RuntimeWarning"),
+    pytest.mark.filterwarnings("error::pytest.PytestUnraisableExceptionWarning"),
+]
 
 
 def _schema() -> str:
@@ -26,6 +33,95 @@ def _eligible_spec() -> dict[str, object]:
 
 
 # --- non-PG unit tests ---
+
+
+class _FakeConnection:
+    """An asyncpg connection that answers every ``fetch`` with ``rows``.
+
+    ``fetchval`` answers the open-handoff sweep's advisory lock: it is taken unless the lock's
+    key is in ``held_locks``.
+    """
+
+    def __init__(self, rows: list[dict[str, Any]] | None = None, held_locks: set[str] | None = None) -> None:
+        self.rows = list(rows or [])
+        self.held_locks = set(held_locks or ())
+        self.fetches: list[tuple[str, tuple[Any, ...]]] = []
+        self.lock_keys: list[str] = []
+
+    async def fetch(self, sql: str, *args: Any) -> list[dict[str, Any]]:
+        self.fetches.append((sql, args))
+        return self.rows
+
+    async def fetchval(self, _sql: str, key: str) -> bool:
+        self.lock_keys.append(key)
+        return key not in self.held_locks
+
+    async def execute(self, *_args: Any) -> str:
+        return "UPDATE 0"
+
+    @asynccontextmanager
+    async def transaction(self) -> AsyncIterator[None]:
+        yield
+
+
+class _FakePool:
+    def __init__(self, conn: _FakeConnection) -> None:
+        self._conn = conn
+
+    @asynccontextmanager
+    async def acquire(self) -> AsyncIterator[_FakeConnection]:
+        yield self._conn
+
+
+class _FakeThreadStore:
+    """A thread store whose pool is async like asyncpg's, so the router's SQL sweeps run against it."""
+
+    _schema = "knowledge_v2"
+
+    def __init__(self, conn: _FakeConnection | None = None) -> None:
+        self.conn = conn or _FakeConnection()
+        self._ensure_pool = AsyncMock(return_value=_FakePool(self.conn))
+        self.post_thread_message = AsyncMock(return_value=99)
+        self.notify_event = AsyncMock()
+
+
+def _handoff_row(row_id: int, handoff_id: str | None) -> dict[str, Any]:
+    return {"id": row_id, "thread_id": f"thread-{row_id}", "handoff_id": handoff_id, "task_id": f"task-{row_id}"}
+
+
+@pytest.mark.asyncio
+async def test_sweep_open_handoffs_checks_each_handoff_it_locks_and_pages_after_a_full_batch() -> None:
+    conn = _FakeConnection(
+        rows=[_handoff_row(5, "handoff-a"), _handoff_row(6, None), _handoff_row(7, "handoff-held")],
+        held_locks={"squad_handoff_completion:handoff-held"},
+    )
+    router = SquadRouter(task_store=AsyncMock(), thread_store=_FakeThreadStore(conn), batch_size=3)  # type: ignore[arg-type]
+    complete = AsyncMock()
+
+    with patch("koda.services.queue_manager.complete_open_squad_handoff", complete):
+        checked = await router._sweep_open_handoffs()
+
+    # A row with no handoff id is skipped, and a handoff another runtime holds is left to it.
+    assert checked == 1
+    complete.assert_awaited_once_with(thread_id="thread-5", squad_task_id="task-5", handoff_id="handoff-a")
+    assert conn.lock_keys == ["squad_handoff_completion:handoff-a", "squad_handoff_completion:handoff-held"]
+    [(_sql, first_args)] = conn.fetches
+    assert first_args[2:] == (3, 0)
+
+    # A full batch moves the cursor past its last row; a short one starts the next sweep over.
+    conn.rows = [_handoff_row(8, "handoff-b")]
+    with patch("koda.services.queue_manager.complete_open_squad_handoff", complete):
+        assert await router._sweep_open_handoffs() == 1
+    assert conn.fetches[1][1][2:] == (3, 7)
+    conn.rows = []
+    with patch("koda.services.queue_manager.complete_open_squad_handoff", complete):
+        assert await router._sweep_open_handoffs() == 0
+    assert conn.fetches[2][1][2:] == (3, 0)
+
+
+@pytest.mark.asyncio
+async def test_sweep_open_handoffs_needs_a_thread_store() -> None:
+    assert await SquadRouter(task_store=AsyncMock())._sweep_open_handoffs() == 0
 
 
 def test_sweep_report_reverted_count_default() -> None:
@@ -60,9 +156,8 @@ async def test_sweep_once_emits_thread_event_per_claim() -> None:
         ),
     ]
     task_store.sweep_expired_claims = AsyncMock(return_value=claims)
-    thread_store = AsyncMock()
-    thread_store.post_thread_message = AsyncMock(return_value=99)
-    router = SquadRouter(task_store=task_store, thread_store=thread_store)
+    thread_store = _FakeThreadStore()
+    router = SquadRouter(task_store=task_store, thread_store=thread_store)  # type: ignore[arg-type]
     report = await router.sweep_once()
     assert report.reverted_count == 2
     assert thread_store.post_thread_message.await_count == 2
@@ -83,9 +178,9 @@ async def test_sweep_once_swallows_thread_event_failure() -> None:
         version_after=2,
     )
     task_store.sweep_expired_claims = AsyncMock(return_value=[claim])
-    thread_store = AsyncMock()
+    thread_store = _FakeThreadStore()
     thread_store.post_thread_message = AsyncMock(side_effect=RuntimeError("disk full"))
-    router = SquadRouter(task_store=task_store, thread_store=thread_store)
+    router = SquadRouter(task_store=task_store, thread_store=thread_store)  # type: ignore[arg-type]
     # Must not propagate the inner error; the claim was already reverted
     # before this call, so a failed audit event is non-fatal.
     report = await router.sweep_once()
@@ -320,10 +415,9 @@ async def test_sweep_squad_claims_runs_only_that_squads_claim_sweep() -> None:
     )
     task_store = AsyncMock()
     task_store.sweep_expired_claims = AsyncMock(return_value=[claim])
-    thread_store = AsyncMock()
-    thread_store.post_thread_message = AsyncMock(return_value=1)
+    thread_store = _FakeThreadStore()
     coordinator = AsyncMock()
-    router = SquadRouter(task_store=task_store, thread_store=thread_store, coordinator_service=coordinator)
+    router = SquadRouter(task_store=task_store, thread_store=thread_store, coordinator_service=coordinator)  # type: ignore[arg-type]
     report = await router.sweep_squad_claims("build")
     assert report.expired_claims == [claim]
     assert task_store.sweep_expired_claims.await_args.kwargs["squad_id"] == "build"
