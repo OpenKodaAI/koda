@@ -753,3 +753,132 @@ class TestMCPDiscoverTools:
         assert tool_payload["diff"]["changed"] == ["create_issue"]
         assert tool_payload["policies"]["create_issue"] == "always_ask"
         assert len(db.tables["cp_connection_discovery_runs"]) == 2
+
+
+# D-321: control-plane probes start the server with its stored isolation
+
+
+class _FakeStdioTransport:
+    """Records the argv the stdio transport would exec."""
+
+    spawned: list[list[str]] = []
+
+    def __init__(self, command: str, args: list[str] | None = None, env: dict[str, str] | None = None) -> None:
+        _FakeStdioTransport.spawned.append([command, *(args or [])])
+
+    async def start(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+def _probe_session() -> MagicMock:
+    from koda.services.mcp_client import McpToolDefinition
+
+    session = MagicMock()
+    session.initialize = AsyncMock(return_value={})
+    session.list_tools = AsyncMock(return_value=[McpToolDefinition(name="list_issues")])
+    session.list_resources = AsyncMock(return_value=[])
+    session.list_resource_templates = AsyncMock(return_value=[])
+    session.list_prompts = AsyncMock(return_value=[])
+    session.ping = AsyncMock(return_value=True)
+    session.read_resource = AsyncMock(return_value=MagicMock(contents=[]))
+    session.get_prompt = AsyncMock(return_value=MagicMock(description="", messages=[]))
+    session.server_info = {}
+    session.server_capabilities = {}
+    session.protocol_version = None
+    return session
+
+
+def _verify_capabilities_error(mgr: Any) -> str:
+    from unittest.mock import patch
+
+    from koda.services.mcp_capability_service import verify_capabilities
+
+    with (
+        patch("koda.services.mcp_capability_service._load_snapshot", return_value=None),
+        patch("koda.services.mcp_capability_service._persist_snapshot"),
+        patch("koda.services.mcp_capability_service._persist_discovered_resources"),
+        patch("koda.services.mcp_capability_service._persist_discovered_prompts"),
+    ):
+        # The manager's capability route passes the normalized agent id.
+        return str(verify_capabilities("AGENT_1", "linear", force_refresh=True).error)
+
+
+_REFUSAL = "refused to start: isolation mount host '/etc' is a sensitive host path and cannot be mounted"
+
+
+class TestMCPProbeIsolation:
+    @pytest.fixture()
+    def probe(self, mcp_manager, monkeypatch):
+        from unittest.mock import patch
+
+        mgr, db = mcp_manager
+        mgr.upsert_mcp_catalog_entry(
+            "linear",
+            {"display_name": "Linear", "transport_type": "stdio", "command": ["npx", "server-linear"]},
+        )
+        mgr.upsert_mcp_agent_connection("agent-1", "linear", {"enabled": True})
+        # The mount check reads the agents' published state roots through the global manager.
+        monkeypatch.setattr(manager_mod, "get_control_plane_manager", lambda: mgr)
+        monkeypatch.delenv("KODA_MCP_ISOLATION", raising=False)
+        _FakeStdioTransport.spawned = []
+        with (
+            patch("koda.services.mcp_isolation.shutil.which", side_effect=lambda name: f"/usr/bin/{name}"),
+            patch("koda.services.mcp_isolation.platform.system", return_value="Linux"),
+            patch("koda.services.mcp_manager.StdioTransport", _FakeStdioTransport),
+            patch("koda.services.mcp_manager.McpSession", return_value=_probe_session()),
+        ):
+            yield mgr, db
+
+    @staticmethod
+    def _store_isolation(db: _MemDB, profile: str, constraints: dict[str, Any]) -> None:
+        db.tables["cp_mcp_server_catalog"][0].update(
+            isolation_profile=profile, isolation_constraints_json=json.dumps(constraints)
+        )
+
+    @pytest.mark.parametrize(
+        "run_probe",
+        [
+            pytest.param(lambda mgr: mgr.test_mcp_connection("agent-1", "linear").get("error"), id="test_connection"),
+            pytest.param(lambda mgr: mgr.discover_mcp_tools("agent-1", "linear").get("error"), id="discover_tools"),
+            pytest.param(
+                lambda mgr: mgr.read_mcp_resource("agent-1", "linear", "file:///notes").get("error"), id="read_resource"
+            ),
+            pytest.param(
+                lambda mgr: mgr.render_mcp_prompt("agent-1", "linear", "summary").get("error"), id="get_prompt"
+            ),
+            pytest.param(_verify_capabilities_error, id="verify_capabilities"),
+        ],
+    )
+    def test_probe_refuses_a_stored_forbidden_mount_and_keeps_the_refusal(self, probe, run_probe):
+        mgr, db = probe
+        self._store_isolation(db, "bwrap", {"mounts": [{"host": "/etc", "container": "/etc", "read_only": True}]})
+        connection = db.tables["cp_mcp_agent_connections"][0]
+        # The worker already refused this server and recorded why.
+        connection.update(last_error=_REFUSAL, last_connected_at="")
+
+        error = run_probe(mgr)
+
+        assert error == _REFUSAL
+        assert _FakeStdioTransport.spawned == []
+        assert connection["last_error"] == _REFUSAL
+        assert connection["last_connected_at"] == ""
+
+    def test_test_connection_runs_with_the_stored_isolation(self, probe):
+        mgr, db = probe
+        self._store_isolation(
+            db,
+            "bwrap",
+            {"network_mode": "none", "mounts": [{"host": "/srv/data", "container": "/data", "read_only": True}]},
+        )
+
+        result = mgr.test_mcp_connection("agent-1", "linear")
+
+        assert result["success"] is True, result
+        [argv] = _FakeStdioTransport.spawned
+        assert argv[0] == "/usr/bin/bwrap"
+        assert "--unshare-net" in argv
+        assert "--ro-bind /srv/data /data" in " ".join(argv)
+        assert argv[-2:] == ["npx", "server-linear"]
