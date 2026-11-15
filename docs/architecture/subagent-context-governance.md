@@ -71,7 +71,9 @@ the parent's capability envelope: the parent's agent, its core tool allowlist
 workspace, inbox, squad access, approval grants and memory scope are the
 parent's. A core tool outside the envelope is denied before the policy gate
 (`child_run_capability_denied`), and a child run without an envelope gets no
-tools. The child is judged by the parent's task kind, so execution-policy rules
+tools. The dispatcher's `execute_tool` applies the same check to every tool
+call of a child, so a `workflow_run` step inside a child is held to the
+envelope too. The child is judged by the parent's task kind, so execution-policy rules
 keyed on it bind the child too. Memory writes and sensitive recall are never
 granted: the normalized context policy carries neither, whatever the request
 asks for.

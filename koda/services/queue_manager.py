@@ -5009,6 +5009,8 @@ async def _run_agent_loop(
             context_governance=ctx.context_governance,
             source_root_path=ctx.source_root_path or context.user_data.get("source_root_path"),
             runtime_workspace_path=ctx.work_dir if ctx.runtime_env_id is not None else None,
+            is_child_run=ctx.is_child_run,
+            child_capabilities=ctx.child_capabilities,
         )
 
         from koda.services import audit, metrics

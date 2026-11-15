@@ -256,3 +256,42 @@ class TestWorkflowEngine:
         assert run.status == "completed"
         assert run.step_results["s2"]["output"] == "fetched"
         assert run.step_results["s2"].get("skipped") is None
+
+
+class TestWorkflowStepsInAChildRun:
+    """D-373: every tool call of a child run passes the parent capability envelope, workflow steps too."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.usefixtures("_workflow_max_steps")
+    async def test_a_workflow_step_in_a_child_is_denied_a_tool_its_parent_lacks(self):
+        from koda.services.tool_dispatcher import AgentToolResult, ToolContext
+
+        wf = Workflow(
+            name="child-steps",
+            steps=[
+                WorkflowStep(id="jobs", tool="job_list", params={}),
+                WorkflowStep(id="search", tool="web_search", params={"query": "x"}),
+            ],
+        )
+        ctx = ToolContext(
+            user_id=111,
+            chat_id=111,
+            work_dir="/tmp",
+            user_data={},
+            agent=None,
+            agent_mode="autonomous",
+            is_child_run=True,
+            child_capabilities={"agent_id": "default", "allowed_tool_ids": ["job_list"]},
+        )
+        handlers = {
+            "job_list": AsyncMock(return_value=AgentToolResult(tool="job_list", success=True, output="No jobs.")),
+            "web_search": AsyncMock(return_value=AgentToolResult(tool="web_search", success=True, output="hits")),
+        }
+        with patch("koda.services.tool_dispatcher._TOOL_HANDLERS", handlers):
+            run = await WorkflowEngine().run(wf, ctx)
+
+        handlers["job_list"].assert_awaited_once()
+        handlers["web_search"].assert_not_awaited()
+        assert run.status == "failed"
+        assert run.step_results["search"]["success"] is False
+        assert "parent run does not have" in run.step_results["search"]["output"]
