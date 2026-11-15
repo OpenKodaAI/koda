@@ -459,8 +459,8 @@ class SquadRouter:
 
         A handoff is checked when it was requested less than ``_HANDOFF_COMPLETION_MAX_AGE_S`` ago
         in an open thread, is still ``requested`` or ``accepted``, its cycle has a task, no task of
-        its thread is open (the check waits for every open task of the thread), and its cycle's
-        tasks have not changed for ``_HANDOFF_COMPLETION_GRACE_S``. The check runs as the
+        its cycle is open (as in the check, open tasks of other cycles do not hold it, D-287), and
+        its cycle's tasks have not changed for ``_HANDOFF_COMPLETION_GRACE_S``. The check runs as the
         follow-up of the cycle's most recently changed task that the coordinator does not own.
         Each sweep takes the next batch after the last one, so handoffs the check cannot close do
         not keep it from the others. A runtime checks a handoff only while it holds a transaction
@@ -508,10 +508,10 @@ class SquadRouter:
                            SELECT 1
                              FROM "{schema}"."squad_tasks" AS o
                             WHERE o.thread_id = h.thread_id
+                              AND o.metadata_json->>'handoff_correlation_id' = h.correlation_id
                               AND (
                                   o.status IN ('pending', 'claimed', 'in_progress', 'blocked')
-                                  OR (o.metadata_json->>'handoff_correlation_id' = h.correlation_id
-                                      AND o.updated_at > NOW() - make_interval(secs => $2))
+                                  OR o.updated_at > NOW() - make_interval(secs => $2)
                               )
                        )
                   ORDER BY h.id ASC

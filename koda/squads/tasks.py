@@ -292,13 +292,18 @@ class SquadTaskStore:
         thread_id: str | None = None,
         assigned_agent_id: str | None = None,
         status: str | list[str] | None = None,
+        coordination_parent_message_id: str | None = None,
         limit: int = 100,
     ) -> list[TaskDescriptor]:
+        """List tasks; ``coordination_parent_message_id`` keeps one coordination cycle's tasks."""
         clauses: list[str] = []
         params: list[Any] = []
         if thread_id:
             params.append(thread_id)
             clauses.append(f"thread_id = ${len(params)}")
+        if coordination_parent_message_id:
+            params.append(coordination_parent_message_id)
+            clauses.append(f"metadata_json->>'coordination_parent_message_id' = ${len(params)}")
         if assigned_agent_id:
             params.append(assigned_agent_id)
             clauses.append(f"assigned_agent_id = ${len(params)}")

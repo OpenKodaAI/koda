@@ -6924,6 +6924,9 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
 ) -> None:
     """Queue the coordinator synthesis once the cycle's tasks have ended, then record each handoff's outcome.
 
+    The cycle's tasks are those whose ``coordination_parent_message_id`` is the turn's parent
+    message; open tasks of other cycles of the thread do not hold it (D-287).
+
     With ``swept_handoff_id`` the squad router's sweep runs the check for that handoff: it queues
     nothing unless the handoff is open in the cycle it reads, and it adds no result for the swept
     task, whose turn did not run here.
@@ -6953,9 +6956,11 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             return
         open_tasks = []
         for attempt in range(4):
+            # This cycle's tasks only: an open task of an earlier cycle does not hold this one (D-287).
             open_tasks = await task_store.list_tasks(
                 thread_id=ctx.squad_thread_id,
                 status=["pending", "claimed", "in_progress", "blocked"],
+                coordination_parent_message_id=ctx.parent_message_id,
                 limit=1,
             )
             if not open_tasks:

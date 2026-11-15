@@ -574,3 +574,68 @@ async def test_a_paused_thread_keeps_its_expired_claims_until_it_reopens(
     await threads.update_thread_status(thread_id, "open")
     assert [claim.task_id for claim in (await router.sweep_once()).expired_claims] == [task_ids["QA"]]
     assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA"]
+
+
+async def _leave_a_stale_task_of_an_earlier_cycle(tasks: SquadTaskStore, thread_id: str) -> str:
+    """A task of an earlier cycle of the room that its worker started and never finished.
+
+    It is ``in_progress``, so no claim of it expires and nothing ends it.
+    """
+    stale = await tasks.create_task(
+        thread_id=thread_id,
+        title="Old work",
+        assigner_agent_id="PM",
+        assigned_agent_id="UX",
+        metadata={"coordination_parent_message_id": "msg-earlier-cycle"},
+    )
+    claimed = await tasks.claim_task(task_id=stale.id, agent_id="UX")
+    await tasks.update_task_status(task_id=stale.id, new_status="in_progress", agent_id="UX")
+    return claimed.id
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_stale_open_task_of_an_earlier_cycle_does_not_hold_a_later_handoff(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    stale_id = await _leave_a_stale_task_of_an_earlier_cycle(tasks, thread_id)
+
+    await _finish_turn(thread_id=thread_id, parent=parent, task_id=task_ids["FE"], agent_id="FE")
+    assert _final_syntheses(turn_stubs) == []
+    await _finish_turn(thread_id=thread_id, parent=parent, task_id=task_ids["QA"], agent_id="QA")
+
+    # The check reads this cycle's tasks only (D-287).
+    [synthesis] = _final_syntheses(turn_stubs)
+    assert synthesis["target_agent_id"] == "PM"
+    assert await _handoff_statuses(threads, thread_id) == ["requested", "returned"]
+    stale = await tasks.get_task(stale_id)
+    assert stale is not None and stale.status == "in_progress"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_the_sweep_completes_a_handoff_beside_a_stale_open_task_of_an_earlier_cycle(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    thread_id, _parent, _task_ids = await _strand_handoff(threads, tasks)
+    await _leave_a_stale_task_of_an_earlier_cycle(tasks, thread_id)
+
+    assert await _sweep(_router(threads, tasks)) == 1
+
+    assert len(_final_syntheses(turn_stubs)) == 1
+    assert await _handoff_statuses(threads, thread_id) == ["requested", "returned"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_list_tasks_reads_one_coordination_cycle(stores: tuple[SquadThreadStore, SquadTaskStore]) -> None:
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    await _leave_a_stale_task_of_an_earlier_cycle(tasks, thread_id)
+
+    cycle = await tasks.list_tasks(thread_id=thread_id, coordination_parent_message_id=parent)
+
+    assert sorted(task.id for task in cycle) == sorted(task_ids.values())
