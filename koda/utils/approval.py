@@ -40,7 +40,7 @@ from koda.state.approval_grants import (
     load_approval_grants,
     remove_approval_grant,
     remove_approval_grants,
-    save_approval_grant,
+    store_approval_grants,
     update_approval_grant,
 )
 from koda.state.pending_approvals import (
@@ -84,6 +84,14 @@ APPROVAL_TIMEOUT = 300  # 5 minutes
 MAX_PENDING_OPS_PER_USER = 10
 
 _persistence_loaded = False
+
+
+class ApprovalGrantNotSavedError(RuntimeError):
+    """Postgres did not store the grants of an approval, so none was issued.
+
+    Using a grant needs its row, so the caller tells the approver and leaves the
+    request open to approve again.
+    """
 
 
 async def _ensure_persistence_loaded() -> None:
@@ -292,8 +300,8 @@ async def revoke_scoped_approval_state(
 ) -> None:
     """Revoke the matching pending ops and grants in memory, then in Postgres.
 
-    A failed Postgres delete is raised to the caller, so a revocation that would
-    not survive a restart is not reported as done.
+    Both Postgres deletes are tried, and then the first failure is raised to the
+    caller, so a revocation that would not survive a restart is not reported as done.
     """
     for grant_id, grant in list(_APPROVAL_GRANTS.items()):
         if int(grant.get("user_id") or 0) != user_id:
@@ -325,8 +333,14 @@ async def revoke_scoped_approval_state(
         if chat_id is not None and int(pending.get("chat_id") or 0) != chat_id:
             continue
         _PENDING_AGENT_CMD_OPS.pop(op_id, None)
-    await remove_pending_ops(user_id=user_id, agent_id=agent_id, session_id=session_id, chat_id=chat_id)
-    await remove_approval_grants(user_id=user_id, agent_id=agent_id, session_id=session_id, chat_id=chat_id)
+    failures: list[Exception] = []
+    for remove in (remove_pending_ops, remove_approval_grants):
+        try:
+            await remove(user_id=user_id, agent_id=agent_id, session_id=session_id, chat_id=chat_id)
+        except Exception as exc:
+            failures.append(exc)
+    if failures:
+        raise failures[0]
 
 
 # READ/WRITE classifiers
@@ -1547,6 +1561,12 @@ def _issue_agent_approval_grants(
     decision: str,
     issued_by_op_id: str | None = None,
 ) -> list[dict[str, Any]]:
+    """Issue one grant per approved request, once Postgres has stored them all.
+
+    Using a grant needs its row (D-344), so the rows are written before any grant is
+    in memory. When Postgres does not store them, no grant is issued and
+    :class:`ApprovalGrantNotSavedError` is raised for the caller to tell the approver.
+    """
     grants: list[dict[str, Any]] = []
     scope_kind = "approve_scope" if decision == "approved_scope" else "approve_once"
     for request in requests:
@@ -1579,10 +1599,13 @@ def _issue_agent_approval_grants(
             ),
             "scope_fingerprint": resolved_envelope.resource_scope_fingerprint,
         }
-        _APPROVAL_GRANTS[grant_id] = grant
-        # Without its row the grant works in this process until a restart.
-        _spawn_store_write(save_approval_grant(grant_id, grant, ttl_seconds))
         grants.append(grant)
+    try:
+        store_approval_grants(grants)
+    except Exception as exc:
+        raise ApprovalGrantNotSavedError(issued_by_op_id or "") from exc
+    for grant in grants:
+        _APPROVAL_GRANTS[str(grant["grant_id"])] = grant
     return grants
 
 

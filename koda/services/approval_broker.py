@@ -206,7 +206,8 @@ async def resolve_approval(
 
     Valid decisions include schema-driven dashboard decisions and legacy
     Telegram aliases. Returns the updated summary or raises ``KeyError`` when
-    the approval id is unknown.
+    the approval id is unknown. When Postgres does not store an approval's
+    grants, ``ApprovalGrantNotSavedError`` is raised and the approval stays open.
     """
     import koda.config as config_module
     from koda.utils.approval import (

@@ -235,6 +235,59 @@ async def test_a_use_postgres_does_not_record_is_refused_and_memory_matches_the_
     assert await remaining() == (None, None)
 
 
+async def test_an_approval_whose_grants_postgres_rejects_issues_none(approval_db: tuple[Any, str]) -> None:
+    """A grant is stored before it is issued, all of an approval's grants or none: using one needs its row."""
+    from koda.agent_contract import ActionEnvelope
+    from koda.services.execution_policy import ApprovalScope
+    from koda.utils import approval
+
+    conn, schema = approval_db
+    scope = ApprovalScope(kind="scope", ttl_seconds=900, max_uses=3)
+    requests = [
+        {
+            "envelope": ActionEnvelope(
+                tool_id="file_delete",
+                integration_id="fileops",
+                action_id="file_delete",
+                transport="internal",
+                access_level="destructive",
+                risk_class="destructive",
+                resource_scope_fingerprint=f"scope-fp-{index}",
+                params_fingerprint="params-fp",
+            ),
+            "approval_scope": scope,
+        }
+        for index in range(2)
+    ]
+    issue = {
+        "user_id": _USER,
+        "agent_id": "AGENT_A",
+        "chat_id": _SUPERGROUP_CHAT,
+        "requests": requests,
+        "decision": "approved_scope",
+    }
+
+    # Postgres takes the first row of the approval and rejects the second.
+    with (
+        injected_fault("approval_grants", "INSERT", rows_before=1),
+        pytest.raises(approval.ApprovalGrantNotSavedError),
+    ):
+        approval._issue_agent_approval_grants(**issue)
+    assert await _grant_rows(conn, schema) == {}
+    assert approval._APPROVAL_GRANTS == {}
+
+    grants = approval._issue_agent_approval_grants(**issue)
+    assert set(await _grant_rows(conn, schema)) == {grant["grant_id"] for grant in grants}
+    used = await approval.consume_agent_approval_grant(
+        user_id=_USER,
+        agent_id="AGENT_A",
+        envelope=requests[0]["envelope"],
+        approval_scope=scope,
+        chat_id=_SUPERGROUP_CHAT,
+    )
+    assert used is not None and used["remaining_uses"] == 2
+
+
 async def _audited_grant_count(conn: Any, schema: str, grant_id: str) -> int:
     return int(
         await conn.fetchval(
@@ -271,7 +324,7 @@ async def test_the_json_files_are_imported_once_at_startup(
     seeded = {"pending_approvals.json": json.dumps(pending), "approval_grants.json": json.dumps(grants)}
     for name, content in seeded.items():
         (tmp_path / name).write_text(content, encoding="utf-8")
-    audited_before = await _audited_grant_count(conn, schema, "json-orphan-m2e1t2")
+    audited_before = {grant_id: await _audited_grant_count(conn, schema, grant_id) for grant_id in grants}
 
     assert await approval_import.import_approval_json_files() == {
         "pending_approvals.json": 1,
@@ -285,9 +338,13 @@ async def test_the_json_files_are_imported_once_at_startup(
         "json-orphan-m2e1t2": "",
     }
     assert rows["json-a"]["remaining_uses"] == 3
-    assert set(await approval_grants.load_approval_grants()) == {"json-a", "json-request"}
+    # Every imported grant arrives expired, with one audit row: the file cannot tell a spent or
+    # revoked grant from an unused one, so none of them authorizes anything.
+    assert all(row["expires_at"] == 0 for row in rows.values())
+    assert await approval_grants.load_approval_grants() == {}
+    audited = {grant_id: audited_before[grant_id] + 1 for grant_id in grants}
+    assert {grant_id: await _audited_grant_count(conn, schema, grant_id) for grant_id in grants} == audited
     assert set(await pending_approvals.load_pending_ops()) == {"json-op"}
-    assert await _audited_grant_count(conn, schema, "json-orphan-m2e1t2") == audited_before + 1
     # Each file is kept, renamed.
     for name, content in seeded.items():
         assert not (tmp_path / name).exists()
@@ -306,9 +363,74 @@ async def test_the_json_files_are_imported_once_at_startup(
         "approval_grants.json": 0,
     }
     assert await _grant_rows(conn, schema) == imported
-    assert await _audited_grant_count(conn, schema, "json-orphan-m2e1t2") == audited_before + 1
+    assert {grant_id: await _audited_grant_count(conn, schema, grant_id) for grant_id in grants} == audited
     for name in seeded:
         assert len(list(tmp_path.glob(f"{name}*.migrated"))) == 2
+
+
+async def test_a_grant_spent_before_the_upgrade_authorizes_nothing_after_the_import(
+    approval_db: tuple[Any, str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M2-E1-T2: a grant the old release used up or revoked comes back from the file expired.
+
+    The old release wrote a grant to the file when its INSERT overflowed (a supergroup chat),
+    and its last use then deleted no row, so the file still reads ``remaining_uses`` 1.
+    """
+    import koda.config as config_module
+    from koda.state import approval_grants, approval_import
+    from koda.utils import approval
+
+    conn, schema = approval_db
+    monkeypatch.setattr(config_module, "STATE_ROOT_DIR", tmp_path)
+    now = time.time()
+    spent = _scope_grant("AGENT_A", uses=1) | {
+        "grant_id": "json-spent",
+        "kind": "approve_once",
+        "chat_id": _SUPERGROUP_CHAT,
+        "created_at": now - 60,
+        "expires_at": now + 540,
+    }
+    seeded = json.dumps({"json-spent": spent})
+    grants_file = tmp_path / "approval_grants.json"
+    grants_file.write_text(seeded, encoding="utf-8")
+
+    assert await approval_import.import_approval_json_files() == {"approval_grants.json": 1}
+
+    row = await conn.fetchrow(
+        f'SELECT expires_at, payload_json FROM "{schema}"."approval_grants" WHERE grant_id = $1', "json-spent"
+    )
+    assert row is not None and row["expires_at"] == 0
+    assert json.loads(row["payload_json"])["expires_at"] == 0
+    details = json.loads(
+        await conn.fetchval(
+            f"""SELECT details_json FROM "{schema}"."audit_events"
+                 WHERE event_type = 'approval.grant_expired' AND details_json ->> 'grant_id' = $1
+                 ORDER BY id DESC LIMIT 1""",
+            "json-spent",
+        )
+    )
+    assert details["reason"] == "imported_from_retired_json"
+    assert details["expires_at"] == pytest.approx(now + 540)
+
+    # The worker's first approval request loads what Postgres holds, and the same call asks again.
+    monkeypatch.setattr(approval, "_persistence_loaded", False)
+    await approval._ensure_persistence_loaded()
+    assert "json-spent" not in approval._APPROVAL_GRANTS
+    assert await _use_in_supergroup(approval) is None
+
+    # The rename failed and the file is imported again after the row was cleaned up: it comes
+    # back, expired again, and still authorizes nothing.
+    await conn.execute(f'DELETE FROM "{schema}"."approval_grants" WHERE grant_id = $1', "json-spent")
+    grants_file.write_text(seeded, encoding="utf-8")
+    assert await approval_import.import_approval_json_files() == {"approval_grants.json": 1}
+    assert await approval_grants.load_approval_grants() == {}
+    assert await _use_in_supergroup(approval) is None
+
+
+def _use_in_supergroup(approval: Any) -> Any:
+    return approval.consume_agent_approval_grant(
+        user_id=_USER, agent_id="AGENT_A", envelope=_ENVELOPE, approval_scope=_SCOPE, chat_id=_SUPERGROUP_CHAT
+    )
 
 
 # 1.8e9 is a multiple of 128, the step of REAL (float4) there, so 10 seconds either side of this

@@ -87,15 +87,25 @@ def _row_params(grant_id: str, entry: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
-def _primary_upsert(grant_id: str, entry: dict[str, Any]) -> None:
-    """Insert or update one grant; an existing row of another agent is left unchanged."""
+def store_approval_grants(grants: list[dict[str, Any]]) -> None:
+    """Insert or update grants, each with its ``grant_id``, ``created_at`` and ``expires_at``.
+
+    It returns once Postgres has stored them: one statement, so either every grant is
+    stored or none is, and a failure is raised. An existing row of another agent is
+    left unchanged.
+    """
+    if not grants:
+        return
+    rows = [_row_params(str(grant["grant_id"]), grant) for grant in grants]
     _execute(
         "upsert",
         """
         INSERT INTO approval_grants (
             grant_id, user_id, agent_id, session_id, chat_id, created_at, expires_at, payload_json
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES """
+        + ", ".join("(?, ?, ?, ?, ?, ?, ?, ?)" for _ in rows)
+        + """
         ON CONFLICT(grant_id) DO UPDATE SET
             user_id = excluded.user_id,
             session_id = excluded.session_id,
@@ -105,34 +115,55 @@ def _primary_upsert(grant_id: str, entry: dict[str, Any]) -> None:
             payload_json = excluded.payload_json
         WHERE approval_grants.agent_id = excluded.agent_id
         """,
-        _row_params(grant_id, entry),
+        tuple(value for row in rows for value in row),
     )
 
 
 def import_approval_grants(entries: dict[str, Any]) -> int:
-    """Insert grants read from the retired JSON file; a grant already stored is left as it is.
+    """Insert grants read from the retired JSON file, each one expired, with an audit row.
 
-    Each grant keeps its ``agent_id``. Returns how many rows were inserted.
+    The file cannot tell a grant the old release used up or revoked from an unused one:
+    those writes deleted a Postgres row that was not there and left the file as it was.
+    So every imported grant is stored with ``expires_at`` 0, in its row and its payload,
+    and authorizes nothing; its user approves again. One ``approval.grant_expired``
+    audit row records each grant inserted, with the expiry the file gave it. Each grant
+    keeps its ``agent_id``. A grant already stored is left as it is and is not
+    audited again; one deleted since an earlier import of the same file comes back, expired
+    again. Returns how many grants were inserted.
     """
     inserted = 0
     for grant_id, entry in entries.items():
         if not isinstance(entry, dict) or not str(grant_id):
             continue
         try:
-            params = _row_params(str(grant_id), dict(entry, grant_id=str(grant_id)))
+            expires_at = float(entry.get("expires_at") or 0)
+            params = _row_params(str(grant_id), dict(entry, grant_id=str(grant_id), expires_at=0))
         except (TypeError, ValueError):
             log.warning("approval_grants_import_entry_skipped", grant_id=str(grant_id))
             continue
         inserted += _execute(
             "import",
             """
-            INSERT INTO approval_grants (
-                grant_id, user_id, agent_id, session_id, chat_id, created_at, expires_at, payload_json
+            WITH imported AS (
+                INSERT INTO approval_grants (
+                    grant_id, user_id, agent_id, session_id, chat_id, created_at, expires_at, payload_json
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(grant_id) DO NOTHING
+                RETURNING grant_id, user_id, agent_id, session_id, chat_id
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(grant_id) DO NOTHING
+            INSERT INTO audit_events (agent_id, timestamp, event_type, user_id, details_json)
+            SELECT COALESCE(NULLIF(btrim(agent_id), ''), 'global'), NOW(), 'approval.grant_expired', user_id,
+                   jsonb_build_object(
+                       'grant_id', grant_id,
+                       'session_id', session_id,
+                       'chat_id', chat_id,
+                       'expires_at', CAST(? AS DOUBLE PRECISION),
+                       'reason', 'imported_from_retired_json'
+                   )
+              FROM imported
             """,
-            params,
+            (*params, expires_at),
         )
     return inserted
 
@@ -143,7 +174,7 @@ async def save_approval_grant(grant_id: str, payload: dict[str, Any], ttl_second
     entry["grant_id"] = grant_id
     entry["created_at"] = now
     entry["expires_at"] = now + ttl_seconds
-    _primary_upsert(grant_id, entry)
+    store_approval_grants([entry])
 
 
 async def update_approval_grant(grant_id: str, payload: dict[str, Any]) -> int:

@@ -3071,6 +3071,7 @@ async def list_agent_tools_catalog_route(request: web.Request) -> web.Response: 
 
 async def post_dashboard_approval_route(request: web.Request) -> web.Response:
     from koda.services.approval_broker import resolve_approval
+    from koda.utils.approval import ApprovalGrantNotSavedError
 
     payload = await _json_payload(request)
     approval_id = request.match_info["approval_id"]
@@ -3094,6 +3095,8 @@ async def post_dashboard_approval_route(request: web.Request) -> web.Response:
         return web.json_response({"error": "approval not found"}, status=404)
     except ValueError as exc:
         return web.json_response({"error": str(exc)}, status=400)
+    except ApprovalGrantNotSavedError:
+        return web.json_response({"error": "approval not saved; nothing was approved, try again"}, status=503)
     return web.json_response({"approval": summary})
 
 

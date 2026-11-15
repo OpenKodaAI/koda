@@ -247,6 +247,57 @@ class TestCallbackApproval:
         await callback_approval(update, context)
 
 
+_FILE_DELETE_REQUEST = {
+    "envelope": {
+        "tool_id": "file_delete",
+        "integration_id": "fileops",
+        "action_id": "file_delete",
+        "transport": "internal",
+        "access_level": "destructive",
+        "risk_class": "destructive",
+        "resource_scope_fingerprint": "scope-fp",
+        "params_fingerprint": "params-fp",
+    },
+    "approval_scope": {"kind": "scope", "ttl_seconds": 900, "max_uses": 10},
+}
+
+
+@pytest.fixture
+def grant_rows_not_saved(monkeypatch):
+    """Postgres rejects every approval-grant write."""
+    from koda.state import approval_grants
+
+    def fail(_action, _query, _params):
+        raise RuntimeError("injected fault")
+
+    monkeypatch.setattr(approval_grants, "_execute", fail)
+
+
+def _approver_was_told_the_approval_was_not_saved(update) -> bool:
+    reply = update.effective_message.reply_text
+    return reply.await_count == 1 and "Nao foi possivel salvar a aprovacao" in reply.call_args[0][0]
+
+
+@pytest.mark.asyncio
+async def test_a_command_whose_grant_is_not_saved_does_not_run(grant_rows_not_saved):
+    """The approver is told, and the request stays open so they can approve it again."""
+    from koda.handlers.callbacks import callback_approval
+
+    handler = AsyncMock()
+    op_id = "12345_111"
+    _add_pending_op(op_id, handler=handler)
+    update = _make_callback_update(f"approve:one:{op_id}")
+    update.effective_message.reply_text = AsyncMock()
+
+    await callback_approval(update, _make_context())
+
+    handler.assert_not_called()
+    assert _PENDING_OPS[op_id]["grants"] == []
+    assert _APPROVAL_GRANTS == {}
+    update.callback_query.edit_message_text.assert_not_called()
+    assert _approver_was_told_the_approval_was_not_saved(update)
+
+
 # Agent-cmd approval callback tests
 
 
@@ -316,6 +367,26 @@ class TestCallbackAgentCmdApproval:
         for other_agent in ("default", "DEFAULT"):
             assert await consume_agent_approval_grant(agent_id=other_agent, **match) is None
         assert await consume_agent_approval_grant(agent_id="AGENT_A", **match) is not None
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("action", ["ok", "scope"])
+    async def test_an_approval_whose_grant_is_not_saved_tells_the_approver(self, action, grant_rows_not_saved):
+        """The agent's call stays waiting for a decision; before, it resumed and was refused without a word."""
+        from koda.handlers.callbacks import callback_agent_cmd_approval
+
+        op_id = f"test_acmd_not_saved_{action}"
+        event = _add_agent_cmd_op(op_id, requests=[_FILE_DELETE_REQUEST])
+        update = _make_callback_update(f"acmd:{action}:{op_id}")
+        update.effective_message.reply_text = AsyncMock()
+
+        await callback_agent_cmd_approval(update, _make_context())
+
+        assert not event.is_set()
+        assert _PENDING_AGENT_CMD_OPS[op_id]["decision"] is None
+        assert _PENDING_AGENT_CMD_OPS[op_id]["grants"] == []
+        assert _APPROVAL_GRANTS == {}
+        update.callback_query.edit_message_text.assert_not_called()
+        assert _approver_was_told_the_approval_was_not_saved(update)
 
     @pytest.mark.asyncio
     async def test_approve_sets_decision(self):

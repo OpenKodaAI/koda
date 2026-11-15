@@ -66,6 +66,9 @@ def test_the_approval_stores_have_no_file_path() -> None:
         assert "STATE_ROOT_DIR" not in source, name
 
 
-def test_the_worker_runs_the_import_at_startup() -> None:
+def test_the_worker_runs_the_import_at_startup_before_it_recovers_tasks() -> None:
+    """A recovered task may ask for approval, which loads the approval rows once."""
     source = (_KODA / "__main__.py").read_text(encoding="utf-8")
-    assert "await import_approval_json_files()" in source
+    imported_at = source.index("await import_approval_json_files()")
+    assert imported_at < source.index("await get_runtime_controller().start(app)")
+    assert imported_at < source.index("await recover_pending_tasks(app)")

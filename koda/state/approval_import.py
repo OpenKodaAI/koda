@@ -3,14 +3,17 @@
 Earlier releases wrote ``approval_grants.json`` and ``pending_approvals.json``
 in ``STATE_ROOT_DIR`` when a Postgres write failed, and never read them back.
 Postgres is now the only approval store. At startup each file still there is
-imported and then renamed ``<name>.migrated``; it is never deleted. Rows that
-are already stored are left as they are, so an import that stops before the
-rename imports nothing twice on the next boot.
+imported and then renamed ``<name>.migrated``; it is never deleted. A row that
+is already stored is left as it is. When an import stops before the rename,
+the next boot imports the file again, and a row deleted in between is
+inserted again.
 
-An imported grant keeps its ``agent_id``. One without an agent follows the
-migration ``050_approval_tables`` rule: it gets the one agent its approval
-request, session or chat names, or it expires with an
-``approval.grant_expired`` audit row.
+Every imported grant is expired, with one ``approval.grant_expired`` audit
+row: the old release left a grant in the file after its last use or its
+revocation, so the file cannot tell a spent grant from an unused one, and
+none of them authorizes anything. An imported grant keeps its ``agent_id``.
+One without an agent follows the migration ``050_approval_tables`` rule: it
+gets the one agent its approval request, session or chat names.
 """
 
 from __future__ import annotations
