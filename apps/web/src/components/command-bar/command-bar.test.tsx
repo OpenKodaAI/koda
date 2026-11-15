@@ -73,6 +73,34 @@ describe("CommandBar inline dropdown (M8-E1-T1)", () => {
     expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
   });
 
+  it("points aria-activedescendant at a rendered option only while the list is open", async () => {
+    // A closed combobox that names an option id the document does not hold
+    // fails axe's aria-valid-attr-value (critical) on Home.
+    const user = userEvent.setup();
+    const input = renderBar();
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+
+    await user.click(input);
+    await screen.findByRole("listbox");
+    const active = input.getAttribute("aria-activedescendant");
+    expect(active).toBeTruthy();
+    expect(document.getElementById(active ?? "")).toHaveAttribute("role", "option");
+
+    await user.keyboard("zzzz-no-such-command");
+    expect(screen.getByText("Nothing found")).toBeInTheDocument();
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+
+    await user.clear(input);
+    await user.keyboard("home");
+    expect(input).toHaveAttribute("aria-activedescendant");
+
+    // Leaving with a query typed keeps the query but closes the list.
+    await user.tab();
+    expect(input).toHaveValue("home");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+  });
+
   it("styles the bar with :focus-within, never from state", async () => {
     const user = userEvent.setup();
     const input = renderBar();

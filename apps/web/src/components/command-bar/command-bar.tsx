@@ -192,7 +192,9 @@ export function CommandBar({
           role="combobox"
           aria-expanded={open && flat.length > 0}
           aria-controls={listId}
-          aria-activedescendant={activeCommandId ? `${listId}-${activeCommandId}` : undefined}
+          aria-activedescendant={
+            open && flat.length > 0 && activeCommandId ? `${listId}-${activeCommandId}` : undefined
+          }
           aria-autocomplete="list"
           value={value}
           onChange={(event) => {
