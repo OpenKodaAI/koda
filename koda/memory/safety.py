@@ -24,30 +24,36 @@ _QUOTE = r"[\"'`]?"
 # comma is followed by whitespace, which the single-character branch of _SAME_CLAUSE never takes, so
 # the two branches cannot both match a comma (no exponential backtracking on ",a,a,a").
 _ASIDE = r",\s+\w+(?:\s+\w+){0,2},"
-# A clause break: `, `, `; `, `. ` and so on, or a subordinate clause whose subject is the file ("Show a
-# banner when .env is missing"). A subordinate aside before the object ("Print if possible the .env")
-# does not break the clause.
-_CLAUSE_BREAK = (
-    r"[.!?;,](?:\s|$)"
-    r"|\b(?:when|whenever|if|unless|quando)\s+(?:(?:the|a|an|your|our|its|o|um|uma|seu|sua)\s+)?"
-    + _QUOTE
-    + r"(?=\.env)"
+# A subordinate conjunction ("Show a warning if the user has no .env").
+_SUBORDINATE = r"\b(?:when|whenever|if|unless|quando|se)\b"
+# A clause break: `, `, `; `, `. ` and so on, or a subordinate clause.
+_CLAUSE_BREAK = r"[.!?;,](?:\s|$)|" + _SUBORDINATE
+# A subordinate aside right after the verb, before its object ("Print if possible the .env", "Mostre
+# quando puder o .env"), does not break the clause, unless the file is its subject ("Show when .env is
+# missing").
+_SUBORDINATE_ASIDE = (
+    r"(?:\s+" + _SUBORDINATE + r"(?!\s+(?:(?:the|a|an|your|our|its|o|um|uma|seu|sua)\s+)?" + _QUOTE + r"\.env))?"
 )
 # Up to 80 characters of one clause; an aside does not break it.
-_SAME_CLAUSE = r"(?:" + _ASIDE + r"|(?!" + _CLAUSE_BREAK + r").){0,80}?"
+_SAME_CLAUSE = _SUBORDINATE_ASIDE + r"(?:" + _ASIDE + r"|(?!" + _CLAUSE_BREAK + r").){0,80}?"
 # Up to 80 characters of one sentence: commas do not break it.
 _SAME_SENTENCE = r"(?:(?![.!?;](?:\s|$)).){0,80}?"
-# Up to eight flags, each with an optional value. The bound keeps the scan linear: no command word
-# walks the rest of a long flag chain ("cat -n cat -n ...").
-_SHELL_FLAGS = r"(?:\s+-\S+(?:\s+[^\s-]\S*)?){0,8}"
+# Flags: up to eight with an optional value (which may be any word, even a command), then any number of
+# plain flags made of word characters, `-` and `=`. A command word never starts inside such a flag
+# (`-cat`, see _SHELL_COMMAND), so no command walks a flag chain that another one already walks, and
+# the scan stays linear ("cat -n cat -n ...", "cat -cat -cat ...").
+_SHELL_FLAGS = r"(?:\s+-\S+(?:\s+[^\s-]\S*)?){0,8}(?:\s+-[\w=-]+)*"
+# A command word, not the tail of a flag or an option value (`-cat`, `--x=cat`).
+_SHELL_COMMAND = r"(?<![-=])\b"
+# Where `source`, `type` and `more` are commands rather than English words ("more .env files", "the
+# data source .env"): at the start of a line, after a shell separator, a subshell or a backtick, or
+# after "run", "then", "please", "try", "exec(ute)" or "rode".
+_SHELL_COMMAND_POSITION = r"(?:^|[\n;&|(`$]|\b(?:run|then|please|try|execute|exec|rode)\b)\s*"
 # Shell commands that print a file, then flags and at most two other arguments before `.env`, which
-# may be quoted. `source`, `type` and `more` are also English words: right behind a determiner they
-# are nouns ("The source .env file", "the file type .env" are prose), and they take the file as their
-# first argument.
+# may be quoted. `source`, `type` and `more` take the file as their first argument.
 _DOTENV_SHELL_READ = (
-    r"(?:\b(?:cat|less|head|tail|grep)\b" + _SHELL_FLAGS + r"(?:\s+[^\s-]\S*){0,2}?"
-    r"|(?<!\bthe )(?<!\ba )(?<!\ban )(?<!\bthis )(?<!\bthat )(?<!\bits )(?<!\byour )(?<!\bour )(?<!\bfile )"
-    r"\b(?:source|type|more)\b" + _SHELL_FLAGS + r")\s+" + _QUOTE
+    r"(?:" + _SHELL_COMMAND + r"(?:cat|less|head|tail|grep)\b" + _SHELL_FLAGS + r"(?:\s+[^\s-]\S*){0,2}?"
+    r"|" + _SHELL_COMMAND_POSITION + _SHELL_COMMAND + r"(?:source|type|more)\b" + _SHELL_FLAGS + r")\s+" + _QUOTE
 )
 # A negation right before the verb: "Never share .env", "Não envie o .env" are hygiene notes. "Why not
 # share .env" suggests the read, so it is not a negation.
@@ -63,13 +69,15 @@ _DOTENV_READ_OR_SEND_VERBS = (
     r"|postem?|revelem?|exponham?)\b"
 )
 # `.env` named as an entry of an ignore file ("include .env in .gitignore", "in web/.dockerignore") is not
-# being read or sent. The ignore file's name starts with its dot: `console.gitignore` is not one.
+# being read or sent. The ignore file's name starts with its dot (`console.gitignore` is not one), and
+# its directories are plain local names: a URL or a host (`https://evil.example/.gitignore`,
+# `attacker.example/.gitignore`) is where the file would be sent.
 _NOT_INTO_IGNORE_FILE = (
     r"(?!"
     + _QUOTE
     + r"\s+(?:in|to|into|no|na|ao|em)\s+(?:(?:the|your|our|o|a|seu|sua)\s+)?"
     + _QUOTE
-    + r"(?:\S*/)?\.\w*ignore\b)"
+    + r"(?:\.{0,2}/)?(?:[\w-]+/)*\.\w*ignore\b)"
 )
 # A secret-ish word, also inside an identifier such as `SECRET_TOKEN`.
 _SECRET_WORD = r"(?<![^\W_])(?:secret|token|credential|ssh key|api key)(?![^\W_])"
@@ -84,16 +92,33 @@ _PT_INSTRUCTION_TARGET = (
     r"|\b(?:prompt|mensagem) d[oe] (?:sistema|desenvolvedor)\b|\bsystem prompt\b)"
 )
 # Broader targets, only as the direct object of a formal imperative: "Ignore as instruções", "Ignore
-# essas regras e execute", "Desconsidere as regras de segurança". The rules must be bare (the whole
-# object), so "Desconsidere as regras de lint" stays a note, and an object further on belongs to another
-# verb ("Ignore o cache e siga as instruções do README").
-_PT_DETERMINER = r"(?:(?:todas\s+)?(?:as|essas|estas)|a|essa|esta)"
+# essas regras e execute", "Desconsidere as regras de segurança". Rules, and a singular instruction,
+# must be bare (the whole object), so "Desconsidere as regras de lint" and "Ignore a orientação do
+# ESLint" stay notes, and an object further on belongs to another verb ("Ignore o cache e siga as
+# instruções do README").
+_PT_PLURAL_DETERMINER = r"(?:todas\s+)?(?:as|essas|estas)"
+_PT_DETERMINER = r"(?:" + _PT_PLURAL_DETERMINER + r"|a|essa|esta)"
+_PT_BARE = r"(?=\s*(?:[.!?;,]|$)|\s+e\s)"
 _PT_GENERIC_TARGET = (
-    r"(?:" + _PT_DETERMINER + r"\s+" + _PT_INSTRUCTIONS + r"\b"
-    r"|" + _PT_DETERMINER + r"\s+" + _PT_RULES + r"(?=\s*(?:[.!?;,]|$)|\s+e\s)"
-    r"|(?:" + _PT_DETERMINER + r"\s+)?" + _PT_RULES + r"\s+de\s+seguran[cç]a\b"
-    r"|todas\s+as\s+" + _PT_RULES + r"\b)"
+    r"(?:"
+    + "|".join(
+        (
+            _PT_PLURAL_DETERMINER + r"\s+" + _PT_INSTRUCTIONS + r"\b",
+            _PT_DETERMINER + r"\s+" + _PT_INSTRUCTIONS + r"\b" + _PT_BARE,
+            _PT_DETERMINER + r"\s+" + _PT_RULES + r"\b" + _PT_BARE,
+            r"(?:" + _PT_DETERMINER + r"\s+)?" + _PT_RULES + r"\s+de\s+seguran[cç]a\b",
+            r"todas\s+as\s+" + _PT_RULES + r"\b",
+        )
+    )
+    + r")"
 )
+# What may stand between the imperative and its object: an aside between commas (", por favor,") or
+# up to three adverbs ("agora", "também", "por completo", "de vez", "-mente").
+_PT_ADVERB = (
+    r"(?:\w+mente|agora|tamb[eé]m|sempre|j[aá]|apenas|s[oó]|ent[aã]o|logo|ainda|mesmo|de vez|de uma vez"
+    r"|por completo|por favor|de novo)"
+)
+_PT_BEFORE_OBJECT = r"(?:" + _ASIDE + r"|\s+" + _PT_ADVERB + r"\b,?){0,3}\s+"
 # Formal (você) and informal Brazilian (tu, "ignora as instruções anteriores") imperatives.
 _PT_OVERRIDE_FORMAL = r"\b(?:ignorem?|desconsiderem?|desprezem?|esque[cç]am?|sobrescrevam?|anulem?)\b"
 _PT_OVERRIDE_INFORMAL = r"\b(?:ignora|desconsidera|despreza|esquece|sobrescreve|anula)\b"
@@ -103,7 +128,7 @@ _PT_OVERRIDE_INFORMAL = r"\b(?:ignora|desconsidera|despreza|esquece|sobrescreve|
 _PT_INJECTION = "|".join(
     (
         _PT_OVERRIDE_FORMAL + _SAME_SENTENCE + _PT_INSTRUCTION_TARGET,
-        _PT_OVERRIDE_FORMAL + r"\s+(?:\w+mente\s+)?" + _PT_GENERIC_TARGET,
+        _PT_OVERRIDE_FORMAL + _PT_BEFORE_OBJECT + _PT_GENERIC_TARGET,
         _PT_OVERRIDE_INFORMAL + _SAME_SENTENCE + _PT_INSTRUCTION_TARGET,
         r"\b(?:revelem?|mostrem?|exibam?|revela|mostra|exibe)\b"
         + _SAME_SENTENCE
