@@ -1,6 +1,9 @@
 """Shared test fixtures."""
 
+import atexit
 import os
+import shutil
+import sys
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -35,6 +38,37 @@ _GUARD = None if _security_guard.guard_disabled() else _security_guard.select_gu
 
 
 _REAL_HOME = os.path.expanduser("~")
+# Koda keeps its state in STATE_ROOT_DIR, ~/.koda-state by default, and modules read it at
+# import, before any per-test fixture runs. Point it at this session's own directory here so
+# no test writes into the real one or shares it with a run in another checkout (D-265);
+# session_state_root owns the directory and checks the run left the real one alone.
+_REAL_STATE_ROOT = Path(_REAL_HOME) / ".koda-state"
+_SESSION_STATE_ROOT = Path(tempfile.mkdtemp(prefix="koda-test-state-"))
+atexit.register(shutil.rmtree, _SESSION_STATE_ROOT, True)
+os.environ["STATE_ROOT_DIR"] = str(_SESSION_STATE_ROOT)
+os.environ.pop(f"{os.environ['AGENT_ID']}_STATE_ROOT_DIR", None)
+
+
+def _koda_paths_under(root: Path) -> list[str]:
+    """Return the module-level path settings (UPPER_CASE names) of loaded koda modules inside ``root``."""
+    found = []
+    for name, module in list(sys.modules.items()):
+        if module is None or not (name == "koda" or name.startswith("koda.")):
+            continue
+        for attr, value in list(vars(module).items()):
+            if not attr.lstrip("_").isupper() or not isinstance(value, Path | str) or not os.path.isabs(value):
+                continue
+            if Path(value).is_relative_to(root):
+                found.append(f"{name}.{attr} = {value}")
+    return found
+
+
+@pytest.fixture(scope="session", autouse=True)
+def session_state_root():
+    """This session's STATE_ROOT_DIR; fails the run if a loaded module points into the real one."""
+    yield _SESSION_STATE_ROOT
+    leaked = _koda_paths_under(_REAL_STATE_ROOT)
+    assert not leaked, f"Koda paths under the real state dir {_REAL_STATE_ROOT}: {leaked}"
 
 
 @pytest.fixture(autouse=True)
