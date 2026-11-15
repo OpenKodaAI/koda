@@ -52,7 +52,7 @@
   {
    "wave": "W6",
    "name": "Onda 6",
-   "scope": "Squads, memória e agendador, acessibilidade, estados de erro e navegação mobile (M3, M8). Onda 6b corrige a causa raiz do deadlock das squads (M3-E6-T1) e o despacho entre agentes do agendador (D-259)",
+   "scope": "Squads, memória e agendador, acessibilidade, estados de erro e navegação mobile (M3, M8). Estados de erro e navegação mobile aprovados; acessibilidade em rodada de pendências (foco escondido atrás da barra de comandos na Home). Onda 6b corrige a causa raiz do deadlock das squads (M3-E6-T1) e o despacho entre agentes do agendador (D-259)",
    "status": "implementing",
    "ref": "task/M3-*, task/M8-*"
   },
@@ -83,6 +83,13 @@
    "scope": "Ajustes do plano vindos do openbot.run, mais jornadas de agentes (M3), design system (M8-E5) e dados (M2)",
    "status": "queued",
    "ref": "após as ondas 2A e 5"
+  },
+  {
+   "wave": "W8",
+   "name": "Onda 8",
+   "scope": "Rotinas de ponta a ponta (M3-E1-T3, T6, T7, T8), rótulos honestos para o que ainda não funciona (M6-E1-T2, T9, T10, M6-E3-T5, T6), saúde e confiabilidade (M7-E1-T1, T2, T4, M7-E2-T4)",
+   "status": "implementing",
+   "ref": "task/M3-E1-T3, task/M6-E1-T2, task/M7-E1-T1"
   }
  ],
  "meta": [

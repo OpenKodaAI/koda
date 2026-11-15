@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L19",
+   "at": "2026-11-15 01:20",
+   "event": "Onda 8 iniciada: rotinas (M3), rótulos honestos de funções indisponíveis (M6, primeira onda) e saúde/confiabilidade (M7, primeira onda). Onda 6 web: estados de erro e navegação mobile aprovados; acessibilidade em rodada de pendências"
+  },
+  {
    "id": "L18",
    "at": "2026-11-15 01:05",
    "event": "Onda 7: lanes de dados (M2) e código morto (M4) terminaram as rodadas de revisão; as pendências menores (schema do Postgres sem reescrita de SQL, registro da retenção, teste do modo OFF, arquivo de bootstrap) estão sendo corrigidas antes da integração, para não virar débito"

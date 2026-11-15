@@ -81,14 +81,15 @@ Learned from waves 2A–5 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-15 00:12 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 01:20 UTC. The progress tracker mirrors this list for the operator.)
 
-- WAVE-5 (`wf_94cba2c7-f62`): final rounds. M1-E7-T2 Python advisories (round 3 done; confirm reviews), M1-E7-T3 with M1-E7-T11 (round-2 confirm reviews), M1-E7-T6 (round 3 for one unresolved item), D-254 (round-2 confirm reviews). The integration follows: merge the four branches, run the full gates, merge.
-- WAVE-6 web (`wf_71bac8b0-c06`): M8-E1-T1..T3 accessibility (round 2); M8-E5-T2 + M8-E2-T1 (rounds done).
-- WAVE-6b (`wf_36851995-7f3`): M3-E6-T1, the squads deadlock root cause, with the M3-E6-T2/T3 leftovers; and D-259, scheduled-job dispatch across agents, with the memory leftovers. Two rounds.
-- WAVE-7 (`wf_d9f147a2-300` auth, `wf_23e36b0c-5e3` core): M1-E1-T4/T14/T15 round 2; M1-E1-T5 + T13 round-1 reviews; M2-E5-T1 + M2-E2-T4 round 2; M4-E1-T6 + T9 round-2 confirm reviews.
+- WAVE-5 (`wf_94cba2c7-f62`): round 3 for M1-E7-T3 with T11, M1-E7-T6 and D-254; M1-E7-T2 approved. The integration follows: merge the four branches, run the full gates, merge.
+- WAVE-6 web (`wf_71bac8b0-c06`, done): M8-E5-T2 + M8-E2-T1 approved. M8-E1-T1..T3 ended with one major (keyboard focus hidden behind the Home command bar) and minors; leftovers round `wf_8ffea544-16c` fixes them before integration.
+- WAVE-6b (`wf_36851995-7f3`): M3-E6-T1 squads deadlock root cause with the M3-E6-T2/T3 leftovers; D-259 scheduled-job dispatch with the memory leftovers (round 2: manual and validation runs must take the job agent's policy snapshot).
+- WAVE-7 auth (`wf_d9f147a2-300`): M1-E1-T5 + T13 round 2. WAVE-7 core (`wf_23e36b0c-5e3`, done) left minors; leftovers round `wf_b20c1233-8b4` covers M2-E2-T4 (schema through a startup search_path instead of a run-time SQL rewriter, pooler note), M2-E5-T1 (retention record without the bridge loop, one report per deployment per day), M4-E1-T6 (PRIMARY branch test, OFF-mode change recorded) and the M1-E1-T14 bootstrap file (seed with '=', undecodable file, atomic write).
+- WAVE-8 (`wf_f5891b55-639`, base f345140): M3-E1-T3/T6/T7/T8 routines; M6-E1-T2/T10, M6-E3-T5/T6, M6-E1-T9 honest labels; M7-E1-T1/T2/T4, M7-E2-T4 health and reliability.
 - Awaiting the operator: ADR-002 OQ-1..OQ-12, and plan Q-25..Q-27 (§13 sign-off).
-- Merged since the last record: ADR-002 (d21c2b3), WAVE-4 (06cde4d), REF-OPENBOT (cee7b41), WAVE-2A (dae8c39).
+- Merged since the last record: none (records and tracker only).
 
 ## Pending findings for the plan (verified by the orchestrator)
 

@@ -32,9 +32,9 @@
    "name": "Jornadas críticas quebradas",
    "total": 43,
    "done": 4,
-   "in_progress": 5,
+   "in_progress": 9,
    "awaiting_evidence": 3,
-   "remaining": 31
+   "remaining": 27
   },
   {
    "milestone": "M4",
@@ -59,18 +59,18 @@
    "name": "Completar funcionalidades",
    "total": 25,
    "done": 0,
-   "in_progress": 0,
+   "in_progress": 5,
    "awaiting_evidence": 0,
-   "remaining": 25
+   "remaining": 20
   },
   {
    "milestone": "M7",
    "name": "Confiabilidade e operação",
    "total": 20,
    "done": 0,
-   "in_progress": 0,
+   "in_progress": 4,
    "awaiting_evidence": 0,
-   "remaining": 20
+   "remaining": 16
   },
   {
    "milestone": "M8",
