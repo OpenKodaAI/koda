@@ -23,6 +23,19 @@ def normalize_agent_scope(
     return scope
 
 
+def task_agent_scope(agent_id: str | None = None) -> str:
+    """Return the ``agent_id`` value of this agent's ``tasks`` and ``sessions`` rows.
+
+    These rows carry the upper-case id, as ``cp_agent_definitions.id`` and
+    ``audit_events`` do. ``koda.state.history_store`` writes them with this
+    value and the runtime store reads and updates ``tasks`` with it, so both
+    sides match (D-293). The runtime-owned ``runtime_*`` tables keep the
+    lower-case :func:`normalize_agent_scope`.
+    """
+    normalized = str(agent_id or AGENT_ID or "default").strip().upper()
+    return normalized or "DEFAULT"
+
+
 def collection_agent_scope(
     agent_id: str | None = None,
     *,

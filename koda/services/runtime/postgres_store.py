@@ -12,6 +12,7 @@ from typing import Any, cast
 from koda.config import AGENT_ID
 from koda.services.provider_env import validate_runtime_path
 from koda.services.runtime.redaction import redact_json_dumps, redact_value
+from koda.state.agent_scope import task_agent_scope
 from koda.state.primary import (
     primary_execute,
     primary_fetch_all,
@@ -123,6 +124,8 @@ class PostgresRuntimeStore:
 
     def __init__(self) -> None:
         self._agent_scope = _agent_scope()
+        # ``tasks`` rows are written by koda.state.history_store under its scope (D-293).
+        self._task_agent_scope = task_agent_scope(AGENT_ID)
 
     def _execute(self, query: str, params: Iterable[Any] = ()) -> int:
         return int(run_coro_sync(primary_execute(query, tuple(params), agent_id=self._agent_scope)) or 0)
@@ -349,7 +352,7 @@ class PostgresRuntimeStore:
             SET env_id = ?, classification = ?, environment_kind = ?, current_phase = ?, last_heartbeat_at = ?
             WHERE agent_id = ? AND id = ?
             """,
-            (env_id, classification, environment_kind, current_phase, now, self._agent_scope, task_id),
+            (env_id, classification, environment_kind, current_phase, now, self._task_agent_scope, task_id),
         )
         return int(env_id)
 
@@ -514,7 +517,7 @@ class PostgresRuntimeStore:
         if source_action is not None:
             fields.append("source_action = ?")
             values.append(source_action)
-        values.extend([self._agent_scope, task_id])
+        values.extend([self._task_agent_scope, task_id])
         self._execute(f"UPDATE tasks SET {', '.join(fields)} WHERE agent_id = ? AND id = ?", values)
 
     def heartbeat(self, task_id: int, env_id: int | None, *, phase: str | None = None) -> None:
@@ -522,7 +525,7 @@ class PostgresRuntimeStore:
         self._execute(
             "UPDATE tasks SET last_heartbeat_at = ?, current_phase = COALESCE(?, current_phase) "
             "WHERE agent_id = ? AND id = ?",
-            (now, phase, self._agent_scope, task_id),
+            (now, phase, self._task_agent_scope, task_id),
         )
         if env_id is not None:
             self._execute(
@@ -1357,11 +1360,11 @@ class PostgresRuntimeStore:
                    rq.recovery_count, rq.last_recovered_at, rq.source_kind, rq.last_error,
                    rq.queued_at, rq.updated_at
             FROM runtime_queue_items AS rq
-            LEFT JOIN tasks AS t ON lower(t.agent_id) = rq.agent_id AND t.id = rq.task_id
+            LEFT JOIN tasks AS t ON t.agent_id = ? AND t.id = rq.task_id
             WHERE rq.agent_id = ?
             ORDER BY rq.queued_at ASC
             """,
-            (self._agent_scope,),
+            (self._task_agent_scope, self._agent_scope),
         )
 
     def list_environments(self) -> list[dict[str, Any]]:
@@ -1430,7 +1433,7 @@ class PostgresRuntimeStore:
                    last_heartbeat_at, retention_expires_at
             FROM tasks WHERE agent_id = ? AND id = ?
             """,
-            (self._agent_scope, task_id),
+            (self._task_agent_scope, task_id),
         )
 
     def list_events(
@@ -1484,7 +1487,7 @@ class PostgresRuntimeStore:
              WHERE agent_id = ? AND session_id = ?
              ORDER BY id ASC
             """,
-            (self._agent_scope, session_id),
+            (self._task_agent_scope, session_id),
         )
         return [int(row["id"]) for row in rows if row.get("id") is not None]
 

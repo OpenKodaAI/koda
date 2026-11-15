@@ -24,6 +24,7 @@ import asyncpg
 import pytest
 
 from koda.knowledge.v2.common import get_shared_postgres_backend
+from koda.state.agent_scope import task_agent_scope
 from tests.postgres_fixtures import close_shared_postgres_backends
 
 pytestmark = [pytest.mark.postgres]
@@ -100,6 +101,7 @@ def _build_store(agent_id: str):
 
 
 async def _seed_task(dsn: str, *, agent_id: str, task_id: int, user_id: int = 100, chat_id: int = 100) -> None:
+    """Insert a task row under the ``agent_id`` scope ``koda.state.history_store`` writes (D-293)."""
     conn = await asyncpg.connect(dsn)
     try:
         await conn.execute(
@@ -109,7 +111,7 @@ async def _seed_task(dsn: str, *, agent_id: str, task_id: int, user_id: int = 10
             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             task_id,
-            agent_id,
+            task_agent_scope(agent_id),
             user_id,
             chat_id,
             "queued",
@@ -235,7 +237,7 @@ async def test_create_environment_writes_row_and_updates_task(runtime_db: str) -
     try:
         row = await conn.fetchrow(
             "SELECT env_id, current_phase, classification FROM knowledge_v2.tasks WHERE agent_id = $1 AND id = $2",
-            "agent_a",
+            task_agent_scope("agent_a"),
             1,
         )
     finally:

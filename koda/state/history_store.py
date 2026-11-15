@@ -13,6 +13,7 @@ import koda.config as config_module
 from koda.config import AGENT_ID, POD_NAME
 from koda.logging_config import get_logger
 from koda.state import primary as primary_state
+from koda.state.agent_scope import task_agent_scope
 from koda.state.primary import (
     postgres_primary_mode,
     primary_execute,
@@ -38,10 +39,9 @@ def _current_agent_scope() -> str:
     reads — which derive the scope from the uppercase ``cp_agent_definitions``
     id — to miss every row written from this module, leaving the frontend
     executions/usage panels empty even though the runtime was persisting
-    data correctly.
+    data correctly. The runtime store reads ``tasks`` with the same helper.
     """
-    normalized = str(AGENT_ID or "default").strip().upper()
-    return normalized or "DEFAULT"
+    return task_agent_scope(AGENT_ID)
 
 
 def _primary_backend() -> Any | None:
