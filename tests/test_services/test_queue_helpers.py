@@ -40,6 +40,7 @@ from koda.services.queue_manager import (
     _recover_provider_error_with_completed_output,
     _requires_kernel_terminal,
     _resolve_provider_context,
+    _run_agent_loop,
     _run_fallback,
     _run_result_has_native_tool_calls,
     _run_streaming,
@@ -49,6 +50,7 @@ from koda.services.queue_manager import (
     _squad_coordination_integrity_override,
     enqueue,
     enqueue_dashboard_chat_task,
+    start_child_run_task,
 )
 from koda.utils.progress import _format_elapsed
 
@@ -1289,6 +1291,157 @@ class TestRuntimeTerminalCutover:
         assert query_context.task_kind == "deploy"
         assert query_context.child_capabilities == capabilities
         assert query_context.effective_policy.approval_mode == "read_only"
+
+    @staticmethod
+    async def _started_child_raw_item(capabilities: dict, parent_user_data: dict | None = None) -> dict:
+        """Run ``start_child_run_task`` with persistence stubbed and return the raw item it executes."""
+        executed: dict = {}
+
+        async def _execute(raw_item, _user_id, context, _task_id, _task_info):
+            executed["raw_item"] = raw_item
+            executed["user_data"] = context.user_data
+
+        application = SimpleNamespace(
+            user_data={111: {"provider": "claude", "total_cost": 0.0}}, bot=MagicMock(), bot_data={}
+        )
+        with (
+            patch("koda.services.queue_manager.create_task", return_value=77),
+            patch("koda.services.queue_manager._register_task"),
+            patch("koda.services.queue_manager._persist_runtime_queue_item", AsyncMock()),
+            patch("koda.services.queue_manager._update_runtime_queue_status"),
+            patch("koda.services.queue_manager._execute_single_task", side_effect=_execute),
+            patch("koda.services.audit.emit_task_lifecycle"),
+        ):
+            _task_id, task = await start_child_run_task(
+                application=application,
+                user_id=111,
+                chat_id=111,
+                query_text="child brief",
+                parent_task_id=42,
+                child_run_id="childrun_x",
+                provider="claude",
+                model=None,
+                work_dir="/tmp",
+                session_id="canon-1",
+                child_context_prompt="child brief",
+                context_policy={},
+                toolset="read_only",
+                capabilities=capabilities,
+                **({"parent_user_data": parent_user_data} if parent_user_data is not None else {}),
+            )
+            await task
+        return executed
+
+    @pytest.mark.asyncio
+    async def test_a_child_of_a_dry_run_parent_is_a_dry_run(self):
+        """D-372: a child of a scheduled dry-run parent runs as a dry run and performs no write."""
+        capabilities = {
+            "agent_id": "default",
+            "allowed_tool_ids": ["file_write", "job_list"],
+            "task_kind": "general",
+            "dry_run": True,
+            "scheduled_job_id": 5,
+            "scheduled_run_id": 9,
+        }
+        raw_item = (await self._started_child_raw_item(capabilities))["raw_item"]
+        item = _parse_queue_item(raw_item)
+        assert (item.scheduled_dry_run, item.scheduled_job_id, item.scheduled_run_id) == (True, 5, 9)
+        assert item.is_scheduled_run is False  # the parent's scheduled run is finalized by the parent alone
+
+        context = MagicMock()
+        context.user_data = {"provider": "claude", "work_dir": "/tmp", "total_cost": 0.0, "session_id": "canon-1"}
+        save_session = MagicMock()
+        with (
+            patch("koda.memory.config.MEMORY_ENABLED", False),
+            patch("koda.knowledge.config.KNOWLEDGE_ENABLED", False),
+            patch("koda.services.cache_config.CACHE_ENABLED", False),
+            patch("koda.services.cache_config.SCRIPT_LIBRARY_ENABLED", False),
+            patch("koda.services.queue_manager.get_provider_session_mapping", return_value=("thread-1", None)),
+            patch("koda.services.queue_manager.save_session", save_session),
+        ):
+            query_context = await _prepare_query_context(context, item, user_id=111)
+
+        assert query_context.dry_run is True
+        assert query_context.provider_session_id is None
+        assert "Scheduled Dry-Run Mode" in query_context.system_prompt
+        save_session.assert_not_called()
+
+        # The child's tools run in dry-run mode, and its write is never executed.
+        from koda.services.tool_dispatcher import AgentToolResult
+
+        seen_dry_run: list[bool] = []
+
+        async def _job_list(_params, ctx):
+            seen_dry_run.append(ctx.dry_run)
+            return AgentToolResult(tool="job_list", success=True, output="No jobs.")
+
+        handlers = {
+            "job_list": AsyncMock(side_effect=_job_list),
+            "file_write": AsyncMock(return_value=AgentToolResult(tool="file_write", success=True, output="ok")),
+        }
+        initial = RunResult(
+            provider="claude",
+            model="claude-sonnet-4-6",
+            result=(
+                '<agent_cmd tool="job_list">{}</agent_cmd>'
+                '<agent_cmd tool="file_write">{"path": "out.txt", "content": "x"}</agent_cmd>'
+            ),
+            session_id="canon-1",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=False,
+            stop_reason="end_turn",
+        )
+        done = RunResult(
+            provider="claude",
+            model="claude-sonnet-4-6",
+            result="done",
+            session_id="canon-1",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=False,
+            stop_reason="end_turn",
+        )
+        loop_context = MagicMock()
+        loop_context.user_data = dict(context.user_data)
+        loop_context.bot = AsyncMock()
+        with (
+            patch("koda.services.queue_manager._run_with_provider_fallback", AsyncMock(return_value=done)),
+            patch("koda.services.tool_dispatcher._TOOL_HANDLERS", handlers),
+            patch.dict("koda.services.tool_dispatcher._tool_rate_windows", clear=True),
+        ):
+            await _run_agent_loop(query_context, item, 111, 111, loop_context, initial)
+
+        assert seen_dry_run == [True]
+        handlers["file_write"].assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_child_starts_from_its_parent_context_and_budget(self):
+        """D-374: the child sees its parent's settings and spends against the parent's budget."""
+        from koda.config import MAX_TOTAL_BUDGET_USD
+
+        parent_user_data = {
+            "provider": "claude",
+            "work_dir": "/tmp",
+            "session_id": "canon-1",
+            "agent_mode": "supervised",
+            "total_cost": MAX_TOTAL_BUDGET_USD,
+        }
+        executed = await self._started_child_raw_item(
+            {"agent_id": "default", "allowed_tool_ids": ["job_list"], "task_kind": "general"},
+            parent_user_data,
+        )
+        child_user_data = executed["user_data"]
+
+        # Not application.user_data[111] (total 0.0, no agent_mode): the parent's own turn context.
+        assert child_user_data["agent_mode"] == "supervised"
+        assert child_user_data["total_cost"] == MAX_TOTAL_BUDGET_USD
+        assert child_user_data is not parent_user_data  # the child's own keys stay in its copy
+
+        with pytest.raises(BudgetExceeded):
+            await _prepare_query_context(
+                SimpleNamespace(user_data=child_user_data), _parse_queue_item(executed["raw_item"]), user_id=111
+            )
 
     @pytest.mark.asyncio
     async def test_prepare_query_context_blocks_invalid_scheduled_workdir(self):

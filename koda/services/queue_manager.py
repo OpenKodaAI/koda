@@ -25,7 +25,7 @@ import subprocess
 import time
 import unicodedata
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -2324,6 +2324,7 @@ async def start_child_run_task(
     toolset: str,
     target_agent_id: str | None = None,
     capabilities: dict[str, Any] | None = None,
+    parent_user_data: Mapping[str, Any] | None = None,
     bot_override: Any | None = None,
     user_data_overlay: dict[str, Any] | None = None,
 ) -> tuple[int, asyncio.Task[None]]:
@@ -2332,6 +2333,11 @@ async def start_child_run_task(
     This uses normal task persistence and execution machinery, but does not
     enqueue behind the parent user's FIFO worker. Parent tasks wait for child
     results; putting children behind the same per-user FIFO would deadlock.
+
+    The child's context is a copy of ``parent_user_data``, the parent turn's own
+    context, so the child inherits the parent's per-turn settings and is checked
+    against the parent's spend; the parent adds the child's cost to its total
+    when the child finishes.
     """
 
     if _shutting_down:
@@ -2363,7 +2369,8 @@ async def start_child_run_task(
         child_run_id=child_run_id,
     )
     context = build_runtime_context(application, user_id, bot_override=bot_override)
-    context.user_data = dict(getattr(context, "user_data", {}) or {})
+    base_user_data = parent_user_data if parent_user_data is not None else getattr(context, "user_data", {})
+    context.user_data = dict(base_user_data or {})
     if provider:
         context.user_data["provider"] = provider
     if model:
@@ -2392,6 +2399,10 @@ async def start_child_run_task(
         "child_context_policy": dict(context_policy or {}),
         "child_toolset": toolset,
         "child_capabilities": dict(capabilities) if capabilities else None,
+        # A child of a scheduled dry-run parent is a dry run too (D-372).
+        "dry_run": bool((capabilities or {}).get("dry_run")),
+        "scheduled_job_id": (capabilities or {}).get("scheduled_job_id"),
+        "scheduled_run_id": (capabilities or {}).get("scheduled_run_id"),
     }
     task_info = TaskInfo(
         task_id=task_id,
@@ -2887,6 +2898,10 @@ def _parse_queue_item(item: Any) -> QueueItem:
             "child_toolset": raw.get("child_toolset"),
             "child_capabilities": dict(capabilities) if isinstance(capabilities, dict) else None,
             "silent_response": bool(raw.get("silent_response")),
+            # A child of a dry-run parent is a dry run; it never finalizes the parent's scheduled run.
+            "scheduled_dry_run": bool(raw.get("_child_run") and raw.get("dry_run")),
+            "scheduled_job_id": raw.get("scheduled_job_id") if raw.get("_child_run") else None,
+            "scheduled_run_id": raw.get("scheduled_run_id") if raw.get("_child_run") else None,
         }
 
     if isinstance(item, dict) and (item.get("_user_message") or item.get("_recovered_task")):
@@ -3166,7 +3181,7 @@ async def _prepare_query_context(
                 drop_policy="hard_floor",
             )
 
-    if item.is_scheduled_run and item.scheduled_dry_run:
+    if item.scheduled_dry_run:
         _append_prompt_segment(
             prompt_segments,
             segment_id="scheduled_dry_run_rules",
@@ -3379,7 +3394,7 @@ async def _prepare_query_context(
         context.user_data["session_id"] = session_id
 
     agent_mode = context.user_data.get("agent_mode", "autonomous")
-    permission_mode = "plan" if item.is_scheduled_run and item.scheduled_dry_run else "bypassPermissions"
+    permission_mode = "plan" if item.scheduled_dry_run else "bypassPermissions"
     max_turns = 1 if agent_mode == "supervised" else MAX_TURNS
     _query_warnings: list[str] = []
     visual_paths = _filter_visual_paths(item.image_paths)
@@ -3404,7 +3419,7 @@ async def _prepare_query_context(
             has_images=bool(visual_paths),
         )
 
-    if item.is_scheduled_run and item.scheduled_dry_run:
+    if item.scheduled_dry_run:
         provider_session_id = None
         _query_warnings.append("dry-run forced fresh provider turn")
     else:
@@ -4000,9 +4015,9 @@ async def _prepare_query_context(
         stale_sources_present=stale_sources_present,
         turn_mode=cast(
             TurnMode,
-            "new_turn" if item.is_scheduled_run and item.scheduled_dry_run else infer_turn_mode(provider_session_id),
+            "new_turn" if item.scheduled_dry_run else infer_turn_mode(provider_session_id),
         ),
-        resume_requested=provider_session_id is not None and not (item.is_scheduled_run and item.scheduled_dry_run),
+        resume_requested=provider_session_id is not None and not item.scheduled_dry_run,
         dry_run=item.scheduled_dry_run,
         scheduled_job_id=item.scheduled_job_id,
         scheduled_run_id=item.scheduled_run_id,
@@ -5102,6 +5117,8 @@ async def _run_agent_loop(
             context_governance=ctx.context_governance,
             source_root_path=ctx.source_root_path or context.user_data.get("source_root_path"),
             runtime_workspace_path=ctx.work_dir if ctx.runtime_env_id is not None else None,
+            is_child_run=ctx.is_child_run,
+            child_capabilities=ctx.child_capabilities,
         )
 
         from koda.services import audit, metrics

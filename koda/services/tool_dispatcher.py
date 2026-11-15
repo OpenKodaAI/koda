@@ -315,6 +315,9 @@ class ToolContext:
     context_governance: dict[str, Any] | None = None
     source_root_path: str | None = None
     runtime_workspace_path: str | None = None
+    # A child run's tools never exceed its parent's: execute_tool applies the envelope (D-373).
+    is_child_run: bool = False
+    child_capabilities: dict[str, Any] | None = None
 
 
 def parse_agent_commands(text: str) -> tuple[list[AgentToolCall], str]:
@@ -696,6 +699,26 @@ async def _execute_tool_traced(
             )
         except Exception:
             return
+
+    if ctx.is_child_run:
+        # Every tool call of a child run, workflow steps included, stays inside the parent's envelope.
+        from koda.services.child_runs import child_run_tool_denial
+
+        child_denial = child_run_tool_denial(call.tool, ctx.child_capabilities)
+        if child_denial:
+            TOOL_EXECUTIONS.labels(agent_id=_agent_id_label, tool_name=call.tool, status="policy_denied").inc()
+            return AgentToolResult(
+                tool=call.tool,
+                success=False,
+                output=child_denial,
+                metadata={
+                    "category": _infer_tool_category(call.tool),
+                    "policy_blocked": True,
+                    "policy_reason_code": "child_run_capability_denied",
+                },
+                started_at=started_at,
+                completed_at=datetime.now(UTC).isoformat(),
+            )
 
     handler = _TOOL_HANDLERS.get(call.tool)
     plugin_handler = False
