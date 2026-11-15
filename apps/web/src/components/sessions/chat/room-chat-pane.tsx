@@ -828,9 +828,9 @@ export function RoomChatPane({
             <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
               {t("sessions.room.empty.eyebrow", undefined)}
             </p>
-            <h1 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
+            <h2 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
               {t("sessions.room.empty.title", undefined)}
-            </h1>
+            </h2>
             <p className="m-0 max-w-[420px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
               {t("sessions.room.empty.helper", undefined)}
             </p>

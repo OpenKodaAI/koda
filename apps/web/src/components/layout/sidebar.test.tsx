@@ -76,6 +76,9 @@ describe("Sidebar", () => {
       .getAllByRole("navigation")
       .map((nav) => nav.getAttribute("aria-label") ?? "");
     expect(names).toEqual(["Navegação principal", "Sistema"]);
+    // The <aside> around them is a complementary landmark with its own name,
+    // so screen readers do not announce "Navegação principal" twice.
+    expect(screen.getByRole("complementary")).toHaveAttribute("aria-label", "Barra lateral");
   });
 
   it("does not keep Agents active when General settings is selected", () => {

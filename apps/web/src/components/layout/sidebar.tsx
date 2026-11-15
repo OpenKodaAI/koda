@@ -263,7 +263,7 @@ export function Sidebar({
           mobileOpen ? "translate-x-0" : "-translate-x-full",
           collapsed && "lg:w-[3.5rem]"
         )}
-        aria-label={t("sidebar.ariaLabel")}
+        aria-label={t("sidebar.regionLabel")}
         {...tourRoute("shell.sidebar")}
       >
         <div

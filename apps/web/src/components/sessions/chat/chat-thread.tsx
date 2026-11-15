@@ -294,10 +294,10 @@ function ChatThreadImpl({
                 agentLabel ??
                 t("sessions.thread.newChatEyebrow", undefined)}
             </p>
-            <h1 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
+            <h2 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
               {emptyTitle ??
                 t("sessions.thread.heroTitle", undefined)}
-            </h1>
+            </h2>
             <p className="m-0 max-w-[480px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
               {emptyDescription ??
                 t("sessions.thread.heroHelper", undefined)}

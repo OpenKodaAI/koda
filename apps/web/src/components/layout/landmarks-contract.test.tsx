@@ -27,16 +27,27 @@ function read(path: string): string {
 const MAIN_TAG = /<main[\s>]/;
 const H1_TAG = /<h1[\s>]/;
 
-// Pages that render inside AppShell below the workspace topbar. The topbar's
-// route title is their <h1>, so their own page title is an <h2>.
-const UNDER_TOPBAR = [
-  "components/features/overview/overview-page-client.tsx",
-  "components/runtime/runtime-overview.tsx",
-  "components/runtime/runtime-task-room.tsx",
-  "components/control-plane/editor/agent-editor-shell.tsx",
-  "components/control-plane/system/integrations/provider-grid.tsx",
-  "app/settings/account/page.tsx",
-];
+// Every file allowed to render an <h1>. On routes that show the workspace
+// topbar, its route title is the page's <h1>, so a page component under it
+// uses <h2>; a new <h1> anywhere else fails this test.
+const H1_ALLOWED = [
+  // The route title on every route that shows the topbar.
+  "components/layout/workspace-topbar.tsx",
+  // Full-screen auth routes without the topbar.
+  "components/auth/forgot-password-screen.tsx",
+  "components/auth/login-screen.tsx",
+  "components/setup/step-create-account.tsx",
+  "components/setup/step-recovery-codes.tsx",
+  // /sessions hides the topbar: a visually hidden route title.
+  "components/features/sessions/sessions-page-client.tsx",
+  // Markdown headings inside a chat message.
+  "components/sessions/session-rich-text.tsx",
+  // Not mounted on any route (no importers).
+  "components/control-plane/shared/entity-header.tsx",
+  "components/control-plane/system/integrations/integration-marketplace.tsx",
+  "components/control-plane/system/mcp/mcp-server-catalog.tsx",
+  "components/layout/header.tsx",
+].sort();
 
 describe("landmarks, headings and the skip link (M8-E1-T3)", () => {
   it("renders <main> only in the app shell and the full-screen auth frames", () => {
@@ -55,11 +66,34 @@ describe("landmarks, headings and the skip link (M8-E1-T3)", () => {
     expect(read("components/layout/route-loading.tsx").match(/<main[\s>]/g)).toHaveLength(1);
   });
 
-  it("leaves the page <h1> to the topbar on routes that show it", () => {
-    expect(read("components/layout/workspace-topbar.tsx")).toMatch(H1_TAG);
-    for (const path of UNDER_TOPBAR) {
-      expect(read(path), `${path} renders its own <h1>`).not.toMatch(H1_TAG);
-    }
+  it("renders <h1> only in the topbar and on routes without it", () => {
+    const withH1 = sourceFiles(SRC)
+      .filter((path) => H1_TAG.test(readFileSync(path, "utf8")))
+      .map((path) => relative(SRC, path))
+      .sort();
+    expect(withH1).toEqual(H1_ALLOWED);
+  });
+
+  it("keeps the unmounted <h1> components unmounted", () => {
+    const unmounted = [
+      "entity-header",
+      "integration-marketplace",
+      "mcp-server-catalog",
+      "layout/header",
+    ];
+    const importers = sourceFiles(SRC)
+      .filter((path) =>
+        unmounted.some((name) =>
+          new RegExp(`from ["'][^"']*/${name}["']`).test(readFileSync(path, "utf8")),
+        ),
+      )
+      .map((path) => relative(SRC, path));
+    expect(importers).toEqual(["components/control-plane/control-plane-home.tsx"]);
+    // control-plane-home.tsx (the only PageHeader user) is not mounted either.
+    const homeImporters = sourceFiles(SRC).filter((path) =>
+      /from ["'][^"']*\/control-plane-home["']/.test(readFileSync(path, "utf8")),
+    );
+    expect(homeImporters).toEqual([]);
   });
 
   it("gives the auth frame's <main> the skip-link target", () => {
