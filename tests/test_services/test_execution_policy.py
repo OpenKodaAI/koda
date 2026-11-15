@@ -113,6 +113,60 @@ def test_approval_grant_replays_authorized_tool_call() -> None:
     assert allowed.reason_code == "approval_grant"
 
 
+def _read_only_rule_evaluation(tool_id: str, params: dict, decision: str, grant: dict | None) -> PolicyEvaluation:
+    from koda.knowledge.types import EffectiveExecutionPolicy
+
+    return evaluate_execution_policy(
+        tool_id,
+        params,
+        effective_policy=EffectiveExecutionPolicy(task_kind="general", approval_mode="read_only"),
+        resource_access_policy={
+            "integration_grants": {
+                "agent_runtime": {"allow_actions": ["*"]},
+                "fileops": {"allow_actions": ["*"]},
+            }
+        },
+        execution_policy={
+            "version": 1,
+            "rules": [{"id": "rule", "decision": decision, "selectors": {"tool_id": [tool_id]}}],
+        },
+        approval_grant=grant,
+        known_tool=True,
+    )
+
+
+def test_read_only_denies_a_write_whatever_the_rule_decision_or_approval_grant() -> None:
+    # D-371: read-only means read-only. An explicit rule that asks for approval or a preview,
+    # and an approval grant the run holds (a child run consumes its parent's), never let a
+    # read-only run write.
+    for decision in ("allow", "require_approval", "allow_with_preview"):
+        for grant in (None, {"grant_id": "grant-1"}):
+            evaluation = _read_only_rule_evaluation(
+                "agent_send", {"agent_id": "OTHER", "message": "hi"}, decision, grant
+            )
+            assert (decision, grant, evaluation.decision, evaluation.reason_code) == (
+                decision,
+                grant,
+                "deny",
+                "read_only_policy",
+            )
+
+
+def test_read_only_leaves_read_tools_to_the_rule_and_grant() -> None:
+    expected = {
+        ("allow", False): "allow",
+        ("allow", True): "allow",
+        ("require_approval", False): "require_approval",
+        ("require_approval", True): "allow",
+        ("allow_with_preview", False): "allow_with_preview",
+        ("allow_with_preview", True): "allow",
+    }
+    for (decision, with_grant), outcome in expected.items():
+        grant = {"grant_id": "grant-1"} if with_grant else None
+        evaluation = _read_only_rule_evaluation("file_read", {"path": "notes.txt"}, decision, grant)
+        assert (decision, with_grant, evaluation.decision) == (decision, with_grant, outcome)
+
+
 def test_legacy_mcp_policy_is_compiled_inside_central_gate() -> None:
     evaluation = evaluate_execution_policy(
         "mcp_github__create_issue",

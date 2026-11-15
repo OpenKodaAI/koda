@@ -75,6 +75,10 @@ tools. The child is judged by the parent's task kind, so execution-policy rules
 keyed on it bind the child too. Memory writes and sensitive recall are never
 granted: the normalized context policy carries neither, whatever the request
 asks for.
+Every allowed child toolset runs the child read-only, and read-only denies
+every write (`read_only_policy`) whatever execution-policy rule matches and
+whatever approval grant the run holds, so a grant given to the parent never
+lets its child write.
 Phase 3 fails closed for write, network-write, destructive, unknown, or
 unrecognized child toolsets until a stricter approval path is implemented.
 
