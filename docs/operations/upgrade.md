@@ -277,6 +277,88 @@ Releases from before this check ignore the table, so rolling back needs no
 extra step. Keep the key file in place either way: those releases create a
 new key when the file is missing.
 
+### Scheduled jobs without an agent
+
+Each agent worker materializes, claims, recovers and dispatches only its
+own agent's scheduled jobs, through its own bot and under its own policy.
+Its `/jobs` command, job tools and runtime API actions also act only on
+that agent's jobs. The scheduler entry of its `/health` payload and its
+`koda_scheduled_*` metrics count only that agent's jobs and runs.
+
+A job created by a worker started without `--agent-id` (no `AGENT_ID`)
+has no agent: its `scheduled_jobs.agent_id` is NULL, and only a worker
+started the same way runs it. The supervisor always starts workers with
+`--agent-id`. After a move from a standalone worker to supervised agents,
+no worker runs these jobs and the dashboard lists them under no agent.
+Each agent worker logs `scheduler_unowned_jobs_skipped` with their ids
+when its dispatcher starts, and its `/health` scheduler entry reports
+their number as `unowned_jobs`.
+
+No migration assigns them, because nothing records which agent created
+them. Assign each job to the agent that should run it, with `psql`
+against the Koda database (for example
+`docker compose exec postgres psql -U <user> -d <database>`), while no
+worker without `--agent-id` runs.
+
+First close the job's open runs (`queued`, `retrying` or `running`,
+validation runs included). Each one carries the policy snapshot of the
+worker that created it, and an agent blocks a run whose snapshot is not
+its own. Left open, the first such run the agent claims ends `blocked`
+("Scheduled run blocked because the job policy changed after
+validation."), the job moves to `validation_pending` with no next run,
+its other queued and retrying runs end `blocked`, and the agent's bot
+tells the user the run was blocked. Close the runs, then assign the jobs,
+in one transaction. The first statement closes each run as the scheduler
+does when it cancels one: it sets the run's completion and update times,
+and records a `run.cancelled` event that names its earlier status and the
+reason, so the run history shows why the run ended.
+
+```sql
+BEGIN;
+WITH open_runs AS (
+    SELECT id, status FROM knowledge_v2.scheduled_job_runs
+    WHERE scheduled_job_id IN (12, 15)
+      AND status IN ('queued', 'retrying', 'running')
+    FOR UPDATE
+), stamp AS (
+    SELECT to_char(now() AT TIME ZONE 'UTC',
+                   'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"') AS at
+), closed AS (
+    UPDATE knowledge_v2.scheduled_job_runs AS run
+    SET status = 'cancelled', lease_owner = NULL, lease_expires_at = NULL,
+        next_attempt_at = NULL,
+        completed_at = COALESCE(run.completed_at, stamp.at),
+        updated_at = stamp.at,
+        error_message = 'Closed before assigning the job to an agent.'
+    FROM open_runs, stamp
+    WHERE run.id = open_runs.id
+    RETURNING run.id, run.scheduled_job_id, run.trace_id,
+              open_runs.status AS status_from, stamp.at
+)
+INSERT INTO knowledge_v2.scheduled_job_events (
+    scheduled_job_id, scheduled_run_id, trace_id, event_type, actor_type,
+    source, status_from, status_to, reason, created_at
+)
+SELECT scheduled_job_id, id, trace_id, 'run.cancelled', 'operator',
+       'upgrade', status_from, 'cancelled',
+       'Closed before assigning the job to an agent.', at
+FROM closed;
+UPDATE knowledge_v2.scheduled_jobs
+SET agent_id = 'AGENT_A'
+WHERE agent_id IS NULL AND id IN (12, 15);
+COMMIT;
+```
+
+Use your schema name if you changed `KNOWLEDGE_V2_POSTGRES_SCHEMA`. That
+agent's next dispatch cycle runs each active job under its own policy, as
+after an outage: from the job's next run time, it runs the occurrences
+still inside the catch-up window. The occurrences of the closed runs do
+not run. A job that was waiting for its validation stays
+`validation_pending`. Validate it from that agent's bot with
+`/jobs validate <id>`, then `/jobs activate <id>` once the validation
+passes. Do the same for a job that you assigned with its runs still open
+and that the agent moved to `validation_pending`.
+
 ## Step 2 (cluster) — blue/green drain
 
 For a multi-supervisor deployment (`KODA_CLUSTER_MODE=cluster`):

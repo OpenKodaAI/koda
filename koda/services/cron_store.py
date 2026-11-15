@@ -18,7 +18,8 @@ from koda.services.scheduled_jobs import (
     wake_dispatcher,
 )
 
-MAX_CRON_JOBS_PER_USER = 10
+# list_jobs returns the user's jobs on this agent only, so the cap holds per user and per agent.
+MAX_CRON_JOBS_PER_USER_PER_AGENT = 10
 
 
 def create_cron_job(
@@ -38,8 +39,8 @@ def create_cron_job(
         for job in list_jobs(user_id)
         if str(job.get("job_type") or "") == "shell_command" and str(job.get("status") or "") != JOB_STATUS_ARCHIVED
     ]
-    if len(existing) >= MAX_CRON_JOBS_PER_USER:
-        raise ValueError(f"Maximum of {MAX_CRON_JOBS_PER_USER} cron jobs per user reached.")
+    if len(existing) >= MAX_CRON_JOBS_PER_USER_PER_AGENT:
+        raise ValueError(f"Maximum of {MAX_CRON_JOBS_PER_USER_PER_AGENT} cron jobs per user on this agent reached.")
     job_id = create_shell_command_job(
         user_id=user_id,
         chat_id=chat_id,
