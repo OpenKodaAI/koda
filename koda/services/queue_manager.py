@@ -7196,6 +7196,154 @@ async def _maybe_enqueue_squad_reply_synthesis(
         log.exception("squad_reply_synthesis_enqueue_failed", thread_id=ctx.squad_thread_id)
 
 
+async def _persist_squad_turn_result(
+    *,
+    ctx: QueryContext,
+    run_result: RunResult,
+    response_text: str,
+    runtime_task_id: int | None,
+    created_artifacts: list[str],
+    cost: float,
+    log_model: str,
+) -> tuple[str | None, list[str]]:
+    """Post a squad turn's answer to its thread, resolve the obligations it answers and advance its task.
+
+    Returns the posted message ref (``msg-<id>``) and the ids of the registered artifacts.
+    """
+    squad_message_id: str | None = None
+    squad_artifact_ids: list[str] = []
+    thread_id = ctx.squad_thread_id
+    if not thread_id:
+        return squad_message_id, squad_artifact_ids
+    try:
+        from koda.squads import get_squad_thread_store
+
+        store = get_squad_thread_store()
+        if store is not None:
+            squad_artifact_ids = await _register_squad_artifacts(
+                ctx=ctx,
+                runtime_task_id=runtime_task_id,
+                created_artifacts=created_artifacts,
+                run_result=run_result,
+            )
+            message_kind = "task_result" if ctx.squad_task_id else "agent_text"
+            correlation_id = ctx.delegation_request_id or ctx.squad_task_id or ctx.parent_message_id
+            reply_kind = "agent_result" if ctx.delegation_request_id else message_kind
+            posted_id = await store.post_thread_message(
+                thread_id=thread_id,
+                from_agent=ctx.executing_agent_id or AGENT_ID or "default",
+                content=response_text,
+                message_type=message_kind,
+                metadata={
+                    "query_cost_usd": cost,
+                    "provider": run_result.provider,
+                    "model": log_model,
+                    "squad_task_id": ctx.squad_task_id,
+                    "parent_message_id": ctx.parent_message_id,
+                    "reply_contract_version": "thread_reply.v1",
+                    "reply_kind": reply_kind,
+                    "in_reply_to": ctx.parent_message_id,
+                    "correlation_id": correlation_id,
+                    "payload": {
+                        "task_id": ctx.squad_task_id,
+                        "status": "failed" if run_result.error else "ok",
+                        "output_md": response_text,
+                        "artifact_ids": squad_artifact_ids,
+                        "cost_usd": cost,
+                    }
+                    if ctx.squad_task_id
+                    else {"markdown": response_text},
+                },
+                in_reply_to=ctx.parent_message_id,
+                correlation_id=str(correlation_id) if correlation_id else None,
+            )
+            squad_message_id = f"msg-{posted_id}"
+            try:
+                from koda.squads import get_thread_reply_service
+
+                reply_service = get_thread_reply_service(store)
+                if reply_service is not None:
+                    await reply_service.resolve_for_reply(
+                        thread_id=thread_id,
+                        reply_message_id=posted_id,
+                        from_agent=ctx.executing_agent_id or AGENT_ID or "default",
+                        in_reply_to=ctx.parent_message_id,
+                        correlation_id=str(correlation_id) if correlation_id else None,
+                    )
+            except Exception:
+                log.exception("squad_reply_obligation_resolve_failed", thread_id=ctx.squad_thread_id)
+            await _advance_squad_task_from_run(
+                ctx=ctx,
+                run_result=run_result,
+                response_text=response_text,
+                artifact_ids=squad_artifact_ids,
+            )
+    except Exception:
+        log.exception("squad_post_process_message_persist_failed", thread_id=ctx.squad_thread_id)
+    return squad_message_id, squad_artifact_ids
+
+
+async def _record_failed_squad_task_turn(
+    *,
+    user_id: int,
+    context: BotContext,
+    ctx: QueryContext | None,
+    run_result: RunResult | None,
+    error_message: str,
+    task_id: int,
+) -> None:
+    """Record a squad task turn that a queue failure handler ends, as ``_post_process`` records a failed run.
+
+    Its failure is posted as a failed task_result and its squad task fails, then its follow-ups
+    run, so a handoff waiting on this destination completes as failed and the coordinator
+    synthesis, which discloses the failure, is queued (D-074). No worker lock is held here.
+    """
+    if ctx is None or ctx.dry_run or not ctx.squad_thread_id or not ctx.squad_task_id:
+        return
+    try:
+        from koda.squads import get_squad_task_store
+
+        task_store = get_squad_task_store()
+        task = await task_store.get_task(ctx.squad_task_id) if task_store is not None else None
+    except Exception:
+        log.exception(
+            "squad_failed_turn_task_lookup_failed",
+            thread_id=ctx.squad_thread_id,
+            squad_task_id=ctx.squad_task_id,
+        )
+        return
+    if task is None or task.status in {"done", "failed", "cancelled", "escalated"}:
+        # Already recorded, for example by _post_process before a later step of the turn failed.
+        return
+    failed_run = RunResult(
+        provider=run_result.provider if run_result else ctx.provider,
+        model=run_result.model if run_result else ctx.model,
+        result=error_message,
+        session_id=(run_result.session_id if run_result else ctx.session_id) or "",
+        provider_session_id=None,
+        cost_usd=run_result.cost_usd if run_result else 0.0,
+        error=True,
+        stop_reason="error",
+    )
+    squad_message_id, artifact_ids = await _persist_squad_turn_result(
+        ctx=ctx,
+        run_result=failed_run,
+        response_text=error_message,
+        runtime_task_id=task_id,
+        created_artifacts=[],
+        cost=failed_run.cost_usd,
+        log_model=failed_run.model,
+    )
+    await _dispatch_squad_follow_ups(
+        user_id=user_id,
+        context=context,
+        ctx=ctx,
+        response_text=error_message,
+        squad_message_id=squad_message_id,
+        artifact_ids=artifact_ids,
+    )
+
+
 async def _dispatch_squad_follow_ups(
     *,
     user_id: int,
@@ -7300,71 +7448,15 @@ async def _post_process(
     squad_artifact_ids: list[str] = []
     squad_follow_ups: Callable[[], Awaitable[None]] | None = None
     if not dry_run and ctx is not None and ctx.squad_thread_id:
-        try:
-            from koda.squads import get_squad_thread_store
-
-            store = get_squad_thread_store()
-            if store is not None:
-                squad_artifact_ids = await _register_squad_artifacts(
-                    ctx=ctx,
-                    runtime_task_id=task_id,
-                    created_artifacts=list(delivery_outcome.created_artifacts) if delivery_outcome else [],
-                    run_result=run_result,
-                )
-                message_kind = "task_result" if ctx.squad_task_id else "agent_text"
-                correlation_id = ctx.delegation_request_id or ctx.squad_task_id or ctx.parent_message_id
-                reply_kind = "agent_result" if ctx.delegation_request_id else message_kind
-                posted_id = await store.post_thread_message(
-                    thread_id=ctx.squad_thread_id,
-                    from_agent=ctx.executing_agent_id or AGENT_ID or "default",
-                    content=response_text,
-                    message_type=message_kind,
-                    metadata={
-                        "query_cost_usd": cost,
-                        "provider": run_result.provider,
-                        "model": log_model,
-                        "squad_task_id": ctx.squad_task_id,
-                        "parent_message_id": ctx.parent_message_id,
-                        "reply_contract_version": "thread_reply.v1",
-                        "reply_kind": reply_kind,
-                        "in_reply_to": ctx.parent_message_id,
-                        "correlation_id": correlation_id,
-                        "payload": {
-                            "task_id": ctx.squad_task_id,
-                            "status": "failed" if run_result.error else "ok",
-                            "output_md": response_text,
-                            "artifact_ids": squad_artifact_ids,
-                            "cost_usd": cost,
-                        }
-                        if ctx.squad_task_id
-                        else {"markdown": response_text},
-                    },
-                    in_reply_to=ctx.parent_message_id,
-                    correlation_id=str(correlation_id) if correlation_id else None,
-                )
-                squad_message_id = f"msg-{posted_id}"
-                try:
-                    from koda.squads import get_thread_reply_service
-
-                    reply_service = get_thread_reply_service(store)
-                    if reply_service is not None:
-                        await reply_service.resolve_for_reply(
-                            thread_id=ctx.squad_thread_id,
-                            reply_message_id=posted_id,
-                            from_agent=ctx.executing_agent_id or AGENT_ID or "default",
-                            in_reply_to=ctx.parent_message_id,
-                            correlation_id=str(correlation_id) if correlation_id else None,
-                        )
-                except Exception:
-                    log.exception("squad_reply_obligation_resolve_failed", thread_id=ctx.squad_thread_id)
-                await _advance_squad_task_from_run(
-                    ctx=ctx,
-                    run_result=run_result,
-                    response_text=response_text,
-                    artifact_ids=squad_artifact_ids,
-                )
-        except Exception:
-            log.exception("squad_post_process_message_persist_failed", thread_id=ctx.squad_thread_id)
+        squad_message_id, squad_artifact_ids = await _persist_squad_turn_result(
+            ctx=ctx,
+            run_result=run_result,
+            response_text=response_text,
+            runtime_task_id=task_id,
+            created_artifacts=list(delivery_outcome.created_artifacts) if delivery_outcome else [],
+            cost=cost,
+            log_model=log_model,
+        )
         squad_follow_ups = functools.partial(
             _dispatch_squad_follow_ups,
             user_id=user_id,
@@ -8736,6 +8828,14 @@ async def _execute_single_task(
                 duration_ms=query_elapsed * 1000,
             )
             await _send_task_error(task_info, last_error or "unknown error", context, item)
+            await _record_failed_squad_task_turn(
+                user_id=user_id,
+                context=context,
+                ctx=ctx,
+                run_result=run_result,
+                error_message=last_error or "unknown error",
+                task_id=task_id,
+            )
 
     except _RuntimeGuardrailError as e:
         error_str = str(e)
@@ -8763,6 +8863,9 @@ async def _execute_single_task(
         if RUNTIME_ENVIRONMENTS_ENABLED:
             await runtime.finalize_task(task_id=task_id, success=False, error_message=error_str)
         await _send_task_error(task_info, error_str, context, item)
+        await _record_failed_squad_task_turn(
+            user_id=user_id, context=context, ctx=ctx, run_result=run_result, error_message=error_str, task_id=task_id
+        )
     except asyncio.CancelledError:
         cancellation_reason = task_info.error_message or "Cancelled by scheduler control."
         task_info.status = "cancelled"
@@ -8903,6 +9006,9 @@ async def _execute_single_task(
         if RUNTIME_ENVIRONMENTS_ENABLED:
             await runtime.finalize_task(task_id=task_id, success=False, error_message=error_str)
         await _send_task_error(task_info, error_str, context, item)
+        await _record_failed_squad_task_turn(
+            user_id=user_id, context=context, ctx=ctx, run_result=run_result, error_message=error_str, task_id=task_id
+        )
     finally:
         if heartbeat_task:
             heartbeat_task.cancel()

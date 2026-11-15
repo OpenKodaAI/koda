@@ -438,7 +438,16 @@ class SquadThreadStore:
         in_reply_to: int | str | None = None,
         requires_response_by: datetime | None = None,
         idempotency_key: str | None = None,
+        dedupe: bool = False,
     ) -> int:
+        """Post a message to the thread and return its id.
+
+        The idempotency key (``idempotency_key`` or ``metadata["idempotency_key"]``)
+        is stored with the message. Only with ``dedupe=True`` does it deduplicate:
+        the post then returns the id of the message already posted with that key
+        in this thread, and concurrent posts of the key serialize on the thread
+        row. Agent tools pass agent-supplied keys, so they do not opt in.
+        """
         metadata = dict(metadata or {})
         normalized_to_agent_ids = [str(value).strip() for value in to_agent_ids or [] if str(value).strip()]
         if normalized_to_agent_ids:
@@ -458,16 +467,15 @@ class SquadThreadStore:
             metadata["requires_response_by"] = requires_response_by.isoformat()
         pool = await self._ensure_pool()
         async with pool.acquire() as conn, conn.transaction():
-            # With an idempotency key, lock the thread row so concurrent posts of the
-            # same key serialize, and return the message already posted with it.
+            deduplicate = dedupe and bool(normalized_idempotency)
             exists = await conn.fetchval(
                 f'SELECT 1 FROM "{self._schema}"."squad_threads" WHERE id = $1'
-                + (" FOR UPDATE" if normalized_idempotency else ""),
+                + (" FOR UPDATE" if deduplicate else ""),
                 thread_id,
             )
             if not exists:
                 raise KeyError(f"thread {thread_id!r} not found")
-            if normalized_idempotency:
+            if deduplicate:
                 existing_id = await conn.fetchval(
                     f"""SELECT id FROM "{self._schema}"."squad_messages"
                          WHERE thread_id = $1 AND idempotency_key = $2

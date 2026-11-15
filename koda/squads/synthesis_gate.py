@@ -193,7 +193,11 @@ def _string(value: Any) -> str:
 
 
 def _reply_outcomes(result_messages: list[Mapping[str, Any]], reply_obligations: list[Any]) -> dict[str, str]:
-    """Map each agent that answered to ``returned``, or to ``failed`` when all its results failed."""
+    """Map each agent that answered to ``returned``, or to ``failed`` when all its results failed.
+
+    An answered reply obligation counts only for an agent with no result: a failed run answers
+    its obligation too, so the obligation must not hide the failed result (D-074).
+    """
     outcomes: dict[str, str] = {}
     for msg in result_messages:
         agent = _string(msg.get("from") or msg.get("from_agent"))
@@ -204,7 +208,7 @@ def _reply_outcomes(result_messages: list[Mapping[str, Any]], reply_obligations:
     for obligation in reply_obligations:
         agent = _string(_field(obligation, "target_agent_id", "targetAgentId"))
         if agent and _string(_field(obligation, "status")).lower() == "answered":
-            outcomes[agent] = "returned"
+            outcomes.setdefault(agent, "returned")
     return outcomes
 
 

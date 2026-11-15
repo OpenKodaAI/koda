@@ -99,3 +99,17 @@ def test_handoff_with_a_failed_destination_is_failed_and_disclosed() -> None:
     assert result.timeout_disclosures == [
         {"kind": "handoff_event", "id": "handoff-1", "status": "failed", "agent_ids": ["QA"]}
     ]
+
+
+def test_an_answered_reply_obligation_does_not_hide_a_failed_task_result() -> None:
+    result = evaluate_synthesis_readiness(
+        handoff_events=[_handoff(destinations=("QA",))],
+        result_messages=[{"type": "task_result", "id": "msg-2", "from": "QA", "payload": {"status": "failed"}}],
+        # Post-processing answers QA's obligation with the failed result too.
+        reply_obligations=[{"id": 7, "status": "answered", "target_agent_id": "QA"}],
+    )
+
+    assert {"kind": "handoff_event", "id": "handoff-1", "status": "failed"} in result.evidence_refs
+    assert result.timeout_disclosures == [
+        {"kind": "handoff_event", "id": "handoff-1", "status": "failed", "agent_ids": ["QA"]}
+    ]

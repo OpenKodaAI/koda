@@ -555,3 +555,54 @@ async def test_handoff_synthesis_is_queued_after_the_last_destination_releases_t
         delivered = application.bot.texts(GROUP_CHAT_ID)
         for text in ("FE: launch page built.", "QA: launch page reviewed.", FINAL_ANSWER):
             assert any(message.startswith(text) for message in delivered), delivered
+
+
+FAILURES = [
+    pytest.param(_Turn(error="QA could not open the page: request rejected"), id="provider_error"),
+    pytest.param(
+        _Turn(error="claude API overloaded (529), try again later", error_kind="transient", retryable=True),
+        id="retries_exhausted",
+    ),
+    pytest.param(_Turn(error="QA hit a runtime guardrail", error_kind="runtime_guardrail"), id="runtime_guardrail"),
+]
+
+
+@pytest.mark.parametrize("failure", FAILURES)
+async def test_a_destination_whose_run_fails_fails_the_handoff_and_the_coordinator_discloses_it(
+    agent_db: str,
+    squad_stores: tuple[Any, Any],
+    queue_state: None,
+    application: Any,
+    routing_inputs: ExitStack,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: _Turn,
+) -> None:
+    from koda.services import queue_manager as qm
+
+    thread_store, task_store = squad_stores
+    monkeypatch.setattr(qm, "TASK_RETRY_BASE_DELAY", 1.0)
+    monkeypatch.setattr(qm, "TASK_RETRY_MAX_DELAY", 1.0)
+    provider = _ScriptedClaude(lambda query: failure if "Task request [review]" in query else _answers(query))
+    provider.install(monkeypatch)
+    _use_planner(routing_inputs, HANDOFF_TO_FE_AND_QA)
+
+    thread = await _post_telegram_message(thread_store, application)
+    answer = await _wait_for_coordinator_answer(thread_store, thread.id)
+
+    # QA's run failed in the queue, so its task failed, its failure is in the room, and the
+    # coordinator synthesis names it.
+    [synthesis_query] = [query for query in provider.queries if SYNTHESIS_MARKER in query]
+    assert "Timeouts/bloqueios declarados:\n- QA: failed" in synthesis_query
+    assert answer["content"].startswith(FINAL_ANSWER)
+    history = await thread_store.thread_history(thread_id=thread.id, limit=200)
+    assert _handoff_statuses(history) == ["requested", "failed"]
+    [qa_result] = [row for row in history if row.get("from") == "QA" and row.get("type") == "task_result"]
+    assert qa_result["metadata"]["payload"]["status"] == "failed"
+    assert failure.error is not None and failure.error in qa_result["content"]
+    assert {task.assigned_agent_id: task.status for task in await task_store.list_tasks(thread_id=thread.id)} == {
+        "FE": "done",
+        "QA": "failed",
+    }
+    delivered = application.bot.texts(GROUP_CHAT_ID)
+    assert any("falhou" in message for message in delivered), delivered
+    assert any(message.startswith(FINAL_ANSWER) for message in delivered), delivered

@@ -38,13 +38,19 @@ per-user lock it holds for post-processing, because queueing the synthesis
 turn takes that lock again (D-019):
 
 - `returned` when every answer succeeded;
-- `failed` when a destination's task result has `payload.status = failed`. The
-  failure is added to the synthesis disclosures, so the synthesis prompt names
-  the agents that failed.
+- `failed` when a destination's task result has `payload.status = failed`. A
+  destination whose run fails in the queue (a provider error, exhausted
+  retries or a runtime guardrail) gets such a task result and a failed task
+  from the queue's failure handling, which then runs the same check. An
+  answered reply obligation does not turn a failed result into `returned`.
+  The failure is added to the synthesis disclosures, so the synthesis prompt
+  names the agents that failed.
 
 When synthesis then runs, an event with that status and the same `handoff_id`
-is recorded once (its idempotency key is the handoff id and status), and it
-supersedes the open event. A status-change event has a delivery status that
+is recorded once, and it supersedes the open event. Its idempotency key is the
+handoff id and status, and the handoff writer asks the thread store to
+deduplicate on it (`post_thread_message(..., dedupe=True)`); other posts store
+their idempotency key without deduplicating. A status-change event has a delivery status that
 matches it (`completed`, `failed`, `timed_out`, or `blocked`) and is not
 addressed to the destinations again. On the web, the dashboard delivery
 watcher leaves handoff cycles to this post-turn check, so it does not add a

@@ -278,6 +278,7 @@ async def record_squad_handoff_event(
                 in_reply_to=parent_message_id,
                 # One event per handoff and status, even when two turns record it at once.
                 idempotency_key=f"handoff_event:{handoff_id}:{payload['status']}",
+                dedupe=True,
             )
         )
         handoff_metric(
