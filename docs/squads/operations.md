@@ -116,6 +116,8 @@ Before broad rollout, run these in canary:
   past 6 hops (`MAX_REPLY_DEPTH`, the bound `squad_reply` has). Each delegation
   request and `agent_send` message carries the whole chain of agents that led
   to it, ending with its sender, and every entry counts, the router's included.
+  A `squad_reply` or synthesis turn keeps the chain on every path that delivers
+  it: the local queue, the runtime API and the bus fallback.
   The sender's tool refuses the cycle, the depth or the hop count, and the
   receiving inbox refuses the same before it queues a turn, whichever runtime
   sent it: the inbox adds the sender to a chain that does not end with it, so

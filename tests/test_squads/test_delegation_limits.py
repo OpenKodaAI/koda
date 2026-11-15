@@ -308,3 +308,88 @@ async def test_the_inbox_dispatcher_refuses_an_agent_send_past_the_hop_limit(
     assert await _deliver(room, monkeypatch, "A" if chain[-1] == "B" else "B") == []
     [event] = await _limit_events(room)
     assert event["metadata"]["limit"] == "hop_count"
+
+
+def _no_local_runtime() -> Any:
+    """No runtime application in this process, so a squad turn goes to the runtime API, then the bus."""
+    return patch("koda.squads.dispatch._runtime_application_or_none", return_value=None)
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_squad_turn_carries_its_whole_chain_on_every_dispatch_path(
+    room: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The local queue, the runtime API and the bus fallback deliver the same chain (D-352)."""
+    from koda.services import queue_manager as qm
+    from koda.squads import dispatch_squad_turn
+
+    chain = ["squad_router", "A", "B"]
+
+    async def dispatch(application: Any = None) -> Any:
+        return await dispatch_squad_turn(
+            target_agent_id="C",
+            thread=room.thread,
+            thread_store=room.threads,
+            query_text="answer",
+            parent_message_id=None,
+            metadata={"from_agent": "B", "source": "squad_reply"},
+            application=application,
+            delegation_chain=list(chain),
+        )
+
+    local = AsyncMock(return_value=11)
+    with patch.object(qm, "enqueue_squad_agent_task", local):
+        assert (await dispatch(application=SimpleNamespace(bot=None))).transport == "local_queue"
+    assert local.await_args.kwargs["delegation_chain"] == chain
+
+    manager = Mock()
+    manager.send_dashboard_squad_message.return_value = {"task_id": 12, "session_id": "s-1"}
+    with _no_local_runtime(), patch("koda.control_plane.manager.get_control_plane_manager", return_value=manager):
+        assert (await dispatch()).transport == "runtime_http"
+        assert manager.send_dashboard_squad_message.call_args.kwargs["delegation_chain"] == chain
+
+        manager.send_dashboard_squad_message.side_effect = RuntimeError("runtime API down")
+        assert (await dispatch()).transport == "bus"
+    [turn] = await _deliver(room, monkeypatch, "C")
+    assert turn["delegation_chain"] == chain
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_ping_pong_through_the_bus_fallback_stops_at_the_hop_limit_with_one_event(
+    room: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A answers B with squad_reply, delivered through the bus, and B answers A with agent_send (D-352).
+
+    The reply turn keeps the chain it came with, so B's agent_send counts every hop and the two
+    stop at the hop limit, instead of starting again from ``[A]`` at each reply.
+    """
+    from koda.services.tool_dispatcher import _handle_squad_reply
+    from koda.squads import MAX_REPLY_DEPTH
+
+    for agent_id in ("A", "B"):
+        await room.threads.add_participant(thread_id=room.thread.id, agent_id=agent_id)
+    manager = Mock()
+    manager.send_dashboard_squad_message.side_effect = RuntimeError("runtime API down")
+    ctx = _ctx("A", room.thread.id, ["squad_router"])
+    refused = None
+    with _no_local_runtime(), patch("koda.control_plane.manager.get_control_plane_manager", return_value=manager):
+        for _ in range(2 * MAX_REPLY_DEPTH):
+            replied = await _handle_squad_reply({"content": "pong", "target_agent_ids": ["B"]}, ctx)
+            assert replied.success, replied.output
+            [b_turn] = await _deliver(room, monkeypatch, "B")
+            sent = await _handle_agent_send({"to": "A", "message": "ping"}, _turn_ctx(b_turn))
+            if not sent.success:
+                refused = sent
+                break
+            [a_turn] = await _deliver(room, monkeypatch, "A")
+            ctx = _turn_ctx(a_turn)
+
+    assert refused is not None, "A and B kept answering each other"
+    assert "hop" in refused.output.lower()
+    [event] = await _limit_events(room)
+    assert event["metadata"]["limit"] == "hop_count"
+    # Every hop counts: the router's, then A and B in turn, up to the one past the limit.
+    hops = ["squad_router", *(["A", "B"] * MAX_REPLY_DEPTH)]
+    assert event["metadata"]["delegation_chain"] == hops[: MAX_REPLY_DEPTH + 1]

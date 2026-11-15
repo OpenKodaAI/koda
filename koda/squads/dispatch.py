@@ -668,6 +668,9 @@ async def dispatch_squad_turn(
         "delivery_intent": "execution",
     }
     base_metadata.update(dict(metadata or {}))
+    # A turn delivered through the bus keeps the whole chain too, as the local queue and the
+    # runtime API pass it, so its cycle, depth and hop checks do not start again (D-352).
+    base_metadata["delegation_chain"] = list(delegation_chain or [])
 
     if runtime_application is not None and resolved_user_id and resolved_chat_id:
         try:
