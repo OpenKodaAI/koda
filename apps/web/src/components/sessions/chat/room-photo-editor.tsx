@@ -320,7 +320,7 @@ export function RoomPhotoEditor({
             "group relative flex h-full w-full items-center justify-center overflow-hidden rounded-full border-0 p-0 outline-none",
             "ring-1 ring-[color:var(--border-subtle)]",
             "transition-[box-shadow,transform] duration-[200ms] ease-[var(--ease-out-quart)]",
-            !isCropping && !busy && !removing && "cursor-pointer hover:ring-[color:var(--border-strong)] focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]",
+            !isCropping && !busy && !removing && "cursor-pointer hover:ring-[color:var(--border-strong)]",
             isCropping && "cursor-grab active:cursor-grabbing select-none touch-none",
             (busy || removing) && "cursor-wait",
           )}
@@ -388,7 +388,6 @@ export function RoomPhotoEditor({
               "shadow-[var(--shadow-xs)] outline-none",
               "transition-[background-color,color,border-color] duration-[160ms] ease-[var(--ease-out-quart)]",
               "hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)] hover:border-[color:var(--tone-danger-border)]",
-              "focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]",
               "disabled:cursor-wait disabled:opacity-80",
             )}
             style={{

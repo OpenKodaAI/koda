@@ -51,7 +51,7 @@ export function InfiniteListFooter({
         <button
           type="button"
           onClick={onLoadMore}
-          className="inline-flex h-8 items-center justify-center rounded-full border border-[color:var(--border-subtle)] bg-[var(--panel)] px-3 text-[0.75rem] font-medium text-[var(--text-secondary)] transition-colors duration-[140ms] hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent)]"
+          className="inline-flex h-8 items-center justify-center rounded-full border border-[color:var(--border-subtle)] bg-[var(--panel)] px-3 text-[0.75rem] font-medium text-[var(--text-secondary)] transition-colors duration-[140ms] hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]"
         >
           {label}
         </button>

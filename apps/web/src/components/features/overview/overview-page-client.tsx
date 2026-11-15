@@ -321,9 +321,9 @@ function OverviewPageContent() {
       <div className="relative" {...tourRoute("overview", tourVariant)}>
         <section className="mx-auto flex w-full max-w-[760px] flex-col items-stretch gap-7 pt-10 pb-2">
           <header className="flex flex-col items-center gap-3 text-center">
-            <h1 className="display-serif m-0 text-center font-medium text-[var(--text-primary)] [font-size:var(--font-size-display)]">
+            <h2 className="display-serif m-0 text-center font-medium text-[var(--text-primary)] [font-size:var(--font-size-display)]">
               {greeting}
-            </h1>
+            </h2>
           </header>
 
           <div {...tourAnchor("overview.composer")}>
@@ -345,7 +345,6 @@ function OverviewPageContent() {
                         className={cn(
                           "inline-flex h-8 items-center gap-2 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-transparent px-3 text-[0.8125rem] font-medium text-[var(--text-secondary)]",
                           "transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
-                          "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
                         )}
                       >
                         <Icon className="h-3.5 w-3.5" aria-hidden="true" />

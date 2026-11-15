@@ -36,7 +36,7 @@ export default async function SystemSettingsLayout({ children }: { children: Rea
       <SystemSettingsProvider settings={settings} coreIntegrations={coreIntegrations}>
         <div className="flex h-full min-h-0 flex-1 overflow-hidden">
           <SettingsSidebar />
-          <main className="flex flex-1 min-h-0 flex-col overflow-hidden">{children}</main>
+          <div className="flex flex-1 min-h-0 flex-col overflow-hidden">{children}</div>
         </div>
         <UnsavedChangesGuard />
         <SettingsModalHost />

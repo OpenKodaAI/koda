@@ -59,6 +59,28 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /Agentes/i })).toBeInTheDocument();
   });
 
+  it("names each navigation landmark uniquely (M8-E1-T3)", () => {
+    render(
+      <I18nProvider initialLanguage="pt-BR">
+        <AppTourProvider
+          pathname="/control-plane/system"
+          mobileNavOpen={false}
+          onMobileNavOpenChange={() => {}}
+        >
+          <Sidebar mobileOpen={false} onMobileOpenChange={() => {}} collapsed={false} />
+        </AppTourProvider>
+      </I18nProvider>,
+    );
+
+    const names = screen
+      .getAllByRole("navigation")
+      .map((nav) => nav.getAttribute("aria-label") ?? "");
+    expect(names).toEqual(["Navegação principal", "Sistema"]);
+    // The <aside> around them is a complementary landmark with its own name,
+    // so screen readers do not announce "Navegação principal" twice.
+    expect(screen.getByRole("complementary")).toHaveAttribute("aria-label", "Barra lateral");
+  });
+
   it("does not keep Agents active when General settings is selected", () => {
     const agentsItem: SidebarNavItem = {
       href: "/control-plane",

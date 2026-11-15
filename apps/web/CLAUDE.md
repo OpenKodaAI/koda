@@ -62,6 +62,16 @@ Tokens live in [`apps/web/src/app/globals.css`](src/app/globals.css):
 - Radius tokens: `--radius-chip: 8` · `--radius-panel-sm: 10` · `--radius-panel: 12` · `--radius-shell: 14` · `--radius-input: 14` · `--radius-pill: 999`.
 - Shadows barely-there: `--shadow-xs: 0 1px 0 rgba(0,0,0,0.25)`, `--shadow-floating: 0 8px 28px rgba(0,0,0,0.45)`. No stacked `inset + outer` shadows.
 
+### Focus (mandatory)
+
+- Keyboard focus is always visible, in both themes. `--focus-ring` (`#8A8A8A` dark, `#6F685F` light) keeps at least 3:1 contrast against every surface token (`--canvas` … `--surface-elevated-soft`) and against the accent CTA fill. A surface outside those tokens sets `--focus-ring` locally to a colour that keeps 3:1 there: the toast uses its own text colour on the tone fills, and the tour coachmark uses `--text-secondary` on its glass card. `src/components/ui/focus-ring-contract.test.tsx` enforces all of this.
+- One focus indicator per control (decision M8-E1-T1, D-114):
+  - **Controls that are not form fields** (buttons, links, the Select trigger, menu options, tabs, native checkboxes and radios): the global 2px `--focus-ring` outline. It is unlayered CSS, so Tailwind `outline-none` / `outline-hidden` (in `@layer utilities`) cannot remove it, and the flat-design reset nulls box-shadow on these elements, so `ring-*` / `shadow-*` focus utilities on them never paint. Do not add them; the contract test scans every component and fails on a `focus:`/`focus-visible:` `ring-*`, `shadow-*`, `outline-none` or `outline-hidden` utility outside a form field. To restyle a control's ring, set `outline` / `outline-offset` in a component rule, in `--focus-ring`.
+  - **Form fields** (`input` other than checkboxes and radios, `textarea`, `select`, `[contenteditable="true"]`): the global `!important` rule removes their outline, so each draws its own ring with box-shadow. `.field-shell` draws it for the fields it styles; on a `<button>` (the ModelSelector trigger) it leaves the global outline in place. Text fields recolor their border to `--focus-ring` (or `--accent` on the auth screens) and add a 1px ring of the same colour; every range input, `.ui-slider` or not, adds a 2px `--focus-ring` ring (`input[type="range"]:focus-visible`). The flat-design reset near the bottom of `globals.css` is `html body *:where(:not(:is(input, textarea, select, [contenteditable="true"]):focus-visible))`: it spares only these fields while they hold focus, so their ring paints. Keep their focused state free of decorative shadows, because the reset no longer hides them there.
+  - **Wrappers that frame a bare field** (search boxes, composers, `TagInputField`): the reset nulls the wrapper's box-shadow, so draw the ring with an outline: `focus-within:border-[color:var(--focus-ring)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]` (add `focus-within:-outline-offset-1` on a borderless wrapper). Never `focus-within:shadow-*` or `focus-within:ring-*`.
+  - **Dimmed controls**: opacity dims the outline or ring painted inside the element too. A control dimmed with an `opacity-*` utility (the toast buttons, the inheriting EffortPicker slider and number field) adds `focus-visible:opacity-100`; a dimmed group around focusable controls (the inheriting EffortPicker tabs) adds `has-[:focus-visible]:opacity-100`. The contract test checks the toast and the inheriting EffortPicker; it does not find dimmed controls elsewhere.
+- Do not widen the box-shadow reset or raise its specificity, and do not add another `box-shadow: none !important` that matches a focused form field. Never use a translucent token such as `--accent-muted` as the only focus indicator.
+
 ### Glass-blur (mandatory for every overlay)
 
 Every floating surface that overlays another surface MUST get glass-blur. There are exactly four canonical classes — the only correct way to ship an overlay is to apply one of them. The `backdrop-filter` rule on each is `!important` and must stay that way; do not introduce new bg/blur stacks.
@@ -93,8 +103,8 @@ Modal/drawer/popover open and close must never feel abrupt. Pair the glass-blur 
 | `app-drawer-anim-right` | Right-side drawers. |
 | `app-drawer-anim-left` | Left-side drawers. |
 | `app-floating-anim` | Inline-portaled floating menus (e.g. `CommandBar` inline dropdown). Subtle fade + 4px lift + 0.98 scale, faster (160ms) than modals. |
-| Radix data-state animations | `Drawer`, `Popover`, `Tooltip`, `Select`, `CommandBarModal` (already wired via `data-[state=open]:animate-in`). |
-| Framer Motion | `agent-switcher`, `language-switcher`, `settings-warning-indicator`, `agent-catalog`'s `WorkspaceSelectorDropdown` / `CreatePopover`, `tour-coachmark` — these have bespoke choreography, leave them. |
+| Radix data-state animations | `Drawer`, `Popover`, `Tooltip`, `Select`, `CommandBarModal` (already wired via `data-[state=open]:animate-in`). `LanguageSwitcher` is a Radix Select too; Radix Select unmounts its list on close, so the switcher fades out an inert, `aria-hidden` copy of the list for 160ms. Do not keep the Root open for an exit fade: Radix would keep the keyboard, the focus trap and the page lock through it. |
+| Framer Motion | `agent-switcher`, `settings-warning-indicator`, `agent-catalog`'s `WorkspaceSelectorDropdown` / `CreatePopover`, `tour-coachmark` — these have bespoke choreography, leave them. |
 
 Pattern:
 
@@ -144,7 +154,7 @@ Rules:
 Primitives live under `apps/web/src/components/ui/` and `apps/web/src/components/dashboard/`.
 
 - **Button** heights: `lg` 36 / `md` 32 / `sm` 28. Radius `--radius-panel-sm`. Variants: `primary`, `accent`, `mono`, `destructive`, `secondary`, `outline`, `ghost`, `dim`, `foreground`.
-- **Input / Select**: default `h-9` (36px), radius `--radius-input` (14px), bg `--panel-soft`, focus ring `--accent` with `box-shadow: 0 0 0 1px var(--accent-muted)`.
+- **Input / Textarea / Select**: default `h-9` (36px), radius `--radius-input` (14px), bg `--panel-soft`. On focus, Input and Textarea turn their border `--focus-ring` and add a 1px `--focus-ring` ring (`focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]`); the Select trigger is a button, so its ring is the global outline.
 - **SoftTabs** ([`ui/soft-tabs.tsx`](src/components/ui/soft-tabs.tsx)): outer `h-9 p-0.5 rounded-pill`, inner buttons `h-8 px-3`.
 - **Tooltip**: `max-w-220`, `text-[0.75rem]`, radius-chip 8. Glass surface — `--overlay-floating-bg` + `--overlay-floating-filter`.
 - **Modal / Drawer** ([`ui/drawer.tsx`](src/components/ui/drawer.tsx)): Radix Dialog wrapper. Drawers use `modal={false}` by default to preserve context behind. Single panel, radius-shell 14. Glass surface — `--overlay-modal-bg` + `--overlay-modal-filter`; the backdrop scrim uses `--overlay-backdrop-*`.

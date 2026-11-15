@@ -307,7 +307,7 @@ export function ProfilePhotoEditor({
           className={cn(
             "group relative flex h-full w-full items-center justify-center overflow-hidden rounded-full border-0 bg-[var(--panel-soft)] p-0 outline-none ring-1 ring-[color:var(--border-subtle)]",
             "transition-[background-color,box-shadow] duration-[160ms] ease-[var(--ease-out-quart)]",
-            !isCropping && !isBusy && "cursor-pointer hover:bg-[var(--panel)] hover:ring-[color:var(--border-strong)] focus-visible:ring-2 focus-visible:ring-[color:var(--accent)]",
+            !isCropping && !isBusy && "cursor-pointer hover:bg-[var(--panel)] hover:ring-[color:var(--border-strong)]",
             isCropping && "cursor-grab select-none touch-none active:cursor-grabbing",
             isBusy && "cursor-wait",
           )}
@@ -361,7 +361,7 @@ export function ProfilePhotoEditor({
             onClick={(event) => void handleRemove(event)}
             disabled={isBusy}
             aria-label={t("account.profile.photo.remove", undefined)}
-            className="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--panel-strong)] text-[var(--text-tertiary)] shadow-[var(--shadow-xs)] transition-[background-color,border-color,color] duration-[160ms] hover:border-[var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] disabled:cursor-wait disabled:opacity-80"
+            className="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--border-strong)] bg-[var(--panel-strong)] text-[var(--text-tertiary)] shadow-[var(--shadow-xs)] transition-[background-color,border-color,color] duration-[160ms] hover:border-[var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg)] hover:text-[var(--tone-danger-dot)] disabled:cursor-wait disabled:opacity-80"
             style={{ position: "absolute", top: -4, right: -4, transform: "translateZ(0)" }}
           >
             {removing ? (

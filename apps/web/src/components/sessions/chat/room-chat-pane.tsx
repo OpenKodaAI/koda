@@ -828,9 +828,9 @@ export function RoomChatPane({
             <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
               {t("sessions.room.empty.eyebrow", undefined)}
             </p>
-            <h1 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
+            <h2 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
               {t("sessions.room.empty.title", undefined)}
-            </h1>
+            </h2>
             <p className="m-0 max-w-[420px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
               {t("sessions.room.empty.helper", undefined)}
             </p>
@@ -1007,7 +1007,7 @@ export function RoomChatPane({
                         "border border-[color:var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)] opacity-0 shadow-[var(--shadow-xs)]",
                         "transition-[opacity,background-color,color,border-color] duration-[120ms]",
                         "hover:border-[color:var(--border-strong)] hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]",
-                        "focus:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]",
+                        "focus:opacity-100",
                         "group-hover:opacity-100",
                       )}
                       aria-label={t("sessions.room.reply.action", undefined)}
@@ -1038,7 +1038,7 @@ export function RoomChatPane({
           className={cn(
             "flex flex-col rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] shadow-[var(--shadow-xs)]",
             "transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-            "focus-within:border-[color:var(--border-strong)] focus-within:bg-[var(--panel)] focus-within:shadow-[0_0_0_1px_var(--border-strong)]",
+            "focus-within:border-[color:var(--focus-ring)] focus-within:bg-[var(--panel)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]",
             submitting && "opacity-70",
           )}
         >

@@ -113,7 +113,7 @@ export function CategoryBarChart({
                   <TooltipTrigger asChild>
                     <button
                       type="button"
-                      className="h-6 rounded-[3px] transition-opacity focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]"
+                      className="h-6 rounded-[3px] transition-opacity"
                       style={{
                         width: `${shareWidth}%`,
                         opacity: activeId && !active ? 0.45 : 1,

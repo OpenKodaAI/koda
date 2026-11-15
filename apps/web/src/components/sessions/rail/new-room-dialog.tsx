@@ -229,7 +229,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               }}
               placeholder={t("sessions.room.create.namePlaceholder", undefined)}
               maxLength={120}
-              className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[var(--font-size-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] focus:border-[color:var(--border-strong)] focus:bg-[var(--panel)] focus:shadow-[0_0_0_1px_var(--border-strong)]"
+              className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[var(--font-size-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] focus:border-[color:var(--focus-ring)] focus:bg-[var(--panel)] focus:shadow-[0_0_0_1px_var(--focus-ring)]"
             />
           </label>
 
@@ -242,7 +242,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                 </span>
               ) : null}
             </span>
-            <label className="flex h-9 w-full items-center gap-2 rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 transition-[border-color,background-color,box-shadow] duration-[120ms] focus-within:border-[color:var(--border-strong)] focus-within:bg-[var(--panel)] focus-within:shadow-[0_0_0_1px_var(--border-strong)]">
+            <label className="flex h-9 w-full items-center gap-2 rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 transition-[border-color,background-color,box-shadow] duration-[120ms] focus-within:border-[color:var(--focus-ring)] focus-within:bg-[var(--panel)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]">
               <Search
                 className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]"
                 strokeWidth={1.75}
@@ -344,7 +344,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               type="button"
               onClick={handleCancel}
               disabled={submitting}
-              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium text-[var(--text-secondary)] transition-colors duration-[120ms] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)] disabled:opacity-60"
+              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium text-[var(--text-secondary)] transition-colors duration-[120ms] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60"
             >
               {t("common.cancel", undefined)}
             </button>
@@ -355,7 +355,6 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               className={cn(
                 "inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium",
                 "bg-[var(--accent)] text-[var(--accent-text)] transition-[background-color,color] duration-[120ms] hover:bg-[var(--accent-hover)]",
-                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
                 "disabled:bg-[var(--panel-strong)] disabled:text-[var(--text-quaternary)]",
               )}
             >

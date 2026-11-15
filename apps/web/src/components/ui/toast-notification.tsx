@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertCircle,
@@ -130,10 +131,17 @@ function ToastItem({ toast }: { toast: Toast }) {
     >
       <div
         role="status"
-        style={{
-          background: `var(${meta.bgVar})`,
-          color: `var(${meta.fgVar})`,
-        }}
+        style={
+          {
+            background: `var(${meta.bgVar})`,
+            color: `var(${meta.fgVar})`,
+            // The global ring is under 3:1 on the dark tone fills; the
+            // toast's own text colour contrasts with its fill (M8-E1-T1).
+            // The dimmed buttons return to full opacity on focus, since
+            // opacity dims their outline too.
+            "--focus-ring": `var(${meta.fgVar})`,
+          } as CSSProperties
+        }
         className={cn(
           "flex items-center gap-2 rounded-[var(--radius-pill)] py-1.5 pr-1.5 pl-3 shadow-[var(--shadow-floating)]",
           "text-[0.8125rem] leading-5",
@@ -169,7 +177,7 @@ function ToastItem({ toast }: { toast: Toast }) {
             className={cn(
               "ml-2 inline-flex h-6 shrink-0 items-center justify-center rounded-full px-2.5",
               "border border-current/20 text-[0.6875rem] font-medium leading-none opacity-85",
-              "transition-[opacity,background-color,border-color] hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10",
+              "transition-[opacity,background-color,border-color] hover:bg-black/10 hover:opacity-100 focus-visible:opacity-100 dark:hover:bg-white/10",
               "disabled:pointer-events-none disabled:opacity-45",
             )}
           >
@@ -181,7 +189,7 @@ function ToastItem({ toast }: { toast: Toast }) {
             type="button"
             onClick={() => removeToast(toast.id)}
             aria-label={t("generated.ui.fechar_aviso_b7f6fbc3")}
-            className="ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full opacity-70 transition-[opacity,background-color] hover:bg-black/10 hover:opacity-100 dark:hover:bg-white/10"
+            className="ml-1 inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full opacity-70 transition-[opacity,background-color] hover:bg-black/10 hover:opacity-100 focus-visible:opacity-100 dark:hover:bg-white/10"
           >
             <X className="icon-xs" strokeWidth={1.75} />
           </button>

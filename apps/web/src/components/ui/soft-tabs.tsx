@@ -62,7 +62,6 @@ export function SoftTabs({ items, value, onChange, className, ariaLabel }: SoftT
             onKeyDown={(event) => handleKeyDown(event, index)}
             className={cn(
               "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border-0 px-3 text-[0.8125rem] font-medium outline-none transition-[color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-              "focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel-soft)]",
               selected
                 ? "bg-[var(--panel-strong)] text-[var(--text-primary)]"
                 : "bg-transparent text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]",

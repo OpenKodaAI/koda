@@ -92,7 +92,7 @@ export function TagInputField({
         </div>
 
         <div
-          className="field-shell flex min-h-[56px] flex-wrap items-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-3 cursor-text"
+          className="field-shell flex min-h-[56px] flex-wrap items-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-3 cursor-text focus-within:border-[color:var(--focus-ring)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]"
           onClick={(event) => {
             const inputElement = (event.currentTarget as HTMLElement).querySelector("input");
             inputElement?.focus();

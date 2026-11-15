@@ -182,7 +182,6 @@ export function SessionArtifactRail({
             "inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)]",
             "text-[var(--text-tertiary)] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             "hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
           )}
         >
           <PanelRight className="h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -393,7 +392,6 @@ function ArtifactRow({
             "group flex w-full items-center gap-2 rounded-[var(--radius-panel-sm)] px-2 py-1.5 text-left",
             "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             "hover:bg-[var(--hover-tint)]",
-            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--panel-soft)]",
           )}
         >
           {content}

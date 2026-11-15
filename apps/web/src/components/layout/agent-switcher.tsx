@@ -375,7 +375,6 @@ export function AgentSwitcher({
             "rounded-[calc(var(--radius-input)-4px)] bg-transparent px-2 text-left",
             "transition-colors duration-[var(--transition-fast)]",
             "hover:bg-[var(--hover-tint)]",
-            "focus-visible:outline-none",
             "disabled:cursor-not-allowed disabled:opacity-60",
             open && "bg-[var(--hover-tint)]",
           )}
@@ -433,7 +432,6 @@ export function AgentSwitcher({
               "rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[var(--text-primary)]",
               "transition-colors duration-[var(--transition-fast)]",
               "hover:bg-[var(--surface-hover)] active:scale-[0.96]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--canvas)]",
               "disabled:cursor-not-allowed disabled:opacity-60",
             )}
             aria-label={t("agentSwitcher.createAria")}
