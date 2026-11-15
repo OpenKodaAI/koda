@@ -134,8 +134,6 @@ def _tool_family(tool_id: str) -> str:
         return "plugin"
     if normalized.startswith("workflow_"):
         return "workflow"
-    if normalized.startswith("webhook_"):
-        return "webhook"
     return normalized or "general"
 
 

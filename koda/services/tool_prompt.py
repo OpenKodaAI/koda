@@ -20,7 +20,6 @@ from koda.config import (
     PLUGIN_SYSTEM_ENABLED,
     SHELL_ENABLED,
     SNAPSHOT_ENABLED,
-    WEBHOOK_ENABLED,
     WORKFLOW_ENABLED,
 )
 from koda.config import (
@@ -331,7 +330,6 @@ def build_agent_tools_prompt(
         "workflows": WORKFLOW_ENABLED,
         "inter_agent": INTER_AGENT_ENABLED,
         "snapshots": SNAPSHOT_ENABLED,
-        "webhooks": WEBHOOK_ENABLED,
         **dict(feature_flags or {}),
     }
     tool_policy = _configured_tool_policy(tool_policy)
@@ -628,25 +626,6 @@ Snapshots are kept per task (or per user outside a task).
 1. Save a snapshot before making significant environment changes.
 2. Use `snapshot_diff` to understand what changed between two points in time.
 3. Snapshot names must be alphanumeric with hyphens/underscores (1-64 chars).""")
-
-    if WEBHOOK_ENABLED:
-        sections.append("""
-### Webhooks
-Register webhook endpoints to receive external events and wait for incoming payloads.
-
-- `webhook_register` — Register a webhook endpoint.
-  Params: `{"name": "deploy-hook", "path": "/hooks/deploy"}`
-  Optional: `{"name": "...", "path": "...", "secret": "s3cret"}`
-- `webhook_unregister` — Remove a webhook. Params: `{"name": "deploy-hook"}`
-- `webhook_list` — List registered webhooks. Params: `{}`
-- `event_wait` — Wait for an incoming webhook event.
-  Params: `{"event_type": "webhook.deploy-hook"}`
-  Optional: `{"event_type": "...", "timeout": 60}` (max 300s)
-
-#### Webhook Best Practices
-1. Use `webhook_list` to check existing registrations before creating new ones.
-2. Set a secret for production webhooks to verify signatures.
-3. Use reasonable timeouts for `event_wait` to avoid blocking the agent.""")
 
     if PLUGIN_SYSTEM_ENABLED:
         sections.append("""

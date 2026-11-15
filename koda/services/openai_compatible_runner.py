@@ -310,29 +310,20 @@ async def run_openai_compatible(
     chat_url = _join_with_base(base_url, profile.chat_path)
     try:
         async with _provider_session(timeout, allow_private=allow_private) as session:
-            request_task: asyncio.Task[aiohttp.ClientResponse] = asyncio.create_task(
-                session.post(
-                    chat_url,
-                    headers=_profile_headers(profile, api_key, env),
-                    json=payload,
-                    allow_redirects=allow_private,
-                )
+            resp = await session.post(
+                chat_url,
+                headers=_profile_headers(profile, api_key, env),
+                json=payload,
+                allow_redirects=allow_private,
             )
-            if process_holder is not None:
-                process_holder["task"] = request_task
-            try:
-                resp = await request_task
-            finally:
-                if process_holder is not None:
-                    process_holder.pop("task", None)
             async with resp:
                 status = resp.status
                 body_text = await resp.text(encoding="utf-8", errors="replace")
     except asyncio.CancelledError:
         # When this task is itself being cancelled (/cancel, scheduler control,
         # shutdown) the cancellation must propagate so the caller stops instead
-        # of handling an error result. Only a cancel of the inner request task
-        # is reported as a provider error.
+        # of handling an error result. A CancelledError raised while this task
+        # is not being cancelled is reported as a provider error.
         current = asyncio.current_task()
         if current is not None and current.cancelling():
             raise
@@ -512,8 +503,6 @@ async def run_openai_compatible_streaming(
                 allow_redirects=allow_private,
             ) as resp,
         ):
-            if process_holder is not None:
-                process_holder["task"] = asyncio.current_task()
             if resp.status >= 300:  # an unfollowed redirect is an error, not an empty stream
                 body_text = await resp.text(encoding="utf-8", errors="replace")
                 kind, retryable = _classify_http_error(resp.status, body_text)
@@ -582,9 +571,6 @@ async def run_openai_compatible_streaming(
             metadata_collector["retryable"] = True
             metadata_collector["error_message"] = f"{profile.provider_id} stream error: {exc}"
         return
-    finally:
-        if process_holder is not None:
-            process_holder.pop("task", None)
 
     if citations_collected:
         footer = _build_citations_footer(citations_collected)

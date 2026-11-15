@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -94,3 +95,13 @@ def test_docs_never_claim_accepting_a_proposal_changes_the_agent() -> None:
     assert "non-mutating until the proposal lifecycle approves" not in phase_contracts
     assert "accepting them does not change the agent" in proposal_contract
     assert "accepting the proposal does not change the agent" in phase_contracts
+
+
+def test_scaling_runbook_commands_name_existing_test_files() -> None:
+    # pytest stops on the first missing path and runs none of the others.
+    runbook = _read("docs/operations/scaling-resilience-runbook.md")
+
+    paths = re.findall(r"tests/[\w/]+\.py", runbook)
+
+    assert paths
+    assert [path for path in paths if not (ROOT / path).is_file()] == []

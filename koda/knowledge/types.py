@@ -339,26 +339,6 @@ class GraphRelation:
 
 
 @dataclass(slots=True)
-class ArtifactEvidenceNode:
-    """Persisted multimodal evidence extracted from artifact dossiers."""
-
-    evidence_key: str
-    modality: EvidenceModality
-    label: str
-    extracted_text: str
-    agent_id: str | None = None
-    task_id: int | None = None
-    source_path: str = ""
-    source_url: str = ""
-    artifact_id: str = ""
-    confidence: float = 0.0
-    trust_level: str = "untrusted"
-    time_span: str = ""
-    frame_ref: str = ""
-    metadata: dict[str, object] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
 class ArtifactDerivative:
     """Persistable derivative created from one raw multimodal artifact."""
 

@@ -159,7 +159,7 @@ def test_retrieval_v2_fails_closed_when_rust_engine_is_not_ready():
 
 
 def test_graph_materializer_extracts_canonical_entities_from_entries():
-    repository = SimpleNamespace(batch_upsert_graph=MagicMock(), batch_upsert_artifact_evidence=MagicMock())
+    repository = SimpleNamespace(batch_upsert_graph=MagicMock())
     materializer = KnowledgeGraphMaterializer(repository, "AGENT_A")
     entry = KnowledgeEntry(
         id="policy-graph-1",
@@ -1536,18 +1536,12 @@ def off_storage_mode(monkeypatch: pytest.MonkeyPatch) -> Iterator[_GovernanceWri
     monkeypatch.setattr("koda.knowledge.storage_v2.KNOWLEDGE_V2_STORAGE_MODE", "off")
     monkeypatch.setattr("koda.knowledge.repository.KNOWLEDGE_V2_STORAGE_MODE", "off")
     monkeypatch.setattr("koda.knowledge.manager.KNOWLEDGE_ENABLED", True)
-    monkeypatch.setattr("koda.knowledge.manager.KNOWLEDGE_MULTIMODAL_GRAPH_ENABLED", True)
     writes = _GovernanceWrites()
     monkeypatch.setattr(governance_store, "_primary_enabled", lambda _agent_id=None: True)
     monkeypatch.setattr(governance_store, "primary_execute", lambda sql, *_a, **_k: ("execute", sql))
     monkeypatch.setattr(governance_store, "primary_fetch_all", lambda sql, *_a, **_k: ("fetch", sql))
     monkeypatch.setattr(governance_store, "run_coro_sync", writes.run)
     monkeypatch.setattr(KnowledgeRepository, "batch_upsert_graph", MagicMock(name="batch_upsert_graph"))
-    monkeypatch.setattr(
-        KnowledgeRepository,
-        "batch_upsert_artifact_evidence",
-        MagicMock(name="batch_upsert_artifact_evidence"),
-    )
     yield writes
     clear_shared_postgres_backends()
 
@@ -1602,32 +1596,6 @@ async def test_off_mode_resolve_raises_without_registering_workspace_sources(
         )
 
     assert off_storage_mode.source_registrations() == []
-
-
-@pytest.mark.asyncio
-async def test_off_mode_artifact_ingest_writes_no_evidence_rows(off_storage_mode: _GovernanceWrites):
-    """In OFF mode an artifact dossier no longer produces artifact_evidence_nodes
-    or graph rows (needs operator sign-off)."""
-    artifact = SimpleNamespace(
-        ref=SimpleNamespace(kind="pdf", label="invoice.pdf", path="/tmp/invoice.pdf", url="", artifact_id="art-1"),
-        summary="Invoice total 42",
-        evidence_chunks=[SimpleNamespace(citation="invoice.pdf p1", excerpt="Invoice total 42", score_hint=0.8)],
-        metadata={},
-        status=SimpleNamespace(value="ready"),
-        critical_for_action=False,
-    )
-    dossier = SimpleNamespace(subject_id="msg-1", subject_label="PDF upload", summary="one pdf", artifacts=[artifact])
-    manager = KnowledgeManager("AGENT_A", retrieval_service=_NoStartRetrieval())  # type: ignore[arg-type]
-    await manager.initialize()
-
-    nodes = await manager.ingest_artifact_dossiers(
-        KnowledgeQueryContext(query="read the invoice", agent_id="AGENT_A", task_id=8),
-        [dossier],
-    )
-
-    assert nodes == []
-    cast(MagicMock, KnowledgeRepository.batch_upsert_artifact_evidence).assert_not_called()
-    cast(MagicMock, KnowledgeRepository.batch_upsert_graph).assert_not_called()
 
 
 @pytest.mark.asyncio

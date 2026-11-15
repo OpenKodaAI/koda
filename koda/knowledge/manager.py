@@ -15,7 +15,6 @@ from koda.knowledge.config import (
     KNOWLEDGE_CONTEXT_MAX_TOKENS,
     KNOWLEDGE_ENABLED,
     KNOWLEDGE_MAX_RESULTS,
-    KNOWLEDGE_MULTIMODAL_GRAPH_ENABLED,
     KNOWLEDGE_V2_ENABLED,
 )
 from koda.knowledge.experiments import KnowledgeExperimentPlan, KnowledgeExperimentService
@@ -24,7 +23,6 @@ from koda.knowledge.retrieval_v2 import KnowledgeRetrievalService, RetrievalEngi
 from koda.knowledge.storage_v2 import KnowledgeStorageV2
 from koda.knowledge.telemetry import knowledge_span
 from koda.knowledge.types import (
-    ArtifactEvidenceNode,
     AuthoritativeEvidence,
     CitationRequirement,
     KnowledgeConflict,
@@ -177,26 +175,6 @@ class KnowledgeManager:
         if not resolution.hits:
             return "", []
         return resolution.context, resolution.hits
-
-    async def ingest_artifact_dossiers(
-        self,
-        query_context: KnowledgeQueryContext,
-        dossiers: list[Any],
-    ) -> list[ArtifactEvidenceNode]:
-        """Return no evidence nodes: this manager does not ingest artifact dossiers.
-
-        No mode writes artifact evidence here. Before M4-E1-T6 the OFF storage
-        mode tried to write ``artifact_evidence_nodes``, which no schema creates.
-        """
-        if not KNOWLEDGE_MULTIMODAL_GRAPH_ENABLED or not dossiers or query_context.task_id is None:
-            return []
-        if self._storage_v2.primary_read_enabled():
-            log.info(
-                "knowledge_primary_read_only_skips_artifact_ingest",
-                task_id=query_context.task_id,
-                dossier_count=len(dossiers),
-            )
-        return []
 
     def _resolve_with_strategy(
         self,

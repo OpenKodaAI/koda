@@ -211,7 +211,6 @@ class TestPhase1NativeToolHelpers:
         monkeypatch.setattr(config_module, "WORKFLOW_ENABLED", False)
         monkeypatch.setattr(config_module, "INTER_AGENT_ENABLED", False)
         monkeypatch.setattr(config_module, "SNAPSHOT_ENABLED", False)
-        monkeypatch.setattr(config_module, "WEBHOOK_ENABLED", False)
 
         schemas = _native_tool_schemas_for_runtime()
         schema_by_name = {item["function"]["name"]: item for item in schemas}
@@ -1108,8 +1107,13 @@ class TestParseQueueItem:
 
     def test_parse_normal_with_images(self):
         mock_update = MagicMock()
-        mock_update.effective_chat.id = 789
-        raw = (mock_update, "hello world", ["/tmp/img.png"])
+        raw = {
+            "_user_message": True,
+            "chat_id": 789,
+            "query_text": "hello world",
+            "update": mock_update,
+            "image_paths": ["/tmp/img.png"],
+        }
         item = _parse_queue_item(raw)
         assert item.chat_id == 789
         assert item.query_text == "hello world"
@@ -1118,9 +1122,7 @@ class TestParseQueueItem:
         assert item.is_continuation is False
 
     def test_parse_normal_without_images(self):
-        mock_update = MagicMock()
-        mock_update.effective_chat.id = 100
-        raw = (mock_update, "just text")
+        raw = {"_user_message": True, "chat_id": 100, "query_text": "just text", "image_paths": []}
         item = _parse_queue_item(raw)
         assert item.chat_id == 100
         assert item.query_text == "just text"
@@ -1808,7 +1810,7 @@ class TestCancelQueuedTask:
         # Enqueue three items with task_ids 1, 2, 3, tracked as the enqueue
         # helpers do.
         for tid in (1, 2, 3):
-            await queue.put(("update", "query", "work_dir", tid))
+            await queue.put({"_task_id": tid, "chat_id": 1, "query_text": "query"})
             _track_queued_task_id(user_id, tid)
 
         try:
@@ -2379,13 +2381,8 @@ class TestQueueOrdering:
         queue = asyncio.Queue()
         _user_queues[user_id] = queue
 
-        first_update = MagicMock()
-        first_update.effective_chat.id = 654
-        second_update = MagicMock()
-        second_update.effective_chat.id = 654
-
-        await queue.put((first_update, "primeira", None, None, 1))
-        await queue.put((second_update, "segunda", None, None, 2))
+        await queue.put({"_task_id": 1, "chat_id": 654, "query_text": "primeira"})
+        await queue.put({"_task_id": 2, "chat_id": 654, "query_text": "segunda"})
 
         started: list[int] = []
         active = 0

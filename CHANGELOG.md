@@ -225,6 +225,12 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - The repository no longer tracks two third-party JavaScript bundles at its root, or
   another project's `CHANGELOG.md`. Neither was in the npm package or the images.
   (M1-E7-T6, D-128, D-084)
+- Agents no longer have the `webhook_register`, `webhook_unregister`, `webhook_list`
+  and `event_wait` tools, and the `WEBHOOK_ENABLED`, `WEBHOOK_MAX_REGISTRATIONS` and
+  `WEBHOOK_TIMEOUT_MAX` settings are gone. No route ever delivered an event to a
+  registered webhook, so `event_wait` always timed out. An agent whose tool policy
+  still lists one of these tools fails validation with "unknown core tools" until the
+  id is removed from its tool policy JSON. (M4-E1-T10, D-067)
 
 ### Fixed
 

@@ -11,7 +11,7 @@ from typing import Any, cast
 
 from koda.config import AGENT_ID
 from koda.knowledge.config import KNOWLEDGE_V2_STORAGE_MODE
-from koda.knowledge.types import ArtifactEvidenceNode, GraphEntity, GraphRelation, RetrievalTrace
+from koda.knowledge.types import GraphEntity, GraphRelation, RetrievalTrace
 from koda.knowledge.v2.postgres_backend import KnowledgeV2PostgresBackend
 from koda.state.primary import primary_execute, primary_fetch_all, primary_fetch_one, primary_fetch_val
 
@@ -471,63 +471,6 @@ class KnowledgeRepository:
             return
         self._require_primary_backend()
         self._run_coro_sync(self._postgres.upsert_graph(entities=list(entities), relations=list(relations)))
-        return
-
-    def batch_upsert_artifact_evidence(self, nodes: Sequence[ArtifactEvidenceNode]) -> None:
-        if not nodes:
-            return
-        now = _now_iso()
-        self._require_primary_backend()
-        for node in nodes:
-            self._run_coro_sync(
-                primary_execute(
-                    """INSERT INTO artifact_evidence_nodes
-                       (evidence_key, agent_id, task_id, artifact_id, project_key, workspace_fingerprint,
-                        modality, label, extracted_text, source_path, source_url, source_hash, embedding_json,
-                        confidence, trust_level, time_span, frame_ref, metadata_json, created_at)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                       ON CONFLICT(evidence_key) DO UPDATE SET
-                           agent_id = EXCLUDED.agent_id,
-                           task_id = EXCLUDED.task_id,
-                           artifact_id = EXCLUDED.artifact_id,
-                           project_key = EXCLUDED.project_key,
-                           workspace_fingerprint = EXCLUDED.workspace_fingerprint,
-                           modality = EXCLUDED.modality,
-                           label = EXCLUDED.label,
-                           extracted_text = EXCLUDED.extracted_text,
-                           source_path = EXCLUDED.source_path,
-                           source_url = EXCLUDED.source_url,
-                           source_hash = EXCLUDED.source_hash,
-                           embedding_json = EXCLUDED.embedding_json,
-                           confidence = EXCLUDED.confidence,
-                           trust_level = EXCLUDED.trust_level,
-                           time_span = EXCLUDED.time_span,
-                           frame_ref = EXCLUDED.frame_ref,
-                           metadata_json = EXCLUDED.metadata_json""",
-                    (
-                        node.evidence_key,
-                        _scope(node.agent_id or self._agent_id),
-                        node.task_id,
-                        node.artifact_id,
-                        str(node.metadata.get("project_key") or ""),
-                        str(node.metadata.get("workspace_fingerprint") or ""),
-                        node.modality.value,
-                        node.label,
-                        node.extracted_text,
-                        node.source_path,
-                        node.source_url,
-                        str(node.metadata.get("source_hash") or ""),
-                        node.metadata.get("embedding") or [],
-                        node.confidence,
-                        node.trust_level,
-                        node.time_span,
-                        node.frame_ref,
-                        node.metadata or {},
-                        now,
-                    ),
-                    agent_id=_scope(node.agent_id or self._agent_id),
-                )
-            )
         return
 
     def get_retrieval_trace(self, trace_id: int) -> dict[str, Any] | None:

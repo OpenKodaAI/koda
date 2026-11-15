@@ -101,7 +101,6 @@ pytest tests/test_services/test_queue_manager_lease.py \
   tests/test_services/test_queue_resilience.py \
   tests/test_services/test_queue_ops_benchmark.py \
   tests/test_services/test_resilience.py \
-  tests/test_services/test_global_semaphore.py \
   tests/test_services/runtime/test_recovery_manager.py \
   tests/test_services/runtime/test_events_broker.py
 ```
