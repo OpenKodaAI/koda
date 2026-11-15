@@ -636,11 +636,16 @@ a {
   text-decoration: none;
 }
 
-button,
-input,
-select,
-textarea {
-  font: inherit;
+/* In @layer base, not unlayered: unlayered CSS beats every layered rule, so it
+   overrode every Tailwind font utility on these controls (D-331). Here a
+   utility wins and an unstyled control still inherits. */
+@layer base {
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
 }
 
 button {
