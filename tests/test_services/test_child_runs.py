@@ -9,6 +9,7 @@ import pytest
 
 from koda.services.child_runs import (
     MAX_CHILD_RUNS_PER_CALL,
+    child_run_tool_denial,
     delegate_child_task_tool,
     make_child_run_id,
     make_idempotency_key,
@@ -127,3 +128,13 @@ async def test_child_run_starts_with_the_parent_capability_envelope() -> None:
     assert started["context_policy"]["include_memory"] is True
     assert "allow_memory_writes" not in started["context_policy"]
     assert "include_sensitive" not in started["context_policy"]
+
+
+def test_child_run_denied_task_because_child_runs_do_not_nest() -> None:
+    """The parent has `task` (it just spawned the child), so the denial must not blame the parent."""
+
+    denial = child_run_tool_denial("task", {"agent_id": "KODA", "allowed_tool_ids": ["file_list"]})
+
+    assert denial is not None
+    assert "do not nest" in denial
+    assert "parent run does not have" not in denial

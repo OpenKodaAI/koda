@@ -92,7 +92,12 @@ _DEFAULT_CORE_ARGS_SCHEMAS: dict[str, JsonObject] = {
                     "properties": {
                         "goal": {"type": "string"},
                         "prompt": {"type": "string"},
-                        "target_agent_id": {"type": "string"},
+                        "target_agent_id": {
+                            "type": "string",
+                            "description": (
+                                "Optional; must be the parent's own agent: a child run never acts as another."
+                            ),
+                        },
                         "toolset": {"type": "string"},
                         "timeout_seconds": {"type": "integer"},
                         "max_context_tokens": {"type": "integer"},

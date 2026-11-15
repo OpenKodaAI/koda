@@ -135,10 +135,13 @@ def parent_capability_envelope(ctx: Any) -> dict[str, Any]:
 def child_run_tool_denial(tool_id: str, capabilities: Mapping[str, Any] | None) -> str | None:
     """Return why a child run may not call ``tool_id``, or ``None`` when its parent could.
 
-    A child without a parent envelope gets no tools. A core tool outside the parent's
-    allowlist is denied. Other tools (MCP, skill packages) resolve against the parent's
-    agent, which the child acts as, so the usual policy gate decides them as for the parent.
+    A child never gets `task`, since child runs do not nest. A child without a parent
+    envelope gets no tools. A core tool outside the parent's allowlist is denied. Other
+    tools (MCP, skill packages) resolve against the parent's agent, which the child acts
+    as, so the usual policy gate decides them as for the parent.
     """
+    if tool_id == "task":
+        return "Child runs cannot use `task`: child runs do not nest."
     if not capabilities:
         return f"Child runs cannot use `{tool_id}`: the run has no parent capability envelope."
     from koda.agent_contract import CORE_TOOL_CATALOG
