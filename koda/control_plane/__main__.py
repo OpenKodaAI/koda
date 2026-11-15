@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from koda.control_plane.crypto import MasterKeyError
+from koda.control_plane.runtime_kernel_link import RuntimeKernelTargetError
 from koda.control_plane.supervisor import run_supervisor
 from koda.services.browser_bootstrap import ensure_browser_installed_in_background
 
@@ -15,7 +16,7 @@ def main() -> None:
     ensure_browser_installed_in_background()
     try:
         asyncio.run(run_supervisor())
-    except MasterKeyError as exc:
+    except (MasterKeyError, RuntimeKernelTargetError) as exc:
         # The message carries the operator guidance; a traceback would bury it.
         raise SystemExit(f"koda control plane refused to start: {exc}") from None
 

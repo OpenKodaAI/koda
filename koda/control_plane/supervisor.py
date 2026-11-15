@@ -50,6 +50,9 @@ log = get_logger(__name__)
 
 _HEALTH_PROBE_TIMEOUT_SECONDS: float = 1.0
 _READY_POSTGRES_TIMEOUT_SECONDS: float = 2.0
+# Reconcile waits CONTROL_PLANE_POLL_INTERVAL_SECONDS between ticks and doubles
+# the wait per consecutive failure, up to this cap.
+_RECONCILE_BACKOFF_MAX_SECONDS: float = 60.0
 
 # Module-scoped so tests can monkey-patch.
 _CRASH_LOOP_WINDOW_SECONDS: float = 300.0
@@ -478,23 +481,48 @@ class ControlPlaneSupervisor:
                 raise
 
     async def _reconcile_loop(self) -> None:
+        # While reconcile fails (typically: the kernel is unreachable) the wait
+        # doubles per failure, the traceback is logged once per state change
+        # (first failure, or a different error) and every other failure is one line.
+        failures = 0
+        failure_kind = ""
         while not self._closing:
             try:
                 await self._reconcile_once()
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                log.exception("control_plane_reconcile_error")
-            event = get_lifecycle_event()
-            if event is None:
-                await asyncio.sleep(CONTROL_PLANE_POLL_INTERVAL_SECONDS)
-                continue
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(
-                    event.wait(),
-                    timeout=CONTROL_PLANE_POLL_INTERVAL_SECONDS,
-                )
-            consume_lifecycle_signal()
+            except Exception as exc:
+                failures += 1
+                kind = exc.__class__.__name__
+                if kind != failure_kind:
+                    log.exception("control_plane_reconcile_error", kernel_target=self._link.target)
+                    failure_kind = kind
+                else:
+                    log.warning(
+                        "control_plane_reconcile_still_failing",
+                        consecutive_failures=failures,
+                        error=f"{kind}: {' '.join(str(exc).split())[:200]}",
+                    )
+            else:
+                if failures:
+                    log.info("control_plane_reconcile_recovered", consecutive_failures=failures)
+                failures = 0
+                failure_kind = ""
+            delay = min(
+                CONTROL_PLANE_POLL_INTERVAL_SECONDS * (2**failures),
+                max(_RECONCILE_BACKOFF_MAX_SECONDS, CONTROL_PLANE_POLL_INTERVAL_SECONDS),
+            )
+            await self._wait_for_next_reconcile(delay)
+
+    async def _wait_for_next_reconcile(self, delay: float) -> None:
+        """Sleep ``delay`` seconds, waking early on a lifecycle signal."""
+        event = get_lifecycle_event()
+        if event is None:
+            await asyncio.sleep(delay)
+            return
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(event.wait(), timeout=delay)
+        consume_lifecycle_signal()
 
     async def _reconcile_once(self) -> None:
         agents = self._manager.list_agents()
