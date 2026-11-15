@@ -11,8 +11,8 @@ runtime root, the state root or the task directory.
 
 The real controller logic runs over a stub store. Not covered, and listed in the D-358 record:
 ``GET /api/runtime/readiness``, the operator diagnostics surface, which reports the runtime root's
-path, the kernel's health and its last answer per operation; and the artifact and checkpoint
-rows, which this test does not seed.
+path, the kernel's health and its last answer per operation; and the artifact, checkpoint and
+warning rows, which this test does not seed.
 """
 
 from __future__ import annotations
@@ -204,6 +204,44 @@ class _Store:
                 [str(roots.task / "checkpoints" / "1" / "manifest.json")],
             ),
             _event(11, "plan.updated", {"goal": "build"}, [str(roots.task / "decision_trace.jsonl")]),
+            # As record_warning writes it for a failed required kernel operation: its details are
+            # the kernel operation record, with the kernel's health and answer.
+            _event(
+                12,
+                "warning.issued",
+                {
+                    "warning_type": "runtime_kernel_restore_checkpoint_failed",
+                    "message": "checkpoint missing",
+                    "details": {
+                        "operation": "restore_checkpoint",
+                        "required": True,
+                        "ok": False,
+                        "runtime_kernel": {
+                            "details": {
+                                "runtime_root": str(roots.runtime),
+                                "socket_path": str(roots.state / "kernel.sock"),
+                            }
+                        },
+                        "cutover": {"socket": str(roots.state / "kernel.sock")},
+                        "checkpoint_dir": str(roots.task / "checkpoints" / "1"),
+                    },
+                },
+            ),
+            # A voice response is persisted under the task's artifacts directory.
+            _event(
+                13,
+                "artifact_ready",
+                {
+                    "artifact": {
+                        "id": "12",
+                        "kind": "audio",
+                        "label": "voice-response-7.ogg",
+                        "download_url": "/api/runtime/artifacts/12/download",
+                        "path": str(roots.task / "artifacts" / "voice-response-7.ogg"),
+                    }
+                },
+                [str(roots.task / "artifacts" / "voice-response-7.ogg")],
+            ),
         ]
 
     def get_task_runtime(self, task_id: int) -> dict[str, Any] | None:
@@ -369,7 +407,7 @@ _GET_ROUTES = {
     "/api/runtime/tasks/{task_id}/loop": f"/api/runtime/tasks/{_TASK_ID}/loop",
     "/api/runtime/tasks/{task_id}/sessions": f"/api/runtime/tasks/{_TASK_ID}/sessions",
 }
-_EVENT_COUNT = 11
+_EVENT_COUNT = 13
 _STREAMS = {
     # route: (URL, messages to read)
     "/api/runtime/stream": (f"/api/runtime/stream?task_id={_TASK_ID}", _EVENT_COUNT),
@@ -411,10 +449,11 @@ async def test_the_routes_that_carry_the_rows_send_them_projected(client: TestCl
     detail = json.loads(await (await client.get(f"/api/runtime/tasks/{_TASK_ID}", headers=_HEADERS)).text())
     environment = detail["environment"]
     assert (environment["runtime_dir"], environment["checkpoint_path"]) == (".", "checkpoints/1")
+    # A directory outside the task is named, not located: the task room shows it (D-358).
     assert (environment["workspace_path"], environment["base_work_dir"], environment["source_root_path"]) == (
-        None,
-        None,
-        None,
+        "task-7-build",
+        "workspace",
+        "workspace",
     )
     assert (environment["source_root_exists"], environment["branch_name"]) == (True, "task/7-build")
     assert len(detail["run_graph"]["nodes"]) > _EVENT_COUNT

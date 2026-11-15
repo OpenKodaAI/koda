@@ -274,15 +274,16 @@ async def test_browser_started_lifts_the_kernel_unavailable_reason(client: TestC
     }
 
 
-async def test_other_event_types_keep_their_payload_and_paths_outside_the_task_are_dropped(
+async def test_other_event_types_send_only_their_scalar_fields_and_paths_outside_the_task_are_dropped(
     client: TestClient, controller: _Controller, roots: tuple[Path, Path, Path]
 ) -> None:
-    runtime_root, _state_root, task_root = roots
+    """A type without its own projection sends its top-level scalars, never a nested record (D-357)."""
+    runtime_root, state_root, task_root = roots
     controller.store.events = [
         _event(
             1,
             "plan.updated",
-            {"goal": "ship", "steps": ["a", "b"]},
+            {"goal": "ship", "steps": ["a", "b"], "context": {"cwd": str(state_root / "agents" / "A")}},
             [str(task_root / "decision_trace.jsonl"), str(runtime_root / "worktrees" / "task-7")],
         ),
         _event(
@@ -301,7 +302,7 @@ async def test_other_event_types_keep_their_payload_and_paths_outside_the_task_a
     response = await client.get(f"/api/runtime/tasks/{_TASK_ID}/events", headers=_HEADERS)
 
     items = json.loads(await response.text())["items"]
-    assert items[0]["payload"] == {"goal": "ship", "steps": ["a", "b"]}
+    assert items[0]["payload"] == {"goal": "ship"}
     assert items[0]["artifact_refs"] == ["decision_trace.jsonl"]
     assert items[1]["payload"] == {
         "branch_name": "task/7-x",
@@ -310,3 +311,81 @@ async def test_other_event_types_keep_their_payload_and_paths_outside_the_task_a
         "workspace_path": None,
         "metadata_path": "worktree.json",
     }
+
+
+def _kernel_operation_record(runtime_root: Path, state_root: Path) -> dict[str, Any]:
+    """A failed required operation as ``_forward_runtime_kernel_operation`` records it."""
+    return {
+        "operation": "restore_checkpoint",
+        "recorded_at": "2026-11-15T00:00:00+00:00",
+        "required": True,
+        "runtime_kernel": {
+            "details": {"runtime_root": str(runtime_root), "socket_path": str(state_root / "kernel.sock")}
+        },
+        "cutover": {"mode": "rust", "socket": str(state_root / "kernel.sock")},
+        "forwarded": True,
+        "restored": False,
+        "workspace_path": str(runtime_root / "worktrees" / "task-7"),
+        "reason": "checkpoint missing",
+        "ok": False,
+    }
+
+
+async def test_warning_and_artifact_events_send_named_fields_with_task_relative_paths(
+    client: TestClient, controller: _Controller, roots: tuple[Path, Path, Path]
+) -> None:
+    """``warning.issued`` carries a kernel record and ``artifact_ready`` a file path (D-357)."""
+    runtime_root, state_root, task_root = roots
+    voice = str(task_root / "artifacts" / "voice-response-7.ogg")
+    artifact = {
+        "id": "12",
+        "kind": "audio",
+        "label": "voice-response-7.ogg",
+        "mime_type": "audio/ogg",
+        "size_bytes": 2048,
+        "created_at": "2026-11-15T00:00:00+00:00",
+        "source_session_id": "s-1",
+        "source_execution_id": "7",
+        "download_url": "/api/runtime/artifacts/12/download",
+        "preview_state": "available",
+    }
+    controller.store.events = [
+        _event(
+            1,
+            "warning.issued",
+            {
+                "warning_type": "runtime_kernel_restore_checkpoint_failed",
+                "message": "checkpoint missing",
+                "details": _kernel_operation_record(runtime_root, state_root),
+            },
+        ),
+        _event(2, "warning.issued", {"message": "stop", "actor": "operator", "kind": "cancel_requested"}),
+        _event(3, "artifact_ready", {"artifact": {**artifact, "path": voice}}, [voice]),
+        # A provider output file lives in the agent's work directory, outside the task.
+        _event(4, "artifact_ready", {"artifact": {**artifact, "path": str(state_root / "work" / "out.png")}}),
+    ]
+
+    response = await client.get(f"/api/runtime/tasks/{_TASK_ID}/events", headers=_HEADERS)
+
+    text = await response.text()
+    for root in roots:
+        assert str(root) not in text
+    for key in ('"runtime_kernel"', '"cutover"', '"restored"', '"workspace_path"'):
+        assert key not in text
+    items = json.loads(text)["items"]
+    assert items[0]["payload"] == {
+        "warning_type": "runtime_kernel_restore_checkpoint_failed",
+        "message": "checkpoint missing",
+        "details": {
+            "operation": "restore_checkpoint",
+            "recorded_at": "2026-11-15T00:00:00+00:00",
+            "required": True,
+            "forwarded": True,
+            "ok": False,
+            "reason": "checkpoint missing",
+        },
+    }
+    assert items[1]["payload"] == {"message": "stop", "actor": "operator", "kind": "cancel_requested"}
+    assert items[2]["payload"] == {"artifact": {**artifact, "path": "artifacts/voice-response-7.ogg"}}
+    assert items[2]["artifact_refs"] == ["artifacts/voice-response-7.ogg"]
+    assert items[3]["payload"] == {"artifact": {**artifact, "path": None}}

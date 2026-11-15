@@ -314,9 +314,10 @@ def _projected(
     return payload
 
 
-# The environment row's columns other than its host paths; ``workspace_path``, ``runtime_dir``,
-# ``base_work_dir``, ``source_root_path`` and ``checkpoint_path`` are given relative to the task's
-# runtime directory, or null outside it (D-358).
+# The environment row's columns other than its host paths; ``runtime_dir`` and ``checkpoint_path``
+# are given relative to the task's runtime directory, or null outside it, and ``workspace_path``,
+# ``base_work_dir`` and ``source_root_path``, which lie outside it (a worktree, the agent's work
+# directory), by their directory's name, which the task room shows (D-358).
 _ENVIRONMENT_FIELDS = (
     "id",
     "task_id",
@@ -354,12 +355,18 @@ _ENVIRONMENT_FIELDS = (
     "retention_expires_at",
     "source_root_exists",
 )
-_ENVIRONMENT_PATH_FIELDS = ("workspace_path", "runtime_dir", "base_work_dir", "source_root_path", "checkpoint_path")
+_ENVIRONMENT_PATH_FIELDS = ("runtime_dir", "checkpoint_path")
+_ENVIRONMENT_NAMED_DIRECTORY_FIELDS = ("workspace_path", "base_work_dir", "source_root_path")
 
 
 def _environment_payload(env: Mapping[str, Any]) -> dict[str, object]:
     task_root = _task_runtime_root(int(env.get("task_id") or 0))
-    return _projected(env, _ENVIRONMENT_FIELDS, _ENVIRONMENT_PATH_FIELDS, task_root)
+    payload = _projected(env, _ENVIRONMENT_FIELDS, _ENVIRONMENT_PATH_FIELDS, task_root)
+    for key in _ENVIRONMENT_NAMED_DIRECTORY_FIELDS:
+        if key in env:
+            value = env[key]
+            payload[key] = (Path(str(value)).name or None) if value else None
+    return payload
 
 
 # A terminal row's columns; its ``path`` and ``stream_path`` are relative to the task's runtime
@@ -391,9 +398,10 @@ def _terminal_payload(row: Mapping[str, Any]) -> dict[str, object]:
 
 # Runtime events are answered through an explicit projection (D-357): the envelope's named fields,
 # ``artifact_refs`` relative to the task's runtime directory (a ref outside it is left out), and,
-# for the event types that carry the browser session, a kernel answer or a host path, a payload of
-# named fields with each path relative to the task's runtime directory or null. The other event
-# types are built by the runtime from named scalar fields, and their payload passes as it is.
+# for the event types that carry the browser session, a kernel answer, a warning's details, an
+# artifact or a host path, a payload of named fields with each path relative to the task's runtime
+# directory or null. Any other event type sends only its payload's top-level scalar fields: a
+# nested object or list, where a record from the kernel or a caller sits, is not forwarded.
 _EVENT_FIELDS = ("seq", "ts", "task_id", "env_id", "attempt", "phase", "type", "severity", "resource_snapshot_ref")
 _EVENT_PAYLOAD_PROJECTIONS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     # event type: (fields passed as they are, host-path fields made task-relative)
@@ -408,6 +416,23 @@ _EVENT_PAYLOAD_PROJECTIONS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] =
 # A ``runtime_kernel.<operation>`` event records the kernel's whole answer and its health; only these
 # scalars are sent.
 _RUNTIME_KERNEL_EVENT_FIELDS = ("operation", "recorded_at", "required", "forwarded", "ok", "status", "reason", "error")
+# A ``warning.issued`` event's ``details`` may be a kernel operation record (record_warning for a
+# failed required operation), so they are projected as a ``runtime_kernel.*`` event is.
+_WARNING_EVENT_FIELDS = ("warning_type", "message", "actor", "kind")
+# An ``artifact_ready`` event's ``artifact``: the fields the dashboard's artifact contract reads, and
+# its ``path`` relative to the task's runtime directory.
+_ARTIFACT_EVENT_FIELDS = (
+    "id",
+    "kind",
+    "label",
+    "mime_type",
+    "size_bytes",
+    "created_at",
+    "source_session_id",
+    "source_execution_id",
+    "download_url",
+    "preview_state",
+)
 
 
 def _browser_session_payload(session: Mapping[str, Any], task_root: Path) -> dict[str, object]:
@@ -436,11 +461,25 @@ def _runtime_event(event: Mapping[str, Any]) -> dict[str, object]:
         projected["payload"] = _browser_session_payload(payload, task_root)
     elif event_type.startswith("runtime_kernel."):
         projected["payload"] = _projected(payload, _RUNTIME_KERNEL_EVENT_FIELDS, (), task_root)
+    elif event_type == "warning.issued":
+        warning = _projected(payload, _WARNING_EVENT_FIELDS, (), task_root)
+        details = payload.get("details")
+        if isinstance(details, Mapping):
+            warning["details"] = _projected(details, _RUNTIME_KERNEL_EVENT_FIELDS, (), task_root)
+        projected["payload"] = warning
+    elif event_type == "artifact_ready":
+        ready = _projected(payload, ("message_id",), (), task_root)
+        artifact = payload.get("artifact")
+        if isinstance(artifact, Mapping):
+            ready["artifact"] = _projected(artifact, _ARTIFACT_EVENT_FIELDS, ("path",), task_root)
+        projected["payload"] = ready
     elif event_type in _EVENT_PAYLOAD_PROJECTIONS:
         fields, path_fields = _EVENT_PAYLOAD_PROJECTIONS[event_type]
         projected["payload"] = _projected(payload, fields, path_fields, task_root)
     else:
-        projected["payload"] = dict(payload)
+        projected["payload"] = {
+            key: value for key, value in payload.items() if value is None or isinstance(value, str | int | float)
+        }
     raw_refs = event.get("artifact_refs")
     refs = raw_refs if isinstance(raw_refs, list) else []
     projected["artifact_refs"] = [
@@ -1794,6 +1833,31 @@ async def _runtime_recover(request: web.Request) -> web.Response:
     return web.json_response(result)
 
 
+# The control plane's own squad dispatchers. They start a delegation chain and may be its origin;
+# they name no agent, so neither can steer a result to an agent or hide a recorded hop (D-355).
+_SQUAD_DISPATCHER_IDS = frozenset({"squad_router", "squad_delivery_watcher"})
+
+
+def _squad_delegation_chain(
+    caller_chain: list[str], recorded_hop: str | None, *, has_parent: bool
+) -> tuple[list[str], bool]:
+    """The delegation chain a squad turn continues, and whether the caller's chain was ignored (D-355).
+
+    A turn that answers no message continues no delegation, so its chain is empty. Otherwise the
+    caller's chain is kept when it ends with the recorded hop (the parent's sender, when that is a
+    participant): it may name earlier hops the record does not hold, never drop the one it holds.
+    A chain the control plane's dispatcher starts gets the recorded hop added. Any other chain is
+    replaced by the recorded hop.
+    """
+    if not has_parent:
+        return [], bool(caller_chain)
+    if recorded_hop is None or caller_chain[-1:] == [recorded_hop]:
+        return caller_chain, False
+    if caller_chain[:1] and caller_chain[0] in _SQUAD_DISPATCHER_IDS:
+        return [*caller_chain, recorded_hop], False
+    return [recorded_hop], True
+
+
 async def _runtime_send_session_message(request: web.Request) -> web.Response:
     auth = _authorize_mutation(request)
     if auth:
@@ -1869,26 +1933,38 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
             if str(squad_payload.get(name) or "").strip() and optional_int(squad_payload.get(name)) != used
         ]
         # The delegation the turn continues comes from the server's record of the thread and the
-        # parent message, not from the caller (D-355). The turn answers the parent message, so the
-        # parent's sender is the delegation's origin and, when it is a participant, the chain's last
-        # hop. The caller's chain is kept only when it ends with that hop: it may name earlier hops
-        # the record does not hold, never drop the ones it holds. The caller's origin is kept only
-        # when it is the parent's sender or the thread's coordinator.
+        # parent message, not from the caller (D-355). The turn answers the parent message, which
+        # must be one of this thread's, so the parent's sender is the delegation's origin and, when
+        # it is a participant, the chain's last hop (see _squad_delegation_chain). The caller's
+        # origin is kept only when it is the parent's sender, the thread's coordinator or one of the
+        # control plane's dispatchers, which name no agent.
         parent_message_id = str(squad_payload.get("parent_message_id") or "").strip() or None
-        parent_sender = (
-            await thread_store.get_message_sender(thread_id=squad_thread_id, message_ref=parent_message_id)
-            if parent_message_id
-            else None
-        )
-        recorded_chain = [parent_sender] if parent_sender and parent_sender.strip().upper() in participants else []
+        parent_sender: str | None = None
+        if parent_message_id:
+            parent_sender = await thread_store.get_message_sender(
+                thread_id=squad_thread_id, message_ref=parent_message_id
+            )
+            if parent_sender is None:
+                log.warning(
+                    "squad_message_unknown_parent_refused",
+                    thread_id=squad_thread_id,
+                    parent_message_id=parent_message_id,
+                )
+                return web.json_response(
+                    {"error": f"message {parent_message_id} not found in thread {squad_thread_id}"},
+                    status=404,
+                )
+        recorded_hop = parent_sender if parent_sender and parent_sender.strip().upper() in participants else None
         chain_raw = squad_payload.get("delegation_chain")
         caller_chain = [str(item) for item in chain_raw] if isinstance(chain_raw, list) else []
-        delegation_chain = caller_chain
-        if caller_chain[len(caller_chain) - len(recorded_chain) :] != recorded_chain:
-            delegation_chain = recorded_chain
+        delegation_chain, chain_ignored = _squad_delegation_chain(
+            caller_chain, recorded_hop, has_parent=parent_message_id is not None
+        )
+        if chain_ignored:
             ignored.append("squad.delegation_chain")
         caller_origin = str(squad_payload.get("delegation_origin_agent_id") or "").strip() or None
-        delegation_origin = caller_origin if caller_origin in {parent_sender, thread.coordinator_agent_id} else None
+        accepted_origins = {parent_sender, thread.coordinator_agent_id, *_SQUAD_DISPATCHER_IDS}
+        delegation_origin = caller_origin if caller_origin in accepted_origins else None
         if caller_origin and delegation_origin is None:
             ignored.append("squad.delegation_origin_agent_id")
         delegation_origin = delegation_origin or parent_sender
