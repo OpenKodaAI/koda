@@ -202,6 +202,23 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   same rule. A server already saved with an unknown `network_mode` fails to start
   with that error until the value is corrected; before, it shared the host network.
   (D-301)
+- Starting an MCP server, at agent startup or on first use, applies the same checks
+  to its stored isolation constraints, so a server saved before they existed no
+  longer bind-mounts a sensitive host path. A server whose stored constraints fail
+  them is not started: the worker logs `mcp_server_start_refused` and the
+  connection's last error reads `refused to start: ...` until the constraint is
+  corrected. Mount hosts must be absolute paths (`~` is expanded), on save and at
+  start. The protected state directories now include the default `~/.koda-state`,
+  every `STATE_ROOT_DIR` and per-agent `<AGENT_ID>_STATE_ROOT_DIR` set in the
+  environment or `.env`, the one each agent's published settings (its applied and
+  desired versions) give its worker, and, at start, the worker's own. A mount is
+  refused when those settings cannot be read. (D-316, D-317, D-318)
+- The control plane's MCP test connection, tool discovery, capability check,
+  resource read and prompt render start the server with its stored isolation
+  profile and constraints, as the worker does. Before, they ran it without them,
+  and a passing test connection cleared the worker's `refused to start: ...`
+  error. A server the worker refuses is refused there with the same reason, which
+  stays the connection's last error. (D-321)
 - Channel gateway pairing: codes are 8 letters and digits, one message tries at most
   one code (the whole message, or `/start CODE`) and other messages are not attempts,
   and a sender (one user across all its chats) with 5 failed attempts in 15 minutes is

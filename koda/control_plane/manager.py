@@ -19,7 +19,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 from uuid import uuid4
 
 from dotenv import dotenv_values
@@ -127,6 +127,7 @@ from koda.services.provider_auth import (
     verify_provider_local_connection,
     verify_provider_subscription_login,
 )
+from koda.services.sandbox_policy import state_roots_in
 from koda.services.supertonic_manager import (
     SUPERTONIC_DEFAULT_LANGUAGE_ID,
     SUPERTONIC_DEFAULT_MODEL_ID,
@@ -223,6 +224,9 @@ from .workspace_import import (
     validate_workspace_root,
     workspace_source_from_dict,
 )
+
+if TYPE_CHECKING:
+    from koda.services.mcp_manager import McpServerInstance
 
 log = get_logger(__name__)
 
@@ -12604,6 +12608,26 @@ class ControlPlaneManager:
         )
         return json_load(str(row["snapshot_json"]), {}) if row else None
 
+    def published_state_roots(self) -> tuple[str, ...]:
+        """The state roots agents' applied and desired snapshots give their workers.
+
+        The supervisor forces its own ``STATE_ROOT_DIR`` onto every worker when its
+        environment sets one. Otherwise a worker's state root is the one its
+        snapshot's env sets, which no process's environment names.
+        """
+        rows = fetch_all(
+            """
+            SELECT v.snapshot_json FROM cp_agent_config_versions v
+            JOIN cp_agent_definitions a ON a.id = v.agent_id
+            WHERE v.version = a.applied_version OR v.version = a.desired_version
+            """
+        )
+        roots: list[str] = []
+        for row in rows:
+            snapshot = _safe_json_object(json_load(str(row["snapshot_json"]), {}))
+            roots.extend(state_roots_in(_safe_json_object(snapshot.get("process_env") or snapshot.get("env"))))
+        return tuple(dict.fromkeys(roots))
+
     def build_draft_snapshot(self, agent_id: str) -> dict[str, Any]:
         normalized = _normalize_agent_id(agent_id)
         agent_row = fetch_one("SELECT * FROM cp_agent_definitions WHERE id = ?", (normalized,))
@@ -14110,22 +14134,13 @@ class ControlPlaneManager:
 
     def test_mcp_connection(self, agent_id: str, server_key: str) -> dict[str, Any]:
         """Test an MCP server connection by starting it temporarily."""
-        from koda.services.mcp_manager import McpServerInstance
-
         normalized = _normalize_agent_id(agent_id)
         resolved = self._resolve_mcp_runtime_payload(normalized, server_key)
         if resolved is None:
             return {"success": False, "healthy": False, "error": "connection_not_found", "server_key": server_key}
-        instance = McpServerInstance(
-            server_key=server_key,
-            agent_id=normalized,
-            transport_type=str(resolved.get("transport_type") or "stdio"),
-            command=resolved.get("command") or None,
-            url=resolved.get("url"),
-            env=resolved.get("env_values") or None,
-            headers=resolved.get("headers") or None,
-        )
+        instance: McpServerInstance | None = None
         try:
+            instance = self._mcp_probe_instance(normalized, server_key, resolved)
             run_coro_sync(instance.start())
             healthy = run_coro_sync(instance.health_check())
             self._record_mcp_runtime_state(
@@ -14150,13 +14165,12 @@ class ControlPlaneManager:
                 "server_key": server_key,
             }
         finally:
-            with contextlib.suppress(Exception):
-                run_coro_sync(instance.stop())
+            if instance is not None:
+                with contextlib.suppress(Exception):
+                    run_coro_sync(instance.stop())
 
     def discover_mcp_tools(self, agent_id: str, server_key: str) -> dict[str, Any]:
         """Discover tools from an MCP server and cache them."""
-        from koda.services.mcp_manager import McpServerInstance
-
         normalized = _normalize_agent_id(agent_id)
         before_tools = {
             str(tool.get("name") or ""): str(tool.get("signature_hash") or self._mcp_tool_signature_hash(tool))
@@ -14166,16 +14180,9 @@ class ControlPlaneManager:
         resolved = self._resolve_mcp_runtime_payload(normalized, server_key)
         if resolved is None:
             return {"success": False, "error": "connection_not_found", "tools": [], "tool_count": 0, "cached_at": None}
-        instance = McpServerInstance(
-            server_key=server_key,
-            agent_id=normalized,
-            transport_type=str(resolved.get("transport_type") or "stdio"),
-            command=resolved.get("command") or None,
-            url=resolved.get("url"),
-            env=resolved.get("env_values") or None,
-            headers=resolved.get("headers") or None,
-        )
+        instance: McpServerInstance | None = None
         try:
+            instance = self._mcp_probe_instance(normalized, server_key, resolved)
             run_coro_sync(instance.start())
             tools = instance.cached_tools
             tools_data = [self._tool_to_payload(tool) for tool in tools]
@@ -14237,8 +14244,34 @@ class ControlPlaneManager:
                 "cached_at": None,
             }
         finally:
-            with contextlib.suppress(Exception):
-                run_coro_sync(instance.stop())
+            if instance is not None:
+                with contextlib.suppress(Exception):
+                    run_coro_sync(instance.stop())
+
+    def _mcp_probe_instance(self, agent_id: str, server_key: str, resolved: dict[str, Any]) -> McpServerInstance:
+        """A temporary server for a control-plane probe, isolated as the worker would start it.
+
+        Test connection, discovery, resource reads, prompt renders and capability
+        verification run the server with the catalog's stored isolation profile
+        and constraints, checked by the worker's own rule: constraints it would
+        refuse raise ``McpStartRefusedError`` with its reason, so a probe neither
+        runs the server outside its sandbox nor reports a refused server healthy.
+        ``resolved`` carries that isolation from the same catalog row as the
+        command (see ``_resolve_mcp_runtime_payload``).
+        """
+        from koda.services.mcp_bootstrap import _catalog_isolation
+        from koda.services.mcp_manager import McpServerInstance
+
+        return McpServerInstance(
+            server_key=server_key,
+            agent_id=agent_id,
+            transport_type=str(resolved.get("transport_type") or "stdio"),
+            command=resolved.get("command") or None,
+            url=resolved.get("url"),
+            env=resolved.get("env_values") or None,
+            headers=resolved.get("headers") or None,
+            **_catalog_isolation(resolved),
+        )
 
     def _resolve_mcp_runtime_payload(self, agent_id: str, server_key: str) -> dict[str, Any] | None:
         catalog_row = fetch_one("SELECT * FROM cp_mcp_server_catalog WHERE server_key = ?", (server_key,))
@@ -14250,12 +14283,18 @@ class ControlPlaneManager:
         )
         if connection_row is None:
             return None
-        return resolve_mcp_runtime_connection(
+        resolved = resolve_mcp_runtime_connection(
             agent_id,
             server_key,
             connection_row=connection_row,
             catalog_row=catalog_row,
         )
+        if resolved is not None:
+            # A probe isolates the server with the row its command came from.
+            catalog = self._serialize_mcp_catalog_row(catalog_row)
+            resolved["isolation_profile"] = catalog["isolation_profile"]
+            resolved["isolation_constraints"] = catalog["isolation_constraints"]
+        return resolved
 
     def _tool_to_payload(self, tool: Any) -> dict[str, Any]:
         from koda.services.mcp_risk import assess_mcp_tool_risk, evaluate_mcp_risk
@@ -14702,21 +14741,13 @@ class ControlPlaneManager:
             policy = self._get_mcp_capability_policy(normalized, server_key, "resource", uri)
         if policy == "blocked":
             return {"success": False, "error": "resource_blocked", "uri": uri}
-        from koda.services.mcp_manager import McpServerInstance
 
         resolved = self._resolve_mcp_runtime_payload(normalized, server_key)
         if resolved is None:
             return {"success": False, "error": "connection_not_found", "uri": uri}
-        instance = McpServerInstance(
-            server_key=server_key,
-            agent_id=normalized,
-            transport_type=str(resolved.get("transport_type") or "stdio"),
-            command=resolved.get("command") or None,
-            url=resolved.get("url"),
-            env=resolved.get("env_values") or None,
-            headers=resolved.get("headers") or None,
-        )
+        instance: McpServerInstance | None = None
         try:
+            instance = self._mcp_probe_instance(normalized, server_key, resolved)
             run_coro_sync(instance.start())
             session = instance.session
             if session is None:
@@ -14726,8 +14757,9 @@ class ControlPlaneManager:
         except Exception as exc:
             return {"success": False, "error": str(exc), "uri": uri}
         finally:
-            with contextlib.suppress(Exception):
-                run_coro_sync(instance.stop())
+            if instance is not None:
+                with contextlib.suppress(Exception):
+                    run_coro_sync(instance.stop())
 
     def render_mcp_prompt(
         self,
@@ -14741,21 +14773,13 @@ class ControlPlaneManager:
         policy = self._get_mcp_capability_policy(normalized, server_key, "prompt", prompt_name)
         if policy == "blocked":
             return {"success": False, "error": "prompt_blocked", "prompt": prompt_name}
-        from koda.services.mcp_manager import McpServerInstance
 
         resolved = self._resolve_mcp_runtime_payload(normalized, server_key)
         if resolved is None:
             return {"success": False, "error": "connection_not_found", "prompt": prompt_name}
-        instance = McpServerInstance(
-            server_key=server_key,
-            agent_id=normalized,
-            transport_type=str(resolved.get("transport_type") or "stdio"),
-            command=resolved.get("command") or None,
-            url=resolved.get("url"),
-            env=resolved.get("env_values") or None,
-            headers=resolved.get("headers") or None,
-        )
+        instance: McpServerInstance | None = None
         try:
+            instance = self._mcp_probe_instance(normalized, server_key, resolved)
             run_coro_sync(instance.start())
             session = instance.session
             if session is None:
@@ -14770,8 +14794,9 @@ class ControlPlaneManager:
         except Exception as exc:
             return {"success": False, "error": str(exc), "prompt": prompt_name}
         finally:
-            with contextlib.suppress(Exception):
-                run_coro_sync(instance.stop())
+            if instance is not None:
+                with contextlib.suppress(Exception):
+                    run_coro_sync(instance.stop())
 
     # ------------------------------------------------------------------ #
     #  MCP Capability Policies (unified tool/resource/prompt)            #
