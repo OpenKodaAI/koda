@@ -72,6 +72,9 @@ class _StoreStub:
     def list_environments(self) -> list[dict[str, Any]]:
         return [self.env] if self.env else []
 
+    def list_live_environments(self) -> list[dict[str, Any]]:
+        return self.list_environments()
+
     def get_environment_by_task(self, task_id: int) -> dict[str, Any] | None:
         if self.env and int(self.env["task_id"]) == task_id:
             return self.env
