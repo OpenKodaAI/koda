@@ -9975,6 +9975,32 @@ class ControlPlaneManager:
         raise AssertionError("unreachable: generated agent id candidates never run out")
 
     def update_agent(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Apply a PATCH. A ``status`` change goes through the lifecycle methods.
+
+        ``pause_agent`` and ``activate_agent`` roll the queue back, wake the
+        supervisor and write the audit row; writing ``status`` directly skipped
+        all three (D-150). A change to any other status is rejected.
+        """
+        fields = dict(payload)
+        requested_status = str(fields.pop("status", None) or "").strip()
+        normalized, current = self._require_agent_row(agent_id)
+        current_status = str(current["status"])
+        target_status = _normalize_status(requested_status) if requested_status else current_status
+        if target_status != current_status and target_status not in {"active", "paused"}:
+            raise ValueError(
+                f"status can only change to active or paused here, not {target_status}; "
+                "use the pause and activate endpoints for lifecycle changes"
+            )
+        if target_status == current_status:
+            return self._update_agent_definition(normalized, fields)
+        if fields:
+            self._update_agent_definition(normalized, fields)
+        if target_status == "paused":
+            return self.pause_agent(normalized)
+        return self.activate_agent(normalized)
+
+    def _update_agent_definition(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """Write the agent definition row, ``status`` included. Lifecycle side effects are the caller's."""
         normalized, current = self._require_agent_row(agent_id)
         display_name = str(payload.get("display_name") or current["display_name"])
         status = _normalize_status(str(payload.get("status") or current["status"]))
@@ -10081,7 +10107,7 @@ class ControlPlaneManager:
         return cloned
 
     def activate_agent(self, agent_id: str) -> dict[str, Any]:
-        result = self.update_agent(agent_id, {"status": "active"})
+        result = self._update_agent_definition(agent_id, {"status": "active"})
         # Wake the supervisor immediately so the worker spawns without
         # waiting for the next poll cycle. Items previously rolled back to
         # 'queued' by ``pause_agent`` will be picked up by the fresh runtime.
@@ -10096,7 +10122,7 @@ class ControlPlaneManager:
         return result
 
     def pause_agent(self, agent_id: str) -> dict[str, Any]:
-        result = self.update_agent(agent_id, {"status": "paused"})
+        result = self._update_agent_definition(agent_id, {"status": "paused"})
         # Rollback every in-flight queue item to ``queued`` so the operator
         # can resume from a clean slate. The runtime worker is killed by
         # the supervisor (no idle wait); without this rollback the killed
