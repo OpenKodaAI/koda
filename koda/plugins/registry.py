@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import errno
 import importlib
 import importlib.util
+import os
 import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -79,7 +81,7 @@ class PluginRegistry:
             self._handlers.pop(tool.id, None)
             self._tool_to_plugin.pop(tool.id, None)
         # Remove plugin module from sys.modules
-        prefix = f"_koda_plugin_{plugin_name}"
+        prefix = _plugin_module_prefix(plugin_name)
         to_remove = [k for k in sys.modules if k.startswith(prefix)]
         for k in to_remove:
             del sys.modules[k]
@@ -161,25 +163,35 @@ class PluginRegistry:
 
         The handler file must resolve inside *plugin_dir*; an absolute path, a
         traversal or a symlink out of the plugin is rejected before anything is
-        imported. ``sys.path`` is left untouched.
+        imported. The source is then read from a handle opened by walking down
+        from the plugin directory without following a symlink, so a file or a
+        directory swapped in after the check is not loaded (D-270). The module
+        gets a flat name, with no parent package, so a relative import in it fails
+        instead of resolving against another package. ``sys.path`` is left
+        untouched.
         """
-        from koda.skills._package import _safe_child_path
+        from koda.skills._package import _safe_child_path, _SourceOnlyLoader
 
         parts = handler_path.rsplit(".", 1)
         if len(parts) != 2:
             return None
         module_path, func_name = parts
-        file_path = _safe_child_path(plugin_dir, f"{module_path.replace('.', '/')}.py")
+        relative_path = f"{module_path.replace('.', '/')}.py"
+        file_path = _safe_child_path(plugin_dir, relative_path)
         if file_path is None:
             log.warning("plugin_handler_path_rejected", handler=handler_path, plugin_dir=str(plugin_dir))
             return None
         # Create a unique module name to avoid conflicts
-        plugin_name = plugin_dir.name
-        module_name = f"_koda_plugin_{plugin_name}.{module_path}"
+        module_name = _plugin_module_prefix(plugin_dir.name) + module_path.replace(".", "/")
         try:
+            source = _read_checked_source(plugin_dir, file_path)
+            if source is None:
+                log.warning("plugin_handler_path_changed", handler=handler_path, plugin_dir=str(plugin_dir))
+                return None
             if module_name in sys.modules:
                 del sys.modules[module_name]
-            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            loader = _SourceOnlyLoader(module_name, str(file_path), source=source)
+            spec = importlib.util.spec_from_file_location(module_name, file_path, loader=loader)
             if spec is None or spec.loader is None:
                 return None
             module = importlib.util.module_from_spec(spec)
@@ -192,3 +204,41 @@ class PluginRegistry:
         except Exception as e:
             log.warning("plugin_handler_load_failed", handler=handler_path, error=str(e))
             return None
+
+
+def _plugin_module_prefix(plugin_name: str) -> str:
+    """The start of a plugin's handler module names, which hold no dot, so there is no parent package.
+
+    A '/' ends the plugin's part and separates the module's parts. It cannot occur in a
+    directory name, and the dots of the plugin name are escaped, so two plugins' names
+    never meet and one prefix matches the modules of one plugin only.
+    """
+    return "_koda_plugin_" + plugin_name.replace("%", "%25").replace(".", "%2E") + "/"
+
+
+def _read_checked_source(plugin_dir: Path, file_path: Path) -> bytes | None:
+    """Read *file_path*, which the path check resolved inside *plugin_dir*, or return None.
+
+    The file is opened by walking down from *plugin_dir* one component at a time, each
+    opened relative to the directory before it and never through a symlink. The bytes
+    therefore come from the file at the checked place inside the plugin: when a file or a
+    directory on the way is swapped for a symlink after the check, the open fails and
+    None is returned, whatever a later lookup of the path would show.
+    """
+    root = plugin_dir.resolve()
+    *directories, name = file_path.relative_to(root).parts
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in directories:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        file_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            return None
+        raise
+    finally:
+        os.close(fd)
+    with os.fdopen(file_fd, "rb") as handle:
+        return handle.read()

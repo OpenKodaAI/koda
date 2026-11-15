@@ -25,12 +25,17 @@ from koda.config import (
 from koda.config import (
     POSTGRES_ENABLED as _POSTGRES_ENABLED,
 )
+from koda.logging_config import get_logger
 from koda.services.cache_config import CACHE_ENABLED, SCRIPT_LIBRARY_ENABLED
 from koda.services.execution_policy import resolve_execution_policy_allowed_tool_ids
 from koda.services.tool_registry import TOOL_SCHEMA_VERSION, get_default_tool_registry
 
 # Compatibility export kept for older tests and monkeypatch-based callers.
 POSTGRES_ENABLED = _POSTGRES_ENABLED
+
+log = get_logger(__name__)
+# (agent_id, server_key) whose MCP tool list was cut from the prompt, already logged in this process.
+_MCP_PROMPT_CUTS_LOGGED: set[tuple[str, str]] = set()
 
 
 def _tool_id_from_bullet_line(line: str) -> str | None:
@@ -240,10 +245,27 @@ def _blocked_mcp_tool_names(agent_id: str, server_key: str) -> set[str]:
 
 
 def _build_mcp_tools_prompt(agent_id: str) -> str:
-    """Generate system prompt section documenting available MCP tools for an agent."""
+    """Generate system prompt section documenting available MCP tools for an agent.
+
+    A third-party server chooses how many tools and parameters it lists, so the
+    section shows at most ``MCP_PROMPT_MAX_TOOLS_PER_SERVER`` tools per server and
+    ``MCP_TOOL_MAX_PARAMS`` parameters per tool, and adds no more tools once their
+    entries reach ``MCP_PROMPT_SECTION_MAX_CHARS``. What is cut is counted in the
+    prompt and logged once per server.
+    """
+    from koda.services.mcp_bridge import (
+        MCP_PARAM_DESCRIPTION_MAX_CHARS,
+        MCP_PROMPT_MAX_TOOLS_PER_SERVER,
+        MCP_PROMPT_SECTION_MAX_CHARS,
+        MCP_TOOL_MAX_PARAMS,
+        is_safe_mcp_tool_name,
+        mcp_tool_id,
+        sanitize_mcp_description,
+    )
     from koda.services.mcp_manager import mcp_server_manager
 
     sections: list[str] = []
+    budget = MCP_PROMPT_SECTION_MAX_CHARS
 
     # Collect all running MCP instances for this agent
     for key, instance in mcp_server_manager.active_instances.items():
@@ -252,33 +274,30 @@ def _build_mcp_tools_prompt(agent_id: str) -> str:
         if not instance.started or not instance.cached_tools:
             continue
         blocked_tool_names = _blocked_mcp_tool_names(agent_id, instance.server_key)
+        tools = [
+            tool
+            for tool in instance.cached_tools
+            if tool.name not in blocked_tool_names and is_safe_mcp_tool_name(tool.name)
+        ]
 
         server_section_lines: list[str] = []
         server_section_lines.append(f"### MCP Server: {instance.server_key}")
         server_section_lines.append("")
+        shown_tools = 0
+        cut_params = 0
 
-        for tool in instance.cached_tools:
-            if tool.name in blocked_tool_names:
-                continue
-            from koda.services.mcp_bridge import (
-                MCP_PARAM_DESCRIPTION_MAX_CHARS,
-                is_safe_mcp_tool_name,
-                mcp_tool_id,
-                sanitize_mcp_description,
-            )
-
-            if not is_safe_mcp_tool_name(tool.name):
-                continue
+        for tool in tools[:MCP_PROMPT_MAX_TOOLS_PER_SERVER]:
             tid = mcp_tool_id(instance.server_key, tool.name)
             desc = sanitize_mcp_description(tool.description) or "No description available."
-            server_section_lines.append(f"**`{tid}`** — {desc}")
+            entry_lines = [f"**`{tid}`** — {desc}"]
+            tool_cut_params = 0
 
             # Add parameter schema if available
             if tool.input_schema and tool.input_schema.get("properties"):
-                props = tool.input_schema["properties"]
+                props = list(tool.input_schema["properties"].items())
                 required = set(tool.input_schema.get("required", []))
                 param_lines: list[str] = []
-                for param_name, param_info in props.items():
+                for param_name, param_info in props[:MCP_TOOL_MAX_PARAMS]:
                     name = sanitize_mcp_description(param_name, max_chars=MCP_PARAM_DESCRIPTION_MAX_CHARS)
                     param_type = sanitize_mcp_description(
                         param_info.get("type", "any"), max_chars=MCP_PARAM_DESCRIPTION_MAX_CHARS
@@ -288,14 +307,39 @@ def _build_mcp_tools_prompt(agent_id: str) -> str:
                     )
                     req_marker = " (required)" if param_name in required else ""
                     param_lines.append(f"  - `{name}` ({param_type}{req_marker}): {param_desc}")
+                tool_cut_params = max(0, len(props) - MCP_TOOL_MAX_PARAMS)
+                if tool_cut_params:
+                    param_lines.append(f"  _{tool_cut_params} more parameters not shown._")
                 if param_lines:
-                    server_section_lines.append("  Parameters:")
-                    server_section_lines.extend(param_lines)
+                    entry_lines.append("  Parameters:")
+                    entry_lines.extend(param_lines)
 
+            entry_lines.append("")
+            entry_chars = sum(len(line) + 1 for line in entry_lines)
+            if entry_chars > budget:
+                budget = 0
+                break
+            budget -= entry_chars
+            server_section_lines.extend(entry_lines)
+            shown_tools += 1
+            cut_params += tool_cut_params
+
+        cut_tools = len(tools) - shown_tools
+        if cut_tools:
+            server_section_lines.append(f"_{cut_tools} more tools from this server not shown._")
             server_section_lines.append("")
+        if (cut_tools or cut_params) and (agent_id, instance.server_key) not in _MCP_PROMPT_CUTS_LOGGED:
+            _MCP_PROMPT_CUTS_LOGGED.add((agent_id, instance.server_key))
+            log.warning(
+                "mcp_prompt_tools_cut",
+                agent_id=agent_id,
+                server_key=instance.server_key,
+                tools_listed=len(tools),
+                tools_not_shown=cut_tools,
+                parameters_not_shown=cut_params,
+            )
 
-        if server_section_lines:
-            sections.append("\n".join(server_section_lines))
+        sections.append("\n".join(server_section_lines))
 
     if not sections:
         return ""

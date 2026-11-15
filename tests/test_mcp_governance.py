@@ -232,6 +232,100 @@ class TestMcpPromptGeneration:
         assert len(name) <= len("  - `") + MCP_PARAM_DESCRIPTION_MAX_CHARS
         assert len(kind.split("):", 1)[0]) <= MCP_PARAM_DESCRIPTION_MAX_CHARS
 
+    def test_mcp_prompt_caps_the_tools_shown_per_server(self):
+        """D-269: a server listing thousands of tools shows the first ones, says how many are left, logs once."""
+        from koda.services import tool_prompt
+        from koda.services.mcp_bridge import MCP_PROMPT_MAX_TOOLS_PER_SERVER
+        from koda.services.mcp_manager import mcp_server_manager
+
+        tools = [
+            McpToolDefinition(name=f"t{i}", description="Tool") for i in range(MCP_PROMPT_MAX_TOOLS_PER_SERVER + 5)
+        ]
+        instance = _make_instance("big", "agent-1", tools=tools)
+
+        original = mcp_server_manager._instances
+        mcp_server_manager._instances = {"agent-1:big": instance}
+        try:
+            with (
+                patch.object(tool_prompt, "_MCP_PROMPT_CUTS_LOGGED", set()),
+                patch.object(tool_prompt, "log") as log,
+            ):
+                result = tool_prompt._build_mcp_tools_prompt("agent-1")
+                again = tool_prompt._build_mcp_tools_prompt("agent-1")
+        finally:
+            mcp_server_manager._instances = original
+
+        tool_lines = [line for line in result.splitlines() if line.startswith("**`")]
+        assert len(tool_lines) == MCP_PROMPT_MAX_TOOLS_PER_SERVER
+        assert tool_lines[-1].startswith(f"**`mcp_big__t{MCP_PROMPT_MAX_TOOLS_PER_SERVER - 1}`**")
+        assert "_5 more tools from this server not shown._" in result
+        assert again == result
+        assert log.warning.call_count == 1
+
+    def test_mcp_prompt_caps_the_parameters_shown_per_tool(self):
+        """D-269: a tool with hundreds of parameters shows the first ones and says how many are left."""
+        from koda.services.mcp_bridge import MCP_TOOL_MAX_PARAMS
+        from koda.services.mcp_manager import mcp_server_manager
+        from koda.services.tool_prompt import _build_mcp_tools_prompt
+
+        properties = {f"p{i}": {"type": "string", "description": "d"} for i in range(MCP_TOOL_MAX_PARAMS + 3)}
+        tools = [
+            McpToolDefinition(
+                name="wide", description="Wide", input_schema={"type": "object", "properties": properties}
+            ),
+            McpToolDefinition(name="narrow", description="Narrow"),
+        ]
+        instance = _make_instance("docs", "agent-1", tools=tools)
+
+        original = mcp_server_manager._instances
+        mcp_server_manager._instances = {"agent-1:docs": instance}
+        try:
+            result = _build_mcp_tools_prompt("agent-1")
+        finally:
+            mcp_server_manager._instances = original
+
+        param_lines = [line for line in result.splitlines() if line.startswith("  - `p")]
+        assert len(param_lines) == MCP_TOOL_MAX_PARAMS
+        assert "  _3 more parameters not shown._" in result
+        assert "mcp_docs__narrow" in result
+
+    def test_mcp_prompt_section_stops_at_its_size_cap(self):
+        """D-269: many servers with long descriptions cannot grow the section past its cap."""
+        from koda.services.mcp_bridge import (
+            MCP_PROMPT_MAX_TOOLS_PER_SERVER,
+            MCP_PROMPT_SECTION_MAX_CHARS,
+            MCP_TOOL_DESCRIPTION_MAX_CHARS,
+        )
+        from koda.services.mcp_manager import mcp_server_manager
+        from koda.services.tool_prompt import _build_mcp_tools_prompt
+
+        servers = MCP_PROMPT_SECTION_MAX_CHARS // (MCP_PROMPT_MAX_TOOLS_PER_SERVER * MCP_TOOL_DESCRIPTION_MAX_CHARS) + 2
+        long_description = "d" * MCP_TOOL_DESCRIPTION_MAX_CHARS
+        instances = {
+            f"agent-1:s{n}": _make_instance(
+                f"s{n}",
+                "agent-1",
+                tools=[
+                    McpToolDefinition(name=f"t{i}", description=long_description)
+                    for i in range(MCP_PROMPT_MAX_TOOLS_PER_SERVER)
+                ],
+            )
+            for n in range(servers)
+        }
+
+        original = mcp_server_manager._instances
+        mcp_server_manager._instances = instances
+        try:
+            result = _build_mcp_tools_prompt("agent-1")
+        finally:
+            mcp_server_manager._instances = original
+
+        assert len(result) <= MCP_PROMPT_SECTION_MAX_CHARS + 1_000
+        assert "### MCP Server: s0" in result
+        assert "**`mcp_s0__t0`**" in result
+        assert "more tools from this server not shown._" in result
+        assert f"### MCP Server: s{servers - 1}" in result
+
     def test_mcp_prompt_skips_other_agents(self):
         """Only includes instances for the requested agent_id."""
         from koda.services.mcp_manager import mcp_server_manager
