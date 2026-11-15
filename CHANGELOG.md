@@ -233,6 +233,13 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   as plain text instead of inside a code block, and without a URL it answers
   "Usage: /fetch <url>". The agent tool catalog describes `curl` as "Alias of /fetch".
   (M6-E3-T4)
+- Publishing an agent fails when its model policy names an unknown provider in
+  `default_models`, `tier_models` or `available_models_by_provider`, as it already did
+  for `default_provider`. At runtime, an unknown provider id still falls back to the
+  default provider but logs `unknown_provider_id`. Changing the agent's provider or
+  model from Telegram (`/settings` or chat) publishes the agent, so the supervisor
+  moves the running agent to the new version; before, the agent kept the model it
+  started with until it was restarted. (M6-E3-T2, D-157, D-068)
 
 
 ### Removed

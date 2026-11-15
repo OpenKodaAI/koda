@@ -23,12 +23,14 @@ from koda.config import (
     TTS_DEFAULT_VOICE,
     TTS_ENABLED,
 )
+from koda.logging_config import get_logger
 from koda.state.history_store import get_user_cost
 from koda.telegram_types import BotContext, MessageUpdate
 from koda.utils.rate_limiter import acquire_rate_limit
 
 P = ParamSpec("P")
 R = TypeVar("R")
+log = get_logger(__name__)
 
 _GENERAL_PROVIDER_ALIASES: dict[str, str] = {
     "anthropic": "claude",
@@ -93,6 +95,7 @@ def normalize_provider(provider: str | None) -> str:
     normalized = str(provider or DEFAULT_PROVIDER).strip().lower()
     normalized = _GENERAL_PROVIDER_ALIASES.get(normalized, normalized)
     if normalized not in _KNOWN_GENERAL_PROVIDER_IDS:
+        log.warning("unknown_provider_id", provider=normalized, fallback=DEFAULT_PROVIDER)
         return DEFAULT_PROVIDER
     return normalized
 

@@ -1251,6 +1251,18 @@ def validate_agent_spec(
                     + ", ".join(disallowed_fallback)
                 )
 
+        # A provider id the runtime does not know would silently fall back to the default
+        # provider (D-157), so the per-provider model maps are checked like default_provider.
+        for field, normalize_provider_map in (
+            ("available_models_by_provider", _normalize_provider_models),
+            ("default_models", _normalize_default_models),
+            ("tier_models", _normalize_tier_models),
+        ):
+            provider_map = normalize_provider_map(model_policy.get(field))
+            unknown_providers = [provider for provider in provider_map if provider not in CORE_PROVIDER_IDS]
+            if unknown_providers:
+                errors.append(f"model_policy.{field} contains unknown providers: {', '.join(unknown_providers)}")
+
         for provider, models in _normalize_provider_models(model_policy.get("available_models_by_provider")).items():
             known_models = set(available_models.get(provider.lower(), []))
             invalid_models = [model for model in models if known_models and model not in known_models]
