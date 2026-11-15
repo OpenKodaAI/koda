@@ -61,7 +61,7 @@ export const EMBEDDING_CATALOG_QUERY_KEY = ["control-plane", "embedding-catalog"
 
 function Stars({ score, max = 5 }: { score: number; max?: number }) {
   return (
-    <span className="text-[11px] tracking-tight text-[var(--text-tertiary)]">
+    <span className="text-[11px] tracking-tight text-[color:var(--text-tertiary)]">
       {Array.from({ length: max })
         .map((_, i) => (i < score ? "●" : "○"))
         .join("")}
@@ -249,7 +249,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
 
   if (!catalog || catalogLoading) {
     return (
-      <div className="rounded-xl border border-[color:var(--divider-hair)] p-4 text-sm text-[var(--text-tertiary)]">
+      <div className="rounded-xl border border-[color:var(--divider-hair)] p-4 text-sm text-[color:var(--text-tertiary)]">
         {t("generated.controlPlane.carregando_catalogo_de_modelos_6c45df79")}
       </div>
     );
@@ -260,7 +260,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
 
   return (
     <div className="flex flex-col gap-1.5">
-      <p className="text-[11px] leading-relaxed text-[var(--text-tertiary)]">
+      <p className="text-[11px] leading-relaxed text-[color:var(--text-tertiary)]">
         {tl(
           "Escolha o modelo usado para memória, knowledge base e cache semântico. " +
             "Nenhum vem pré-instalado: baixe sob demanda quando precisar.",
@@ -276,7 +276,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
             <span className="font-medium">
               {t("generated.controlPlane.memoria_ativada_sem_modelo_de_embedding_inst_ee8a3751")}
             </span>
-            <span className="leading-snug text-[var(--text-secondary)]">
+            <span className="leading-snug text-[color:var(--text-secondary)]">
               {tl(
                 "Extremamente recomendado escolher e baixar um modelo abaixo. " +
                   "Sem ele a recuperação semântica cai para um match por palavras-chave (qualidade degradada).",
@@ -310,7 +310,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
             >
               <header className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
-                  <h4 className="truncate text-[13px] font-medium text-[var(--text-primary)]">
+                  <h4 className="truncate text-[13px] font-medium text-[color:var(--text-primary)]">
                     {model.title}
                   </h4>
                   {isActiveModel ? (
@@ -334,7 +334,7 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
                   ) : null}
                   {showDownloading ? (
                     <span
-                      className="inline-flex h-5 min-w-7 items-center justify-center rounded-pill bg-[color:var(--panel-strong)] px-2 py-0.5 text-[11px] text-[var(--text-secondary)]"
+                      className="inline-flex h-5 min-w-7 items-center justify-center rounded-pill bg-[color:var(--panel-strong)] px-2 py-0.5 text-[11px] text-[color:var(--text-secondary)]"
                       role="status"
                       aria-label={t("generated.controlPlane.baixando_732b403f")}
                     >
@@ -370,10 +370,10 @@ export function EmbeddingModelPicker({ memoryEnabled = false }: { memoryEnabled?
                   ) : null}
                 </div>
               </header>
-              <p className="line-clamp-2 text-[11px] leading-snug text-[var(--text-secondary)]">
+              <p className="line-clamp-2 text-[11px] leading-snug text-[color:var(--text-secondary)]">
                 {tl(model.description)}
               </p>
-              <footer className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-[var(--text-tertiary)]">
+              <footer className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-[color:var(--text-tertiary)]">
                 <span className="inline-flex items-center gap-1">
                   <Sparkles size={10} strokeWidth={1.75} />
                   <Stars score={model.quality} />

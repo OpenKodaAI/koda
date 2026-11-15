@@ -3612,6 +3612,32 @@ async def _require_squad_admin(
     return None
 
 
+async def _squad_delegation_limit_refusal(
+    tool: str, ctx: ToolContext, chain: list[str], to: str
+) -> AgentToolResult | None:
+    """Refuse a delegation or ``agent_send`` past a limit; in a squad thread, the room is told which (P25)."""
+    from koda.squads import get_squad_thread_store, record_squad_delegation_limit, squad_delegation_limit
+
+    limit = squad_delegation_limit(chain=chain, to_agent_id=to, agent_send=tool == "agent_send")
+    if limit is None:
+        return None
+    log.info("inter_agent_limit_reached", tool=tool, limit=limit.limit, chain=chain, to_agent=to)
+    thread_store = get_squad_thread_store() if ctx.squad_thread_id else None
+    if ctx.squad_thread_id and thread_store is not None:
+        await record_squad_delegation_limit(
+            thread_store,
+            thread_id=ctx.squad_thread_id,
+            limit=limit,
+            tool=tool,
+            from_agent=chain[-1],
+            to_agent=to,
+            chain=chain,
+            parent_message_id=ctx.parent_message_id,
+        )
+    output = f"Delegation failed: {limit.reason}" if limit.limit == "depth" else limit.reason
+    return AgentToolResult(tool=tool, success=False, output=output)
+
+
 async def _handle_agent_send(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_inter_agent_available("agent_send")
     if err:
@@ -3642,6 +3668,11 @@ async def _handle_agent_send(params: dict, ctx: ToolContext) -> AgentToolResult:
     from koda.agents import get_message_bus
 
     from_agent = _ctx_agent_id(ctx)
+    # The message carries every hop that led to it, so a squad thread's agents cannot answer each
+    # other without end (D-096).
+    chain = [*(ctx.delegation_chain or []), from_agent]
+    if ctx.squad_thread_id and (refused := await _squad_delegation_limit_refusal("agent_send", ctx, chain, to)):
+        return refused
     log.info("inter_agent_communication", tool="agent_send", from_agent=from_agent, to_agent=to, user_id=ctx.user_id)
     _audit_blocked("agent_send", f"inter_agent:{from_agent}->{to}", user_id=ctx.user_id)
     msg_id = await get_message_bus().send(
@@ -3652,7 +3683,7 @@ async def _handle_agent_send(params: dict, ctx: ToolContext) -> AgentToolResult:
             "thread_id": ctx.squad_thread_id,
             "squad_task_id": ctx.squad_task_id,
             "parent_message_id": ctx.parent_message_id,
-            "delegation_chain": ctx.delegation_chain,
+            "delegation_chain": chain,
             "kind": "agent_text",
         },
     )
@@ -3694,8 +3725,6 @@ async def _handle_agent_delegate(params: dict, ctx: ToolContext) -> AgentToolRes
     task = params.get("task", "")
     if not to or not task:
         return AgentToolResult(tool="agent_delegate", success=False, output="Missing 'to' and 'task'.")
-    if to in set(ctx.delegation_chain or []):
-        return AgentToolResult(tool="agent_delegate", success=False, output=f"Delegation cycle detected for '{to}'.")
     if ctx.squad_thread_id:
         access_err = await _require_squad_thread_access(
             tool="agent_delegate",
@@ -3714,13 +3743,17 @@ async def _handle_agent_delegate(params: dict, ctx: ToolContext) -> AgentToolRes
             await service.require_thread_access(thread_id=ctx.squad_thread_id, agent_id=to)
         except SquadAccessError as exc:
             return AgentToolResult(tool="agent_delegate", success=False, output=f"Forbidden target: {exc}")
+    from_agent = _ctx_agent_id(ctx)
+    # The request carries the whole chain, so a cycle or the depth cap is seen at every hop (D-095).
+    chain = [*(ctx.delegation_chain or []), from_agent]
+    if refused := await _squad_delegation_limit_refusal("agent_delegate", ctx, chain, to):
+        return refused
     timeout = min(int(params.get("timeout", 60)), 300)
     context = params.get("context", {})
 
     from koda.agents import get_message_bus
     from koda.agents.models import DelegationRequest
 
-    from_agent = _ctx_agent_id(ctx)
     log.info(
         "inter_agent_communication",
         tool="agent_delegate",
@@ -3736,6 +3769,7 @@ async def _handle_agent_delegate(params: dict, ctx: ToolContext) -> AgentToolRes
         context=context if isinstance(context, dict) else {},
         timeout=timeout,
         delegation_depth=len(ctx.delegation_chain or []),
+        delegation_chain=chain,
         thread_id=ctx.squad_thread_id,
         parent_message_id=ctx.parent_message_id,
         squad_task_id=ctx.squad_task_id,
@@ -3783,11 +3817,42 @@ async def _handle_agent_broadcast(params: dict, ctx: ToolContext) -> AgentToolRe
     message = params.get("message", "")
     if not message:
         return AgentToolResult(tool="agent_broadcast", success=False, output="Missing 'message'.")
+    thread_id = ctx.squad_thread_id
+    if not thread_id:
+        return AgentToolResult(
+            tool="agent_broadcast",
+            success=False,
+            output="agent_broadcast needs a squad thread: it reaches only the current thread's participants.",
+        )
+    access_err = await _require_squad_thread_access(
+        tool="agent_broadcast",
+        ctx=ctx,
+        thread_id=thread_id,
+        require_write=True,
+    )
+    if access_err:
+        return access_err
 
     from koda.agents import get_message_bus
-    from koda.config import AGENT_ID
+    from koda.squads import get_squad_thread_store
 
-    count = await get_message_bus().broadcast(AGENT_ID or "default", message)
+    store = get_squad_thread_store()
+    if store is None:
+        return AgentToolResult(tool="agent_broadcast", success=False, output="Squad thread store unavailable.")
+    participants = await store.list_participants(thread_id=thread_id, active_only=True)
+    # The same squad task, cycle and chain as ``agent_send``, so each recipient's turn stays tied
+    # to the sender's work and a broadcast loop shows up in the delegation chain.
+    count = await get_message_bus().broadcast(
+        _ctx_agent_id(ctx),
+        message,
+        thread_id=thread_id,
+        recipients=[participant.agent_id for participant in participants],
+        metadata={
+            "squad_task_id": ctx.squad_task_id,
+            "parent_message_id": ctx.parent_message_id,
+            "delegation_chain": ctx.delegation_chain,
+        },
+    )
     return AgentToolResult(tool="agent_broadcast", success=True, output=f"Broadcast sent to {count} agents.")
 
 
@@ -4314,6 +4379,28 @@ def _string_list(value: Any) -> list[str]:
     return [str(item) for item in value if item is not None]
 
 
+def _refuse_server_task_metadata(tool_name: str, param_name: str, metadata: Any) -> AgentToolResult | None:
+    """Refuse task metadata outside AGENT_TASK_METADATA_KEYS from an agent's squad task tool (D-339).
+
+    The claim bookkeeping and the coordination fields are the server's.
+    """
+    if not isinstance(metadata, dict):
+        return None
+    from koda.squads.tasks import AGENT_TASK_METADATA_KEYS
+
+    server_keys = sorted(str(key) for key in metadata if str(key) not in AGENT_TASK_METADATA_KEYS)
+    if not server_keys:
+        return None
+    return AgentToolResult(
+        tool=tool_name,
+        success=False,
+        output=(
+            f"Task metadata cannot be set by an agent: {', '.join(server_keys)}. "
+            f"{param_name} may set only: {', '.join(sorted(AGENT_TASK_METADATA_KEYS))}."
+        ),
+    )
+
+
 async def _handle_squad_task_create(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_inter_agent_available("squad_task_create")
     if err:
@@ -4326,6 +4413,9 @@ async def _handle_squad_task_create(params: dict, ctx: ToolContext) -> AgentTool
             success=False,
             output="Missing 'thread_id' or 'title'.",
         )
+    metadata_refusal = _refuse_server_task_metadata("squad_task_create", "metadata", params.get("metadata"))
+    if metadata_refusal:
+        return metadata_refusal
     access_err = await _require_squad_thread_access(
         tool="squad_task_create",
         ctx=ctx,
@@ -4430,6 +4520,10 @@ async def _run_status_update(
     target_status = new_status or params.get("new_status", "")
     if not task_id or not target_status:
         return AgentToolResult(tool=tool_name, success=False, output="Missing 'task_id' or 'new_status'.")
+    metadata_patch = params.get("metadata_patch")
+    metadata_refusal = _refuse_server_task_metadata(tool_name, "metadata_patch", metadata_patch)
+    if metadata_refusal:
+        return metadata_refusal
     coordinator_override = bool(params.get("coordinator_override", False))
     access_err = await _require_squad_task_access(
         tool=tool_name,
@@ -4456,7 +4550,6 @@ async def _run_status_update(
 
     extra = extra or {}
     expected_version = params.get("expected_version")
-    metadata_patch = params.get("metadata_patch")
     try:
         task = await store.update_task_status(
             task_id=task_id,

@@ -348,7 +348,62 @@ async def test_runtime_task_browser_exposes_preview_url(tmp_path):
     assert payload["browser"]["screenshot_url"] == "/api/runtime/tasks/7/browser/screenshot"
     assert payload["browser"]["preview_url"] == "/api/runtime/tasks/7/browser/screenshot"
     assert payload["browser"]["preview_available"] is True
-    assert payload["browser"]["preview_path"] == str(preview_path)
+    assert payload["browser"]["preview_path"] == "artifacts/preview.png"
+
+
+@pytest.mark.asyncio
+async def test_runtime_task_browser_payload_is_an_explicit_projection(tmp_path):
+    """Only the named browser fields are sent; other snapshot keys and session metadata are not (M3-E8-T4)."""
+    runtime_root = tmp_path / "runtime"
+    task_root = runtime_root / "tasks" / "7"
+    screenshot = task_root / "browser" / "browser_7_1.png"
+    screenshot.parent.mkdir(parents=True, exist_ok=True)
+    screenshot.write_bytes(b"\x89PNG\r\n")
+    outside = tmp_path / "elsewhere" / "shot.png"
+    controller = _ControllerStub(
+        runtime_root=runtime_root,
+        env={"task_id": 7, "browser_scope_id": 7},
+        browser_snapshot={
+            "scope_id": 7,
+            "status": "unavailable",
+            "runtime_dir": str(task_root / "browser"),
+            "last_screenshot_path": str(screenshot),
+            "metadata": {"runtime_dir": str(task_root / "browser"), "profile_dir": str(outside.parent)},
+            "download_paths": [str(outside)],
+            "url": outside.as_uri(),
+            "last_title": "/",
+            "kernel_error": "/usr/bin/Xvfb: not found",
+            "unavailable_reason": "/dev/shm is full",
+            "session_persisted_only": True,
+        },
+    )
+    controller.store.list_browser_sessions = lambda task_id: [  # type: ignore[method-assign]
+        {"id": 1, "status": "running", "metadata": {"runtime_dir": str(task_root / "browser")}},
+    ]
+    request = _request(task_id=7, headers={"X-Runtime-Token": "secret"})
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+    ):
+        response = await _runtime_task_browser(request)
+
+    assert str(tmp_path) not in response.text
+    body = json.loads(response.text)
+    assert body["browser"] == {
+        "scope_id": 7,
+        "status": "unavailable",
+        "runtime_dir": "browser",
+        "last_title": "/",
+        "kernel_error": "/usr/bin/Xvfb: not found",
+        "unavailable_reason": "/dev/shm is full",
+        "session_persisted_only": True,
+        "screenshot_url": "/api/runtime/tasks/7/browser/screenshot",
+        "preview_url": "/api/runtime/tasks/7/browser/screenshot",
+        "preview_available": True,
+        "preview_path": "browser/browser_7_1.png",
+    }
+    assert body["sessions"] == [{"id": 1, "status": "running"}]
 
 
 @pytest.mark.asyncio
@@ -586,6 +641,42 @@ async def test_runtime_task_detail_skips_legacy_local_knowledge_in_postgres_prim
     assert response.status == 200
     assert payload["knowledge"]["retrieval_trace"]["id"] == 91
     assert payload["knowledge"]["answer_trace"]["id"] == 44
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("runtime_dir", "expected"),
+    [
+        pytest.param("runtime/tasks/12", ".", id="task-root"),
+        pytest.param("runtime/tasks/12/browser", "browser", id="inside"),
+        pytest.param("kernel/tasks/12", None, id="outside"),
+    ],
+)
+async def test_runtime_task_detail_environment_runtime_dir_is_task_relative(tmp_path, runtime_dir, expected):
+    """The environment's runtime_dir is relative to the task's runtime directory, or null (M3-E8-T4)."""
+    env = {"id": 3, "task_id": 12, "runtime_dir": str(tmp_path / runtime_dir), "workspace_path": "/work/repo"}
+    controller = _ControllerStub(runtime_root=tmp_path / "runtime", env=env)
+    request = _request(task_id=12, headers={"X-Runtime-Token": "secret"})
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+        patch("koda.state.knowledge_governance_store.get_latest_execution_episode", return_value=None),
+        _patch_knowledge_modules(
+            repository_cls=MagicMock(),
+            storage_cls=MagicMock(return_value=_KnowledgeStorageStub()),
+        ),
+        _patch_agent_asset_registry(SimpleNamespace(search=AsyncMock(return_value=[]))),
+    ):
+        response = await _runtime_task_detail(request)
+
+    assert response.status == 200
+    assert str(tmp_path) not in response.text
+    environment = json.loads(response.text)["environment"]
+    assert environment["runtime_dir"] == expected
+    assert environment["workspace_path"] == "/work/repo"
+    # The store's row is not changed.
+    assert env["runtime_dir"] == str(tmp_path / runtime_dir)
 
 
 @pytest.mark.asyncio
@@ -1238,12 +1329,141 @@ async def test_runtime_cancel_reports_a_finished_task_as_a_conflict(tmp_path, ca
     controller.cancel_task.assert_awaited_once_with(task_id=27, actor="runtime_api")  # type: ignore[attr-defined]
 
 
+_THREAD_ID = "6f0c1a52-0d3e-4c55-9a43-7a1f2c0d5e40"
+
+
+class _SquadThreadStoreStub:
+    def __init__(self, thread: object | None) -> None:
+        self.thread = thread
+        self.calls: list[str] = []
+
+    async def get_thread(self, thread_id: str) -> object | None:
+        self.calls.append(thread_id)
+        return self.thread
+
+
+def _squad_message_request(squad: dict[str, object]):
+    request = _request(headers={"X-Runtime-Token": "secret"})
+    request.json = AsyncMock(return_value={"text": "hello", "session_id": "squad-session", "squad": squad})
+    return request
+
+
+async def _send_squad_message(squad: dict[str, object], *, thread: object | None):
+    from koda.services.runtime.api import _runtime_send_session_message
+
+    controller = SimpleNamespace(_application=object())
+    store = _SquadThreadStoreStub(thread)
+    enqueue = AsyncMock(return_value=11)
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+        patch("koda.squads.get_squad_thread_store", return_value=store),
+        patch("koda.services.queue_manager.enqueue_squad_agent_task", enqueue),
+    ):
+        response = await _runtime_send_session_message(_squad_message_request(squad))
+    return response, enqueue, store
+
+
+@pytest.mark.asyncio
+async def test_squad_message_runs_as_the_thread_owner_not_a_caller_chosen_user():
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    response, enqueue, store = await _send_squad_message(
+        {"thread_id": _THREAD_ID, "target_agent_id": "WORKER", "user_id": 1, "chat_id": 2, "telegram_chat_id": 3},
+        thread=thread,
+    )
+
+    assert response.status == 202
+    assert store.calls == [_THREAD_ID]
+    kwargs = enqueue.await_args.kwargs
+    assert (kwargs["user_id"], kwargs["chat_id"]) == (777, -100555)
+    # The caller learns that the identity it sent was not used.
+    assert json.loads(response.text)["ignored"] == ["squad.user_id", "squad.chat_id", "squad.telegram_chat_id"]
+
+
+@pytest.mark.asyncio
+async def test_squad_message_logs_a_caller_identity_it_ignores():
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, _enqueue, _store = await _send_squad_message(
+            {"thread_id": _THREAD_ID, "target_agent_id": "WORKER", "user_id": 1},
+            thread=thread,
+        )
+
+    assert response.status == 202
+    assert json.loads(response.text)["ignored"] == ["squad.user_id"]
+    log.warning.assert_called_once_with(
+        "squad_message_identity_ignored",
+        thread_id=_THREAD_ID,
+        session_id="squad-session",
+        ignored=["squad.user_id"],
+    )
+
+
+@pytest.mark.asyncio
+async def test_squad_message_with_the_thread_identity_reports_nothing_ignored():
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, _enqueue, _store = await _send_squad_message(
+            {"thread_id": _THREAD_ID, "target_agent_id": "WORKER", "user_id": 777, "chat_id": -100555},
+            thread=thread,
+        )
+
+    assert response.status == 202
+    assert json.loads(response.text)["ignored"] == []
+    log.warning.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_squad_message_without_thread_owner_uses_server_derived_dashboard_identity():
+    from koda.services.runtime.api import _dashboard_actor_id
+
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=None, telegram_chat_id=None)
+    response, enqueue, _store = await _send_squad_message(
+        {"thread_id": _THREAD_ID, "target_agent_id": "WORKER", "user_id": 1, "chat_id": 2},
+        thread=thread,
+    )
+
+    assert response.status == 202
+    kwargs = enqueue.await_args.kwargs
+    assert kwargs["user_id"] == _dashboard_actor_id(namespace="squad-user", session_id="squad-session")
+    assert kwargs["chat_id"] == -_dashboard_actor_id(namespace="squad-chat", session_id="squad-session")
+
+
+@pytest.mark.asyncio
+async def test_squad_message_for_an_unknown_thread_is_refused():
+    response, enqueue, _store = await _send_squad_message(
+        {"thread_id": _THREAD_ID, "target_agent_id": "WORKER", "user_id": 1, "chat_id": 2},
+        thread=None,
+    )
+
+    assert response.status == 404
+    enqueue.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_squad_message_with_a_malformed_thread_id_is_a_client_error():
+    response, enqueue, store = await _send_squad_message(
+        {"thread_id": "not-a-uuid", "target_agent_id": "WORKER"},
+        thread=SimpleNamespace(owner_user_id=1, telegram_chat_id=1),
+    )
+
+    assert response.status == 400
+    assert store.calls == []
+    enqueue.assert_not_awaited()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("thread", "expected_status", "expected_error"),
     [
-        (None, 404, "thread thread-404 not found"),
-        (SimpleNamespace(status="paused", budget_usd_cap=None, cost_usd_accum=0), 409, "thread is paused"),
+        (None, 404, f"thread {_THREAD_ID} not found"),
+        (
+            SimpleNamespace(
+                status="paused", budget_usd_cap=None, cost_usd_accum=0, owner_user_id=777, telegram_chat_id=-100555
+            ),
+            409,
+            "thread is paused",
+        ),
     ],
 )
 async def test_runtime_squad_message_to_a_missing_thread_is_not_found_and_to_a_paused_one_a_conflict(
@@ -1260,7 +1480,7 @@ async def test_runtime_squad_message_to_a_missing_thread_is_not_found_and_to_a_p
     thread_store.get_thread = AsyncMock(return_value=thread)
     request = _json_request(
         task_id=0,
-        payload={"text": "Build the UI", "squad": {"thread_id": "thread-404", "target_agent_id": "FE"}},
+        payload={"text": "Build the UI", "squad": {"thread_id": _THREAD_ID, "target_agent_id": "FE"}},
         headers={"X-Runtime-Token": "secret"},
     )
     create_task = MagicMock(return_value=1)

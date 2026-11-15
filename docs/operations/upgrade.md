@@ -206,6 +206,41 @@ These changes apply with or without rules:
   `file_move` included, so it no longer covers a move from the same
   source to another destination. Scope grants issued before the upgrade
   no longer match, and their calls ask for approval again.
+- **Approval grants belong to one agent.** Migration `050_approval_tables`
+  creates `pending_approvals` and `approval_grants` with BIGINT user and
+  chat ids and DOUBLE PRECISION times; earlier releases created them on
+  first use with INTEGER ids and REAL times, which it widens.
+  A stored grant with a blank `agent_id` gets the agent that the approval
+  request that issued it, its session or its chat names, when exactly one
+  agent is named. A session naming `KODA` counts as naming none, because
+  migration 027 set `KODA` on every session older than it. Every other such
+  grant expires, with one
+  `approval.grant_expired` audit event (scope `global`) each, and its call
+  asks for approval again. No grant without an agent applies to any agent.
+  A grant approved for a request that names no agent now belongs to the
+  worker that issued it instead of agent `default`.
+- **A grant's use is recorded before its action runs.** When Postgres does
+  not record the use, the call or command does not run and asks for
+  approval again. A use counts when the action starts, so an action that
+  fails has used its approval. An approval's grants are stored before the
+  approval completes: when Postgres does not store them, the approver gets
+  a Telegram reply or an HTTP 503 from the dashboard, and the request stays
+  open to approve again.
+- **Approvals are kept in Postgres only.** Earlier releases wrote
+  `approval_grants.json` and `pending_approvals.json` in `STATE_ROOT_DIR`
+  when a Postgres write failed, and never read them back. On its first
+  start, before it recovers tasks, each worker imports the files it finds
+  there, once. The old release left a grant in the file after its last use
+  or its revocation, so every imported grant is stored expired, with one
+  `approval.grant_expired` audit event (reason
+  `imported_from_retired_json`) each, and its calls ask for approval
+  again. A grant keeps its `agent_id`, and one without an agent follows
+  the rule above. Each file is then renamed `<name>.migrated` and kept,
+  and the worker logs `approval_json_import_complete` with the rows it
+  imported. A file that fails to import stays in place: the worker
+  reports `approval_json_import_error` and tries again on its next start.
+  A failed approval write is now logged (`approval_grants_write_failed`,
+  `pending_approvals_write_failed`) and no file is written.
 
 ## Step 1 — schema migration gate
 

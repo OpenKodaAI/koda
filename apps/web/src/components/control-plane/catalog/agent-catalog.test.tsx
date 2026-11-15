@@ -513,6 +513,42 @@ describe("AgentCatalog organization board", () => {
     ).not.toBeInTheDocument();
   });
 
+  // D-320: both toolbar popovers closed on Escape from a window bubble listener without
+  // preventDefault(). A dialog around them (useEscapeToClose since D-277, a Radix Dialog) only
+  // ignores an Escape another handler already took, so the same Escape closed the dialog too.
+  it("closes each toolbar popover on Escape and marks the Escape handled", async () => {
+    const user = userEvent.setup();
+    renderCatalog();
+    const escapeReachesDialog = () => {
+      let taken: boolean | null = null;
+      // Where a dialog's Escape listener sits: the document, bubble phase.
+      const dialogListener = (event: KeyboardEvent) => {
+        if (event.key === "Escape") taken = event.defaultPrevented;
+      };
+      document.addEventListener("keydown", dialogListener);
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+      document.removeEventListener("keydown", dialogListener);
+      return taken === false;
+    };
+
+    const create = screen.getByRole("button", { name: /^Criar$/i });
+    await user.click(create);
+    expect(await screen.findByRole("menu")).toBeInTheDocument();
+    expect(escapeReachesDialog()).toBe(false);
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    expect(create).toHaveAttribute("aria-expanded", "false");
+
+    const workspace = screen.getByRole("button", { name: /Selecione o espa.o de trabalho/i });
+    await user.click(workspace);
+    expect(await screen.findByRole("listbox")).toBeInTheDocument();
+    expect(escapeReachesDialog()).toBe(false);
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+    expect(workspace).toHaveAttribute("aria-expanded", "false");
+
+    // With no popover open, Escape is left to the dialog.
+    expect(escapeReachesDialog()).toBe(true);
+  });
+
   it("creates a workspace from the management toolbar", async () => {
     const user = userEvent.setup();
     renderCatalog();

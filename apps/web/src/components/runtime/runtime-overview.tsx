@@ -147,32 +147,32 @@ function LiveRow({ row }: { row: RuntimeRoomRow }) {
     >
       <span className="flex min-w-0 items-center gap-2">
         <StatusDot color={agentColor} />
-        <span className="truncate font-mono text-[0.75rem] text-[var(--text-secondary)]">
+        <span className="truncate font-mono text-[0.75rem] text-[color:var(--text-secondary)]">
           {getAgentLabel(row.agentId)}
         </span>
       </span>
 
-      <span className="font-mono text-[0.75rem] tabular-nums text-[var(--text-quaternary)]">
+      <span className="font-mono text-[0.75rem] tabular-nums text-[color:var(--text-quaternary)]">
         #{row.taskId}
       </span>
 
       <span className="flex min-w-0 items-center gap-2">
         <StatusDot tone={phaseTone} pulse={isLive} />
-        <span className="truncate text-[0.75rem] text-[var(--text-tertiary)]">{phaseLabel}</span>
+        <span className="truncate text-[0.75rem] text-[color:var(--text-tertiary)]">{phaseLabel}</span>
       </span>
 
-      <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+      <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
         {sourceLabel}
       </span>
 
-      <span className="truncate text-[0.8125rem] text-[var(--text-secondary)]">
+      <span className="truncate text-[0.8125rem] text-[color:var(--text-secondary)]">
         {summary}
       </span>
 
       <span
         className={cn(
           liveTablePinnedColumn,
-          "whitespace-nowrap text-right font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]",
+          "whitespace-nowrap text-right font-mono text-[0.6875rem] tabular-nums text-[color:var(--text-quaternary)]",
           "group-hover:bg-[var(--hover-tint)] group-focus-visible:bg-[var(--hover-tint)]",
         )}
       >
@@ -370,7 +370,7 @@ export function RuntimeOverviewScreen({
       >
         <div className="min-w-0">
           <p className="eyebrow">{t("runtime.overview.title")}</p>
-          <h2 className="m-0 mt-1 text-[1.375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+          <h2 className="m-0 mt-1 text-[1.375rem] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
             {t("runtime.controlCard.title", undefined)}
           </h2>
         </div>
@@ -444,11 +444,11 @@ export function RuntimeOverviewScreen({
           <header className="flex items-baseline justify-between gap-3 border-b border-[var(--divider-hair)] px-3 py-2.5">
             <div className="min-w-0">
               <p className="eyebrow truncate">{translate("generated.runtime.runtime_5359aeee")}</p>
-              <h3 className="m-0 mt-1 truncate text-[var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+              <h3 className="m-0 mt-1 truncate text-[length:var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
                 {t("runtime.overview.liveExecutions")}
               </h3>
             </div>
-            <span className="shrink-0 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+            <span className="shrink-0 font-mono text-[0.6875rem] text-[color:var(--text-tertiary)]">
               {roomRows.length}
             </span>
           </header>
@@ -462,25 +462,25 @@ export function RuntimeOverviewScreen({
                     liveTableColumns,
                   )}
                 >
-                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                     {t("runtime.overview.table.agent", undefined)}
                   </span>
-                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                     {t("runtime.overview.table.task", undefined)}
                   </span>
-                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                     {t("common.status")}
                   </span>
-                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                     {t("runtime.overview.table.source", undefined)}
                   </span>
-                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                  <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                     {t("runtime.overview.table.summary", undefined)}
                   </span>
                   <span
                     className={cn(
                       liveTablePinnedColumn,
-                      "z-20 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]",
+                      "z-20 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]",
                     )}
                   >
                     {t("runtime.overview.table.updated", undefined)}
@@ -490,10 +490,10 @@ export function RuntimeOverviewScreen({
                 <div>
                   {roomRows.length === 0 ? (
                     <div
-                      className="flex min-h-[240px] flex-col items-center justify-center gap-2 px-3 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]"
+                      className="flex min-h-[240px] flex-col items-center justify-center gap-2 px-3 py-10 text-center text-[0.8125rem] text-[color:var(--text-tertiary)]"
                       {...tourAnchor("runtime.empty-live")}
                     >
-                      <Activity className="h-4 w-4 text-[var(--text-quaternary)]" />
+                      <Activity className="h-4 w-4 text-[color:var(--text-quaternary)]" />
                       <p className="m-0">{t("runtime.overview.noExecutionsMatch")}</p>
                     </div>
                   ) : (

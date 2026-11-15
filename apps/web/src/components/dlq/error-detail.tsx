@@ -156,15 +156,15 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
                 <div className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="app-card-row__eyebrow">{translate("generated.executions.dlq_ddb953bb")}{renderedEntry.id}</span>
-                    <span className="font-mono text-xs text-[var(--text-tertiary)]">{translate("generated.executions.task_1070b13b")}{renderedEntry.task_id}</span>
+                    <span className="font-mono text-xs text-[color:var(--text-tertiary)]">{translate("generated.executions.task_1070b13b")}{renderedEntry.task_id}</span>
                     {renderedEntry.bot_id && (
-                      <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--text-secondary)]">
+                      <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-[color:var(--text-secondary)]">
                         {renderedEntry.bot_id}
                       </span>
                     )}
                   </div>
                   <div>
-                    <h2 className="text-[1.08rem] font-semibold leading-6 tracking-[-0.035em] text-[var(--text-primary)] sm:text-[1.15rem]">
+                    <h2 className="text-[1.08rem] font-semibold leading-6 tracking-[-0.035em] text-[color:var(--text-primary)] sm:text-[1.15rem]">
                       {renderedEntry.error_message
                         ? truncateText(renderedEntry.error_message, 110)
                         : t("dlq.detail.empty")}
@@ -213,7 +213,7 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
               </div>
 
               <div className="space-y-2.5">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--text-tertiary)]">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[color:var(--text-tertiary)]">
                   {t("dlq.detail.operationalContext")}
                 </span>
                 <div className="app-detail-grid gap-2 sm:grid-cols-2">
@@ -277,10 +277,10 @@ export function ErrorDetail({ entry, onClose }: ErrorDetailProps) {
 function DrawerMetric({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="min-w-0 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-3 py-2.5">
-      <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+      <p className="truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
         {label}
       </p>
-      <p className={cn("mt-1 truncate text-[13px] leading-5 text-[var(--text-primary)]", mono && "font-mono")}>
+      <p className={cn("mt-1 truncate text-[13px] leading-5 text-[color:var(--text-primary)]", mono && "font-mono")}>
         {value}
       </p>
     </div>

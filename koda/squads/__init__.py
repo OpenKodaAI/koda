@@ -63,14 +63,17 @@ from koda.squads.delivery import (
     summarize_route_quality_history,
 )
 from koda.squads.dispatch import (
+    SquadDelegationLimit,
     SquadThreadNotFoundError,
     SquadThreadNotRunnableError,
     SquadTurnDispatchResult,
     dispatch_squad_turn,
+    record_squad_delegation_limit,
     record_squad_dispatch_unavailable,
     record_squad_handoff_event,
     record_squad_mention_unresolved,
     record_squad_routing_decision,
+    squad_delegation_limit,
     squad_thread_turn_refusal,
 )
 from koda.squads.event_hub import SquadEventHub, get_squad_event_hub
@@ -217,6 +220,7 @@ __all__ = [
     "SquadOverview",
     "SquadPrincipal",
     "SquadCoordinatorEngine",
+    "SquadDelegationLimit",
     "SquadMentionResolver",
     "SquadRouter",
     "SquadSemanticRouter",
@@ -291,6 +295,7 @@ __all__ = [
     "message_ref_to_id",
     "post_to_telegram_thread",
     "record_squad_handoff_event",
+    "record_squad_delegation_limit",
     "record_squad_dispatch_unavailable",
     "record_squad_mention_unresolved",
     "record_squad_routing_decision",
@@ -300,6 +305,7 @@ __all__ = [
     "request_needs_coordination",
     "select_targets",
     "should_use_coordinator_engine",
+    "squad_delegation_limit",
     "squad_thread_turn_refusal",
     "synthesis_gate_metric",
     "sync_thread_participants_from_squad",

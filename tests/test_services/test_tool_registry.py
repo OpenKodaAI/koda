@@ -215,6 +215,11 @@ def test_delegate_task_registry_contract_is_schema_first() -> None:
     assert definition.approval_default == "require_approval"
     assert definition.idempotency == "idempotent"
     assert definition.args_schema["properties"]["tasks"]["type"] == "array"
+    # A fan-out item may not name another agent either: both say the child acts as the parent.
+    top_level_target = definition.args_schema["properties"]["target_agent_id"]
+    item_target = definition.args_schema["properties"]["tasks"]["items"]["properties"]["target_agent_id"]
+    assert "parent's own agent" in top_level_target["description"]
+    assert item_target == top_level_target
 
     schemas = build_openai_tool_schemas_for_runtime(
         feature_flags={"inter_agent": True},

@@ -183,12 +183,12 @@ export function SettingsWarningIndicator({
             >
               <div className="relative z-[1] border-b border-[rgba(255,255,255,0.06)] px-4 py-3">
                 <div className="flex items-center gap-2.5">
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.75rem] border border-[rgba(214,164,64,0.24)] bg-[rgba(166,117,25,0.12)] text-[var(--tone-warning-dot)]">
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[0.75rem] border border-[rgba(214,164,64,0.24)] bg-[rgba(166,117,25,0.12)] text-[color:var(--tone-warning-dot)]">
                     <AlertTriangle className="h-4 w-4" />
                   </div>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-[var(--text-primary)]">{title}</p>
-                    <p className="text-xs text-[var(--text-quaternary)]">
+                    <p className="text-sm font-medium text-[color:var(--text-primary)]">{title}</p>
+                    <p className="text-xs text-[color:var(--text-quaternary)]">
                       {t("generated.controlPlane.revise_estes_pontos_antes_de_publicar_config_aba1ddd3")}
                     </p>
                   </div>
@@ -204,7 +204,7 @@ export function SettingsWarningIndicator({
                     >
                       <div className="flex items-start gap-2.5">
                         <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-[var(--tone-warning-dot)]" />
-                        <span className="text-sm leading-6 text-[var(--text-secondary)]">
+                        <span className="text-sm leading-6 text-[color:var(--text-secondary)]">
                           {tl(warning)}
                         </span>
                       </div>

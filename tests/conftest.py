@@ -309,11 +309,8 @@ def execution_approved():
 @pytest.fixture(autouse=True)
 def _reset_approval_runtime_state():
     """Keep approval/pending-op globals isolated across tests."""
-    from koda import config as config_module
     from koda.utils.approval import _APPROVAL_GRANTS, _PENDING_AGENT_CMD_OPS, _PENDING_OPS
 
-    pending_approvals_path = config_module.STATE_ROOT_DIR / "pending_approvals.json"
-    pending_approvals_path.unlink(missing_ok=True)
     _PENDING_OPS.clear()
     _PENDING_AGENT_CMD_OPS.clear()
     _APPROVAL_GRANTS.clear()
@@ -321,7 +318,25 @@ def _reset_approval_runtime_state():
     _PENDING_OPS.clear()
     _PENDING_AGENT_CMD_OPS.clear()
     _APPROVAL_GRANTS.clear()
-    pending_approvals_path.unlink(missing_ok=True)
+
+
+@pytest.fixture(autouse=True)
+def _approval_store_without_postgres(request, monkeypatch):
+    """Outside Postgres tests, let every approval-store write succeed and every read find nothing.
+
+    Postgres is the only approval store (M2-E1-T2), and it raises without a database. Tests
+    marked ``postgres`` use the real database; tests marked ``real_approval_store`` check the
+    store's behaviour without one.
+    """
+    if request.node.get_closest_marker("postgres") or request.node.get_closest_marker("real_approval_store"):
+        yield
+        return
+    from koda.state import approval_grants, pending_approvals
+
+    for module in (approval_grants, pending_approvals):
+        monkeypatch.setattr(module, "_execute", lambda _action, _query, _params: 1)
+        monkeypatch.setattr(module, "_fetch_all", lambda _action, _query, _params: [])
+    yield
 
 
 @pytest.fixture(autouse=True)

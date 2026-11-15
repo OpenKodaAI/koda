@@ -75,7 +75,7 @@ export function McpRiskBadgeGroup({
     return (
       <span
         className={cn(
-          "inline-flex items-center gap-1 rounded-[var(--radius-chip)] border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--tone-danger-text)]",
+          "inline-flex items-center gap-1 rounded-[var(--radius-chip)] border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--tone-danger-text)]",
           className,
         )}
         title={`${capabilityName}: mcp_risk.v1 unavailable`}
@@ -125,7 +125,7 @@ export function McpRiskBadgeGroup({
         {formatValue(risk.grant_state)}
       </span>
       {risk.redaction_required ? (
-        <span className="inline-flex items-center gap-1 rounded-[var(--radius-chip)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--tone-warning-text)]">
+        <span className="inline-flex items-center gap-1 rounded-[var(--radius-chip)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--tone-warning-text)]">
           {translate("generated.controlPlane.redaction_a63a6db7")}</span>
       ) : null}
     </span>

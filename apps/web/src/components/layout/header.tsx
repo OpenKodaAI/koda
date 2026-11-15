@@ -44,17 +44,17 @@ export function PageHeader({
                     className="inline-flex min-w-0 items-center gap-2"
                   >
                     {index > 0 && (
-                      <span className="text-[var(--text-quaternary)]">/</span>
+                      <span className="text-[color:var(--text-quaternary)]">/</span>
                     )}
                     {item.href ? (
                       <Link
                         href={item.href}
-                        className="truncate transition-colors hover:text-[var(--text-primary)]"
+                        className="truncate transition-colors hover:text-[color:var(--text-primary)]"
                       >
                         {tl(item.label)}
                       </Link>
                     ) : (
-                      <span className="truncate text-[var(--text-secondary)]">
+                      <span className="truncate text-[color:var(--text-secondary)]">
                         {tl(item.label)}
                       </span>
                     )}

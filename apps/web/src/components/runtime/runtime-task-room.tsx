@@ -103,7 +103,7 @@ function toneToDot(tone: SemanticTone): StatusDotTone {
 function TerminalPanelLoading() {
   const { t } = useAppI18n();
   return (
-    <div className="flex min-h-[360px] items-center justify-center bg-[var(--terminal-background)] text-[0.8125rem] text-[var(--text-tertiary)]">
+    <div className="flex min-h-[360px] items-center justify-center bg-[var(--terminal-background)] text-[0.8125rem] text-[color:var(--text-tertiary)]">
       {t("generated.runtime.preparando_terminal_892fc854")}
     </div>
   );
@@ -135,7 +135,7 @@ function LiveRuntimeBadge() {
   const { t } = useAppI18n();
   return (
     <span
-      className="inline-flex h-5 items-center gap-1.5 rounded-[var(--radius-chip)] px-1.5 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]"
+      className="inline-flex h-5 items-center gap-1.5 rounded-[var(--radius-chip)] px-1.5 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-tertiary)]"
     >
       <StatusDot tone="success" pulse />
       {t("runtime.room.liveSample")}
@@ -172,42 +172,42 @@ function RuntimeTaskHeader({
     <header className="border-b border-[color:var(--divider-hair)] pb-4">
       <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 flex-wrap items-center gap-2 font-mono text-[0.72rem] text-[var(--text-tertiary)]">
+          <div className="flex min-w-0 flex-wrap items-center gap-2 font-mono text-[0.72rem] text-[color:var(--text-tertiary)]">
             <Link
               href={`/runtime?agent=${agentId}`}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-tertiary)] transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
               aria-label={t("common.back")}
             >
               <ArrowLeft className="h-3.5 w-3.5" strokeWidth={1.75} />
             </Link>
-            <span className="font-medium text-[var(--text-secondary)]">{translate("generated.runtime.task_10323a33")}{taskId}</span>
-            <span className="text-[var(--text-quaternary)]">/</span>
+            <span className="font-medium text-[color:var(--text-secondary)]">{translate("generated.runtime.task_10323a33")}{taskId}</span>
+            <span className="text-[color:var(--text-quaternary)]">/</span>
             <span className="truncate">{getAgentLabel(agentId)}</span>
-            <span className="text-[var(--text-quaternary)]">/</span>
+            <span className="text-[color:var(--text-quaternary)]">/</span>
             <span className="inline-flex items-center gap-1.5">
               <StatusDot tone={phaseTone} pulse={isLivePhase} />
               {currentPhase}
             </span>
             {connected ? (
               <>
-                <span className="text-[var(--text-quaternary)]">/</span>
+                <span className="text-[color:var(--text-quaternary)]">/</span>
                 <span className="inline-flex items-center gap-1.5">
                   <StatusDot tone="success" pulse />
                   {t("runtime.overview.live")}
                 </span>
               </>
             ) : null}
-            <span className="text-[var(--text-quaternary)]">/</span>
+            <span className="text-[color:var(--text-quaternary)]">/</span>
             <span>{heartbeatLabel}</span>
             <LiveRuntimeBadge />
           </div>
 
-          <h2 className="m-0 mt-2 max-w-[860px] text-[1.125rem] font-medium leading-[1.24] tracking-[var(--tracking-tight)] text-[var(--text-primary)] [text-wrap:balance] sm:text-[1.25rem]">
+          <h2 className="m-0 mt-2 max-w-[860px] text-[1.125rem] font-medium leading-[1.24] tracking-[var(--tracking-tight)] text-[color:var(--text-primary)] [text-wrap:balance] sm:text-[1.25rem]">
             {title}
           </h2>
 
           {branchName ? (
-            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+            <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
               <span className="truncate">{branchName}</span>
             </div>
           ) : null}
@@ -283,7 +283,7 @@ function RuntimeActionRail({
         type="button"
         variant="ghost"
         size="sm"
-        className="h-8 rounded-[var(--radius-chip)] border-transparent px-2.5 text-[0.8125rem] font-medium text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+        className="h-8 rounded-[var(--radius-chip)] border-transparent px-2.5 text-[0.8125rem] font-medium text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
         onClick={openDetails}
       >
         {t("runtime.room.details")}
@@ -292,7 +292,7 @@ function RuntimeActionRail({
         asChild
         variant="ghost"
         size="sm"
-        className="h-8 rounded-[var(--radius-chip)] border-transparent px-2.5 text-[0.8125rem] font-medium text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+        className="h-8 rounded-[var(--radius-chip)] border-transparent px-2.5 text-[0.8125rem] font-medium text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
       >
         <Link href="/executions">{t("runtime.room.history")}</Link>
       </Button>
@@ -370,10 +370,10 @@ function RuntimeStatFooter({ stats }: { stats: RuntimeStageStat[] }) {
             key={item.label}
             className="flex min-w-0 items-baseline gap-1.5 font-mono"
           >
-            <dt className="m-0 truncate text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+            <dt className="m-0 truncate text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
               {item.label}
             </dt>
-            <dd className="m-0 truncate text-[0.75rem] text-[var(--text-secondary)]">
+            <dd className="m-0 truncate text-[0.75rem] text-[color:var(--text-secondary)]">
               {item.value}
             </dd>
           </div>
@@ -600,16 +600,16 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
     return (
       <div className="runtime-shell">
         <div className="flex min-h-[320px] flex-col items-center justify-center gap-3 rounded-[var(--radius-panel)] border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] p-8 text-center">
-          <AlertTriangle className="h-6 w-6 text-[var(--tone-danger-dot)]" />
-          <p className="m-0 text-base font-medium text-[var(--text-primary)]">
+          <AlertTriangle className="h-6 w-6 text-[color:var(--tone-danger-dot)]" />
+          <p className="m-0 text-base font-medium text-[color:var(--text-primary)]">
             {t("runtime.room.openErrorTitle")}
           </p>
-          <p className="m-0 max-w-xl text-[0.8125rem] leading-6 text-[var(--text-tertiary)]">
+          <p className="m-0 max-w-xl text-[0.8125rem] leading-6 text-[color:var(--text-tertiary)]">
             {error || t("runtime.room.openErrorDescription")}
           </p>
           <Link
             href="/runtime"
-            className="mt-2 inline-flex h-8 items-center gap-2 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)]"
+            className="mt-2 inline-flex h-8 items-center gap-2 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[color:var(--text-primary)] transition-colors hover:border-[var(--border-strong)]"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
             {t("common.back")}
@@ -695,8 +695,8 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
           {activeTab === "activity" ? (
             <div className="space-y-3 p-3 sm:p-4">
               {bundle.events.length === 0 ? (
-                <div className="flex min-h-[320px] flex-col items-center justify-center gap-2 py-10 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
-                  <Activity className="h-4 w-4 text-[var(--text-quaternary)]" />
+                <div className="flex min-h-[320px] flex-col items-center justify-center gap-2 py-10 text-center text-[0.8125rem] text-[color:var(--text-tertiary)]">
+                  <Activity className="h-4 w-4 text-[color:var(--text-quaternary)]" />
                   <p className="m-0">{t("runtime.room.noMovementYet")}</p>
                 </div>
               ) : (
@@ -770,7 +770,7 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
 
               {sourceRootMissing ? (
                 <div
-                  className="flex items-start gap-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-xs leading-relaxed text-[var(--tone-warning-text)]"
+                  className="flex items-start gap-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-xs leading-relaxed text-[color:var(--tone-warning-text)]"
                   role="status"
                 >
                   <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
@@ -837,10 +837,10 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                         key={warning.id}
                         className="rounded-[var(--radius-panel-sm)] bg-[var(--panel)] p-2.5"
                       >
-                        <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">
+                        <p className="m-0 text-[0.8125rem] text-[color:var(--text-primary)]">
                           {warning.message || warning.warning_type}
                         </p>
-                        <p className="m-0 mt-1 text-[0.6875rem] text-[var(--text-quaternary)]">
+                        <p className="m-0 mt-1 text-[0.6875rem] text-[color:var(--text-quaternary)]">
                           {warning.created_at
                             ? formatDateTime(warning.created_at)
                             : t("runtime.room.eventRecordedNow")}
@@ -853,8 +853,8 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
 
               <SharedDetailBlock title={t("runtime.room.events")}>
                 {bundle.events.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
-                    <Activity className="h-4 w-4 text-[var(--text-quaternary)]" />
+                  <div className="flex flex-col items-center gap-2 py-6 text-center text-[0.8125rem] text-[color:var(--text-tertiary)]">
+                    <Activity className="h-4 w-4 text-[color:var(--text-quaternary)]" />
                     <p className="m-0">{t("runtime.room.noEvents")}</p>
                   </div>
                 ) : (
@@ -908,8 +908,8 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
 
               <SharedDetailBlock title={t("runtime.room.services")}>
                 {bundle.services.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
-                    <Globe className="h-4 w-4 text-[var(--text-quaternary)]" />
+                  <div className="flex flex-col items-center gap-2 py-6 text-center text-[0.8125rem] text-[color:var(--text-tertiary)]">
+                    <Globe className="h-4 w-4 text-[color:var(--text-quaternary)]" />
                     <p className="m-0">{t("runtime.room.noActiveServices")}</p>
                   </div>
                 ) : (
@@ -920,15 +920,15 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                         className="flex items-start justify-between gap-3"
                       >
                         <div className="min-w-0">
-                          <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">
+                          <p className="m-0 text-[0.8125rem] text-[color:var(--text-primary)]">
                             {service.label || service.service_kind}
                           </p>
-                          <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+                          <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[color:var(--text-tertiary)]">
                             {service.url ||
                               `${service.protocol}://${service.host}:${service.port}`}
                           </p>
                         </div>
-                        <span className="inline-flex items-center gap-1.5 text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-secondary)]">
+                        <span className="inline-flex items-center gap-1.5 text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-secondary)]">
                           <StatusDot tone={toneToDot(getRuntimeTone(service.status))} />
                           {getRuntimeLabel(service.status)}
                         </span>
@@ -943,14 +943,14 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                   {latestCheckpoint ? (
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">
+                        <p className="m-0 text-[0.8125rem] text-[color:var(--text-primary)]">
                           {t("runtime.room.latestCheckpoint")}
                         </p>
-                        <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+                        <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[color:var(--text-tertiary)]">
                           {latestCheckpoint.checkpoint_dir}
                         </p>
                       </div>
-                      <span className="text-[0.6875rem] text-[var(--text-quaternary)]">
+                      <span className="text-[0.6875rem] text-[color:var(--text-quaternary)]">
                         {formatRelativeTime(latestCheckpoint.created_at)}
                       </span>
                     </div>
@@ -962,10 +962,10 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                       className="flex items-start justify-between gap-3"
                     >
                       <div className="min-w-0">
-                        <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">
+                        <p className="m-0 text-[0.8125rem] text-[color:var(--text-primary)]">
                           {artifact.label || artifact.artifact_kind}
                         </p>
-                        <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+                        <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[color:var(--text-tertiary)]">
                           {artifact.path}
                         </p>
                       </div>
@@ -993,8 +993,8 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
 
               <SharedDetailBlock title={t("runtime.room.recentGuardrails")}>
                 {bundle.guardrails.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 py-6 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
-                    <Waypoints className="h-4 w-4 text-[var(--text-quaternary)]" />
+                  <div className="flex flex-col items-center gap-2 py-6 text-center text-[0.8125rem] text-[color:var(--text-tertiary)]">
+                    <Waypoints className="h-4 w-4 text-[color:var(--text-quaternary)]" />
                     <p className="m-0">{t("runtime.room.noRecentGuardrails")}</p>
                   </div>
                 ) : (
@@ -1005,10 +1005,10 @@ export function RuntimeTaskRoom({ agentId, taskId }: RuntimeTaskRoomProps) {
                         className="flex items-start justify-between gap-3"
                       >
                         <div className="min-w-0">
-                          <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">
+                          <p className="m-0 text-[0.8125rem] text-[color:var(--text-primary)]">
                             {guardrail.guardrail_type}
                           </p>
-                          <p className="m-0 mt-0.5 text-[0.6875rem] text-[var(--text-quaternary)]">
+                          <p className="m-0 mt-0.5 text-[0.6875rem] text-[color:var(--text-quaternary)]">
                             {formatRelativeTime(guardrail.created_at)}
                           </p>
                         </div>
@@ -1052,12 +1052,12 @@ function ActionButton({
         "h-8 rounded-[var(--radius-chip)] border-transparent px-2.5 text-[0.8125rem] font-medium",
         "transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
         isPrimary &&
-          "bg-[var(--panel-strong)] text-[var(--text-primary)] hover:bg-[var(--surface-hover)]",
+          "bg-[var(--panel-strong)] text-[color:var(--text-primary)] hover:bg-[var(--surface-hover)]",
         isDanger &&
-          "text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)]",
+          "text-[color:var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)]",
         !isPrimary &&
           !isDanger &&
-          "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+          "text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
       )}
       aria-busy={busy || undefined}
     >
@@ -1122,25 +1122,25 @@ function RuntimeEventLogRow({ event }: { event: RuntimeEvent }) {
     <article className="flex flex-col gap-1.5 border-b border-[color:var(--divider-hair)] py-2.5 last:border-b-0">
       <div className="flex flex-wrap items-center gap-2">
         <StatusDot tone={toneDot} />
-        <span className="text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]">
+        <span className="text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-tertiary)]">
           {getRuntimeLabel(event.severity || "info")}
         </span>
-        <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+        <span className="font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
           {translate("generated.runtime.seq_bb6e6e40")}{event.seq}
         </span>
         {event.phase ? (
-          <span className="text-[0.6875rem] text-[var(--text-quaternary)]">
+          <span className="text-[0.6875rem] text-[color:var(--text-quaternary)]">
             · {getRuntimeLabel(event.phase)}
           </span>
         ) : null}
-        <span className="ml-auto text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+        <span className="ml-auto text-[0.6875rem] tabular-nums text-[color:var(--text-quaternary)]">
           {event.ts ? formatRelativeTime(event.ts) : t("runtime.room.eventRecordedNow")}
         </span>
       </div>
-      <p className="m-0 text-[0.8125rem] font-medium text-[var(--text-primary)]">
+      <p className="m-0 text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
         {getRuntimeLabel(event.type || t("runtime.room.eventFallback"))}
       </p>
-      <p className="m-0 text-[0.75rem] leading-[1.5] text-[var(--text-secondary)]">
+      <p className="m-0 text-[0.75rem] leading-[1.5] text-[color:var(--text-secondary)]">
         {getEventPreview(event)}
       </p>
       {event.payload && Object.keys(event.payload).length > 0 ? (

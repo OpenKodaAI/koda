@@ -213,7 +213,7 @@ function EditorHeader({
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/control-plane"
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)] hover:bg-[var(--surface-tint)]"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[color:var(--text-quaternary)] transition-colors hover:text-[color:var(--text-secondary)] hover:bg-[var(--surface-tint)]"
             aria-label={t("generated.controlPlane.voltar_ao_catalogo_9b2761dd")}
           >
             <ArrowLeft size={16} />
@@ -232,18 +232,18 @@ function EditorHeader({
             <div className="flex min-w-0 items-center gap-2">
               <Link
                 href="/control-plane"
-                className="shrink-0 text-xs uppercase tracking-[0.18em] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)]"
+                className="shrink-0 text-xs uppercase tracking-[0.18em] text-[color:var(--text-quaternary)] transition-colors hover:text-[color:var(--text-secondary)]"
                 {...tourAnchor("editor.back-link")}
               >
                 {t("generated.controlPlane.agentes_8ecacbc4")}
               </Link>
-              <span className="text-xs text-[var(--text-quaternary)]">/</span>
-              <span className="truncate text-xs uppercase tracking-[0.16em] text-[var(--text-quaternary)]">
+              <span className="text-xs text-[color:var(--text-quaternary)]">/</span>
+              <span className="truncate text-xs uppercase tracking-[0.16em] text-[color:var(--text-quaternary)]">
                 {agentId}
               </span>
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-2.5">
-              <h2 className="truncate text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+              <h2 className="truncate text-xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
                 {state.displayName || agentId}
               </h2>
             </div>
@@ -257,7 +257,7 @@ function EditorHeader({
                 type="button"
                 onClick={onPrevious}
                 disabled={!previousStep}
-                className="inline-flex items-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-transparent px-3.5 py-2 text-sm text-[var(--text-secondary)] shadow-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex items-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-transparent px-3.5 py-2 text-sm text-[color:var(--text-secondary)] shadow-none transition-colors hover:border-[var(--border-strong)] hover:text-[color:var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                 {...tourAnchor("editor.previous-step")}
               >
                 <ArrowLeft size={15} />
@@ -269,7 +269,7 @@ function EditorHeader({
                 className={cn(
                   "inline-flex items-center gap-2 rounded-[var(--radius-panel)] px-3.5 py-2 text-sm shadow-none transition-colors",
                   nextStep
-                    ? "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-elevated)]"
+                    ? "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[color:var(--text-primary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-elevated)]"
                     : "font-semibold text-[color:var(--interactive-active-text)]",
                 )}
                 style={nextStep ? undefined : {
@@ -310,7 +310,7 @@ function EditorHeader({
                   <button
                     type="button"
                     onClick={onDiscard}
-                    className="inline-flex items-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-transparent px-3.5 py-2 text-sm text-[var(--text-secondary)] shadow-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+                    className="inline-flex items-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-transparent px-3.5 py-2 text-sm text-[color:var(--text-secondary)] shadow-none transition-colors hover:border-[var(--border-strong)] hover:text-[color:var(--text-primary)]"
                     {...tourAnchor("editor.discard")}
                   >
                     {t("generated.controlPlane.descartar_8c52be0d")}
@@ -355,7 +355,7 @@ function ActiveStepRenderer({
 
 function InnerShell() {
   const { state, persistDraft, discardDraft, applyAgentLifecycle } = useAgentEditor();
-  const { t, tl } = useAppI18n();
+  const { t } = useAppI18n();
   const router = useRouter();
   const { runAction, isPending, getStatus } = useAsyncAction();
   const { activeTab, setActiveTab } = useTabNavigation([...STEP_KEYS], {
@@ -487,7 +487,7 @@ function InnerShell() {
           <aside className="h-full min-h-0 border-b border-[var(--border-subtle)] bg-[var(--canvas)] lg:border-b-0 lg:border-r" {...tourAnchor("editor.step-rail")}>
             <div className="flex h-full flex-col px-2 py-3 lg:px-2.5 lg:py-4">
               <div className="mb-2 px-1.5">
-                <span className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--text-quaternary)]">
+                <span className="text-xs font-medium uppercase tracking-[0.2em] text-[color:var(--text-quaternary)]">
                   {t("generated.controlPlane.fluxo_16a7913a")}
                 </span>
               </div>
@@ -517,10 +517,10 @@ function InnerShell() {
                         className={cn(
                           "inline-flex h-7 w-7 shrink-0 items-center justify-center transition-colors",
                           isActive
-                            ? "text-[var(--text-primary)]"
+                            ? "text-[color:var(--text-primary)]"
                             : isCompleted
-                              ? "text-[var(--tone-success-dot)]"
-                              : "text-[var(--text-quaternary)]",
+                              ? "text-[color:var(--tone-success-dot)]"
+                              : "text-[color:var(--text-quaternary)]",
                         )}
                       >
                         {step.completed ? <Check size={17} /> : <Icon size={17} />}
@@ -531,13 +531,13 @@ function InnerShell() {
                         className={cn(
                           "whitespace-nowrap text-sm font-medium",
                           isActive
-                            ? "text-[var(--text-primary)]"
+                            ? "text-[color:var(--text-primary)]"
                             : isCompleted
-                              ? "text-[var(--text-secondary)]"
-                              : "text-[var(--text-tertiary)]",
+                              ? "text-[color:var(--text-secondary)]"
+                              : "text-[color:var(--text-tertiary)]",
                         )}
                       >
-                        {tl(step.label)}
+                        {t(step.label)}
                       </span>
 
                       {step.dirty ? (

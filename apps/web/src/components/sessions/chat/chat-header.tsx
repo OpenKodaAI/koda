@@ -63,12 +63,12 @@ export function ChatHeader({
             type="button"
             onClick={onOpenRail}
             aria-label={t("chat.rail.openLabel", undefined)}
-            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] md:hidden"
+            className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)] md:hidden"
           >
             <PanelLeft className="icon-sm" strokeWidth={1.75} aria-hidden />
           </button>
         ) : null}
-        <h2 className="m-0 max-w-[min(52vw,560px)] truncate text-[0.875rem] font-medium text-[var(--text-primary)]">
+        <h2 className="m-0 max-w-[min(52vw,560px)] truncate text-[0.875rem] font-medium text-[color:var(--text-primary)]">
           {title}
         </h2>
       </div>
@@ -95,8 +95,8 @@ export function ChatHeader({
             aria-pressed={contextPanelOpen}
             className={cn(
               "hidden h-8 w-8 items-center justify-center rounded-[var(--radius-panel-sm)] lg:inline-flex",
-              "text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
-              contextPanelOpen && "bg-[var(--panel-soft)] text-[var(--text-primary)]",
+              "text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
+              contextPanelOpen && "bg-[var(--panel-soft)] text-[color:var(--text-primary)]",
             )}
           >
             <PanelRight className="icon-sm" strokeWidth={1.75} aria-hidden />

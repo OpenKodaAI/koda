@@ -73,7 +73,7 @@ export const ScreenTimeCard = ({
   return (
     <div
       className={cn(
-        "w-full text-[var(--text-primary)]",
+        "w-full text-[color:var(--text-primary)]",
         className
       )}
     >
@@ -85,18 +85,18 @@ export const ScreenTimeCard = ({
           <div className="relative flex h-full min-h-[300px] flex-col overflow-hidden">
             <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-tertiary)]">
                   {t("screenTime.aggregate", undefined)}
                 </p>
                 <div className="mt-1.5 flex items-end gap-3">
-                  <span className="text-[1.9rem] font-semibold tracking-[-0.06em] text-[var(--text-primary)] sm:text-[2.15rem]">
+                  <span className="text-[1.9rem] font-semibold tracking-[-0.06em] text-[color:var(--text-primary)] sm:text-[2.15rem]">
                     {totalHours}{translate("generated.ui.h_c2b9057e")}{totalMinutes}{translate("generated.ui.m_ed141783")}</span>
-                  <span className="pb-1 text-[11px] font-medium text-[var(--text-tertiary)]">
+                  <span className="pb-1 text-[11px] font-medium text-[color:var(--text-tertiary)]">
                     {t("screenTime.last24h", undefined)}
                   </span>
                 </div>
               </div>
-              <p className="shrink-0 text-[11px] font-medium text-[var(--text-tertiary)]">
+              <p className="shrink-0 text-[11px] font-medium text-[color:var(--text-tertiary)]">
                 {t("screenTime.hourlyWindow", undefined)}
               </p>
             </div>
@@ -131,7 +131,7 @@ export const ScreenTimeCard = ({
               })}
             </div>
 
-            <div className="flex items-center justify-between gap-3 text-[11px] font-medium text-[var(--text-tertiary)]">
+            <div className="flex items-center justify-between gap-3 text-[11px] font-medium text-[color:var(--text-tertiary)]">
               {timeLabels.map((label) => (
                 <span key={label}>{label}</span>
               ))}
@@ -141,10 +141,10 @@ export const ScreenTimeCard = ({
 
         {topApps.length > 0 && <div className="min-w-0 border-t border-[var(--border-subtle)] pt-4 lg:flex lg:flex-col lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
           <div className="mb-3 flex items-center justify-between gap-3">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-tertiary)]">
               {t("screenTime.focusAgents", undefined)}
             </p>
-            <span className="text-[11px] text-[var(--text-quaternary)]">
+            <span className="text-[11px] text-[color:var(--text-quaternary)]">
               {t("screenTime.items", { count: topApps.length })}
             </span>
           </div>
@@ -167,16 +167,16 @@ export const ScreenTimeCard = ({
                 }
                 >
                 <div
-                  className="flex h-7 w-7 shrink-0 items-center justify-center text-[var(--text-primary)]"
+                  className="flex h-7 w-7 shrink-0 items-center justify-center text-[color:var(--text-primary)]"
                   style={app.color ? { color: app.color } : undefined}
                 >
                   {app.icon}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="line-clamp-1 text-sm font-medium text-[var(--text-primary)]">
+                  <p className="line-clamp-1 text-sm font-medium text-[color:var(--text-primary)]">
                     {app.name}
                   </p>
-                  <p className="line-clamp-1 text-xs text-[var(--text-tertiary)]">
+                  <p className="line-clamp-1 text-xs text-[color:var(--text-tertiary)]">
                     {app.duration}
                   </p>
                 </div>

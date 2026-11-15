@@ -1320,17 +1320,17 @@ export function RuntimeFilesPanel({
               >
                 {item.is_dir ? (
                   isLoading ? (
-                    <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--text-quaternary)]" />
+                    <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-[color:var(--text-quaternary)]" />
                   ) : isExpanded ? (
-                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]" />
+                    <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-quaternary)]" />
                   ) : (
-                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]" />
+                    <ChevronRight className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-quaternary)]" />
                   )
                 ) : (
                   <span className="w-[14px] shrink-0" />
                 )}
                 {getFileIcon(item, isExpanded)}
-                <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-[var(--text-primary)]">
+                <span className="min-w-0 flex-1 truncate text-[0.8125rem] text-[color:var(--text-primary)]">
                   {item.name}
                 </span>
                 {!item.is_dir && item.size != null ? (
@@ -2140,8 +2140,8 @@ function RuntimeFileMenuItem({
         "transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
         "focus-visible:bg-[var(--hover-tint)]",
         tone === "danger"
-          ? "text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)]"
-          : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+          ? "text-[color:var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)]"
+          : "text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
       )}
     >
       <Icon className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} />

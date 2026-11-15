@@ -99,7 +99,7 @@ export function AgentCatalogCard({
           <div className="pointer-events-none absolute inset-x-0 top-0 h-px overflow-hidden rounded-full bg-[var(--border-subtle)]">
             <span className="block h-full w-1/3 animate-[agentMoveBar_1s_ease-in-out_infinite] rounded-full bg-[var(--button-primary-bg)]" />
           </div>
-          <span className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded-[0.5rem] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-2.5 py-1 text-[11px] text-[var(--text-secondary)]">
+          <span className="pointer-events-none absolute right-3 top-3 inline-flex items-center gap-1 rounded-[0.5rem] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-2.5 py-1 text-[11px] text-[color:var(--text-secondary)]">
             <LoaderCircle className="h-3.5 w-3.5 animate-spin" />
             {t("generated.controlPlane.movendo_20da2807")}
           </span>
@@ -129,7 +129,7 @@ export function AgentCatalogCard({
               <h3 className="min-w-0">
                 <Link
                   href={`/control-plane/agents/${agent.id}`}
-                  className="block min-w-0 truncate whitespace-nowrap text-[0.9375rem] font-medium leading-tight tracking-[-0.02em] text-[var(--text-primary)] transition-opacity duration-200 hover:opacity-100 group-hover:opacity-100"
+                  className="block min-w-0 truncate whitespace-nowrap text-[0.9375rem] font-medium leading-tight tracking-[-0.02em] text-[color:var(--text-primary)] transition-opacity duration-200 hover:opacity-100 group-hover:opacity-100"
                   title={agent.display_name}
                 >
                   <span className="block">
@@ -138,7 +138,7 @@ export function AgentCatalogCard({
                 </Link>
               </h3>
               <p
-                className="truncate whitespace-nowrap text-[0.8125rem] leading-5 text-[var(--text-tertiary)]"
+                className="truncate whitespace-nowrap text-[0.8125rem] leading-5 text-[color:var(--text-tertiary)]"
                 title={defaultModel}
               >
                 {defaultModel}

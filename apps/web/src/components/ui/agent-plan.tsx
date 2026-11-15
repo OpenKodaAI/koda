@@ -149,7 +149,7 @@ function StatusIcon({
         className="relative flex h-4 w-4 items-center justify-center"
       >
         {status === "completed" ? (
-          <CheckCircle2 className="h-4 w-4 text-[var(--tone-success-dot)]" />
+          <CheckCircle2 className="h-4 w-4 text-[color:var(--tone-success-dot)]" />
         ) : isInProgress(status) ? (
           <>
             {!prefersReducedMotion && animate && (
@@ -180,11 +180,11 @@ function StatusIcon({
             </motion.div>
           </>
         ) : status === "need-help" ? (
-          <CircleAlert className="h-4 w-4 text-[var(--tone-warning-dot)]" />
+          <CircleAlert className="h-4 w-4 text-[color:var(--tone-warning-dot)]" />
         ) : status === "failed" ? (
-          <CircleX className="h-4 w-4 text-[var(--tone-danger-dot)]" />
+          <CircleX className="h-4 w-4 text-[color:var(--tone-danger-dot)]" />
         ) : (
-          <Circle className="h-4 w-4 text-[var(--text-quaternary)]" />
+          <Circle className="h-4 w-4 text-[color:var(--text-quaternary)]" />
         )}
       </motion.div>
     </AnimatePresence>
@@ -194,15 +194,15 @@ function StatusIcon({
 function getMetadataToneTextClasses(tone: AgentPlanMetadataTone = "neutral") {
   switch (tone) {
     case "info":
-      return "text-[var(--tone-info-dot)]";
+      return "text-[color:var(--tone-info-dot)]";
     case "success":
-      return "text-[var(--tone-success-dot)]";
+      return "text-[color:var(--tone-success-dot)]";
     case "warning":
-      return "text-[var(--tone-warning-dot)]";
+      return "text-[color:var(--tone-warning-dot)]";
     case "danger":
-      return "text-[var(--tone-danger-dot)]";
+      return "text-[color:var(--tone-danger-dot)]";
     default:
-      return "text-[var(--text-secondary)]";
+      return "text-[color:var(--text-secondary)]";
   }
 }
 
@@ -345,14 +345,14 @@ function MetadataLine({
   return (
     <div
       className={cn(
-        "mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] leading-none text-[var(--text-tertiary)]",
+        "mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] leading-none text-[color:var(--text-tertiary)]",
         compact && "mt-1.5 text-[11px]"
       )}
     >
       {segments.map((segment, index) => (
         <React.Fragment key={segment.id}>
           {index > 0 ? (
-            <span className="text-[10px] text-[var(--text-quaternary)]" aria-hidden="true">
+            <span className="text-[10px] text-[color:var(--text-quaternary)]" aria-hidden="true">
               •
             </span>
           ) : null}
@@ -366,7 +366,7 @@ function MetadataLine({
               <>
                 {!prefersReducedMotion ? (
                   <motion.span
-                    className="inline-flex items-center gap-1.5 text-[var(--tone-info-dot)]"
+                    className="inline-flex items-center gap-1.5 text-[color:var(--tone-info-dot)]"
                     animate={{ opacity: [0.7, 1, 0.7] }}
                     transition={{
                       repeat: Number.POSITIVE_INFINITY,
@@ -377,9 +377,9 @@ function MetadataLine({
                     <Clock3 className={cn("h-3.5 w-3.5", compact && "h-3 w-3")} />
                   </motion.span>
                 ) : (
-                  <Clock3 className={cn("h-3.5 w-3.5 text-[var(--tone-info-dot)]", compact && "h-3 w-3")} />
+                  <Clock3 className={cn("h-3.5 w-3.5 text-[color:var(--tone-info-dot)]", compact && "h-3 w-3")} />
                 )}
-                <span className="font-medium tabular-nums text-[var(--tone-info-dot)]">
+                <span className="font-medium tabular-nums text-[color:var(--tone-info-dot)]">
                   <LiveRuntimeValue liveSince={liveSince} />
                 </span>
               </>
@@ -510,13 +510,13 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
         }}
       >
         <div className="flex min-h-[132px] flex-col items-center justify-center rounded-lg border border-dashed border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-5 py-8 text-center">
-          <div className="flex h-11 w-11 items-center justify-center rounded-[0.95rem] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-tertiary)]">
+          <div className="flex h-11 w-11 items-center justify-center rounded-[0.95rem] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[color:var(--text-tertiary)]">
             <Activity className="h-5 w-5" />
           </div>
-          <p className="mt-4 text-sm font-medium text-[var(--text-primary)]">
+          <p className="mt-4 text-sm font-medium text-[color:var(--text-primary)]">
             {translate("generated.ui.no_live_plan_yet_23fb1184")}
           </p>
-          <p className="mt-1 max-w-[38rem] text-sm leading-6 text-[var(--text-tertiary)]">
+          <p className="mt-1 max-w-[38rem] text-sm leading-6 text-[color:var(--text-tertiary)]">
             {translate("generated.ui.waiting_for_the_first_published_execution_to_c4823d7e")}
           </p>
         </div>
@@ -575,13 +575,13 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
                       <div className="min-w-0 flex-1">
                         <div className="flex min-w-0 items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="line-clamp-1 text-sm font-semibold text-[var(--text-primary)]">
+                            <p className="line-clamp-1 text-sm font-semibold text-[color:var(--text-primary)]">
                               {task.title}
                             </p>
                             <AnimatePresence mode="wait" initial={false}>
                               <motion.p
                                 key={`${task.id}-${task.status}-${task.description}`}
-                                className="mt-1 line-clamp-2 text-sm text-[var(--text-secondary)]"
+                                className="mt-1 line-clamp-2 text-sm text-[color:var(--text-secondary)]"
                                 initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 5, filter: "blur(4px)" }}
                                 animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                                 exit={{ opacity: 0, y: prefersReducedMotion ? 0 : -5, filter: "blur(4px)" }}
@@ -599,7 +599,7 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
 
                           <div className="flex shrink-0 items-start gap-2">
                             {task.dependencies.length > 0 && (
-                              <p className="hidden max-w-[220px] text-right text-[11px] leading-5 text-[var(--text-tertiary)] lg:block">
+                              <p className="hidden max-w-[220px] text-right text-[11px] leading-5 text-[color:var(--text-tertiary)] lg:block">
                                 {task.dependencies.join(" • ")}
                               </p>
                             )}
@@ -607,7 +607,7 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
                             <motion.span
                               animate={{ rotate: isExpanded ? 180 : 0 }}
                               transition={{ duration: 0.18 }}
-                              className="mt-0.5 shrink-0 text-[var(--text-quaternary)]"
+                              className="mt-0.5 shrink-0 text-[color:var(--text-quaternary)]"
                               aria-hidden="true"
                             >
                               <ChevronDown className="h-4 w-4" />
@@ -658,13 +658,13 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
                                   <div className="min-w-0 flex-1">
                                     <div className="flex min-w-0 items-start justify-between gap-3">
                                       <div className="min-w-0">
-                                        <p className="line-clamp-1 text-[13px] font-medium text-[var(--text-primary)]">
+                                        <p className="line-clamp-1 text-[13px] font-medium text-[color:var(--text-primary)]">
                                           {subtask.title}
                                         </p>
                                         <AnimatePresence mode="wait" initial={false}>
                                           <motion.p
                                             key={`${subtask.id}-${subtask.status}-${subtask.description}`}
-                                            className="mt-0.5 line-clamp-2 text-xs text-[var(--text-tertiary)]"
+                                            className="mt-0.5 line-clamp-2 text-xs text-[color:var(--text-tertiary)]"
                                             initial={{ opacity: 0, y: prefersReducedMotion ? 0 : 4, filter: "blur(4px)" }}
                                             animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                                             exit={{ opacity: 0, y: prefersReducedMotion ? 0 : -4, filter: "blur(4px)" }}
@@ -684,7 +684,7 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
                                       <motion.span
                                         animate={{ rotate: isSubtaskExpanded ? 180 : 0 }}
                                         transition={{ duration: 0.18 }}
-                                        className="mt-0.5 shrink-0 text-[var(--text-quaternary)]"
+                                        className="mt-0.5 shrink-0 text-[color:var(--text-quaternary)]"
                                         aria-hidden="true"
                                       >
                                         <ChevronDown className="h-3.5 w-3.5" />
@@ -700,7 +700,7 @@ export default function AgentPlan({ tasks: tasksProp, className }: AgentPlanProp
                                           transition={{ duration: 0.18 }}
                                           className="overflow-hidden"
                                         >
-                                          <p className="mt-2 text-[11px] leading-5 text-[var(--text-quaternary)]">
+                                          <p className="mt-2 text-[11px] leading-5 text-[color:var(--text-quaternary)]">
                                             {subtask.tags.join(" • ")}
                                           </p>
                                         </motion.div>

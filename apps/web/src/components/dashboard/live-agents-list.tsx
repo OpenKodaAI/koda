@@ -64,13 +64,13 @@ function LiveAgentsListComponent({
       )}
     >
       <header className="flex items-center justify-between gap-2">
-        <h3 className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+        <h3 className="m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
           {title}
         </h3>
         {viewAllHref ? (
           <Link
             href={viewAllHref}
-            className="inline-flex items-center gap-1 text-[0.8125rem] text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
+            className="inline-flex items-center gap-1 text-[0.8125rem] text-[color:var(--text-tertiary)] transition-colors hover:text-[color:var(--text-primary)]"
           >
             {viewAllLabel}
             <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
@@ -79,7 +79,7 @@ function LiveAgentsListComponent({
       </header>
 
       {entries.length === 0 ? (
-        <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+        <p className="m-0 text-[length:var(--font-size-sm)] text-[color:var(--text-tertiary)]">
           {emptyLabel}
         </p>
       ) : (
@@ -102,7 +102,7 @@ function LiveAgentsListComponent({
                   onClick={() => onSelectAgent?.(entry.agent.id)}
                   className={cn(
                     "flex w-full items-center gap-3 py-2.5 text-left transition-colors",
-                    "hover:text-[var(--text-primary)]",
+                    "hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   <AgentSigil
@@ -118,7 +118,7 @@ function LiveAgentsListComponent({
                   />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <span className="truncate text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+                      <span className="truncate text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-primary)]">
                         {entry.agent.label}
                       </span>
                       <span
@@ -129,7 +129,7 @@ function LiveAgentsListComponent({
                         aria-hidden="true"
                       />
                     </div>
-                    <p className="m-0 truncate text-[0.75rem] text-[var(--text-tertiary)]">
+                    <p className="m-0 truncate text-[0.75rem] text-[color:var(--text-tertiary)]">
                       {detail}
                     </p>
                   </div>

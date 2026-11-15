@@ -188,3 +188,59 @@ describe("LanguageSwitcher keyboard support (M8-E1-T2)", () => {
     expect(trigger).toHaveTextContent("EN");
   });
 });
+
+// D-350: with the list open, Radix hides the rest of the page with aria-hidden but left its
+// controls focusable (axe aria-hidden-focus on the skip link, the sidebar, the topbar and the
+// main content), and the list sat outside every landmark (axe region).
+describe("LanguageSwitcher page isolation (D-350)", () => {
+  function renderInPage() {
+    render(
+      <>
+        <a href="#main" className="sr-only">
+          Skip to content
+        </a>
+        <div className="app-shell">
+          <aside>
+            <button type="button">Sidebar action</button>
+          </aside>
+          <main id="main">
+            <I18nProvider initialLanguage="en-US">
+              <LanguageSwitcher />
+            </I18nProvider>
+          </main>
+        </div>
+      </>,
+    );
+    return screen.getByRole("combobox", { name: "Language" });
+  }
+
+  it("makes the hidden page inert while the list is open and restores it on close", async () => {
+    const trigger = renderInPage();
+    const skip = screen.getByRole("link", { name: "Skip to content" });
+    const sidebar = screen.getByRole("button", { name: "Sidebar action" });
+
+    await openWithKeyboard(trigger, "ArrowDown");
+
+    // Every subtree Radix hid is inert, so nothing focusable stays inside aria-hidden.
+    await waitFor(() => {
+      const hidden = [...document.querySelectorAll('[aria-hidden="true"]')].filter(
+        (node) => node.querySelector("a[href], button, input, select, textarea, [tabindex]") || node.matches("a[href], button"),
+      );
+      expect(hidden.length).toBeGreaterThan(0);
+      for (const node of hidden) expect(node.closest("[inert]")).not.toBeNull();
+    });
+    expect(skip.closest("[inert]")).not.toBeNull();
+    expect(sidebar.closest("[inert]")).not.toBeNull();
+    // The list sits in a landmark named after the switcher.
+    expect(screen.getByRole("region", { name: "Language" })).toContainElement(screen.getByRole("listbox"));
+
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
+    expect(document.querySelectorAll("[inert]:not([aria-hidden])")).toHaveLength(0);
+    expect(skip.closest("[inert]")).toBeNull();
+    expect(sidebar.closest("[inert]")).toBeNull();
+    expect(screen.queryByRole("region", { name: "Language" })).not.toBeInTheDocument();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+});

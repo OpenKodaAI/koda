@@ -54,10 +54,10 @@ export function VariableEditorModal({
 
         <div className="border-b border-[var(--border-subtle)] px-6 py-5 pr-14 sm:pr-16">
           <div>
-            <h3 className="text-lg font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+            <h3 className="text-lg font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
               {draft.key ? t("generated.controlPlane.editar_variavel_e57d717e") : t("generated.controlPlane.nova_variavel_17e0a7c8")}
             </h3>
-            <p className="mt-1 text-sm text-[var(--text-quaternary)]">
+            <p className="mt-1 text-sm text-[color:var(--text-quaternary)]">
               {t("generated.controlPlane.defina_o_tipo_escopo_e_descricao_do_recurso__daf51056")}
             </p>
           </div>
@@ -66,7 +66,7 @@ export function VariableEditorModal({
         <div className="grid gap-3 px-6 py-5 md:grid-cols-2">
           <FieldShell label={t("generated.controlPlane.nome_fb4c2d32")} description={t("generated.controlPlane.use_um_nome_em_formato_de_variavel_de_ambien_7aba128b")}>
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               value={draft.key}
               onChange={(event) => onChange({ ...draft, key: event.target.value })}
               placeholder="TEAM_NAME"
@@ -109,7 +109,7 @@ export function VariableEditorModal({
 
           <FieldShell label={t("generated.controlPlane.descricao_ff40fdea")} description={t("generated.controlPlane.contexto_curto_para_o_operador_lembrar_o_pro_2709d0d5")}>
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               value={draft.description}
               onChange={(event) => onChange({ ...draft, description: event.target.value })}
               placeholder={t("generated.controlPlane.fila_operacional_do_time_1a7f8d7d")}
@@ -129,7 +129,7 @@ export function VariableEditorModal({
             >
               <div className="space-y-3">
                 {draft.type === "secret" && draft.value_present ? (
-                  <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                  <span className="inline-flex items-center gap-1 self-start rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[color:var(--tone-success-text)]">
                     {t("generated.controlPlane.armazenada_c08c504b")}
                   </span>
                 ) : null}
@@ -141,7 +141,7 @@ export function VariableEditorModal({
                   />
                 ) : (
                   <input
-                    className="field-shell text-[var(--text-primary)]"
+                    className="field-shell text-[color:var(--text-primary)]"
                     type="text"
                     value={draft.value}
                     onChange={(event) => onChange({ ...draft, value: event.target.value, clear: false })}
@@ -156,8 +156,8 @@ export function VariableEditorModal({
                   className={cn(
                     "mt-3 inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors",
                     draft.clear
-                      ? "border-[rgba(255,110,110,0.3)] bg-[rgba(255,110,110,0.12)] text-[var(--tone-danger-text)]"
-                      : "border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]",
+                      ? "border-[rgba(255,110,110,0.3)] bg-[rgba(255,110,110,0.12)] text-[color:var(--tone-danger-text)]"
+                      : "border-[var(--border-subtle)] text-[color:var(--text-secondary)] hover:bg-[var(--surface-hover)]",
                   )}
                 >
                   <Trash2 size={14} />
@@ -172,14 +172,14 @@ export function VariableEditorModal({
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
+            className="rounded-lg border border-[var(--border-subtle)] px-4 py-2 text-sm text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
           >
             {t("generated.controlPlane.cancelar_091200fb")}
           </button>
           <button
             type="button"
             onClick={onConfirm}
-            className="rounded-lg bg-[rgba(113,219,190,0.18)] px-4 py-2 text-sm font-semibold text-[var(--text-primary)] transition-colors hover:bg-[rgba(113,219,190,0.24)]"
+            className="rounded-lg bg-[rgba(113,219,190,0.18)] px-4 py-2 text-sm font-semibold text-[color:var(--text-primary)] transition-colors hover:bg-[rgba(113,219,190,0.24)]"
           >
             {t("generated.controlPlane.aplicar_f2badfb2")}
           </button>

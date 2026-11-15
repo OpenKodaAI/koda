@@ -157,7 +157,7 @@ export function LoginScreen() {
         <div className="text-center">
           <Link
             href="/forgot-password"
-            className="text-[12px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+            className="text-[12px] text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)] transition-colors"
           >
             {t("auth.login.forgot_link")}
           </Link>

@@ -312,7 +312,7 @@ export function McpCustomServerModal({
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--panel-soft)]">
               {renderIntegrationLogo("mcp", "h-5 w-5") || <Plus size={16} />}
             </div>
-            <h3 id="mcp-custom-modal-title" className="text-base font-semibold text-[var(--text-primary)]">
+            <h3 id="mcp-custom-modal-title" className="text-base font-semibold text-[color:var(--text-primary)]">
               {t("generated.controlPlane.adicionar_servidor_mcp_ea88d544")}
             </h3>
             <div className="ml-auto flex items-center gap-2">
@@ -379,7 +379,7 @@ export function McpCustomServerModal({
               />
             )}
             {error ? (
-              <p className="mt-3 text-xs font-medium text-[var(--tone-danger-dot)]">{error}</p>
+              <p className="mt-3 text-xs font-medium text-[color:var(--tone-danger-dot)]">{error}</p>
             ) : null}
           </div>
 
@@ -388,7 +388,7 @@ export function McpCustomServerModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
+              className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
             >
               {t("generated.controlPlane.cancelar_091200fb")}
             </button>
@@ -396,7 +396,7 @@ export function McpCustomServerModal({
               type="button"
               onClick={mode === "form" ? handleSubmitForm : handleSubmitJson}
               disabled={submitDisabled}
-              className="inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs font-semibold text-[var(--interactive-active-text)] transition-all disabled:opacity-50"
+              className="inline-flex h-8 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-xs font-semibold text-[color:var(--interactive-active-text)] transition-all disabled:opacity-50"
               style={{
                 background:
                   "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
@@ -579,7 +579,7 @@ function FormBody(props: FormBodyProps) {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex flex-col gap-1">
-      <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-quaternary)]">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--text-quaternary)]">
         {label}
       </span>
       {children}
@@ -600,7 +600,7 @@ function EnvSchemaBuilder({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-quaternary)]">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--text-quaternary)]">
           {t("generated.controlPlane.variaveis_de_ambiente_fc3cabe2")}
         </span>
         <button
@@ -608,7 +608,7 @@ function EnvSchemaBuilder({
           onClick={() => setFields([...fields, emptyEnv()])}
           aria-label={t("generated.controlPlane.nova_variavel_17e0a7c8")}
           title={t("generated.controlPlane.nova_variavel_17e0a7c8")}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
         >
           <Plus size={11} />
         </button>
@@ -637,7 +637,7 @@ function EnvSchemaBuilder({
                 }
                 placeholder={t("generated.controlPlane.rotulo_18b7d611")}
               />
-              <label className="flex items-center gap-1 whitespace-nowrap text-[10px] text-[var(--text-quaternary)]">
+              <label className="flex items-center gap-1 whitespace-nowrap text-[10px] text-[color:var(--text-quaternary)]">
                 <input
                   type="checkbox"
                   checked={field.required}
@@ -650,7 +650,7 @@ function EnvSchemaBuilder({
               <button
                 type="button"
                 onClick={() => setFields(fields.filter((f) => f._id !== field._id))}
-                className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+                className="rounded p-1 text-[color:var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
                 aria-label={t("generated.controlPlane.remover_5465770e")}
               >
                 <Trash2 size={11} />
@@ -674,7 +674,7 @@ function HeadersBuilder({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
-        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--text-quaternary)]">
+        <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[color:var(--text-quaternary)]">
           {t("generated.controlPlane.headers_http_71f40bc9")}
         </span>
         <button
@@ -682,7 +682,7 @@ function HeadersBuilder({
           onClick={() => setHeaders([...headers, emptyHeader()])}
           aria-label={t("generated.controlPlane.novo_header_959c3951")}
           title={t("generated.controlPlane.novo_header_959c3951")}
-          className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+          className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-[var(--border-subtle)] text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
         >
           <Plus size={11} />
         </button>
@@ -702,7 +702,7 @@ function HeadersBuilder({
               <button
                 type="button"
                 onClick={() => setHeaders(headers.filter((it) => it._id !== h._id))}
-                className="rounded p-1 text-[var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+                className="rounded p-1 text-[color:var(--text-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
                 aria-label={t("generated.controlPlane.remover_5465770e")}
               >
                 <Trash2 size={11} />
@@ -733,17 +733,17 @@ function JsonBody({
       {importResult ? (
         <div className="flex flex-col gap-1 text-xs">
           {importResult.created.length > 0 ? (
-            <p className="text-[var(--tone-success-text)]">
+            <p className="text-[color:var(--tone-success-text)]">
               {t("generated.controlPlane.criados_names_db1d0de6", { names: importResult.created.join(", ") })}
             </p>
           ) : null}
           {importResult.updated.length > 0 ? (
-            <p className="text-[var(--text-secondary)]">
+            <p className="text-[color:var(--text-secondary)]">
               {t("generated.controlPlane.atualizados_names_45415321", { names: importResult.updated.join(", ") })}
             </p>
           ) : null}
           {importResult.errors.length > 0 ? (
-            <ul className="list-disc pl-5 text-[var(--tone-danger-dot)]">
+            <ul className="list-disc pl-5 text-[color:var(--tone-danger-dot)]">
               {importResult.errors.map((err, idx) => (
                 <li key={`${err.name}-${idx}`}>
                   <strong>{err.name}</strong>: {err.message}

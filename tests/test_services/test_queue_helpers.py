@@ -1260,6 +1260,36 @@ class TestRuntimeTerminalCutover:
         assert "dry-run forced fresh provider turn" in query_context.warnings
 
     @pytest.mark.asyncio
+    async def test_prepare_query_context_runs_a_child_under_its_parent_envelope(self):
+        """M6-E2-T6: the child is judged by its parent's task kind, so rules keyed on it still bind."""
+        context = MagicMock()
+        context.user_data = {"provider": "claude", "work_dir": "/tmp", "total_cost": 0.0, "session_id": "canon-1"}
+        capabilities = {"agent_id": "default", "allowed_tool_ids": ["file_list"], "task_kind": "deploy"}
+        item = QueueItem(
+            chat_id=111,
+            query_text="list the files",
+            is_child_run=True,
+            child_run_id="childrun_x",
+            parent_task_id=42,
+            child_toolset="read_only",
+            child_capabilities=capabilities,
+        )
+
+        with (
+            patch("koda.memory.config.MEMORY_ENABLED", False),
+            patch("koda.knowledge.config.KNOWLEDGE_ENABLED", False),
+            patch("koda.services.cache_config.CACHE_ENABLED", False),
+            patch("koda.services.cache_config.SCRIPT_LIBRARY_ENABLED", False),
+            patch("koda.services.queue_manager.get_provider_session_mapping", return_value=None),
+            patch("koda.services.queue_manager.save_session"),
+        ):
+            query_context = await _prepare_query_context(context, item, user_id=111)
+
+        assert query_context.task_kind == "deploy"
+        assert query_context.child_capabilities == capabilities
+        assert query_context.effective_policy.approval_mode == "read_only"
+
+    @pytest.mark.asyncio
     async def test_prepare_query_context_blocks_invalid_scheduled_workdir(self):
         context = MagicMock()
         context.user_data = {

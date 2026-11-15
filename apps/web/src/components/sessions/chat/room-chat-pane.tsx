@@ -252,7 +252,7 @@ function MessageSenderAvatar({
         />
       ) : null}
       <AvatarFallback
-        className="relative z-[1] rounded-[0.65rem] border-0 bg-transparent font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.02em] text-[var(--text-primary)]"
+        className="relative z-[1] rounded-[0.65rem] border-0 bg-transparent font-mono text-[0.6875rem] font-semibold uppercase tracking-[0.02em] text-[color:var(--text-primary)]"
       >
         {senderInitials(label)}
       </AvatarFallback>
@@ -764,7 +764,7 @@ export function RoomChatPane({
               type="button"
               onClick={onOpenRail}
               aria-label={t("chat.rail.openLabel", undefined)}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] md:hidden"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)] md:hidden"
             >
               <PanelLeft className="icon-sm" strokeWidth={1.75} aria-hidden />
             </button>
@@ -783,7 +783,7 @@ export function RoomChatPane({
               />
             </Avatar>
           ) : null}
-          <h2 className="m-0 truncate text-[0.875rem] font-semibold text-[var(--text-primary)]">
+          <h2 className="m-0 truncate text-[0.875rem] font-semibold text-[color:var(--text-primary)]">
             {detail?.thread.title ||
               t("sessions.room.untitled", undefined)}
           </h2>
@@ -811,27 +811,27 @@ export function RoomChatPane({
         {!detail && (query.isPending || query.isFetching) ? (
           <div className="flex h-full items-center justify-center">
             <LoaderCircle
-              className="h-4 w-4 animate-spin text-[var(--text-tertiary)]"
+              className="h-4 w-4 animate-spin text-[color:var(--text-tertiary)]"
               strokeWidth={2}
               aria-hidden
             />
           </div>
         ) : stable.showBlockingError ? (
           <div className="mx-auto flex h-full w-full max-w-[480px] flex-col items-center justify-center gap-2 px-6 text-center">
-            <p className="m-0 text-[var(--font-size-sm)] text-[var(--tone-danger-dot)]">
+            <p className="m-0 text-[length:var(--font-size-sm)] text-[color:var(--tone-danger-dot)]">
               {query.error?.message ??
                 t("sessions.room.loadError", undefined)}
             </p>
           </div>
         ) : messages.length === 0 ? (
           <div className="mx-auto flex h-full w-full max-w-[640px] flex-col items-center justify-center gap-2 px-6 text-center">
-            <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+            <p className="m-0 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
               {t("sessions.room.empty.eyebrow", undefined)}
             </p>
-            <h2 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[var(--text-primary)] sm:text-[1.75rem]">
+            <h2 className="m-0 text-[1.5rem] font-medium leading-[1.15] text-[color:var(--text-primary)] sm:text-[1.75rem]">
               {t("sessions.room.empty.title", undefined)}
             </h2>
-            <p className="m-0 max-w-[420px] text-[var(--font-size-sm)] leading-[1.55] text-[var(--text-tertiary)]">
+            <p className="m-0 max-w-[420px] text-[length:var(--font-size-sm)] leading-[1.55] text-[color:var(--text-tertiary)]">
               {t("sessions.room.empty.helper", undefined)}
             </p>
           </div>
@@ -840,7 +840,7 @@ export function RoomChatPane({
             {loadingOlderDetailPages ? (
               <div className="flex justify-center py-3">
                 <LoaderCircle
-                  className="h-4 w-4 animate-spin text-[var(--text-tertiary)]"
+                  className="h-4 w-4 animate-spin text-[color:var(--text-tertiary)]"
                   strokeWidth={2}
                   aria-hidden
                 />
@@ -884,7 +884,7 @@ export function RoomChatPane({
                   {showDaySeparator ? (
                     <div className="my-4 flex items-center gap-3 px-1">
                       <div className="h-px flex-1 bg-[var(--divider-hair)]" />
-                      <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                      <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                         {dayLabel}
                       </span>
                       <div className="h-px flex-1 bg-[var(--divider-hair)]" />
@@ -901,7 +901,7 @@ export function RoomChatPane({
                   >
                     <div className="flex justify-center pt-0.5">
                       {isContinuation ? (
-                        <span className="w-full whitespace-nowrap pt-0.5 text-right font-mono text-[0.5625rem] leading-5 text-[var(--text-quaternary)] opacity-0 transition-opacity group-hover:opacity-100">
+                        <span className="w-full whitespace-nowrap pt-0.5 text-right font-mono text-[0.5625rem] leading-5 text-[color:var(--text-quaternary)] opacity-0 transition-opacity group-hover:opacity-100">
                           {time}
                         </span>
                       ) : (
@@ -923,28 +923,28 @@ export function RoomChatPane({
                               aria-hidden
                             />
                           ) : null}
-                          <span className="truncate text-[0.9375rem] font-semibold text-[var(--text-primary)]">
+                          <span className="truncate text-[0.9375rem] font-semibold text-[color:var(--text-primary)]">
                             {authorLabel}
                           </span>
                           {time ? (
-                            <span className="shrink-0 text-[0.75rem] text-[var(--text-quaternary)]">
+                            <span className="shrink-0 text-[0.75rem] text-[color:var(--text-quaternary)]">
                               {time}
                             </span>
                           ) : null}
                           {message.type === "coordinator_synthesis" ? (
-                            <span className="shrink-0 rounded-full bg-[var(--tone-info-bg)] px-2 py-0.5 font-mono text-[0.5625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-info-dot)]">
+                            <span className="shrink-0 rounded-full bg-[var(--tone-info-bg)] px-2 py-0.5 font-mono text-[0.5625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--tone-info-dot)]">
                               {t("sessions.room.reply.synthesized", undefined)}
                             </span>
                           ) : null}
                         </div>
                       ) : null}
                       {inReplyTo ? (
-                        <div className="mt-1.5 flex max-w-full items-center gap-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--divider-hair)] bg-[var(--panel-soft)] px-2 py-1 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
-                          <Reply className="h-3 w-3 text-[var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
+                        <div className="mt-1.5 flex max-w-full items-center gap-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--divider-hair)] bg-[var(--panel-soft)] px-2 py-1 text-[0.75rem] leading-5 text-[color:var(--text-tertiary)]">
+                          <Reply className="h-3 w-3 text-[color:var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
                           <span className="truncate">
                             {t("sessions.room.reply.parentPreview", undefined)}
                           </span>
-                          <span className="hidden font-mono text-[0.625rem] text-[var(--text-quaternary)] sm:inline">
+                          <span className="hidden font-mono text-[0.625rem] text-[color:var(--text-quaternary)] sm:inline">
                             {inReplyTo}
                           </span>
                         </div>
@@ -952,9 +952,9 @@ export function RoomChatPane({
                       {message.content.trim() ? (
                         <div
                           className={cn(
-                            "min-w-0 text-[var(--text-primary)]",
+                            "min-w-0 text-[color:var(--text-primary)]",
                             isContinuation ? "pt-0" : "pt-1",
-                            message.type === "system_event" && "text-[var(--text-tertiary)]",
+                            message.type === "system_event" && "text-[color:var(--text-tertiary)]",
                           )}
                         >
                           <SessionRichText
@@ -983,15 +983,15 @@ export function RoomChatPane({
                         </div>
                       ) : null}
                       {openReplies > 0 || answeredReplies > 0 ? (
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
+                        <div className="mt-2 flex flex-wrap items-center gap-2 text-[0.75rem] leading-5 text-[color:var(--text-tertiary)]">
                           {openReplies > 0 ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--tone-warning-bg)] px-2 py-0.5 font-medium text-[var(--tone-warning-dot)]">
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--tone-warning-bg)] px-2 py-0.5 font-medium text-[color:var(--tone-warning-dot)]">
                               <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
                               {t("sessions.room.reply.waiting", { count: openReplies })}
                             </span>
                           ) : null}
                           {answeredReplies > 0 ? (
-                            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--tone-success-bg)] px-2 py-0.5 font-medium text-[var(--tone-success-dot)]">
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--tone-success-bg)] px-2 py-0.5 font-medium text-[color:var(--tone-success-dot)]">
                               <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden />
                               {t("sessions.room.reply.answered", { count: answeredReplies })}
                             </span>
@@ -1004,9 +1004,9 @@ export function RoomChatPane({
                       onClick={() => startReply(message)}
                       className={cn(
                         "mt-0.5 inline-flex h-7 w-7 items-center justify-center justify-self-end rounded-[var(--radius-panel-sm)]",
-                        "border border-[color:var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)] opacity-0 shadow-[var(--shadow-xs)]",
+                        "border border-[color:var(--border-subtle)] bg-[var(--panel)] text-[color:var(--text-quaternary)] opacity-0 shadow-[var(--shadow-xs)]",
                         "transition-[opacity,background-color,color,border-color] duration-[120ms]",
-                        "hover:border-[color:var(--border-strong)] hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]",
+                        "hover:border-[color:var(--border-strong)] hover:bg-[var(--panel-strong)] hover:text-[color:var(--text-primary)]",
                         "focus:opacity-100",
                         "group-hover:opacity-100",
                       )}
@@ -1045,12 +1045,12 @@ export function RoomChatPane({
           {replyDraft ? (
             <div className="mx-3 mt-3 flex items-start justify-between gap-3 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-strong)] px-3 py-2">
               <div className="min-w-0">
-                <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                   {replyDraft.targetAgentId
                     ? t("sessions.room.reply.requesting", { label: replyDraft.label })
                     : t("sessions.room.reply.linked", undefined)}
                 </p>
-                <p className="m-0 mt-0.5 truncate text-[0.75rem] text-[var(--text-secondary)]">
+                <p className="m-0 mt-0.5 truncate text-[0.75rem] text-[color:var(--text-secondary)]">
                   {replyDraft.excerpt ||
                     t("sessions.room.reply.noPreview", undefined)}
                 </p>
@@ -1058,7 +1058,7 @@ export function RoomChatPane({
               <button
                 type="button"
                 onClick={() => setReplyDraft(null)}
-                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+                className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
                 aria-label={t("sessions.room.reply.cancel", undefined)}
               >
                 <X className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
@@ -1070,7 +1070,7 @@ export function RoomChatPane({
               {draft ? (
                 <div
                   aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words py-1 text-[var(--font-size-md)] leading-[1.5] text-[var(--text-primary)]"
+                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words py-1 text-[length:var(--font-size-md)] leading-[1.5] text-[color:var(--text-primary)]"
                 >
                   <RoomMentionRichText
                     text={draft}
@@ -1092,9 +1092,9 @@ export function RoomChatPane({
                 rows={1}
                 placeholder={t("sessions.room.composer.placeholder", undefined)}
                 className={cn(
-                  "relative min-h-[56px] max-h-[200px] w-full resize-none bg-transparent py-1 text-[var(--font-size-md)] leading-[1.5]",
-                  "caret-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none selection:bg-[var(--tone-info-bg)]",
-                  draft ? "text-transparent" : "text-[var(--text-primary)]",
+                  "relative min-h-[56px] max-h-[200px] w-full resize-none bg-transparent py-1 text-[length:var(--font-size-md)] leading-[1.5]",
+                  "caret-[var(--text-primary)] placeholder:text-[color:var(--text-quaternary)] outline-none selection:bg-[var(--tone-info-bg)]",
+                  draft ? "text-transparent" : "text-[color:var(--text-primary)]",
                 )}
               />
             </div>
@@ -1106,8 +1106,8 @@ export function RoomChatPane({
                 "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
                 "transition-[background-color,color,transform] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                 draft.trim() && !submitting
-                  ? "bg-[var(--accent)] text-[var(--accent-text)] hover:bg-[var(--accent-hover)] active:scale-[0.96]"
-                  : "bg-[var(--panel-strong)] text-[var(--text-quaternary)]",
+                  ? "bg-[var(--accent)] text-[color:var(--accent-text)] hover:bg-[var(--accent-hover)] active:scale-[0.96]"
+                  : "bg-[var(--panel-strong)] text-[color:var(--text-quaternary)]",
               )}
             >
               {submitting ? (
@@ -1117,7 +1117,7 @@ export function RoomChatPane({
               )}
             </button>
           </div>
-          <div className="px-4 pb-3 pt-1 text-[0.6875rem] text-[var(--text-quaternary)]">
+          <div className="px-4 pb-3 pt-1 text-[0.6875rem] text-[color:var(--text-quaternary)]">
             {t("sessions.room.composer.helper", undefined)}
           </div>
         </div>
@@ -1155,8 +1155,8 @@ export function RoomChatPane({
                     "flex cursor-pointer items-center gap-2 rounded-[var(--radius-panel-sm)] px-2 py-1.5 text-[0.8125rem]",
                     "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                     isActive
-                      ? "bg-[var(--hover-tint)] text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+                      ? "bg-[var(--hover-tint)] text-[color:var(--text-primary)]"
+                      : "text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   <AgentGlyph
@@ -1171,7 +1171,7 @@ export function RoomChatPane({
                       {candidate.label}
                     </span>
                     {candidate.label !== candidate.id ? (
-                      <span className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                      <span className="truncate font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                         {candidate.id}
                       </span>
                     ) : null}

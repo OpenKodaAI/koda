@@ -73,25 +73,25 @@ function SessionRowImpl({
         className={cn(
           "flex min-w-0 flex-1 items-start gap-2 rounded-[var(--radius-panel-sm)] px-2 py-1.5 text-left",
           active
-            ? "text-[var(--text-primary)]"
-            : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]",
+            ? "text-[color:var(--text-primary)]"
+            : "text-[color:var(--text-secondary)] group-hover:text-[color:var(--text-primary)]",
         )}
       >
         <MessageCircle
-          className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-tertiary)] transition-colors group-hover:text-[var(--text-secondary)]"
+          className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--text-tertiary)] transition-colors group-hover:text-[color:var(--text-secondary)]"
           strokeWidth={1.75}
           aria-hidden
         />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <div className="flex items-baseline justify-between gap-2">
             <span className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate text-[var(--font-size-sm)] font-medium leading-[1.3] text-[var(--text-primary)]">
+              <span className="truncate text-[length:var(--font-size-sm)] font-medium leading-[1.3] text-[color:var(--text-primary)]">
                 {agentLabel}
               </span>
             </span>
             <span
               className={cn(
-                "shrink-0 font-mono text-xs text-[var(--text-quaternary)] transition-opacity duration-[120ms]",
+                "shrink-0 font-mono text-xs text-[color:var(--text-quaternary)] transition-opacity duration-[120ms]",
                 onRequestDelete && "group-hover:opacity-0",
               )}
             >
@@ -99,7 +99,7 @@ function SessionRowImpl({
               {timeLabel}
             </span>
           </div>
-          <span className="truncate text-[0.75rem] font-light leading-[1.35] text-[var(--text-tertiary)]">
+          <span className="truncate text-[0.75rem] font-light leading-[1.35] text-[color:var(--text-tertiary)]">
             {preview}
           </span>
           {session.name?.trim() ? (
@@ -114,8 +114,8 @@ function SessionRowImpl({
           aria-label={t("chat.rail.deleteSession", undefined)}
           className={cn(
             "absolute right-1.5 top-1.5 inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-panel-sm)]",
-            "text-[var(--text-quaternary)] opacity-0 transition-[opacity,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-            "hover:text-[var(--tone-danger-dot)]",
+            "text-[color:var(--text-quaternary)] opacity-0 transition-[opacity,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+            "hover:text-[color:var(--tone-danger-dot)]",
             "focus-visible:opacity-100",
             "group-hover:opacity-100",
           )}

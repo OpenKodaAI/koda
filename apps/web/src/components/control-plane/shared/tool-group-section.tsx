@@ -78,12 +78,12 @@ export function ToolGroupSection({
           <motion.span
             animate={{ rotate: expanded ? 0 : -90 }}
             transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            className="text-[var(--text-quaternary)] shrink-0"
+            className="text-[color:var(--text-quaternary)] shrink-0"
           >
             <ChevronDown size={14} />
           </motion.span>
 
-          <span className="text-sm font-semibold text-[var(--text-primary)] truncate">
+          <span className="text-sm font-semibold text-[color:var(--text-primary)] truncate">
             {tl(label)}
           </span>
 
@@ -106,7 +106,7 @@ export function ToolGroupSection({
           <SelectTrigger
             sizeVariant="sm"
             onClick={(e) => e.stopPropagation()}
-            className="w-auto shrink-0 whitespace-nowrap text-[var(--text-secondary)]"
+            className="w-auto shrink-0 whitespace-nowrap text-[color:var(--text-secondary)]"
             title={t("generated.controlPlane.politica_do_grupo_be950a8e")}
           >
             <SelectValue />
@@ -145,11 +145,11 @@ export function ToolGroupSection({
                   )}
                 >
                   <div className="min-w-0 flex-1">
-                    <span className="text-sm text-[var(--text-tertiary)]">
+                    <span className="text-sm text-[color:var(--text-tertiary)]">
                       {tool.label}
                     </span>
                     {tool.description && (
-                      <p className="mt-0.5 text-xs text-[var(--text-quaternary)] truncate">
+                      <p className="mt-0.5 text-xs text-[color:var(--text-quaternary)] truncate">
                         {tool.description}
                       </p>
                     )}

@@ -35,8 +35,8 @@ export function ReasoningBlock({
         aria-expanded={open}
         className={cn(
           "inline-flex w-fit items-center gap-1.5 rounded-[var(--radius-chip)] px-1.5 py-0.5 text-[0.75rem]",
-          "text-[var(--text-tertiary)] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-          "hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]",
+          "text-[color:var(--text-tertiary)] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+          "hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-secondary)]",
         )}
       >
         <ChevronRight
@@ -59,7 +59,7 @@ export function ReasoningBlock({
           <div
             className={cn(
               "pl-4 py-1",
-              "italic text-[0.875rem] leading-[1.55] text-[var(--text-tertiary)]",
+              "italic text-[0.875rem] leading-[1.55] text-[color:var(--text-tertiary)]",
               "max-h-[320px] overflow-y-auto",
             )}
           >

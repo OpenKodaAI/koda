@@ -22,7 +22,7 @@ const TooltipContent = React.forwardRef<
       sideOffset={sideOffset}
       className={cn(
         // z-[110] keeps tooltips above selects/popovers (z-[90]) and modals (z-[80]).
-        "app-floating-panel relative z-[110] max-w-[220px] !rounded-[var(--radius-chip)] px-2 py-1 text-[0.75rem] leading-tight text-[var(--text-primary)]",
+        "app-floating-panel relative z-[110] max-w-[220px] !rounded-[var(--radius-chip)] px-2 py-1 text-[0.75rem] leading-tight text-[color:var(--text-primary)]",
         "data-[state=delayed-open]:animate-in data-[state=closed]:animate-out",
         "data-[state=closed]:fade-out-0 data-[state=delayed-open]:fade-in-0",
         "data-[state=closed]:zoom-out-95 data-[state=delayed-open]:zoom-in-95",

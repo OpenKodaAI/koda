@@ -72,7 +72,7 @@ export function ActivityTimeline({
       <div className="mb-5 flex items-end justify-between gap-3 border-b border-[var(--border-subtle)] pb-4">
         <div>
           <p className="eyebrow">{t("overview.sections.recentActivityTitle")}</p>
-          <h3 className="mt-1.5 text-[1.08rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)] sm:text-[1.16rem]">
+          <h3 className="mt-1.5 text-[1.08rem] font-semibold tracking-[-0.04em] text-[color:var(--text-primary)] sm:text-[1.16rem]">
             {t("overview.activity.latestExecutions", undefined)}
           </h3>
         </div>
@@ -82,7 +82,7 @@ export function ActivityTimeline({
       </div>
 
       {activities.length === 0 ? (
-        <p className="py-8 text-center text-sm text-[var(--text-tertiary)]">
+        <p className="py-8 text-center text-sm text-[color:var(--text-tertiary)]">
           {t("overview.activity.noRecent", undefined)}
         </p>
       ) : (
@@ -113,7 +113,7 @@ export function ActivityTimeline({
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span
-                          className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-secondary)]"
+                          className="inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-secondary)]"
                           style={{
                             backgroundColor: `${getAgentColor(activity.agentId)}14`,
                             borderColor: `${getAgentColor(activity.agentId)}24`,
@@ -132,11 +132,11 @@ export function ActivityTimeline({
                           {typeLabels[activity.type] ?? activity.type}
                         </span>
                       </div>
-                      <p className="mt-2 line-clamp-2 text-[14px] leading-6 text-[var(--text-primary)]">
+                      <p className="mt-2 line-clamp-2 text-[14px] leading-6 text-[color:var(--text-primary)]">
                         {activity.description}
                       </p>
                     </div>
-                    <span className="shrink-0 pt-0.5 text-[11px] text-[var(--text-tertiary)]">
+                    <span className="shrink-0 pt-0.5 text-[11px] text-[color:var(--text-tertiary)]">
                       {formatRelativeTime(activity.timestamp)}
                     </span>
                   </div>
@@ -145,7 +145,7 @@ export function ActivityTimeline({
             ))}
           </ul>
           {hasMore && (
-            <p className="mt-4 text-center text-[11px] uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+            <p className="mt-4 text-center text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-tertiary)]">
               {t("overview.activity.showingRecent", undefined)}
             </p>
           )}

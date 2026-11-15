@@ -623,6 +623,7 @@ class QueueItem:
     child_context_prompt: str | None = None
     child_context_policy: dict[str, Any] = field(default_factory=dict)
     child_toolset: str | None = None
+    child_capabilities: dict[str, Any] | None = None
     silent_response: bool = False
 
 
@@ -695,6 +696,7 @@ class QueryContext:
     parent_task_id: int | None = None
     child_context_policy: dict[str, Any] = field(default_factory=dict)
     child_toolset: str | None = None
+    child_capabilities: dict[str, Any] | None = None
     context_governance: dict[str, Any] | None = None
 
 
@@ -2318,6 +2320,7 @@ async def start_child_run_task(
     context_policy: dict[str, Any],
     toolset: str,
     target_agent_id: str | None = None,
+    capabilities: dict[str, Any] | None = None,
     bot_override: Any | None = None,
     user_data_overlay: dict[str, Any] | None = None,
 ) -> tuple[int, asyncio.Task[None]]:
@@ -2385,6 +2388,7 @@ async def start_child_run_task(
         "child_context_prompt": child_context_prompt,
         "child_context_policy": dict(context_policy or {}),
         "child_toolset": toolset,
+        "child_capabilities": dict(capabilities) if capabilities else None,
     }
     task_info = TaskInfo(
         task_id=task_id,
@@ -2598,6 +2602,54 @@ async def _squad_thread_runtime_defaults(thread_id: str) -> tuple[int, int]:
         return 0, 0
 
 
+async def _refuse_squad_inbox_message_past_limit(
+    bus: Any,
+    *,
+    agent_id: str,
+    msg: Any,
+    thread_id: str,
+    chain: list[str],
+    limit: Any,
+    request_id: str | None,
+) -> None:
+    """Tell the room which limit stopped a delegation or agent_send, and a delegator that it failed (P25)."""
+    from koda.agents.models import DelegationResult
+    from koda.squads import get_squad_thread_store, record_squad_delegation_limit
+
+    log.info(
+        "squad_inbox_message_past_limit",
+        agent_id=agent_id,
+        message_id=msg.message_id,
+        thread_id=thread_id,
+        limit=limit.limit,
+        chain=chain,
+    )
+    thread_store = get_squad_thread_store()
+    if thread_store is not None:
+        await record_squad_delegation_limit(
+            thread_store,
+            thread_id=thread_id,
+            limit=limit,
+            tool="agent_delegate" if msg.message_type == "delegation_request" else "agent_send",
+            from_agent=str(msg.from_agent or ""),
+            to_agent=agent_id,
+            chain=chain,
+            parent_message_id=(msg.metadata or {}).get("parent_message_id"),
+        )
+    if request_id:
+        # The delegator waits for a result: it gets the refusal now instead of its timeout.
+        bus.resolve_delegation(
+            request_id,
+            DelegationResult(
+                request_id=request_id,
+                from_agent=agent_id,
+                to_agent=str(msg.from_agent or ""),
+                success=False,
+                error=limit.reason,
+            ),
+        )
+
+
 async def start_squad_inbox_dispatcher(application: Any) -> None:
     """Consume durable squad inbox messages and enqueue real agent turns.
 
@@ -2605,8 +2657,9 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
     requiring an agent to call ``squad_inbox_drain`` manually.
     """
     from koda.agents import get_message_bus
+    from koda.agents.models import DelegationResult
     from koda.config import SQUAD_POLL_INTERVAL_S, SQUADS_ENABLED
-    from koda.squads import SquadThreadNotRunnableError
+    from koda.squads import SquadThreadNotRunnableError, squad_delegation_limit
 
     agent_id = AGENT_ID or "default"
     if not SQUADS_ENABLED:
@@ -2647,6 +2700,23 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
                         has_thread=bool(thread_id),
                     )
                     await bus.ack(agent_id, msg.message_id)
+                    request_id = metadata.get("request_id")
+                    if not thread_id and msg.message_type == "delegation_request" and request_id:
+                        # The inbox runs squad turns only: a delegation outside a squad thread is
+                        # answered at once with why, instead of its delegator's timeout (D-353).
+                        bus.resolve_delegation(
+                            str(request_id),
+                            DelegationResult(
+                                request_id=str(request_id),
+                                from_agent=agent_id,
+                                to_agent=str(msg.from_agent or ""),
+                                success=False,
+                                error=(
+                                    f"Agent '{agent_id}' runs a delegated turn only in a squad thread, "
+                                    "and this delegation has none."
+                                ),
+                            ),
+                        )
                     continue
 
                 user_id = _coerce_int_or_zero(metadata.get("user_id"))
@@ -2657,9 +2727,34 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
                     chat_id = chat_id or default_chat_id
                 delegation_chain = metadata.get("delegation_chain")
                 chain = [str(value) for value in delegation_chain] if isinstance(delegation_chain, list) else []
-                if msg.from_agent and msg.from_agent not in chain:
+                # The chain ends with its sender; one a sender did not add itself to still counts
+                # that hop (D-096).
+                if msg.from_agent and (not chain or chain[-1] != msg.from_agent):
                     chain.append(msg.from_agent)
                 request_id = metadata.get("request_id") if kind in {"task_request", "delegation_request"} else None
+                # A delegation past a cycle or the depth cap, or an agent_send past the hop limit,
+                # runs no turn, whichever runtime sent it (D-095, D-096).
+                limit = None
+                if msg.message_type == "delegation_request":
+                    limit = squad_delegation_limit(
+                        chain=chain,
+                        to_agent_id=agent_id,
+                        delegation_depth=_coerce_int_or_zero(metadata.get("delegation_depth")),
+                    )
+                elif kind == "agent_text":
+                    limit = squad_delegation_limit(chain=chain, to_agent_id=agent_id, agent_send=True)
+                if limit is not None:
+                    await bus.ack(agent_id, msg.message_id)
+                    await _refuse_squad_inbox_message_past_limit(
+                        bus,
+                        agent_id=agent_id,
+                        msg=msg,
+                        thread_id=str(thread_id),
+                        chain=chain,
+                        limit=limit,
+                        request_id=str(request_id) if request_id else None,
+                    )
+                    continue
 
                 enqueued_task_id = await enqueue_squad_agent_task(
                     application=application,
@@ -2772,6 +2867,7 @@ def _parse_queue_item(item: Any) -> QueueItem:
 
     def child_run_fields(raw: dict[str, Any]) -> dict[str, Any]:
         policy = raw.get("child_context_policy")
+        capabilities = raw.get("child_capabilities")
         return {
             "is_child_run": bool(raw.get("_child_run")),
             "child_run_id": raw.get("child_run_id"),
@@ -2779,6 +2875,7 @@ def _parse_queue_item(item: Any) -> QueueItem:
             "child_context_prompt": raw.get("child_context_prompt"),
             "child_context_policy": dict(policy) if isinstance(policy, dict) else {},
             "child_toolset": raw.get("child_toolset"),
+            "child_capabilities": dict(capabilities) if isinstance(capabilities, dict) else None,
             "silent_response": bool(raw.get("silent_response")),
         }
 
@@ -3007,6 +3104,9 @@ async def _prepare_query_context(
     if source_root_path:
         context.user_data["source_root_path"] = source_root_path
     task_kind = classify_task_kind(item.query_text)
+    if item.is_child_run and item.child_capabilities and item.child_capabilities.get("task_kind"):
+        # A child run is judged by its parent's task kind, so policy rules keyed on it still bind.
+        task_kind = str(item.child_capabilities["task_kind"])
     project_key = Path(work_dir).name.lower()
     environment = ""
     runtime_agent_id = str(item.executing_agent_id or AGENT_ID or "default").strip() or "default"
@@ -3920,6 +4020,7 @@ async def _prepare_query_context(
         parent_task_id=item.parent_task_id,
         child_context_policy=dict(item.child_context_policy or {}),
         child_toolset=item.child_toolset,
+        child_capabilities=item.child_capabilities,
         context_governance=context_governance,
     )
 
@@ -4709,6 +4810,7 @@ async def _run_agent_loop(
     from dataclasses import asdict
 
     from koda.knowledge import default_execution_policy
+    from koda.services.child_runs import child_run_tool_denial
     from koda.services.execution_confidence import evaluate_write_confidence, parse_action_plan
     from koda.services.execution_policy import evaluate_execution_policy
     from koda.services.runtime import get_runtime_controller
@@ -4872,6 +4974,7 @@ async def _run_agent_loop(
                     parent_task_id=ctx.parent_task_id,
                     child_context_policy=dict(ctx.child_context_policy or {}),
                     child_toolset=ctx.child_toolset,
+                    child_capabilities=ctx.child_capabilities,
                     context_governance=ctx.context_governance,
                 )
                 resume_item = QueueItem(
@@ -5082,6 +5185,28 @@ async def _run_agent_loop(
                         ),
                     )
                 )
+                continue
+
+            child_denial = child_run_tool_denial(call.tool, ctx.child_capabilities) if ctx.is_child_run else None
+            if child_denial:
+                log.info("child_run_tool_denied", child_run_id=ctx.child_run_id, tool=call.tool)
+                executed_pairs.append(
+                    (
+                        call,
+                        AgentToolResult(
+                            tool=call.tool,
+                            success=False,
+                            output=child_denial,
+                            metadata={
+                                "category": _infer_tool_category(call.tool),
+                                "policy_blocked": True,
+                                "policy_reason_code": "child_run_capability_denied",
+                            },
+                        ),
+                    )
+                )
+                if _is_write_tool(call.tool, call.params):
+                    skip_following_reads = True
                 continue
 
             policy_params = _policy_params_for_call(call, tool_ctx)
@@ -5299,7 +5424,31 @@ async def _run_agent_loop(
                     skip_following_reads = True
                 continue
 
-            if policy_evaluation.requires_confirmation:
+            grant_unusable = False
+            if (
+                not policy_evaluation.requires_confirmation
+                and requested_scope is not None
+                and approval_grant is not None
+                and not str(approval_grant.get("grant_id") or "").startswith("edited:")
+            ):
+                # The grant's use is recorded before the call runs (D-344). A grant
+                # revoked meanwhile, or a use Postgres did not record, runs nothing.
+                try:
+                    grant_unusable = (
+                        await consume_agent_approval_grant(
+                            user_id=user_id,
+                            agent_id=AGENT_ID or "default",
+                            envelope=policy_evaluation.envelope,
+                            approval_scope=requested_scope,
+                            session_id=str(context.user_data.get("session_id") or "").strip() or None,
+                            chat_id=chat_id,
+                        )
+                        is None
+                    )
+                except Exception:
+                    grant_unusable = True
+
+            if policy_evaluation.requires_confirmation or grant_unusable:
                 result = AgentToolResult(
                     tool=call.tool,
                     success=False,
@@ -5307,7 +5456,9 @@ async def _run_agent_loop(
                     metadata={
                         "category": _infer_tool_category(call.tool),
                         "approval_required": True,
-                        "policy_reason_code": policy_evaluation.reason_code,
+                        "policy_reason_code": (
+                            "approval_grant_unavailable" if grant_unusable else policy_evaluation.reason_code
+                        ),
                         "policy_rule_id": policy_evaluation.rule_id,
                     },
                 )
@@ -5318,15 +5469,6 @@ async def _run_agent_loop(
 
             result = await execute_tool(call, tool_ctx, policy_evaluation=policy_evaluation)
             executed_pairs.append((call, result))
-            if requested_scope is not None and approval_grant is not None and result.success:
-                consume_agent_approval_grant(
-                    user_id=user_id,
-                    agent_id=AGENT_ID or "default",
-                    envelope=policy_evaluation.envelope,
-                    approval_scope=requested_scope,
-                    session_id=str(context.user_data.get("session_id") or "").strip() or None,
-                    chat_id=chat_id,
-                )
 
         results = [result for _, result in executed_pairs]
         updated_work_dir = context.user_data.get("work_dir", ctx.work_dir)
@@ -5545,6 +5687,7 @@ async def _run_agent_loop(
             parent_task_id=ctx.parent_task_id,
             child_context_policy=dict(ctx.child_context_policy or {}),
             child_toolset=ctx.child_toolset,
+            child_capabilities=ctx.child_capabilities,
             context_governance=ctx.context_governance,
         )
         resume_item = QueueItem(
@@ -7746,19 +7889,26 @@ async def redispatch_expired_squad_claim(*, task_id: str) -> str:
 
     The squad router's sweep calls this after it reverted the claim to ``pending``, with the
     assignee kept. On the first expiry the assignee claims the task again and its task request is
-    dispatched to it again; a refused dispatch leaves that claim to expire too. On a later expiry
-    the task is escalated to the coordinator: the system posts a failed task result for the
-    assignee that says so, the task ends ``escalated``, and its follow-ups run, so its dependents
-    are cancelled and the coordinator synthesis, which discloses the escalation, is queued once
-    the cycle's tasks have ended. A task whose dependencies are not all done is left pending for
-    the dependency path to dispatch. Returns ``redispatched``, ``escalated`` or ``skipped``.
+    dispatched to it again. A dispatch the room refuses because it was paused or spent after the
+    sweep releases that claim without counting an expiry (D-338); another failed dispatch leaves
+    the claim to expire, and that expiry counts. On a later expiry the task is escalated to the
+    coordinator: the system posts a failed task result for the assignee that says so, the task
+    ends ``escalated``, and its follow-ups run, so its dependents are cancelled and the
+    coordinator synthesis, which discloses the escalation, is queued once the cycle's tasks have
+    ended. A task whose dependencies are not all done is left pending for the dependency path to
+    dispatch. Returns ``redispatched``, ``escalated`` or ``skipped``.
     """
     if _shutting_down:
         return "skipped"
     from types import SimpleNamespace
 
     from koda.config import SQUAD_CLAIM_TTL_S
-    from koda.squads import TaskClaimConflictError, dispatch_squad_turn, get_squad_task_store, get_squad_thread_store
+    from koda.squads import (
+        TaskClaimConflictError,
+        dispatch_squad_turn,
+        get_squad_task_store,
+        get_squad_thread_store,
+    )
 
     thread_store = get_squad_thread_store()
     task_store = get_squad_task_store()
@@ -7804,7 +7954,15 @@ async def redispatch_expired_squad_claim(*, task_id: str) -> str:
             delegation_origin_agent_id=coordinator,
             telegram_message_thread_id=thread.telegram_message_thread_id,
         )
-        return "redispatched" if result.dispatched else "skipped"
+        if result.dispatched:
+            return "redispatched"
+        if result.transport == "none":
+            # The room, paused or spent after the sweep, refused the turn (dispatch_squad_turn
+            # sends nothing then): the fresh claim is released without counting an expiry, as the
+            # other refusal paths release theirs, and the first sweep after the room can run again
+            # dispatches the task again (D-338).
+            await _release_refused_squad_task_claim(squad_task_id=claimed.id, agent_id=assignee)
+        return "skipped"
     reason = (
         f"Not completed: the claim of task {task.id} ({task.title}) by {assignee} expired {expiries} times, "
         f"so the task is escalated to the coordinator {coordinator}."

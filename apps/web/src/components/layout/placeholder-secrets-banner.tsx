@@ -65,7 +65,7 @@ export function PlaceholderSecretsBanner({ className }: { className?: string }) 
       <p className="font-medium">
         {t(single ? "securityBanner.placeholderSecrets.titleOne" : "securityBanner.placeholderSecrets.title")}
       </p>
-      <p className="mt-0.5 text-[var(--text-secondary)]">
+      <p className="mt-0.5 text-[color:var(--text-secondary)]">
         {t(
           single
             ? "securityBanner.placeholderSecrets.descriptionOne"

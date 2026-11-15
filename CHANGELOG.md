@@ -25,6 +25,21 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 
 ### Security
 
+- An approval grant's use is recorded in Postgres before the call or command it
+  approves runs. When that write fails, nothing runs and the call asks for approval
+  again, so a grant is never used more times than it allows. Before, the worker counted
+  the use in memory and wrote it afterwards, and a failed write gave the use back on
+  the next restart. A use now counts when the action starts, so an action that fails
+  has used its approval. A use of a grant revoked meanwhile, by a new session for
+  example, no longer stores the grant again, and the worker drops it too. (D-343,
+  D-344)
+- An approval's grants are stored in Postgres before the approval completes. When
+  Postgres does not store them, nothing is approved: the approver is told (a Telegram
+  reply, or HTTP 503 from the dashboard route) and the request stays open to approve
+  again. Before, the grant was written in the background, and when that write failed
+  the approved call was refused without telling anyone. (M2-E1-T2)
+- A grant approved for a request that names no agent belongs to the worker that
+  issued it. Before, it named agent `default`. (D-345)
 - The control-plane API and the dashboard are published on loopback by default. Every
   compose file binds the API to `127.0.0.1:${CONTROL_PLANE_PORT:-8090}` and the
   dashboard to `${WEB_PUBLISH_ADDRESS:-127.0.0.1}:${WEB_PORT:-3000}`. Before, the base
@@ -278,6 +293,18 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   can no longer open a private thread it is not in, squad sync never adds members to a
   private thread, and break-glass access is refused when its audit event cannot be written.
   (M1-E5-T1, M1-E5-T4, D-038, D-041, D-304, D-306)
+- `agent_broadcast` reaches only the active participants of the current squad thread, needs
+  write access to that thread, and tags each message with the thread, the sender's squad
+  task and its delegation chain. It never reaches the `system`, `user:*` or `operator:*`
+  pseudo-agents (an agent named `SYSTEM` or `OPERATOR` is still reached) or agents of other
+  threads and workspaces; outside a squad thread it is refused. On Postgres a broadcast is
+  one thread message with all its recipients, so the squad room shows it once. A squad
+  message sent to the runtime API runs as the thread's owner and chat, not as a `user_id`
+  or `chat_id` the caller supplies; the response lists such a field under `ignored` and
+  the runtime logs it. The memory engine refuses a recall without a positive `user_id`
+  instead of returning every user's memories, and the runtime refuses such a recall before
+  it calls the engine, with `MemoryRecallUserRequiredError` and a
+  `memory_recall_user_required` log line. (M1-E5-T2, D-040, D-134, D-137)
 - A skill package that runs code through a route the verified-bytes check does not cover
   (`runpy.run_path`, `compile`, `exec` or `eval` through builtins, `source_to_code`,
   `marshal` or `pickle`, a loader of its own, another interpreter through `os.exec*`,
@@ -292,6 +319,15 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   passed to `__import__`, `builtins.__import__`, `importlib.__import__` or
   `importlib.import_module`. Importing `posix`, `nt`, `_posixsubprocess` or `_winapi` is
   denied as well. A package that uses `os` only for `os.path` still installs. (D-323)
+- Squad agents can no longer delegate in a cycle, past `INTER_AGENT_MAX_DELEGATION_DEPTH`,
+  or answer each other with `agent_send` without end: each delegation and message carries
+  its chain of agents on every dispatch path, the receiving inbox refuses it past a limit,
+  and the room shows one `delegation_limit_reached` event that names the limit. (M3-E6-T4,
+  D-095, D-096, D-352)
+- An agent's squad task tools may set only `notes` and `progress` in a task's metadata; the
+  claim bookkeeping and other server-owned keys are refused. (D-339)
+- A child run (Delegate Task) can use only the tools its parent run has, and cannot act as
+  another agent. (M6-E2-T6)
 
 
 ### Added
@@ -410,6 +446,15 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 
 ### Removed
 
+- The approval JSON fallback. Approval requests and grants are kept in Postgres only;
+  a failed write is logged and returned to the caller instead of going to
+  `approval_grants.json` or `pending_approvals.json`, which no code read back. At
+  startup, before it recovers tasks, the worker imports each of those files still in
+  `STATE_ROOT_DIR` once and renames it `<name>.migrated`; nothing is deleted. Every
+  imported grant is stored expired, with an `approval.grant_expired` audit event,
+  because the file kept grants after their last use or their revocation; their users
+  approve again. A grant keeps its agent, and one without an agent follows the
+  migration `050_approval_tables` rule. (M2-E1-T2, TD-043 part)
 - `GRPC_TLS_ENABLED`, with `GRPC_TLS_CA_CERT`, `GRPC_TLS_CLIENT_CERT` and
   `GRPC_TLS_CLIENT_KEY`. The switch moved every internal gRPC channel to TLS, but only
   the security and memory sidecars served TLS, so it broke the runtime-kernel, artifact,
@@ -475,6 +520,27 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 
 ### Fixed
 
+- Approval requests and grants for Telegram user and chat ids above 2^31, supergroup
+  chats included, are stored in Postgres and survive a restart. Before, the insert
+  overflowed an INTEGER column and the entry was lost on restart. Using a grant
+  rewrites only that grant; before, each partial use deleted every agent's grants and
+  re-inserted one worker's copy. Migration `050_approval_tables` creates both tables,
+  with their times in DOUBLE PRECISION: the REAL (float4) columns an earlier release
+  created had a 128-second step, so a grant could read as expired up to a minute
+  early or late. A stored grant without an agent gets the one agent its request,
+  session or chat names, or expires with an `approval.grant_expired` audit event.
+  (M2-E1-T1, D-059, D-060, D-347)
+- The runtime API answers a non-numeric `after_offset` on the terminal WebSocket with `400`
+  instead of `500`, and a bad `offset` on a schedule detail names `offset` in its error. The
+  browser payload (`GET .../browser`, `POST .../attach/browser`, the browser WebSocket's
+  snapshots and the browser session rows of `GET .../sessions`) carries only named fields:
+  the kernel's and the session's free-form `metadata`, with its `*_log` file paths, and any
+  key the kernel adds later are no longer sent in these payloads. Its `runtime_dir`, like
+  the task environment's `runtime_dir`, is relative to the task's runtime directory
+  (`browser`, or `.` for the directory itself) or `null` outside it, never an absolute host
+  path. A page title or error that starts with `/` is kept. Runtime events are not
+  projected: a `browser.started` event on the event routes still carries the whole
+  session, including its `metadata` log paths and absolute `runtime_dir`. (M3-E8-T4)
 - Automatic and web-created scheduled jobs run. Every reminder, interval and cron run
   used to be blocked as "policy snapshot is missing". Migration 047 adds the scheduler
   events table and the dispatch and validation columns that a real Postgres database
@@ -583,6 +649,21 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   redundant logo alt text. (D-282)
 - Web: dimmed session surfaces (a pending message, a submitted form, a system event row, a
   submitting room composer) keep a full-strength focus ring. (D-281)
+- Squads: a delegation sent outside a squad thread fails at once with a reason instead of
+  waiting for its timeout; a delegation result is kept in memory only while its delegator
+  waits, and the Postgres bus logs a result it could not store as
+  `delegation_result_persist_failed`. A room paused between the router's sweep and a
+  redispatch no longer counts a claim expiry. (D-353, D-185, D-354, D-338)
+- Web: font-size classes and size, weight, colour, cursor and opacity utilities on links,
+  buttons and inputs now apply; the global reset rules sit in the base layer and every
+  arbitrary `text-[var(--x)]` names its type. (D-330, D-331, D-349)
+- Web: the composer agent picker, the room role picker, the empty command palette and the
+  routine editor popovers expose valid names and structure to assistive technology, the open
+  language switcher leaves the rest of the page inert, and the routine editor adds no second
+  banner landmark. (D-332, D-333, D-319, D-348, D-350)
+- Web: the agent editor step rail shows translated step names; Escape in the agent catalog's
+  popovers and the model selector closes only that popover; Tailwind no longer emits rules
+  for classes that appear only in tests. (D-334, D-320, D-351)
 
 
 ## [1.0.18] - 2026-05-20

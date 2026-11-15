@@ -84,7 +84,7 @@ def _make_context():
 
 def _resolved_agent_cmd_approval(decision: str = "approved_scope"):
     async def _request(*_args, **kwargs):
-        from koda.utils.approval import _PENDING_AGENT_CMD_OPS
+        from koda.utils.approval import _APPROVAL_GRANTS, _PENDING_AGENT_CMD_OPS
 
         op_id = f"op-{decision}"
         request = list(kwargs.get("requests") or [])[0]
@@ -103,7 +103,11 @@ def _resolved_agent_cmd_approval(decision: str = "approved_scope"):
             "max_uses": max_uses,
             "exact_fingerprint": f"{envelope.resource_scope_fingerprint}:{envelope.params_fingerprint}",
             "scope_fingerprint": envelope.resource_scope_fingerprint,
+            "created_at": time.time(),
+            "expires_at": time.time() + 600,
         }
+        # As _issue_agent_approval_grants does: the grant's use is taken from memory before the call runs.
+        _APPROVAL_GRANTS[grant["grant_id"]] = grant
         event = asyncio.Event()
         event.set()
         _PENDING_AGENT_CMD_OPS[op_id] = {
@@ -1346,6 +1350,57 @@ class TestAgentLoop:
         assert ctx.confidence_reports[-1]["blocked"] is False
 
     @pytest.mark.asyncio
+    async def test_an_approved_write_runs_only_once_its_grant_use_is_recorded(self):
+        """D-344: the grant's use is written before the call runs; when the write fails, the call does not run."""
+        ctx = _make_ctx(knowledge_hits=[{"source_label": "README.md", "freshness": "fresh"}])
+        item = _make_item()
+        context = _make_context()
+        initial = _make_result(
+            result=(
+                "<action_plan>"
+                "<summary>Add the cron job</summary>"
+                "<assumptions>User wants a daily backup</assumptions>"
+                "<evidence>I inspected the project docs first</evidence>"
+                "<sources>README.md</sources>"
+                "<risk>Wrong schedule would create noisy automation</risk>"
+                "<success>The cron job is listed after creation</success>"
+                "</action_plan>"
+                '<agent_cmd tool="job_create">{"expression": "0 3 * * *", "command": "echo hi"}</agent_cmd>'
+            ),
+            tool_uses=[{"name": "Read", "input": {"file_path": "/tmp/README.md"}}],
+        )
+
+        with (
+            patch(
+                "koda.services.queue_manager._run_with_provider_fallback",
+                new_callable=AsyncMock,
+                return_value=_make_result(result="Not created.", cost_usd=0.01),
+            ),
+            patch("koda.services.execution_policy.AGENT_EXECUTION_POLICY", SCHEDULER_EXECUTION_POLICY),
+            patch("koda.services.queue_manager.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.execution_policy.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch("koda.services.tool_dispatcher.AGENT_RESOURCE_ACCESS_POLICY", SCHEDULER_WRITE_POLICY),
+            patch(
+                "koda.utils.approval.request_agent_cmd_approval",
+                new_callable=AsyncMock,
+                side_effect=_resolved_agent_cmd_approval("approved_scope"),
+            ),
+            patch(
+                "koda.utils.approval.consume_agent_approval_grant",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("approval_grants_write_failed"),
+            ) as consume,
+            patch("koda.services.tool_dispatcher._handle_job_create", new_callable=AsyncMock) as mock_add,
+            patch.dict("koda.services.tool_dispatcher._TOOL_HANDLERS", {"job_create": mock_add}, clear=True),
+        ):
+            result = await _run_agent_loop(ctx, item, 111, 111, context, initial)
+
+        assert consume.await_count == 1
+        assert mock_add.await_count == 0
+        [step] = [step for step in result.tool_execution_trace if step["tool"] == "job_create"]
+        assert step["output"] == "Human approval required before execution."
+
+    @pytest.mark.asyncio
     async def test_code_change_requires_post_write_verification_before_finalize(self):
         ctx = _make_ctx(
             task_kind="code_change",
@@ -1827,3 +1882,49 @@ class TestAgentLoop:
         assert "print" not in spoken_text
         context.bot.send_voice.assert_awaited_once()
         context.bot.send_document.assert_awaited()
+
+
+class TestChildRunCapabilities:
+    """M6-E2-T6: a child run's tools are a subset of its parent's."""
+
+    @staticmethod
+    async def _run_child(capabilities: dict | None):
+        ctx = _make_ctx(
+            is_child_run=True,
+            child_run_id="childrun_x",
+            parent_task_id=42,
+            child_capabilities=capabilities,
+        )
+        initial = _make_result(
+            result='<agent_cmd tool="job_list">{}</agent_cmd><agent_cmd tool="web_search">{"query": "x"}</agent_cmd>',
+        )
+        resume = AsyncMock(return_value=_make_result(result="done"))
+        from koda.services.tool_dispatcher import AgentToolResult
+
+        handlers = {
+            "job_list": AsyncMock(return_value=AgentToolResult(tool="job_list", success=True, output="No jobs.")),
+            "web_search": AsyncMock(return_value=AgentToolResult(tool="web_search", success=True, output="hits")),
+        }
+        with (
+            patch("koda.services.queue_manager._run_with_provider_fallback", resume),
+            patch("koda.services.tool_dispatcher._TOOL_HANDLERS", handlers),
+        ):
+            await _run_agent_loop(ctx, _make_item(), 111, 111, _make_context(), initial)
+        return handlers, resume.await_args.args[1].query_text
+
+    @pytest.mark.asyncio
+    async def test_child_is_denied_a_tool_its_parent_lacks(self):
+        handlers, resume_prompt = await self._run_child({"agent_id": "default", "allowed_tool_ids": ["job_list"]})
+
+        handlers["job_list"].assert_awaited_once()
+        handlers["web_search"].assert_not_awaited()
+        assert '<tool_result tool="web_search" success="false">' in resume_prompt
+        assert "parent run does not have" in resume_prompt
+
+    @pytest.mark.asyncio
+    async def test_child_without_a_parent_envelope_gets_no_tools(self):
+        handlers, resume_prompt = await self._run_child(None)
+
+        handlers["job_list"].assert_not_awaited()
+        handlers["web_search"].assert_not_awaited()
+        assert '<tool_result tool="job_list" success="false">' in resume_prompt

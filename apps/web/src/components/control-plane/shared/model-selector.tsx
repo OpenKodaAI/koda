@@ -51,14 +51,14 @@ function ProviderIcon({
       <Icon
         width={size}
         height={size}
-        className="shrink-0 text-[var(--text-secondary)]"
+        className="shrink-0 text-[color:var(--text-secondary)]"
       />
     );
   }
 
   const logo = PROVIDER_LOGOS[providerId];
   if (!logo) {
-    return <Server size={size} className="text-[var(--text-quaternary)]" />;
+    return <Server size={size} className="text-[color:var(--text-quaternary)]" />;
   }
 
   // Colored brand logos render as a real image so the original palette
@@ -109,8 +109,8 @@ function MetricBar({
   return (
     <div className="flex items-center gap-3">
       <div className="flex items-center gap-1.5 w-[100px] shrink-0">
-        <Icon size={12} className="text-[var(--text-quaternary)]" />
-        <span className="text-[11px] text-[var(--text-tertiary)]">{label}</span>
+        <Icon size={12} className="text-[color:var(--text-quaternary)]" />
+        <span className="text-[11px] text-[color:var(--text-tertiary)]">{label}</span>
       </div>
       <div className="flex gap-1 flex-1">
         {[1, 2, 3, 4, 5].map((i) => (
@@ -160,11 +160,11 @@ function ModelDetailCard({
   return (
     <div className="flex flex-col gap-3 w-[248px]">
       <div>
-        <div className="text-sm font-semibold text-[var(--text-primary)]">
+        <div className="text-sm font-semibold text-[color:var(--text-primary)]">
           {meta?.displayName || modelId}
         </div>
         {meta?.description && (
-          <div className="mt-0.5 text-xs leading-relaxed text-[var(--text-tertiary)]">
+          <div className="mt-0.5 text-xs leading-relaxed text-[color:var(--text-tertiary)]">
             {meta.description}
           </div>
         )}
@@ -179,60 +179,60 @@ function ModelDetailCard({
 
       <div className="flex flex-col gap-1.5 border-t border-[rgba(255,255,255,0.06)] pt-3">
         <div className="flex justify-between text-[11px]">
-          <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.provider_c2d1091b")}</span>
-          <span className="text-[var(--text-secondary)]">{providerLabel}</span>
+          <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.provider_c2d1091b")}</span>
+          <span className="text-[color:var(--text-secondary)]">{providerLabel}</span>
         </div>
         {ollamaMeta?.family && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.familia_f26e5199")}</span>
-            <span className="text-[var(--text-secondary)]">{ollamaMeta.family}</span>
+            <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.familia_f26e5199")}</span>
+            <span className="text-[color:var(--text-secondary)]">{ollamaMeta.family}</span>
           </div>
         )}
         {ollamaMeta?.parameter_size && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.parametros_a223a8f5")}</span>
-            <span className="text-[var(--text-secondary)]">{ollamaMeta.parameter_size}</span>
+            <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.parametros_a223a8f5")}</span>
+            <span className="text-[color:var(--text-secondary)]">{ollamaMeta.parameter_size}</span>
           </div>
         )}
         {ollamaMeta?.quantization_level && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.quantizacao_4265fef5")}</span>
-            <span className="font-mono text-[var(--text-secondary)]">{ollamaMeta.quantization_level}</span>
+            <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.quantizacao_4265fef5")}</span>
+            <span className="font-mono text-[color:var(--text-secondary)]">{ollamaMeta.quantization_level}</span>
           </div>
         )}
         {ollamaMeta?.size_bytes != null && ollamaMeta.size_bytes > 0 && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.disco_27affb4b")}</span>
-            <span className="text-[var(--text-secondary)]">{formatSizeBytes(ollamaMeta.size_bytes)}</span>
+            <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.disco_27affb4b")}</span>
+            <span className="text-[color:var(--text-secondary)]">{formatSizeBytes(ollamaMeta.size_bytes)}</span>
           </div>
         )}
         {meta?.contextWindow != null && meta.contextWindow > 0 && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.contexto_e462fa88")}</span>
-            <span className="text-[var(--text-secondary)]">{formatContextWindow(meta.contextWindow)}</span>
+            <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.contexto_e462fa88")}</span>
+            <span className="text-[color:var(--text-secondary)]">{formatContextWindow(meta.contextWindow)}</span>
           </div>
         )}
         {hasCost && (
           <>
             <div className="flex justify-between text-[11px]">
-              <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.custo_input_628ae9af")}</span>
-              <span className="text-[var(--text-secondary)]">{formatCost(meta!.inputCostPer1M!)} / 1M</span>
+              <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.custo_input_628ae9af")}</span>
+              <span className="text-[color:var(--text-secondary)]">{formatCost(meta!.inputCostPer1M!)} / 1M</span>
             </div>
             <div className="flex justify-between text-[11px]">
-              <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.custo_output_470790a9")}</span>
-              <span className="text-[var(--text-secondary)]">{formatCost(meta!.outputCostPer1M!)} / 1M</span>
+              <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.custo_output_470790a9")}</span>
+              <span className="text-[color:var(--text-secondary)]">{formatCost(meta!.outputCostPer1M!)} / 1M</span>
             </div>
           </>
         )}
         {isOllama && !hasCost && (
           <div className="flex justify-between text-[11px]">
-            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.custo_e31838b4")}</span>
-            <span className="text-[var(--text-secondary)]">{t("generated.controlPlane.gratuito_local_5d539621")}</span>
+            <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.custo_e31838b4")}</span>
+            <span className="text-[color:var(--text-secondary)]">{t("generated.controlPlane.gratuito_local_5d539621")}</span>
           </div>
         )}
         <div className="flex justify-between text-[11px]">
-          <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.model_id_79808c3c")}</span>
-          <span className="font-mono text-[var(--text-quaternary)]">{modelId}</span>
+          <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.model_id_79808c3c")}</span>
+          <span className="font-mono text-[color:var(--text-quaternary)]">{modelId}</span>
         </div>
       </div>
     </div>
@@ -281,18 +281,18 @@ function ModelRow({
           className={cn(
             "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors",
             disabled
-              ? "cursor-not-allowed text-[var(--text-quaternary)] opacity-60"
+              ? "cursor-not-allowed text-[color:var(--text-quaternary)] opacity-60"
               : isSelected
-                ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-                : "text-[var(--text-secondary)]",
+                ? "bg-[var(--surface-hover)] text-[color:var(--text-primary)]"
+                : "text-[color:var(--text-secondary)]",
           )}
         >
           <ProviderIcon providerId={opt.providerId} size={20} />
           <div className="min-w-0 flex-1">
-            <div className="text-sm font-medium text-[var(--text-primary)] truncate">
+            <div className="text-sm font-medium text-[color:var(--text-primary)] truncate">
               {opt.displayName}
             </div>
-            <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-quaternary)] truncate">
+            <div className="flex items-center gap-1.5 text-[11px] text-[color:var(--text-quaternary)] truncate">
               <span className="truncate">{opt.modelId}</span>
               {opt.providerId === "ollama" && opt.apiMeta?.parameter_size && (
                 <span className="inline-flex shrink-0 items-center gap-1 rounded border border-[rgba(255,255,255,0.06)] px-1.5 py-0.5 text-[10px]">
@@ -302,12 +302,12 @@ function ModelRow({
               )}
             </div>
             {opt.disabledReason && (
-              <div className="mt-0.5 truncate text-[11px] text-[var(--text-quaternary)]">
+              <div className="mt-0.5 truncate text-[11px] text-[color:var(--text-quaternary)]">
                 {opt.disabledReason}
               </div>
             )}
           </div>
-          {isSelected && <Check size={14} className="shrink-0 text-[var(--text-primary)]" />}
+          {isSelected && <Check size={14} className="shrink-0 text-[color:var(--text-primary)]" />}
         </button>
       </TooltipTrigger>
       <TooltipContent
@@ -553,13 +553,17 @@ export function ModelSelector({
   }, [open]);
 
   /* ---- Close on Escape ---- */
+  // Capture phase, ahead of a dialog's own Escape listener, and marked handled, so
+  // Escape here closes only this panel and not a dialog around it (D-320).
   useEffect(() => {
     if (!open) return;
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setOpen(false);
     }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
+    window.addEventListener("keydown", handleKey, true);
+    return () => window.removeEventListener("keydown", handleKey, true);
   }, [open]);
 
   /* ---- Panel position: auto up/down ---- */
@@ -611,7 +615,7 @@ export function ModelSelector({
             )}
             <span className={cn(
               "truncate",
-              selectedOption ? "text-[var(--text-primary)]" : "text-[var(--text-quaternary)]",
+              selectedOption ? "text-[color:var(--text-primary)]" : "text-[color:var(--text-quaternary)]",
             )}>
               {triggerLabel}
             </span>
@@ -619,7 +623,7 @@ export function ModelSelector({
           <ChevronDown
             size={16}
             className={cn(
-              "shrink-0 text-[var(--text-quaternary)] transition-transform duration-200",
+              "shrink-0 text-[color:var(--text-quaternary)] transition-transform duration-200",
               open && "rotate-180",
             )}
           />
@@ -638,14 +642,14 @@ export function ModelSelector({
             >
               {/* Search */}
               <div className="border-b border-[var(--divider-hair)] px-2.5 py-2">
-                <div className="flex h-8 items-center gap-2 rounded-[var(--radius-input)] px-2.5 text-[var(--text-tertiary)] transition-[background-color,box-shadow] duration-150 focus-within:bg-[var(--panel-soft)] focus-within:outline focus-within:-outline-offset-1 focus-within:outline-[color:var(--focus-ring)]">
-                  <Search size={13} className="shrink-0 text-[var(--text-quaternary)]" />
+                <div className="flex h-8 items-center gap-2 rounded-[var(--radius-input)] px-2.5 text-[color:var(--text-tertiary)] transition-[background-color,box-shadow] duration-150 focus-within:bg-[var(--panel-soft)] focus-within:outline focus-within:-outline-offset-1 focus-within:outline-[color:var(--focus-ring)]">
+                  <Search size={13} className="shrink-0 text-[color:var(--text-quaternary)]" />
                   <input
                     type="text"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     placeholder={t("generated.controlPlane.buscar_modelo_50f4a238")}
-                    className="h-full w-full min-w-0 bg-transparent text-[0.8125rem] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+                    className="h-full w-full min-w-0 bg-transparent text-[0.8125rem] text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)]"
                     style={{ outline: "none", border: "none", boxShadow: "none" }}
                     autoFocus
                   />
@@ -654,7 +658,7 @@ export function ModelSelector({
                       type="button"
                       onClick={() => setSearch("")}
                       aria-label={t("generated.controlPlane.limpar_busca_0bb288dc")}
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)]"
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[color:var(--text-quaternary)] transition-colors focus-visible:text-[color:var(--text-primary)]"
                     >
                       <X size={12} />
                     </button>
@@ -673,24 +677,24 @@ export function ModelSelector({
                       className={cn(
                         "flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-sm transition-colors",
                         value === ""
-                          ? "bg-[var(--surface-hover)] text-[var(--text-primary)]"
-                          : "text-[var(--text-secondary)]",
+                          ? "bg-[var(--surface-hover)] text-[color:var(--text-primary)]"
+                          : "text-[color:var(--text-secondary)]",
                       )}
                     >
-                      {value === "" && <Check size={14} className="shrink-0 text-[var(--text-primary)]" />}
+                      {value === "" && <Check size={14} className="shrink-0 text-[color:var(--text-primary)]" />}
                       <span className={value === "" ? "" : "pl-[26px]"}>{tl(emptyLabel)}</span>
                     </button>
                   )}
 
                   {filteredGroups.length === 0 && (
-                    <div className="px-3 py-4 text-center text-xs text-[var(--text-quaternary)]">
+                    <div className="px-3 py-4 text-center text-xs text-[color:var(--text-quaternary)]">
                       {t("generated.controlPlane.nenhum_modelo_encontrado_a79c6a50")}
                     </div>
                   )}
 
                   {filteredGroups.map((group) => (
                     <div key={group.providerId}>
-                      <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
+                      <div className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-quaternary)]">
                         {group.label}
                       </div>
                       {group.items.map((opt) => (

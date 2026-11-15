@@ -38,10 +38,10 @@ function checkIcon(check: SandboxDoctorCheck) {
 function PolicyDatum({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <dt className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+      <dt className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
         {label}
       </dt>
-      <dd className="m-0 mt-1 truncate text-[0.8125rem] text-[var(--text-primary)]">{value}</dd>
+      <dd className="m-0 mt-1 truncate text-[0.8125rem] text-[color:var(--text-primary)]">{value}</dd>
     </div>
   );
 }
@@ -57,12 +57,12 @@ export function SandboxDoctorPanel({ result, className }: SandboxDoctorPanelProp
       >
         <div className="flex items-center gap-2">
           <StatusDot tone="neutral" />
-          <h3 className="m-0 text-[0.875rem] font-medium text-[var(--text-primary)]">
+          <h3 className="m-0 text-[0.875rem] font-medium text-[color:var(--text-primary)]">
             {translate("generated.runtime.sandbox_doctor_unavailable_894149c1")}</h3>
         </div>
         <div className="flex min-h-[118px] flex-col items-center justify-center gap-2 py-5 text-center">
-          <Stethoscope className="h-4 w-4 text-[var(--text-quaternary)]" strokeWidth={1.75} />
-          <p className="m-0 max-w-md text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
+          <Stethoscope className="h-4 w-4 text-[color:var(--text-quaternary)]" strokeWidth={1.75} />
+          <p className="m-0 max-w-md text-[0.75rem] leading-5 text-[color:var(--text-tertiary)]">
             {translate("generated.runtime.no_sandbox_doctor_v1_result_is_published_for_524cf81a")}</p>
         </div>
       </section>
@@ -81,19 +81,19 @@ export function SandboxDoctorPanel({ result, className }: SandboxDoctorPanelProp
     >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+          <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
             {translate("generated.runtime.sandbox_doctor_v1_f69ac165")}</p>
-          <h3 className="m-0 mt-1 flex items-center gap-2 text-[0.875rem] font-medium text-[var(--text-primary)]">
+          <h3 className="m-0 mt-1 flex items-center gap-2 text-[0.875rem] font-medium text-[color:var(--text-primary)]">
             <StatusDot tone={tone} />
             {translate("generated.runtime.sandbox_doctor_cba777ca")} {result.status}
           </h3>
           {result.generated_at ? (
-            <p className="m-0 mt-1 text-[0.72rem] text-[var(--text-tertiary)]">
+            <p className="m-0 mt-1 text-[0.72rem] text-[color:var(--text-tertiary)]">
               {formatDateTime(result.generated_at)}
             </p>
           ) : null}
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]">
+        <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-2 py-1 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-tertiary)]">
           <StatusDot tone={tone} />
           {result.checks.length} {translate("generated.runtime.checks_0912fac7")}</span>
       </div>
@@ -108,7 +108,7 @@ export function SandboxDoctorPanel({ result, className }: SandboxDoctorPanelProp
       ) : null}
 
       {result.degraded_components.length > 0 ? (
-        <div className="mt-3 rounded-[var(--radius-panel-sm)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-[0.75rem] text-[var(--tone-warning-text)]">
+        <div className="mt-3 rounded-[var(--radius-panel-sm)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-[0.75rem] text-[color:var(--tone-warning-text)]">
           {translate("generated.runtime.degraded_0e6a3544")} {result.degraded_components.join(", ")}
         </div>
       ) : null}
@@ -119,21 +119,21 @@ export function SandboxDoctorPanel({ result, className }: SandboxDoctorPanelProp
             const Icon = checkIcon(check);
             return (
               <article key={check.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 py-2.5">
-                <Icon className="mt-0.5 h-4 w-4 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+                <Icon className="mt-0.5 h-4 w-4 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
                 <div className="min-w-0">
-                  <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+                  <p className="m-0 truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
                     {check.title}
                   </p>
-                  <p className="m-0 mt-0.5 text-[0.72rem] leading-5 text-[var(--text-tertiary)]">
+                  <p className="m-0 mt-0.5 text-[0.72rem] leading-5 text-[color:var(--text-tertiary)]">
                     {check.message ?? check.scope}
                   </p>
                   {check.user_action ? (
-                    <p className="m-0 mt-1 text-[0.72rem] leading-5 text-[var(--text-secondary)]">
+                    <p className="m-0 mt-1 text-[0.72rem] leading-5 text-[color:var(--text-secondary)]">
                       {check.user_action}
                     </p>
                   ) : null}
                 </div>
-                <span className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+                <span className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] text-[color:var(--text-tertiary)]">
                   <StatusDot tone={statusTone(check.status)} />
                   {check.status}
                 </span>

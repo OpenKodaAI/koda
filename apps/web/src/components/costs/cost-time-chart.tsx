@@ -185,7 +185,7 @@ export function CostTimeChart({
     return (
       <div
         className={cn(
-          "flex min-h-[300px] items-center justify-center gap-2 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]",
+          "flex min-h-[300px] items-center justify-center gap-2 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]",
           className
         )}
       >
@@ -206,20 +206,20 @@ export function CostTimeChart({
         <div className="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <p className="eyebrow truncate">{t("costs.chart.eyebrow")}</p>
-            <h3 className="mt-1 truncate text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+            <h3 className="mt-1 truncate text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
               {t("costs.chart.title")}
             </h3>
           </div>
 
           <div className="flex min-w-0 flex-wrap items-center gap-2 lg:justify-end">
             <div className="inline-flex min-w-0 items-center gap-2 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2.5 py-1 text-[0.75rem]">
-              <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+              <span className="truncate font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                 {activeDatum?.label ?? t("costs.page.timeChart.noBucket", undefined)}
               </span>
-              <span className="shrink-0 font-mono text-[var(--text-primary)]">
+              <span className="shrink-0 font-mono text-[color:var(--text-primary)]">
                 {activeDatum ? formatCost(activeDatum.total) : "—"}
               </span>
-              <span className="hidden min-w-0 truncate text-[var(--text-tertiary)] sm:inline">
+              <span className="hidden min-w-0 truncate text-[color:var(--text-tertiary)] sm:inline">
                 {activeDatum?.driverLabel
                   ? t("costs.page.timeChart.driver", { value: activeDatum.driverLabel })
                   : t("costs.page.timeChart.noDriver", undefined)}
@@ -342,8 +342,8 @@ export function CostTimeChart({
                 return (
                   <div className="min-w-[min(220px,calc(100vw-3rem))] max-w-[calc(100vw-3rem)] rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-2">
                     <div className="flex min-w-0 items-center justify-between gap-3">
-                      <p className="truncate text-[11px] font-medium text-[var(--text-tertiary)]">{datum.label}</p>
-                      <p className="shrink-0 font-mono text-[0.875rem] font-medium text-[var(--text-primary)]">
+                      <p className="truncate text-[11px] font-medium text-[color:var(--text-tertiary)]">{datum.label}</p>
+                      <p className="shrink-0 font-mono text-[0.875rem] font-medium text-[color:var(--text-primary)]">
                         {formatCost(datum.total)}
                       </p>
                     </div>
@@ -354,9 +354,9 @@ export function CostTimeChart({
                           <div key={item.key} className="flex items-center justify-between gap-3 text-[12px]">
                             <div className="flex min-w-0 items-center gap-2">
                               <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: item.color }} />
-                              <span className="truncate text-[var(--text-secondary)]">{item.label}</span>
+                              <span className="truncate text-[color:var(--text-secondary)]">{item.label}</span>
                             </div>
-                            <span className="font-mono text-[var(--text-primary)]">{formatCost(item.value)}</span>
+                            <span className="font-mono text-[color:var(--text-primary)]">{formatCost(item.value)}</span>
                           </div>
                         ))}
                       </div>

@@ -76,6 +76,7 @@ from koda.utils.approval import (
     _PENDING_AGENT_CMD_OPS,
     _PENDING_OPS,
     APPROVAL_TIMEOUT,
+    ApprovalGrantNotSavedError,
     _cleanup_stale_agent_cmd_ops,
     _cleanup_stale_ops,
     _issue_agent_approval_grants,
@@ -132,6 +133,16 @@ async def _safe_edit_message_text(query: Any, text: str, **kwargs: Any) -> bool:
             log.debug("telegram_callback_edit_expired", data=getattr(query, "data", None))
             return False
         raise
+
+
+_APPROVAL_NOT_SAVED_TEXT = "Nao foi possivel salvar a aprovacao; nada foi executado. Tente aprovar de novo."
+
+
+async def _tell_approval_not_saved(update: Update, op_id: str) -> None:
+    """The grant's row was not written, so nothing was approved; the keyboard stays to approve again."""
+    log.warning("approval_grant_not_saved", op_id=op_id, user_id=update.effective_user.id)
+    with contextlib.suppress(Exception):
+        await update.effective_message.reply_text(_APPROVAL_NOT_SAVED_TEXT)
 
 
 def _optional_chat_id(value: Any) -> int | None:
@@ -1616,15 +1627,19 @@ async def callback_approval(update: Update, context: BotContext) -> None:
             await query.edit_message_text("Operacao invalida.")
         return
 
-    grants = _issue_agent_approval_grants(
-        user_id=update.effective_user.id,
-        agent_id=str(pending.get("agent_id") or "default"),
-        session_id=str(pending.get("session_id") or "").strip() or None,
-        chat_id=_optional_chat_id(pending.get("chat_id")),
-        requests=list(pending.get("requests") or []),
-        decision="approved_scope" if action == "scope" else "approved",
-        issued_by_op_id=op_id,
-    )
+    try:
+        grants = _issue_agent_approval_grants(
+            user_id=update.effective_user.id,
+            agent_id=str(pending.get("agent_id") or config.AGENT_ID or "default"),
+            session_id=str(pending.get("session_id") or "").strip() or None,
+            chat_id=_optional_chat_id(pending.get("chat_id")),
+            requests=list(pending.get("requests") or []),
+            decision="approved_scope" if action == "scope" else "approved",
+            issued_by_op_id=op_id,
+        )
+    except ApprovalGrantNotSavedError:
+        await _tell_approval_not_saved(update, op_id)
+        return
     pending["grants"] = grants
     pending["decision"] = "approved_scope" if action == "scope" else "approved"
 
@@ -1697,15 +1712,19 @@ async def callback_agent_cmd_approval(update: Update, context: BotContext) -> No
     chat_id = _optional_chat_id(pending.get("chat_id"))
 
     if action == "scope":
-        grants = _issue_agent_approval_grants(
-            user_id=update.effective_user.id,
-            agent_id=str(pending.get("agent_id") or "default"),
-            session_id=session_id,
-            chat_id=chat_id,
-            requests=list(pending.get("requests") or []),
-            decision="approved_scope",
-            issued_by_op_id=op_id,
-        )
+        try:
+            grants = _issue_agent_approval_grants(
+                user_id=update.effective_user.id,
+                agent_id=str(pending.get("agent_id") or config.AGENT_ID or "default"),
+                session_id=session_id,
+                chat_id=chat_id,
+                requests=list(pending.get("requests") or []),
+                decision="approved_scope",
+                issued_by_op_id=op_id,
+            )
+        except ApprovalGrantNotSavedError:
+            await _tell_approval_not_saved(update, op_id)
+            return
         pending["grants"] = grants
         resolve_agent_cmd_approval(op_id, "approved_scope", grants=grants)
         log.info(
@@ -1720,15 +1739,19 @@ async def callback_agent_cmd_approval(update: Update, context: BotContext) -> No
         return
 
     # action == "ok"
-    grants = _issue_agent_approval_grants(
-        user_id=update.effective_user.id,
-        agent_id=str(pending.get("agent_id") or "default"),
-        session_id=session_id,
-        chat_id=chat_id,
-        requests=list(pending.get("requests") or []),
-        decision="approved",
-        issued_by_op_id=op_id,
-    )
+    try:
+        grants = _issue_agent_approval_grants(
+            user_id=update.effective_user.id,
+            agent_id=str(pending.get("agent_id") or config.AGENT_ID or "default"),
+            session_id=session_id,
+            chat_id=chat_id,
+            requests=list(pending.get("requests") or []),
+            decision="approved",
+            issued_by_op_id=op_id,
+        )
+    except ApprovalGrantNotSavedError:
+        await _tell_approval_not_saved(update, op_id)
+        return
     pending["grants"] = grants
     resolve_agent_cmd_approval(op_id, "approved", grants=grants)
     log.info(

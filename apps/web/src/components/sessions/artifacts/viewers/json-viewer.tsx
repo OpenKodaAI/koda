@@ -33,7 +33,7 @@ function JsonNode({ name, value, depth }: JsonNodeProps) {
   const label = (
     <span className="font-mono text-[0.8125rem]">
       {name !== null ? (
-        <span className="text-[var(--text-secondary)]">
+        <span className="text-[color:var(--text-secondary)]">
           {typeof name === "number" ? name : `"${name}"`}:{" "}
         </span>
       ) : null}
@@ -49,10 +49,10 @@ function JsonNode({ name, value, depth }: JsonNodeProps) {
         {label}
         <span
           className={cn(
-            value === null && "text-[var(--text-quaternary)]",
-            typeof value === "string" && "text-[var(--tone-info-text)]",
-            typeof value === "number" && "text-[var(--tone-success-text)]",
-            typeof value === "boolean" && "text-[var(--tone-warning-text)]",
+            value === null && "text-[color:var(--text-quaternary)]",
+            typeof value === "string" && "text-[color:var(--tone-info-text)]",
+            typeof value === "number" && "text-[color:var(--tone-success-text)]",
+            typeof value === "boolean" && "text-[color:var(--tone-warning-text)]",
           )}
         >
           {value === null ? "null" : typeof value === "string" ? `"${value}"` : String(value)}
@@ -71,7 +71,7 @@ function JsonNode({ name, value, depth }: JsonNodeProps) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="font-mono text-[0.8125rem] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+        className="font-mono text-[0.8125rem] text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]"
       >
         {open ? "▾" : "▸"} {label}
         {open ? (isArray ? "[" : "{") : valuePreview(value)}
@@ -89,7 +89,7 @@ function JsonNode({ name, value, depth }: JsonNodeProps) {
             ))}
           </div>
           <div
-            className="font-mono text-[0.8125rem] text-[var(--text-secondary)]"
+            className="font-mono text-[0.8125rem] text-[color:var(--text-secondary)]"
             style={{ paddingLeft: `${depth * 12}px` }}
           >
             {isArray ? "]" : "}"}
@@ -118,7 +118,7 @@ export function JsonViewer({ content, filename }: JsonViewerProps) {
   if (!parsed.ok) {
     return (
       <div className="flex flex-col">
-        <p className="m-0 px-4 py-2 text-[0.75rem] text-[var(--tone-danger-dot)]">
+        <p className="m-0 px-4 py-2 text-[0.75rem] text-[color:var(--tone-danger-dot)]">
           {t("sessions.artifacts.invalidJson", undefined)}: {parsed.error}
         </p>
         <TextViewer text={content} filename={filename} />
@@ -130,7 +130,7 @@ export function JsonViewer({ content, filename }: JsonViewerProps) {
     <div className="flex flex-col">
       <div className="flex items-center justify-between border-b border-[color:var(--divider-hair)] px-4 py-2">
         {filename ? (
-          <span className="truncate text-[0.8125rem] text-[var(--text-secondary)]">
+          <span className="truncate text-[0.8125rem] text-[color:var(--text-secondary)]">
             {filename}
           </span>
         ) : (

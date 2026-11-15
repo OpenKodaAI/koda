@@ -1092,7 +1092,7 @@ function SessionsPageContent() {
 
   return (
     <div
-      className="flex h-full min-h-0 overflow-hidden bg-[var(--canvas)] text-[var(--text-primary)]"
+      className="flex h-full min-h-0 overflow-hidden bg-[var(--canvas)] text-[color:var(--text-primary)]"
       {...tourRoute("sessions", tourVariant)}
     >
       {/* /sessions hides the workspace topbar, whose route title is the <h1>

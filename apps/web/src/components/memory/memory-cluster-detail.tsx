@@ -22,7 +22,7 @@ function ClusterHistory({
 }) {
   const { t } = useAppI18n();
   if (detail.history.length === 0) {
-    return <p className="text-sm leading-6 text-[var(--text-secondary)]">{t("memory.curation.detail.noReviewRecorded")}</p>;
+    return <p className="text-sm leading-6 text-[color:var(--text-secondary)]">{t("memory.curation.detail.noReviewRecorded")}</p>;
   }
 
   return (
@@ -30,18 +30,18 @@ function ClusterHistory({
       {detail.history.map((entry) => (
         <div key={entry.id} className="px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-medium text-[var(--text-primary)]">
+            <span className="font-medium text-[color:var(--text-primary)]">
               {t(`memory.curation.actions.${entry.action}`, {
                 defaultValue: entry.action,
               })}
             </span>
-            <span className="text-[var(--text-tertiary)]">•</span>
-            <span className="text-[12px] text-[var(--text-tertiary)]">
+            <span className="text-[color:var(--text-tertiary)]">•</span>
+            <span className="text-[12px] text-[color:var(--text-tertiary)]">
               {formatDateTime(entry.created_at)}
             </span>
           </div>
           {entry.reason ? (
-            <p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">{entry.reason}</p>
+            <p className="mt-1 text-sm leading-6 text-[color:var(--text-secondary)]">{entry.reason}</p>
           ) : null}
         </div>
       ))}
@@ -65,7 +65,7 @@ export function MemoryClusterDetail({
   return (
     <div className="space-y-5">
       <section className="border-t-0 pt-0">
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--text-tertiary)]">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[color:var(--text-tertiary)]">
           <span
             className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1"
             style={{
@@ -89,7 +89,7 @@ export function MemoryClusterDetail({
           ) : null}
         </div>
 
-        <p className="mt-4 text-[15px] leading-7 text-[var(--text-primary)]">
+        <p className="mt-4 text-[15px] leading-7 text-[color:var(--text-primary)]">
           {detail.cluster.summary}
         </p>
       </section>
@@ -98,36 +98,36 @@ export function MemoryClusterDetail({
         <p className="eyebrow">{t("memory.curation.detail.groupingContext")}</p>
         <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
           <div>
-            <p className="text-[12px] uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+            <p className="text-[12px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
               {t("memory.curation.detail.created")}
             </p>
-            <p className="mt-1 text-sm text-[var(--text-primary)]">
+            <p className="mt-1 text-sm text-[color:var(--text-primary)]">
               {formatDateTime(detail.cluster.created_at)}
             </p>
           </div>
           <div>
-            <p className="text-[12px] uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+            <p className="text-[12px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
               {t("memory.curation.detail.sessionsCovered")}
             </p>
-            <p className="mt-1 text-sm text-[var(--text-primary)]">
+            <p className="mt-1 text-sm text-[color:var(--text-primary)]">
               {detail.overlaps.length}
             </p>
           </div>
           <div>
-            <p className="text-[12px] uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+            <p className="text-[12px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
               {t("memory.curation.detail.editorialStatus")}
             </p>
-            <p className="mt-1 text-sm text-[var(--text-primary)]">
+            <p className="mt-1 text-sm text-[color:var(--text-primary)]">
               {getClusterStatusLabel(detail.cluster.review_status, t)}
             </p>
           </div>
           <div>
-            <p className="text-[12px] uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+            <p className="text-[12px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
               {t("memory.curation.detail.navigation")}
             </p>
             <Link
               href={mapHref}
-              className="mt-1 inline-flex items-center gap-1.5 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              className="mt-1 inline-flex items-center gap-1.5 text-sm text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]"
             >
               {t("memory.curation.detail.viewOnMap")}
               <ArrowUpRight className="h-4 w-4" />
@@ -149,14 +149,14 @@ export function MemoryClusterDetail({
                   className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_3%,transparent)]"
                 >
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+                    <p className="truncate text-sm font-medium text-[color:var(--text-primary)]">
                       {member.title}
                     </p>
-                    <p className="mt-1 line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">
+                    <p className="mt-1 line-clamp-2 text-sm leading-6 text-[color:var(--text-secondary)]">
                       {member.content}
                     </p>
                   </div>
-                  <span className="shrink-0 text-[11px] text-[var(--text-tertiary)]">
+                  <span className="shrink-0 text-[11px] text-[color:var(--text-tertiary)]">
                     {formatRelativeTime(member.last_accessed ?? member.created_at)}
                   </span>
                 </button>
@@ -168,7 +168,7 @@ export function MemoryClusterDetail({
             <p className="eyebrow">{t("memory.curation.detail.sessionsCovered")}</p>
             <div className="mt-3 divide-y divide-[var(--border-subtle)] rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]">
               {detail.overlaps.length === 0 ? (
-                <div className="px-4 py-3 text-sm text-[var(--text-secondary)]">
+                <div className="px-4 py-3 text-sm text-[color:var(--text-secondary)]">
                   {t("memory.curation.detail.noLinkedSessions")}
                 </div>
               ) : (
@@ -177,10 +177,10 @@ export function MemoryClusterDetail({
                     key={entry.session_id}
                     className="flex items-center justify-between gap-3 px-4 py-3"
                   >
-                    <span className="truncate text-sm text-[var(--text-primary)]">
+                    <span className="truncate text-sm text-[color:var(--text-primary)]">
                       {entry.session_id}
                     </span>
-                    <span className="shrink-0 text-[11px] text-[var(--text-tertiary)]">
+                    <span className="shrink-0 text-[11px] text-[color:var(--text-tertiary)]">
                       {t("memory.map.memoryCount", { count: entry.count })}
                     </span>
                   </div>

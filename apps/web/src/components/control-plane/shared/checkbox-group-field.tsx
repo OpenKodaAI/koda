@@ -64,10 +64,10 @@ export function CheckboxGroupField({
                 }}
               >
                 {isChecked && (
-                  <Check size={10} className="text-[var(--tone-info-text)]" />
+                  <Check size={10} className="text-[color:var(--tone-info-text)]" />
                 )}
               </span>
-              <span className="text-sm text-[var(--text-secondary)] truncate">
+              <span className="text-sm text-[color:var(--text-secondary)] truncate">
                 {tl(opt.label)}
               </span>
             </button>

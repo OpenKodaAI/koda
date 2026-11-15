@@ -31,7 +31,7 @@ export function SectionCollapsible({
         <motion.span
           animate={{ rotate: isOpen ? 90 : 0 }}
           transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          className="text-[var(--text-quaternary)]"
+          className="text-[color:var(--text-quaternary)]"
         >
           <ChevronRight size={14} />
         </motion.span>

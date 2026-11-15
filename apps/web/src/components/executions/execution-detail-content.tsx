@@ -319,13 +319,13 @@ function ExecutionDataStrip({
                 </span>
               ) : null}
               <span className="flex min-w-0 flex-1 flex-col gap-1">
-                <span className="break-words font-mono text-[10px] font-medium uppercase leading-4 tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                <span className="break-words font-mono text-[10px] font-medium uppercase leading-4 tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                   {item.label}
                 </span>
                 <span
                   title={item.title}
                   className={cn(
-                    "block min-w-0 max-w-full text-[0.8125rem] leading-5 text-[var(--text-primary)]",
+                    "block min-w-0 max-w-full text-[0.8125rem] leading-5 text-[color:var(--text-primary)]",
                     shouldWrap ? "whitespace-normal break-words [&>*]:max-w-full" : "truncate",
                     item.mono && "font-mono tabular-nums",
                   )}
@@ -693,11 +693,11 @@ export function ExecutionDetailContent({
           <div
             key={`${line}-${index}`}
             className={cn(
-              "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-sm leading-6 text-[var(--text-secondary)] shadow-none",
+              "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-sm leading-6 text-[color:var(--text-secondary)] shadow-none",
               isExpanded ? "rounded-lg px-4 py-3.5" : "rounded-lg px-3.5 py-3"
             )}
           >
-            <span className="mr-2 font-mono text-[10px] text-[var(--text-quaternary)]">
+            <span className="mr-2 font-mono text-[10px] text-[color:var(--text-quaternary)]">
               {(index + 1).toString().padStart(2, "0")}
             </span>
             {line}
@@ -945,25 +945,25 @@ function TimelineCard({
             >
               <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
             </span>
-            <p className="text-sm font-semibold text-[var(--text-primary)]">{item.title}</p>
+            <p className="text-sm font-semibold text-[color:var(--text-primary)]">{item.title}</p>
           </div>
           {item.summary && (
-            <p className="text-[13px] leading-6 text-[var(--text-secondary)]">{item.summary}</p>
+            <p className="text-[13px] leading-6 text-[color:var(--text-secondary)]">{item.summary}</p>
           )}
-          <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] text-[color:var(--text-tertiary)]">
             <span
               className="rounded-lg border px-2.5 py-1 font-mono text-[10px]"
               style={getSemanticStyle(visual.tone)}
             >
               {visual.label}
             </span>
-            <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
+            <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[color:var(--text-secondary)]">
               {item.type}
             </span>
             <span>{formatDateTime(item.timestamp)}</span>
           </div>
         </div>
-        <span className="text-[11px] text-[var(--text-quaternary)]">
+        <span className="text-[11px] text-[color:var(--text-quaternary)]">
           {formatRelativeTime(item.timestamp)}
         </span>
       </div>
@@ -1024,17 +1024,17 @@ function ToolCard({
           </span>
           <div className="min-w-0 space-y-2">
             <div className="min-w-0">
-              <p className="text-sm font-semibold text-[var(--text-primary)]">{tool.tool}</p>
-              <p className="text-[13px] leading-6 text-[var(--text-secondary)]">{tool.summary}</p>
+              <p className="text-sm font-semibold text-[color:var(--text-primary)]">{tool.tool}</p>
+              <p className="text-[13px] leading-6 text-[color:var(--text-secondary)]">{tool.summary}</p>
             </div>
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[color:var(--text-tertiary)]">
               <span
                 className="rounded-lg border px-2.5 py-1 font-mono text-[10px]"
                 style={getSemanticStyle(visual.tone)}
               >
                 {visual.label}
               </span>
-              <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
+              <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[color:var(--text-secondary)]">
                 {tool.category}
               </span>
               <span
@@ -1242,7 +1242,7 @@ function ArtifactShell({
               <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
             </span>
           ) : null}
-          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+          <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
             {title}
           </span>
           {visual ? (
@@ -1256,7 +1256,7 @@ function ArtifactShell({
         </div>
         <div className="flex items-center gap-2">
           {unavailable && (
-            <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1 text-[10px] font-semibold text-[var(--text-tertiary)]">
+            <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1 text-[10px] font-semibold text-[color:var(--text-tertiary)]">
               {translate("generated.executions.indisponivel_16d4946c")}
             </span>
           )}
@@ -1310,7 +1310,7 @@ function CodePanel({
       <div className="mb-3 flex items-start justify-between gap-4">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
               {title}
             </span>
             {badge}
@@ -1343,7 +1343,7 @@ function CodePanel({
       ) : (
         <pre
           className={cn(
-            "overflow-x-auto whitespace-pre-wrap break-words border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] font-sans leading-7 text-[var(--text-secondary)]",
+            "overflow-x-auto whitespace-pre-wrap break-words border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] font-sans leading-7 text-[color:var(--text-secondary)]",
             isExpanded
               ? "rounded-lg p-[18px] text-[13px]"
               : isPanel

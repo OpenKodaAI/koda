@@ -49,13 +49,13 @@ const SelectTrigger = React.forwardRef<
     data-slot="select-trigger"
     aria-invalid={invalid || undefined}
     className={cn(
-      "flex w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-primary)]",
+      "flex w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[color:var(--text-primary)]",
       "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
       "hover:border-[var(--border-strong)]",
       // The trigger is a button: the global --focus-ring outline is its ring.
       "focus-visible:border-[var(--border-strong)] focus-visible:bg-[var(--panel)]",
       "data-[state=open]:border-[var(--border-strong)] data-[state=open]:bg-[var(--panel)]",
-      "data-[placeholder]:text-[var(--text-quaternary)]",
+      "data-[placeholder]:text-[color:var(--text-quaternary)]",
       "disabled:cursor-not-allowed disabled:opacity-60",
       invalid && "border-[var(--tone-danger-border)] focus-visible:border-[var(--tone-danger-border)]",
       triggerSizeClasses[sizeVariant],
@@ -65,7 +65,7 @@ const SelectTrigger = React.forwardRef<
   >
     {children}
     <SelectPrimitive.Icon asChild>
-      <ChevronDown className="icon-sm shrink-0 text-[var(--text-tertiary)]" />
+      <ChevronDown className="icon-sm shrink-0 text-[color:var(--text-tertiary)]" />
     </SelectPrimitive.Icon>
   </SelectPrimitive.Trigger>
 ));
@@ -77,7 +77,7 @@ const SelectScrollUpButton = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.ScrollUpButton
     ref={ref}
-    className={cn("flex cursor-default items-center justify-center py-1 text-[var(--text-tertiary)]", className)}
+    className={cn("flex cursor-default items-center justify-center py-1 text-[color:var(--text-tertiary)]", className)}
     {...props}
   >
     <ChevronUp className="icon-sm" />
@@ -91,7 +91,7 @@ const SelectScrollDownButton = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <SelectPrimitive.ScrollDownButton
     ref={ref}
-    className={cn("flex cursor-default items-center justify-center py-1 text-[var(--text-tertiary)]", className)}
+    className={cn("flex cursor-default items-center justify-center py-1 text-[color:var(--text-tertiary)]", className)}
     {...props}
   >
     <ChevronDown className="icon-sm" />
@@ -160,7 +160,7 @@ const SelectContent = React.forwardRef<
         className={cn(
           // z-[90] keeps the dropdown above modals/drawers (z-[70..80]). Without
           // this bump, Selects rendered inside modals get clipped behind them.
-          "app-floating-panel relative z-[90] min-w-[10rem] overflow-hidden text-[var(--text-primary)]",
+          "app-floating-panel relative z-[90] min-w-[10rem] overflow-hidden text-[color:var(--text-primary)]",
           "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           "data-[side=bottom]:slide-in-from-top-1 data-[side=top]:slide-in-from-bottom-1",
           className,
@@ -169,10 +169,10 @@ const SelectContent = React.forwardRef<
       >
         <div className="border-b border-[var(--divider-hair)] px-2.5 py-2">
           <div
-            className="flex h-8 items-center gap-2 rounded-[var(--radius-input)] px-2.5 text-[var(--text-tertiary)] transition-[background-color,box-shadow] duration-150 focus-within:bg-[var(--panel-soft)] focus-within:outline focus-within:-outline-offset-1 focus-within:outline-[color:var(--focus-ring)]"
+            className="flex h-8 items-center gap-2 rounded-[var(--radius-input)] px-2.5 text-[color:var(--text-tertiary)] transition-[background-color,box-shadow] duration-150 focus-within:bg-[var(--panel-soft)] focus-within:outline focus-within:-outline-offset-1 focus-within:outline-[color:var(--focus-ring)]"
             onPointerDown={(event) => event.stopPropagation()}
           >
-            <Search size={13} className="shrink-0 text-[var(--text-quaternary)]" />
+            <Search size={13} className="shrink-0 text-[color:var(--text-quaternary)]" />
             <input
               type="text"
               value={query}
@@ -182,7 +182,7 @@ const SelectContent = React.forwardRef<
               }}
               placeholder={translate("generated.ui.search_4ad1f049")}
               aria-label={translate("generated.ui.search_options_d887d97b")}
-              className="h-full w-full min-w-0 bg-transparent text-[0.8125rem] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+              className="h-full w-full min-w-0 bg-transparent text-[0.8125rem] text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)]"
               style={{ outline: "none", border: "none", boxShadow: "none" }}
             />
             {query ? (
@@ -190,7 +190,7 @@ const SelectContent = React.forwardRef<
                 type="button"
                 onClick={() => setQuery("")}
                 aria-label={translate("generated.ui.clear_search_10bcbac4")}
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors focus-visible:text-[var(--text-primary)]"
+                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[color:var(--text-quaternary)] transition-colors focus-visible:text-[color:var(--text-primary)]"
               >
                 <X size={12} />
               </button>
@@ -207,7 +207,7 @@ const SelectContent = React.forwardRef<
         >
           {children}
           {!hasMatches ? (
-            <div className="px-3 py-4 text-center text-xs text-[var(--text-quaternary)]">
+            <div className="px-3 py-4 text-center text-xs text-[color:var(--text-quaternary)]">
               {translate("generated.ui.no_options_found_42e1b04f")}</div>
           ) : null}
         </SelectPrimitive.Viewport>
@@ -226,7 +226,7 @@ const SelectLabel = React.forwardRef<
     ref={ref}
     data-slot="select-label"
     className={cn(
-      "px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]",
+      "px-2 pb-1 pt-2 text-[10px] font-medium uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]",
       className,
     )}
     {...props}
@@ -242,10 +242,10 @@ const SelectItem = React.forwardRef<
     ref={ref}
     data-slot="select-item"
     className={cn(
-      "relative flex w-full cursor-default select-none items-center gap-2 rounded-[var(--radius-panel-sm)] py-1.5 pl-7 pr-2 text-[0.8125rem] text-[var(--text-secondary)] outline-none",
+      "relative flex w-full cursor-default select-none items-center gap-2 rounded-[var(--radius-panel-sm)] py-1.5 pl-7 pr-2 text-[0.8125rem] text-[color:var(--text-secondary)] outline-none",
       "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-      "focus:text-[var(--text-primary)]",
-      "data-[state=checked]:bg-[var(--panel-strong)] data-[state=checked]:text-[var(--text-primary)]",
+      "focus:text-[color:var(--text-primary)]",
+      "data-[state=checked]:bg-[var(--panel-strong)] data-[state=checked]:text-[color:var(--text-primary)]",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
       className,
     )}
@@ -253,7 +253,7 @@ const SelectItem = React.forwardRef<
   >
     <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
       <SelectPrimitive.ItemIndicator>
-        <Check className="icon-sm text-[var(--accent)]" />
+        <Check className="icon-sm text-[color:var(--accent)]" />
       </SelectPrimitive.ItemIndicator>
     </span>
 

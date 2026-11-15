@@ -63,6 +63,6 @@ describe("NewRoomDialog agent rows", () => {
     expect(row.className).toContain("hover:bg-[var(--hover-tint)]");
     expect(row.classList).toContain("group");
     const id = screen.getByText("ATLAS");
-    expect(id.classList).toContain("group-hover:text-[var(--text-tertiary)]");
+    expect(id.classList).toContain("group-hover:text-[color:var(--text-tertiary)]");
   });
 });

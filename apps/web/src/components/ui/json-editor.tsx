@@ -121,12 +121,12 @@ function tokenize(source: string): Token[] {
 // the warm CTA accent. Tokens follow the conventional shape: keys blue,
 // strings yellow, numbers green, literals violet.
 const TOKEN_CLASS: Record<TokenKind, string> = {
-  key: "text-[var(--json-key)] font-medium",
-  string: "text-[var(--json-string)]",
-  number: "text-[var(--json-number)]",
-  bool: "text-[var(--json-literal)] italic",
-  null: "text-[var(--json-literal)] italic",
-  punct: "text-[var(--json-punct)]",
+  key: "text-[color:var(--json-key)] font-medium",
+  string: "text-[color:var(--json-string)]",
+  number: "text-[color:var(--json-number)]",
+  bool: "text-[color:var(--json-literal)] italic",
+  null: "text-[color:var(--json-literal)] italic",
+  punct: "text-[color:var(--json-punct)]",
   ws: "",
 };
 
@@ -208,7 +208,7 @@ export function JsonEditor({
           className="pointer-events-none absolute inset-0 m-0 overflow-auto whitespace-pre-wrap break-words px-3 py-2 font-mono text-xs leading-[1.5]"
         >
           {tokens.length === 0 && placeholder ? (
-            <span className="text-[var(--text-quaternary)]">{placeholder}</span>
+            <span className="text-[color:var(--text-quaternary)]">{placeholder}</span>
           ) : (
             tokens.map((token, idx) => (
               <span key={idx} className={TOKEN_CLASS[token.kind]}>
@@ -237,8 +237,8 @@ export function JsonEditor({
           className={cn(
             "relative block w-full resize-y bg-transparent px-3 py-2 font-mono text-xs leading-[1.5] text-transparent caret-[var(--text-primary)] outline-none",
             // Selection still readable on the highlight layer below
-            "selection:bg-[var(--accent-muted)] selection:text-[var(--text-primary)]",
-            "placeholder:text-[var(--text-quaternary)]",
+            "selection:bg-[var(--accent-muted)] selection:text-[color:var(--text-primary)]",
+            "placeholder:text-[color:var(--text-quaternary)]",
             readOnly && "cursor-default",
           )}
           style={{ minHeight: `${rows * 1.5}rem` }}
@@ -246,7 +246,7 @@ export function JsonEditor({
       </div>
 
       {showValidation && !validation.valid ? (
-        <p className="text-[11px] font-medium text-[var(--tone-danger-dot)]">
+        <p className="text-[11px] font-medium text-[color:var(--tone-danger-dot)]">
           {validation.line && validation.column
             ? `${validation.error} (linha ${validation.line}, col ${validation.column})`
             : validation.error}

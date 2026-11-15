@@ -55,8 +55,8 @@ export function SettingsSidebar() {
                 "group relative flex items-center gap-2 rounded-[var(--radius-panel-sm)] px-3 py-2",
                 "text-[0.8125rem] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                 isActive
-                  ? "bg-[var(--hover-tint)] text-[var(--text-primary)]"
-                  : "text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]",
+                  ? "bg-[var(--hover-tint)] text-[color:var(--text-primary)]"
+                  : "text-[color:var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-secondary)]",
               )}
             >
               {Icon ? (
@@ -64,8 +64,8 @@ export function SettingsSidebar() {
                   className={cn(
                     "h-3.5 w-3.5 shrink-0",
                     isActive
-                      ? "text-[var(--text-primary)]"
-                      : "text-[var(--text-quaternary)] transition-colors group-hover:text-[var(--text-secondary)]",
+                      ? "text-[color:var(--text-primary)]"
+                      : "text-[color:var(--text-quaternary)] transition-colors group-hover:text-[color:var(--text-secondary)]",
                   )}
                 />
               ) : null}

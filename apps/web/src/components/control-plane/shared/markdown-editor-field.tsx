@@ -37,9 +37,9 @@ export function MarkdownEditorField({
   const characterCount = useMemo(() => value.length, [value]);
 
   const modeTabClass =
-    "rounded-[5px] px-2.5 py-1 text-[11px] font-semibold leading-none text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]";
+    "rounded-[5px] px-2.5 py-1 text-[11px] font-semibold leading-none text-[color:var(--text-tertiary)] transition-colors hover:text-[color:var(--text-primary)]";
   const activeModeTabClass =
-    "bg-[var(--surface-hover)] text-[var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]";
+    "bg-[var(--surface-hover)] text-[color:var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]";
 
   const editor = (
     <div className={cn("flex flex-col gap-2", className)}>
@@ -87,7 +87,7 @@ export function MarkdownEditorField({
             value={value}
             onChange={(e) => onChange(e.target.value)}
             aria-label={textareaAriaLabel || label}
-            className="block w-full resize-y rounded-[var(--radius-input)] bg-transparent px-3 pb-2.5 pt-11 text-[0.8125rem] leading-6 text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+            className="block w-full resize-y rounded-[var(--radius-input)] bg-transparent px-3 pb-2.5 pt-11 text-[0.8125rem] leading-6 text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-quaternary)]"
             style={{ minHeight }}
             spellCheck
             placeholder={
@@ -109,7 +109,7 @@ export function MarkdownEditorField({
                 {value}
               </ReactMarkdown>
             ) : (
-              <p className="text-sm italic text-[var(--text-quaternary)]">
+              <p className="text-sm italic text-[color:var(--text-quaternary)]">
                 {t("generated.controlPlane.nenhum_conteudo_para_visualizar_b4c7dc4c")}
               </p>
             )}
@@ -118,7 +118,7 @@ export function MarkdownEditorField({
       </div>
 
       <div className="flex justify-end px-1">
-        <span className="tabular-nums text-[10px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+        <span className="tabular-nums text-[10px] uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
           {characterCount} {t("generated.controlPlane.caracteres_e7774181")}
         </span>
       </div>

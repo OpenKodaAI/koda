@@ -67,7 +67,7 @@ export function ConnectorPicker({
           <p className="m-0 mt-0.5">{t("routines.editor.connectors.unavailableDescription")}</p>
         </InlineAlert>
       ) : (
-        <p className="m-0 text-[0.8125rem] text-[var(--text-tertiary)]">
+        <p className="m-0 text-[0.8125rem] text-[color:var(--text-tertiary)]">
           {t("routines.editor.connectors.description")}
         </p>
       )}
@@ -75,7 +75,7 @@ export function ConnectorPicker({
       <div className="flex flex-wrap items-center gap-2">
         {selectedConnectors.length === 0 ? (
           unavailable ? null : (
-            <span className="text-[0.8125rem] text-[var(--text-quaternary)]">
+            <span className="text-[0.8125rem] text-[color:var(--text-quaternary)]">
               {t("routines.editor.connectors.empty")}
             </span>
           )
@@ -83,16 +83,16 @@ export function ConnectorPicker({
           selectedConnectors.map((connector) => (
             <span
               key={connector.id}
-              className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2.5 py-1 text-[0.8125rem] text-[var(--text-primary)]"
+              className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2.5 py-1 text-[0.8125rem] text-[color:var(--text-primary)]"
             >
-              <Plug2 className="icon-xs text-[var(--text-tertiary)]" strokeWidth={1.75} />
+              <Plug2 className="icon-xs text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
               <span>{connector.label}</span>
               <button
                 type="button"
                 aria-label={t("routines.editor.connectors.remove", { label: connector.label })}
                 onClick={() => removeConnector(connector.id)}
                 disabled={disabled}
-                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
+                className="inline-flex h-4 w-4 items-center justify-center rounded-full text-[color:var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <X className="icon-xs" strokeWidth={1.75} />
               </button>
@@ -106,9 +106,9 @@ export function ConnectorPicker({
               type="button"
               disabled={disabled || filteredAvailable.length === 0}
               className={cn(
-                "inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-pill)] border border-dashed border-[var(--border-subtle)] bg-transparent px-2.5 text-[0.8125rem] text-[var(--text-secondary)]",
+                "inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-pill)] border border-dashed border-[var(--border-subtle)] bg-transparent px-2.5 text-[0.8125rem] text-[color:var(--text-secondary)]",
                 "transition-[border-color,color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-                "hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]",
+                "hover:border-[var(--border-strong)] hover:text-[color:var(--text-primary)]",
                 "disabled:cursor-not-allowed disabled:opacity-60",
               )}
             >
@@ -118,12 +118,12 @@ export function ConnectorPicker({
           </PopoverTrigger>
           <PopoverContent align="start" className="w-[18rem] p-0">
             <div className="flex items-center gap-2 border-b border-[var(--divider-hair)] px-3">
-              <Search className="icon-sm shrink-0 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+              <Search className="icon-sm shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
               <input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={t("routines.editor.connectors.searchPlaceholder")}
-                className="h-9 w-full bg-transparent text-[0.8125rem] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+                className="h-9 w-full bg-transparent text-[0.8125rem] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-quaternary)]"
                 spellCheck={false}
                 autoCapitalize="off"
                 autoCorrect="off"
@@ -132,7 +132,7 @@ export function ConnectorPicker({
             </div>
             <div className="max-h-[14rem] overflow-y-auto py-1">
               {filteredAvailable.length === 0 ? (
-                <div className="px-3 py-3 text-center text-[0.75rem] text-[var(--text-tertiary)]">
+                <div className="px-3 py-3 text-center text-[0.75rem] text-[color:var(--text-tertiary)]">
                   {t("routines.editor.connectors.searchEmpty")}
                 </div>
               ) : (
@@ -144,9 +144,9 @@ export function ConnectorPicker({
                       addConnector(connector.id);
                       setOpen(false);
                     }}
-                    className="flex w-full items-center gap-2 rounded-[var(--radius-chip)] px-2.5 py-1.5 text-left text-[0.8125rem] text-[var(--text-primary)] transition-[background-color] duration-[120ms] hover:bg-[var(--hover-tint)]"
+                    className="flex w-full items-center gap-2 rounded-[var(--radius-chip)] px-2.5 py-1.5 text-left text-[0.8125rem] text-[color:var(--text-primary)] transition-[background-color] duration-[120ms] hover:bg-[var(--hover-tint)]"
                   >
-                    <Plug2 className="icon-xs shrink-0 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+                    <Plug2 className="icon-xs shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
                     <span className="flex-1 truncate">{connector.label}</span>
                   </button>
                 ))

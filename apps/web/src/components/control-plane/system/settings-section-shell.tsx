@@ -29,10 +29,10 @@ export function SettingsSectionShell({
         <div className="flex flex-col gap-4 pt-6 pb-6 lg:pt-8">
           {!hideHeader ? (
             <header className="flex flex-col gap-1 border-b border-[var(--divider-hair)] pb-4">
-              <h2 className="m-0 text-[1.125rem] font-medium tracking-[-0.02em] text-[var(--text-primary)]">
+              <h2 className="m-0 text-[1.125rem] font-medium tracking-[-0.02em] text-[color:var(--text-primary)]">
                 {t(title)}
               </h2>
-              <p className="m-0 max-w-[720px] text-[0.8125rem] leading-[1.55] text-[var(--text-tertiary)]">
+              <p className="m-0 max-w-[720px] text-[0.8125rem] leading-[1.55] text-[color:var(--text-tertiary)]">
                 {t(description)}
               </p>
             </header>

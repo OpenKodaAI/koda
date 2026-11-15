@@ -114,10 +114,10 @@ function PanelShell({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+          <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
             {eyebrow}
           </p>
-          <h3 className="m-0 mt-1 flex min-w-0 items-center gap-2 text-[0.875rem] font-medium text-[var(--text-primary)]">
+          <h3 className="m-0 mt-1 flex min-w-0 items-center gap-2 text-[0.875rem] font-medium text-[color:var(--text-primary)]">
             <StatusDot tone={tone} />
             <span className="truncate">{title}</span>
           </h3>
@@ -140,9 +140,9 @@ function EmptyState({
 }) {
   return (
     <div className="flex min-h-[120px] flex-col items-center justify-center gap-2 py-5 text-center">
-      <AlertTriangle className="h-4 w-4 text-[var(--text-quaternary)]" strokeWidth={1.75} />
-      <p className="m-0 text-[0.8125rem] font-medium text-[var(--text-secondary)]">{title}</p>
-      <p className="m-0 max-w-md text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
+      <AlertTriangle className="h-4 w-4 text-[color:var(--text-quaternary)]" strokeWidth={1.75} />
+      <p className="m-0 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]">{title}</p>
+      <p className="m-0 max-w-md text-[0.75rem] leading-5 text-[color:var(--text-tertiary)]">
         {description}
       </p>
       {action ? <div className="mt-1">{action}</div> : null}
@@ -153,10 +153,10 @@ function EmptyState({
 function MetricLine({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0">
-      <dt className="break-words font-mono text-[0.625rem] uppercase leading-4 tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+      <dt className="break-words font-mono text-[0.625rem] uppercase leading-4 tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
         {label}
       </dt>
-      <dd className="m-0 mt-1 break-words text-[0.8125rem] leading-5 text-[var(--text-primary)]">{value}</dd>
+      <dd className="m-0 mt-1 break-words text-[0.8125rem] leading-5 text-[color:var(--text-primary)]">{value}</dd>
     </div>
   );
 }
@@ -212,12 +212,12 @@ export function RunGraphSummaryPanel({
         <MetricLine label={translate("generated.runtime.completed_9779880c")} value={formatDateTime(graph.completed_at)} />
       </dl>
       {completenessWarnings.length > 0 ? (
-        <div className="mt-3 rounded-[var(--radius-panel-sm)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-[0.75rem] text-[var(--tone-warning-text)]">
+        <div className="mt-3 rounded-[var(--radius-panel-sm)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-[0.75rem] text-[color:var(--tone-warning-text)]">
           {translate("generated.runtime.rungraph_completeness_b6e2a52c")} {completenessWarnings[0]}
         </div>
       ) : null}
       {graph.error ? (
-        <div className="mt-3 rounded-[var(--radius-panel-sm)] border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-3 py-2 text-[0.75rem] text-[var(--tone-danger-text)]">
+        <div className="mt-3 rounded-[var(--radius-panel-sm)] border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-3 py-2 text-[0.75rem] text-[color:var(--tone-danger-text)]">
           {graph.error.message}
         </div>
       ) : null}
@@ -274,10 +274,10 @@ export function RunGraphViewer({
                 <StatusDot tone={stateTone(node.status)} />
               </div>
               <div className="min-w-0">
-                <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+                <p className="m-0 truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
                   {node.label}
                 </p>
-                <div className="m-0 mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[0.72rem] text-[var(--text-tertiary)]">
+                <div className="m-0 mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[0.72rem] text-[color:var(--text-tertiary)]">
                   <span
                     className="inline-flex rounded-md border px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[0.08em]"
                     style={getSemanticStyle(visual.tone)}
@@ -287,7 +287,7 @@ export function RunGraphViewer({
                   {node.summary ? <span className="min-w-0 truncate">{node.summary}</span> : null}
                 </div>
               </div>
-              <span className="whitespace-nowrap font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+              <span className="whitespace-nowrap font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                 {formatDuration(node.duration_ms ?? null)}
               </span>
             </article>
@@ -322,10 +322,10 @@ export function RunReplayPanel({
       eyebrow={translate("generated.runtime.run_replay_v1_51536198")}
       tone={availabilityTone(replay.availability)}
       variant={variant}
-      action={<PlayCircle className="h-4 w-4 text-[var(--text-tertiary)]" strokeWidth={1.75} />}
+      action={<PlayCircle className="h-4 w-4 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />}
     >
       {replay.missing_dependencies.length > 0 ? (
-        <div className="mb-3 rounded-[var(--radius-panel-sm)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-[0.75rem] text-[var(--tone-warning-text)]">
+        <div className="mb-3 rounded-[var(--radius-panel-sm)] border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-3 py-2 text-[0.75rem] text-[color:var(--tone-warning-text)]">
           {translate("generated.runtime.missing_4fc6280c")}{replay.missing_dependencies.join(", ")}
         </div>
       ) : null}
@@ -346,8 +346,8 @@ export function RunReplayPanel({
                 {(index + 1).toString().padStart(2, "0")}
               </span>
               <div className="min-w-0">
-                <p className="m-0 truncate text-[0.8125rem] text-[var(--text-primary)]">{step.label}</p>
-                <div className="m-0 mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[0.72rem] text-[var(--text-tertiary)]">
+                <p className="m-0 truncate text-[0.8125rem] text-[color:var(--text-primary)]">{step.label}</p>
+                <div className="m-0 mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[0.72rem] text-[color:var(--text-tertiary)]">
                   <span
                     className="inline-flex rounded-md border px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[0.08em]"
                     style={getSemanticStyle(visual.tone)}
@@ -357,7 +357,7 @@ export function RunReplayPanel({
                   {step.notes ? <span className="min-w-0 truncate">{step.notes}</span> : null}
                 </div>
               </div>
-              <span className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+              <span className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] text-[color:var(--text-tertiary)]">
                 <StatusDot tone={stateTone(step.status)} />
                 {step.redacted ? "redacted" : step.status}
               </span>
@@ -394,7 +394,7 @@ export function RouteExplanationPanel({
       eyebrow={translate("generated.runtime.route_explanation_v1_b7e37ca1")}
       tone={latest.clarification_required ? "warning" : "info"}
       variant={variant}
-      action={<Route className="h-4 w-4 text-[var(--text-tertiary)]" strokeWidth={1.75} />}
+      action={<Route className="h-4 w-4 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />}
     >
       <dl className="mb-3 grid grid-cols-2 gap-3">
         <MetricLine label={translate("generated.runtime.selected_d4192feb")} value={latest.selected_agent_ids.join(", ") || "-"} />
@@ -405,20 +405,20 @@ export function RouteExplanationPanel({
         <MetricLine label={translate("generated.runtime.skills_3e0b892b")} value={latest.required_skills.join(", ") || "-"} />
       </dl>
       {latest.summary ? (
-        <p className="m-0 mb-3 text-[0.75rem] leading-5 text-[var(--text-secondary)]">{latest.summary}</p>
+        <p className="m-0 mb-3 text-[0.75rem] leading-5 text-[color:var(--text-secondary)]">{latest.summary}</p>
       ) : null}
       <div className="divide-y divide-[var(--divider-hair)]">
         {latest.candidates.slice(0, 8).map((candidate) => (
           <article key={candidate.agent_id} className="grid grid-cols-[1fr_auto] gap-3 py-2.5">
             <div className="min-w-0">
-              <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+              <p className="m-0 truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
                 {candidate.agent_id}
               </p>
-              <p className="m-0 mt-1 truncate text-[0.72rem] text-[var(--text-tertiary)]">
+              <p className="m-0 mt-1 truncate text-[0.72rem] text-[color:var(--text-tertiary)]">
                 {candidate.reason || candidate.exclusion_reason || candidate.status}
               </p>
             </div>
-            <span className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] text-[var(--text-secondary)]">
+            <span className="inline-flex items-center gap-1.5 font-mono text-[0.6875rem] text-[color:var(--text-secondary)]">
               <StatusDot tone={candidate.status === "excluded" ? "warning" : "success"} />
               {candidate.score == null ? candidate.status : candidate.score.toFixed(2)}
             </span>
@@ -454,31 +454,31 @@ export function HandoffTimelinePanel({
       eyebrow={`${handoffs.length} handoffs`}
       tone={blocked ? "warning" : "info"}
       variant={variant}
-      action={<GitPullRequestArrow className="h-4 w-4 text-[var(--text-tertiary)]" strokeWidth={1.75} />}
+      action={<GitPullRequestArrow className="h-4 w-4 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />}
     >
       <div className="divide-y divide-[var(--divider-hair)]">
         {handoffs.map((handoff) => (
           <article key={handoff.handoff_id} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 py-3">
             <StatusDot tone={handoffTone(handoff.status)} />
             <div className="min-w-0">
-              <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+              <p className="m-0 truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
                 {handoff.source_agent_id}
                 {" -> "}
                 {handoff.destination_agent_ids.join(", ")}
               </p>
-              <p className="m-0 mt-1 text-[0.72rem] leading-5 text-[var(--text-tertiary)]">
+              <p className="m-0 mt-1 text-[0.72rem] leading-5 text-[color:var(--text-tertiary)]">
                 {handoff.reason}
               </p>
-              <p className="m-0 mt-1 truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+              <p className="m-0 mt-1 truncate font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                 {handoff.handoff_kind} {translate("generated.runtime.criteria_88fbfeb1")}{handoff.return_criteria.length} {translate("generated.runtime.node_a1dcba8d")}{handoff.run_graph_node_id}
               </p>
               {handoff.deadline ? (
-                <p className="m-0 mt-1 text-[0.6875rem] text-[var(--text-quaternary)]">
+                <p className="m-0 mt-1 text-[0.6875rem] text-[color:var(--text-quaternary)]">
                   {translate("generated.runtime.deadline_640c7864")}{formatDateTime(handoff.deadline)}
                 </p>
               ) : null}
             </div>
-            <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-secondary)]">
+            <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-secondary)]">
               {handoff.status}
             </span>
           </article>
@@ -531,20 +531,20 @@ export function ChildRunsPanel({
               className="grid grid-cols-[auto_1fr_auto] items-start gap-3 py-3"
             >
               <div className="mt-0.5 flex items-center gap-2">
-                <GitBranch className="h-3.5 w-3.5 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+                <GitBranch className="h-3.5 w-3.5 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
                 <StatusDot tone={stateTone(childRun.status)} />
               </div>
               <div className="min-w-0">
-                <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+                <p className="m-0 truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
                   {childRun.summary || childRun.child_run_id}
                 </p>
-                <p className="m-0 mt-0.5 truncate text-[0.72rem] text-[var(--text-tertiary)]">
+                <p className="m-0 mt-0.5 truncate text-[0.72rem] text-[color:var(--text-tertiary)]">
                   {childRun.status} · {childRun.toolset}
                   {childTaskId ? ` · task #${childTaskId}` : ""}
                   {childRun.cost_usd != null ? ` · $${childRun.cost_usd.toFixed(4)}` : ""}
                 </p>
                 {childRun.error ? (
-                  <p className="m-0 mt-1 text-[0.72rem] text-[var(--tone-danger-text)]">
+                  <p className="m-0 mt-1 text-[0.72rem] text-[color:var(--tone-danger-text)]">
                     {childRun.error.message}
                   </p>
                 ) : null}
@@ -672,10 +672,10 @@ export function ContextGovernancePanel({
               <ContextBlockIcon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden="true" />
             </span>
             <div className="min-w-0">
-              <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+              <p className="m-0 truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
                 {block.block_id}
               </p>
-              <div className="m-0 mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[0.72rem] text-[var(--text-tertiary)]">
+              <div className="m-0 mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[0.72rem] text-[color:var(--text-tertiary)]">
                 <span
                   className="inline-flex rounded-md border px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[0.08em]"
                   style={getSemanticStyle(block.status === "included" ? "success" : block.status === "review_required" ? "warning" : "neutral")}
@@ -691,7 +691,7 @@ export function ContextGovernancePanel({
                 <MemoryContextProvenance provenance={block.provenance} />
               ) : null}
             </div>
-            <span className="whitespace-nowrap font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+            <span className="whitespace-nowrap font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
               {block.token_estimate} {translate("generated.runtime.tok_9a0e5809")}</span>
           </article>
         ))}
@@ -714,7 +714,7 @@ function MemoryContextProvenance({ provenance }: { provenance: Record<string, un
   const explanations = Array.isArray(provenance.explanations) ? provenance.explanations.slice(0, 3) : [];
 
   return (
-    <div className="mt-2 space-y-1 text-[0.7rem] text-[var(--text-tertiary)]">
+    <div className="mt-2 space-y-1 text-[0.7rem] text-[color:var(--text-tertiary)]">
       <div className="flex flex-wrap items-center gap-1.5">
         <span>{translate("generated.runtime.selected_6ea4a98a")} {selectedCount}</span>
         <span>{translate("generated.runtime.dropped_a48c358b")} {droppedCount}</span>

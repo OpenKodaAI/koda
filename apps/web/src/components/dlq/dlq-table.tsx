@@ -47,7 +47,7 @@ function RetryIndicator({ entry }: { entry: DLQEntry }) {
   const { t } = useAppI18n();
   const state = resolveRetryState(entry, t);
   return (
-    <span className="inline-flex items-center gap-1.5 text-[0.75rem] text-[var(--text-secondary)]">
+    <span className="inline-flex items-center gap-1.5 text-[0.75rem] text-[color:var(--text-secondary)]">
       <StatusDot tone={state.tone} />
       {state.label}
     </span>
@@ -128,24 +128,24 @@ export function DLQTable({
                       )}
                     >
                       <td>
-                        <p className="m-0 font-mono text-[0.75rem] text-[var(--text-primary)]">
+                        <p className="m-0 font-mono text-[0.75rem] text-[color:var(--text-primary)]">
                           {translate("generated.executions.dlq_ddb953bb")}{entry.id}
                         </p>
-                        <p className="m-0 text-[0.6875rem] text-[var(--text-quaternary)]">
+                        <p className="m-0 text-[0.6875rem] text-[color:var(--text-quaternary)]">
                           {entry.bot_id ?? t("dlq.table.noAgent")}
                         </p>
                       </td>
                       <td>
-                        <p className="m-0 font-mono text-[0.75rem] text-[var(--text-primary)]">
+                        <p className="m-0 font-mono text-[0.75rem] text-[color:var(--text-primary)]">
                           #{entry.task_id}
                         </p>
-                        <p className="m-0 text-[0.6875rem] text-[var(--text-quaternary)]">
+                        <p className="m-0 text-[0.6875rem] text-[color:var(--text-quaternary)]">
                           {entry.model ?? t("dlq.table.modelUnknown")}
                         </p>
                       </td>
                       <td className="whitespace-normal">
                         <p
-                          className="m-0 line-clamp-2 text-[0.8125rem] leading-[1.5] text-[var(--text-primary)]"
+                          className="m-0 line-clamp-2 text-[0.8125rem] leading-[1.5] text-[color:var(--text-primary)]"
                           title={entry.query_text}
                         >
                           {truncateText(entry.query_text, 110)}
@@ -153,25 +153,25 @@ export function DLQTable({
                       </td>
                       <td className="whitespace-normal">
                         <p
-                          className="m-0 line-clamp-2 text-[0.8125rem] leading-[1.5] text-[var(--tone-danger-text)]"
+                          className="m-0 line-clamp-2 text-[0.8125rem] leading-[1.5] text-[color:var(--tone-danger-text)]"
                           title={entry.error_message ?? undefined}
                         >
                           {entry.error_message ? truncateText(entry.error_message, 110) : "—"}
                         </p>
                         {entry.error_class ? (
-                          <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[var(--tone-danger-dot)]">
+                          <p className="m-0 mt-0.5 font-mono text-[0.6875rem] text-[color:var(--tone-danger-dot)]">
                             {entry.error_class}
                           </p>
                         ) : null}
                       </td>
                       <td>
                         <p
-                          className="m-0 text-[0.75rem] text-[var(--text-secondary)]"
+                          className="m-0 text-[0.75rem] text-[color:var(--text-secondary)]"
                           title={formatDateTime(entry.failed_at)}
                         >
                           {formatRelativeTime(entry.failed_at)}
                         </p>
-                        <p className="m-0 text-[0.6875rem] text-[var(--text-quaternary)]">
+                        <p className="m-0 text-[0.6875rem] text-[color:var(--text-quaternary)]">
                           {entry.retried_at
                             ? t("dlq.table.alreadyReprocessed")
                             : t("dlq.table.waitingDecision")}
@@ -188,11 +188,11 @@ export function DLQTable({
                   <td colSpan={6} className="py-12">
                     <div className="flex flex-col items-center gap-2 text-center">
                       <ShieldCheck
-                        className="icon-lg text-[var(--text-quaternary)]"
+                        className="icon-lg text-[color:var(--text-quaternary)]"
                         strokeWidth={1.5}
                         aria-hidden
                       />
-                      <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+                      <p className="m-0 text-[length:var(--font-size-sm)] text-[color:var(--text-tertiary)]">
                         {t("dlq.table.noFailures")}
                       </p>
                     </div>
@@ -234,40 +234,40 @@ export function DLQTable({
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex min-w-0 flex-col gap-2">
                     <div className="flex flex-wrap items-center gap-2 text-[0.75rem]">
-                      <span className="font-mono text-[var(--text-quaternary)]">
+                      <span className="font-mono text-[color:var(--text-quaternary)]">
                         {translate("generated.executions.dlq_ddb953bb")}{entry.id}
                       </span>
-                      <span className="text-[var(--text-quaternary)]">·</span>
-                      <span className="font-mono text-[var(--text-secondary)]">
+                      <span className="text-[color:var(--text-quaternary)]">·</span>
+                      <span className="font-mono text-[color:var(--text-secondary)]">
                         #{entry.task_id}
                       </span>
-                      <span className="text-[var(--text-quaternary)]">·</span>
+                      <span className="text-[color:var(--text-quaternary)]">·</span>
                       <RetryIndicator entry={entry} />
                     </div>
-                    <p className="m-0 line-clamp-2 text-[var(--font-size-sm)] leading-[1.5] text-[var(--text-primary)]">
+                    <p className="m-0 line-clamp-2 text-[length:var(--font-size-sm)] leading-[1.5] text-[color:var(--text-primary)]">
                       {truncateText(entry.query_text, 110)}
                     </p>
-                    <p className="m-0 line-clamp-2 text-[0.75rem] leading-[1.5] text-[var(--tone-danger-text)]">
+                    <p className="m-0 line-clamp-2 text-[0.75rem] leading-[1.5] text-[color:var(--tone-danger-text)]">
                       {entry.error_message
                         ? truncateText(entry.error_message, 110)
                         : t("dlq.table.noErrorMessage")}
                     </p>
-                    <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                    <div className="flex flex-wrap gap-x-4 gap-y-1 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                       {entry.bot_id ? (
                         <span>
-                          {translate("generated.executions.agent_49af14f5")}<span className="text-[var(--text-secondary)]">{entry.bot_id}</span>
+                          {translate("generated.executions.agent_49af14f5")}<span className="text-[color:var(--text-secondary)]">{entry.bot_id}</span>
                         </span>
                       ) : null}
                       <span>
                         {translate("generated.executions.failed_2a342abe")}{" "}
-                        <span className="text-[var(--text-secondary)]">
+                        <span className="text-[color:var(--text-secondary)]">
                           {formatRelativeTime(entry.failed_at)}
                         </span>
                       </span>
                     </div>
                   </div>
                   <ArrowUpRight
-                    className="mt-0.5 h-4 w-4 shrink-0 text-[var(--text-quaternary)]"
+                    className="mt-0.5 h-4 w-4 shrink-0 text-[color:var(--text-quaternary)]"
                     strokeWidth={1.75}
                     aria-hidden
                   />
@@ -278,11 +278,11 @@ export function DLQTable({
         {entries.length === 0 && !loading && (
           <div className="flex flex-col items-center gap-2 py-12 text-center">
             <ShieldCheck
-              className="icon-lg text-[var(--text-quaternary)]"
+              className="icon-lg text-[color:var(--text-quaternary)]"
               strokeWidth={1.5}
               aria-hidden
             />
-            <p className="m-0 text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+            <p className="m-0 text-[length:var(--font-size-sm)] text-[color:var(--text-tertiary)]">
               {t("dlq.table.noFailures")}
             </p>
           </div>

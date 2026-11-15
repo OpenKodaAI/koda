@@ -31,13 +31,13 @@ export function FallbackViewer({ artifact, banner }: FallbackViewerProps) {
   return (
     <div className="flex flex-col gap-3 px-5 py-6">
       {banner ? (
-        <p className="m-0 text-[0.8125rem] text-[var(--text-tertiary)]">{banner}</p>
+        <p className="m-0 text-[0.8125rem] text-[color:var(--text-tertiary)]">{banner}</p>
       ) : null}
       <div className="flex items-start gap-3 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] p-4">
-        <Icon className="h-5 w-5 shrink-0 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+        <Icon className="h-5 w-5 shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-[var(--text-primary)]">{filename}</span>
-          <span className="mt-0.5 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+          <span className="truncate text-[color:var(--text-primary)]">{filename}</span>
+          <span className="mt-0.5 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
             {[artifact.kind.toUpperCase(), artifact.mime_type, size]
               .filter(Boolean)
               .join(" · ")}
@@ -45,7 +45,7 @@ export function FallbackViewer({ artifact, banner }: FallbackViewerProps) {
         </div>
       </div>
       {error ? (
-        <p className="m-0 text-[0.75rem] text-[var(--tone-danger-dot)]">{error}</p>
+        <p className="m-0 text-[0.75rem] text-[color:var(--tone-danger-dot)]">{error}</p>
       ) : null}
       <div className="flex gap-2">
         <Button

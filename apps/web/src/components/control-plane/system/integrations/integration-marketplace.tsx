@@ -43,8 +43,8 @@ function CategoryChip({
       className={cn(
         "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors duration-200",
         active
-          ? "border-[var(--interactive-active-border)] bg-[var(--interactive-active-top)] text-[var(--interactive-active-text)]"
-          : "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-tertiary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-secondary)]",
+          ? "border-[var(--interactive-active-border)] bg-[var(--interactive-active-top)] text-[color:var(--interactive-active-text)]"
+          : "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[color:var(--text-tertiary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-secondary)]",
       )}
     >
       {label}
@@ -129,10 +129,10 @@ function MarketplaceGrid({
       <div className="integration-marketplace-hero">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <h1 className="text-xl font-bold tracking-[-0.04em] text-[var(--text-primary)] sm:text-2xl">
+            <h1 className="text-xl font-bold tracking-[-0.04em] text-[color:var(--text-primary)] sm:text-2xl">
               {t("generated.controlPlane.conecte_suas_ferramentas_de7a7271")}
             </h1>
-            <p className="mt-1.5 max-w-2xl text-sm text-[var(--text-tertiary)]">
+            <p className="mt-1.5 max-w-2xl text-sm text-[color:var(--text-tertiary)]">
               {t(
                 "generated.controlPlane.integre_com_plataformas_nativas_e_organize_t_dad92b64",
               )}
@@ -142,7 +142,7 @@ function MarketplaceGrid({
           <button
             type="button"
             onClick={onAddCustomMcp}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-[var(--interactive-active-text)] transition-all sm:shrink-0"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold text-[color:var(--interactive-active-text)] transition-all sm:shrink-0"
             style={{
               background:
                 "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
@@ -159,14 +159,14 @@ function MarketplaceGrid({
             <div className="relative w-full max-w-sm flex-1">
               <Search
                 size={15}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)]"
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-quaternary)]"
               />
               <input
                 type="text"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={t("generated.controlPlane.buscar_integracoes_e_servidores_2376bd3c")}
-                className="field-shell pl-9 pr-3 text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+                className="field-shell pl-9 pr-3 text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)]"
                 aria-label={t("generated.controlPlane.buscar_integracoes_e_servidores_mcp_442e52fb")}
               />
             </div>
@@ -194,7 +194,7 @@ function MarketplaceGrid({
 
           {mcpCatalogLoading ? (
             <div
-              className="flex items-center py-1 text-[var(--text-quaternary)]"
+              className="flex items-center py-1 text-[color:var(--text-quaternary)]"
               role="status"
               aria-label={t("generated.controlPlane.atualizando_estado_do_catalogo_mcp_51927d11")}
             >
@@ -203,7 +203,7 @@ function MarketplaceGrid({
           ) : null}
 
           {mcpCatalogError ? (
-            <div className="flex flex-col gap-2 rounded-xl border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-4 py-3 text-sm text-[var(--tone-danger-text)] sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 rounded-xl border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-4 py-3 text-sm text-[color:var(--tone-danger-text)] sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2">
                 <AlertTriangle size={14} className="shrink-0" />
                 <span>{mcpCatalogError}</span>
@@ -211,7 +211,7 @@ function MarketplaceGrid({
               <button
                 type="button"
                 onClick={onRetryMcpCatalog}
-                className="inline-flex items-center gap-2 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+                className="inline-flex items-center gap-2 text-xs font-medium text-[color:var(--text-secondary)] transition-colors hover:text-[color:var(--text-primary)]"
               >
                 {t("generated.controlPlane.tentar_novamente_14dc7f3f")}
               </button>
@@ -230,14 +230,14 @@ function MarketplaceGrid({
           ))}
         </div>
       ) : grouped.length === 0 ? (
-        <div className="py-12 text-center text-sm text-[var(--text-quaternary)]">
+        <div className="py-12 text-center text-sm text-[color:var(--text-quaternary)]">
           {t("generated.controlPlane.nenhuma_integracao_ou_servidor_mcp_encontrad_eb198904")}
         </div>
       ) : (
         <div className="mt-4 space-y-4">
           {grouped.map(({ category, entries: categoryEntries }) => (
             <div key={category}>
-              <span className="eyebrow mb-2 block text-[var(--text-quaternary)]">
+              <span className="eyebrow mb-2 block text-[color:var(--text-quaternary)]">
                 {tl(UNIFIED_CATEGORY_LABELS[category])}
               </span>
               <div className="grid grid-cols-2 gap-2">
@@ -296,8 +296,8 @@ function TabBar({
           className={cn(
             "relative px-4 py-2.5 text-sm font-medium transition-colors",
             activeTab === tab.id
-              ? "text-[var(--text-primary)]"
-              : "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]",
+              ? "text-[color:var(--text-primary)]"
+              : "text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)]",
           )}
         >
           {tab.label}

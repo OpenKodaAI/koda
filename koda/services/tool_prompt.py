@@ -714,7 +714,8 @@ Communicate with other agents, delegate tasks, and coordinate work.
 - `agent_delegate` — Delegate a task and wait for result.
   Params: `{"to": "agent-2", "task": "Analyze report", "timeout": 60}`
 - `agent_list_agents` — List known agents and inbox status. Params: `{}`
-- `agent_broadcast` — Send a message to all known agents. Params: `{"message": "Status update"}`
+- `agent_broadcast` — Send a message to every participant of the current squad thread.
+  Params: `{"message": "Status update"}`
 
 ### Squad Threads
 Persistent multi-agent conversations scoped to a (workspace_id, squad_id).
@@ -742,9 +743,11 @@ Decompose squad work into tracked tasks. Single-owner-per-task via optimistic lo
             "kind": "research|design|backend|frontend|copy|review",
             "assigned_agent_id": "BACKEND", "depends_on": ["<uuid>"],
             "acceptance_criteria": ["..."], "idempotency_key": "..."}`
+  Optional `"metadata"` may set only `notes` and `progress`; other task metadata is the server's.
 - `squad_task_claim` — Atomically claim a pending task. Params: `{"task_id": "<uuid>", "ttl_seconds": 300}`
 - `squad_task_update` — Transition status (e.g., to `in_progress`, `blocked`).
   Params: `{"task_id": "<uuid>", "new_status": "in_progress", "expected_version": 2}`
+  Optional `"metadata_patch"` may set only `notes` and `progress`; other task metadata is the server's.
 - `squad_task_complete` — Mark done with deliverables.
   Params: `{"task_id": "<uuid>", "result_summary": "...", "deliverables": ["<artifact_id>"]}`
 - `squad_task_escalate` — Escalate to coordinator. Params: `{"task_id": "<uuid>", "reason": "..."}`

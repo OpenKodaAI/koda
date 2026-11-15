@@ -30,7 +30,7 @@ export function TextViewer({ text, filename, showLineCount = true }: TextViewerP
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between border-b border-[color:var(--divider-hair)] px-4 py-2">
-        <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+        <span className="font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
           {filename ? `${filename} · ` : ""}
           {showLineCount ? `${lineCount} lines` : ""}
         </span>
@@ -43,7 +43,7 @@ export function TextViewer({ text, filename, showLineCount = true }: TextViewerP
       </div>
       <pre
         className={cn(
-          "m-0 max-h-[60vh] overflow-auto px-4 py-3 text-[0.8125rem] leading-[1.55] text-[var(--text-primary)]",
+          "m-0 max-h-[60vh] overflow-auto px-4 py-3 text-[0.8125rem] leading-[1.55] text-[color:var(--text-primary)]",
           "whitespace-pre-wrap break-words font-mono",
         )}
       >

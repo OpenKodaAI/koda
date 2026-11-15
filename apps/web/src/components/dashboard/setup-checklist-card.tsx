@@ -146,10 +146,10 @@ export function SetupChecklistCard({ snapshot }: SetupChecklistCardProps) {
     >
       <header className="flex items-start justify-between gap-3">
         <div className="flex flex-col">
-          <h2 className="m-0 text-[var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+          <h2 className="m-0 text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-primary)]">
             {t("dashboard.checklist.title")}
           </h2>
-          <p className="m-0 text-[12px] text-[var(--text-tertiary)]">
+          <p className="m-0 text-[12px] text-[color:var(--text-tertiary)]">
             {t("dashboard.checklist.subtitle")}
           </p>
         </div>
@@ -169,7 +169,7 @@ export function SetupChecklistCard({ snapshot }: SetupChecklistCardProps) {
           <li key={key} className="border-t border-[color:var(--divider-hair)] first:border-t-0">
             <Link
               href={href}
-              className="group flex items-center gap-3 px-1.5 py-2 text-[var(--text-secondary)] transition-colors hover:text-[var(--text-primary)]"
+              className="group flex items-center gap-3 px-1.5 py-2 text-[color:var(--text-secondary)] transition-colors hover:text-[color:var(--text-primary)]"
             >
               <span
                 className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border ${iconTone}`}
@@ -177,14 +177,14 @@ export function SetupChecklistCard({ snapshot }: SetupChecklistCardProps) {
                 <Icon className="h-3.5 w-3.5" strokeWidth={1.75} />
               </span>
               <span className="flex-1 text-[13px]">{label}</span>
-              <ArrowRight className="icon-xs text-[var(--text-quaternary)] transition-transform group-hover:translate-x-0.5" />
+              <ArrowRight className="icon-xs text-[color:var(--text-quaternary)] transition-transform group-hover:translate-x-0.5" />
             </Link>
           </li>
         ))}
       </ul>
       {!snapshot.firstTaskReady && snapshot.agentReady && (
         <div className="flex items-center justify-between gap-3 border-t border-[color:var(--divider-hair)] pt-3">
-          <div className="min-w-0 text-[12px] text-[var(--text-tertiary)]">
+          <div className="min-w-0 text-[12px] text-[color:var(--text-tertiary)]">
             {firstTaskError ?? "Create a safe dashboard task to verify the runtime path."}
           </div>
           <Button

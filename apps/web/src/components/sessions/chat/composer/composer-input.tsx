@@ -104,8 +104,8 @@ export const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>
           autoComplete="off"
           spellCheck
           className={cn(
-            "min-h-[56px] max-h-[200px] flex-1 resize-none bg-transparent py-1 text-[var(--font-size-md)] leading-[1.5]",
-            "text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none",
+            "min-h-[56px] max-h-[200px] flex-1 resize-none bg-transparent py-1 text-[length:var(--font-size-md)] leading-[1.5]",
+            "text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)] outline-none",
           )}
         />
         <button
@@ -120,8 +120,8 @@ export const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>
             "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full",
             "transition-[background-color,color,transform] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             canSubmit
-              ? "bg-[var(--accent)] text-[var(--accent-text)] hover:bg-[var(--accent-hover)] active:scale-[0.96]"
-              : "bg-[var(--panel-strong)] text-[var(--text-quaternary)]",
+              ? "bg-[var(--accent)] text-[color:var(--accent-text)] hover:bg-[var(--accent-hover)] active:scale-[0.96]"
+              : "bg-[var(--panel-strong)] text-[color:var(--text-quaternary)]",
           )}
         >
           {busy ? (

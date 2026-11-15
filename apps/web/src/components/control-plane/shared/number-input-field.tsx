@@ -50,7 +50,7 @@ export function NumberInputField({
           type="button"
           onClick={decrement}
           disabled={min !== undefined && value <= min}
-          className="inline-flex items-center justify-center h-9 w-9 shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-tint)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="inline-flex items-center justify-center h-9 w-9 shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-tint)] text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:border-[var(--border-strong)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           aria-label={`Diminuir ${label}`}
         >
           <Minus size={14} />
@@ -68,10 +68,10 @@ export function NumberInputField({
             max={max}
             step={step}
             aria-label={label}
-            className="field-shell w-20 px-2 py-2 text-sm text-[var(--text-primary)] text-center tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+            className="field-shell w-20 px-2 py-2 text-sm text-[color:var(--text-primary)] text-center tabular-nums [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
           />
           {unit && (
-            <span className="text-xs text-[var(--text-quaternary)] ml-1.5 shrink-0">
+            <span className="text-xs text-[color:var(--text-quaternary)] ml-1.5 shrink-0">
               {unit}
             </span>
           )}
@@ -81,7 +81,7 @@ export function NumberInputField({
           type="button"
           onClick={increment}
           disabled={max !== undefined && value >= max}
-          className="inline-flex items-center justify-center h-9 w-9 shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-tint)] text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:border-[var(--border-strong)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          className="inline-flex items-center justify-center h-9 w-9 shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-tint)] text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)] hover:border-[var(--border-strong)] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
           aria-label={`Aumentar ${label}`}
         >
           <Plus size={14} />

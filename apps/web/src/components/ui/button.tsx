@@ -14,21 +14,21 @@ const buttonVariants = cva(
         accent:
           "border-[color:var(--accent)] bg-[var(--accent)] text-[color:var(--accent-text)] hover:border-[color:var(--accent-hover)] hover:bg-[var(--accent-hover)] data-[state=open]:border-[color:var(--accent-hover)] data-[state=open]:bg-[var(--accent-hover)]",
         mono:
-          "border-[color:var(--border-subtle)] bg-[var(--panel)] text-[var(--text-primary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)]",
+          "border-[color:var(--border-subtle)] bg-[var(--panel)] text-[color:var(--text-primary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)]",
         destructive:
-          "border-[color:var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)] hover:border-[color:var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg-strong)]",
+          "border-[color:var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)] hover:border-[color:var(--tone-danger-border)] hover:bg-[var(--tone-danger-bg-strong)]",
         secondary:
-          "border-[color:var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)] data-[state=open]:border-[color:var(--border-strong)] data-[state=open]:bg-[var(--surface-hover)]",
+          "border-[color:var(--border-subtle)] bg-[var(--panel-soft)] text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)] data-[state=open]:border-[color:var(--border-strong)] data-[state=open]:bg-[var(--surface-hover)]",
         outline:
-          "border-[color:var(--border-subtle)] bg-transparent text-[var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
+          "border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]",
         dashed:
-          "border-dashed border-[color:var(--border-subtle)] bg-transparent text-[var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
+          "border-dashed border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]",
         ghost:
-          "border-transparent bg-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
+          "border-transparent bg-transparent text-[color:var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]",
         dim:
-          "border-transparent bg-transparent text-[var(--text-tertiary)] hover:bg-transparent hover:text-[var(--text-primary)]",
+          "border-transparent bg-transparent text-[color:var(--text-tertiary)] hover:bg-transparent hover:text-[color:var(--text-primary)]",
         foreground:
-          "border-transparent bg-transparent text-[var(--text-primary)] hover:bg-transparent",
+          "border-transparent bg-transparent text-[color:var(--text-primary)] hover:bg-transparent",
         inverse:
           "border-transparent bg-transparent text-inherit hover:bg-transparent",
       },
@@ -62,11 +62,11 @@ const buttonVariants = cva(
         // Focus is the global --focus-ring outline (apps/web/CLAUDE.md, Focus).
         default: "",
         icon: "",
-        link: "h-auto rounded-none border-transparent bg-transparent p-0 text-[var(--text-primary)] hover:bg-transparent",
+        link: "h-auto rounded-none border-transparent bg-transparent p-0 text-[color:var(--text-primary)] hover:bg-transparent",
         input: "justify-start font-normal",
       },
       placeholder: {
-        true: "text-[var(--text-quaternary)]",
+        true: "text-[color:var(--text-quaternary)]",
         false: "",
       },
     },
@@ -90,7 +90,7 @@ const buttonVariants = cva(
         variant: "outline",
         mode: "input",
         placeholder: true,
-        className: "text-[var(--text-quaternary)]",
+        className: "text-[color:var(--text-quaternary)]",
       },
       {
         variant: "primary",
@@ -108,7 +108,7 @@ const buttonVariants = cva(
         variant: "primary",
         appearance: "ghost",
         className:
-          "border-transparent bg-transparent text-[var(--text-primary)] hover:bg-[var(--surface-hover)]",
+          "border-transparent bg-transparent text-[color:var(--text-primary)] hover:bg-[var(--surface-hover)]",
       },
       {
         size: "icon",

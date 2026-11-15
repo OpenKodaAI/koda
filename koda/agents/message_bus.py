@@ -6,10 +6,11 @@ import asyncio
 import json
 import os
 import uuid
+from collections.abc import Iterable
 from typing import Any
 
 from koda.agents.message_bus_iface import MessageBus
-from koda.agents.models import AgentMessage, DelegationRequest, DelegationResult
+from koda.agents.models import AgentMessage, DelegationRequest, DelegationResult, broadcast_recipients
 from koda.logging_config import get_logger
 
 log = get_logger(__name__)
@@ -208,6 +209,7 @@ class InMemoryMessageBus:
                 "request_id": request.request_id,
                 "context": request.context,
                 "delegation_depth": request.delegation_depth,
+                "delegation_chain": list(request.delegation_chain),
             },
             message_id=self._next_id(),
         )
@@ -247,12 +249,13 @@ class InMemoryMessageBus:
             )
         finally:
             self._delegation_results.pop(request.request_id, None)
+            self._delegation_data.pop(request.request_id, None)
 
     def resolve_delegation(self, request_id: str, result: DelegationResult) -> None:
-        """Resolve a pending delegation with a result."""
-        self._delegation_data[request_id] = result
+        """Resolve a pending delegation with a result; one nobody waits for is dropped (D-185)."""
         event = self._delegation_results.get(request_id)
         if event:
+            self._delegation_data[request_id] = result
             event.set()
 
     async def broadcast(
@@ -260,13 +263,17 @@ class InMemoryMessageBus:
         from_agent: str,
         content: str,
         exclude: set[str] | None = None,
+        *,
+        thread_id: str,
+        recipients: Iterable[str],
+        metadata: dict[str, Any] | None = None,
     ) -> int:
-        """Send message to all known agents. Returns count sent."""
-        exclude = exclude or set()
+        """Send a thread message to each of the thread's participants. Returns count sent."""
+        message_metadata = {**(metadata or {}), "thread_id": thread_id, "kind": "agent_text"}
         count = 0
-        for agent_id in list(self._inboxes):
-            if agent_id != from_agent and agent_id not in exclude:
-                await self.send(from_agent, agent_id, content)
+        for agent_id in broadcast_recipients(from_agent, recipients, exclude):
+            msg_id = await self.send(from_agent, agent_id, content, dict(message_metadata))
+            if not msg_id.startswith("Error"):
                 count += 1
         return count
 

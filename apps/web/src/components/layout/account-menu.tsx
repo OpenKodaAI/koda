@@ -40,7 +40,7 @@ export function AccountMenu({ className }: AccountMenuProps) {
           type="button"
           aria-label={t("auth.account_menu.trigger_label")}
           className={cn(
-            "inline-flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] text-[12px] font-medium text-[var(--text-primary)] transition-[background-color,border-color] duration-150 ease-out hover:border-[color:var(--border-strong)] hover:bg-[color:var(--panel)]",
+            "inline-flex h-9 w-9 items-center justify-center rounded-full border border-[color:var(--border-subtle)] bg-[color:var(--panel-soft)] text-[12px] font-medium text-[color:var(--text-primary)] transition-[background-color,border-color] duration-150 ease-out hover:border-[color:var(--border-strong)] hover:bg-[color:var(--panel)]",
             className,
           )}
           data-testid="account-menu-trigger"
@@ -62,11 +62,11 @@ export function AccountMenu({ className }: AccountMenuProps) {
       </PopoverTrigger>
       <PopoverContent align="end" sideOffset={8} className="w-[14rem] p-1.5">
         <div className="px-2 pb-2 pt-1">
-          <p className="m-0 truncate text-[12.5px] font-medium text-[var(--text-primary)]">
+          <p className="m-0 truncate text-[12.5px] font-medium text-[color:var(--text-primary)]">
             {label}
           </p>
           {operator.email && operator.email !== label ? (
-            <p className="m-0 truncate text-[11.5px] text-[var(--text-tertiary)]">
+            <p className="m-0 truncate text-[11.5px] text-[color:var(--text-tertiary)]">
               {operator.email}
             </p>
           ) : null}
@@ -75,18 +75,18 @@ export function AccountMenu({ className }: AccountMenuProps) {
         <Link
           href="/settings/account"
           onClick={() => setOpen(false)}
-          className="mt-1 flex items-center gap-2 rounded-[var(--radius-chip)] px-2 py-1.5 text-[13px] text-[var(--text-primary)] transition-colors duration-150 hover:bg-[color:var(--hover-tint,rgba(255,255,255,0.04))] focus-visible:bg-[color:var(--hover-tint,rgba(255,255,255,0.04))]"
+          className="mt-1 flex items-center gap-2 rounded-[var(--radius-chip)] px-2 py-1.5 text-[13px] text-[color:var(--text-primary)] transition-colors duration-150 hover:bg-[color:var(--hover-tint,rgba(255,255,255,0.04))] focus-visible:bg-[color:var(--hover-tint,rgba(255,255,255,0.04))]"
         >
-          <User className="h-4 w-4 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+          <User className="h-4 w-4 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
           <span>{t("auth.account_menu.account")}</span>
         </Link>
         <button
           type="button"
           onClick={handleSignOut}
-          className="flex w-full items-center gap-2 rounded-[var(--radius-chip)] px-2 py-1.5 text-left text-[13px] text-[var(--text-primary)] transition-colors duration-150 hover:bg-[color:var(--hover-tint,rgba(255,255,255,0.04))] focus-visible:bg-[color:var(--hover-tint,rgba(255,255,255,0.04))]"
+          className="flex w-full items-center gap-2 rounded-[var(--radius-chip)] px-2 py-1.5 text-left text-[13px] text-[color:var(--text-primary)] transition-colors duration-150 hover:bg-[color:var(--hover-tint,rgba(255,255,255,0.04))] focus-visible:bg-[color:var(--hover-tint,rgba(255,255,255,0.04))]"
           data-testid="account-menu-sign-out"
         >
-          <LogOut className="h-4 w-4 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+          <LogOut className="h-4 w-4 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
           <span>{t("auth.account_menu.sign_out")}</span>
         </button>
       </PopoverContent>

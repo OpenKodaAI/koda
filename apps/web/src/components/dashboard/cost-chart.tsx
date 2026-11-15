@@ -53,7 +53,7 @@ const CustomTooltip = memo(function CustomTooltip({ active, payload, label }: Cu
 
   return (
     <div className="glass-card-sm min-w-[180px] px-3 py-3 text-xs shadow-2xl">
-      <p className="mb-2 font-medium text-[var(--text-primary)]">
+      <p className="mb-2 font-medium text-[color:var(--text-primary)]">
         {label ? formatDateShort(label) : ""}
       </p>
       {payload.map((entry) => (
@@ -66,11 +66,11 @@ const CustomTooltip = memo(function CustomTooltip({ active, payload, label }: Cu
               className="block h-2 w-2 rounded-full"
               style={{ backgroundColor: entry.color }}
             />
-            <span className="text-[var(--text-secondary)]">
+            <span className="text-[color:var(--text-secondary)]">
               {getAgentLabel(entry.dataKey)}
             </span>
           </div>
-          <span className="font-medium tabular-nums text-[var(--text-primary)]">
+          <span className="font-medium tabular-nums text-[color:var(--text-primary)]">
             {formatCost(entry.value)}
           </span>
         </div>
@@ -98,7 +98,7 @@ export const CostChart = memo(function CostChart({ data, className }: CostChartP
         {agentIds.map((agentId) => (
           <span
             key={agentId}
-            className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] font-medium text-[var(--text-secondary)]"
+            className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-[11px] font-medium text-[color:var(--text-secondary)]"
             style={{
               borderColor: `color-mix(in srgb, ${getAgentChartColor(agentId)} 58%, #2b2d31)`,
               background: `linear-gradient(180deg, color-mix(in srgb, ${getAgentChartColor(agentId)} 28%, #2e3137) 0%, color-mix(in srgb, ${getAgentChartColor(agentId)} 16%, #17181b) 100%)`,

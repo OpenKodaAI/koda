@@ -39,8 +39,8 @@ function CategoryChip({
       className={[
         "rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors duration-200",
         active
-          ? "border-[var(--interactive-active-border)] bg-[var(--interactive-active-top)] text-[var(--interactive-active-text)]"
-          : "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-tertiary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-secondary)]",
+          ? "border-[var(--interactive-active-border)] bg-[var(--interactive-active-top)] text-[color:var(--interactive-active-text)]"
+          : "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[color:var(--text-tertiary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-secondary)]",
       ].join(" ")}
     >
       {label}
@@ -68,8 +68,8 @@ function SuggestedChip({
       className={[
         "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
         exists
-          ? "cursor-default border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-quaternary)]"
-          : "border-[var(--border-subtle)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]",
+          ? "cursor-default border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[color:var(--text-quaternary)]"
+          : "border-[var(--border-subtle)] text-[color:var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]",
       ].join(" ")}
       title={exists ? t("generated.controlPlane.ja_adicionado_2b8a8465") : undefined}
     >
@@ -201,12 +201,12 @@ export function McpServerCatalog() {
       {/* Hero */}
       <div>
         <div className="flex items-center gap-2">
-          <Puzzle size={20} className="text-[var(--text-tertiary)]" />
-          <h1 className="text-xl font-bold tracking-[-0.04em] text-[var(--text-primary)] sm:text-2xl">
+          <Puzzle size={20} className="text-[color:var(--text-tertiary)]" />
+          <h1 className="text-xl font-bold tracking-[-0.04em] text-[color:var(--text-primary)] sm:text-2xl">
             {t("generated.controlPlane.servidores_mcp_6dc46f21")}
           </h1>
         </div>
-        <p className="mt-1.5 text-sm text-[var(--text-tertiary)]">
+        <p className="mt-1.5 text-sm text-[color:var(--text-tertiary)]">
           {t(
             "generated.controlPlane.gerencie_servidores_do_model_context_protoco_eea4d009",
           )}
@@ -217,7 +217,7 @@ export function McpServerCatalog() {
           <div className="relative w-full max-w-sm flex-1">
             <Search
               size={15}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)]"
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-[color:var(--text-quaternary)]"
             />
             <Input
               type="text"
@@ -255,7 +255,7 @@ export function McpServerCatalog() {
                 setLockServerKey(false);
                 setEditingServer("new");
               }}
-              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[var(--interactive-active-text)] transition-all"
+              className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-[color:var(--interactive-active-text)] transition-all"
               style={{
                 background:
                   "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
@@ -272,7 +272,7 @@ export function McpServerCatalog() {
       {/* Suggested servers */}
       {servers.length < 4 && (
         <div className="mt-4">
-          <span className="eyebrow mb-2 block text-[var(--text-quaternary)]">
+          <span className="eyebrow mb-2 block text-[color:var(--text-quaternary)]">
             {t("generated.controlPlane.sugeridos_356a1292")}
           </span>
           {suggestedLoading ? (
@@ -315,11 +315,11 @@ export function McpServerCatalog() {
             ))}
           </div>
         ) : error ? (
-          <div className="py-12 text-center text-sm text-[var(--tone-danger-text)]">
+          <div className="py-12 text-center text-sm text-[color:var(--tone-danger-text)]">
             {error}
           </div>
         ) : filtered.length === 0 ? (
-          <div className="py-12 text-center text-sm text-[var(--text-quaternary)]">
+          <div className="py-12 text-center text-sm text-[color:var(--text-quaternary)]">
             {servers.length === 0
               ? t("generated.controlPlane.nenhum_servidor_mcp_configurado_adicione_um__e0b0b184")
               : t("generated.controlPlane.nenhum_servidor_encontrado_a6a1a59d")}

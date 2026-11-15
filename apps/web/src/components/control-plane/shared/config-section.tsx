@@ -28,11 +28,11 @@ export const ConfigSection = forwardRef<HTMLElement, ConfigSectionProps>(functio
     >
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
-          <h3 className="m-0 text-[0.9375rem] font-medium tracking-[-0.01em] text-[var(--text-primary)]">
+          <h3 className="m-0 text-[0.9375rem] font-medium tracking-[-0.01em] text-[color:var(--text-primary)]">
             {title}
           </h3>
           {description ? (
-            <p className="m-0 max-w-[600px] text-[0.8125rem] leading-[1.5] text-[var(--text-tertiary)]">
+            <p className="m-0 max-w-[600px] text-[0.8125rem] leading-[1.5] text-[color:var(--text-tertiary)]">
               {description}
             </p>
           ) : null}

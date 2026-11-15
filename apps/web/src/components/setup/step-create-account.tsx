@@ -217,7 +217,7 @@ export function StepCreateAccount({
                   style={{ width: `${Math.min(100, passwordMeter.score * 25)}%` }}
                 />
               </div>
-              <span className="text-[10.5px] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+              <span className="text-[10.5px] font-medium uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                 {strengthLabel(t, passwordMeter.label)}
               </span>
             </div>

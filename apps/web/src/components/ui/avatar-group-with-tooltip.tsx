@@ -159,7 +159,7 @@ export function AvatarGroupWithTooltips({
               <TooltipTrigger asChild>
                 <span
                   className={cn(
-                    "relative inline-flex shrink-0 items-center justify-center rounded-full border border-[color:var(--canvas)] bg-[var(--panel-strong)] font-mono font-medium text-[var(--text-secondary)] ring-1 ring-[color:var(--divider-hair)] transition-colors hover:border-[color:var(--border-strong)]",
+                    "relative inline-flex shrink-0 items-center justify-center rounded-full border border-[color:var(--canvas)] bg-[var(--panel-strong)] font-mono font-medium text-[color:var(--text-secondary)] ring-1 ring-[color:var(--divider-hair)] transition-colors hover:border-[color:var(--border-strong)]",
                     classes.avatar,
                     visible.length > 0 && classes.overlap,
                   )}

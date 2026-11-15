@@ -97,25 +97,25 @@ export function TabPublicacao() {
         <div className="flex flex-col gap-1.5">
           <span className="inline-flex items-center gap-2">
             <StatusDot tone={lifecycle.tone} pulse={lifecycle.pulse} />
-            <span className="text-sm font-medium text-[var(--text-primary)]">
+            <span className="text-sm font-medium text-[color:var(--text-primary)]">
               {t(lifecycle.labelKey, lifecycle.descriptionOptions)}
             </span>
           </span>
-          <p className="max-w-xl text-xs leading-relaxed text-[var(--text-tertiary)]">
+          <p className="max-w-xl text-xs leading-relaxed text-[color:var(--text-tertiary)]">
             {t(lifecycle.descriptionKey, lifecycle.descriptionOptions)}
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-[var(--text-tertiary)]">
+        <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-[color:var(--text-tertiary)]">
           <span className="inline-flex items-center gap-1.5">
-            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.versao_aplicada_ffebc9f4")}</span>
-            <span className="tabular-nums text-[var(--text-secondary)]">
+            <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.versao_aplicada_ffebc9f4")}</span>
+            <span className="tabular-nums text-[color:var(--text-secondary)]">
               {state.agent.applied_version ?? "—"}
             </span>
           </span>
           <span className="inline-flex items-center gap-1.5">
-            <span className="text-[var(--text-quaternary)]">{t("generated.controlPlane.versao_desejada_3db461e6")}</span>
-            <span className="tabular-nums text-[var(--text-secondary)]">
+            <span className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.versao_desejada_3db461e6")}</span>
+            <span className="tabular-nums text-[color:var(--text-secondary)]">
               {state.agent.desired_version ?? t("generated.controlPlane.rascunho_1e888028")}
             </span>
           </span>
@@ -123,7 +123,7 @@ export function TabPublicacao() {
 
         {hasPendingChanges ? (
           <InlineAlert tone="warning">
-            <span className="text-[var(--text-secondary)]">
+            <span className="text-[color:var(--text-secondary)]">
               {t("generated.controlPlane.alteracoes_pendentes_em_0ababa4f")}: {" "}
               {dirtyKeys
                 .map((key) => tl(SECTION_LABELS[key] ?? key))
@@ -167,7 +167,7 @@ export function TabPublicacao() {
       <div className="border-t border-[color:var(--divider-hair)]" />
 
       <div className="flex items-center justify-between">
-        <span className="text-xs text-[var(--text-quaternary)]">
+        <span className="text-xs text-[color:var(--text-quaternary)]">
           {t("generated.controlPlane.remove_este_agente_e_todos_os_dados_associad_0b087473")}
         </span>
         <button
@@ -176,7 +176,7 @@ export function TabPublicacao() {
           disabled={isPending("delete")}
           aria-label={isPending("delete") ? t("generated.controlPlane.removendo_ba1bef53") : undefined}
           aria-busy={isPending("delete") || undefined}
-          className="inline-flex min-h-5 min-w-24 items-center justify-center text-xs text-[var(--text-quaternary)] transition-colors hover:text-[var(--tone-danger-text)] disabled:opacity-50"
+          className="inline-flex min-h-5 min-w-24 items-center justify-center text-xs text-[color:var(--text-quaternary)] transition-colors hover:text-[color:var(--tone-danger-text)] disabled:opacity-50"
         >
           {isPending("delete") ? (
             <InlineSpinner className="h-3.5 w-3.5" />

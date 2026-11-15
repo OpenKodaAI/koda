@@ -34,9 +34,9 @@ export function UnsupportedBlock({ blockType, raw }: UnsupportedBlockProps) {
       </p>
       {isDev && raw !== undefined ? (
         <details className="mt-2 text-[0.6875rem]">
-          <summary className="cursor-pointer text-[var(--text-tertiary)]">
+          <summary className="cursor-pointer text-[color:var(--text-tertiary)]">
             {translate("generated.sessions.raw_payload_a6211760")}</summary>
-          <pre className="mt-1 max-h-48 overflow-auto rounded-[var(--radius-chip)] bg-[var(--panel-strong)] p-2 text-[var(--text-secondary)] whitespace-pre-wrap break-all">
+          <pre className="mt-1 max-h-48 overflow-auto rounded-[var(--radius-chip)] bg-[var(--panel-strong)] p-2 text-[color:var(--text-secondary)] whitespace-pre-wrap break-all">
             {JSON.stringify(raw, null, 2)}
           </pre>
         </details>

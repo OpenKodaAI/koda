@@ -17,11 +17,12 @@ import json
 import re
 import time
 import uuid
+from collections.abc import Iterable
 from contextlib import suppress
 from typing import Any
 
 from koda.agents.listen_notify import AgentInboxListener
-from koda.agents.models import AgentMessage, DelegationRequest, DelegationResult
+from koda.agents.models import AgentMessage, DelegationRequest, DelegationResult, broadcast_recipients
 from koda.logging_config import get_logger
 
 log = get_logger(__name__)
@@ -63,6 +64,7 @@ class PostgresMessageBus:
         self._cursors: dict[str, int] = {}
         self._delegation_results: dict[str, asyncio.Event] = {}
         self._delegation_data: dict[str, DelegationResult] = {}
+        self._persist_tasks: set[asyncio.Task[None]] = set()
         self._local_log: list[AgentMessage] = []
         self._max_local_log = 500
         self._started = False
@@ -158,12 +160,16 @@ class PostgresMessageBus:
     async def _insert(
         self,
         from_agent: str,
-        to_agent: str,
+        to_agent: str | list[str],
         content: str,
         message_type: str,
         metadata: dict[str, Any],
     ) -> str:
+        """Insert one message for one agent or, given a list, one message for all of them."""
         assert self._pool is not None
+        to_agents = [to_agent] if isinstance(to_agent, str) else list(to_agent)
+        # A message to several agents keeps ``to_agent`` NULL, as thread posts do.
+        single_to_agent = to_agents[0] if len(to_agents) == 1 else None
         metadata = dict(metadata or {})
         kind = str(metadata.get("kind") or ("agent_text" if message_type == "text" else message_type))
         payload = metadata.get("payload")
@@ -188,7 +194,7 @@ class PostgresMessageBus:
                          LIMIT 1""",
                     str(idempotency_key),
                     from_agent,
-                    to_agent,
+                    single_to_agent,
                 )
                 if existing is not None:
                     return f"msg-{int(existing)}"
@@ -204,8 +210,8 @@ class PostgresMessageBus:
                 message_uuid,
                 str(thread_id) if thread_id else None,
                 from_agent,
-                to_agent,
-                json.dumps([to_agent]),
+                single_to_agent,
+                json.dumps(to_agents),
                 str(content or ""),
                 message_type,
                 kind,
@@ -216,26 +222,27 @@ class PostgresMessageBus:
                 str(in_reply_to) if in_reply_to else None,
                 str(idempotency_key) if idempotency_key else None,
             )
-            await conn.execute(
-                f"""INSERT INTO "{self._schema}"."squad_message_recipients" (message_id, to_agent_id)
-                      VALUES ($1, $2)
-                      ON CONFLICT DO NOTHING""",
-                int(row_id),
-                to_agent,
-            )
-            notify_payload = json.dumps({"to_agent": to_agent, "msg_id": int(row_id)})
-            await conn.execute("SELECT pg_notify($1, $2)", self._notify_channel, notify_payload)
+            for recipient in to_agents:
+                await conn.execute(
+                    f"""INSERT INTO "{self._schema}"."squad_message_recipients" (message_id, to_agent_id)
+                          VALUES ($1, $2)
+                          ON CONFLICT DO NOTHING""",
+                    int(row_id),
+                    recipient,
+                )
+                notify_payload = json.dumps({"to_agent": recipient, "msg_id": int(row_id)})
+                await conn.execute("SELECT pg_notify($1, $2)", self._notify_channel, notify_payload)
         msg_id = f"msg-{int(row_id)}"
         self._record_local(
             AgentMessage(
                 from_agent=from_agent,
-                to_agent=to_agent,
+                to_agent=to_agents[0],
                 content=content,
                 message_type=message_type,
                 metadata=metadata,
                 message_id=msg_id,
                 thread_id=str(thread_id) if thread_id else None,
-                to_agent_ids=[to_agent],
+                to_agent_ids=list(to_agents),
                 kind=kind,
                 payload=payload if isinstance(payload, dict) else {},
                 causation_id=str(causation_id) if causation_id else None,
@@ -478,6 +485,7 @@ class PostgresMessageBus:
                 "request_id": request.request_id,
                 "context": request.context,
                 "delegation_depth": request.delegation_depth,
+                "delegation_chain": list(request.delegation_chain),
                 "thread_id": request.thread_id,
                 "squad_task_id": request.squad_task_id,
                 "parent_message_id": request.parent_message_id,
@@ -524,17 +532,30 @@ class PostgresMessageBus:
             )
         finally:
             self._delegation_results.pop(request.request_id, None)
+            self._delegation_data.pop(request.request_id, None)
 
     def resolve_delegation(self, request_id: str, result: DelegationResult) -> None:
-        self._delegation_data[request_id] = result
+        # The result is kept in memory only for a delegator waiting in this process; any other
+        # reads the persisted row, so nothing is kept that no one pops (D-185).
         event = self._delegation_results.get(request_id)
         if event is not None:
+            self._delegation_data[request_id] = result
             event.set()
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
             return
-        loop.create_task(self._persist_delegation_result(request_id, result))
+        # The loop holds a task only weakly: the write is held here until it is done, since a
+        # delegator in another process reads only the persisted row (D-354).
+        task = loop.create_task(self._persist_delegation_result_or_log(request_id, result))
+        self._persist_tasks.add(task)
+        task.add_done_callback(self._persist_tasks.discard)
+
+    async def _persist_delegation_result_or_log(self, request_id: str, result: DelegationResult) -> None:
+        try:
+            await self._persist_delegation_result(request_id, result)
+        except Exception:
+            log.exception("delegation_result_persist_failed", request_id=request_id)
 
     async def _persist_delegation_result(self, request_id: str, result: DelegationResult) -> None:
         await self._ensure_started()
@@ -626,40 +647,32 @@ class PostgresMessageBus:
         from_agent: str,
         content: str,
         exclude: set[str] | None = None,
+        *,
+        thread_id: str,
+        recipients: Iterable[str],
+        metadata: dict[str, Any] | None = None,
     ) -> int:
+        """Post one thread message addressed to each participant whose inbox has room."""
         await self._ensure_started()
-        skip = set(exclude or set())
-        skip.add(from_agent)
-        agents = await self._list_known_agents()
-        count = 0
-        for agent_id in agents:
-            if agent_id in skip:
-                continue
+        to_agents: list[str] = []
+        for agent_id in broadcast_recipients(from_agent, recipients, exclude):
             try:
-                if await self._inbox_size(agent_id) >= self._max_inbox_size:
-                    continue
-                await self._insert(from_agent, agent_id, content, "text", {})
-                count += 1
+                if await self._inbox_size(agent_id) < self._max_inbox_size:
+                    to_agents.append(agent_id)
             except Exception:
                 log.exception("postgres_bus_broadcast_send_failed", to=agent_id)
-        return count
-
-    async def _list_known_agents(self) -> list[str]:
-        assert self._pool is not None
-        async with self._pool.acquire() as conn:
-            rows = await conn.fetch(
-                f"""SELECT DISTINCT agent FROM (
-                       SELECT from_agent AS agent FROM "{self._schema}"."squad_messages"
-                       UNION
-                       SELECT to_agent  AS agent FROM "{self._schema}"."squad_messages"
-                    ) AS s
-                    ORDER BY agent"""
-            )
-        return [row["agent"] for row in rows]
+        if not to_agents:
+            return 0
+        message_metadata = {**(metadata or {}), "thread_id": thread_id, "kind": "agent_text"}
+        try:
+            await self._insert(from_agent, to_agents, content, "text", message_metadata)
+        except Exception:
+            log.exception("postgres_bus_broadcast_send_failed", to=to_agents)
+            return 0
+        return len(to_agents)
 
     def list_agents(self) -> list[dict[str, Any]]:
-        # Best-effort in-process snapshot. Cross-process state lives in DB and
-        # is exposed via ``async list_known_agents`` for callers that need it.
+        # Best-effort in-process snapshot. Cross-process state lives in the DB.
         return [
             {"agent_id": aid, "inbox_size": -1, "inbox_max": self._max_inbox_size} for aid in sorted(self._inbox_events)
         ]

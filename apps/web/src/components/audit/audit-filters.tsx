@@ -23,7 +23,7 @@ export function AuditFilters({ eventTypes, selectedType, onTypeChange }: AuditFi
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-3">
       <label
         htmlFor="event-type-filter"
-        className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]"
+        className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]"
       >
         {t("generated.executions.evento_e4a03401")}
       </label>

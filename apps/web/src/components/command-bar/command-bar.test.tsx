@@ -183,6 +183,32 @@ describe("CommandBar listbox structure (D-282)", () => {
 });
 
 
+describe("CommandBar empty query (D-332)", () => {
+  it("renders no listbox when nothing matches, and reports the empty text as a status", async () => {
+    // A listbox holding only a text div is axe aria-required-children.
+    const user = userEvent.setup();
+    const input = renderBar();
+    await user.click(input);
+    await user.type(input, "zzzz-no-command-matches");
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("Nothing found");
+    expect(input).toHaveAttribute("aria-expanded", "false");
+    expect(input).not.toHaveAttribute("aria-activedescendant");
+  });
+});
+
+describe("CommandBar inline dropdown landmark (D-333)", () => {
+  it("portals the dropdown inside a region named after the input", async () => {
+    // Portaled to <body>, the dropdown was outside every landmark (axe region).
+    const input = renderBar();
+    await userEvent.setup().click(input);
+    const listbox = await screen.findByRole("listbox");
+    const region = screen.getByRole("region", { name: "Search commands" });
+    expect(region.parentElement).toBe(document.body);
+    expect(region).toContainElement(listbox);
+  });
+});
+
 // M8-E5-T3: text in the palette stays on the type scale (12 / 13 / 14 …),
 // through Tailwind's text-xs or a --font-size-* token, with no arbitrary px
 // or rem size and nothing under the 12px floor. The global .eyebrow class

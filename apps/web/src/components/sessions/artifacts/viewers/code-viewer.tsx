@@ -34,11 +34,11 @@ export function CodeViewer({ code, filename }: CodeViewerProps) {
       <div className="flex items-center justify-between border-b border-[color:var(--divider-hair)] px-4 py-2">
         <div className="flex items-center gap-2">
           {filename ? (
-            <span className="truncate text-[0.8125rem] text-[var(--text-secondary)]">
+            <span className="truncate text-[0.8125rem] text-[color:var(--text-secondary)]">
               {filename}
             </span>
           ) : null}
-          <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]">
+          <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)]">
             {language}
           </span>
         </div>
@@ -67,7 +67,7 @@ export function CodeViewer({ code, filename }: CodeViewerProps) {
         <pre
           className={cn(
             "m-0 grid grid-cols-[auto_1fr] gap-x-4 px-4 py-3 text-[0.8125rem] leading-[1.6]",
-            "text-[var(--text-primary)] font-mono",
+            "text-[color:var(--text-primary)] font-mono",
             softWrap ? "whitespace-pre-wrap break-words" : "whitespace-pre",
           )}
         >
@@ -75,7 +75,7 @@ export function CodeViewer({ code, filename }: CodeViewerProps) {
             <div key={index} className="contents">
               <span
                 aria-hidden
-                className="select-none text-right text-[var(--text-quaternary)]"
+                className="select-none text-right text-[color:var(--text-quaternary)]"
               >
                 {index + 1}
               </span>

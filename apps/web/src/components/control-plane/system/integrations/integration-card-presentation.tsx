@@ -31,7 +31,7 @@ export function IntegrationCardStatusIndicator({
       <motion.div
         initial={{ scale: 0.82, opacity: 0.72 }}
         animate={{ scale: 1, opacity: 1 }}
-        className="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]"
+        className="flex h-6 w-6 items-center justify-center rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[color:var(--tone-success-text)]"
       >
         <Check size={17} />
       </motion.div>
@@ -40,14 +40,14 @@ export function IntegrationCardStatusIndicator({
 
   if (status === "pending") {
     return (
-      <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]">
+      <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]">
         <AlertTriangle size={12} />
       </div>
     );
   }
 
   return (
-    <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--icon-secondary)] transition-colors group-hover:border-[var(--border-strong)] group-hover:bg-[var(--surface-hover)] group-hover:text-[var(--icon-primary)]">
+    <div className="flex h-7 w-7 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[color:var(--icon-secondary)] transition-colors group-hover:border-[var(--border-strong)] group-hover:bg-[var(--surface-hover)] group-hover:text-[color:var(--icon-primary)]">
       <Plus size={14} />
     </div>
   );

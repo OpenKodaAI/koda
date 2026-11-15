@@ -26,8 +26,8 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(fun
       disabled={disabled}
       aria-invalid={invalid || undefined}
       className={cn(
-        "w-full rounded-[var(--radius-input)] border bg-[var(--panel-soft)] px-3 py-2 text-[0.8125rem] text-[var(--text-primary)] outline-none",
-        "placeholder:text-[var(--text-quaternary)]",
+        "w-full rounded-[var(--radius-input)] border bg-[var(--panel-soft)] px-3 py-2 text-[0.8125rem] text-[color:var(--text-primary)] outline-none",
+        "placeholder:text-[color:var(--text-quaternary)]",
         "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
         "border-[var(--border-subtle)] hover:border-[var(--border-strong)]",
         "focus-visible:border-[var(--focus-ring)] focus-visible:bg-[var(--panel)] focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",

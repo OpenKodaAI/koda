@@ -80,7 +80,7 @@ export function ExecutionDetailPanel({
                     {translate(traceMeta.labelKey)}
                   </span>
                 </div>
-                <h2 className="text-[1.35rem] font-semibold tracking-[-0.06em] text-[var(--text-primary)]">
+                <h2 className="text-[1.35rem] font-semibold tracking-[-0.06em] text-[color:var(--text-primary)]">
                   {t("tasks.detail.executionFallback", { id: data.task_id })}
                 </h2>
               </div>
@@ -99,12 +99,12 @@ export function ExecutionDetailPanel({
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
-              <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
+            <div className="flex flex-wrap items-center gap-2 text-[11px] text-[color:var(--text-tertiary)]">
+              <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1 font-mono text-[10px] text-[color:var(--text-secondary)]">
                 {data.model ?? t("tasks.table.noModel")}
               </span>
               {data.session_id && (
-                <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-quaternary)]">
+                <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-2.5 py-1 font-mono text-[10px] text-[color:var(--text-quaternary)]">
                   {t("tasks.table.session", { value: truncateText(data.session_id, 18) })}
                 </span>
               )}

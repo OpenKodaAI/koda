@@ -190,13 +190,13 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
             <div className="flex items-center gap-2">
               <span
                 aria-hidden
-                className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] bg-[var(--panel-strong)] text-[var(--text-tertiary)]"
+                className="flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] bg-[var(--panel-strong)] text-[color:var(--text-tertiary)]"
               >
                 <Users className="h-3.5 w-3.5" strokeWidth={1.75} />
               </span>
               <h2
                 id="new-room-dialog-title"
-                className="m-0 text-[var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]"
+                className="m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]"
               >
                 {t("sessions.room.create.title", undefined)}
               </h2>
@@ -205,18 +205,18 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               type="button"
               onClick={handleCancel}
               aria-label={t("common.close", undefined)}
-              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+              className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
             >
               <X className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
             </button>
           </header>
 
-          <p className="mt-1 text-[var(--font-size-sm)] leading-[1.5] text-[var(--text-tertiary)]">
+          <p className="mt-1 text-[length:var(--font-size-sm)] leading-[1.5] text-[color:var(--text-tertiary)]">
             {t("sessions.room.create.helper", undefined)}
           </p>
 
           <label className="mt-5 flex flex-col gap-1.5">
-            <span className="text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+            <span className="text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
               {t("sessions.room.create.nameLabel", undefined)}
             </span>
             <input
@@ -229,22 +229,22 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               }}
               placeholder={t("sessions.room.create.namePlaceholder", undefined)}
               maxLength={120}
-              className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[var(--font-size-sm)] text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] focus:border-[color:var(--focus-ring)] focus:bg-[var(--panel)] focus:shadow-[0_0_0_1px_var(--focus-ring)]"
+              className="h-9 w-full rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-[length:var(--font-size-sm)] text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)] outline-none transition-[border-color,background-color,box-shadow] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] focus:border-[color:var(--focus-ring)] focus:bg-[var(--panel)] focus:shadow-[0_0_0_1px_var(--focus-ring)]"
             />
           </label>
 
           <div className="mt-4 flex flex-col gap-1.5">
-            <span className="text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+            <span className="text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
               {t("sessions.room.create.agentsLabel", undefined)}
               {selectedIds.length > 0 ? (
-                <span className="ml-1 font-mono text-[var(--text-tertiary)]">
+                <span className="ml-1 font-mono text-[color:var(--text-tertiary)]">
                   · {selectedIds.length}
                 </span>
               ) : null}
             </span>
             <label className="flex h-9 w-full items-center gap-2 rounded-[var(--radius-input)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 transition-[border-color,background-color,box-shadow] duration-[120ms] focus-within:border-[color:var(--focus-ring)] focus-within:bg-[var(--panel)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]">
               <Search
-                className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]"
+                className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-quaternary)]"
                 strokeWidth={1.75}
                 aria-hidden
               />
@@ -253,12 +253,12 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
                 placeholder={t("sessions.room.create.searchAgents", undefined)}
-                className="flex-1 bg-transparent text-[var(--font-size-sm)] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+                className="flex-1 bg-transparent text-[length:var(--font-size-sm)] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-quaternary)]"
               />
             </label>
             <div className="mt-1 flex max-h-[260px] flex-col gap-0.5 overflow-y-auto rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] p-1">
               {filteredAgents.length === 0 ? (
-                <div className="px-3 py-4 text-center text-[var(--font-size-sm)] text-[var(--text-tertiary)]">
+                <div className="px-3 py-4 text-center text-[length:var(--font-size-sm)] text-[color:var(--text-tertiary)]">
                   {t("sessions.room.create.agentsEmpty", undefined)}
                 </div>
               ) : (
@@ -275,8 +275,8 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                         "group flex w-full items-center gap-3 rounded-[var(--radius-panel-sm)] p-2 text-left",
                         "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                         checked
-                          ? "bg-[var(--panel-strong)] text-[var(--text-primary)]"
-                          : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+                          ? "bg-[var(--panel-strong)] text-[color:var(--text-primary)]"
+                          : "text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
                       )}
                     >
                       <AgentGlyph
@@ -286,17 +286,17 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                         className="h-7 w-7 shrink-0"
                       />
                       <div className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate text-[var(--font-size-sm)] font-medium">
+                        <span className="truncate text-[length:var(--font-size-sm)] font-medium">
                           {agent.label || agent.id}
                         </span>
                         {agent.label && agent.label !== agent.id ? (
-                          <span className="truncate font-mono text-xs text-[var(--text-quaternary)] group-hover:text-[var(--text-tertiary)]">
+                          <span className="truncate font-mono text-xs text-[color:var(--text-quaternary)] group-hover:text-[color:var(--text-tertiary)]">
                             {agent.id}
                           </span>
                         ) : null}
                       </div>
                       {isPaused ? (
-                        <span className="shrink-0 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-xs uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
+                        <span className="shrink-0 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-xs uppercase tracking-[var(--tracking-mono)] text-[color:var(--tone-warning-text)]">
                           <span className="sr-only">{t("sessions.room.create.pausedLabel", undefined)}</span>
                           <span aria-hidden="true">{t("sessions.room.create.pausedBadge", undefined)}</span>
                         </span>
@@ -306,7 +306,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                         className={cn(
                           "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-[4px] border",
                           checked
-                            ? "border-[color:var(--accent)] bg-[var(--accent)] text-[var(--accent-text)]"
+                            ? "border-[color:var(--accent)] bg-[var(--accent)] text-[color:var(--accent-text)]"
                             : "border-[color:var(--border-strong)] bg-transparent",
                         )}
                       >
@@ -320,19 +320,19 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               )}
             </div>
             {selectedIds.length > 0 ? (
-              <p className="mt-1 text-[0.6875rem] text-[var(--text-quaternary)]">
+              <p className="mt-1 text-[0.6875rem] text-[color:var(--text-quaternary)]">
                 {t("sessions.room.create.coordinatorHint", undefined)}
               </p>
             ) : null}
             {hasPausedSelected ? (
-              <p className="mt-1 text-[0.6875rem] text-[var(--tone-warning-text)]">
+              <p className="mt-1 text-[0.6875rem] text-[color:var(--tone-warning-text)]">
                 {t("sessions.room.create.pausedHint", undefined)}
               </p>
             ) : null}
           </div>
 
           {error ? (
-            <p className="mt-3 text-[var(--font-size-sm)] text-[var(--tone-danger-dot)]">
+            <p className="mt-3 text-[length:var(--font-size-sm)] text-[color:var(--tone-danger-dot)]">
               {error}
             </p>
           ) : null}
@@ -342,7 +342,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               type="button"
               onClick={handleCancel}
               disabled={submitting}
-              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium text-[var(--text-secondary)] transition-colors duration-[120ms] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60"
+              className="inline-flex h-9 items-center justify-center rounded-[var(--radius-panel-sm)] px-3.5 text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-secondary)] transition-colors duration-[120ms] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)] disabled:opacity-60"
             >
               {t("common.cancel", undefined)}
             </button>
@@ -351,9 +351,9 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
               onClick={() => void handleSubmit()}
               disabled={submitting || !name.trim() || selectedIds.length === 0}
               className={cn(
-                "inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-panel-sm)] px-3.5 text-[var(--font-size-sm)] font-medium",
-                "bg-[var(--accent)] text-[var(--accent-text)] transition-[background-color,color] duration-[120ms] hover:bg-[var(--accent-hover)]",
-                "disabled:bg-[var(--panel-strong)] disabled:text-[var(--text-quaternary)]",
+                "inline-flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-panel-sm)] px-3.5 text-[length:var(--font-size-sm)] font-medium",
+                "bg-[var(--accent)] text-[color:var(--accent-text)] transition-[background-color,color] duration-[120ms] hover:bg-[var(--accent-hover)]",
+                "disabled:bg-[var(--panel-strong)] disabled:text-[color:var(--text-quaternary)]",
               )}
             >
               {submitting ? (

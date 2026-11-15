@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from collections.abc import AsyncIterator
 from contextlib import suppress
@@ -249,15 +250,190 @@ async def test_persist_delegation_result_addresses_original_caller(monkeypatch: 
     assert args[:4] == ("worker", "caller", "done", "delegation_result")
 
 
+@pytest.mark.asyncio
+async def test_a_delegation_result_without_a_local_waiter_is_only_persisted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only an in-process delegator reads the in-memory result; any other is persisted, not kept (D-185)."""
+    from unittest.mock import AsyncMock
+
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    persist = AsyncMock()
+    monkeypatch.setattr(bus, "_persist_delegation_result", persist)
+
+    result = DelegationResult(request_id="req-1", from_agent="worker", to_agent="caller", success=True, result="x")
+    bus.resolve_delegation("req-1", result)
+    await asyncio.sleep(0)
+
+    assert bus._delegation_data == {}
+    persist.assert_awaited_once_with("req-1", result)
+
+
+@pytest.mark.asyncio
+async def test_a_delegation_result_that_races_the_timeout_is_not_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A local result stored after the last pop, while its row is not yet committed, is dropped (D-185)."""
+    from unittest.mock import AsyncMock
+
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    monkeypatch.setattr(bus, "_ensure_started", AsyncMock())
+    monkeypatch.setattr(bus, "_inbox_size", AsyncMock(return_value=0))
+    monkeypatch.setattr(bus, "_insert", AsyncMock(return_value="msg-1"))
+    monkeypatch.setattr(bus, "_persist_delegation_result", AsyncMock())
+
+    async def fetched_before_the_result_commits(request: DelegationRequest) -> None:
+        await asyncio.sleep(0.05)
+        bus.resolve_delegation(
+            request.request_id,
+            DelegationResult(request_id=request.request_id, from_agent="b", to_agent="a", success=True, result="x"),
+        )
+        return None
+
+    monkeypatch.setattr(bus, "_fetch_delegation_result", fetched_before_the_result_commits)
+
+    timed_out = await bus.delegate(DelegationRequest(from_agent="a", to_agent="b", task="x", timeout=0.01))
+
+    assert not timed_out.success
+    assert bus._delegation_data == {}
+
+
 @pytest.mark.postgres
 @pytest.mark.asyncio
-async def test_broadcast_skips_sender_and_excluded(bus_factory) -> None:  # type: ignore[no-untyped-def]
+async def test_a_resolved_delegation_is_persisted_for_a_delegator_in_another_process(bus_factory) -> None:  # type: ignore[no-untyped-def]
+    """The write is kept alive until it is done, so a second bus instance reads the result (D-354)."""
+    import gc
+
+    caller = bus_factory()
+    worker = bus_factory()
+    request = DelegationRequest(from_agent="a", to_agent="b", task="x", timeout=10, request_id="req-gc")
+    delegation = asyncio.create_task(caller.delegate(request))
+    msg = await worker.receive("b", timeout=3)
+    assert msg is not None
+    await worker.ack("b", msg.message_id)
+
+    worker.resolve_delegation(
+        "req-gc", DelegationResult(request_id="req-gc", from_agent="b", to_agent="a", success=True, result="ok")
+    )
+    # Nothing else refers to the write: a collection before it runs does not drop it.
+    gc.collect()
+
+    result = await asyncio.wait_for(delegation, timeout=10)
+    assert result.success
+    assert result.result == "ok"
+
+
+@pytest.mark.asyncio
+async def test_a_delegation_result_write_is_held_until_it_is_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bus holds the write task until it is done, so it is not collected before it runs (D-354)."""
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    release = asyncio.Event()
+
+    async def slow_persist(request_id: str, result: DelegationResult) -> None:
+        await release.wait()
+
+    monkeypatch.setattr(bus, "_persist_delegation_result", slow_persist)
+
+    bus.resolve_delegation(
+        "req-1", DelegationResult(request_id="req-1", from_agent="worker", to_agent="caller", success=True)
+    )
+
+    [held] = bus._persist_tasks
+    assert not held.done()
+    release.set()
+    await asyncio.wait_for(held, timeout=1)
+    await asyncio.sleep(0)
+    assert bus._persist_tasks == set()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_delegation_result_write_is_logged(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A delegator in another process reads only the persisted row, so a failed write is not silent (D-354)."""
+    from unittest.mock import AsyncMock, Mock
+
+    from koda.agents import postgres_message_bus
+
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    monkeypatch.setattr(bus, "_ensure_started", AsyncMock())
+    monkeypatch.setattr(bus, "_insert", AsyncMock(side_effect=RuntimeError("database down")))
+    log = Mock()
+    monkeypatch.setattr(postgres_message_bus, "log", log)
+
+    bus.resolve_delegation(
+        "req-1", DelegationResult(request_id="req-1", from_agent="worker", to_agent="caller", success=False)
+    )
+    for _ in range(50):
+        if log.exception.called:
+            break
+        await asyncio.sleep(0.01)
+
+    log.exception.assert_called_once()
+    assert log.exception.call_args.args == ("delegation_result_persist_failed",)
+    assert log.exception.call_args.kwargs["request_id"] == "req-1"
+
+
+@pytest.mark.asyncio
+async def test_a_delegation_request_persists_its_chain(monkeypatch: pytest.MonkeyPatch) -> None:
+    from unittest.mock import AsyncMock
+
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    insert = AsyncMock(return_value="msg-1")
+    monkeypatch.setattr(bus, "_ensure_started", AsyncMock())
+    monkeypatch.setattr(bus, "_inbox_size", AsyncMock(return_value=0))
+    monkeypatch.setattr(bus, "_insert", insert)
+    monkeypatch.setattr(bus, "_fetch_delegation_result", AsyncMock(return_value=None))
+
+    await bus.delegate(
+        DelegationRequest(from_agent="a", to_agent="b", task="x", timeout=0.01, delegation_chain=["squad_router", "a"])
+    )
+
+    metadata = insert.await_args.args[4]
+    assert metadata["delegation_chain"] == ["squad_router", "a"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_broadcast_reaches_only_thread_participants(bus_factory, clean_squad_messages: str) -> None:  # type: ignore[no-untyped-def]
+    import asyncpg  # type: ignore[import-not-found]
+
     seed = bus_factory()
-    # Make three agents observable by inserting any message touching them.
-    await seed.send("a", "b", "seed-1")
-    await seed.send("c", "d", "seed-2")
-    await seed.send("a", "c", "seed-3")
+    # Agents from other threads and workspaces, and pseudo-agents, are known to
+    # ``squad_messages``; a broadcast must not reach any of them.
+    await seed.send("other-workspace-agent", "b", "seed-1")
+    await seed.send("system", "user:42", "seed-2")
+    await seed.send("operator:alice", "c", "seed-3")
     bus = bus_factory()
-    count = await bus.broadcast("a", "ping", exclude={"d"})
-    # Known agents: a, b, c, d. Exclude {a (sender), d}. Should reach b and c.
+    thread_id = "00000000-0000-4000-8000-000000000040"
+    count = await bus.broadcast(
+        "a",
+        "ping",
+        exclude={"d"},
+        thread_id=thread_id,
+        recipients=["a", "b", "c", "d", "system", "user:42", "operator:alice", ""],
+    )
+    # Sender a and excluded d are skipped, and pseudo-agents are never recipients.
     assert count == 2
+    conn = await asyncpg.connect(clean_squad_messages)
+    try:
+        # One thread message for all recipients, so the transcript shows the broadcast once.
+        rows = await conn.fetch(
+            f"""SELECT id, to_agent, to_agent_ids, thread_id::text AS thread_id
+                  FROM "{_schema()}"."squad_messages"
+                 WHERE content = 'ping'"""
+        )
+        recipients = await conn.fetch(
+            f'''SELECT message_id, to_agent_id FROM "{_schema()}"."squad_message_recipients"
+                 WHERE message_id = ANY($1::bigint[]) ORDER BY to_agent_id''',
+            [row["id"] for row in rows],
+        )
+    finally:
+        await conn.close()
+    assert len(rows) == 1
+    assert (rows[0]["to_agent"], rows[0]["thread_id"]) == (None, thread_id)
+    to_agent_ids = rows[0]["to_agent_ids"]
+    assert (json.loads(to_agent_ids) if isinstance(to_agent_ids, str) else to_agent_ids) == ["b", "c"]
+    assert [(row["message_id"], row["to_agent_id"]) for row in recipients] == [
+        (rows[0]["id"], "b"),
+        (rows[0]["id"], "c"),
+    ]
+    for agent_id in ("b", "c"):
+        # Each recipient's inbox holds its seed message, then the broadcast.
+        inbox = await bus.receive_batch(agent_id, limit=10, timeout=3)
+        broadcast = [msg for msg in inbox if msg.content == "ping"]
+        assert [(msg.thread_id, msg.metadata["kind"]) for msg in broadcast] == [(thread_id, "agent_text")]

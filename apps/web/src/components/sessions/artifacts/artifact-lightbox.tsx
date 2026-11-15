@@ -160,7 +160,7 @@ export function ArtifactLightbox({
     }
 
     return (
-      <div className="rounded-[var(--radius-panel)] border border-[color:var(--border-subtle)] bg-[var(--surface-panel)] px-6 py-5 text-center text-[0.875rem] text-[var(--text-tertiary)]">
+      <div className="rounded-[var(--radius-panel)] border border-[color:var(--border-subtle)] bg-[var(--surface-panel)] px-6 py-5 text-center text-[0.875rem] text-[color:var(--text-tertiary)]">
         {t("sessions.artifacts.previewUnavailable", undefined)}
       </div>
     );

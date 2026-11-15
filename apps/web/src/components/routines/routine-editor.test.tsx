@@ -1,7 +1,9 @@
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
+import { DatePicker } from "@/components/routines/date-picker";
+import { RecurrencePicker } from "@/components/routines/recurrence-picker";
 import { RoutineEditor } from "@/components/routines/routine-editor";
 import type { AgentDisplay } from "@/lib/agent-constants";
 import {
@@ -10,6 +12,7 @@ import {
   translateForLanguage,
   type AppLanguage,
 } from "@/lib/i18n";
+import { defaultRecurrenceFields } from "@/lib/routines/recurrence";
 import type { CronJob } from "@/lib/types";
 
 vi.mock("next/navigation", () => ({
@@ -434,6 +437,70 @@ describe("RoutineEditor", () => {
     fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
 
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("adds no banner landmark next to the workspace topbar on any step (D-333)", async () => {
+    // The dialog portals outside <main>, so a <header> in it was a second banner.
+    renderEditor();
+    const dialog = await screen.findByRole("dialog");
+    const banners = () => within(dialog).queryAllByRole("banner").length + dialog.querySelectorAll("header").length;
+    expect(banners()).toBe(0);
+    fireEvent.change(screen.getByPlaceholderText(/Daily code review/i), { target: { value: "Daily review" } });
+    fireEvent.change(screen.getByPlaceholderText(/Describe what the agent should do/i), {
+      target: { value: "Look for regressions in main." },
+    });
+    fireEvent.click(await screen.findByRole("button", { name: /next/i }));
+    expect(await screen.findByText(/schedule/i)).toBeInTheDocument();
+    expect(banners()).toBe(0);
+  });
+
+  it("opens the date picker without a banner landmark (D-333)", async () => {
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <DatePicker value={new Date(2026, 11, 1)} onChange={vi.fn()} />
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button"));
+    expect(await screen.findByRole("button", { name: /previous month/i })).toBeInTheDocument();
+    expect(screen.queryAllByRole("banner")).toHaveLength(0);
+    expect(document.querySelectorAll("header")).toHaveLength(0);
+  });
+
+  // D-348, D-319: with a schedule popover open, axe reported aria-dialog-name (the Radix popover
+  // content is a dialog with no name) and, for the timezone list, aria-input-field-name.
+  it("names the date, time and timezone popovers of a one-time schedule (D-348, D-319)", async () => {
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <RecurrencePicker
+          value={{
+            scheduleMode: "once",
+            oneShotAt: "2026-12-01T09:00",
+            recurrence: defaultRecurrenceFields(),
+            customCron: "",
+            intervalExpr: "",
+            timezone: "UTC",
+          }}
+          onChange={vi.fn()}
+          preview={{ status: "idle", nextRuns: [], message: null }}
+        />
+      </I18nProvider>,
+    );
+    const open = async (trigger: HTMLElement, name: string) => {
+      fireEvent.click(trigger);
+      const dialog = await screen.findByRole("dialog", { name });
+      return dialog;
+    };
+
+    await open(screen.getByRole("button", { name: /^Date/ }), "Date");
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    await open(screen.getByRole("button", { name: /^Time of day/ }), "Time of day");
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    const timezone = await open(screen.getByRole("button", { name: /^Timezone/ }), "Timezone");
+    expect(within(timezone).getByRole("listbox", { name: "Timezone" })).toBeInTheDocument();
   });
 
   describe("schedule step (D-080, D-081)", () => {

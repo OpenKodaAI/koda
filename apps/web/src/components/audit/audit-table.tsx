@@ -121,13 +121,13 @@ export function AuditTable({
                   >
                       <td className="w-[176px]">
                         <div className="space-y-1">
-                          <p className="text-xs text-[var(--text-secondary)]">
+                          <p className="text-xs text-[color:var(--text-secondary)]">
                             {formatRelativeTime(entry.timestamp)}
                           </p>
-                          <p className="text-[11px] text-[var(--text-quaternary)]">
+                          <p className="text-[11px] text-[color:var(--text-quaternary)]">
                             {formatDateTime(entry.timestamp)}
                           </p>
-                          <p className="font-mono text-[11px] text-[var(--text-quaternary)]">
+                          <p className="font-mono text-[11px] text-[color:var(--text-quaternary)]">
                             {t("audit.table.record", { id: entry.id })}
                           </p>
                         </div>
@@ -143,18 +143,18 @@ export function AuditTable({
                       <td className="min-w-[360px]">
                         <div className="space-y-1.5">
                           <p
-                            className="text-sm leading-6 text-[var(--text-primary)] transition-colors group-hover:text-[var(--text-primary)]"
+                            className="text-sm leading-6 text-[color:var(--text-primary)] transition-colors group-hover:text-[color:var(--text-primary)]"
                             title={getDetailsPreview(entry, t)}
                           >
                             {getDetailsPreview(entry, t)}
                           </p>
-                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-[color:var(--text-tertiary)]">
                             <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-tint)] px-2.5 py-1">
                               {entry.bot_id ?? t("common.noAgent")}
                             </span>
                             <span>{t("audit.table.task", { value: entry.task_id != null ? `#${entry.task_id}` : "—" })}</span>
                             {entry.trace_id && (
-                              <span className="font-mono text-[10px] text-[var(--text-quaternary)]">
+                              <span className="font-mono text-[10px] text-[color:var(--text-quaternary)]">
                                 {t("audit.table.trace", { value: truncateText(entry.trace_id, 16) })}
                               </span>
                             )}
@@ -162,12 +162,12 @@ export function AuditTable({
                         </div>
                       </td>
                       <td className="text-right">
-                        <p className="font-mono text-xs tabular-nums text-[var(--text-primary)]">
+                        <p className="font-mono text-xs tabular-nums text-[color:var(--text-primary)]">
                           {formatCost(entry.cost_usd)}
                         </p>
                       </td>
                       <td className="text-right">
-                        <p className="font-mono text-xs tabular-nums text-[var(--text-secondary)]">
+                        <p className="font-mono text-xs tabular-nums text-[color:var(--text-secondary)]">
                           {formatDuration(entry.duration_ms)}
                         </p>
                       </td>
@@ -221,16 +221,16 @@ export function AuditTable({
                   >
                     {entry.event_type}
                   </span>
-                  <p className="text-sm leading-6 text-[var(--text-primary)]">
+                  <p className="text-sm leading-6 text-[color:var(--text-primary)]">
                     {truncateText(getDetailsPreview(entry, t), 100)}
                   </p>
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-[color:var(--text-tertiary)]">
                     <span>{entry.bot_id ?? t("common.noAgent")}</span>
                     <span className="h-1 w-1 rounded-full bg-[var(--border-strong)]" />
                     <span>{formatRelativeTime(entry.timestamp)}</span>
                   </div>
                 </div>
-                <ArrowUpRight className="mt-0.5 h-4 w-4 text-[var(--text-quaternary)]" />
+                <ArrowUpRight className="mt-0.5 h-4 w-4 text-[color:var(--text-quaternary)]" />
               </div>
               <div className="mt-4 grid grid-cols-3 gap-3">
                 <MobileAuditStat label={t("common.agent")} value={entry.bot_id ?? "—"} />
@@ -256,8 +256,8 @@ export function AuditTable({
 function MobileAuditStat({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] px-3 py-3">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">{label}</p>
-      <p className={cn("mt-1 text-[12px] text-[var(--text-secondary)]", mono && "font-mono tabular-nums")}>
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">{label}</p>
+      <p className={cn("mt-1 text-[12px] text-[color:var(--text-secondary)]", mono && "font-mono tabular-nums")}>
         {value}
       </p>
     </div>

@@ -41,7 +41,7 @@ export function TabPerfil() {
             status={state.status}
             size="lg"
           />
-          <span className="text-[9px] text-[var(--text-quaternary)] font-mono">
+          <span className="text-[9px] text-[color:var(--text-quaternary)] font-mono">
             {agentId}
           </span>
         </div>
@@ -73,10 +73,10 @@ export function TabPerfil() {
 
       <section className="flex flex-col gap-4 border-t border-[var(--border-subtle)] pt-6">
         <div className="flex flex-col gap-1">
-          <h2 className="text-lg font-semibold text-[var(--text-primary)]">
+          <h2 className="text-lg font-semibold text-[color:var(--text-primary)]">
             {t("generated.controlPlane.canais_de_comunicacao_9f375cf8")}
           </h2>
-          <p className="text-sm text-[var(--text-tertiary)]">
+          <p className="text-sm text-[color:var(--text-tertiary)]">
             {t("generated.controlPlane.conecte_canais_de_entrada_para_que_usuarios__7ab51769")}
           </p>
         </div>

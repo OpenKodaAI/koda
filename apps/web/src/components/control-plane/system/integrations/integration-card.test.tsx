@@ -63,6 +63,6 @@ describe("IntegrationCard", () => {
     expect(checkIcon).not.toBeNull();
     // The check icon inherits success color from its container's CSS class
     const container = checkIcon!.closest("div");
-    expect(container?.className).toContain("text-[var(--tone-success-text)]");
+    expect(container?.className).toContain("text-[color:var(--tone-success-text)]");
   });
 });

@@ -132,12 +132,12 @@ export function UiForm({ block, agentId, sessionId }: UiFormProps) {
       )}
     >
       {title ? (
-        <h4 className="m-0 text-[0.875rem] font-medium text-[var(--text-primary)]">
+        <h4 className="m-0 text-[0.875rem] font-medium text-[color:var(--text-primary)]">
           {title}
         </h4>
       ) : null}
       {description ? (
-        <p className="m-0 text-[0.8125rem] text-[var(--text-secondary)]">
+        <p className="m-0 text-[0.8125rem] text-[color:var(--text-secondary)]">
           {description}
         </p>
       ) : null}
@@ -147,9 +147,9 @@ export function UiForm({ block, agentId, sessionId }: UiFormProps) {
           if (field.kind === "text" || field.kind === "number") {
             return (
               <div key={field.id} className="flex flex-col gap-1">
-                <label htmlFor={id} className="text-[0.75rem] text-[var(--text-secondary)]">
+                <label htmlFor={id} className="text-[0.75rem] text-[color:var(--text-secondary)]">
                   {field.label}
-                  {field.required ? <span className="text-[var(--tone-danger-dot)]"> *</span> : null}
+                  {field.required ? <span className="text-[color:var(--tone-danger-dot)]"> *</span> : null}
                 </label>
                 <Input
                   id={id}
@@ -165,9 +165,9 @@ export function UiForm({ block, agentId, sessionId }: UiFormProps) {
           if (field.kind === "textarea") {
             return (
               <div key={field.id} className="flex flex-col gap-1">
-                <label htmlFor={id} className="text-[0.75rem] text-[var(--text-secondary)]">
+                <label htmlFor={id} className="text-[0.75rem] text-[color:var(--text-secondary)]">
                   {field.label}
-                  {field.required ? <span className="text-[var(--tone-danger-dot)]"> *</span> : null}
+                  {field.required ? <span className="text-[color:var(--tone-danger-dot)]"> *</span> : null}
                 </label>
                 <Textarea
                   id={id}
@@ -185,7 +185,7 @@ export function UiForm({ block, agentId, sessionId }: UiFormProps) {
               <label
                 key={field.id}
                 htmlFor={id}
-                className="flex items-center justify-between gap-2 text-[0.8125rem] text-[var(--text-secondary)]"
+                className="flex items-center justify-between gap-2 text-[0.8125rem] text-[color:var(--text-secondary)]"
               >
                 <span>{field.label}</span>
                 <input
@@ -203,9 +203,9 @@ export function UiForm({ block, agentId, sessionId }: UiFormProps) {
             const value = String(values[field.id] ?? "");
             return (
               <div key={field.id} className="flex flex-col gap-1">
-                <label htmlFor={id} className="text-[0.75rem] text-[var(--text-secondary)]">
+                <label htmlFor={id} className="text-[0.75rem] text-[color:var(--text-secondary)]">
                   {field.label}
-                  {field.required ? <span className="text-[var(--tone-danger-dot)]"> *</span> : null}
+                  {field.required ? <span className="text-[color:var(--tone-danger-dot)]"> *</span> : null}
                 </label>
                 <Select
                   value={value}
@@ -230,7 +230,7 @@ export function UiForm({ block, agentId, sessionId }: UiFormProps) {
         })}
       </div>
       {submitError ? (
-        <p className="m-0 text-[0.75rem] text-[var(--tone-danger-dot)]">
+        <p className="m-0 text-[0.75rem] text-[color:var(--tone-danger-dot)]">
           {submitError}
         </p>
       ) : null}

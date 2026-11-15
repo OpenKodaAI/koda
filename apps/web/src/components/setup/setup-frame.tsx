@@ -21,7 +21,7 @@ export function SetupFrame({ children, top, className }: SetupFrameProps) {
   return (
     <div
       className={cn(
-        "relative flex min-h-[100dvh] w-full flex-col overflow-hidden bg-[var(--canvas)] text-[var(--text-primary)]",
+        "relative flex min-h-[100dvh] w-full flex-col overflow-hidden bg-[var(--canvas)] text-[color:var(--text-primary)]",
         className,
       )}
     >

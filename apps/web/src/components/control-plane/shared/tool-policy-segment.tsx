@@ -76,7 +76,7 @@ export function ToolPolicySegment({
             aria-pressed={isActive}
             className={cn(
               "relative z-10 flex h-7 w-8 items-center justify-center rounded-md transition-colors duration-150",
-              !isActive && "text-[var(--text-quaternary)] hover:text-[var(--text-tertiary)]",
+              !isActive && "text-[color:var(--text-quaternary)] hover:text-[color:var(--text-tertiary)]",
               disabled && "pointer-events-none opacity-40",
             )}
           >

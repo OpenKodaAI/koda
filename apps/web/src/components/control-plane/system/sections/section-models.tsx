@@ -132,7 +132,7 @@ export function providerOrder(category: string) {
 
 function SelectLoadingSpinner({ loading }: { loading: boolean }) {
   if (!loading) return null;
-  return <InlineSpinner className="h-3.5 w-3.5 shrink-0 text-[var(--text-tertiary)]" />;
+  return <InlineSpinner className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-tertiary)]" />;
 }
 
 export type ProviderOption = ReturnType<typeof useSystemSettings>["providerOptions"][number];
@@ -671,12 +671,12 @@ function ClaudeCodeEntry({
 
   return (
     <div key={sessionId} className="space-y-2.5 px-1">
-      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
         {t("generated.controlPlane.authentication_code_28780d65")}
       </div>
       <div className="flex items-center gap-2.5">
         <input
-          className="field-shell min-w-0 flex-1 font-mono tracking-[0.08em] text-[var(--text-primary)]"
+          className="field-shell min-w-0 flex-1 font-mono tracking-[0.08em] text-[color:var(--text-primary)]"
           type="text"
           inputMode="text"
           autoCapitalize="none"
@@ -710,7 +710,7 @@ function ClaudeCodeEntry({
         <div
           className={cn(
             "text-xs leading-5",
-            status === "error" ? "text-rose-300" : "text-[var(--text-secondary)]",
+            status === "error" ? "text-rose-300" : "text-[color:var(--text-secondary)]",
           )}
         >
           {feedback}
@@ -735,7 +735,7 @@ function WhisperCppModelList({
 
   if (!whisperCatalog) {
     return (
-      <div className="px-1 text-sm text-[var(--text-tertiary)]">
+      <div className="px-1 text-sm text-[color:var(--text-tertiary)]">
         {t("generated.controlPlane.carregando_modelos_whisper_cpp_3bde8b2d")}
       </div>
     );
@@ -744,10 +744,10 @@ function WhisperCppModelList({
   return (
     <div className="space-y-3 px-1">
       <div>
-        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
           {t("generated.controlPlane.modelos_whisper_cpp_c793774d")}
         </div>
-        <p className="mt-1 text-sm text-[var(--text-secondary)]">
+        <p className="mt-1 text-sm text-[color:var(--text-secondary)]">
           {t("generated.controlPlane.modelos_locais_para_transcricao_offline_baix_6f80d015")}
         </p>
       </div>
@@ -762,15 +762,15 @@ function WhisperCppModelList({
               className="flex flex-wrap items-center gap-3 text-sm"
             >
               <div className="flex min-w-0 flex-1 flex-col">
-                <span className="font-medium text-[var(--text-primary)]">
+                <span className="font-medium text-[color:var(--text-primary)]">
                   {variant.label}
                   {isDefault ? (
-                    <span className="ml-2 rounded-full border border-[var(--border-subtle)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[var(--text-tertiary)]">
+                    <span className="ml-2 rounded-full border border-[var(--border-subtle)] px-1.5 py-0.5 text-[10px] uppercase tracking-wide text-[color:var(--text-tertiary)]">
                       {t("generated.controlPlane.padrao_ecc075df")}
                     </span>
                   ) : null}
                 </span>
-                <span className="text-xs text-[var(--text-tertiary)]">
+                <span className="text-xs text-[color:var(--text-tertiary)]">
                   {variant.description}
                   {variant.downloaded && Number(variant.bytes ?? 0) > 0
                     ? ` · ${formatAssetBytes(variant.bytes)}`
@@ -780,7 +780,7 @@ function WhisperCppModelList({
                 </span>
               </div>
               {variant.downloaded ? (
-                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[color:var(--tone-success-text)]">
                   <Check className="h-3 w-3" strokeWidth={1.75} />
                   {t("generated.controlPlane.baixado_fdf556f7")}
                 </span>
@@ -971,21 +971,21 @@ export function ProviderAuthPanel({
               O download é independente do download de vozes. Mostra tamanho
               em disco quando presente e oferece botão de remoção. */}
           <div className="flex flex-wrap items-center gap-3 px-1 pb-2 text-sm">
-            <span className="text-[var(--text-secondary)]">
+            <span className="text-[color:var(--text-secondary)]">
               {t("generated.controlPlane.modelo_base_do_kokoro_6a93f08f")}
             </span>
             {kokoroModelStatus?.downloaded ? (
               <>
-                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[color:var(--tone-success-text)]">
                   <Check className="h-3 w-3" strokeWidth={1.75} />
                   {t("generated.controlPlane.disponivel_099498ec")}
                 </span>
-                <span className="font-mono text-[11px] text-[var(--text-tertiary)]">
+                <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
                   {formatAssetBytes(kokoroModelStatus.bytes)}
                 </span>
               </>
             ) : (
-              <span className="text-xs text-[var(--text-tertiary)]">
+              <span className="text-xs text-[color:var(--text-tertiary)]">
                 {t("generated.controlPlane.necessario_antes_de_baixar_qualquer_voz_4b78c793")}
               </span>
             )}
@@ -1138,7 +1138,7 @@ export function ProviderAuthPanel({
                 {t("generated.controlPlane.remover_5465770e")}
               </AsyncActionButton>
             ) : null}
-            <span className="text-sm text-[var(--text-secondary)]">
+            <span className="text-sm text-[color:var(--text-secondary)]">
               {kokoroSelectedVoice
                 ? `${tl(kokoroSelectedVoice.language_label)} · ${kokoroSelectedVoice.gender === "female" ? t("generated.controlPlane.feminina_06649a23") : t("generated.controlPlane.masculina_6a75350b")}${
                     kokoroSelectedVoice.downloaded && Number(kokoroSelectedVoice.bytes ?? 0) > 0
@@ -1154,25 +1154,25 @@ export function ProviderAuthPanel({
       ) : provider.id === "supertonic" ? (
         <>
           <div className="flex flex-wrap items-center gap-3 px-1 pb-2 text-sm">
-            <span className="text-[var(--text-secondary)]">
+            <span className="text-[color:var(--text-secondary)]">
               {t("generated.controlPlane.modelo_supertonic_1d003ea1")}
             </span>
             {supertonicSelectedModel?.downloaded ? (
               <>
-                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[color:var(--tone-success-text)]">
                   <Check className="h-3 w-3" strokeWidth={1.75} />
                   {t("generated.controlPlane.disponivel_099498ec")}
                 </span>
-                <span className="font-mono text-[11px] text-[var(--text-tertiary)]">
+                <span className="font-mono text-[11px] text-[color:var(--text-tertiary)]">
                   {formatAssetBytes(supertonicSelectedModel.bytes)}
                 </span>
               </>
             ) : (
-              <span className="text-xs text-[var(--text-tertiary)]">
+              <span className="text-xs text-[color:var(--text-tertiary)]">
                 {t("generated.controlPlane.download_inicial_via_hugging_face_f6a44a0a")}
               </span>
             )}
-            <span className="rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] text-[var(--text-tertiary)]">
+            <span className="rounded-full border border-[var(--border-subtle)] px-2 py-0.5 text-[11px] text-[color:var(--text-tertiary)]">
               {tl(supertonicAccelerationLabel)}
             </span>
             <div className="ml-auto flex items-center gap-2">
@@ -1367,7 +1367,7 @@ export function ProviderAuthPanel({
                   {t("generated.controlPlane.remover_5465770e")}
                 </AsyncActionButton>
               ) : null}
-              <span className="text-sm text-[var(--text-secondary)]">
+              <span className="text-sm text-[color:var(--text-secondary)]">
                 {supertonicSelectedVoice
                   ? `${tl(supertonicSelectedVoice.language_label)} · ${
                       supertonicSelectedVoice.gender === "female"
@@ -1388,7 +1388,7 @@ export function ProviderAuthPanel({
       ) : supportsAnyAuth ? (
         <>
           <div className="space-y-2 px-1">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
               {t("generated.controlPlane.autenticacao_023abe86")}
             </div>
             <div
@@ -1405,8 +1405,8 @@ export function ProviderAuthPanel({
                   className={cn(
                     "relative -mb-px border-b-2 px-0 pb-2.5 text-sm transition-colors",
                     activeMode === "api_key"
-                      ? "border-[var(--text-primary)] text-[var(--text-primary)]"
-                      : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                      ? "border-[var(--text-primary)] text-[color:var(--text-primary)]"
+                      : "border-transparent text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   {translate("generated.controlPlane.api_key_9245266a")}</button>
@@ -1420,8 +1420,8 @@ export function ProviderAuthPanel({
                   className={cn(
                     "relative -mb-px border-b-2 px-0 pb-2.5 text-sm transition-colors",
                     activeMode === "local"
-                      ? "border-[var(--text-primary)] text-[var(--text-primary)]"
-                      : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                      ? "border-[var(--text-primary)] text-[color:var(--text-primary)]"
+                      : "border-transparent text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   {provider.id === "claude" ? t("generated.controlPlane.claude_code_cli_b86bb2cc") : t("generated.controlPlane.servidor_local_79e4f89a")}
@@ -1440,8 +1440,8 @@ export function ProviderAuthPanel({
                   className={cn(
                     "relative -mb-px border-b-2 px-0 pb-2.5 text-sm transition-colors",
                     activeMode === "subscription_login"
-                      ? "border-[var(--text-primary)] text-[var(--text-primary)]"
-                      : "border-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                      ? "border-[var(--text-primary)] text-[color:var(--text-primary)]"
+                      : "border-transparent text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   {t("generated.controlPlane.assinatura_login_c48f1746")}
@@ -1454,11 +1454,11 @@ export function ProviderAuthPanel({
             <div className="grid gap-3 xl:grid-cols-2">
               <div className="space-y-2 px-1">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
                     {t("generated.controlPlane.chave_da_api_7c8c1447")}
                   </div>
                   {connection?.api_key_present ? (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[var(--tone-success-text)]">
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-[color:var(--tone-success-text)]">
                       <CheckCircle2 className="h-3 w-3" strokeWidth={1.75} />
                       {t("generated.controlPlane.configurada_df5188a8")}
                     </span>
@@ -1468,7 +1468,7 @@ export function ProviderAuthPanel({
                 !connectionDraft?.api_key &&
                 !replacingApiKey ? (
                   <div className="space-y-2">
-                    <p className="text-xs text-[var(--text-tertiary)]">
+                    <p className="text-xs text-[color:var(--text-tertiary)]">
                       {t(
                         "generated.controlPlane.a_chave_esta_armazenada_e_criptografada_para_9bd55941",
                       )}
@@ -1476,7 +1476,7 @@ export function ProviderAuthPanel({
                     <button
                       type="button"
                       onClick={markReplacingKey}
-                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-transparent px-2.5 py-1.5 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+                      className="inline-flex items-center gap-1.5 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-transparent px-2.5 py-1.5 text-[11px] font-medium text-[color:var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
                     >
                       <RefreshCcw className="h-3 w-3" strokeWidth={1.75} />
                       {t("generated.controlPlane.substituir_chave_0f8828aa")}
@@ -1502,7 +1502,7 @@ export function ProviderAuthPanel({
                           unmarkReplacingKey();
                           setProviderConnectionDraft(provider.id, { api_key: "" });
                         }}
-                        className="text-[11px] text-[var(--text-tertiary)] underline-offset-2 transition-colors hover:text-[var(--text-primary)] hover:underline"
+                        className="text-[11px] text-[color:var(--text-tertiary)] underline-offset-2 transition-colors hover:text-[color:var(--text-primary)] hover:underline"
                       >
                         {t("generated.controlPlane.cancelar_substituicao_77e2d650")}
                       </button>
@@ -1603,19 +1603,19 @@ export function ProviderAuthPanel({
           ) : activeMode === "local" ? (
             <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,240px)]">
               <div className="space-y-2 px-1">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
                   {providerLocalTitle(provider.id, t)}
                 </div>
-                <div className="text-sm leading-6 text-[var(--text-secondary)]">
+                <div className="text-sm leading-6 text-[color:var(--text-secondary)]">
                   {providerLocalDescription(provider.id, t)}
                 </div>
               </div>
               {provider.id === "ollama" ? (
                 <div className="space-y-2 px-1">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
                     {translate("generated.controlPlane.base_url_91eabd63")}</div>
                   <input
-                    className="field-shell text-[var(--text-primary)]"
+                    className="field-shell text-[color:var(--text-primary)]"
                     type="text"
                     placeholder="http://host.docker.internal:11434"
                     value={connectionDraft?.base_url || ""}
@@ -1623,7 +1623,7 @@ export function ProviderAuthPanel({
                       setProviderConnectionDraft(provider.id, { base_url: event.target.value })
                     }
                   />
-                  <p className="text-[11px] leading-5 text-[var(--text-tertiary)]">
+                  <p className="text-[11px] leading-5 text-[color:var(--text-tertiary)]">
                     {t(
                       "generated.controlPlane.ollama_no_desktop_host_http_host_docker_inte_3968b4fb",
                     )}
@@ -1633,10 +1633,10 @@ export function ProviderAuthPanel({
             </div>
           ) : (
             <div className="space-y-2 px-1">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
                 {t("generated.controlPlane.login_oficial_09256a9c")}
               </div>
-              <div className="text-sm leading-6 text-[var(--text-secondary)]">
+              <div className="text-sm leading-6 text-[color:var(--text-secondary)]">
                 {providerLoginCopy(provider.id, t)}
               </div>
             </div>
@@ -1645,11 +1645,11 @@ export function ProviderAuthPanel({
           {provider.id === "ollama" ? (
             <div className="space-y-2 px-1">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
                   {t("generated.controlPlane.modelos_detectados_3f86289b")}
                 </div>
                 <div
-                  className="inline-flex min-h-4 min-w-16 items-center justify-end text-xs text-[var(--text-quaternary)]"
+                  className="inline-flex min-h-4 min-w-16 items-center justify-end text-xs text-[color:var(--text-quaternary)]"
                   role={ollamaModelsLoading ? "status" : undefined}
                   aria-label={ollamaModelsLoading ? t("generated.controlPlane.carregando_62b04e95") : undefined}
                 >
@@ -1675,9 +1675,9 @@ export function ProviderAuthPanel({
                         .join(" · ");
                       return (
                         <div key={item.model_id} className="px-3 py-2.5">
-                          <div className="text-sm font-medium text-[var(--text-primary)]">{item.name}</div>
+                          <div className="text-sm font-medium text-[color:var(--text-primary)]">{item.name}</div>
                           {metadata ? (
-                            <div className="mt-0.5 text-xs text-[var(--text-quaternary)]">{metadata}</div>
+                            <div className="mt-0.5 text-xs text-[color:var(--text-quaternary)]">{metadata}</div>
                           ) : null}
                         </div>
                       );
@@ -1685,7 +1685,7 @@ export function ProviderAuthPanel({
                   </div>
                 </div>
               ) : (
-                <div className="text-sm text-[var(--text-secondary)]">
+                <div className="text-sm text-[color:var(--text-secondary)]">
                   {connection?.configured || connection?.verified || connection?.api_key_present
                     ? t("generated.controlPlane.nenhum_modelo_foi_retornado_pelo_endpoint_co_0a0f60f9")
                     : t("generated.controlPlane.conecte_o_ollama_para_carregar_a_lista_real__fa609232")}
@@ -1696,10 +1696,10 @@ export function ProviderAuthPanel({
         </>
       ) : (
         <div className="space-y-2 px-1">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
             {t("generated.controlPlane.operacao_e27e6db2")}
           </div>
-          <div className="text-sm leading-6 text-[var(--text-secondary)]">
+          <div className="text-sm leading-6 text-[color:var(--text-secondary)]">
             {provider.id === "ollama"
               ? t("generated.controlPlane.o_ollama_depende_apenas_do_runtime_local_con_c2e28849")
               : t("generated.controlPlane.este_provider_nao_exige_autenticacao_manual__826b2975")}
@@ -1712,7 +1712,7 @@ export function ProviderAuthPanel({
       ) : null}
 
       {loginSession ? (
-        <div className="space-y-5 px-1 text-sm text-[var(--text-secondary)]">
+        <div className="space-y-5 px-1 text-sm text-[color:var(--text-secondary)]">
           <span>
             {loginSession.status === "pending"
               ? loginSession.message || t("generated.controlPlane.iniciando_autenticacao_e684996c")
@@ -1734,13 +1734,13 @@ export function ProviderAuthPanel({
                 <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-4 py-3.5">
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
                         {t("generated.controlPlane.codigo_de_autorizacao_54b1b8f9")}
                       </div>
-                      <div className="mt-2 font-mono text-lg tracking-[0.28em] text-[var(--text-primary)] sm:text-[1.35rem]">
+                      <div className="mt-2 font-mono text-lg tracking-[0.28em] text-[color:var(--text-primary)] sm:text-[1.35rem]">
                         {loginSession.user_code}
                       </div>
-                      <div className="mt-2 text-xs leading-5 text-[var(--text-quaternary)]">
+                      <div className="mt-2 text-xs leading-5 text-[color:var(--text-quaternary)]">
                         {t("generated.controlPlane.use_este_codigo_na_pagina_de_autorizacao_abe_98218908")}
                       </div>
                     </div>
@@ -1749,7 +1749,7 @@ export function ProviderAuthPanel({
                       onClick={() => {
                         void handleCopyLoginCode();
                       }}
-                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--panel-soft)] hover:text-[var(--text-secondary)]"
+                      className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel)] text-[color:var(--text-quaternary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--panel-soft)] hover:text-[color:var(--text-secondary)]"
                       aria-label={codeCopied ? t("generated.controlPlane.codigo_copiado_cd656998") : t("generated.controlPlane.copiar_codigo_de_autenticacao_6ecb37b0")}
                       title={codeCopied ? t("generated.controlPlane.codigo_copiado_cd656998") : t("generated.controlPlane.copiar_codigo_de_autenticacao_6ecb37b0")}
                     >
@@ -1832,8 +1832,8 @@ export function ProviderAccordionItem({
         >
           <ProviderLogo providerId={provider.id} title={provider.title} active={ui.hasActiveConnection} />
           <div className="min-w-0 flex-1">
-            <div className="text-base font-semibold text-[var(--text-primary)]">{provider.title}</div>
-            <p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">
+            <div className="text-base font-semibold text-[color:var(--text-primary)]">{provider.title}</div>
+            <p className="mt-1 text-sm leading-6 text-[color:var(--text-secondary)]">
               {providerDescription(provider.id, provider.category, t)}
             </p>
           </div>
@@ -1859,7 +1859,7 @@ export function ProviderAccordionItem({
             type="button"
             onClick={onToggle}
             className={cn(
-              "inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)] transition-colors",
+              "inline-flex h-9 w-9 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel)] text-[color:var(--text-quaternary)] transition-colors",
               "group-hover:bg-[var(--panel-soft)]",
             )}
             aria-label={
@@ -2147,14 +2147,14 @@ export function SectionModels() {
                       key={providerId}
                       className="flex items-center gap-3 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 py-3"
                     >
-                      <span className="w-5 shrink-0 text-center text-[11px] font-medium text-[var(--text-quaternary)]">
+                      <span className="w-5 shrink-0 text-center text-[11px] font-medium text-[color:var(--text-quaternary)]">
                         {index + 1}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="text-sm font-medium text-[var(--text-primary)]">
+                        <div className="text-sm font-medium text-[color:var(--text-primary)]">
                           {providerLabel(providerId)}
                         </div>
-                        <div className="mt-0.5 text-xs text-[var(--text-quaternary)]">
+                        <div className="mt-0.5 text-xs text-[color:var(--text-quaternary)]">
                           {connection?.verified ? t("generated.controlPlane.verificado_2e7257fc") : t("generated.controlPlane.ainda_nao_verificado_3848ed3a")}
                         </div>
                       </div>
@@ -2199,7 +2199,7 @@ export function SectionModels() {
             error={findFieldError(modelsErrors, "models.max_budget_usd")?.message}
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={0}
               step={0.01}
@@ -2220,7 +2220,7 @@ export function SectionModels() {
             error={findFieldError(modelsErrors, "models.max_total_budget_usd")?.message}
           >
             <input
-              className="field-shell text-[var(--text-primary)]"
+              className="field-shell text-[color:var(--text-primary)]"
               type="number"
               min={0}
               step={0.01}
@@ -2289,15 +2289,15 @@ export function SectionModels() {
 
       {selectedGeneralEffortModel && (
         <SettingsFieldGroup title={t("modelEffort.sectionTitle")}>
-          <p className="-mt-2 text-xs text-[var(--text-tertiary)] leading-relaxed">
+          <p className="-mt-2 text-xs text-[color:var(--text-tertiary)] leading-relaxed">
             {t("modelEffort.sectionDescription")}
           </p>
           <div className="flex flex-col gap-2 py-3 sm:flex-row sm:items-center sm:gap-6">
             <div className="flex min-w-0 flex-1 flex-col">
-              <span className="text-sm font-medium text-[var(--text-primary)]">
+              <span className="text-sm font-medium text-[color:var(--text-primary)]">
                 {selectedGeneralEffortModel.modelTitle}
               </span>
-              <span className="text-xs text-[var(--text-tertiary)]">
+              <span className="text-xs text-[color:var(--text-tertiary)]">
                 {selectedGeneralEffortModel.providerTitle}
               </span>
             </div>
@@ -2327,16 +2327,16 @@ export function SectionModels() {
         <div className="flex items-center justify-between gap-4 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-4 py-3">
           <div className="flex min-w-0 items-center gap-3">
             <span
-              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-strong)] text-[var(--text-primary)]"
+              className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-strong)] text-[color:var(--text-primary)]"
               aria-hidden="true"
             >
               <AppleLogo size={18} />
             </span>
             <div className="flex min-w-0 flex-col">
-              <span className="text-sm font-medium text-[var(--text-primary)]">
+              <span className="text-sm font-medium text-[color:var(--text-primary)]">
                 {t("generated.controlPlane.aceleracao_metal_apple_silicon_7591b382")}
               </span>
-              <span className="text-xs text-[var(--text-tertiary)]">
+              <span className="text-xs text-[color:var(--text-tertiary)]">
                 {t("controlPlane.providerCopy.acceleration.metalDescription")}
               </span>
             </div>

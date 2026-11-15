@@ -247,13 +247,13 @@ export function IntegrationPermissionDetail({
       <button
         type="button"
         onClick={onBack}
-        className="flex items-center gap-2 text-sm text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+        className="flex items-center gap-2 text-sm text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)] transition-colors"
       >
         <ArrowLeft size={16} />
         <span>
           {t("generated.controlPlane.integracoes_fe756444")}
-          <span className="mx-1 text-[var(--text-quaternary)]">/</span>
-          <span className="text-[var(--text-primary)]">{entry.label}</span>
+          <span className="mx-1 text-[color:var(--text-quaternary)]">/</span>
+          <span className="text-[color:var(--text-primary)]">{entry.label}</span>
         </span>
       </button>
 
@@ -274,7 +274,7 @@ export function IntegrationPermissionDetail({
           (entry.kind === "core" && entry.coreConnection?.connected) ? (
             <span
               aria-label={t("generated.controlPlane.conectado_e04915ac")}
-              className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg-strong)] text-[var(--tone-success-text)] shadow-[0_0_0_2px_var(--canvas)]"
+              className="pointer-events-none absolute -bottom-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg-strong)] text-[color:var(--tone-success-text)] shadow-[0_0_0_2px_var(--canvas)]"
             >
               <Check size={12} strokeWidth={2.5} />
             </span>
@@ -283,10 +283,10 @@ export function IntegrationPermissionDetail({
 
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="text-lg font-bold text-[var(--text-primary)]">
+            <span className="text-lg font-bold text-[color:var(--text-primary)]">
               {entry.label}
             </span>
-            <span className="rounded-md border border-[var(--border-subtle)] px-2 py-0.5 text-[10px] font-medium text-[var(--text-quaternary)]">
+            <span className="rounded-md border border-[var(--border-subtle)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--text-quaternary)]">
               {entry.kind === "mcp" ? "MCP" : t("generated.controlPlane.core_db195f1f")}
             </span>
           </div>
@@ -298,7 +298,7 @@ export function IntegrationPermissionDetail({
             <button
               type="button"
               onClick={onDisconnect}
-              className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
+              className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[color:var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
             >
               {t("generated.controlPlane.desconectar_d1a164af")}
             </button>
@@ -307,7 +307,7 @@ export function IntegrationPermissionDetail({
               type="button"
               onClick={onConnectOAuth}
               disabled={isOAuthLoading}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] disabled:opacity-60"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[color:var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)] disabled:opacity-60"
             >
               {isOAuthLoading ? <Loader2 size={11} className="animate-spin" /> : null}
               {t("generated.controlPlane.conectar_a587e076")}
@@ -316,7 +316,7 @@ export function IntegrationPermissionDetail({
             <button
               type="button"
               onClick={() => setConnectModalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[color:var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
             >
               {t("generated.controlPlane.conectar_a587e076")}
             </button>
@@ -325,7 +325,7 @@ export function IntegrationPermissionDetail({
           <button
             type="button"
             onClick={onDisconnectCore}
-            className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
+            className="rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-medium text-[color:var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
           >
             {t("generated.controlPlane.desconectar_d1a164af")}
           </button>
@@ -333,7 +333,7 @@ export function IntegrationPermissionDetail({
           <button
             type="button"
             onClick={() => setConnectModalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-3 py-1.5 text-xs font-semibold text-[color:var(--text-primary)] transition-colors hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
           >
             {t("generated.controlPlane.conectar_a587e076")}
           </button>
@@ -342,7 +342,7 @@ export function IntegrationPermissionDetail({
 
       {/* 3. Description */}
       {entry.description && (
-        <p className="text-sm leading-relaxed text-[var(--text-tertiary)]">
+        <p className="text-sm leading-relaxed text-[color:var(--text-tertiary)]">
           {entry.description}
         </p>
       )}
@@ -360,14 +360,14 @@ export function IntegrationPermissionDetail({
                   : "var(--tone-danger-dot)",
             }}
           />
-          <span className="text-[var(--text-secondary)]">
+          <span className="text-[color:var(--text-secondary)]">
             {oauthStatus.account_label || t("generated.controlPlane.oauth_conectado_3a49aa03")}
           </span>
           {isTokenExpiring && (
             <button
               type="button"
               onClick={onConnectOAuth}
-              className="ml-auto text-[10px] font-medium text-[var(--tone-warning-text)] underline"
+              className="ml-auto text-[10px] font-medium text-[color:var(--tone-warning-text)] underline"
             >
               {t("generated.controlPlane.reconectar_5843f2c2")}
             </button>
@@ -377,7 +377,7 @@ export function IntegrationPermissionDetail({
 
       {entry.kind === "mcp" && entry.mcpConnection && (
         <div className="flex flex-col gap-1.5">
-          <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-tertiary)]">
+          <div className="flex flex-wrap items-center gap-3 text-xs text-[color:var(--text-tertiary)]">
             <span>
               {entry.mcpCapabilitySummary?.tool_count ?? entry.mcpSummary?.total ?? entry.mcpTools?.length ?? 0} {translate("generated.controlPlane.tools_c8224289")}</span>
             <span>
@@ -389,7 +389,7 @@ export function IntegrationPermissionDetail({
                 type="button"
                 onClick={onDiscoverTools}
                 disabled={isDiscovering}
-                className="ml-auto inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-60"
+                className="ml-auto inline-flex items-center gap-1 rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-60"
               >
                 <RefreshCw size={11} className={isDiscovering ? "animate-spin" : ""} />
                 {t("generated.controlPlane.re_descobrir_c5febe99")}
@@ -399,14 +399,14 @@ export function IntegrationPermissionDetail({
               <button
                 type="button"
                 onClick={onRemoveCustomServer}
-                className="inline-flex items-center gap-1 rounded-lg border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-2 py-1 text-[11px] text-[var(--tone-danger-text)] transition-colors hover:bg-[var(--tone-danger-bg-strong)]"
+                className="inline-flex items-center gap-1 rounded-lg border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-2 py-1 text-[11px] text-[color:var(--tone-danger-text)] transition-colors hover:bg-[var(--tone-danger-bg-strong)]"
               >
                 {t("generated.controlPlane.remover_5465770e")}
               </button>
             ) : null}
           </div>
           {entry.mcpDiscoveryError ? (
-            <p className="text-[11px] font-medium text-[var(--tone-danger-dot)]">{entry.mcpDiscoveryError}</p>
+            <p className="text-[11px] font-medium text-[color:var(--tone-danger-dot)]">{entry.mcpDiscoveryError}</p>
           ) : null}
         </div>
       )}
@@ -415,7 +415,7 @@ export function IntegrationPermissionDetail({
         <div className="flex flex-col gap-2">
           {coreConnection?.connected ? (
             <>
-              <div className="flex flex-wrap items-center gap-3 text-xs text-[var(--text-tertiary)]">
+              <div className="flex flex-wrap items-center gap-3 text-xs text-[color:var(--text-tertiary)]">
                 {coreConnection?.auth_method ? <span>{coreConnection.auth_method}</span> : null}
                 {coreConnection?.account_label ? <span>{coreConnection.account_label}</span> : null}
                 {coreConnection?.last_verified_at ? (
@@ -425,7 +425,7 @@ export function IntegrationPermissionDetail({
                   <button
                     type="button"
                     onClick={onImportDefault}
-                    className="ml-auto rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
+                    className="ml-auto rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
                   >
                     {t("generated.controlPlane.importar_padrao_53349722")}
                   </button>
@@ -434,7 +434,7 @@ export function IntegrationPermissionDetail({
                   <button
                     type="button"
                     onClick={onConnectCore}
-                    className="rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
+                    className="rounded-lg border border-[var(--border-subtle)] px-2 py-1 text-[11px] font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)]"
                   >
                     {t("generated.controlPlane.editar_28e2e08e")}
                   </button>
@@ -444,13 +444,13 @@ export function IntegrationPermissionDetail({
           ) : null}
 
           {!coreConnection?.connected && coreDefaultConnection?.connected ? (
-            <p className="text-xs text-[var(--text-tertiary)]">
+            <p className="text-xs text-[color:var(--text-tertiary)]">
               {t("generated.controlPlane.ha_um_padrao_do_sistema_disponivel_para_impo_3e678c07")}
             </p>
           ) : null}
 
           {coreConnection?.last_error ? (
-            <p className="text-xs text-[var(--tone-warning-text)]">{coreConnection.last_error}</p>
+            <p className="text-xs text-[color:var(--tone-warning-text)]">{coreConnection.last_error}</p>
           ) : null}
 
         </div>
@@ -459,7 +459,7 @@ export function IntegrationPermissionDetail({
       {/* 4. Tool permissions header */}
       <div className="flex flex-col gap-1">
         <span className="eyebrow">{t("generated.controlPlane.permissoes_de_ferramentas_a6f3858e")}</span>
-        <span className="text-xs text-[var(--text-quaternary)]">
+        <span className="text-xs text-[color:var(--text-quaternary)]">
           {t("generated.controlPlane.escolha_quando_o_agente_pode_executar_cada_f_64275c47")}
         </span>
       </div>
@@ -501,9 +501,9 @@ export function IntegrationPermissionDetail({
             <div className="flex items-center gap-2 py-6 justify-center">
               <Loader2
                 size={16}
-                className="animate-spin text-[var(--text-tertiary)]"
+                className="animate-spin text-[color:var(--text-tertiary)]"
               />
-              <span className="text-sm text-[var(--text-tertiary)]">
+              <span className="text-sm text-[color:var(--text-tertiary)]">
                 {t("generated.controlPlane.descobrindo_ferramentas_56130d2f")}
               </span>
             </div>
@@ -512,7 +512,7 @@ export function IntegrationPermissionDetail({
           {/* No tools state */}
           {!isDiscovering && !hasMcpTools && entry.mcpConnection && (
             <div className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-6 text-center">
-              <p className="text-sm text-[var(--text-quaternary)]">
+              <p className="text-sm text-[color:var(--text-quaternary)]">
                 {t("generated.controlPlane.nenhuma_ferramenta_descoberta_6a540f4c")}
               </p>
               {onDiscoverTools && (
@@ -521,7 +521,7 @@ export function IntegrationPermissionDetail({
                   onClick={onDiscoverTools}
                   className={cn(
                     "inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)]",
-                    "px-3 py-1.5 text-xs font-medium text-[var(--text-secondary)]",
+                    "px-3 py-1.5 text-xs font-medium text-[color:var(--text-secondary)]",
                     "transition-colors hover:bg-[var(--surface-hover)]",
                   )}
                 >
@@ -634,7 +634,7 @@ export function IntegrationPermissionDetail({
             />
           ) : (
             <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-6 text-center">
-              <p className="text-sm text-[var(--text-quaternary)]">
+              <p className="text-sm text-[color:var(--text-quaternary)]">
                 {entry.coreGrant?.enabled
                   ? t("generated.controlPlane.integracao_habilitada_sem_capacidades_granul_690b872d")
                   : t("generated.controlPlane.integracao_desabilitada_07c05c3d")}

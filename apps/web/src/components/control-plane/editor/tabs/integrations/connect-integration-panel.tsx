@@ -208,10 +208,10 @@ export const ConnectIntegrationPanel = forwardRef<
   return (
     <div className="flex flex-col gap-3">
       {/* Always-on status copy so the body is never blank. */}
-      <p className="text-xs leading-5 text-[var(--text-tertiary)]">{statusMessage}</p>
+      <p className="text-xs leading-5 text-[color:var(--text-tertiary)]">{statusMessage}</p>
 
       {oauthStatus?.last_error ? (
-        <p className="text-xs font-medium text-[var(--tone-danger-dot)]">{oauthStatus.last_error}</p>
+        <p className="text-xs font-medium text-[color:var(--tone-danger-dot)]">{oauthStatus.last_error}</p>
       ) : null}
 
       {/* Manual form fields — collapsed under "Credenciais manuais" when OAuth is preferred */}
@@ -221,7 +221,7 @@ export const ConnectIntegrationPanel = forwardRef<
             <button
               type="button"
               onClick={() => setShowAdvanced((prev) => !prev)}
-              className="flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+              className="flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left text-xs text-[color:var(--text-secondary)] hover:bg-[var(--surface-hover)]"
             >
               <span>{t("generated.controlPlane.credenciais_manuais_8d6b692a")}</span>
               {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -248,7 +248,7 @@ export const ConnectIntegrationPanel = forwardRef<
           <button
             type="button"
             onClick={() => setShowJson((prev) => !prev)}
-            className="flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]"
+            className="flex w-full items-center justify-between gap-3 rounded-xl px-4 py-3 text-left text-xs text-[color:var(--text-secondary)] hover:bg-[var(--surface-hover)]"
           >
             <span>{t("generated.controlPlane.json_7106b990")}</span>
             {showJson ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
@@ -265,7 +265,7 @@ export const ConnectIntegrationPanel = forwardRef<
                 type="button"
                 onClick={handleSubmitJson}
                 disabled={submitting || !jsonRaw.trim()}
-                className="inline-flex h-9 items-center justify-center gap-2 self-start rounded-lg border border-[var(--border-subtle)] px-4 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-60"
+                className="inline-flex h-9 items-center justify-center gap-2 self-start rounded-lg border border-[var(--border-subtle)] px-4 text-sm font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] disabled:opacity-60"
               >
                 {submitting ? <Loader2 size={13} className="animate-spin" /> : null}
                 {t("generated.controlPlane.aplicar_f2badfb2")}
@@ -275,14 +275,14 @@ export const ConnectIntegrationPanel = forwardRef<
         </div>
       ) : null}
 
-      {error ? <p className="text-xs font-medium text-[var(--tone-danger-dot)]">{error}</p> : null}
+      {error ? <p className="text-xs font-medium text-[color:var(--tone-danger-dot)]">{error}</p> : null}
 
       {docsUrl ? (
         <a
           href={docsUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 self-start text-xs text-[var(--text-tertiary)] hover:text-[var(--text-secondary)]"
+          className="inline-flex items-center gap-1.5 self-start text-xs text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)]"
         >
           <ExternalLink size={11} />
           {t("generated.controlPlane.documentacao_9db82914")}
@@ -310,9 +310,9 @@ function FieldRow({
 
   return (
     <label className="flex flex-col gap-1.5">
-      <span className="text-xs font-medium text-[var(--text-secondary)]">{field.label}</span>
+      <span className="text-xs font-medium text-[color:var(--text-secondary)]">{field.label}</span>
       {isSwitch ? (
-        <label className="flex items-center gap-2 text-sm text-[var(--text-primary)]">
+        <label className="flex items-center gap-2 text-sm text-[color:var(--text-primary)]">
           <input
             type="checkbox"
             checked={state.value === "true"}
