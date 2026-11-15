@@ -86,8 +86,8 @@ function getPayloadString(job: CronJob, key: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-function getRoutineName(job: CronJob): string {
-  return job.summary?.trim() || getPayloadString(job, "name") || truncateText(job.command, 56);
+export function getRoutineName(job: CronJob): string {
+  return getPayloadString(job, "name") || job.summary?.trim() || truncateText(job.command, 56);
 }
 
 function getRoutineSummary(job: CronJob): string {

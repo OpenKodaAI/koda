@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import patch
 
@@ -12,6 +13,8 @@ from aiohttp.test_utils import AioHTTPTestCase
 from koda.services.runtime.api import (
     _IDEMPOTENCY_CACHE,
     _runtime_schedule_create,
+    _runtime_schedule_preview,
+    _runtime_schedule_update,
 )
 
 
@@ -279,3 +282,129 @@ def test_idempotency_cache_does_not_grow_unbounded() -> None:
         _idempotency_remember(user_id=1, key=f"k{i}", job_id=i)
     assert len(_IDEMPOTENCY_CACHE) == 10
     _IDEMPOTENCY_CACHE.clear()
+
+
+class RuntimeScheduleUpdateTests(AioHTTPTestCase):
+    """D-122: a version conflict answers 409 so the routines page can reload the routine."""
+
+    async def get_application(self) -> web.Application:
+        app = web.Application()
+        app.router.add_patch("/api/runtime/schedules/{job_id:\\d+}", _runtime_schedule_update)
+        return app
+
+    async def setUpAsync(self) -> None:
+        await super().setUpAsync()
+        self._patches = [
+            patch("koda.services.runtime.api.RuntimeAccessService", _StubRuntimeAccessService),
+            patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "test-token"),
+        ]
+        for entry in self._patches:
+            entry.start()
+
+    async def tearDownAsync(self) -> None:
+        for entry in self._patches:
+            entry.stop()
+        await super().tearDownAsync()
+
+    async def _patch_job(self, stored_job: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        with patch("koda.services.scheduled_jobs._get_job", return_value=stored_job):
+            async with self.client.patch(
+                "/api/runtime/schedules/7",
+                data=json.dumps(
+                    {"user_id": 1, "expected_config_version": 1, "patch": {"name": "Renamed"}},
+                ),
+                headers={"X-Runtime-Token": "any", "Content-Type": "application/json"},
+            ) as response:
+                return response.status, await response.json()
+
+    async def test_version_conflict_returns_409_with_the_backend_message(self) -> None:
+        status, payload = await self._patch_job({"id": 7, "status": "active", "config_version": 2})
+        assert status == 409
+        assert payload["ok"] is False
+        assert payload["message"].startswith("Job was updated by another actor.")
+
+    async def test_other_refusals_stay_400(self) -> None:
+        status, payload = await self._patch_job({"id": 7, "status": "archived", "config_version": 1})
+        assert status == 400
+        assert payload["message"] == "Archived jobs cannot be edited."
+
+
+class RuntimeSchedulePreviewTests(AioHTTPTestCase):
+    """D-080/D-081: the editor validates schedules and previews runs through the scheduler."""
+
+    _NOW = datetime(2026, 11, 15, 10, 2, tzinfo=UTC)
+
+    async def get_application(self) -> web.Application:
+        app = web.Application()
+        app.router.add_get("/api/runtime/schedules/preview", _runtime_schedule_preview)
+        return app
+
+    async def setUpAsync(self) -> None:
+        await super().setUpAsync()
+        self._patches = [
+            patch("koda.services.runtime.api.RuntimeAccessService", _StubRuntimeAccessService),
+            patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "test-token"),
+            patch("koda.services.scheduled_jobs._utcnow", return_value=self._NOW),
+        ]
+        for entry in self._patches:
+            entry.start()
+
+    async def tearDownAsync(self) -> None:
+        for entry in self._patches:
+            entry.stop()
+        await super().tearDownAsync()
+
+    async def _preview(self, **params: str) -> tuple[int, dict[str, Any]]:
+        async with self.client.get(
+            "/api/runtime/schedules/preview",
+            params=params,
+            headers={"X-Runtime-Token": "any"},
+        ) as response:
+            return response.status, await response.json()
+
+    async def test_step_cron_is_accepted_and_matches_the_scheduler_next_run(self) -> None:
+        from koda.services import scheduled_jobs
+
+        status, payload = await self._preview(trigger_type="cron", schedule_expr="*/5 * * * *", timezone="UTC")
+        assert status == 200, payload
+        assert payload["next_runs"] == [
+            "2026-11-15T10:05:00+00:00",
+            "2026-11-15T10:10:00+00:00",
+            "2026-11-15T10:15:00+00:00",
+        ]
+        expected = scheduled_jobs._validated_next_run(
+            job_type="agent_query", trigger_type="cron", schedule_expr="*/5 * * * *", timezone_name="UTC"
+        )
+        assert payload["next_runs"][0] == expected.isoformat()
+
+    async def test_ranges_and_lists_are_accepted(self) -> None:
+        status, payload = await self._preview(trigger_type="cron", schedule_expr="0 9-17 * * 1,3,5", timezone="UTC")
+        assert status == 200, payload
+        assert len(payload["next_runs"]) == 3
+
+    async def test_cron_runs_in_the_selected_timezone(self) -> None:
+        status, payload = await self._preview(
+            trigger_type="cron", schedule_expr="0 9 * * *", timezone="America/Sao_Paulo"
+        )
+        assert status == 200, payload
+        assert payload["next_runs"][0] == "2026-11-15T12:00:00+00:00"
+
+    async def test_interval_previews_consecutive_runs(self) -> None:
+        status, payload = await self._preview(trigger_type="interval", schedule_expr="1h", timezone="UTC")
+        assert status == 200, payload
+        assert payload["next_runs"] == [
+            "2026-11-15T11:02:00+00:00",
+            "2026-11-15T12:02:00+00:00",
+            "2026-11-15T13:02:00+00:00",
+        ]
+
+    async def test_invalid_cron_answers_422_with_the_reason(self) -> None:
+        status, payload = await self._preview(trigger_type="cron", schedule_expr="61 * * * *", timezone="UTC")
+        assert status == 422
+        assert payload["field"] == "schedule_expr"
+        assert "Invalid schedule expression" in payload["error"]
+
+    async def test_unknown_trigger_type_answers_422(self) -> None:
+        status, payload = await self._preview(trigger_type="weekly", schedule_expr="x", timezone="UTC")
+        assert status == 422
+        assert payload["field"] == "trigger_type"

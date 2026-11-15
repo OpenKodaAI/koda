@@ -69,6 +69,7 @@ RUNTIME_ROUTE_MATRIX: dict[tuple[str, str], Decision] = {
     ("GET", "/api/runtime/environments/{env_id}"): Decision(READ),
     ("GET", "/api/runtime/schedules"): Decision(READ),
     ("GET", "/api/runtime/schedules/{job_id}"): Decision(READ),
+    ("GET", "/api/runtime/schedules/preview"): Decision(READ),
     ("GET", "/api/runtime/tasks/{task_id}"): Decision(READ),
     ("GET", "/api/runtime/tasks/{task_id}/run-graph"): Decision(READ),
     ("GET", "/api/runtime/tasks/{task_id}/replay"): Decision(READ),

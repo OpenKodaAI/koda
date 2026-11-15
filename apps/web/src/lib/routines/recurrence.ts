@@ -1,18 +1,4 @@
-import {
-  addDays,
-  addHours,
-  addMonths,
-  addWeeks,
-  setDay,
-  setDate,
-  setHours,
-  setMilliseconds,
-  setMinutes,
-  setSeconds,
-  startOfHour,
-} from "date-fns";
-
-export type RecurrencePreset = "hourly" | "daily" | "weekly" | "monthly" | "custom";
+export type RecurrencePreset = "hourly" | "daily" | "weekly" | "monthly" | "interval" | "custom";
 
 export interface RecurrenceFields {
   preset: RecurrencePreset;
@@ -103,47 +89,6 @@ export function cronToPreset(expr: string): RecurrenceFields | null {
   return null;
 }
 
-function withTime(date: Date, hour: number, minute: number): Date {
-  return setMilliseconds(setSeconds(setMinutes(setHours(date, hour), minute), 0), 0);
-}
-
-export function computeNextRuns(fields: RecurrenceFields, count = 3, now: Date = new Date()): Date[] {
-  if (fields.preset === "custom") {
-    return [];
-  }
-
-  if (fields.preset === "hourly") {
-    const base = startOfHour(now);
-    const first = base.getTime() <= now.getTime() ? addHours(base, 1) : base;
-    return Array.from({ length: count }, (_, index) => addHours(first, index));
-  }
-
-  const { hour, minute } = parseTime(fields.time);
-
-  if (fields.preset === "daily") {
-    const candidate = withTime(now, hour, minute);
-    const first = candidate.getTime() <= now.getTime() ? addDays(candidate, 1) : candidate;
-    return Array.from({ length: count }, (_, index) => addDays(first, index));
-  }
-
-  if (fields.preset === "weekly") {
-    const targetDay = Math.min(6, Math.max(0, fields.weekday));
-    let candidate = setDay(withTime(now, hour, minute), targetDay, { weekStartsOn: 0 });
-    if (candidate.getTime() <= now.getTime()) {
-      candidate = addWeeks(candidate, 1);
-    }
-    return Array.from({ length: count }, (_, index) => addWeeks(candidate, index));
-  }
-
-  // monthly
-  const targetDay = Math.min(28, Math.max(1, fields.day));
-  let candidate = setDate(withTime(now, hour, minute), targetDay);
-  if (candidate.getTime() <= now.getTime()) {
-    candidate = addMonths(candidate, 1);
-  }
-  return Array.from({ length: count }, (_, index) => addMonths(candidate, index));
-}
-
 export function defaultRecurrenceFields(): RecurrenceFields {
   return {
     preset: "daily",
@@ -153,34 +98,53 @@ export function defaultRecurrenceFields(): RecurrenceFields {
   };
 }
 
-export type CronCellKey = "minute" | "hour" | "day" | "month" | "weekday";
+// One-shot times are wall-clock "YYYY-MM-DDTHH:mm" values in the routine's timezone, which can
+// differ from the browser's (D-081). Cron and interval previews come from the scheduler itself.
 
-export interface CronValidationError {
-  cell: CronCellKey;
-  code: "invalidChar" | "dayOutOfRange" | "monthOutOfRange" | "weekdayOutOfRange";
+function zonedParts(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((entry) => entry.type === type)?.value ?? 0);
+  return {
+    year: part("year"),
+    month: part("month"),
+    day: part("day"),
+    hour: part("hour"),
+    minute: part("minute"),
+    second: part("second"),
+  };
 }
 
-const CELL_ORDER: CronCellKey[] = ["minute", "hour", "day", "month", "weekday"];
+function zoneOffsetMs(date: Date, timeZone: string): number {
+  const p = zonedParts(date, timeZone);
+  const wallAsUtc = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+  return wallAsUtc - (date.getTime() - date.getMilliseconds());
+}
 
-export function validateCron(cron: string): CronValidationError | null {
-  const segments = (cron ?? "").trim().split(/\s+/);
-  for (let i = 0; i < CELL_ORDER.length; i += 1) {
-    const cell = CELL_ORDER[i];
-    const value = segments[i] ?? "*";
-    if (value === "*") continue;
-    if (!/^\d+$/.test(value)) {
-      return { cell, code: "invalidChar" };
-    }
-    const n = Number(value);
-    if (cell === "day" && n < 1) {
-      return { cell, code: "dayOutOfRange" };
-    }
-    if (cell === "month" && n < 1) {
-      return { cell, code: "monthOutOfRange" };
-    }
-    if (cell === "weekday" && n > 6) {
-      return { cell, code: "weekdayOutOfRange" };
-    }
-  }
-  return null;
+/** The wall-clock time of `date` in `timeZone`, as "YYYY-MM-DDTHH:mm". */
+export function utcToZonedWallTime(date: Date, timeZone: string): string {
+  const p = zonedParts(date, timeZone);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}T${pad(p.hour)}:${pad(p.minute)}`;
+}
+
+/** The instant at which the wall clock in `timeZone` reads `wall` ("YYYY-MM-DDTHH:mm"). */
+export function zonedWallTimeToUtc(wall: string, timeZone: string): Date {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(wall.trim());
+  if (!match) return new Date(Number.NaN);
+  const [, year, month, day, hour, minute] = match.map(Number);
+  const wallAsUtc = Date.UTC(year, month - 1, day, hour, minute);
+  // Two passes settle the offset when the first guess lands across a DST change.
+  let instant = wallAsUtc - zoneOffsetMs(new Date(wallAsUtc), timeZone);
+  instant = wallAsUtc - zoneOffsetMs(new Date(instant), timeZone);
+  return new Date(instant);
 }

@@ -1,8 +1,27 @@
 import { describe, expect, it } from "vitest";
 import {
+  patchScheduleBodySchema,
   scheduleErrorMessage,
   scheduleValidationNotQueuedMessage,
 } from "@/lib/contracts/schedules";
+
+describe("patchScheduleBodySchema", () => {
+  const body = (name: string) => ({
+    user_id: 1,
+    expected_config_version: 3,
+    reason: "Updated from the dashboard.",
+    patch: { name },
+  });
+
+  // D-063: a rename travels as patch.name and is validated like the create payload's name.
+  it("accepts a routine name and trims it", () => {
+    expect(patchScheduleBodySchema.parse(body("  Weekly audit  ")).patch.name).toBe("Weekly audit");
+  });
+
+  it("rejects a name longer than the create payload allows", () => {
+    expect(patchScheduleBodySchema.safeParse(body("x".repeat(121))).success).toBe(false);
+  });
+});
 
 describe("scheduleErrorMessage", () => {
   it("shows the scheduler's refusal message when the action answers ok:false", () => {
