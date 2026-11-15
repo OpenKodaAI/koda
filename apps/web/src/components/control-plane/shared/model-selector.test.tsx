@@ -67,6 +67,40 @@ describe("ModelSelector", () => {
     expect(onChange).toHaveBeenCalledWith("claude:claude-sonnet-4-5");
   });
 
+  // D-320: the panel closed on Escape from a document bubble listener without preventDefault(),
+  // so a dialog around it (useEscapeToClose since D-277, a Radix Dialog), which only ignores an
+  // Escape another handler already took, closed on the same Escape.
+  it("closes on Escape and marks the Escape handled, so a dialog around it stays open", () => {
+    render(
+      <ModelSelector
+        label="Modelo"
+        value=""
+        onChange={vi.fn()}
+        providers={{ claude: { title: "Anthropic", category: "general", available_models: ["claude-sonnet-4-5"] } }}
+        enabledProviders={["claude"]}
+      />,
+    );
+    const dialogSaw: boolean[] = [];
+    // Where a dialog's Escape listener sits: the document, bubble phase.
+    const dialogListener = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dialogSaw.push(event.defaultPrevented);
+    };
+    document.addEventListener("keydown", dialogListener);
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Modelo" }));
+      const search = screen.getByPlaceholderText("Buscar modelo...");
+
+      fireEvent.keyDown(search, { key: "Escape" });
+
+      expect(screen.queryByPlaceholderText("Buscar modelo...")).not.toBeInTheDocument();
+      // With the panel closed, the next Escape is the dialog's.
+      fireEvent.keyDown(document.body, { key: "Escape" });
+      expect(dialogSaw).toEqual([true, false]);
+    } finally {
+      document.removeEventListener("keydown", dialogListener);
+    }
+  });
+
   it("keeps unavailable settings options visible but not selectable", () => {
     const onChange = vi.fn();
 

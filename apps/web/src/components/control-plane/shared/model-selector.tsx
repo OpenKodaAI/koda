@@ -553,13 +553,17 @@ export function ModelSelector({
   }, [open]);
 
   /* ---- Close on Escape ---- */
+  // Capture phase, ahead of a dialog's own Escape listener, and marked handled, so
+  // Escape here closes only this panel and not a dialog around it (D-320).
   useEffect(() => {
     if (!open) return;
     function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      setOpen(false);
     }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
+    window.addEventListener("keydown", handleKey, true);
+    return () => window.removeEventListener("keydown", handleKey, true);
   }, [open]);
 
   /* ---- Panel position: auto up/down ---- */
