@@ -894,8 +894,8 @@ class TestIsWriteTool:
     """Test the _is_write_tool classifier used by the agent loop."""
 
     @pytest.mark.parametrize("tool_name", ["gws", "jira", "confluence", "gh", "glab", "aws"])
-    def test_removed_legacy_tools_are_not_write_classified(self, tool_name: str):
-        assert _is_write_tool(tool_name, {"args": "list"}) is False
+    def test_removed_legacy_tools_are_write_classified_like_any_unknown_tool(self, tool_name: str):
+        assert _is_write_tool(tool_name, {"args": "list"}) is True
 
     def test_web_search_is_read(self):
         assert _is_write_tool("web_search", {}) is False
@@ -918,9 +918,41 @@ class TestIsWriteTool:
     def test_browser_cookies_set_is_write(self):
         assert _is_write_tool("browser_cookies", {"action": "set", "name": "x", "value": "y"}) is True
 
-    def test_unknown_tool_is_not_write(self):
-        """Unknown tools not in any set default to False."""
-        assert _is_write_tool("some_unknown_tool", {}) is False
+    @pytest.mark.parametrize("tool_name", ["some_unknown_tool", "legacy_plugin_send", "hello_world"])
+    def test_uncatalogued_tool_is_write_like_the_policy_envelope(self, tool_name: str):
+        """Uncatalogued, non-skill-package tools are writes, as the action envelope classifies them."""
+        envelope, _ = resolve_action_envelope(tool_name, {}, None)
+        assert envelope.catalogued is False
+        assert envelope.access_level != "read"
+        assert _is_write_tool(tool_name, {}) is True
+
+    @pytest.mark.asyncio
+    async def test_dry_run_and_supervised_gates_apply_to_uncatalogued_plugin_tools(self):
+        """A legacy plugin handler outside _TOOL_HANDLERS is gated like any other write."""
+        from koda.utils.approval import _execution_approved
+
+        handler = AsyncMock(return_value=AgentToolResult(tool="legacy_plugin_send", success=True, output="sent"))
+        registry = MagicMock()
+        registry.get_handler.return_value = handler
+        registry.get_tool_def.return_value = None
+        call = AgentToolCall(tool="legacy_plugin_send", params={"to": "x"}, raw_match="")
+        with (
+            patch("koda.services.tool_dispatcher.PLUGIN_SYSTEM_ENABLED", True),
+            patch("koda.plugins.get_registry", return_value=registry),
+            patch("koda.skills._package.ensure_installed_package_tools_registered"),
+        ):
+            dry_run = await execute_tool(call, _make_ctx(dry_run=True))
+            token = _execution_approved.set(False)
+            try:
+                supervised = await execute_tool(call, _make_ctx(agent_mode="supervised"))
+            finally:
+                _execution_approved.reset(token)
+
+        assert dry_run.success is False
+        assert dry_run.metadata.get("dry_run_blocked") is True
+        assert supervised.success is False
+        assert supervised.metadata.get("requires_approval") is True
+        handler.assert_not_awaited()
 
     # Cache/Script tools read/write classification
     def test_script_save_is_write(self):

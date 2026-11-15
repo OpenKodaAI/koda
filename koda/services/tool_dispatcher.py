@@ -1042,7 +1042,12 @@ def format_tool_results(results: list[AgentToolResult]) -> str:
 
 
 def _is_write_tool(tool: str, params: dict) -> bool:
-    """Determine if a tool call is a write operation."""
+    """Determine if a tool call is a write operation.
+
+    Tools with no read/write metadata (uncatalogued, non-skill-package tools such
+    as legacy plugin handlers) fall through to the integration resolution, which
+    classifies them as writes, as the policy envelope does.
+    """
     if tool in _WRITE_TOOLS:
         return True
     if tool in _READ_TOOLS:
@@ -1060,8 +1065,6 @@ def _is_write_tool(tool: str, params: dict) -> bool:
         definition = get_tool_definition(tool)
         if definition is not None and definition.source == "skill_package":
             return definition.access_level != "read"
-    if tool not in _TOOL_HANDLERS:
-        return False
     resolution = resolve_integration_action(tool, params)
     return resolution.access_level != "read"
 
