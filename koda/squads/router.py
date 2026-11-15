@@ -35,6 +35,13 @@ _HANDOFF_COMPLETION_GRACE_S = 30.0
 # A handoff requested longer ago than this is not swept: the sweep completes a check lost to a
 # restart, a cancel or a refused dispatch, not a request nobody answered long ago.
 _HANDOFF_COMPLETION_MAX_AGE_S = 24 * 3600.0
+# A refused synthesis a runtime took for its retry is taken again by any runtime once this long
+# has passed, so a retry cut off by a cancel or a crash does not leave it unrun (D-336). It is
+# well above the time a retry takes, whose dispatch waits at most 20 s for the runtime API.
+_SYNTHESIS_RETRY_LEASE_S = 300.0
+# A synthesis refused longer ago than this is not retried, so the sweep reads only recent events,
+# on the created_at index, not the whole of squad_messages (D-336).
+_SYNTHESIS_RETRY_MAX_AGE_S = 7 * 24 * 3600.0
 
 
 def _decode_json_object(value: Any) -> dict[str, Any]:
@@ -418,7 +425,9 @@ class SquadRouter:
         string) for the cap it was sent at, ``budget_alert_80_cap``; a raised or lowered cap is
         alerted again at 80% of the new cap (D-341), and a flag left by older code with no cap
         counts for the current one. Each room has its own error handling, so a room whose event
-        cannot be posted does not keep the rooms after it from their alert or pause (D-340).
+        cannot be posted does not keep the rooms after it from their alert or pause (D-340). A
+        room's alert and pause are independent: a room whose alert fails is still paused at its
+        cap, and its ``updated_at`` is bumped so it goes behind the rooms after it.
         """
         if self._thread_store is None:
             return 0, 0
@@ -468,22 +477,33 @@ class SquadRouter:
         cap = float(row["budget_usd_cap"] or 0)
         alerts = 0
         if not row["alert_80_sent"]:
-            await self._emit_system_event(
-                thread_id=thread_id,
-                event_type="budget_80_percent",
-                content=f"[budget_80_percent] thread spend is ${cost:.4f} of ${cap:.4f}",
-                metadata={"event_type": "budget_80_percent", "cost_usd": cost, "budget_usd_cap": cap},
-            )
-            async with pool.acquire() as conn:
-                await conn.execute(
-                    f"""UPDATE "{schema}"."squad_threads"
-                           SET metadata_json = metadata_json || jsonb_build_object(
-                                   'budget_alert_80_sent', true, 'budget_alert_80_cap', budget_usd_cap),
-                               updated_at = NOW()
-                         WHERE id = $1""",
-                    thread_id,
+            try:
+                await self._emit_system_event(
+                    thread_id=thread_id,
+                    event_type="budget_80_percent",
+                    content=f"[budget_80_percent] thread spend is ${cost:.4f} of ${cap:.4f}",
+                    metadata={"event_type": "budget_80_percent", "cost_usd": cost, "budget_usd_cap": cap},
                 )
-            alerts = 1
+                async with pool.acquire() as conn:
+                    await conn.execute(
+                        f"""UPDATE "{schema}"."squad_threads"
+                               SET metadata_json = metadata_json || jsonb_build_object(
+                                       'budget_alert_80_sent', true, 'budget_alert_80_cap', budget_usd_cap),
+                                   updated_at = NOW()
+                             WHERE id = $1""",
+                        thread_id,
+                    )
+                alerts = 1
+            except Exception:
+                # The room is still paused below when it is at its cap, and goes behind the rooms
+                # after it, so rooms whose alert keeps failing do not fill every batch (D-340).
+                log.exception("squad_router_budget_alert_failed", thread_id=thread_id)
+                with suppress(Exception):
+                    async with pool.acquire() as conn:
+                        await conn.execute(
+                            f'UPDATE "{schema}"."squad_threads" SET updated_at = NOW() WHERE id = $1',
+                            thread_id,
+                        )
         # An open thread at its cap runs no turn, so it is paused, and the room told why, each
         # time it is open there: a room an operator reopened at its cap is paused again. Only
         # the UPDATE that paused it posts the event, so a pause that won the race (the
@@ -607,24 +627,33 @@ class SquadRouter:
         """Run each coordinator synthesis a room refused again once the room can run (D-336).
 
         A cycle with no handoff records its refused synthesis as a ``synthesis_refused`` system
-        event with ``retry_status`` ``pending``. For each one in a room that is open and under its
-        cap, a runtime takes it (``running``) with one conditional UPDATE, so two runtimes do not
-        run it both, and runs the synthesis check again. A synthesis refused again is ``pending``
-        until the room can run again; otherwise it is ``done``, so it runs at most once.
+        event with ``retry_status`` ``pending``. For each one recorded in the last
+        ``_SYNTHESIS_RETRY_MAX_AGE_S`` in a room that is open and under its cap, a runtime takes it
+        (``running``, with ``retry_started_at``) with one conditional UPDATE, so two runtimes do
+        not run it both, and runs the synthesis check again. A synthesis refused again is
+        ``pending`` until the room can run again; otherwise it is ``done``, so it runs at most
+        once. A ``running`` retry that has not ended after ``_SYNTHESIS_RETRY_LEASE_S``, because
+        the router task was cancelled or the runtime stopped mid-retry, is taken again.
         Returns the number of syntheses run again.
         """
         if self._thread_store is None:
             return 0
         pool = await self._thread_store._ensure_pool()  # noqa: SLF001
         schema = self._thread_store._schema  # noqa: SLF001
+        # Pending, or taken by a retry whose lease has ended; {lease} is the lease's parameter.
+        retry_due = """(m.metadata_json->>'retry_status' = 'pending'
+                         OR (m.metadata_json->>'retry_status' = 'running'
+                             AND COALESCE((m.metadata_json->>'retry_started_at')::double precision, 0)
+                                 < extract(epoch FROM NOW()) - {lease}))"""
         async with pool.acquire() as conn:
             rows = await conn.fetch(
                 f"""SELECT m.id, m.thread_id, m.metadata_json
                       FROM "{schema}"."squad_messages" AS m
                       JOIN "{schema}"."squad_threads" AS th ON th.id = m.thread_id
-                     WHERE m.message_type = 'system_event'
+                     WHERE m.created_at > NOW() - make_interval(secs => $2)
+                       AND m.message_type = 'system_event'
                        AND m.metadata_json->>'event_type' = 'synthesis_refused'
-                       AND m.metadata_json->>'retry_status' = 'pending'
+                       AND {retry_due.format(lease="$3")}
                        AND th.status = 'open'
                        AND (th.budget_usd_cap IS NULL
                             OR th.budget_usd_cap <= 0
@@ -632,6 +661,8 @@ class SquadRouter:
                   ORDER BY m.id ASC
                      LIMIT $1""",
                 self._batch_size,
+                float(_SYNTHESIS_RETRY_MAX_AGE_S),
+                float(_SYNTHESIS_RETRY_LEASE_S),
             )
         from koda.services.queue_manager import retry_refused_squad_synthesis
 
@@ -639,11 +670,13 @@ class SquadRouter:
         for row in rows:
             async with pool.acquire() as conn:
                 taken = await conn.execute(
-                    f"""UPDATE "{schema}"."squad_messages"
-                           SET metadata_json = metadata_json || '{{"retry_status": "running"}}'::jsonb
-                         WHERE id = $1
-                           AND metadata_json->>'retry_status' = 'pending'""",
+                    f"""UPDATE "{schema}"."squad_messages" AS m
+                           SET metadata_json = m.metadata_json || jsonb_build_object(
+                                   'retry_status', 'running', 'retry_started_at', extract(epoch FROM NOW()))
+                         WHERE m.id = $1
+                           AND {retry_due.format(lease="$2")}""",
                     int(row["id"]),
+                    float(_SYNTHESIS_RETRY_LEASE_S),
                 )
             if taken != "UPDATE 1":
                 # Another runtime runs it.

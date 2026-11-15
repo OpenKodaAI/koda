@@ -741,3 +741,49 @@ async def test_after_a_cap_raise_crossing_80_percent_of_the_new_cap_alerts_once(
     assert (await router.sweep_once()).budget_alerts == 0
     alerts = _alert_events(await threads.thread_history(thread_id=room.id, limit=50))
     assert [event["metadata"]["budget_usd_cap"] for event in reversed(alerts)] == [1.0, 2.0]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_room_at_its_cap_whose_alert_cannot_be_posted_is_still_paused(threads: SquadThreadStore) -> None:
+    """The 80% alert and the pause of a room are independent (D-340)."""
+    room = await threads.create_thread(
+        workspace_id="acme", squad_id="build", title="room", budget_usd_cap=Decimal("1.00")
+    )
+    await _spend(threads, room.id, "1.00")
+
+    async def fail(**kwargs: Any) -> int:
+        raise RuntimeError("event store down")
+
+    with patch.object(threads, "post_thread_message", fail):
+        await _budget_router(threads).sweep_once()
+
+    paused = await threads.get_thread(room.id)
+    assert paused is not None and paused.status == "paused"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_rooms_whose_alert_keeps_failing_do_not_fill_every_batch(threads: SquadThreadStore) -> None:
+    """A room whose alert fails goes behind the rooms after it, so they are reached (D-340)."""
+    failing = await threads.create_thread(
+        workspace_id="acme", squad_id="build", title="failing room", budget_usd_cap=Decimal("1.00")
+    )
+    later = await threads.create_thread(
+        workspace_id="acme", squad_id="build", title="later room", budget_usd_cap=Decimal("1.00")
+    )
+    await _spend(threads, failing.id, "0.85")
+    await _spend(threads, later.id, "0.90")
+    post = threads.post_thread_message
+
+    async def post_or_fail(**kwargs: Any) -> int:
+        if kwargs["thread_id"] == failing.id:
+            raise RuntimeError("event store down")
+        return int(await post(**kwargs))
+
+    router = _budget_router(threads, batch_size=1)
+    with patch.object(threads, "post_thread_message", post_or_fail):
+        assert (await router.sweep_once()).budget_alerts == 0
+        assert (await router.sweep_once()).budget_alerts == 1
+
+    assert len(_alert_events(await threads.thread_history(thread_id=later.id, limit=50))) == 1

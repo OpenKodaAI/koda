@@ -98,7 +98,8 @@ Before broad rollout, run these in canary:
   do not keep the sweep from an open room at its cap. The 80% alert is sent
   once per cap: a room whose cap is raised or lowered is alerted again at 80%
   of the new cap. A room whose alert or pause event cannot be posted does not
-  stop the sweep for the rooms after it.
+  stop the sweep for the rooms after it; a room whose alert fails is still
+  paused at its cap, and goes behind the rooms after it in the next sweep.
   A thread that is not `open`, or whose spend reached its cap, runs no agent
   turn on any path: web, Telegram, the inbox, unblocked tasks or synthesis,
   and the queue worker checks again when it takes a queued or recovered turn.
@@ -120,8 +121,12 @@ Before broad rollout, run these in canary:
   is recorded as one `synthesis_refused` system event, and the first router
   sweep after the room can run again runs it, with the same idempotency key,
   at most once; a handoff cycle's synthesis is retried by the open-handoff
-  sweep. A finished task unblocks only the pending tasks of its own
-  coordination cycle; a pending task of an earlier cycle is not dispatched.
+  sweep. A retry cut off by a shutdown or a crash is taken again after 5
+  minutes. A synthesis refused more than 7 days ago is not retried. A
+  finished task unblocks only the pending tasks of its own coordination cycle
+  and the tasks agents created with `squad_task_create`, which belong to no
+  cycle; a pending task of an earlier cycle is not dispatched, and a task an
+  agent created unblocks only other tasks agents created.
   A dashboard post or Telegram topic message to such a thread is not routed;
   the sender is told why. A dashboard room update may set only `photo_url` in
   `metadata`; keys the server keeps, such as the budget flags, are refused.
