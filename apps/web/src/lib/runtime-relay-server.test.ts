@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import http from "node:http";
 import net, { type AddressInfo } from "node:net";
-import type { Duplex } from "node:stream";
+import { Duplex } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import { createDashboardServer } from "./dashboard-server.mjs";
@@ -36,6 +36,9 @@ type Upstream = {
 };
 
 const TOKEN = "operator-token";
+// What rawUpgrade sends as Host, and the Origin of a dashboard page served there.
+const DASHBOARD_HOST = "127.0.0.1";
+const DASHBOARD_ORIGIN = `http://${DASHBOARD_HOST}`;
 const tokenHash = (token: string) => createHash("sha256").update(token).digest("hex");
 const inFiveMinutes = () => new Date(Date.now() + 5 * 60_000).toISOString();
 // The Cookie header a browser sends once the login route has set the session
@@ -110,28 +113,40 @@ async function startDashboard(
   return port;
 }
 
+type UpgradeTarget = { host?: string; origin?: string | null };
+
+// The request head of a WebSocket upgrade. A browser always sends Origin, the
+// page's origin; `origin: null` leaves it out.
+function upgradeRequest(
+  path: string,
+  headers: string[],
+  { host = DASHBOARD_HOST, origin = DASHBOARD_ORIGIN }: UpgradeTarget,
+): string {
+  return [
+    `GET ${path} HTTP/1.1`,
+    `Host: ${host}`,
+    "Connection: Upgrade",
+    "Upgrade: websocket",
+    "Sec-WebSocket-Version: 13",
+    "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+    ...(origin === null ? [] : [`Origin: ${origin}`]),
+    ...headers,
+    "",
+    "",
+  ].join("\r\n");
+}
+
 // Sends a WebSocket upgrade by hand and returns the raw response head, so a
 // refusal can be told apart from a completed handshake.
 function rawUpgrade(
   port: number,
   path: string,
   headers: string[] = [],
+  target: UpgradeTarget = {},
 ): Promise<{ status: number; head: string; socket: net.Socket }> {
   return new Promise((resolve, reject) => {
     const socket = net.connect(port, "127.0.0.1", () => {
-      socket.write(
-        [
-          `GET ${path} HTTP/1.1`,
-          "Host: 127.0.0.1",
-          "Connection: Upgrade",
-          "Upgrade: websocket",
-          "Sec-WebSocket-Version: 13",
-          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
-          ...headers,
-          "",
-          "",
-        ].join("\r\n"),
-      );
+      socket.write(upgradeRequest(path, headers, target));
     });
     let text = "";
     const onData = (chunk: Buffer) => {
@@ -147,6 +162,18 @@ function rawUpgrade(
     closers.push(async () => {
       socket.destroy();
     });
+  });
+}
+
+// A client that sends an upgrade and resets the connection at once, as a
+// browser that aborts mid-handshake does.
+function upgradeThenReset(port: number, path: string, headers: string[] = []): Promise<void> {
+  return new Promise((resolve) => {
+    const socket = net.connect(port, "127.0.0.1", () => {
+      socket.write(upgradeRequest(path, headers, {}), () => socket.resetAndDestroy());
+    });
+    socket.on("error", () => undefined);
+    socket.on("close", () => resolve());
   });
 }
 
@@ -180,9 +207,10 @@ function readFrame(socket: net.Socket): Promise<{ opcode: number; payload: Buffe
   });
 }
 
-function connectClient(url: string, cookie: string): Promise<WebSocket> {
+// A browser's WebSocket: it sends the session cookie and the page's origin.
+function connectClient(url: string, cookie: string, origin: string): Promise<WebSocket> {
   return new Promise((resolve, reject) => {
-    const client = new WebSocket(url, { headers: { Cookie: cookie }, perMessageDeflate: false });
+    const client = new WebSocket(url, { headers: { Cookie: cookie }, origin, perMessageDeflate: false });
     client.once("open", () => resolve(client));
     client.once("error", reject);
     closers.push(async () => {
@@ -230,7 +258,7 @@ async function authorizedRelay(extra: Partial<Descriptor> = {}) {
     descriptors,
     port,
     path,
-    connect: () => connectClient(`ws://127.0.0.1:${port}${path}`, sessionCookie(TOKEN)),
+    connect: () => connectClient(`ws://127.0.0.1:${port}${path}`, sessionCookie(TOKEN), `http://127.0.0.1:${port}`),
   };
 }
 
@@ -266,7 +294,7 @@ describe("runtime relay upgrade", () => {
     const url = buildClientWebSocketUrl(getRuntimeRelayPath(relay.id));
     expect(new URL(url).search).toBe("");
 
-    const client = await connectClient(url, sessionCookie(TOKEN));
+    const client = await connectClient(url, sessionCookie(TOKEN), window.location.origin);
     await waitFor(() => upstream.sockets[0]?.readyState === WebSocket.OPEN);
     expect(upstream.headers[0]["x-koda-attach-token"]).toBe("attach-secret");
     client.send(JSON.stringify({ type: "input", data: "ls\n" }));
@@ -315,6 +343,60 @@ describe("runtime relay upgrade", () => {
       expect(response.status, query).toBe(401);
     }
     expect(upstream.connections).toBe(0);
+  });
+
+  it("refuses an upgrade from another origin with 403 before any relay work, even with the session cookie", async () => {
+    const { upstream, port, path } = await authorizedRelay();
+
+    // A browser attaches the SameSite=Strict cookie for a same-site page:
+    // another port on the same host, a sibling subdomain. Another scheme, the
+    // "null" a sandboxed page sends, and no Origin at all (only non-browser
+    // clients leave it out) are refused too.
+    const origins = [
+      null,
+      "null",
+      "http://127.0.0.1:8080",
+      "http://app.127.0.0.1",
+      "https://127.0.0.1",
+      "http://127.0.0.1.evil.example",
+      "",
+    ];
+    for (const relayPath of [path, `${RELAY_PATH_PREFIX}unknown`]) {
+      for (const origin of origins) {
+        const response = await rawUpgrade(port, relayPath, [`Cookie: ${sessionCookie(TOKEN)}`], { origin });
+        expect(response.status, `${relayPath} ${origin}`).toBe(403);
+        expect(response.head).not.toMatch(/sec-websocket-accept/i);
+        await waitForClose(response.socket);
+      }
+    }
+    expect(upstream.connections).toBe(0);
+  });
+
+  it("takes the dashboard origin from Host and X-Forwarded-Proto, as a TLS-terminating proxy sends them", async () => {
+    const { upstream, port, path } = await authorizedRelay();
+    const cookie = `Cookie: ${sessionCookie(TOKEN)}`;
+    const host = "koda.example.com";
+
+    // Traefik sends wss for a WebSocket it received over TLS, nginx and Caddy https.
+    for (const proto of ["https", "wss", "https, http"]) {
+      const response = await rawUpgrade(port, path, [cookie, `X-Forwarded-Proto: ${proto}`], {
+        host,
+        origin: `https://${host}`,
+      });
+      expect(response.status, proto).toBe(101);
+    }
+    await waitFor(() => upstream.connections === 3);
+
+    const refused = [
+      { proto: "https", origin: `http://${host}` },
+      { proto: "http", origin: `https://${host}` },
+      { proto: "https", origin: `https://other.example.com` },
+    ];
+    for (const { proto, origin } of refused) {
+      const response = await rawUpgrade(port, path, [cookie, `X-Forwarded-Proto: ${proto}`], { host, origin });
+      expect(response.status, `${proto} ${origin}`).toBe(403);
+    }
+    expect(upstream.connections).toBe(3);
   });
 
   it("refuses a relay that was stored without a token hash instead of letting anyone in", async () => {
@@ -391,6 +473,58 @@ describe("dashboard upgrade routing", () => {
   });
 });
 
+describe("refused upgrades and connection resets", () => {
+  it("survives clients that reset the connection while a refusal is written", async () => {
+    const uncaught = vi.fn();
+    process.on("uncaughtException", uncaught);
+    closers.push(async () => {
+      process.off("uncaughtException", uncaught);
+    });
+    const { upstream, port, path } = await authorizedRelay();
+
+    const resets: Promise<void>[] = [];
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      resets.push(upgradeThenReset(port, path)); // 401
+      resets.push(upgradeThenReset(port, `${RELAY_PATH_PREFIX}unknown`)); // 404
+      resets.push(upgradeThenReset(port, "/anything")); // 404, unrouted
+    }
+    await Promise.all(resets);
+    // The server is still up and still refuses.
+    const response = await rawUpgrade(port, "/anything");
+    expect(response.status).toBe(404);
+    await waitForClose(response.socket);
+
+    expect(uncaught).not.toHaveBeenCalled();
+    expect(upstream.connections).toBe(0);
+  });
+
+  it("destroys the socket instead of raising when writing the refusal fails", async () => {
+    const uncaught = vi.fn();
+    process.on("uncaughtException", uncaught);
+    closers.push(async () => {
+      process.off("uncaughtException", uncaught);
+    });
+    const relay = createRuntimeRelay({ store: { descriptors: new Map() } });
+    // Stands in for Node's http server, which removes its own error listener
+    // from the socket before it emits "upgrade".
+    const route = createUpgradeRouter({ relay });
+
+    for (const url of ["/anything", `${RELAY_PATH_PREFIX}unknown`]) {
+      const socket = new Duplex({
+        read() {},
+        write(_chunk, _encoding, callback) {
+          callback(Object.assign(new Error("write ECONNRESET"), { code: "ECONNRESET" }));
+        },
+      });
+      route({ url, headers: { host: DASHBOARD_HOST, origin: DASHBOARD_ORIGIN } } as http.IncomingMessage, socket, Buffer.alloc(0));
+      await waitFor(() => socket.destroyed);
+      // The stream emits the write error on the next tick.
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(uncaught, url).not.toHaveBeenCalled();
+    }
+  });
+});
+
 describe("runtime relay frame limits", () => {
   it("bounds frames in both directions at 4 MiB, the runtime's own inbound limit", () => {
     expect(RELAY_CLIENT_MAX_PAYLOAD_BYTES).toBe(4 * 1024 * 1024);
@@ -462,11 +596,13 @@ describe("server.mjs relay wiring", () => {
     expect(source).not.toMatch(/\bWebSocketServer\b|new WebSocket\(/);
   });
 
-  it("reads the request target only through parseRequestUrl, never the Host header", async () => {
+  it("reads the request target only through parseRequestUrl, and the Host header only to compare it with Origin", async () => {
     const source = await readFile(new URL("./runtime-relay-server.mjs", import.meta.url), "utf8");
 
+    // Nothing the client sends is parsed as a URL: a `new URL` that throws in
+    // an upgrade listener would stop the process.
     expect(source).not.toMatch(/new URL\(/);
-    expect(source).not.toMatch(/headers\.host/);
     expect(source.match(/\bparseRequestUrl\(request\)/g)).toHaveLength(1);
+    expect(source.match(/headers\.host\b/g)).toHaveLength(1);
   });
 });

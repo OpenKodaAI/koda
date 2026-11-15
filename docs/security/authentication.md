@@ -203,7 +203,9 @@ every field and the operator's profile.
 - Runtime relays: the terminal, browser-snapshot and noVNC WebSockets at
   `/api/runtime/relay/<id>` read the same cookie on the upgrade, before the handshake
   (`apps/web/src/lib/runtime-relay-server.mjs`). A relay admits only the session that attached
-  it, and the token is never taken from the URL.
+  it, and the token is never taken from the URL. The upgrade's `Origin` must also match the
+  `Host` header and `X-Forwarded-Proto`, as for every other change (403 otherwise): the
+  `SameSite=Strict` cookie still reaches a page on another origin of the same site.
 - Revocation: logout revokes the current session. Password _change_ revokes every other
   session for the same user and keeps the initiating session alive. Password _reset_ via
   recovery code revokes **all** sessions for the user.

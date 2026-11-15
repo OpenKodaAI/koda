@@ -2,10 +2,11 @@
  * The runtime relay: a WebSocket at `/api/runtime/relay/<id>` that the
  * dashboard bridges to a worker's terminal, browser snapshot or noVNC socket.
  * server.mjs hands every upgrade to `createUpgradeRouter`, which routes
- * relay-path upgrades here. The relay descriptor (written by `runtime-relay.ts`
- * when an operator attaches) and the session cookie are checked before the
- * WebSocket handshake, so a request that is not authorised gets a plain HTTP
- * refusal: no WebSocket, no frame parsing and no upstream connection.
+ * relay-path upgrades here. The Origin, the relay descriptor (written by
+ * `runtime-relay.ts` when an operator attaches) and the session cookie are
+ * checked before the WebSocket handshake, so a request that is not authorised
+ * gets a plain HTTP refusal: no WebSocket, no frame parsing and no upstream
+ * connection.
  */
 
 import { createHash, timingSafeEqual } from "node:crypto";
@@ -112,15 +113,50 @@ function tokenMatches(descriptor, token) {
 }
 
 /**
- * Decides an upgrade before any WebSocket work: 404 for an unknown or expired
- * relay, 401 unless the session cookie holds the token of the operator who
- * attached.
+ * The origin of a dashboard page served at the request's target, by the rule
+ * request-origin.ts applies to the dashboard's other routes: the scheme in the
+ * first `X-Forwarded-Proto` entry, which a TLS-terminating proxy sends
+ * (docs/install/vps.md), or http, the scheme this server listens on; then the
+ * Host header. ws and wss stand for http and https: Traefik sends them for a
+ * WebSocket.
+ * @param {import("node:http").IncomingMessage} request
+ * @returns {string | null}
+ */
+function dashboardOrigin(request) {
+  const host = request.headers.host;
+  if (typeof host !== "string" || !host) return null;
+  const forwarded = request.headers["x-forwarded-proto"];
+  const proto = (typeof forwarded === "string" ? forwarded.split(",")[0].trim().toLowerCase() : "") || "http";
+  const scheme = proto === "wss" ? "https" : proto === "ws" ? "http" : proto;
+  return `${scheme}://${host.toLowerCase()}`;
+}
+
+/**
+ * Whether the upgrade comes from a dashboard page. A browser sends the page's
+ * origin with every WebSocket handshake, and a page cannot change it. The
+ * session cookie is SameSite=Strict, so a browser still attaches it for a page
+ * on another origin of the same site (another port on the same host, a sibling
+ * subdomain): this check refuses that page.
+ * @param {import("node:http").IncomingMessage} request
+ * @returns {boolean}
+ */
+function fromDashboardOrigin(request) {
+  const origin = request.headers.origin;
+  const expected = dashboardOrigin(request);
+  return typeof origin === "string" && expected !== null && origin.toLowerCase() === expected;
+}
+
+/**
+ * Decides an upgrade before any WebSocket work: 403 unless it comes from a
+ * dashboard page, 404 for an unknown or expired relay, 401 unless the session
+ * cookie holds the token of the operator who attached.
  * @param {RelayStore} store
  * @param {import("node:http").IncomingMessage} request
  * @param {URL} url the request target, as the upgrade router parsed it
- * @returns {{ descriptor: RelayDescriptor } | { status: 401 | 404 }}
+ * @returns {{ descriptor: RelayDescriptor } | { status: 401 | 403 | 404 }}
  */
 export function authorizeRelayUpgrade(store, request, url) {
+  if (!fromDashboardOrigin(request)) return { status: 403 };
   const relayId = url.pathname.slice(RELAY_PATH_PREFIX.length);
   const descriptor = relayId ? readRelayDescriptor(store, relayId) : null;
   if (!descriptor?.upstreamUrl) return { status: 404 };
@@ -129,11 +165,15 @@ export function authorizeRelayUpgrade(store, request, url) {
 }
 
 /**
- * Answers an upgrade with a plain HTTP status and closes the socket.
+ * Answers an upgrade with a plain HTTP status and closes the socket. Node's
+ * http server removes its own error listener from the socket before it emits
+ * "upgrade", so this adds one first: a client that resets the connection while
+ * the refusal is written would otherwise raise an uncaught ECONNRESET.
  * @param {import("node:stream").Duplex} socket
  * @param {number} status
  */
 function refuseUpgrade(socket, status) {
+  socket.on("error", () => socket.destroy());
   if (!socket.writable) {
     socket.destroy();
     return;

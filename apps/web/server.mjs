@@ -43,8 +43,9 @@ await app.prepare();
 // no rewrites, so in production it would accept none.
 const nextUpgrade = dev ? app.getUpgradeHandler() : null;
 
-// Checks the relay descriptor and session cookie before the WebSocket
-// handshake, and bounds frames in both directions (runtime-relay-server.mjs).
+// Checks the Origin, the relay descriptor and the session cookie before the
+// WebSocket handshake, and bounds frames in both directions
+// (runtime-relay-server.mjs).
 const runtimeRelay = createRuntimeRelay({ store: getRuntimeRelayStore() });
 
 const server = createDashboardServer({

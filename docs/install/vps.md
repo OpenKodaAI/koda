@@ -36,9 +36,9 @@ from the network until a reverse proxy publishes it. A reverse proxy should:
   the dashboard, and keep those connections and the runtime event streams
   (`/api/runtime/agents/*/stream`) open while idle: neither sends a heartbeat
 - pass the `Host` header the browser sent, port included, and the scheme in `X-Forwarded-Proto`:
-  the dashboard accepts a sign-in or any other change only when its `Origin` matches them. Give a
-  request that arrives without a `Host` (an HTTP/1.0 health check) your domain instead: the
-  dashboard refuses an HTTP/1.1 request without one
+  the dashboard accepts a sign-in, a relay WebSocket or any other change only when its `Origin`
+  matches them. Give a request that arrives without a `Host` (an HTTP/1.0 health check) your
+  domain instead: the dashboard refuses an HTTP/1.1 request without one
 - send to the control-plane API only the `/api/control-plane/*` requests that carry
   `Authorization: Bearer` (API-token clients), and `/openapi/control-plane.json`
 - keep request bodies the dashboard gets to 1 MiB, nginx's default `client_max_body_size`: the
