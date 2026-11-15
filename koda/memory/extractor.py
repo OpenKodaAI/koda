@@ -10,7 +10,7 @@ from koda.logging_config import get_logger
 from koda.memory.config import MEMORY_EXTRACTION_MODEL, MEMORY_EXTRACTION_PROVIDER, MEMORY_MAX_EXTRACTION_ITEMS
 from koda.memory.profile import MemoryProfile
 from koda.memory.prompts import get_extraction_prompt
-from koda.memory.safety import MemorySafetyError, assert_memory_text_safe, memory_safety_payload
+from koda.memory.safety import MemorySafetyError, assert_memory_text_safe, memory_safety_payload, scan_memory_text
 from koda.memory.types import Memory, MemoryStatus, MemoryType, build_conflict_key
 from koda.services.llm_runner import get_provider_fallback_chain, resolve_provider_model, run_llm
 
@@ -271,6 +271,13 @@ def _parse_extraction_result(
     resolved_profile = profile or MemoryProfile(agent_id=agent_id or "default")
     memories: list[Memory] = []
     now = datetime.now()
+    # Every item carries the same query preview: it is scanned once and left out when unsafe, so a
+    # question about reading `.env` does not drop each memory of the turn for the same preview.
+    if source_query_preview:
+        preview_scan = scan_memory_text(source_query_preview, surface="memory.extraction")
+        if not preview_scan.allowed:
+            log.warning("memory_extraction_query_preview_omitted", categories=preview_scan.blocked_categories)
+            source_query_preview = ""
 
     for item in items[:MEMORY_MAX_EXTRACTION_ITEMS]:
         if not isinstance(item, dict):

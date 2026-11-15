@@ -221,6 +221,53 @@ def test_extractor_drops_an_item_whose_stored_fields_are_unsafe_and_the_store_ke
     store._assert_memories_safe([store._hydrate_memory(memory) for memory in memories], surface="memory.batch_write")
 
 
+@pytest.mark.parametrize(
+    "query",
+    [
+        "How do I read .env files in Node?",
+        "Should I commit or cat .env in CI logs?",
+        "cat .env prints nothing on staging, why?",
+    ],
+)
+def test_an_unsafe_query_preview_is_left_out_and_the_batch_survives(query: str):
+    # The query preview is shared by every item: scanned once, and left out when unsafe, so a question
+    # about reading `.env` does not drop the unrelated memories of the turn.
+    raw = json.dumps(
+        [
+            {"type": "fact", "content": "The user's service is written in Node 20 with TypeScript.", "importance": 0.8},
+            {"type": "preference", "content": "User prefers pnpm over npm.", "importance": 0.8},
+        ]
+    )
+
+    memories = _parse_extraction_result(raw, user_id=111, session_id=None, source_query_preview=query[:200])
+
+    assert [memory.content for memory in memories] == [
+        "The user's service is written in Node 20 with TypeScript.",
+        "User prefers pnpm over npm.",
+    ]
+    assert all("source_query_preview" not in memory.metadata for memory in memories)
+    store = MemoryStore("AGENT_A")
+    store._assert_memories_safe([store._hydrate_memory(memory) for memory in memories], surface="memory.batch_write")
+
+
+def test_a_safe_query_preview_is_kept_on_every_item():
+    raw = json.dumps(
+        [
+            {"type": "fact", "content": "Staging uses Postgres 16 with pgvector enabled.", "importance": 0.8},
+            {"type": "decision", "content": "Use PostgreSQL for the scheduler store.", "importance": 0.8},
+        ]
+    )
+
+    memories = _parse_extraction_result(
+        raw, user_id=111, session_id=None, source_query_preview="Which package manager should I use?"
+    )
+
+    assert [memory.metadata["source_query_preview"] for memory in memories] == [
+        "Which package manager should I use?",
+        "Which package manager should I use?",
+    ]
+
+
 def test_parse_sets_expiry():
     """All memories get an expiry date."""
     raw = '[{"type": "task", "content": "Fix bug", "importance": 0.7}]'
