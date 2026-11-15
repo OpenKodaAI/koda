@@ -163,6 +163,14 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   and updated secrets store none. `GET /api/control-plane/system-settings` and the draft
   and published snapshots in `GET /api/control-plane/agents/{agent_id}` return `preview`
   as `""`, also for values stored before. (M1-E6-T5, TD-077)
+- A third-party MCP server can no longer flood the system prompt: each server shows at most
+  128 tools and each tool at most 64 parameters, the MCP section stops at 100,000
+  characters, and the prompt says how many tools or parameters were left out. (D-269)
+- A plugin handler loads only from the file the path check found inside the plugin; a file
+  or directory swapped after the check is refused. Handler modules get unique names with
+  no parent package. (D-270)
+- Skill package code always runs from its verified `.py` sources, also for modules it loads
+  at tool-call time; a bytecode cache planted after approval never runs. (D-273)
 
 
 ### Added
@@ -248,6 +256,14 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   stopped. (M2-E3-T4, D-150)
 - The routine connectors picker is disabled and reads "Not available yet": nothing used
   its list. (M3-E1-T8)
+- Runtime sweeps act only on live environments, so their cost no longer grows with history.
+  The command palette polls agent stats only while open, and chat and room mutations no
+  longer revalidate the app layout. Web unit tests run files in parallel. (M9-E1-T4,
+  M9-E2-T1, M9-E2-T2)
+- A migrations gate in CI diffs an upgrade from the previous release against a fresh
+  install and refuses plain index builds on large tables. Migration 049 builds
+  `idx_audit_events_type_time` with `CREATE INDEX CONCURRENTLY`. (M2-E2-T5)
+- `CLAUDE.md` is the one contributor and agent guide; `AGENTS.md` points to it. (M10-E1-T2)
 
 
 ### Removed
@@ -366,6 +382,16 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - Routines: cron step, range and list syntax is accepted and validated by the scheduler;
   next-run previews and one-shot times use the routine's timezone; interval routines stay
   intervals. (M3-E1-T7, D-080, D-081)
+- Owner setup, password recovery, agent delete and workspace delete commit all their writes
+  or none. (M2-E2-T1, D-056)
+- A coordinator always answers a squad handoff once every destination has ended, also after
+  a refused dispatch, a restart or a cancel while queued; a background sweep completes
+  stranded handoffs from the last 24 hours. Synthesis is no longer retried inside the turn.
+  (M3-E6-T2, M3-E6-T3, D-015, D-074)
+- Keyboard focus is visible on every control in both themes, the language switcher works
+  from the keyboard, and each page has one h1. (M8-E1-T1, M8-E1-T2, M8-E1-T3)
+- The memory safety scanner is pinned by a labelled English and Portuguese corpus: fewer
+  false refusals of developer text, more Portuguese injections caught. (M3-E4-T6, D-035)
 
 
 ## [1.0.18] - 2026-05-20
