@@ -18,6 +18,16 @@ pnpm test:web
 pnpm build:web
 ```
 
+Koda needs `cryptography` 50.0.2 or later for security fixes. Its wheels cover
+Apple silicon macOS, x86-64 Windows and Linux on x86-64, ARM64, ARMv7 and
+ppc64le, which includes the Docker images. Elsewhere, including Intel (x86_64)
+macOS, 32-bit Windows and Windows on ARM with an ARM64 Python, the install
+builds it from source. That needs Rust, OpenSSL and a C compiler: on macOS, the
+Xcode command line tools (`xcode-select --install`) and
+`brew install openssl@3 rust`; on Windows, the Microsoft C++ Build Tools, Rust
+from rustup and an OpenSSL build that `OPENSSL_DIR` points to. See
+[cryptography's installation guide](https://cryptography.io/en/latest/installation/).
+
 For product-facing local work, prefer the Docker-first stack documented in:
 
 - [README.md](README.md)

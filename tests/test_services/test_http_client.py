@@ -527,10 +527,16 @@ _ENTRY_POINTS = {
     "make_http_request": lambda url, **kw: make_http_request("GET", url, **kw),
 }
 
-# yarl (and so aiohttp) applies UTS-46, which maps these code points to nothing.
-# The stdlib IDNA 2003 codec behind urlparse/getaddrinfo keeps them, so the same
-# host is a punycode DNS name to the stdlib and the IP literal 127.0.0.1 to aiohttp.
-_IDNA_MAPPED_LOOPBACK_HOSTS = ["127.0.0.1ᅟ", "឴127.0.0.1"]
+# yarl (and so aiohttp) applies UTS-46 with current Unicode tables, which map
+# SEGMENTED DIGIT ONE (U+1FBF1, Unicode 13) to "1". The stdlib IDNA 2003 codec
+# behind urlparse/getaddrinfo knows only Unicode 3.2 and punycodes it, so the same
+# host is a DNS name to the stdlib and the IP literal 127.0.0.1 to aiohttp.
+_IDNA_MAPPED_LOOPBACK_HOSTS = ["127.0.0.\U0001fbf1", "\U0001fbf127.0.0.1"]
+
+# UTS-46 also maps some code points to nothing (here HANGUL CHOSEONG FILLER and
+# KHMER VOWEL INHERENT AQ). yarl 1.25 rejects a host containing one instead of
+# dropping it, so these never reach a connection; yarl 1.23 read both as 127.0.0.1.
+_IDNA_DROPPED_CODE_POINT_HOSTS = ["127.0.0.1ᅟ", "឴127.0.0.1"]
 
 
 def _wildcard_getaddrinfo(real_getaddrinfo):
@@ -555,11 +561,24 @@ def test_url_safety_checks_the_host_aiohttp_connects_to(host):
     import yarl
 
     assert yarl.URL(f"http://{host}:8080/").raw_host == "127.0.0.1"
+    assert b"xn--" in host.encode("idna")  # the stdlib reads a punycode DNS name
     with patch.object(socket_module, "getaddrinfo", _wildcard_getaddrinfo(socket_module.getaddrinfo)):
         result = _check_url_safety(f"http://{host}:8080/")
 
     assert result is not None
     assert "private/reserved" in result
+
+
+@pytest.mark.parametrize("host", _IDNA_DROPPED_CODE_POINT_HOSTS)
+def test_url_safety_rejects_hosts_with_code_points_uts46_drops(host):
+    import socket as socket_module
+
+    import yarl
+
+    with pytest.raises(ValueError):
+        yarl.URL(f"http://{host}:8080/")
+    with patch.object(socket_module, "getaddrinfo", _wildcard_getaddrinfo(socket_module.getaddrinfo)):
+        assert _check_url_safety(f"http://{host}:8080/") == "Invalid URL."
 
 
 @pytest.mark.parametrize(
@@ -626,8 +645,12 @@ async def test_entry_points_report_malformed_urls_instead_of_raising(case, entry
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("entry_point", sorted(_ENTRY_POINTS))
-@pytest.mark.parametrize("host", _IDNA_MAPPED_LOOPBACK_HOSTS)
-async def test_entry_points_cannot_reach_loopback_through_idna_mapped_host(entry_point, host):
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [(host, "private/reserved") for host in _IDNA_MAPPED_LOOPBACK_HOSTS]
+    + [(host, "Invalid URL.") for host in _IDNA_DROPPED_CODE_POINT_HOSTS],
+)
+async def test_entry_points_cannot_reach_loopback_through_idna_mapped_host(entry_point, host, expected):
     """aiohttp skips the resolver for IP literals, so the pre-check must see the literal yarl produces."""
     import socket as socket_module
 
@@ -647,7 +670,7 @@ async def test_entry_points_cannot_reach_loopback_through_idna_mapped_host(entry
     assert hits == []
     assert isinstance(result, str)
     assert result.startswith("Error:")
-    assert "private/reserved" in result
+    assert expected in result
 
 
 @pytest.mark.asyncio

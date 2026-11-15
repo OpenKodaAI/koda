@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import tomllib
+from collections.abc import Callable
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,3 +97,45 @@ def test_readme_covers_public_entrypoints() -> None:
     assert "/setup" in readme
     assert "runtime API" in readme
     assert "SeaweedFS" in readme
+
+
+# Contributor platforms, as CONTRIBUTING.md and README.md name them, and whether a
+# wheel platform tag (from uv.lock) installs on them.
+_CRYPTOGRAPHY_PLATFORMS: dict[str, Callable[[str], bool]] = {
+    "Apple silicon macOS": lambda tag: tag.startswith("macosx_") and tag.endswith(("_arm64", "_universal2")),
+    "Intel (x86_64) macOS": lambda tag: tag.startswith("macosx_") and tag.endswith(("_x86_64", "_universal2")),
+    "x86-64 Windows": lambda tag: tag == "win_amd64",
+    "32-bit Windows": lambda tag: tag == "win32",
+    "Windows on ARM": lambda tag: tag == "win_arm64",
+}
+
+
+def _locked_cryptography_wheel_tags() -> set[str]:
+    lock = tomllib.loads((ROOT / "uv.lock").read_text(encoding="utf-8"))
+    (package,) = [package for package in lock["package"] if package["name"] == "cryptography"]
+    filenames = [wheel["url"].rsplit("/", 1)[-1].removesuffix(".whl") for wheel in package["wheels"]]
+    return {tag for filename in filenames for tag in filename.split("-")[-1].split(".")}
+
+
+def test_contributor_setup_names_the_platforms_without_cryptography_wheels() -> None:
+    # Koda requires cryptography >= 50.0.2 for security fixes. Where uv.lock has no
+    # wheel for a platform, the install builds it from source there.
+    tags = _locked_cryptography_wheel_tags()
+    has_wheel = {platform: any(map(covers, tags)) for platform, covers in _CRYPTOGRAPHY_PLATFORMS.items()}
+    guide = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+    paragraph = " ".join(next(block for block in guide.split("\n\n") if "`cryptography` 50.0.2" in block).split())
+    sentences = re.split(r"(?<=\.) (?=[A-Z])", paragraph)
+    wheels = " ".join(sentence for sentence in sentences if sentence.startswith("Its wheels cover"))
+    source = " ".join(sentence for sentence in sentences if "builds it from source" in sentence)
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    readme_source = " ".join(line for line in readme.splitlines() if "builds `cryptography` from source" in line)
+    assert wheels, "CONTRIBUTING.md must say which platforms cryptography's wheels cover"
+
+    for platform, wheel in has_wheel.items():
+        assert (platform in wheels) == wheel, platform
+        assert (platform in source) != wheel, platform
+        assert (platform in readme_source) != wheel, platform
+    assert "on macOS, the Xcode command line tools (`xcode-select --install`)" in paragraph
+    assert "brew install openssl@3 rust" in paragraph
+    assert "on Windows, the Microsoft C++ Build Tools" in paragraph
+    assert "(CONTRIBUTING.md#development-setup)" in readme_source
