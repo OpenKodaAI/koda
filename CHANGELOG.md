@@ -246,6 +246,8 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   `archived`, answers 400 and changes nothing. Before, PATCH wrote the status alone,
   so a paused agent could keep queue items in `running` after its worker was
   stopped. (M2-E3-T4, D-150)
+- The routine connectors picker is disabled and reads "Not available yet": nothing used
+  its list. (M3-E1-T8)
 
 
 ### Removed
@@ -355,6 +357,15 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - `scripts/install.sh` stops with a clear message on Node older than 20, installs Node
   from NodeSource when it is missing, and picks the Docker apt repository from
   `/etc/os-release` (Debian, Ubuntu and derivatives). (M7-E2-T4)
+- Routines: deleted routines no longer reappear in the list, and renames are saved.
+  (M3-E1-T3, D-079, D-063)
+- Routines: Run, Pause, Resume and Delete report failures and no longer open the editor;
+  with no agents the page shows an empty state; a version conflict answers 409. In the
+  editor, Next and Enter before the Refine step never save or create the routine.
+  (M3-E1-T6, D-121, D-122, D-123, D-211, D-268)
+- Routines: cron step, range and list syntax is accepted and validated by the scheduler;
+  next-run previews and one-shot times use the routine's timezone; interval routines stay
+  intervals. (M3-E1-T7, D-080, D-081)
 
 
 ## [1.0.18] - 2026-05-20

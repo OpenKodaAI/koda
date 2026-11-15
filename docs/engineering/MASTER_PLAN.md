@@ -66,7 +66,7 @@ jump ahead of high-severity items in a later milestone just because of their mil
 | `TD-NNN` | Debt item in TECHNICAL_DEBT.md Part 2 |
 | `SM-NN` | Runtime-smoke defect FEATURE_MATRIX.md §3.4 `D-NN` (renamed here to avoid a clash with `D-NNN`) |
 | `J-NN` | Journey in FEATURE_MATRIX.md §3.2 |
-| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-30 are added in section 5. |
+| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-31 are added in section 5. |
 | `P<n>` | Design principle in REFERENCE_RESEARCH.md §6 |
 | `ADR-NNN` | Entry in DECISIONS.md |
 | `R-NN` | Entry in REMAINING_RISKS.md |
@@ -287,6 +287,7 @@ in `koda/knowledge`). Both are cheap to leave; revisit only if the code is touch
 | Q-28 | With `KNOWLEDGE_V2_STORAGE_MODE=off` (not the default), M4-E1-T6 removed four side effects that ran before retrieval raised on every turn: pack and workspace sources registered, artifact evidence written and read. The artifact-evidence table was never created, so those writes and reads never stored or returned a row | Accept the removal (applied; rollback: revert the manager.py and storage_v2.py parts of b845d89 and f989685) | open (§13 confirmation of ADR-015's interim approval; the default is applied) | none |
 | Q-29 | Release v1.0.18 stopped at `publish-npm` (run 26138278216): the GitHub release is a draft and the seven GHCR images are published, but npm still serves the previous version | Ship the next version normally and keep the CHANGELOG note; republishing 1.0.18 needs the npm credentials and a release run | open (§13: production release and credentials) | none |
 | Q-30 | `MEMORY_SIMILARITY_DEDUP_THRESHOLD` is an operator-visible per-agent memory-policy field (editor, agent spec, memory profiles, system settings) that nothing reads | Remove the field with a changelog entry: it never had an effect | open (§13: removes an operator-visible setting) | M4-E1-T2 follow-up |
+| Q-31 | `/jobs`, the job tools, the `/cron` wrappers and the runtime schedule API act only on the bot's own agent's jobs (D-259); jobs with `agent_id` NULL are no longer listed under every agent | Keep the per-agent scope: it is the isolation D-259 requires; `docs/operations/upgrade.md` explains how to assign old jobs | default applied (rollback: revert the scoping of `_get_job` / `list_jobs`) | M3-E4-T6 lane |
 
 ### 5.2 Approvals required
 
@@ -527,20 +528,20 @@ Owner QA · Risk low · Gate none · **done** · Deps —
 - **Tests:** G, G-PG · **Evidence:** VALIDATION_REPORT.md "WAVE-3" (the 7 files pass from /tmp; squad tables reset only through reset_squad_runtime_tables; leaked bridge-loop pools closed)
 
 #### M0-E2-T4 · Global approval fixture becomes opt-in; D-011 regression tests
-Owner QA (SEC) · Risk med · Gate none · **ready** · Deps —
+Owner QA (SEC) · Risk med · Gate none · **done** · Deps —
 - **Addresses:** TD-041, D-011 (characterisation), F-GOV-08, F-SKL-06, F-SKL-07
 - **Files:** `tests/conftest.py:195-202`, the tests that depend on it, new `tests/test_services/test_approval_context_regression.py`
 - **Do:** replace the autouse `_execution_approved` fixture with an opt-in fixture. Add it only to tests that model an approved context, and record the list. Add `xfail(strict=True)` tests that run `shell_execute` and `git_status` through `_run_agent_loop` with a policy allow and no approval context, plus a supervised-mode write.
 - **Done when:** the suite is green, the new tests fail as expected, and the opted-in tests are listed in VALIDATION_REPORT.md.
-- **Tests:** G, plus the new regression file · **Evidence:** —
+- **Tests:** G, plus the new regression file · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": the autouse approval fixture is the opt-in `execution_approved`; strict-xfail tests run `shell_execute`, `git_status` and a supervised write through `_run_agent_loop` with a policy allow and no approval context; the 74 opted-in test items are listed in the report. D-265: every test session gets its own `STATE_ROOT_DIR`
 
 #### M0-E2-T5 · Strict markers and dead test scaffolding
-Owner QA · Risk low · Gate none · **ready** · Deps —
+Owner QA · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-181, TD-182, TD-183, F-QA-13, F-QA-14, F-QA-20; dead testcontainers branch (SYSTEM_INVENTORY §3.13)
 - **Files:** `pyproject.toml:91-108`, `tests/e2e/`, `tests/eval/`, `tests/_artifacts/`, `tests/_provider_plugin.py`, `tests/postgres_fixtures.py:41-78`
 - **Do:** add `--strict-markers` and drop the 11 unused markers. Delete the empty scaffolds, the unused provider plugin and the testcontainers branch.
 - **Done when:** collection fails on an unknown marker, and the test count matches the baseline.
-- **Tests:** G · **Evidence:** —
+- **Tests:** G · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": `strict_markers = true`; 9 unused markers dropped (`slow` kept: batch 3 applies it; `rust_engine` was already applied); the empty test packages and `tests/_provider_plugin.py` are removed; a test shows an unknown marker fails collection
 
 #### M0-E2-T6 · Deterministic time in tests
 Owner QA · Risk low · Gate none · **ready** · Deps —
@@ -1143,28 +1144,28 @@ Owner SEC (OPS, review REV) · Risk high · Gate needs-approval (§13: productio
 - **Tests:** Rust interceptor unit test; Python client test; G; G-RS; G-CI; changelog entry (compose networks) · **Evidence:** —
 
 #### M1-E6-T2 · Remove the broken `GRPC_TLS_ENABLED` switch
-Owner OPS · Risk low · Gate none · **ready** · Deps —
+Owner OPS · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-139, F-GOV-20
 - **Files:** `koda/internal_rpc/common.py` (~72), `koda/config.py`, docs
 - **Do:** remove the switch, which breaks most sidecar connections. Fail at startup with a clear message if it is set.
 - **Done when:** the setting is rejected with guidance, and no partial-TLS path remains.
-- **Tests:** unit test; G; changelog entry (startup refusal) · **Evidence:** —
+- **Tests:** unit test; G; changelog entry (startup refusal) · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": `GRPC_TLS_ENABLED=true` stops startup with guidance; Python channels have no TLS branch; the security and memory sidecars refuse `GRPC_TLS_SERVER_CERT` / `KEY`; tonic is built without its `tls` feature. Rust fmt, clippy and tests pass
 
 #### M1-E6-T3 · Distinct signing key
-Owner SEC · Risk med · Gate none · **ready** · Deps —
+Owner SEC · Risk med · Gate none · **done** · Deps —
 - **Addresses:** TD-078 (part), F-ADM-09, R-07
 - **Files:** `koda/control_plane/crypto.py` (~84-121), `koda/services/runtime_access_service.py`
 - **Do:** derive the HMAC signing key with HKDF and a distinct info label, instead of reusing the Fernet key. Runtime tokens (300 s) are re-issued transparently.
 - **Done when:** the signing key differs from the Fernet key, tokens verify across a supervisor restart, and old tokens simply expire.
-- **Tests:** unit tests; G · **Evidence:** —
+- **Tests:** unit tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": done by removal. Corrected premise: runtime access tokens were never signed with the master key (they use `RUNTIME_LOCAL_UI_TOKEN`, so restarts and expiry are unchanged), and the only HMAC use of the Fernet key was the unverified custom MCP `validation_signature`, which batch 3 (M4-E1-T8) removed with `get_signing_key`. No HMAC key derived from the master key remains; `tests/test_control_plane_dead_code.py` pins that. The lane's HKDF key was dropped at integration as dead code
 
 #### M1-E6-T5 · Stop storing secret previews
-Owner SEC · Risk low · Gate none · **ready** · Deps —
+Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-077, F-ADM-07
 - **Files:** `koda/control_plane/manager.py` (~12042-12052, ~12385-12398)
 - **Do:** stop writing `preview` for new or updated secrets, and never return it. The column stays. Existing values are purged only under M2-E5-T3.
 - **Done when:** new secrets have a null preview.
-- **Tests:** unit test; G-PG · **Evidence:** —
+- **Tests:** unit test; G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": new and updated secrets store an empty preview; `GET /system-settings` and the draft and published snapshots return `preview` as `""`, also for values stored before; the column stays
 
 #### M1-E7 — Supply chain
 
@@ -1392,36 +1393,36 @@ Owner BE (OPS) · Risk med · Gate none · **pending** · Deps M2-E2-T2
 #### M2-E3 — Agent identity and deletion
 
 #### M2-E3-T1 · Conflict on agent ID collisions; server-side IDs
-Owner BE (FE) · Risk med · Gate none · **ready** · Deps —
+Owner BE (FE) · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-055, TD-149, F-AGT-02, F-AGT-03
 - **Files:** `koda/control_plane/manager.py` (~9824), `koda/control_plane/api.py`, `apps/web/src/hooks/use-create-agent.ts`, `agent-catalog.tsx` (~871-889), `tabs/tab-publicacao.tsx` (~53-62)
 - **Do:** create and clone return 409 when an id exists or collides after normalisation. The server generates ids. Remove the client-side id and health_port allocation. Add the 409 to OpenAPI.
 - **Done when:** creating `my-agent` after `My Agent` returns 409, and the UI shows the conflict.
-- **Tests:** G-PG; web unit tests; G; changelog entry (409) · **Evidence:** —
+- **Tests:** G-PG; web unit tests; G; changelog entry (409) · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": create and clone answer 409 on an id collision after normalisation and copy nothing; without an id the server generates the id (`NOVO_AGENTE`, `NOVO_AGENTE_2`) and the health port; the dashboard sends neither and shows the localized conflict; OpenAPI lists the 409
 
 #### M2-E3-T2 · Canonical per-agent table list
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-054 (part), TD-079 (part), F-AGT-04
 - **Files:** `koda/control_plane/manager.py` (~9897), a new constant module, tests
 - **Do:** define one list of per-agent tables and use it for both repair and delete. A schema test fails when a table with an `agent_id` column is neither listed nor explicitly exempt. Delete behaviour does not change yet.
 - **Done when:** the test enumerates the live schema and passes.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": `koda/control_plane/agent_tables.py` is the one per-agent table list for repair and delete; a Postgres test enumerates every `agent_id` table in the live schema (97, including the three created at runtime) and fails on an unlisted or stale entry. Delete still purges 13 of 25 tables, as the task requires; M2-E3-T3 changes that
 
 #### M2-E3-T3 · Agent delete semantics
 Owner BE (SEC, review REV) · Risk high · Gate needs-approval (§13: destructive data operation; Q-11) · **blocked** · Deps M2-E3-T2, M2-E2-T1, M2-E6-T1
 - **Addresses:** D-054, F-AGT-04, F-AGT-05, ADR-023
 - **Files:** `koda/control_plane/manager.py` (delete and `archive_agent` ~9886), `api.py`, the web catalog delete flow, docs
-- **Do:** archive is the default. Hard delete removes every listed table, including `cp_secret_values`, in one transaction. Recreating an agent with the same id never inherits old secrets.
+- **Do:** archive is the default. Hard delete removes every listed table, including `cp_secret_values`, in one transaction. Recreating an agent with the same id never inherits old secrets. Decide, with the same rule, whether hard delete also purges `pending_approvals`, `approval_grants` and `artifact_objects` (created at runtime, so possibly absent: use `to_regclass`), so a recreated agent never inherits old approval grants.
 - **Done when:** a hard delete leaves zero rows in every listed table, and archive is reversible.
 - **Tests:** G-PG; web unit tests; changelog entry · **Evidence:** —
 
 #### M2-E3-T4 · PATCH status goes through the lifecycle methods
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-150, F-AGT-08
 - **Files:** `koda/control_plane/manager.py` (~9847)
 - **Do:** route a `status` change in PATCH through `pause_agent` or `activate_agent`, which do the queue rollback, wake signal and audit. Otherwise reject `status` in PATCH.
 - **Done when:** a PATCH pause leaves no zombie `running` items and writes an audit row.
-- **Tests:** G-PG; changelog entry (PATCH may reject `status`) · **Evidence:** —
+- **Tests:** G-PG; changelog entry (PATCH may reject `status`) · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": PATCH `status` paused or active goes through `pause_agent` / `activate_agent` (queue rollback, wake, audit row); any other status change answers 400 and writes nothing
 
 #### M2-E3-T5 · Canonical `agent_id` casing
 Owner BE · Risk high · Gate needs-approval (§13: irreversible data migration on existing installs) · **blocked** · Deps M2-E2-T2, M2-E6-T1
@@ -1549,12 +1550,12 @@ Owner BE (FE) · Risk med · Gate none · **in-review** · *started early: real-
 - **Tests:** G-PG; web tests · **Evidence:** **Missing for done:** the web journey on a running stack (M0-E3-T7). VALIDATION_REPORT.md "DEFECT-BATCH-1" (D-016): runtime-API create validates and activates (Postgres), idempotent replay, web contract and toast tests; browser journey not yet run
 
 #### M3-E1-T3 · Archived routines hidden; routine names persisted
-Owner BE (FE) · Risk low · Gate none · **ready** · Deps —
+Owner BE (FE) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-079, D-063, F-SCH-04, F-SCH-06, F-SCH-07
 - **Files:** `koda/control_plane/dashboard_service.py` (~990), `apps/web/src/components/routines/routine-editor.tsx` (~147), the patch schema, `update_job`
 - **Do:** filter out `status <> 'archived'`, with an optional `include_archived`. Read and write `payload.name` explicitly.
 - **Done when:** a deleted routine disappears, and a rename survives a reload.
-- **Tests:** G-PG; web tests · **Evidence:** —
+- **Tests:** G-PG; web tests · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": archived routines are hidden unless asked for (`include_archived`); names are prefilled from `payload.name` (then the summary) and saved on edit
 
 #### M3-E1-T4 · Enforce routine read-only and allowed paths
 Owner SEC (BE) · Risk med · Gate none · **pending** · Deps M3-E1-T1
@@ -1573,7 +1574,7 @@ Owner BE · Risk low · Gate none · **ready** · Deps —
 - **Tests:** G-PG · **Evidence:** —
 
 #### M3-E1-T6 · Routine page action feedback
-Owner FE · Risk low · Gate none · **ready** · Deps —
+Owner FE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-121, D-122, D-123, D-211, F-SCH-07, F-SCH-06
 - **Files:** `apps/web/src/app/routines/schedules/page.tsx` (~312, ~502, ~584, ~830)
 - **Do:**
@@ -1582,23 +1583,23 @@ Owner FE · Risk low · Gate none · **ready** · Deps —
   - row actions no longer open the editor;
   - with no agents, show an empty state instead of an endless skeleton.
 - **Done when:** each D-1xx scenario behaves correctly in a component test.
-- **Tests:** web component tests; G · **Evidence:** —
+- **Tests:** web component tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": component tests cover each scenario: the toast follows the action result, the backend message is shown, a version conflict answers 409, row actions no longer open the editor, and with no agents the page shows an empty state. Follow-ups: Next and Enter before the Refine step never submit the editor (D-268), checked in Chromium by `apps/web/tests/e2e-stub/routine-editor-steps.spec.ts`
 
 #### M3-E1-T7 · Cron validation and timezone-correct previews
-Owner FE (BE) · Risk low · Gate none · **ready** · Deps —
+Owner FE (BE) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-080, D-081, F-SCH-11
 - **Files:** `apps/web/src/lib/routines/recurrence.ts` (~171), `routine-editor.tsx` (~187), a backend validation endpoint (croniter)
 - **Do:** validate cron on the backend, accepting `*/5`, ranges and lists. Keep interval triggers editable. Compute the preview and one-shot times in the selected zone.
 - **Done when:** `*/5 * * * *` is accepted, interval jobs round-trip, and the preview matches the backend's next run.
-- **Tests:** unit tests on both sides; G · **Evidence:** —
+- **Tests:** unit tests on both sides; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": the scheduler validates cron step, range and list syntax and serves `GET /api/runtime/schedules/preview`; next-run previews and one-shot times use the routine's zone; interval routines round-trip as intervals
 
 #### M3-E1-T8 · Disable the stub connectors picker
-Owner FE (PROD) · Risk low · Gate none · **ready** · Deps —
+Owner FE (PROD) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-160, F-SCH-08
 - **Files:** `apps/web/src/lib/routines/connectors.ts`, the routine editor
 - **Do:** show the picker as "Not available yet", disabled, until a backend consumes it. Deleting the code is decided under Q-14 (M6-E3-T3).
 - **Done when:** no routine UI implies that connectors are applied.
-- **Tests:** web test; G · **Evidence:** —
+- **Tests:** web test; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 4": the connectors picker is disabled and reads "Not available yet"; the stub catalog stays until Q-14 (TD-160 mitigated)
 
 #### M3-E2 — Cancellation and the queue worker
 

@@ -225,7 +225,7 @@ Rust:
 | anyhow | 1.0.102 | RUSTSEC-2026-0190 | informational (unsound) | runtime | not_reachable (no `downcast_mut` anywhere) | not_reachable | 1.0.103 | no | not verified |
 | lru | 0.16.3 | RUSTSEC-2026-0253 | informational (unsound) | runtime (the aws-sdk-s3 S3 Express cache) | not_reachable. `LruCache::pop` is never called, and the keys are Strings. | not_reachable | 0.18.2 (via aws-sdk-s3 ≥1.144.0) | major for lru; no Koda manifest change | not verified |
 | rustix | 1.1.4 | RUSTSEC-2026-0486 / GHSA-jh2m-fhpj-3vr7 | informational (unsound) | build (prost-build → tempfile) | not_reachable. It is not linked into any binary, and no xattr calls are made. | not_reachable | 1.1.6 | no | not verified |
-| rustls-pemfile | 2.2.0 | RUSTSEC-2025-0134 | informational (unmaintained) | runtime (tonic TLS) | not_reachable. It parses only operator-provided PEM, which is unset in the release compose. | no_fix | none; tonic ≥0.13 drops it | yes (tonic major) | not verified |
+| rustls-pemfile | 2.2.0 | RUSTSEC-2025-0134 | informational (unmaintained) | none since M1-E6-T2 | resolved: tonic is built without `tls`, so `rust/Cargo.lock` no longer contains rustls-pemfile (M1-E6-T2). | resolved | — | no | verified (`rust/Cargo.lock`) |
 | pin-utils | 0.1.0 | RUSTSEC-2026-0441 | informational (unmaintained) | runtime (aws-smithy-http) | not_reachable. The notice describes no vulnerable code. | no_fix | none; aws-smithy-http ≥0.64.2 drops it | no (an in-range AWS SDK bump) | not verified |
 
 ## 5. Remediation batches
@@ -270,12 +270,12 @@ Gates for every batch: `cargo fmt --all --check --manifest-path rust/Cargo.toml`
 
 | # | Batch | Changes | Specific regression risks |
 |---|---|---|---|
-| R1 | TLS stack | rustls 0.23.46; rustls-webpki 0.103.16 or later, bumped explicitly; webpki-roots 1.0.10. The dry runs pull aws-lc-rs 1.19.0, aws-lc-sys 0.47.0 and pkg-config 0.3.34. | The aws-lc-sys C build in `Dockerfile.artifact` was not built. TLS behaviour changes for bot-gateway to Telegram, artifact-engine on https S3, and the memory and security gRPC servers when `GRPC_TLS_SERVER_CERT`/`KEY` are set. An alternative is reqwest with `rustls-tls-native-roots`. |
+| R1 | TLS stack | rustls 0.23.46; rustls-webpki 0.103.16 or later, bumped explicitly; webpki-roots 1.0.10. The dry runs pull aws-lc-rs 1.19.0, aws-lc-sys 0.47.0 and pkg-config 0.3.34. | The aws-lc-sys C build in `Dockerfile.artifact` was not built. TLS behaviour changes for bot-gateway to Telegram and artifact-engine on https S3. The memory and security gRPC servers no longer have a TLS path: they refuse `GRPC_TLS_SERVER_CERT`/`KEY` at startup, and tonic is built without its `tls` feature (M1-E6-T2). An alternative is reqwest with `rustls-tls-native-roots`. |
 | R2 | HTTP/2 | h2 0.4.16 or later; `http ^1.1` is already satisfied. | tonic gRPC servers in all 7 binaries. |
 | R3 | Postgres client | tokio-postgres 0.7.18 together with postgres-protocol 0.6.12 (and postgres-types 0.2.14). MSRV 1.85 is within the rust:1.95 builders. | The koda-postgres pool, the policy-engine store, and `Row::get`/`try_get` call sites. |
 | R4 | In-range hygiene (clears the audit gates) | quinn-proto 0.11.19 (the dry run swaps rand 0.9 for rand_pcg 0.10.2); quinn-udp 0.5.16; ctutils 0.4.4; tokio 1.53.3 or ≥1.54.1, never 1.54.0; anyhow 1.0.103; rustix 1.1.6. | tokio minor bump across all binaries. The rest are lockfile-only or build-only crates. |
 | R5 | AWS SDK stack (artifact-engine) | Bump within the existing `"1"` requirements: aws-sdk-s3 ≥1.144.0 brings lru ^0.18.2, aws-sigv4 ≥1.6.4 brings crypto-bigint ^0.7.10, and aws-smithy-http ≥0.64.2 drops pin-utils. MSRV is 1.94.1. Alternatively drop the unused `sigv4a` feature if Multi-Region Access Points are not supported. | The S3 client against SeaweedFS (`force_path_style`, custom endpoint). This was not checked with the resolver. |
-| R6 | Majors | tonic 0.12 → 0.13+ to drop rustls-pemfile (tonic-build and prost changes); pyo3 0.24 → 0.29 in `koda-command-guard`, which must happen before the wheel ships in any image (`koda/services/command_guard.py:11-14` says production intends to install it). | API renames across pyo3 0.25–0.29 in `lib.rs`; gRPC codegen changes in tonic. |
+| R6 | Majors | tonic 0.12 → 0.13+ on its own merits (rustls-pemfile is already gone, M1-E6-T2; tonic-build and prost changes); pyo3 0.24 → 0.29 in `koda-command-guard`, which must happen before the wheel ships in any image (`koda/services/command_guard.py:11-14` says production intends to install it). | API renames across pyo3 0.25–0.29 in `lib.rs`; gRPC codegen changes in tonic. |
 
 Code or documentation change outside the lockfiles: add Postgres TLS support, or document a VPN-only requirement for multi-host cluster mode (NoTls is hard-coded at `rust/koda-postgres/src/lib.rs:155` and `rust/koda-policy-engine/src/store.rs:133`).
 
@@ -283,7 +283,7 @@ Code or documentation change outside the lockfiles: add Postgres TLS support, or
 
 | Item | Status | Mitigation |
 |---|---|---|
-| rustls-pemfile 2.2.0 (RUSTSEC-2025-0134, unmaintained) | No patched release | It parses only trusted operator PEM, so the risk is maintenance-only. Migrate to tonic ≥0.13 (R6). |
+| rustls-pemfile 2.2.0 (RUSTSEC-2025-0134, unmaintained) | Resolved | Gone from `rust/Cargo.lock` since M1-E6-T2 (tonic without `tls`). The `--ignore RUSTSEC-2025-0134` in `.github/workflows/security.yml` can go with M1-E7-T4. |
 | pin-utils 0.1.0 (RUSTSEC-2026-0441, unmaintained) | No patched release | The AWS SDK bump (R5) removes it with no Koda manifest change. |
 | minimatch 10.2.5 (GHSA-g3hv-75wg-m249) | No fix within the consumer's `^10.2.2` range; the latest typescript-estree (8.72.2) keeps that range. | Not reachable. Add a time-boxed pnpm `auditConfig` ignore with this rationale (no `auditConfig` exists today), or force an override to 11.0.1, which upstream does not support and which would need `pnpm lint:web`. Revisit when typescript-eslint moves to minimatch 11. |
 | crypto-bigint and lru | They cannot be forced because of parent pins. | Fix through R5. |
@@ -298,7 +298,7 @@ Fixing these needs no approval. Each one needs operator approval under MISSION �
 - **filelock 3.x and soupsieve ≤2.10, if their major bumps are deferred**: these are not-reachable advisories that keep failing `pip-audit --strict`.
 - **Any not-reachable Node or Rust item left in the tree**: it needs an explicit audit ignore with a rationale, because the gates fail on it. Examples are quinn-proto under `cargo audit`, and every moderate-or-higher dev item under `pnpm audit` without `--prod`.
 - **Postgres NoTls in multi-host cluster mode, if TLS is not added**: RUSTSEC-2026-0179 and 0178 remain exploitable by a man-in-the-middle in that topology, even after R3 fixes the parser bugs.
-- **Unmaintained crates rustls-pemfile and pin-utils**: these need acceptance until R6 and R5 land, if the `cargo audit` gate fails on unmaintained notices. How the gate treats informational notices was not checked.
+- **Unmaintained crate pin-utils** (rustls-pemfile is gone since M1-E6-T2): it needs acceptance until R5 lands, if the `cargo audit` gate fails on unmaintained notices. How the gate treats informational notices was not checked.
 
 ## 6. Open questions and caveats
 
