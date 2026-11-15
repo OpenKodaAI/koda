@@ -559,7 +559,8 @@ class TestRunOpenAICompatibleCancellation:
         assert run.cancelled()
 
     @pytest.mark.asyncio
-    async def test_cancelling_only_the_request_task_returns_an_error_result(self, ready_capability):
+    async def test_request_registers_nothing_in_the_process_holder(self, ready_capability):
+        """No reader takes a task from the holder, so the HTTP runner puts none there (M4-E1-T1)."""
         from koda.services.openai_compatible_runner import run_openai_compatible
 
         process_holder: dict = {}
@@ -580,12 +581,12 @@ class TestRunOpenAICompatibleCancellation:
                     )
                 )
                 await asyncio.wait_for(request_received.wait(), timeout=10)
-                process_holder["task"].cancel()
-                result = await asyncio.wait_for(run, timeout=10)
+                assert process_holder == {}
+                run.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(run, timeout=10)
 
-        assert result["error"] is True
-        assert result["result"] == "mistral request cancelled."
-        assert "task" not in process_holder
+        assert process_holder == {}
 
 
 class TestUserContentBuilder:

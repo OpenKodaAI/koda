@@ -44,7 +44,6 @@ from koda.config import (
     MAX_AGENT_TOOL_ITERATIONS,
     MAX_BROWSER_TASKS_GLOBAL,
     MAX_CONCURRENT_TASKS_GLOBAL,
-    MAX_CONCURRENT_TASKS_PER_USER,
     MAX_HEAVY_TASKS_GLOBAL,
     MAX_QUEUED_TASKS_PER_USER,
     MAX_STANDARD_TASKS_GLOBAL,
@@ -1436,7 +1435,6 @@ agent_start_time = time.time()
 _shutting_down = False
 
 _user_tasks: dict[int, dict[int, TaskInfo]] = {}  # user_id -> {task_id -> TaskInfo}
-_user_semaphores: dict[int, asyncio.Semaphore] = {}
 _global_semaphore = asyncio.Semaphore(MAX_CONCURRENT_TASKS_GLOBAL)
 _standard_task_semaphore = asyncio.Semaphore(MAX_STANDARD_TASKS_GLOBAL)
 _heavy_task_semaphore = asyncio.Semaphore(MAX_HEAVY_TASKS_GLOBAL)
@@ -1452,13 +1450,6 @@ async def _cancel_pending_task(task: asyncio.Task[Any] | None) -> None:
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError, Exception):
         await task
-
-
-def _get_user_semaphore(user_id: int) -> asyncio.Semaphore:
-    """Get or create the concurrency semaphore for a user."""
-    if user_id not in _user_semaphores:
-        _user_semaphores[user_id] = asyncio.Semaphore(MAX_CONCURRENT_TASKS_PER_USER)
-    return _user_semaphores[user_id]
 
 
 def _get_active_task_count(user_id: int) -> int:
@@ -1613,38 +1604,6 @@ def _serialize_queue_payload(raw_item: Any) -> str:
         payload.pop("update", None)
         if "artifact_bundle" in payload:
             payload["artifact_bundle"] = _serialize_artifact_bundle(payload.get("artifact_bundle"))
-    elif isinstance(raw_item, tuple):
-        task_id = _extract_task_id_from_raw_item(raw_item)
-        if len(raw_item) == 5:
-            update, query_text, image_paths, artifact_bundle, _ = raw_item
-            payload = {
-                "_user_message": True,
-                "_task_id": task_id,
-                "chat_id": update.effective_chat.id,
-                "query_text": query_text,
-                "image_paths": list(image_paths or []),
-                "artifact_bundle": _serialize_artifact_bundle(artifact_bundle),
-                "force_audio_response": False,
-            }
-        elif len(raw_item) == 4:
-            update, query_text, image_paths, _ = raw_item
-            payload = {
-                "_user_message": True,
-                "_task_id": task_id,
-                "chat_id": update.effective_chat.id,
-                "query_text": query_text,
-                "image_paths": list(image_paths or []),
-                "force_audio_response": False,
-            }
-        else:
-            update, query_text = raw_item
-            payload = {
-                "_user_message": True,
-                "_task_id": task_id,
-                "chat_id": update.effective_chat.id,
-                "query_text": query_text,
-                "force_audio_response": False,
-            }
     else:
         payload = {"_unsupported_payload": True}
     return json.dumps(payload, ensure_ascii=False, default=str)
@@ -1934,10 +1893,6 @@ def _extract_task_id_from_raw_item(raw_item: Any) -> int | None:
         value = raw_item.get("_task_id")
         if isinstance(value, int):
             return value
-    if isinstance(raw_item, tuple) and len(raw_item) >= 4:
-        candidate = raw_item[-1]
-        if isinstance(candidate, int):
-            return candidate
     return None
 
 
@@ -2710,39 +2665,7 @@ def _parse_queue_item(item: Any) -> QueueItem:
             is_link_analysis=True,
             **squad_fields(item),
         )
-    # Handle 5-tuple from enqueue (update, query_text, image_paths, artifact_bundle, task_id)
-    if isinstance(item, tuple) and len(item) == 5:
-        update, query_text, image_paths, artifact_bundle, _task_id = item
-        return QueueItem(
-            chat_id=update.effective_chat.id,
-            query_text=query_text,
-            update=update,
-            image_paths=image_paths,
-            artifact_bundle=artifact_bundle,
-        )
-    # Handle 4-tuple legacy enqueue payloads
-    if isinstance(item, tuple) and len(item) == 4:
-        update, query_text, image_paths, _task_id = item
-        return QueueItem(
-            chat_id=update.effective_chat.id,
-            query_text=query_text,
-            update=update,
-            image_paths=image_paths,
-        )
-    if len(item) == 3:
-        update, query_text, image_paths = item
-        return QueueItem(
-            chat_id=update.effective_chat.id,
-            query_text=query_text,
-            update=update,
-            image_paths=image_paths,
-        )
-    update, query_text = item
-    return QueueItem(
-        chat_id=update.effective_chat.id,
-        query_text=query_text,
-        update=update,
-    )
+    raise ValueError(f"unsupported queue item: {type(item).__name__}")
 
 
 def _filter_visual_paths(paths: list[str] | None) -> list[str]:
@@ -7673,10 +7596,10 @@ async def _finalize_scheduled_run(
 
 
 @contextlib.asynccontextmanager
-async def _task_capacity_scope(raw_item: Any, semaphore: asyncio.Semaphore) -> Any:
+async def _task_capacity_scope(raw_item: Any) -> Any:
     """Acquire normal task capacity unless this is a bounded child-run lane.
 
-    Parent turns hold the normal user/global task semaphores while waiting for
+    Parent turns hold the global task semaphore while waiting for
     child results. Re-acquiring the same capacity in a child run can deadlock,
     so child-runs rely on their dedicated fan-out semaphore and still pass
     through leases, runtime status, policy, sandbox, and provider handling.
@@ -7685,7 +7608,7 @@ async def _task_capacity_scope(raw_item: Any, semaphore: asyncio.Semaphore) -> A
     if isinstance(raw_item, dict) and raw_item.get("_child_run"):
         yield
         return
-    async with _global_semaphore, semaphore:
+    async with _global_semaphore:
         yield
 
 
@@ -7700,7 +7623,6 @@ async def _execute_single_task(
     from koda.services import audit, metrics
     from koda.services.runtime import get_runtime_controller
 
-    semaphore = _get_user_semaphore(user_id)
     item: QueueItem | None = None
     ctx: QueryContext | None = None
     run_result: RunResult | None = None
@@ -7723,7 +7645,7 @@ async def _execute_single_task(
 
     try:
         metrics.ACTIVE_TASKS.labels(agent_id=_agent_id_label).inc()
-        async with _task_capacity_scope(raw_item, semaphore):
+        async with _task_capacity_scope(raw_item):
             ctx_user_id.set(user_id)
             query_id = str(uuid.uuid4())[:8]
             ctx_query_id.set(query_id)
@@ -8006,13 +7928,12 @@ async def _execute_single_task(
                         runtime_terminal_path = str(run_result.runtime_terminal_path or "")
                         if not runtime_terminal_path.startswith(("kernel://", "kernel-stream://")):
                             raise RuntimeError("runtime terminal output requires a kernel-backed terminal path")
-                        stdout_path = None
                         if run_result.runtime_terminal_id is None:
                             await runtime.register_terminal(
                                 task_id=task_id,
                                 terminal_kind="command",
                                 label=f"{run_result.provider} attempt {attempt}",
-                                path=str(stdout_path) if stdout_path is not None else runtime_terminal_path,
+                                path=runtime_terminal_path,
                             )
 
                     if _recover_provider_error_with_completed_output(run_result):
@@ -8873,40 +8794,14 @@ async def _process_queue(user_id: int, context: BotContext) -> None:
                     _cancelled_task_ids.discard(task_id)
                     continue
 
-                if isinstance(raw_item, dict):
-                    chat_id = int(raw_item.get("chat_id") or 0)
-                    query_text = str(raw_item.get("query_text") or "continuation")
-                    task_provider = raw_item.get("provider") or context.user_data.get("provider")
-                else:
-                    chat_id = raw_item[0].effective_chat.id
-                    query_text = raw_item[1]
-                    task_provider = context.user_data.get("provider")
-
                 if task_id is None:
-                    provider_sessions = context.user_data.get("provider_sessions", {})
-                    task_id = create_task(
-                        user_id,
-                        chat_id,
-                        query_text,
-                        provider=task_provider,
-                        model=get_provider_model(context.user_data, task_provider),
-                        session_id=context.user_data.get("session_id"),
-                        provider_session_id=provider_sessions.get(task_provider),
-                        max_attempts=TASK_MAX_RETRY_ATTEMPTS,
-                    )
-                    from koda.services import audit as _audit
-
-                    _audit.emit_task_lifecycle("task.created", user_id=user_id, task_id=task_id)
-                    await _persist_runtime_queue_item(
-                        task_id=task_id,
-                        user_id=user_id,
-                        chat_id=chat_id,
-                        query_text=query_text,
-                        raw_item=raw_item,
-                    )
+                    # Every producer creates the task row and sets ``_task_id``.
+                    raise ValueError("queue item has no task id")
+                chat_id = int(raw_item.get("chat_id") or 0)
+                query_text = str(raw_item.get("query_text") or "continuation")
 
                 task_info = TaskInfo(
-                    task_id=cast(int, task_id),
+                    task_id=task_id,
                     user_id=user_id,
                     chat_id=chat_id,
                     query_text=query_text,
@@ -8915,7 +8810,7 @@ async def _process_queue(user_id: int, context: BotContext) -> None:
                 _sync_user_queue_observability(user_id)
                 log.info("task_created", task_id=task_id, user_id=user_id, query_preview=query_text[:60])
 
-                t = asyncio.create_task(_execute_single_task(raw_item, user_id, context, cast(int, task_id), task_info))
+                t = asyncio.create_task(_execute_single_task(raw_item, user_id, context, task_id, task_info))
                 task_info.asyncio_task = t
                 try:
                     await t

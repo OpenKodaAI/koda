@@ -282,10 +282,8 @@ async def test_process_queue_survives_dispatch_failure_and_continues_fifo():
     context.user_data = {}
 
     broken_item = {"_task_id": 1, "chat_id": 123}
-    second_update = MagicMock()
-    second_update.effective_chat.id = 123
     await queue.put(broken_item)
-    await queue.put((second_update, "segunda", None, None, 2))
+    await queue.put({"_task_id": 2, "chat_id": 123, "query_text": "segunda"})
 
     executed: list[int] = []
 

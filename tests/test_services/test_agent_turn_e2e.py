@@ -105,7 +105,6 @@ def queue_state() -> Iterator[None]:
         qm._queue_workers,
         qm._user_tasks,
         qm._worker_locks,
-        qm._user_semaphores,
         qm._user_queue_task_ids,
         qm._active_chat_ids,
     ):
