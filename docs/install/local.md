@@ -5,7 +5,7 @@ Use this path when you want Koda running on your machine with the same core topo
 ## Prerequisites
 
 - Docker and Docker Compose
-- Node.js with npm for the packaged CLI path
+- Node.js 20 or later with npm for the packaged CLI path
 - A repository clone only if you are contributing from source
 
 ## Quickstart
@@ -21,7 +21,7 @@ Without a global install:
 npx @openkodaai/koda@latest install
 ```
 
-From a source clone on apt-based Linux hosts:
+From a source clone on Debian, Ubuntu or a derivative:
 
 ```bash
 git clone <your-fork-or-repo-url> ./koda
@@ -29,7 +29,7 @@ cd ./koda
 ./scripts/install.sh
 ```
 
-The installer verifies prerequisites, stages the product bundle, creates `.env` if needed, starts Docker Compose, runs doctor checks, and prints the setup URL plus a short-lived setup code.
+When Docker or Node.js is missing, `install.sh` installs Docker from Docker's apt repository for the host's distro and Node.js 22 from NodeSource. It never replaces an existing Node.js: an older one than 20 stops the script with a message saying so. The installer verifies prerequisites, stages the product bundle, creates `.env` if needed, starts Docker Compose, runs doctor checks, and prints the setup URL plus a short-lived setup code.
 
 ## What Starts
 
