@@ -52,8 +52,20 @@ _DANGEROUS_IMPORTS = frozenset(
     }
 )
 # Matched by the name as written and by every name an import in the file binds it to, so after
-# ``import os as o`` or ``from os import system as s``, ``o.system`` and ``s`` are ``os.system`` (D-323).
-_DANGEROUS_CALLS = frozenset({"eval", "exec", "os.system", "posix.system", "nt.system", "_winapi.CreateProcess"})
+# ``import os as o`` or ``from os import system as s``, ``o.system`` and ``s`` are ``os.system``, and
+# after ``import builtins as b``, ``b.exec`` is ``builtins.exec`` (D-323).
+_DANGEROUS_CALLS = frozenset(
+    {
+        "eval",
+        "exec",
+        "builtins.eval",
+        "builtins.exec",
+        "os.system",
+        "posix.system",
+        "nt.system",
+        "_winapi.CreateProcess",
+    }
+)
 _DANGEROUS_CALL_PREFIXES = ("subprocess.", "_posixsubprocess.")
 _NETWORK_IMPORTS = frozenset({"socket", "requests", "httpx", "urllib", "paramiko"})
 # Standard ways to run code that never reach SourceFileLoader.get_code, so never the verified bytes
@@ -106,8 +118,9 @@ _EXEC_FROM_FILE_NAMES = frozenset(
         "source_to_code",
     }
 )
-# Matched by the name as written and by the name an import alias stands for. The builtin compile,
-# called bare, has a rule of its own (_exec_from_file_routes).
+# Matched by the name as written and by every name an import in the file binds it to, a star import
+# included. A call to builtins.exec or builtins.eval is denied (_DANGEROUS_CALLS); these match it passed
+# on. The builtin compile, called bare, has a rule of its own (_exec_from_file_routes).
 _EXEC_FROM_FILE_CALLS = frozenset({"builtins.compile", "builtins.exec", "builtins.eval"})
 _EXEC_FROM_FILE_CALL_PREFIXES = (
     "os.exec",
@@ -1392,9 +1405,6 @@ def _scan_python_file(
             if literal_module:
                 _classify_import(literal_module.split(".", 1)[0], findings, risk_classes, file_path)
             names = {_call_name(node.func), *_imported_names(node.func, aliases)}
-            if isinstance(node.func, ast.Name):
-                # A star import binds the module's names: after ``from os import *``, ``system`` is ``os.system``.
-                names.update(f"{star[:-1]}{node.func.id}" for star in aliases.get("*", ()))
             dotted = next(
                 (
                     name
@@ -1447,14 +1457,18 @@ def _import_aliases(tree: ast.AST) -> dict[str, set[str]]:
 
 
 def _literal_import(call: ast.Call, aliases: dict[str, set[str]]) -> tuple[str, str]:
-    """The module a literal ``__import__`` or ``importlib.import_module`` call imports, and the one it returns."""
-    first = call.args[0] if call.args else None
+    """The module a literal ``__import__`` or ``importlib.import_module`` call imports, and the one it returns.
+
+    The module is the first argument or the ``name`` keyword, and ``__import__`` is also matched as
+    ``builtins.__import__`` and ``importlib.__import__`` (D-323).
+    """
+    first = call.args[0] if call.args else next((kw.value for kw in call.keywords if kw.arg == "name"), None)
     if not isinstance(first, ast.Constant) or not isinstance(first.value, str):
         return "", ""
     functions = {_call_name(call.func), *_imported_names(call.func, aliases)}
     if "importlib.import_module" in functions:
         return first.value, first.value
-    if "__import__" in functions:
+    if functions & {"__import__", "builtins.__import__", "importlib.__import__"}:
         return first.value, first.value.split(".", 1)[0]
     return "", ""
 
@@ -1462,7 +1476,9 @@ def _literal_import(call: ast.Call, aliases: dict[str, set[str]]) -> tuple[str, 
 def _imported_names(node: ast.AST, aliases: dict[str, set[str]]) -> set[str]:
     """The dotted names *node* can stand for, as written and through the file's imports (none when it names none)."""
     if isinstance(node, ast.Name):
-        return {node.id, *aliases.get(node.id, ())}
+        # A star import binds the module's names: after ``from os import *``, ``system`` is ``os.system``.
+        stars = {f"{star[:-1]}{node.id}" for star in aliases.get("*", ())}
+        return {node.id, *aliases.get(node.id, ()), *stars}
     if isinstance(node, ast.Attribute):
         return {f"{owner}.{node.attr}" for owner in _imported_names(node.value, aliases)}
     if isinstance(node, ast.Call):
@@ -1475,7 +1491,8 @@ def _exec_from_file_routes(tree: ast.AST) -> set[str]:
     """The names by which *tree* runs code past ``SourceFileLoader.get_code`` (D-311).
 
     A name is matched as written and as every name an import in the file binds it to (after
-    ``import os as o``, ``o.execv`` is ``os.execv``), so an alias adds a match and never hides one.
+    ``import os as o``, ``o.execv`` is ``os.execv``; after ``from os import *``, ``popen`` is
+    ``os.popen``), so an alias adds a match and never hides one.
     """
     routes: set[str] = set()
     aliases = _import_aliases(tree)

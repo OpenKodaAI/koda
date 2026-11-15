@@ -33,8 +33,11 @@ The scanner denies:
   and as every name an import in the same file binds it to (after
   `import os as o`, `from os import system as s` or `from os import *`,
   `o.system`, `s` and `system` are `os.system`; after `import subprocess as sp`,
-  `sp.run` is `subprocess.run`), and a literal module name passed to
-  `__import__` or `importlib.import_module` counts as an import (D-323)
+  `sp.run` is `subprocess.run`; after `import builtins as b`, a `b.exec` or
+  `b.eval` call is `builtins.exec` or `builtins.eval`, denied like `exec` and
+  `eval`), and a literal module name passed to `__import__` (also as
+  `builtins.__import__` or `importlib.__import__`) or `importlib.import_module`,
+  as the first argument or as `name=`, counts as an import (D-323)
 - unknown permissions
 - `secret_access`, `code_execution`, `destructive_write`, or `unknown` risk
   without an explicit review path
@@ -140,10 +143,12 @@ is left to the scanner, which flags these standard routes as
 
 - `runpy` (`run_path` compiles a file it reads itself);
 - the builtin `compile`, called with its three arguments (source, filename and
-  mode, or through `*` or `**`) or passed on as a value, and `exec`, `eval` or
-  `compile` reached through `builtins` (bare `exec` and `eval` are denied); a
-  call with fewer arguments, such as `re.compile('a+')` imported as `compile`,
-  cannot be the builtin and is not flagged;
+  mode, or through `*` or `**`) or passed on as a value, `compile` reached
+  through `builtins`, and `exec` or `eval` reached through `builtins` and passed
+  on rather than called (a call to `exec` or `eval`, bare or through
+  `builtins`, is denied); a call with fewer arguments, such as
+  `re.compile('a+')` imported as `compile`, cannot be the builtin and is not
+  flagged;
 - `source_to_code`, a loader's compile step, called on bytes the code read
   itself (for example on a `SourceFileLoader` instance), whose code object can
   then run through `types.FunctionType` or a function's `__code__`;
@@ -171,8 +176,9 @@ is left to the scanner, which flags these standard routes as
 
 The scanner matches names as the code writes them and as every name an import
 in the same file binds them to, so a rebinding (`import json as o` in another
-function) adds a match and never hides one (after `import builtins as b`, `b.exec` is
-`builtins.exec`; after `import os as o`, `o.execv` is `os.execv`), including a
+function) adds a match and never hides one (after `import builtins as b`,
+`b.compile` is `builtins.compile`; after `import os as o`, `o.execv` is
+`os.execv`; after `from os import *`, `popen` is `os.popen`), including a
 literal module name passed to `importlib.import_module` or `__import__`
 (`__import__('os').execv` is `os.execv`); a name bound by an assignment or
 computed at run time is not seen. A package module named after one of the

@@ -168,6 +168,9 @@ _EXEC_FROM_FILE_CASES = [
     ("from multiprocessing import Process\n" + _STUB_HANDLER, "multiprocessing"),
     ("import os, sys\nos.execv(sys.executable, [sys.executable, __file__])\n" + _STUB_HANDLER, "os.execv"),
     ("import asyncio\nasyncio.create_subprocess_exec('python')\n" + _STUB_HANDLER, "asyncio.create_subprocess_exec"),
+    # A star import binds the module's names (D-323).
+    ("from os import *\npopen('id')\n" + _STUB_HANDLER, "os.popen"),
+    ("from os import *\nexecv('/bin/sh', ['sh'])\n" + _STUB_HANDLER, "os.execv"),
     # A SourceFileLoader's own source_to_code, called on bytes the code read itself.
     (
         "import importlib.machinery, types\n"
@@ -177,8 +180,8 @@ _EXEC_FROM_FILE_CASES = [
         "source_to_code",
     ),
     # The call routes through an import alias or a literal __import__ (posix and _posixsubprocess are
-    # denied as imports, D-323).
-    ("import builtins as b\nb.exec(open(__file__).read())\n" + _STUB_HANDLER, "builtins.exec"),
+    # denied as imports, and a builtins.exec call is denied, D-323).
+    ("import builtins as b\nrun = b.exec\n" + _STUB_HANDLER, "builtins.exec"),
     ("from builtins import compile as c\n" + _STUB_HANDLER, "builtins.compile"),
     ("import os as o, sys\no.execv(sys.executable, [sys.executable, __file__])\n" + _STUB_HANDLER, "os.execv"),
     ("import sys\n__import__('os').execv(sys.executable, [sys.executable])\n" + _STUB_HANDLER, "os.execv"),
@@ -257,6 +260,36 @@ _DANGEROUS_CODE_CASES = [
         "m = __import__('subprocess')\nm.run(['id'])\n",
         {(_DANGEROUS_IMPORT, "subprocess")},
     ),
+    # A literal import through builtins or importlib, or with the module as the name keyword.
+    (
+        "__import__('subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "from builtins import __import__ as i\ni('subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "import builtins\nbuiltins.__import__('subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "import importlib\nimportlib.__import__('subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "__import__(name='subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    (
+        "import importlib\nimportlib.import_module(name='subprocess').run(['id'])\n",
+        {(_DANGEROUS_IMPORT, "subprocess"), (_DANGEROUS_CALL, "subprocess.run")},
+    ),
+    # exec and eval, as written and through builtins.
+    ("exec('1')\n", {(_DANGEROUS_CALL, "exec")}),
+    ("import builtins as b\nb.exec(open(__file__).read())\n", {(_DANGEROUS_CALL, "builtins.exec")}),
+    ("from builtins import exec as e\ne('1')\n", {(_DANGEROUS_CALL, "builtins.exec")}),
+    ("import builtins as b\nb.eval('1')\n", {(_DANGEROUS_CALL, "builtins.eval")}),
 ]
 
 
