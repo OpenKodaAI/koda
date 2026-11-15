@@ -2389,6 +2389,10 @@ async def start_child_run_task(
         "child_context_policy": dict(context_policy or {}),
         "child_toolset": toolset,
         "child_capabilities": dict(capabilities) if capabilities else None,
+        # A child of a scheduled dry-run parent is a dry run too (D-372).
+        "dry_run": bool((capabilities or {}).get("dry_run")),
+        "scheduled_job_id": (capabilities or {}).get("scheduled_job_id"),
+        "scheduled_run_id": (capabilities or {}).get("scheduled_run_id"),
     }
     task_info = TaskInfo(
         task_id=task_id,
@@ -2786,6 +2790,10 @@ def _parse_queue_item(item: Any) -> QueueItem:
             "child_toolset": raw.get("child_toolset"),
             "child_capabilities": dict(capabilities) if isinstance(capabilities, dict) else None,
             "silent_response": bool(raw.get("silent_response")),
+            # A child of a dry-run parent is a dry run; it never finalizes the parent's scheduled run.
+            "scheduled_dry_run": bool(raw.get("_child_run") and raw.get("dry_run")),
+            "scheduled_job_id": raw.get("scheduled_job_id") if raw.get("_child_run") else None,
+            "scheduled_run_id": raw.get("scheduled_run_id") if raw.get("_child_run") else None,
         }
 
     if isinstance(item, dict) and (item.get("_user_message") or item.get("_recovered_task")):
@@ -3065,7 +3073,7 @@ async def _prepare_query_context(
                 drop_policy="hard_floor",
             )
 
-    if item.is_scheduled_run and item.scheduled_dry_run:
+    if item.scheduled_dry_run:
         _append_prompt_segment(
             prompt_segments,
             segment_id="scheduled_dry_run_rules",
@@ -3278,7 +3286,7 @@ async def _prepare_query_context(
         context.user_data["session_id"] = session_id
 
     agent_mode = context.user_data.get("agent_mode", "autonomous")
-    permission_mode = "plan" if item.is_scheduled_run and item.scheduled_dry_run else "bypassPermissions"
+    permission_mode = "plan" if item.scheduled_dry_run else "bypassPermissions"
     max_turns = 1 if agent_mode == "supervised" else MAX_TURNS
     _query_warnings: list[str] = []
     visual_paths = _filter_visual_paths(item.image_paths)
@@ -3303,7 +3311,7 @@ async def _prepare_query_context(
             has_images=bool(visual_paths),
         )
 
-    if item.is_scheduled_run and item.scheduled_dry_run:
+    if item.scheduled_dry_run:
         provider_session_id = None
         _query_warnings.append("dry-run forced fresh provider turn")
     else:
@@ -3899,9 +3907,9 @@ async def _prepare_query_context(
         stale_sources_present=stale_sources_present,
         turn_mode=cast(
             TurnMode,
-            "new_turn" if item.is_scheduled_run and item.scheduled_dry_run else infer_turn_mode(provider_session_id),
+            "new_turn" if item.scheduled_dry_run else infer_turn_mode(provider_session_id),
         ),
-        resume_requested=provider_session_id is not None and not (item.is_scheduled_run and item.scheduled_dry_run),
+        resume_requested=provider_session_id is not None and not item.scheduled_dry_run,
         dry_run=item.scheduled_dry_run,
         scheduled_job_id=item.scheduled_job_id,
         scheduled_run_id=item.scheduled_run_id,

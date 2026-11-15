@@ -123,11 +123,52 @@ async def test_child_run_starts_with_the_parent_capability_envelope() -> None:
         "agent_id": "KODA",
         "allowed_tool_ids": ["file_list", "web_search"],
         "task_kind": "investigation",
+        "dry_run": False,
+        "scheduled_job_id": None,
+        "scheduled_run_id": None,
     }
     # Memory rights: recall only on request, never writes or sensitive recall.
     assert started["context_policy"]["include_memory"] is True
     assert "allow_memory_writes" not in started["context_policy"]
     assert "include_sensitive" not in started["context_policy"]
+
+
+@pytest.mark.asyncio
+async def test_a_child_of_a_dry_run_parent_is_spawned_as_a_dry_run() -> None:
+    """D-372: a scheduled dry-run parent passes dry-run to its child, and the child run reports it."""
+    started: dict[str, Any] = {}
+
+    async def _start(**kwargs: Any) -> tuple[int, asyncio.Task[None]]:
+        started.update(kwargs)
+        return 501, asyncio.ensure_future(asyncio.sleep(0))
+
+    with (
+        patch("koda.services.child_runs.list_child_runs_for_parent", AsyncMock(return_value=[])),
+        patch("koda.services.child_runs._fetch_child_run_by_idempotency", AsyncMock(return_value=None)),
+        patch("koda.services.child_runs.upsert_child_run", AsyncMock()),
+        patch("koda.services.child_runs.update_child_run_result", AsyncMock()),
+        patch(
+            "koda.services.child_runs._summarize_child_task",
+            side_effect=lambda _agent, run_id, task_id, warnings: {
+                "child_run_id": run_id,
+                "child_task_id": task_id,
+                "status": "completed",
+                "summary": "ok",
+                "warnings": warnings,
+            },
+        ),
+        patch("koda.services.execution_policy.resolve_execution_policy_allowed_tool_ids", return_value=["file_list"]),
+        patch("koda.services.queue_manager.start_child_run_task", side_effect=_start),
+    ):
+        result = await delegate_child_task_tool(
+            {"prompt": "Inspect X"},
+            _parent_ctx(dry_run=True, scheduled_job_id=5, scheduled_run_id=9),
+        )
+
+    assert result.success is True
+    assert started["capabilities"]["dry_run"] is True
+    assert (started["capabilities"]["scheduled_job_id"], started["capabilities"]["scheduled_run_id"]) == (5, 9)
+    assert "dry_run" in result.data["warnings"]
 
 
 def test_child_run_denied_task_because_child_runs_do_not_nest() -> None:

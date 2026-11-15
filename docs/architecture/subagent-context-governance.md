@@ -79,6 +79,11 @@ Every allowed child toolset runs the child read-only, and read-only denies
 every write (`read_only_policy`) whatever execution-policy rule matches and
 whatever approval grant the run holds, so a grant given to the parent never
 lets its child write.
+A child of a scheduled dry-run parent is a dry run too: the envelope carries
+the parent's dry-run flag and scheduled job and run ids, the child gets the
+dry-run prompt rules, a fresh provider turn and dry-run tools (writes are
+blocked), and its result lists the `dry_run` warning. The child never
+finalizes the parent's scheduled run.
 Phase 3 fails closed for write, network-write, destructive, unknown, or
 unrecognized child toolsets until a stricter approval path is implemented.
 
