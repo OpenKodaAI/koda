@@ -3697,7 +3697,27 @@ class KnowledgeV2PostgresBackend:
                     # The deployment-wide lookup of the last retention.report
                     # filters on event_type alone; idx_audit_events_lookup
                     # leads with agent_id, so it would scan the whole table.
-                    f"""CREATE INDEX IF NOT EXISTS idx_audit_events_type_time
+                    # audit_events is large, so the index is built online
+                    # (ADR-028): CONCURRENTLY does not block writes, and runs
+                    # here because the runner sends each statement on its
+                    # own, outside a transaction. A failed concurrent build
+                    # leaves an INVALID index that IF NOT EXISTS would keep,
+                    # so the next run drops it first.
+                    f"""DO $$
+                        BEGIN
+                            IF EXISTS (
+                                SELECT 1 FROM pg_index i
+                                JOIN pg_class c ON c.oid = i.indexrelid
+                                JOIN pg_namespace n ON n.oid = c.relnamespace
+                                WHERE n.nspname = '{schema}'
+                                  AND c.relname = 'idx_audit_events_type_time'
+                                  AND NOT i.indisvalid
+                            ) THEN
+                                DROP INDEX "{schema}".idx_audit_events_type_time;
+                            END IF;
+                        END
+                        $$""",
+                    f"""CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_audit_events_type_time
                            ON "{schema}"."audit_events" (event_type, timestamp DESC)""",
                 ),
             ),

@@ -165,3 +165,59 @@ def test_workflow_diffs_an_upgrade_from_the_previous_release_against_a_fresh_ins
     assert "--schema gate_upgrade" in workflow and "--schema gate_fresh" in workflow
     assert "scripts/migrations_gate.py normalize" in workflow
     assert "scripts/migrations_gate.py check-indexes" in workflow
+
+
+# Migrations merged after the latest release, v1.0.18.
+_UNRELEASED_VERSIONS = {
+    "047_scheduler_events_and_dispatch_columns",
+    "048_control_plane_master_key_fingerprint",
+    "049_audit_events_type_lookup",
+}
+
+
+def test_the_migrations_added_since_the_latest_release_pass_the_index_check() -> None:
+    gate = _gate()
+    migrations = gate.current_migrations()
+    released = {m.version for m in migrations} - _UNRELEASED_VERSIONS
+
+    assert gate.transactional_indexes_on_large_tables(migrations, previous_versions=released) == []
+
+
+@pytest.mark.postgres
+async def test_audit_events_type_index_is_rebuilt_after_a_failed_concurrent_build(migrated_postgres: str) -> None:
+    """049 builds its index online; a failed build leaves an INVALID index, which the next run replaces."""
+    import asyncpg  # type: ignore[import-not-found]
+
+    from koda.knowledge.v2.postgres_backend import KnowledgeV2PostgresBackend
+
+    schema = "gate_invalid_index_probe"
+    backend = KnowledgeV2PostgresBackend(agent_id=None, dsn=migrated_postgres, schema=schema)
+    migration = next(m for m in backend._migrations() if m.version == "049_audit_events_type_lookup")
+    conn = await asyncpg.connect(migrated_postgres)
+    try:
+        await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        await conn.execute(f'CREATE SCHEMA "{schema}"')
+        await conn.execute(f'CREATE TABLE "{schema}"."audit_events" (event_type TEXT, timestamp TEXT)')
+        await conn.execute(f"INSERT INTO \"{schema}\".\"audit_events\" VALUES ('a', 't'), ('a', 't')")
+        with pytest.raises(asyncpg.UniqueViolationError):
+            await conn.execute(
+                f'CREATE UNIQUE INDEX CONCURRENTLY idx_audit_events_type_time ON "{schema}"."audit_events" (event_type)'
+            )
+
+        for statement in migration.statements:
+            await conn.execute(statement)
+
+        rows = await conn.fetch(
+            """
+            SELECT i.indisvalid, i.indisunique
+            FROM pg_index i
+            JOIN pg_class c ON c.oid = i.indexrelid
+            JOIN pg_namespace n ON n.oid = c.relnamespace
+            WHERE n.nspname = $1 AND c.relname = 'idx_audit_events_type_time'
+            """,
+            schema,
+        )
+        assert [(row["indisvalid"], row["indisunique"]) for row in rows] == [(True, False)]
+    finally:
+        await conn.execute(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE')
+        await conn.close()
