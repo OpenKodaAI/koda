@@ -168,7 +168,7 @@ export function TabInstrucoes() {
           onChange={(id) => setInnerTab(id as InnerTab)}
           ariaLabel={t("generated.controlPlane.secoes_de_instrucoes_4bcc394c")}
         />
-        <span className="text-xs text-[var(--text-quaternary)]">
+        <span className="text-xs text-[color:var(--text-quaternary)]">
           {innerTab === "prompts"
             ? t("generated.controlPlane.blocos_markdown_enviados_ao_modelo_f0be0ee7")
             : t("generated.controlPlane.limites_autonomia_e_execucao_67dbe4f9")}
@@ -189,7 +189,7 @@ export function TabInstrucoes() {
               }
               ariaLabel={t("generated.controlPlane.bloco_de_prompt_ativo_fcbaa58e")}
             />
-            <span className="text-xs text-[var(--text-quaternary)]">
+            <span className="text-xs text-[color:var(--text-quaternary)]">
               {tl(activeBlock.description)}
             </span>
           </div>

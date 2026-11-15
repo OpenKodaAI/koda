@@ -91,8 +91,8 @@ export function SectionRail({
               "relative flex items-center gap-2 rounded-[var(--radius-panel-sm)] px-3 py-2",
               "text-[0.8125rem] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
               active
-                ? "bg-[var(--hover-tint)] text-[var(--text-primary)]"
-                : "text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]",
+                ? "bg-[var(--hover-tint)] text-[color:var(--text-primary)]"
+                : "text-[color:var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-secondary)]",
             )}
           >
             {active ? (
@@ -102,7 +102,7 @@ export function SectionRail({
               />
             ) : null}
             {item.icon ? (
-              <span className="text-[var(--text-quaternary)]" aria-hidden>
+              <span className="text-[color:var(--text-quaternary)]" aria-hidden>
                 {item.icon}
               </span>
             ) : null}

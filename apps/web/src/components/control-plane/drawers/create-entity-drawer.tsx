@@ -241,7 +241,7 @@ export function CreateEntityDrawer({
       <form onSubmit={handleSubmit} className="flex h-full flex-col">
         <div className="flex flex-1 flex-col gap-6 overflow-y-auto px-6 py-6">
           <fieldset className="flex flex-col gap-2">
-            <legend className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+            <legend className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
               {t("controlPlane.create.typeLabel", undefined)}
             </legend>
             <div
@@ -262,8 +262,8 @@ export function CreateEntityDrawer({
                       "inline-flex h-10 items-center justify-center rounded-[var(--radius-pill)] text-[0.8125rem] font-medium",
                       "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                       active
-                        ? "bg-[var(--panel)] text-[var(--text-primary)]"
-                        : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]",
+                        ? "bg-[var(--panel)] text-[color:var(--text-primary)]"
+                        : "text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]",
                     )}
                   >
                     {t(`controlPlane.create.type.${option}`, {
@@ -281,7 +281,7 @@ export function CreateEntityDrawer({
           </fieldset>
 
           <label className="flex flex-col gap-2">
-            <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+            <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
               {t("controlPlane.create.nameLabel", undefined)}
             </span>
             <Input
@@ -296,7 +296,7 @@ export function CreateEntityDrawer({
 
           {type === "agent" ? (
             <label className="flex flex-col gap-2">
-              <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                 {t("controlPlane.create.agentIdLabel", undefined)}
               </span>
               <Input
@@ -309,14 +309,14 @@ export function CreateEntityDrawer({
                 placeholder={t("controlPlane.create.agentIdPlaceholder", undefined)}
                 disabled={submitting}
               />
-              <span className="text-[0.75rem] text-[var(--text-quaternary)]">
+              <span className="text-[0.75rem] text-[color:var(--text-quaternary)]">
                 {t("controlPlane.create.agentIdHint", undefined)}
               </span>
             </label>
           ) : null}
 
           <label className="flex flex-col gap-2">
-            <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+            <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
               {t("controlPlane.create.descriptionLabel", undefined)}
             </span>
             <textarea
@@ -325,13 +325,13 @@ export function CreateEntityDrawer({
               placeholder={t("controlPlane.create.descriptionPlaceholder", undefined)}
               disabled={submitting}
               rows={3}
-              className="min-h-[96px] w-full resize-none rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3.5 py-2.5 text-[0.875rem] leading-[1.5] text-[var(--text-primary)] outline-none transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] placeholder:text-[var(--text-quaternary)] focus-visible:border-[var(--accent)] focus-visible:bg-[var(--panel)]"
+              className="min-h-[96px] w-full resize-none rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3.5 py-2.5 text-[0.875rem] leading-[1.5] text-[color:var(--text-primary)] outline-none transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] placeholder:text-[color:var(--text-quaternary)] focus-visible:border-[var(--accent)] focus-visible:bg-[var(--panel)]"
             />
           </label>
 
           {type === "agent" ? (
             <fieldset className="flex flex-col gap-2">
-              <legend className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <legend className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                 {t("controlPlane.create.colorLabel", undefined)}
               </legend>
               <div className="flex flex-wrap items-center gap-2.5">
@@ -360,7 +360,7 @@ export function CreateEntityDrawer({
 
           {type === "squad" || type === "agent" ? (
             <label className="flex flex-col gap-2">
-              <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                 {type === "squad"
                   ? t("controlPlane.create.parentWorkspace", undefined)
                   : t("controlPlane.create.workspaceOptional", undefined)}
@@ -391,7 +391,7 @@ export function CreateEntityDrawer({
 
           {type === "agent" && workspaceId ? (
             <label className="flex flex-col gap-2">
-              <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+              <span className="text-[0.75rem] font-medium uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                 {t("controlPlane.create.squadOptional", undefined)}
               </span>
               <Select

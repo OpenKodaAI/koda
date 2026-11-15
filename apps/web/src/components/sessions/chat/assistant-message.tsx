@@ -109,7 +109,7 @@ export function AssistantMessage({
       ) : null}
 
       {text.trim() ? (
-        <div className="text-[length:var(--font-size-md)] leading-[1.6] text-[var(--text-primary)]">
+        <div className="text-[length:var(--font-size-md)] leading-[1.6] text-[color:var(--text-primary)]">
           <SessionRichText content={text} variant="assistant" />
         </div>
       ) : null}

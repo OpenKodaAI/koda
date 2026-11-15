@@ -304,7 +304,7 @@ export function TabSegredosVariaveis() {
                 <span className="eyebrow">{t("generated.controlPlane.chave_aa9b585c")}</span>
                 <input
                   type="text"
-                  className="field-shell font-mono text-[var(--text-primary)]"
+                  className="field-shell font-mono text-[color:var(--text-primary)]"
                   value={draftKey}
                   onChange={(event) => setDraftKey(event.target.value.toUpperCase())}
                   placeholder="API_KEY"
@@ -322,7 +322,7 @@ export function TabSegredosVariaveis() {
                 ) : (
                   <input
                     type="text"
-                    className="field-shell text-[var(--text-primary)]"
+                    className="field-shell text-[color:var(--text-primary)]"
                     value={draftValue}
                     onChange={(event) => setDraftValue(event.target.value)}
                     placeholder={t("generated.controlPlane.ex_squad_platform_f98942b9")}
@@ -340,7 +340,7 @@ export function TabSegredosVariaveis() {
                   "inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition-all",
                   draftIsSecret
                     ? "border-[rgba(255,180,80,0.25)] bg-[rgba(255,180,80,0.08)] text-[rgba(255,200,120,0.9)]"
-                    : "border-[var(--border-subtle)] bg-transparent text-[var(--text-tertiary)]",
+                    : "border-[var(--border-subtle)] bg-transparent text-[color:var(--text-tertiary)]",
                   editingKind === "secret" ? "opacity-50 cursor-not-allowed" : "cursor-pointer hover:border-[var(--border-strong)]",
                 )}
               >
@@ -353,7 +353,7 @@ export function TabSegredosVariaveis() {
                   <button
                     type="button"
                     onClick={resetEntryForm}
-                    className="rounded-lg px-3 py-2 text-xs font-medium text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-secondary)]"
+                    className="rounded-lg px-3 py-2 text-xs font-medium text-[color:var(--text-tertiary)] transition-colors hover:text-[color:var(--text-secondary)]"
                   >
                     {t("generated.controlPlane.cancelar_091200fb")}
                   </button>
@@ -371,9 +371,9 @@ export function TabSegredosVariaveis() {
             </div>
 
             {editingKind === "secret" && editingKey && (
-              <p className="text-xs text-[var(--text-quaternary)]">
+              <p className="text-xs text-[color:var(--text-quaternary)]">
                 {t("generated.controlPlane.substituindo_o_valor_de_0077dbea")}{" "}
-                <span className="font-mono text-[var(--text-secondary)]">{editingKey}</span>
+                <span className="font-mono text-[color:var(--text-secondary)]">{editingKey}</span>
                 {". "}
                 {t("generated.controlPlane.o_valor_atual_continua_mascarado_61b7766e")}
               </p>
@@ -381,7 +381,7 @@ export function TabSegredosVariaveis() {
           </div>
 
           {unifiedEntries.length === 0 ? (
-            <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-4 py-6 text-center text-sm text-[var(--text-quaternary)]">
+            <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-4 py-6 text-center text-sm text-[color:var(--text-quaternary)]">
               {t("generated.controlPlane.nenhuma_variavel_ou_segredo_cadastrado_e92517f5")}
             </div>
           ) : (
@@ -397,20 +397,20 @@ export function TabSegredosVariaveis() {
                   >
                     <div className="flex items-center gap-3 rounded-lg border border-[rgba(255,255,255,0.06)] bg-[rgba(255,255,255,0.012)] px-4 py-3">
                       <div className="flex min-w-0 flex-1 items-center gap-2.5">
-                        <span className="font-mono text-sm text-[var(--text-primary)] truncate">{entry.key}</span>
+                        <span className="font-mono text-sm text-[color:var(--text-primary)] truncate">{entry.key}</span>
                         <span
                           className={cn(
                             "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider",
                             entry.kind === "secret"
                               ? "bg-[rgba(255,180,80,0.1)] text-[rgba(255,200,120,0.85)]"
-                              : "bg-[rgba(255,255,255,0.05)] text-[var(--text-quaternary)]",
+                              : "bg-[rgba(255,255,255,0.05)] text-[color:var(--text-quaternary)]",
                           )}
                         >
                           {entry.kind === "secret" ? t("generated.controlPlane.secret_21981078") : t("generated.controlPlane.public_388f0dbf")}
                         </span>
                       </div>
 
-                      <span className="hidden font-mono text-xs text-[var(--text-quaternary)] truncate max-w-[200px] md:block">
+                      <span className="hidden font-mono text-xs text-[color:var(--text-quaternary)] truncate max-w-[200px] md:block">
                         {entry.kind === "secret" ? "••••••••" : entry.value}
                       </span>
 
@@ -422,7 +422,7 @@ export function TabSegredosVariaveis() {
                               ? beginEditVariable(entry.key, entry.value)
                               : beginEditSecret(entry.key)
                           }
-                          className="rounded-md p-1.5 text-[var(--text-quaternary)] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[var(--text-secondary)]"
+                          className="rounded-md p-1.5 text-[color:var(--text-quaternary)] transition-colors hover:bg-[rgba(255,255,255,0.06)] hover:text-[color:var(--text-secondary)]"
                           aria-label={t("generated.controlPlane.editar_28e2e08e")}
                         >
                           <Pencil size={13} />
@@ -431,7 +431,7 @@ export function TabSegredosVariaveis() {
                           <button
                             type="button"
                             onClick={() => handleDeleteVariable(entry.key)}
-                            className="rounded-md p-1.5 text-[var(--text-quaternary)] transition-colors hover:bg-[rgba(255,110,110,0.08)] hover:text-[var(--tone-danger-text)]"
+                            className="rounded-md p-1.5 text-[color:var(--text-quaternary)] transition-colors hover:bg-[rgba(255,110,110,0.08)] hover:text-[color:var(--tone-danger-text)]"
                             aria-label={t("generated.controlPlane.remover_5465770e")}
                           >
                             <Trash2 size={13} />
@@ -441,7 +441,7 @@ export function TabSegredosVariaveis() {
                             type="button"
                             variant="danger"
                             size="sm"
-                            className="!p-1.5 !rounded-md !border-0 !bg-transparent !shadow-none text-[var(--text-quaternary)] hover:!bg-[rgba(255,110,110,0.08)] hover:!text-[var(--tone-danger-text)]"
+                            className="!p-1.5 !rounded-md !border-0 !bg-transparent !shadow-none text-[color:var(--text-quaternary)] hover:!bg-[rgba(255,110,110,0.08)] hover:!text-[color:var(--tone-danger-text)]"
                             loading={isPending(`delete-secret:${entry.key}`)}
                             loadingLabel=""
                             onClick={() => handleDeleteSecret(entry.key)}

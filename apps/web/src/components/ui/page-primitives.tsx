@@ -100,7 +100,7 @@ export function PageSectionHeader({
         {eyebrow ? <p className="eyebrow">{eyebrow}</p> : null}
         <h2
           className={cn(
-            compact ? "m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]" : "app-section__title",
+            compact ? "m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]" : "app-section__title",
             eyebrow && !compact && "mt-2",
           )}
         >
@@ -109,7 +109,7 @@ export function PageSectionHeader({
         {description ? (
           <p
             className={cn(
-              compact ? "m-0 mt-0.5 text-[0.8125rem] text-[var(--text-tertiary)]" : "app-section__description",
+              compact ? "m-0 mt-0.5 text-[0.8125rem] text-[color:var(--text-tertiary)]" : "app-section__description",
             )}
           >
             {description}
@@ -184,13 +184,13 @@ export function PageMetricStripItem({
 }) {
   const toneClass =
     tone === "accent"
-      ? "text-[var(--accent)]"
+      ? "text-[color:var(--accent)]"
       : tone === "warning"
-        ? "text-[var(--tone-warning-dot)]"
+        ? "text-[color:var(--tone-warning-dot)]"
         : tone === "danger"
-          ? "text-[var(--tone-danger-dot)]"
+          ? "text-[color:var(--tone-danger-dot)]"
           : tone === "success"
-            ? "text-[var(--tone-success-dot)]"
+            ? "text-[color:var(--tone-success-dot)]"
             : "";
 
   return (
@@ -309,12 +309,12 @@ export function PageSearchField({
       {loading ? (
         <span role="status" aria-label={loadingLabel}>
           <LoaderCircle
-            className="h-4 w-4 animate-spin text-[var(--text-quaternary)]"
+            className="h-4 w-4 animate-spin text-[color:var(--text-quaternary)]"
             aria-hidden="true"
           />
         </span>
       ) : (
-        <Search className="h-4 w-4 text-[var(--text-quaternary)]" aria-hidden="true" />
+        <Search className="h-4 w-4 text-[color:var(--text-quaternary)]" aria-hidden="true" />
       )}
       <input
         type="text"
@@ -330,7 +330,7 @@ export function PageSearchField({
           type="button"
           onClick={() => onChange("")}
           aria-label={clearLabel}
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]"
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[color:var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-secondary)]"
         >
           <X className="h-3.5 w-3.5" aria-hidden="true" />
         </button>

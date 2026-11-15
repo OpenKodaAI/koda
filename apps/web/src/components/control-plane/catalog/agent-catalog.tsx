@@ -162,20 +162,20 @@ function WorkspaceSelectorDropdown({
         <span className="flex min-w-0 items-center gap-2.5">
           {activeSection && (
             <span
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[10px] font-medium tabular-nums text-[var(--text-tertiary)]"
+              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[10px] font-medium tabular-nums text-[color:var(--text-tertiary)]"
               aria-hidden="true"
               title={t("generated.controlPlane.count_agents_a906521c", { count: activeSection.totalAgents })}
             >
               {activeSection.totalAgents}
             </span>
           )}
-          <span className="block min-w-0 truncate text-sm font-medium text-[var(--text-primary)]">
+          <span className="block min-w-0 truncate text-sm font-medium text-[color:var(--text-primary)]">
             {activeSection?.title ?? t("generated.controlPlane.workspace_85a7b6fe")}
           </span>
         </span>
         <ChevronDown
           className={cn(
-            "h-4 w-4 shrink-0 text-[var(--text-quaternary)] transition-transform duration-200",
+            "h-4 w-4 shrink-0 text-[color:var(--text-quaternary)] transition-transform duration-200",
             open && "rotate-180",
           )}
         />
@@ -222,7 +222,7 @@ function WorkspaceSelectorDropdown({
                         }}
                       >
                         <span
-                          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[10px] font-medium tabular-nums text-[var(--text-tertiary)]"
+                          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full border border-[var(--border-subtle)] bg-[var(--panel-soft)] text-[10px] font-medium tabular-nums text-[color:var(--text-tertiary)]"
                           aria-hidden="true"
                           title={t("generated.controlPlane.count_agents_a906521c", { count: section.totalAgents })}
                         >
@@ -324,7 +324,7 @@ function CreatePopover({
       <button
         type="button"
         className={cn(
-          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[var(--text-primary)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-hover)] active:scale-[0.96]",
+          "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-strong)] text-[color:var(--text-primary)] transition-colors duration-[var(--transition-fast)] hover:bg-[var(--surface-hover)] active:scale-[0.96]",
           open && "bg-[var(--surface-hover)]",
         )}
         aria-label={t("generated.controlPlane.criar_93c27e0c")}
@@ -367,7 +367,7 @@ function CreatePopover({
                       setOpen(false);
                     }}
                   >
-                    <Plus className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                    <Plus className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]" />
                     <span>{t("generated.controlPlane.agente_794b0ee3")}</span>
                   </button>
                   <button
@@ -379,7 +379,7 @@ function CreatePopover({
                       setOpen(false);
                     }}
                   >
-                    <FolderPlus className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                    <FolderPlus className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]" />
                     <span>{t("generated.controlPlane.workspace_85a7b6fe")}</span>
                   </button>
                   <button
@@ -391,7 +391,7 @@ function CreatePopover({
                       setOpen(false);
                     }}
                   >
-                    <FolderSearch className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                    <FolderSearch className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]" />
                     <span>{t("generated.controlPlane.import_from_folder_fd1e100e")}</span>
                   </button>
                   <button
@@ -406,7 +406,7 @@ function CreatePopover({
                       }
                     }}
                   >
-                    <Users className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                    <Users className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]" />
                     <span>{t("generated.controlPlane.squad_927b7ee0")}</span>
                   </button>
                 </motion.div>
@@ -651,14 +651,14 @@ function workspaceRootStatusLabel(
 }
 
 function workspaceRootStatusTone(workspace: ControlPlaneWorkspace) {
-  if (!workspace.root_path) return "bg-[var(--panel-strong)] text-[var(--text-tertiary)]";
+  if (!workspace.root_path) return "bg-[var(--panel-strong)] text-[color:var(--text-tertiary)]";
   if (workspace.root_exists === false || workspace.scan_status === "error") {
-    return "bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]";
+    return "bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)]";
   }
   if (workspace.scan_status === "completed") {
-    return "bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]";
+    return "bg-[var(--tone-success-bg)] text-[color:var(--tone-success-text)]";
   }
-  return "bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]";
+  return "bg-[var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]";
 }
 
 function workspaceImportRootsFromTree(tree: ControlPlaneWorkspaceTree): WorkspaceDirectoryRoot[] {
@@ -1967,7 +1967,7 @@ export function AgentCatalog({
               </span>
 
               <div className="space-y-1">
-                <p className="text-sm font-medium tracking-[-0.02em] text-[var(--text-primary)]">
+                <p className="text-sm font-medium tracking-[-0.02em] text-[color:var(--text-primary)]">
                   {moveFeedback
                     .phase === "moving"
                     ? t("generated.controlPlane.movendo_count_agente_s_para_target_61e712b6", {
@@ -1981,7 +1981,7 @@ export function AgentCatalog({
                         })
                       : t("generated.controlPlane.count_agente_s_sincronizado_s_f79194ae", { count: moveFeedback.total })}
                 </p>
-                <p className="text-xs text-[var(--text-tertiary)]">
+                <p className="text-xs text-[color:var(--text-tertiary)]">
                   {moveFeedback
                     .phase === "moving"
                     ? t("generated.controlPlane.done_de_total_atualizados_em_background_voce_cd4c30bd", {
@@ -2208,7 +2208,7 @@ export function AgentCatalog({
                           <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0 space-y-2">
                               <div className="flex flex-wrap items-center gap-2">
-                                <h3 className="text-base font-medium tracking-[-0.03em] text-[var(--text-primary)]">
+                                <h3 className="text-base font-medium tracking-[-0.03em] text-[color:var(--text-primary)]">
                                   {lane.title}
                                 </h3>
                               </div>
@@ -2284,10 +2284,10 @@ export function AgentCatalog({
                   <div className="flex items-start justify-between gap-4">
                     <div className="space-y-2">
                       <p className="eyebrow">{t("generated.controlPlane.workspace_85a7b6fe")}</p>
-                      <h3 className="text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+                      <h3 className="text-xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
                         {t("generated.controlPlane.import_from_folder_fd1e100e")}
                       </h3>
-                      <p className="text-sm text-[var(--text-tertiary)]">
+                      <p className="text-sm text-[color:var(--text-tertiary)]">
                         {t("generated.controlPlane.detecte_instrucoes_e_configuracoes_locais_an_733cba5f")}
                       </p>
                     </div>
@@ -2350,7 +2350,7 @@ export function AgentCatalog({
                           <button
                             key={root.path}
                             type="button"
-                            className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-2 py-1 text-xs text-[var(--text-tertiary)] transition hover:text-[var(--text-primary)]"
+                            className="inline-flex max-w-full items-center gap-1.5 rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-2 py-1 text-xs text-[color:var(--text-tertiary)] transition hover:text-[color:var(--text-primary)]"
                             onClick={() => void handleWorkspaceImportBrowse(root.path)}
                             disabled={workspaceImportDirectoryBusy}
                             title={root.path}
@@ -2365,7 +2365,7 @@ export function AgentCatalog({
                     {workspaceImportDirectory ? (
                       <div className="rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)]">
                         <div className="flex items-center justify-between gap-2 border-b border-[color:var(--divider-hair)] px-3 py-2">
-                          <span className="min-w-0 truncate font-mono text-[0.72rem] text-[var(--text-secondary)]">
+                          <span className="min-w-0 truncate font-mono text-[0.72rem] text-[color:var(--text-secondary)]">
                             {workspaceImportDirectory.path}
                           </span>
                           <div className="flex shrink-0 items-center gap-1">
@@ -2406,7 +2406,7 @@ export function AgentCatalog({
                               <button
                                 key={entry.path}
                                 type="button"
-                                className="flex w-full items-center gap-2 rounded-[0.35rem] px-2 py-1.5 text-left text-xs text-[var(--text-secondary)] hover:bg-[var(--panel-soft)] hover:text-[var(--text-primary)]"
+                                className="flex w-full items-center gap-2 rounded-[0.35rem] px-2 py-1.5 text-left text-xs text-[color:var(--text-secondary)] hover:bg-[var(--panel-soft)] hover:text-[color:var(--text-primary)]"
                                 onClick={() =>
                                   entry.kind === "directory"
                                     ? void handleWorkspaceImportBrowse(entry.path)
@@ -2422,7 +2422,7 @@ export function AgentCatalog({
                               </button>
                             ))
                           ) : (
-                            <p className="px-2 py-3 text-xs text-[var(--text-tertiary)]">
+                            <p className="px-2 py-3 text-xs text-[color:var(--text-tertiary)]">
                               {t("generated.controlPlane.nenhuma_pasta_visivel_c9d6635b")}
                             </p>
                           )}
@@ -2433,7 +2433,7 @@ export function AgentCatalog({
 
                   {workspaceImportScan ? (
                     <div className="mt-5 space-y-4">
-                      <div className="flex flex-wrap items-center gap-2 text-xs text-[var(--text-tertiary)]">
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-[color:var(--text-tertiary)]">
                         <span className="rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-2 py-1">
                           {workspaceImportScan.summary.total_sources} {t("generated.controlPlane.sources_2f0be9b3")}
                         </span>
@@ -2445,13 +2445,13 @@ export function AgentCatalog({
                             {tool} {count}
                           </span>
                         ))}
-                        <span className="rounded-[var(--radius-chip)] bg-[var(--tone-success-bg)] px-2 py-1 text-[var(--tone-success-text)]">
+                        <span className="rounded-[var(--radius-chip)] bg-[var(--tone-success-bg)] px-2 py-1 text-[color:var(--tone-success-text)]">
                           {workspaceImportScan.summary.importable ?? 0} {t("generated.controlPlane.importable_a750c771")}
                         </span>
-                        <span className="rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-2 py-1 text-[var(--tone-warning-text)]">
+                        <span className="rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-2 py-1 text-[color:var(--tone-warning-text)]">
                           {workspaceImportScan.summary.review_required ?? 0} {t("generated.controlPlane.review_a0e0fd42")}
                         </span>
-                        <span className="rounded-[var(--radius-chip)] bg-[var(--tone-danger-bg)] px-2 py-1 text-[var(--tone-danger-text)]">
+                        <span className="rounded-[var(--radius-chip)] bg-[var(--tone-danger-bg)] px-2 py-1 text-[color:var(--tone-danger-text)]">
                           {workspaceImportScan.summary.blocked ?? 0} {t("generated.controlPlane.blocked_11f684aa")}
                         </span>
                       </div>
@@ -2464,18 +2464,18 @@ export function AgentCatalog({
                               className="border-t border-[color:var(--divider-hair)] first:border-t-0"
                             >
                               <div className="sticky top-0 z-10 flex items-center justify-between gap-2 border-b border-[color:var(--divider-hair)] bg-[var(--panel)] px-3 py-2">
-                                <span className="text-xs font-semibold uppercase tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]">
+                                <span className="text-xs font-semibold uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-tertiary)]">
                                   {group.title}
                                 </span>
                                 <span
                                   className={cn(
                                     "rounded-[var(--radius-chip)] px-1.5 py-0.5 text-[0.68rem]",
                                     group.tone === "success" &&
-                                      "bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]",
+                                      "bg-[var(--tone-success-bg)] text-[color:var(--tone-success-text)]",
                                     group.tone === "warning" &&
-                                      "bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]",
+                                      "bg-[var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]",
                                     group.tone === "danger" &&
-                                      "bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]",
+                                      "bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)]",
                                   )}
                                 >
                                   {group.sources.length}
@@ -2502,27 +2502,27 @@ export function AgentCatalog({
                                       />
                                     ) : null}
                                     <span className="min-w-0 flex-1 space-y-1">
-                                      <span className="flex flex-wrap items-center gap-2 text-sm text-[var(--text-primary)]">
+                                      <span className="flex flex-wrap items-center gap-2 text-sm text-[color:var(--text-primary)]">
                                         <span className="font-mono text-[0.75rem]">
                                           {source.relative_path}
                                         </span>
-                                        <span className="rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[var(--text-tertiary)]">
+                                        <span className="rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[color:var(--text-tertiary)]">
                                           {source.tool}
                                         </span>
-                                        <span className="rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[var(--text-tertiary)]">
+                                        <span className="rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[color:var(--text-tertiary)]">
                                           {source.kind}
                                         </span>
-                                        <span className="rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[var(--text-tertiary)]">
+                                        <span className="rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-1.5 py-0.5 text-[0.68rem] uppercase text-[color:var(--text-tertiary)]">
                                           {source.risk}
                                         </span>
                                       </span>
                                       {source.warnings?.length ? (
-                                        <span className="block text-xs text-[var(--tone-warning-text)]">
+                                        <span className="block text-xs text-[color:var(--tone-warning-text)]">
                                           {source.warnings.join(" · ")}
                                         </span>
                                       ) : null}
                                       {source.content_excerpt ? (
-                                        <span className="line-clamp-2 block text-xs text-[var(--text-tertiary)]">
+                                        <span className="line-clamp-2 block text-xs text-[color:var(--text-tertiary)]">
                                           {source.content_excerpt}
                                         </span>
                                       ) : null}
@@ -2550,7 +2550,7 @@ export function AgentCatalog({
                         )}
                       </div>
 
-                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)] p-3 font-mono text-[0.72rem] leading-relaxed text-[var(--text-tertiary)]">
+                      <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-[var(--radius-panel-sm)] bg-[var(--panel-soft)] p-3 font-mono text-[0.72rem] leading-relaxed text-[color:var(--text-tertiary)]">
                         {workspaceImportPreview}
                       </pre>
                     </div>
@@ -2610,7 +2610,7 @@ export function AgentCatalog({
                           ? t("generated.controlPlane.workspace_85a7b6fe")
                           : t("generated.controlPlane.squad_927b7ee0")}
                       </p>
-                      <h3 className="text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+                      <h3 className="text-xl font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]">
                         {renderedOrganizationForm.mode === "create"
                           ? renderedOrganizationForm.kind === "workspace"
                             ? t("generated.controlPlane.criar_novo_workspace_cf57456c")
@@ -2619,7 +2619,7 @@ export function AgentCatalog({
                             ? t("generated.controlPlane.editar_workspace_9784d8c3")
                             : t("generated.controlPlane.editar_squad_ca51c651")}
                       </h3>
-                      <p className="text-sm text-[var(--text-tertiary)]">
+                      <p className="text-sm text-[color:var(--text-tertiary)]">
                         {t("generated.controlPlane.defina_nome_descricao_curta_e_a_cor_de_apoio_8c87cb87")}
                       </p>
                     </div>

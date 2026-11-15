@@ -42,7 +42,7 @@ export function EditorSaveBar({
         className,
       )}
     >
-      <div className="flex items-center gap-2.5 text-[0.8125rem] text-[var(--text-tertiary)]">
+      <div className="flex items-center gap-2.5 text-[0.8125rem] text-[color:var(--text-tertiary)]">
         {dirty ? <StatusDot tone="accent" pulse /> : <StatusDot tone="success" />}
         <span>{error ?? label}</span>
       </div>

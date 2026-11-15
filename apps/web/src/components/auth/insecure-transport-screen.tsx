@@ -35,7 +35,7 @@ export function InsecureTransportScreen({ origin }: InsecureTransportScreenProps
 
         <InlineAlert tone="warning">{t("auth.insecure_transport.reason")}</InlineAlert>
 
-        <ul className="flex flex-col gap-2 pl-4 text-[0.8125rem] leading-relaxed text-[var(--text-secondary)] list-disc">
+        <ul className="flex flex-col gap-2 pl-4 text-[0.8125rem] leading-relaxed text-[color:var(--text-secondary)] list-disc">
           <li>{t("auth.insecure_transport.fix_proxy")}</li>
           <li>{t("auth.insecure_transport.fix_localhost")}</li>
         </ul>

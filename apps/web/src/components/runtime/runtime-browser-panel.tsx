@@ -322,7 +322,7 @@ export function RuntimeBrowserPanel({
     <div className="space-y-4">
       <div className="runtime-surface-header">
         <div className="runtime-surface-header__main">
-          <span className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-2 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+          <span className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-chip)] bg-[var(--panel-soft)] px-2 font-mono text-[0.6875rem] text-[color:var(--text-tertiary)]">
             <StatusDot tone={snapshot.status === "running" ? "info" : "neutral"} pulse={snapshot.status === "running"} />
             {connectionLabel}
           </span>
@@ -386,18 +386,18 @@ export function RuntimeBrowserPanel({
 
           {snapshot.novnc_port == null && !screenshotUrl ? (
             <div className="runtime-browser-empty mx-auto max-w-md text-center">
-              <MonitorPlay className="mx-auto h-8 w-8 text-[var(--text-tertiary)]" />
-              <p className="mt-4 text-sm font-semibold text-[var(--text-primary)]">
+              <MonitorPlay className="mx-auto h-8 w-8 text-[color:var(--text-tertiary)]" />
+              <p className="mt-4 text-sm font-semibold text-[color:var(--text-primary)]">
                 {snapshot.status === "unavailable"
                   ? t("runtime.browser.visualSessionUnavailable")
                   : t("runtime.browser.noGraphicsTransport")}
               </p>
-              <p className="mt-2 text-sm leading-6 text-[var(--text-tertiary)]">
+              <p className="mt-2 text-sm leading-6 text-[color:var(--text-tertiary)]">
                 {screenshotError ||
                   t("runtime.browser.noVncDescription")}
               </p>
               {snapshot.missing_binaries?.length ? (
-                <p className="mt-3 text-xs text-[var(--text-quaternary)]">
+                <p className="mt-3 text-xs text-[color:var(--text-quaternary)]">
                   {t("runtime.browser.missingBinaries")}: {snapshot.missing_binaries.join(", ")}
                 </p>
               ) : null}

@@ -86,9 +86,9 @@ function undefinedReferences(files: { path: string; text: string }[]): string[] 
 
 // D-330: Tailwind v4 cannot tell what type a var() holds, so text-[var(--x)]
 // and text-(--x) compile to color: whatever --x is. text-[var(--font-size-sm)]
-// became color: 0.8125rem, an invalid colour, and the size never applied. Only
-// a colour token may go without a type hint; anything else takes length: (or
-// color: to say it is a colour).
+// became color: 0.8125rem, an invalid colour, and the size never applied. So
+// every arbitrary text-[var()] or text-(--x) says its type: length: for a
+// size, color: for a colour. The values below only pick which fix to name.
 
 const COLOUR_VALUE =
   /^(?:#[\da-f]{3,8}|(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\(|transparent$|currentcolor$|white$|black$)/i;
@@ -123,8 +123,8 @@ function isColour(name: RegExp, values: Map<string, string[]>, seen = new Set<st
 }
 
 /**
- * Every text-[var(--x)] or text-(--x) without a type hint whose --x is not a
- * colour token, as `file:line class -> fix`.
+ * Every text-[var(--x)] or text-(--x) without a type hint, as `file:line class
+ * fix`: color: when --x is a colour token, length: otherwise.
  */
 function untypedTextReferences(files: { path: string; text: string }[]): string[] {
   const sources = files.map(({ path, text }) => ({ path, text: withoutComments(text) }));
@@ -135,15 +135,15 @@ function untypedTextReferences(files: { path: string; text: string }[]): string[
   const untyped =
     /(?<![\w-])text-(?:\[var\(\s*(--[\w-]*(?:\$\{[^}]*\}[\w-]*)*)[^\]]*\]|\((--[\w-]*(?:\$\{[^}]*\}[\w-]*)*)\))/g;
   return sources.flatMap(({ path, text }) =>
-    [...text.matchAll(untyped)]
-      .filter((match) => !isColour(matcher(match[1] ?? match[2]), values))
-      .map((match) => {
-        const line = text.slice(0, match.index).split("\n").length;
-        const fix = match[1]
-          ? match[0].replace("text-[var(", "text-[length:var(")
-          : match[0].replace("text-(", "text-(length:");
-        return `${relative(SRC, path)}:${line} ${match[0]} compiles to color:, write ${fix} (or color: for a colour)`;
-      }),
+    [...text.matchAll(untyped)].map((match) => {
+      const line = text.slice(0, match.index).split("\n").length;
+      const colour = isColour(matcher(match[1] ?? match[2]), values);
+      const hint = colour ? "color:" : "length:";
+      const fix = match[1] ? match[0].replace("text-[var(", `text-[${hint}var(`) : match[0].replace("text-(", `text-(${hint}`);
+      return colour
+        ? `${relative(SRC, path)}:${line} ${match[0]} has no type hint, write ${fix}`
+        : `${relative(SRC, path)}:${line} ${match[0]} compiles to color:, write ${fix} (or color: for a colour)`;
+    }),
   );
 }
 
@@ -183,12 +183,13 @@ describe("design token references (M8-E5-T3)", () => {
       "components/probe.tsx:6 --font-size-tiny",
     ]);
   });
-  it("a text-[var(--x)] without a type hint names a colour token (D-330)", () => {
+
+  it("every arbitrary text-[var(--x)] or text-(--x) carries a length: or color: hint (D-330)", () => {
     const files = sourceFiles(SRC).map((path) => ({ path, text: readFileSync(path, "utf8") }));
     expect(untypedTextReferences(files)).toEqual([]);
   });
 
-  it("the D-330 scan flags untyped sizes and unknown types, and passes colours and hinted classes", () => {
+  it("the D-330 scan flags every unhinted class, names color: for a colour token, and passes hinted classes", () => {
     const css = [
       ":root { --text-primary: #101010; --font-size-sm: 0.8125rem; --tone-info-text: rgb(1 2 3); }",
       ":root { --tone-danger-text: #f00; --alias: var(--text-primary); --gap: var(--font-size-sm); }",
@@ -207,9 +208,13 @@ describe("design token references (M8-E5-T3)", () => {
         { path: join(SRC, "components/probe.tsx"), text: tsx },
       ]),
     ).toEqual([
+      "components/probe.tsx:1 text-[var(--text-primary)] has no type hint, write text-[color:var(--text-primary)]",
       "components/probe.tsx:1 text-[var(--font-size-sm)] compiles to color:, write text-[length:var(--font-size-sm)] (or color: for a colour)",
+      "components/probe.tsx:3 text-[var(--tone-${name}-text)] has no type hint, write text-[color:var(--tone-${name}-text)]",
       "components/probe.tsx:4 text-(--font-size-sm) compiles to color:, write text-(length:--font-size-sm) (or color: for a colour)",
+      "components/probe.tsx:4 text-(--alias) has no type hint, write text-(color:--alias)",
       "components/probe.tsx:4 text-[var(--gap)] compiles to color:, write text-[length:var(--gap)] (or color: for a colour)",
+      "components/probe.tsx:6 text-[var(--mention)] has no type hint, write text-[color:var(--mention)]",
       "components/probe.tsx:6 text-[var(--pad)] compiles to color:, write text-[length:var(--pad)] (or color: for a colour)",
     ]);
   });

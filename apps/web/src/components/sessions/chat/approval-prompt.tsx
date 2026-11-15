@@ -229,18 +229,18 @@ export function ApprovalPrompt({
     <div className="mt-2 flex flex-col gap-3 rounded-[var(--radius-panel)] border border-[color:var(--tone-warning-border)] bg-[color:var(--tone-warning-bg)] px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
         <StatusDot tone="warning" pulse />
-        <span className="text-[length:var(--font-size-sm)] font-medium text-[var(--tone-warning-text)]">
+        <span className="text-[length:var(--font-size-sm)] font-medium text-[color:var(--tone-warning-text)]">
           {t("generated.sessions.approval_required_c1a6f49c")}
         </span>
         {toolName ? (
-          <span className="truncate font-mono text-[12px] text-[var(--text-tertiary)]">
+          <span className="truncate font-mono text-[12px] text-[color:var(--text-tertiary)]">
             {toolName}
           </span>
         ) : null}
       </div>
 
       {reasons && reasons.length > 0 ? (
-        <ul className="m-0 list-disc space-y-1 pl-5 text-[length:var(--font-size-sm)] text-[var(--text-secondary)]">
+        <ul className="m-0 list-disc space-y-1 pl-5 text-[length:var(--font-size-sm)] text-[color:var(--text-secondary)]">
           {reasons.map((reason, index) => (
             <li key={index}>{reason}</li>
           ))}
@@ -248,7 +248,7 @@ export function ApprovalPrompt({
       ) : null}
 
       {preview ? (
-        <pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-3 py-2 font-mono text-[12px] text-[var(--text-secondary)]">
+        <pre className="m-0 max-h-40 overflow-auto whitespace-pre-wrap rounded-[var(--radius-chip)] bg-[var(--panel-strong)] px-3 py-2 font-mono text-[12px] text-[color:var(--text-secondary)]">
           {preview}
         </pre>
       ) : null}
@@ -256,11 +256,11 @@ export function ApprovalPrompt({
       {hasParamEditor ? (
         <section className="flex flex-col gap-2 rounded-[var(--radius-panel-sm)] border border-[color:var(--divider-hair)] bg-[var(--panel-soft)] p-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
-            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            <span className="font-mono text-[11px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
               {t("generated.sessions.parameters_bb95e589")}
             </span>
             {effectiveSchema ? (
-              <span className="rounded-[var(--radius-chip)] bg-[var(--tone-info-bg)] px-2 py-0.5 text-[11px] text-[var(--tone-info-text)]">
+              <span className="rounded-[var(--radius-chip)] bg-[var(--tone-info-bg)] px-2 py-0.5 text-[11px] text-[color:var(--tone-info-text)]">
                 {t("generated.sessions.schema_available_b3403497")}
               </span>
             ) : null}
@@ -280,10 +280,10 @@ export function ApprovalPrompt({
 
           {effectiveSchema ? (
             <details className="rounded-[var(--radius-chip)] border border-[color:var(--divider-hair)] bg-[var(--panel)] px-3 py-2">
-              <summary className="cursor-pointer text-[12px] text-[var(--text-tertiary)]">
+              <summary className="cursor-pointer text-[12px] text-[color:var(--text-tertiary)]">
                 {t("generated.sessions.schema_d57f85f4")}
               </summary>
-              <pre className="m-0 mt-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-[var(--text-secondary)]">
+              <pre className="m-0 mt-2 max-h-32 overflow-auto whitespace-pre-wrap font-mono text-[11px] text-[color:var(--text-secondary)]">
                 {stringifyJson(effectiveSchema)}
               </pre>
             </details>
@@ -294,11 +294,11 @@ export function ApprovalPrompt({
             aria-label={t("generated.sessions.parameter_diff_55849f7f")}
             className="rounded-[var(--radius-chip)] border border-[color:var(--divider-hair)] bg-[var(--panel)]"
           >
-            <div className="border-b border-[color:var(--divider-hair)] px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+            <div className="border-b border-[color:var(--divider-hair)] px-3 py-2 font-mono text-[11px] uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
               {t("generated.sessions.parameter_diff_55849f7f")}
             </div>
             {diffRows.length === 0 ? (
-              <p className="m-0 px-3 py-2 text-[12px] text-[var(--text-tertiary)]">
+              <p className="m-0 px-3 py-2 text-[12px] text-[color:var(--text-tertiary)]">
                 {t("generated.sessions.no_parameter_changes_c0f8c6a2")}
               </p>
             ) : (
@@ -312,10 +312,10 @@ export function ApprovalPrompt({
                       className={cn(
                         "block whitespace-pre-wrap break-words px-3 py-0.5",
                         row.kind === "add" &&
-                          "bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]",
+                          "bg-[var(--tone-success-bg)] text-[color:var(--tone-success-text)]",
                         row.kind === "remove" &&
-                          "bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]",
-                        row.kind === "same" && "text-[var(--text-tertiary)]",
+                          "bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)]",
+                        row.kind === "same" && "text-[color:var(--text-tertiary)]",
                       )}
                     >
                       {`${prefix} ${row.text}`}
@@ -323,7 +323,7 @@ export function ApprovalPrompt({
                   );
                 })}
                 {hiddenDiffCount > 0 ? (
-                  <code className="block px-3 py-1 text-[var(--text-quaternary)]">
+                  <code className="block px-3 py-1 text-[color:var(--text-quaternary)]">
                     {`... ${hiddenDiffCount} more lines`}
                   </code>
                 ) : null}
@@ -335,7 +335,7 @@ export function ApprovalPrompt({
 
       <div className="grid gap-2 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
             {t("generated.sessions.rationale_b8450b4b")}
           </span>
           <Textarea
@@ -349,7 +349,7 @@ export function ApprovalPrompt({
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[var(--text-tertiary)]">
+          <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[color:var(--text-tertiary)]">
             {t("generated.sessions.response_5b0d921c")}
           </span>
           <Textarea
@@ -411,7 +411,7 @@ export function ApprovalPrompt({
           {t("generated.sessions.approve_9b47d928")}
         </Button>
       </div>
-      <p className="m-0 flex items-center gap-1 text-[11px] text-[var(--text-tertiary)]">
+      <p className="m-0 flex items-center gap-1 text-[11px] text-[color:var(--text-tertiary)]">
         <AlertTriangle strokeWidth={1.5} className="icon-xs" />
         {t("generated.sessions.runtime_pauses_until_you_answer_0c0a64a4")}
       </p>

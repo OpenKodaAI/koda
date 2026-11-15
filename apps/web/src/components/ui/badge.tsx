@@ -20,13 +20,13 @@ const badgeVariants = cva(
   {
     variants: {
       variant: {
-        primary: "bg-[var(--panel-strong)] text-[var(--text-primary)]",
-        secondary: "bg-[var(--panel-soft)] text-[var(--text-secondary)]",
-        success: "bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]",
-        warning: "bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]",
-        info: "bg-[var(--tone-info-bg)] text-[var(--tone-info-text)]",
-        outline: "border border-[var(--border-subtle)] bg-transparent text-[var(--text-secondary)]",
-        destructive: "bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]",
+        primary: "bg-[var(--panel-strong)] text-[color:var(--text-primary)]",
+        secondary: "bg-[var(--panel-soft)] text-[color:var(--text-secondary)]",
+        success: "bg-[var(--tone-success-bg)] text-[color:var(--tone-success-text)]",
+        warning: "bg-[var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]",
+        info: "bg-[var(--tone-info-bg)] text-[color:var(--tone-info-text)]",
+        outline: "border border-[var(--border-subtle)] bg-transparent text-[color:var(--text-secondary)]",
+        destructive: "bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)]",
       },
       appearance: {
         default: "",
@@ -73,32 +73,32 @@ const badgeVariants = cva(
       {
         variant: "primary",
         appearance: "light",
-        className: "bg-[var(--surface-hover)] text-[var(--text-primary)]",
+        className: "bg-[var(--surface-hover)] text-[color:var(--text-primary)]",
       },
       {
         variant: "secondary",
         appearance: "light",
-        className: "bg-[var(--panel-soft)] text-[var(--text-secondary)]",
+        className: "bg-[var(--panel-soft)] text-[color:var(--text-secondary)]",
       },
       {
         variant: "success",
         appearance: "light",
-        className: "bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]",
+        className: "bg-[var(--tone-success-bg)] text-[color:var(--tone-success-text)]",
       },
       {
         variant: "warning",
         appearance: "light",
-        className: "bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]",
+        className: "bg-[var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]",
       },
       {
         variant: "info",
         appearance: "light",
-        className: "bg-[var(--tone-info-bg)] text-[var(--tone-info-text)]",
+        className: "bg-[var(--tone-info-bg)] text-[color:var(--tone-info-text)]",
       },
       {
         variant: "destructive",
         appearance: "light",
-        className: "bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)]",
+        className: "bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)]",
       },
       {
         appearance: "ghost",
@@ -130,7 +130,7 @@ const badgeVariants = cva(
 );
 
 const badgeButtonVariants = cva(
-  "inline-flex size-3.5 cursor-pointer items-center justify-center rounded-[4px] border border-transparent p-0 leading-none text-[var(--icon-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] hover:text-[var(--icon-primary)] [&>svg]:size-3.5 [&>svg]:opacity-100!",
+  "inline-flex size-3.5 cursor-pointer items-center justify-center rounded-[4px] border border-transparent p-0 leading-none text-[color:var(--icon-secondary)] transition-colors hover:border-[var(--border-subtle)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--icon-primary)] [&>svg]:size-3.5 [&>svg]:opacity-100!",
   {
     variants: {
       variant: {

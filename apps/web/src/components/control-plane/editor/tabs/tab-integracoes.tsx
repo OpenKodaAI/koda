@@ -511,13 +511,13 @@ export function TabIntegracoes() {
                 exit={{ opacity: 0, x: 20 }}
                 transition={{ duration: 0.28, ease: EASE_OUT as unknown as [number, number, number, number] }}
               >
-                <p className="text-xs text-[var(--text-quaternary)] mb-3">
+                <p className="text-xs text-[color:var(--text-quaternary)] mb-3">
                   {t("generated.controlPlane.integracoes_nativas_estao_ativas_por_padrao__8b4de9ac")}
                 </p>
 
                 <div className="mb-4 flex items-center gap-2">
                   <div className="relative flex-1">
-                    <Search size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[var(--text-quaternary)]" />
+                    <Search size={14} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-[color:var(--text-quaternary)]" />
                     <Input
                       type="text"
                       value={integrationSearch}
@@ -529,7 +529,7 @@ export function TabIntegracoes() {
                   <button
                     type="button"
                     onClick={() => setCustomMcpModalMode("form")}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-xs font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
                   >
                     <Plus size={13} />
                     <span>{t("generated.controlPlane.adicionar_servidor_5ad219d2")}</span>
@@ -537,7 +537,7 @@ export function TabIntegracoes() {
                   <button
                     type="button"
                     onClick={() => setCustomMcpModalMode("json")}
-                    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-xs font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+                    className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 text-xs font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
                   >
                     <FilePlus2 size={13} />
                     <span>{t("generated.controlPlane.importar_json_283a7ae7")}</span>
@@ -564,18 +564,18 @@ export function TabIntegracoes() {
                     ))}
                   </div>
                 ) : integrationEntries.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-4 text-sm text-[var(--text-quaternary)]">
+                  <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-4 text-sm text-[color:var(--text-quaternary)]">
                     {t("generated.controlPlane.nenhuma_integracao_adicional_disponivel_7df27eb4")}
                   </div>
                 ) : groupedIntegrations.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-4 text-sm text-[var(--text-quaternary)]">
+                  <div className="rounded-xl border border-dashed border-[var(--border-subtle)] px-4 py-4 text-sm text-[color:var(--text-quaternary)]">
                     {t("generated.controlPlane.nenhuma_integracao_encontrada_para_esta_busc_6956d0ff")}
                   </div>
                 ) : (
                   <div className="flex flex-col gap-5">
                     {groupedIntegrations.map((group) => (
                       <div key={group.category}>
-                        <span className="mb-2 block text-[10px] font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
+                        <span className="mb-2 block text-[10px] font-medium uppercase tracking-[0.18em] text-[color:var(--text-quaternary)]">
                           {group.label}
                         </span>
                         <div className="grid grid-cols-2 gap-2">
@@ -602,14 +602,14 @@ export function TabIntegracoes() {
                                   }}
                                 >
                                   {renderIntegrationLogo(entry.logoKey, "h-6 w-6") || (
-                                    <Plug size={16} className="text-[var(--text-quaternary)]" />
+                                    <Plug size={16} className="text-[color:var(--text-quaternary)]" />
                                   )}
                                 </div>
                                 <div className="min-w-0 flex-1">
-                                  <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+                                  <div className="truncate text-sm font-semibold text-[color:var(--text-primary)]">
                                     {entry.label}
                                   </div>
-                                  <div className="mt-0.5 truncate text-xs text-[var(--text-quaternary)]">
+                                  <div className="mt-0.5 truncate text-xs text-[color:var(--text-quaternary)]">
                                     {entry.tagline}
                                   </div>
                                 </div>

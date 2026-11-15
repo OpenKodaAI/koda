@@ -69,7 +69,7 @@ export function FieldShell({
     >
       <span className="eyebrow">{tl(label)}</span>
       {description ? (
-        <span className="max-w-[42rem] text-xs leading-relaxed text-[var(--text-quaternary)]">
+        <span className="max-w-[42rem] text-xs leading-relaxed text-[color:var(--text-quaternary)]">
           {tl(description)}
         </span>
       ) : null}
@@ -78,7 +78,7 @@ export function FieldShell({
         <span
           id={errorId}
           role="alert"
-          className="text-xs text-[var(--tone-danger-text)]"
+          className="text-xs text-[color:var(--tone-danger-text)]"
         >
           {tl(error as string)}
         </span>

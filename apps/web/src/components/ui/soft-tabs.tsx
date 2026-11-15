@@ -63,8 +63,8 @@ export function SoftTabs({ items, value, onChange, className, ariaLabel }: SoftT
             className={cn(
               "inline-flex h-8 cursor-pointer items-center gap-1.5 rounded-[var(--radius-pill)] border-0 px-3 text-[0.8125rem] font-medium outline-none transition-[color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
               selected
-                ? "bg-[var(--panel-strong)] text-[var(--text-primary)]"
-                : "bg-transparent text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]",
+                ? "bg-[var(--panel-strong)] text-[color:var(--text-primary)]"
+                : "bg-transparent text-[color:var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-secondary)]",
             )}
           >
             {item.icon ? <span className="inline-flex">{item.icon}</span> : null}

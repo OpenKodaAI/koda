@@ -49,7 +49,7 @@ export function StatusIndicator({
         "inline-flex items-center gap-2 rounded-lg text-[10.5px] font-semibold tracking-[0.01em]",
         isPill
           ? "min-h-[28px] border px-2.5 py-1"
-          : "border-none bg-transparent px-0 py-0 text-[var(--text-secondary)]",
+          : "border-none bg-transparent px-0 py-0 text-[color:var(--text-secondary)]",
         className
       )}
       style={

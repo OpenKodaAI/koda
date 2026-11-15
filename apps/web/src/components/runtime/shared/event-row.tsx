@@ -55,16 +55,16 @@ export function EventRow({
       )}
     >
       <StatusDot tone={LEVEL_TONE[level]} className="mt-[6px]" />
-      <span className="font-mono text-[0.6875rem] leading-[1.35] text-[var(--text-quaternary)] pt-0.5">
+      <span className="font-mono text-[0.6875rem] leading-[1.35] text-[color:var(--text-quaternary)] pt-0.5">
         {time}
       </span>
       <div className="min-w-0">
-        <p className="m-0 truncate text-[var(--text-secondary)]">{message}</p>
+        <p className="m-0 truncate text-[color:var(--text-secondary)]">{message}</p>
         {source ? (
-          <p className="m-0 text-[0.6875rem] text-[var(--text-quaternary)]">{source}</p>
+          <p className="m-0 text-[0.6875rem] text-[color:var(--text-quaternary)]">{source}</p>
         ) : null}
         {hasPayload && expanded ? (
-          <pre className="mt-1.5 max-h-40 overflow-auto rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-2 font-mono text-[0.6875rem] leading-[1.5] text-[var(--text-tertiary)]">
+          <pre className="mt-1.5 max-h-40 overflow-auto rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] p-2 font-mono text-[0.6875rem] leading-[1.5] text-[color:var(--text-tertiary)]">
             {typeof payload === "string" ? payload : JSON.stringify(payload, null, 2)}
           </pre>
         ) : null}
@@ -75,7 +75,7 @@ export function EventRow({
           onClick={() => setExpanded((prev) => !prev)}
           aria-expanded={expanded}
           className={cn(
-            "inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-quaternary)] transition-[color,transform,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]",
+            "inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-quaternary)] transition-[color,transform,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-secondary)]",
             expanded && "rotate-180",
           )}
         >

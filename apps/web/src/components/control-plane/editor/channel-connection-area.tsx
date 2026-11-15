@@ -157,10 +157,10 @@ function ChannelCard({
         <span style={{ color: "#ffffff" }}>{logo}</span>
       </div>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+        <div className="truncate text-sm font-semibold text-[color:var(--text-primary)]">
           {channelLabel}
         </div>
-        <div className="mt-0.5 truncate text-xs text-[var(--text-quaternary)]">
+        <div className="mt-0.5 truncate text-xs text-[color:var(--text-quaternary)]">
           {connected && agentUsername ? `@${agentUsername}` : channelTagline}
           {!channel.isOfficial && (
             <span className="ml-1 inline-flex items-center rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] text-amber-400/80">

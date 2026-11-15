@@ -29,7 +29,7 @@ function StatusGlyph({ status }: StatusGlyphProps) {
     case "running":
       return (
         <Loader2
-          className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--tone-info-dot)]"
+          className="h-3.5 w-3.5 shrink-0 animate-spin text-[color:var(--tone-info-dot)]"
           strokeWidth={1.75}
           aria-hidden
         />
@@ -37,7 +37,7 @@ function StatusGlyph({ status }: StatusGlyphProps) {
     case "done":
       return (
         <Check
-          className="h-3.5 w-3.5 shrink-0 text-[var(--tone-success-dot)]"
+          className="h-3.5 w-3.5 shrink-0 text-[color:var(--tone-success-dot)]"
           strokeWidth={2}
           aria-hidden
         />
@@ -45,7 +45,7 @@ function StatusGlyph({ status }: StatusGlyphProps) {
     case "failed":
       return (
         <AlertCircle
-          className="h-3.5 w-3.5 shrink-0 text-[var(--tone-danger-dot)]"
+          className="h-3.5 w-3.5 shrink-0 text-[color:var(--tone-danger-dot)]"
           strokeWidth={1.75}
           aria-hidden
         />
@@ -53,7 +53,7 @@ function StatusGlyph({ status }: StatusGlyphProps) {
     case "skipped":
       return (
         <MinusCircle
-          className="h-3.5 w-3.5 shrink-0 text-[var(--tone-warning-dot)]"
+          className="h-3.5 w-3.5 shrink-0 text-[color:var(--tone-warning-dot)]"
           strokeWidth={1.75}
           aria-hidden
         />
@@ -62,7 +62,7 @@ function StatusGlyph({ status }: StatusGlyphProps) {
     default:
       return (
         <Circle
-          className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]"
+          className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-quaternary)]"
           strokeWidth={1.75}
           aria-hidden
         />
@@ -76,7 +76,7 @@ export function UiSteps({ block }: { block: UiStepsBlock }) {
   return (
     <div className="rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] py-1">
       {title ? (
-        <h4 className="m-0 px-3 pt-2 pb-1 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]">
+        <h4 className="m-0 px-3 pt-2 pb-1 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)]">
           {title}
         </h4>
       ) : null}
@@ -88,11 +88,11 @@ export function UiSteps({ block }: { block: UiStepsBlock }) {
           >
             <StatusGlyph status={step.status} />
             <div className="flex min-w-0 flex-col">
-              <span className="truncate text-[0.875rem] text-[var(--text-primary)]">
+              <span className="truncate text-[0.875rem] text-[color:var(--text-primary)]">
                 {step.label}
               </span>
               {step.detail ? (
-                <span className="truncate text-[0.75rem] text-[var(--text-tertiary)]">
+                <span className="truncate text-[0.75rem] text-[color:var(--text-tertiary)]">
                   {step.detail}
                 </span>
               ) : null}

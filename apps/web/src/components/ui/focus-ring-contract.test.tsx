@@ -659,7 +659,7 @@ describe("text contrast (D-267)", () => {
       if (!text) continue;
       let token: string | undefined;
       for (let element = node.parentElement; element && !token; element = element.parentElement) {
-        token = [...element.classList].map((name) => name.match(/^text-\[var\((--text-[\w-]+)\)\]$/)?.[1]).find(Boolean);
+        token = [...element.classList].map((name) => name.match(/^text-\[color:var\((--text-[\w-]+)\)\]$/)?.[1]).find(Boolean);
         if (element === option) break;
       }
       painted.push([text, token ?? "no text colour"]);

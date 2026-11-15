@@ -67,7 +67,7 @@ function renderMentionText(
       return (
         <span
           key={`${keyPrefix}-mention-${segment.mention.id}-${index}`}
-          className="font-medium text-[var(--tone-info-dot)]"
+          className="font-medium text-[color:var(--tone-info-dot)]"
         >
           {segment.raw}
         </span>

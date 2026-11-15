@@ -129,16 +129,16 @@ export function CronTable({
     return (
       <div className="flex flex-col items-center gap-2 py-10 text-center">
         <Clock
-          className="icon-lg text-[var(--text-quaternary)]"
+          className="icon-lg text-[color:var(--text-quaternary)]"
           strokeWidth={1.5}
           aria-hidden
         />
-        <p className="m-0 text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+        <p className="m-0 text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-primary)]">
           {t("schedules.table.noRoutine", {
             bot: t("common.agents", undefined),
           })}
         </p>
-        <p className="m-0 text-[0.75rem] text-[var(--text-tertiary)]">
+        <p className="m-0 text-[0.75rem] text-[color:var(--text-tertiary)]">
           {t("schedules.table.noRoutineDescription")}
         </p>
       </div>
@@ -148,7 +148,7 @@ export function CronTable({
   const cols =
     "md:grid-cols-[minmax(160px,180px)_minmax(260px,1fr)_minmax(128px,150px)_96px_minmax(150px,190px)_176px]";
   const headerClass =
-    "px-1 font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]";
+    "px-1 font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]";
 
   return (
     <TooltipProvider delayDuration={250}>
@@ -270,10 +270,10 @@ function ScheduleDesktopRow({
           size="sm"
         />
         <span className="flex min-w-0 flex-col leading-tight">
-          <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+          <span className="truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
             {agent.label}
           </span>
-          <span className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+          <span className="truncate font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
             {agent.id}
           </span>
         </span>
@@ -281,13 +281,13 @@ function ScheduleDesktopRow({
 
       <div className="min-w-0" role="cell">
         <p
-          className="m-0 line-clamp-1 text-[0.8125rem] font-medium text-[var(--text-primary)]"
+          className="m-0 line-clamp-1 text-[0.8125rem] font-medium text-[color:var(--text-primary)]"
           title={routineName}
         >
           {routineName}
         </p>
         <p
-          className="m-0 mt-1 line-clamp-1 text-[0.75rem] leading-[1.45] text-[var(--text-tertiary)]"
+          className="m-0 mt-1 line-clamp-1 text-[0.75rem] leading-[1.45] text-[color:var(--text-tertiary)]"
           title={routineSummary}
         >
           {routineSummary || t("schedules.table.noSummary")}
@@ -295,10 +295,10 @@ function ScheduleDesktopRow({
       </div>
 
       <div className="min-w-0" role="cell">
-        <span className="block truncate font-mono text-[0.75rem] tabular-nums text-[var(--text-secondary)]">
+        <span className="block truncate font-mono text-[0.75rem] tabular-nums text-[color:var(--text-secondary)]">
           {job.schedule_expr || job.cron_expression}
         </span>
-        <span className="mt-1 block truncate font-mono text-[0.6875rem] uppercase text-[var(--text-quaternary)]">
+        <span className="mt-1 block truncate font-mono text-[0.6875rem] uppercase text-[color:var(--text-quaternary)]">
           {job.timezone || "UTC"}
         </span>
       </div>
@@ -309,7 +309,7 @@ function ScheduleDesktopRow({
 
       <div className="min-w-0" role="cell">
         <span
-          className="block truncate font-mono text-[0.75rem] text-[var(--text-tertiary)]"
+          className="block truncate font-mono text-[0.75rem] text-[color:var(--text-tertiary)]"
           title={job.work_dir ?? undefined}
         >
           {job.work_dir ?? t("schedules.table.noDirectory")}
@@ -372,36 +372,36 @@ function ScheduleMobileRow({
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-3">
-            <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+            <span className="truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
               {agent.label}
             </span>
             <StatusBadge status={job.status} />
           </div>
-          <p className="m-0 mt-1 line-clamp-1 text-[0.8125rem] text-[var(--text-primary)]">
+          <p className="m-0 mt-1 line-clamp-1 text-[0.8125rem] text-[color:var(--text-primary)]">
             {routineName}
           </p>
-          <p className="m-0 mt-1 line-clamp-2 text-[0.75rem] leading-[1.5] text-[var(--text-tertiary)]">
+          <p className="m-0 mt-1 line-clamp-2 text-[0.75rem] leading-[1.5] text-[color:var(--text-tertiary)]">
             {routineSummary || t("schedules.table.noSummary")}
           </p>
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+      <div className="grid grid-cols-2 gap-3 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
         <span className="min-w-0">
           {t("schedules.table.schedule")}:{" "}
-          <span className="text-[var(--text-secondary)]">
+          <span className="text-[color:var(--text-secondary)]">
             {job.schedule_expr || job.cron_expression}
           </span>
         </span>
         <span className="min-w-0">
           {t("schedules.table.nextRun", undefined)}:{" "}
-          <span className="text-[var(--text-secondary)]">
+          <span className="text-[color:var(--text-secondary)]">
             {formatScheduleTimestamp(job.next_run_at, t("schedules.table.lifecycle.validationPending"))}
           </span>
         </span>
         <span className="col-span-2 min-w-0 truncate" title={job.work_dir ?? undefined}>
           {t("schedules.table.scope")}:{" "}
-          <span className="text-[var(--text-secondary)]">
+          <span className="text-[color:var(--text-secondary)]">
             {job.work_dir ?? t("schedules.table.noDirectory")}
           </span>
         </span>
@@ -525,13 +525,13 @@ function ActionButton({
           title={label}
           data-action-state={state}
           className={cn(
-            "inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-chip)] border border-transparent text-[var(--text-tertiary)]",
+            "inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-chip)] border border-transparent text-[color:var(--text-tertiary)]",
             "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-            "hover:border-[color:var(--border-subtle)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+            "hover:border-[color:var(--border-subtle)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
             "disabled:cursor-not-allowed disabled:opacity-50",
-            state === "pending" && "border-[color:var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--text-secondary)] opacity-100",
-            state === "success" && "border-[color:var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--tone-success-dot)] opacity-100",
-            state === "error" && "border-[color:var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--tone-danger-dot)] opacity-100",
+            state === "pending" && "border-[color:var(--border-subtle)] bg-[var(--panel-soft)] text-[color:var(--text-secondary)] opacity-100",
+            state === "success" && "border-[color:var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[color:var(--tone-success-dot)] opacity-100",
+            state === "error" && "border-[color:var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-dot)] opacity-100",
           )}
           onClick={onClick}
           disabled={disabled || isPending}
@@ -589,7 +589,7 @@ function StatusBadge({ status }: { status?: string | null }) {
   }
 
   return (
-    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[0.75rem] text-[var(--text-secondary)]">
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[0.75rem] text-[color:var(--text-secondary)]">
       <StatusDot tone={tone} pulse={pulse} />
       {label}
     </span>

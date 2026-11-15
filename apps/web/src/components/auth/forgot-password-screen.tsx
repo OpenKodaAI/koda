@@ -210,7 +210,7 @@ export function ForgotPasswordScreen() {
         <div className="text-center">
           <Link
             href="/login"
-            className="text-[12px] text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors"
+            className="text-[12px] text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)] transition-colors"
           >
             {t("auth.forgot.back_to_login")}
           </Link>

@@ -11,7 +11,7 @@ export function SettingsFieldGroup({
     <section className="flex flex-col gap-4 border-b border-[var(--divider-hair)] py-6 first:pt-0 last:border-b-0">
       {title ? (
         <header className="flex min-w-0 flex-col gap-1">
-          <h3 className="m-0 text-[0.9375rem] font-medium tracking-[-0.01em] text-[var(--text-primary)]">
+          <h3 className="m-0 text-[0.9375rem] font-medium tracking-[-0.01em] text-[color:var(--text-primary)]">
             {title}
           </h3>
         </header>

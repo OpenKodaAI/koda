@@ -29,10 +29,10 @@ export function ComposerToolbar({
 
   return (
     <div className="flex items-center justify-between gap-3 px-3 pb-2 pt-1">
-      <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+      <span className="font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
         {t("chat.composer.sendHint", undefined)}
       </span>
-      <div className="flex items-center gap-2 text-[0.75rem] text-[var(--text-tertiary)]">
+      <div className="flex items-center gap-2 text-[0.75rem] text-[color:var(--text-tertiary)]">
         {modelLabel ? (
           <span className="font-mono tracking-[-0.01em] text-[0.6875rem]">
             {modelLabel}
@@ -43,7 +43,7 @@ export function ComposerToolbar({
         ) : null}
         {agentLabel ? (
           lockedAgent ? (
-            <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] bg-[var(--panel)] px-1.5 py-0.5 text-[var(--text-secondary)]">
+            <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] bg-[var(--panel)] px-1.5 py-0.5 text-[color:var(--text-secondary)]">
               {agentId ? (
                 <span
                   aria-hidden
@@ -61,9 +61,9 @@ export function ComposerToolbar({
                   className={cn(
                     "inline-flex items-center gap-1.5 truncate max-w-[200px]",
                     "rounded-[var(--radius-pill)] border border-[color:var(--border-subtle)]",
-                    "bg-[var(--panel)] px-1.5 py-0.5 text-[var(--text-secondary)]",
+                    "bg-[var(--panel)] px-1.5 py-0.5 text-[color:var(--text-secondary)]",
                     "transition-[border-color,background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-                    "hover:border-[color:var(--border-strong)] hover:text-[var(--text-primary)]",
+                    "hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   {agentId ? (
@@ -84,7 +84,7 @@ export function ComposerToolbar({
               <PopoverContent align="end" sideOffset={8} className="w-72 p-1" aria-labelledby={headingId}>
                 <div
                   id={headingId}
-                  className="px-2 pt-1.5 pb-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]"
+                  className="px-2 pt-1.5 pb-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)]"
                 >
                   {t("chat.composer.agents", undefined)}
                 </div>
@@ -104,8 +104,8 @@ export function ComposerToolbar({
                           "flex w-full items-center gap-2.5 rounded-[var(--radius-panel-sm)] px-2 py-1.5 text-left text-[0.8125rem]",
                           "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                           active
-                            ? "bg-[var(--hover-tint)] text-[var(--text-primary)]"
-                            : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+                            ? "bg-[var(--hover-tint)] text-[color:var(--text-primary)]"
+                            : "text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
                         )}
                       >
                         <span
@@ -118,7 +118,7 @@ export function ComposerToolbar({
                         </span>
                         {active ? (
                           <Check
-                            className="h-3.5 w-3.5 shrink-0 text-[var(--text-secondary)]"
+                            className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-secondary)]"
                             strokeWidth={1.75}
                             aria-hidden
                           />

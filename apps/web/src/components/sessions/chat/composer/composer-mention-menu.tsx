@@ -156,7 +156,7 @@ export function ComposerMentionMenuContent({
   const showInitialLoader = isLoading && skills.length === 0 && mcps.length === 0;
   const showFooterLoader = paging || hasMoreMcps;
 
-  const loaderShell = "flex items-center justify-center gap-1.5 px-3 py-2.5 min-h-[2rem] text-[0.75rem] text-[var(--text-tertiary)]";
+  const loaderShell = "flex items-center justify-center gap-1.5 px-3 py-2.5 min-h-[2rem] text-[0.75rem] text-[color:var(--text-tertiary)]";
   const spinnerClass = "h-3.5 w-3.5 shrink-0 animate-spin";
 
   const footer = showInitialLoader ? (

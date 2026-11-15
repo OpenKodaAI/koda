@@ -72,12 +72,12 @@ function RailSectionHeader({
 }) {
   return (
     <div className="flex items-center justify-between gap-2 px-2.5 pb-1 pt-2">
-      <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]">
+      <span className="font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)]">
         {children}
       </span>
       {loading ? (
         <LoaderCircle
-          className="h-3 w-3 animate-spin text-[var(--text-quaternary)]"
+          className="h-3 w-3 animate-spin text-[color:var(--text-quaternary)]"
           strokeWidth={1.75}
           role="status"
           aria-label={loadingLabel}
@@ -313,12 +313,12 @@ function SessionRailImpl({
     >
       <div className="flex h-14 shrink-0 items-center justify-between px-3">
         <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-[length:var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+          <span className="truncate text-[length:var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
             {t("chat.rail.title", undefined)}
           </span>
           {showUpdatingIndicator ? (
             <LoaderCircle
-              className="h-3.5 w-3.5 shrink-0 animate-spin text-[var(--text-quaternary)]"
+              className="h-3.5 w-3.5 shrink-0 animate-spin text-[color:var(--text-quaternary)]"
               strokeWidth={1.75}
               role="status"
               aria-label={t("chat.rail.updating", undefined)}
@@ -333,7 +333,7 @@ function SessionRailImpl({
                 aria-label={t("chat.rail.newSession", undefined)}
                 className={cn(
                   "inline-flex h-8 w-8 items-center justify-center rounded-full",
-                  "bg-[var(--panel-strong)] text-[var(--text-primary)]",
+                  "bg-[var(--panel-strong)] text-[color:var(--text-primary)]",
                   "transition-[background-color,transform] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                   "hover:bg-[var(--surface-hover)] active:scale-[0.96]",
                 )}
@@ -350,8 +350,8 @@ function SessionRailImpl({
                   className={cn(
                     "flex-1 rounded-[var(--radius-pill)] text-[0.75rem] font-medium transition-colors duration-[120ms]",
                     createMode === "conversation"
-                      ? "bg-[var(--panel)] text-[var(--text-primary)]"
-                      : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]",
+                      ? "bg-[var(--panel)] text-[color:var(--text-primary)]"
+                      : "text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   {t("chat.rail.create.conversation", undefined)}
@@ -363,8 +363,8 @@ function SessionRailImpl({
                   className={cn(
                     "flex-1 rounded-[var(--radius-pill)] text-[0.75rem] font-medium transition-colors duration-[120ms]",
                     createMode === "room"
-                      ? "bg-[var(--panel)] text-[var(--text-primary)]"
-                      : "text-[var(--text-tertiary)] hover:text-[var(--text-primary)]",
+                      ? "bg-[var(--panel)] text-[color:var(--text-primary)]"
+                      : "text-[color:var(--text-tertiary)] hover:text-[color:var(--text-primary)]",
                   )}
                 >
                   {t("chat.rail.create.room", undefined)}
@@ -373,26 +373,26 @@ function SessionRailImpl({
               {createMode === "conversation" ? (
                 <>
                   <div className="mb-2 mt-3 px-1 pt-1">
-                    <span className="text-[length:var(--font-size-sm)] font-medium text-[var(--text-secondary)]">
+                    <span className="text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-secondary)]">
                       {t("chat.rail.newChatAgent", undefined)}
                     </span>
                   </div>
                   <label className="mb-2 flex h-8 items-center gap-2 rounded-[calc(var(--radius-input)-4px)] bg-[var(--panel-soft)] px-2.5">
-                    <Search className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
+                    <Search className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
                     <input
                       type="text"
                       role="searchbox"
                       value={agentSearch}
                       onChange={(event) => setAgentSearch(event.target.value)}
                       placeholder={t("chat.rail.searchAgents", undefined)}
-                      className="search-input--custom-clear h-full min-w-0 flex-1 bg-transparent text-[0.8125rem] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+                      className="search-input--custom-clear h-full min-w-0 flex-1 bg-transparent text-[0.8125rem] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-quaternary)]"
                     />
                     {agentSearch ? (
                       <button
                         type="button"
                         onClick={() => setAgentSearch("")}
                         aria-label={t("chat.rail.clearAgentSearch", undefined)}
-                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-secondary)]"
+                        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[color:var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-secondary)]"
                       >
                         <X className="h-3 w-3" strokeWidth={1.75} aria-hidden />
                       </button>
@@ -410,7 +410,7 @@ function SessionRailImpl({
                         role="status"
                         aria-label={t("chat.rail.loadingAgents", undefined)}
                       >
-                        <LoaderCircle className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" strokeWidth={1.75} />
+                        <LoaderCircle className="h-4 w-4 animate-spin text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
                       </div>
                     ) : newChatAgentsQuery.isError ? (
                       <InlineAlert tone="danger" className="mx-0 my-1">
@@ -419,7 +419,7 @@ function SessionRailImpl({
                           : t("chat.rail.agentSearchFailed", undefined)}
                       </InlineAlert>
                     ) : newChatAgents.length === 0 ? (
-                      <div className="flex h-28 items-center justify-center px-3 text-center text-[0.8125rem] text-[var(--text-tertiary)]">
+                      <div className="flex h-28 items-center justify-center px-3 text-center text-[0.8125rem] text-[color:var(--text-tertiary)]">
                         {t("chat.rail.noAgentResults", undefined)}
                       </div>
                     ) : (
@@ -441,11 +441,11 @@ function SessionRailImpl({
                                   className="h-6 w-6 shrink-0"
                                 />
                                 <span className="flex min-w-0 flex-col">
-                                  <span className="truncate text-[0.8125rem] font-medium leading-4 text-[var(--text-primary)]">
+                                  <span className="truncate text-[0.8125rem] font-medium leading-4 text-[color:var(--text-primary)]">
                                     {agent.label || agent.id}
                                   </span>
                                   {showId ? (
-                                    <span className="truncate font-mono text-[0.625rem] leading-3 text-[var(--text-quaternary)]">
+                                    <span className="truncate font-mono text-[0.625rem] leading-3 text-[color:var(--text-quaternary)]">
                                       {agent.id}
                                     </span>
                                   ) : null}
@@ -460,7 +460,7 @@ function SessionRailImpl({
                             role="status"
                             aria-label={t("chat.rail.loadingAgents", undefined)}
                           >
-                            <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[var(--text-quaternary)]" strokeWidth={1.75} />
+                            <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[color:var(--text-quaternary)]" strokeWidth={1.75} />
                           </div>
                         ) : null}
                       </>
@@ -469,7 +469,7 @@ function SessionRailImpl({
                 </>
               ) : (
                 <div className="mt-3 flex flex-col gap-2">
-                  <p className="px-2 text-[length:var(--font-size-sm)] text-[var(--text-secondary)]">
+                  <p className="px-2 text-[length:var(--font-size-sm)] text-[color:var(--text-secondary)]">
                     {t("chat.rail.create.roomHelper", undefined)}
                   </p>
                   <PopoverClose asChild>
@@ -480,9 +480,9 @@ function SessionRailImpl({
                       className={cn(
                         "flex h-9 items-center justify-center gap-2 rounded-[var(--radius-panel-sm)]",
                         "border border-[color:var(--border-strong)] bg-transparent",
-                        "text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]",
+                        "text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-primary)]",
                         "transition-colors duration-[120ms] hover:bg-[var(--hover-tint)]",
-                        "disabled:border-[color:var(--border-subtle)] disabled:text-[var(--text-quaternary)]",
+                        "disabled:border-[color:var(--border-subtle)] disabled:text-[color:var(--text-quaternary)]",
                       )}
                     >
                       <Users className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
@@ -498,7 +498,7 @@ function SessionRailImpl({
               type="button"
               onClick={onClose}
               aria-label={t("chat.rail.close", undefined)}
-              className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] md:hidden"
+              className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)] md:hidden"
             >
               <X className="icon-sm" strokeWidth={1.75} aria-hidden />
             </button>
@@ -533,17 +533,17 @@ function SessionRailImpl({
         ) : showEmptyState ? (
           <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-4 text-center">
             <MessageSquare
-              className="icon-lg text-[var(--text-quaternary)]"
+              className="icon-lg text-[color:var(--text-quaternary)]"
               strokeWidth={1.5}
               aria-hidden
             />
-            <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">
+            <p className="m-0 text-[length:var(--font-size-sm)] text-[color:var(--text-tertiary)]">
               {isSearching
                 ? t("chat.rail.noResults", undefined)
                 : t("chat.rail.empty", undefined)}
             </p>
             {!isSearching ? (
-              <p className="m-0 text-[0.75rem] text-[var(--text-quaternary)]">
+              <p className="m-0 text-[0.75rem] text-[color:var(--text-quaternary)]">
                 {t("chat.rail.emptyHelper", undefined)}
               </p>
             ) : null}

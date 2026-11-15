@@ -73,12 +73,12 @@ export function UiTable({ block }: { block: UiTableBlock }) {
   return (
     <div className="rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] overflow-hidden">
       {title ? (
-        <h4 className="m-0 px-3 pt-2 pb-1 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)] border-b border-[color:var(--divider-hair)]">
+        <h4 className="m-0 px-3 pt-2 pb-1 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)] border-b border-[color:var(--divider-hair)]">
           {title}
         </h4>
       ) : null}
       {sortedRows.length === 0 ? (
-        <p className="m-0 px-3 py-4 text-[0.8125rem] text-[var(--text-tertiary)]">
+        <p className="m-0 px-3 py-4 text-[0.8125rem] text-[color:var(--text-tertiary)]">
           {empty_label ?? "No rows"}
         </p>
       ) : (
@@ -93,7 +93,7 @@ export function UiTable({ block }: { block: UiTableBlock }) {
                       key={column.key}
                       scope="col"
                       className={cn(
-                        "border-b border-[color:var(--divider-hair)] px-3 py-1.5 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]",
+                        "border-b border-[color:var(--divider-hair)] px-3 py-1.5 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)]",
                         column.align === "end" && "text-right",
                         column.align === "center" && "text-center",
                         column.align === "start" && "text-left",
@@ -103,7 +103,7 @@ export function UiTable({ block }: { block: UiTableBlock }) {
                         <button
                           type="button"
                           onClick={() => toggleSort(column.key)}
-                          className="inline-flex items-center gap-1 text-[var(--text-quaternary)] hover:text-[var(--text-primary)]"
+                          className="inline-flex items-center gap-1 text-[color:var(--text-quaternary)] hover:text-[color:var(--text-primary)]"
                         >
                           {column.label}
                           {isSortKey ? (
@@ -129,7 +129,7 @@ export function UiTable({ block }: { block: UiTableBlock }) {
                     <td
                       key={column.key}
                       className={cn(
-                        "border-b border-[color:var(--divider-hair)] px-3 py-1.5 text-[var(--text-secondary)] last:border-b-0",
+                        "border-b border-[color:var(--divider-hair)] px-3 py-1.5 text-[color:var(--text-secondary)] last:border-b-0",
                         column.align === "end" && "text-right",
                         column.align === "center" && "text-center",
                         column.align === "start" && "text-left",

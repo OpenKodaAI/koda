@@ -66,7 +66,7 @@ function MemoryReferenceList({
   onSelectMemory: (memoryId: number) => void;
 }) {
   if (items.length === 0) {
-    return <p className="text-sm leading-6 text-[var(--text-secondary)]">{emptyLabel}</p>;
+    return <p className="text-sm leading-6 text-[color:var(--text-secondary)]">{emptyLabel}</p>;
   }
 
   return (
@@ -79,14 +79,14 @@ function MemoryReferenceList({
           className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-[color-mix(in_srgb,var(--text-primary)_3%,transparent)]"
         >
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-[var(--text-primary)]">
+            <p className="truncate text-sm font-medium text-[color:var(--text-primary)]">
               {item.title}
             </p>
-            <p className="mt-1 line-clamp-2 text-sm leading-6 text-[var(--text-secondary)]">
+            <p className="mt-1 line-clamp-2 text-sm leading-6 text-[color:var(--text-secondary)]">
               {item.content}
             </p>
           </div>
-          <span className="shrink-0 text-[11px] text-[var(--text-tertiary)]">
+          <span className="shrink-0 text-[11px] text-[color:var(--text-tertiary)]">
             {formatRelativeTime(item.last_accessed ?? item.created_at)}
           </span>
         </button>
@@ -102,7 +102,7 @@ function ReviewHistory({
 }) {
   const { t } = useAppI18n();
   if (history.length === 0) {
-    return <p className="text-sm leading-6 text-[var(--text-secondary)]">{t("memory.curation.detail.noReviewRecorded")}</p>;
+    return <p className="text-sm leading-6 text-[color:var(--text-secondary)]">{t("memory.curation.detail.noReviewRecorded")}</p>;
   }
 
   return (
@@ -110,18 +110,18 @@ function ReviewHistory({
       {history.map((entry) => (
         <div key={entry.id} className="px-4 py-3">
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="font-medium text-[var(--text-primary)]">
+            <span className="font-medium text-[color:var(--text-primary)]">
               {t(`memory.curation.actions.${entry.action}`, {
                 defaultValue: entry.action,
               })}
             </span>
-            <span className="text-[var(--text-tertiary)]">•</span>
-            <span className="text-[12px] text-[var(--text-tertiary)]">
+            <span className="text-[color:var(--text-tertiary)]">•</span>
+            <span className="text-[12px] text-[color:var(--text-tertiary)]">
               {formatDateTime(entry.created_at)}
             </span>
           </div>
           {entry.reason ? (
-            <p className="mt-1 text-sm leading-6 text-[var(--text-secondary)]">{entry.reason}</p>
+            <p className="mt-1 text-sm leading-6 text-[color:var(--text-secondary)]">{entry.reason}</p>
           ) : null}
         </div>
       ))}
@@ -161,7 +161,7 @@ function MemoryReviewDetailPane({
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="shrink-0 border-b border-[var(--border-subtle)] bg-[var(--surface-elevated-soft)] px-5 py-4">
         <div className="flex flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--text-tertiary)]">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[color:var(--text-tertiary)]">
             <span
               className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--border-subtle)] px-2.5 py-1"
               style={{
@@ -187,10 +187,10 @@ function MemoryReviewDetailPane({
           </div>
 
           <div className="flex flex-col gap-2">
-            <h2 className="text-[1.25rem] font-semibold tracking-[-0.05em] text-[var(--text-primary)]">
+            <h2 className="text-[1.25rem] font-semibold tracking-[-0.05em] text-[color:var(--text-primary)]">
               {detail.item.title}
             </h2>
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[var(--text-tertiary)]">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-[color:var(--text-tertiary)]">
               <span>{t("memory.curation.detail.importanceMeta", { value: Math.round(detail.item.importance * 100) })}</span>
               <span>•</span>
               <span>{t("memory.curation.detail.accessesMeta", { value: detail.item.access_count })}</span>
@@ -221,55 +221,55 @@ function MemoryReviewDetailPane({
       <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5" style={{ maxHeight: 'calc(100dvh - var(--shell-topbar-height) - 24rem)' }}>
         <div className="space-y-5">
           <DetailSection eyebrow={t("memory.curation.detail.content")}>
-            <p className="text-sm leading-7 text-[var(--text-secondary)]">{detail.item.content}</p>
+            <p className="text-sm leading-7 text-[color:var(--text-secondary)]">{detail.item.content}</p>
           </DetailSection>
 
           <DetailSection eyebrow={t("memory.curation.detail.sourceAndContext")}>
             <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
               <div>
-                <p className="text-[12px] font-medium uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+                <p className="text-[12px] font-medium uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
                   {t("memory.curation.detail.sourceQuery")}
                 </p>
-                <p className="mt-2 text-sm leading-7 text-[var(--text-secondary)]">
+                <p className="mt-2 text-sm leading-7 text-[color:var(--text-secondary)]">
                   {detail.source_query_text ?? t("memory.curation.detail.noSourceQuery")}
                 </p>
               </div>
 
               <dl className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <dt className="text-[12px] uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+                  <dt className="text-[12px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
                     {t("common.session")}
                   </dt>
-                  <dd className="mt-1 text-sm text-[var(--text-primary)]">
+                  <dd className="mt-1 text-sm text-[color:var(--text-primary)]">
                     {detail.session_name ?? detail.item.session_id ?? t("memory.curation.detail.sessionFallback")}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[12px] uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+                  <dt className="text-[12px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
                     {t("memory.curation.detail.cluster")}
                   </dt>
-                  <dd className="mt-1 text-sm text-[var(--text-primary)]">
+                  <dd className="mt-1 text-sm text-[color:var(--text-primary)]">
                     {detail.cluster?.member_count
                       ? t("memory.curation.detail.memoriesConnected", { count: detail.cluster.member_count })
                       : t("memory.curation.detail.noGrouping")}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[12px] uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+                  <dt className="text-[12px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
                     {t("memory.curation.detail.editorialStatus")}
                   </dt>
-                  <dd className="mt-1 text-sm text-[var(--text-primary)]">
+                  <dd className="mt-1 text-sm text-[color:var(--text-primary)]">
                     {getStatusLabel(detail.item.review_status, t)}
                   </dd>
                 </div>
                 <div>
-                  <dt className="text-[12px] uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+                  <dt className="text-[12px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
                     {t("memory.curation.detail.navigation")}
                   </dt>
                   <dd className="mt-1">
                     <Link
                       href={mapHref}
-                      className="inline-flex items-center gap-1.5 text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+                      className="inline-flex items-center gap-1.5 text-sm text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]"
                     >
                       {t("memory.curation.detail.viewOnMap")}
                       <ArrowUpRight className="h-4 w-4" />
@@ -280,10 +280,10 @@ function MemoryReviewDetailPane({
             </div>
             {detail.item.review_reason ? (
               <div className="mt-4 border-t border-[var(--border-subtle)] pt-4">
-                <p className="text-[12px] uppercase tracking-[0.12em] text-[var(--text-quaternary)]">
+                <p className="text-[12px] uppercase tracking-[0.12em] text-[color:var(--text-quaternary)]">
                   {t("memory.curation.detail.editorialReason")}
                 </p>
-                <p className="mt-2 text-sm leading-7 text-[var(--text-secondary)]">
+                <p className="mt-2 text-sm leading-7 text-[color:var(--text-secondary)]">
                   {detail.item.review_reason}
                 </p>
               </div>
@@ -293,7 +293,7 @@ function MemoryReviewDetailPane({
           <DetailSection eyebrow={t("memory.curation.detail.relatedAndDuplicates")}>
             <div className="grid gap-5 xl:grid-cols-2">
               <div>
-                <p className="text-sm font-medium text-[var(--text-primary)]">
+                <p className="text-sm font-medium text-[color:var(--text-primary)]">
                   {t("memory.curation.detail.relatedMemories")}
                 </p>
                 <div className="mt-3">
@@ -306,7 +306,7 @@ function MemoryReviewDetailPane({
               </div>
 
               <div>
-                <p className="text-sm font-medium text-[var(--text-primary)]">
+                <p className="text-sm font-medium text-[color:var(--text-primary)]">
                   {t("memory.curation.detail.possibleDuplicates")}
                 </p>
                 <div className="mt-3">
@@ -363,11 +363,11 @@ export function MemoryCurationDetail({
   if (error && !detail) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-        <SearchX className="h-8 w-8 text-[var(--text-tertiary)]" />
-        <p className="mt-4 text-base font-medium text-[var(--text-primary)]">
+        <SearchX className="h-8 w-8 text-[color:var(--text-tertiary)]" />
+        <p className="mt-4 text-base font-medium text-[color:var(--text-primary)]">
           {t("memory.curation.detail.loadDetailErrorTitle")}
         </p>
-        <p className="mt-2 max-w-md text-sm leading-6 text-[var(--text-secondary)]">{error}</p>
+        <p className="mt-2 max-w-md text-sm leading-6 text-[color:var(--text-secondary)]">{error}</p>
       </div>
     );
   }
@@ -375,11 +375,11 @@ export function MemoryCurationDetail({
   if (!detail) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-        <DatabaseZap className="h-8 w-8 text-[var(--text-tertiary)]" />
-        <p className="mt-4 text-base font-medium text-[var(--text-primary)]">
+        <DatabaseZap className="h-8 w-8 text-[color:var(--text-tertiary)]" />
+        <p className="mt-4 text-base font-medium text-[color:var(--text-primary)]">
           {t("memory.curation.detail.selectEditorialItemTitle")}
         </p>
-        <p className="mt-2 max-w-md text-sm leading-6 text-[var(--text-secondary)]">
+        <p className="mt-2 max-w-md text-sm leading-6 text-[color:var(--text-secondary)]">
           {t("memory.curation.detail.selectEditorialItemDescription")}
         </p>
       </div>
@@ -392,8 +392,8 @@ export function MemoryCurationDetail({
   if (kind === "memory" && !isMemoryDetail) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-        <DatabaseZap className="h-8 w-8 text-[var(--text-tertiary)]" />
-        <p className="mt-4 text-base font-medium text-[var(--text-primary)]">
+        <DatabaseZap className="h-8 w-8 text-[color:var(--text-tertiary)]" />
+        <p className="mt-4 text-base font-medium text-[color:var(--text-primary)]">
           {t("memory.curation.detail.loadingMemoryDetail")}
         </p>
       </div>
@@ -403,8 +403,8 @@ export function MemoryCurationDetail({
   if (kind === "cluster" && !isClusterDetail) {
     return (
       <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-6 text-center">
-        <DatabaseZap className="h-8 w-8 text-[var(--text-tertiary)]" />
-        <p className="mt-4 text-base font-medium text-[var(--text-primary)]">
+        <DatabaseZap className="h-8 w-8 text-[color:var(--text-tertiary)]" />
+        <p className="mt-4 text-base font-medium text-[color:var(--text-primary)]">
           {t("memory.curation.detail.loadingClusterDetail")}
         </p>
       </div>
@@ -426,7 +426,7 @@ export function MemoryCurationDetail({
             <div className="flex flex-col gap-3">
               <div className="min-w-0">
                 <p className="eyebrow">{t("memory.curation.detail.learningTitle")}</p>
-                <p className="mt-2 max-w-3xl text-sm leading-7 text-[var(--text-secondary)]">
+                <p className="mt-2 max-w-3xl text-sm leading-7 text-[color:var(--text-secondary)]">
                   {t("memory.curation.detail.learningDescription")}
                 </p>
               </div>

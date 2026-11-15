@@ -103,7 +103,7 @@ export function CollectionManager({
       {/* Header */}
       <div className="flex items-center justify-between">
         <span className="eyebrow">{label}</span>
-        <span className="text-xs text-[var(--text-quaternary)]">
+        <span className="text-xs text-[color:var(--text-quaternary)]">
           {t("generated.controlPlane.count_item_s_6ee20be0", { count: items.length })}
         </span>
       </div>
@@ -122,14 +122,14 @@ export function CollectionManager({
             >
               {/* Item header */}
               <div className="flex items-center gap-3 px-4 py-3">
-                <span className="flex-1 text-sm text-[var(--text-primary)] font-medium truncate">
+                <span className="flex-1 text-sm text-[color:var(--text-primary)] font-medium truncate">
                   {getItemLabel(item)}
                 </span>
 
                 <button
                   type="button"
                   onClick={() => toggleExpand(id)}
-                  className="shrink-0 p-1 text-[var(--text-quaternary)] hover:text-[var(--text-secondary)] transition-colors"
+                  className="shrink-0 p-1 text-[color:var(--text-quaternary)] hover:text-[color:var(--text-secondary)] transition-colors"
                   aria-label={isExpanded ? t("generated.controlPlane.collapse_aa817030") : t("generated.controlPlane.expand_9e31313d")}
                 >
                   {isExpanded ? (
@@ -143,7 +143,7 @@ export function CollectionManager({
                   type="button"
                   onClick={() => onDelete(id)}
                   disabled={itemBusy || busy}
-                  className="shrink-0 p-1 text-[var(--text-quaternary)] hover:text-[var(--tone-danger-dot)] transition-colors disabled:opacity-40"
+                  className="shrink-0 p-1 text-[color:var(--text-quaternary)] hover:text-[color:var(--tone-danger-dot)] transition-colors disabled:opacity-40"
                   aria-label={t("generated.controlPlane.delete_c4aab121")}
                 >
                   <Trash2 size={14} />
@@ -161,11 +161,11 @@ export function CollectionManager({
                         [id]: e.target.value,
                       }))
                     }
-                    className="field-shell resize-y min-h-[160px] font-mono text-xs text-[var(--text-primary)]"
+                    className="field-shell resize-y min-h-[160px] font-mono text-xs text-[color:var(--text-primary)]"
                     spellCheck={false}
                   />
                   {error && expandedId === id && (
-                    <p className="text-xs text-[var(--tone-danger-text)]">
+                    <p className="text-xs text-[color:var(--tone-danger-text)]">
                       {error}
                     </p>
                   )}
@@ -203,11 +203,11 @@ export function CollectionManager({
           <textarea
             value={newItemJson}
             onChange={(e) => setNewItemJson(e.target.value)}
-            className="field-shell resize-y min-h-[160px] font-mono text-xs text-[var(--text-primary)]"
+            className="field-shell resize-y min-h-[160px] font-mono text-xs text-[color:var(--text-primary)]"
             spellCheck={false}
           />
           {error && !expandedId && (
-            <p className="text-xs text-[var(--tone-danger-text)]">{error}</p>
+            <p className="text-xs text-[color:var(--tone-danger-text)]">{error}</p>
           )}
           <div className="flex items-center gap-2 justify-end">
             <button
@@ -238,7 +238,7 @@ export function CollectionManager({
             setError(null);
           }}
           disabled={busy}
-          className="flex items-center justify-center gap-2 py-3 border border-dashed border-[var(--border-subtle)] text-sm text-[var(--text-quaternary)] hover:text-[var(--text-secondary)] hover:border-[var(--border-strong)] transition-colors disabled:opacity-40"
+          className="flex items-center justify-center gap-2 py-3 border border-dashed border-[var(--border-subtle)] text-sm text-[color:var(--text-quaternary)] hover:text-[color:var(--text-secondary)] hover:border-[var(--border-strong)] transition-colors disabled:opacity-40"
         >
           <Plus size={14} />
           <span>{t("generated.controlPlane.add_new_5de667ac")}</span>
@@ -250,7 +250,7 @@ export function CollectionManager({
         <button
           type="button"
           onClick={() => setShowAllJson((prev) => !prev)}
-          className="flex items-center gap-1.5 text-xs text-[var(--text-quaternary)] hover:text-[var(--text-secondary)] transition-colors"
+          className="flex items-center gap-1.5 text-xs text-[color:var(--text-quaternary)] hover:text-[color:var(--text-secondary)] transition-colors"
         >
           {showAllJson ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           <span>{t("generated.controlPlane.raw_json_count_items_b1b73e72", { count: items.length })}</span>
@@ -260,7 +260,7 @@ export function CollectionManager({
           <textarea
             value={JSON.stringify(items, null, 2)}
             readOnly
-            className="field-shell resize-y min-h-[200px] mt-2 font-mono text-xs text-[var(--text-primary)]"
+            className="field-shell resize-y min-h-[200px] mt-2 font-mono text-xs text-[color:var(--text-primary)]"
             spellCheck={false}
           />
         )}

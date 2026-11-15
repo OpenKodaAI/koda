@@ -111,7 +111,7 @@ export function ExecutionDetailModal({
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2.5">
-                    <h2 className="m-0 truncate text-[1.25rem] font-medium tracking-[-0.018em] text-[var(--text-primary)] sm:text-[1.4rem]">
+                    <h2 className="m-0 truncate text-[1.25rem] font-medium tracking-[-0.018em] text-[color:var(--text-primary)] sm:text-[1.4rem]">
                       {getAgentLabel(data.bot_id)}
                     </h2>
                     <ExecutionStatusPill
@@ -122,7 +122,7 @@ export function ExecutionDetailModal({
                       size="md"
                     />
                   </div>
-                  <p className="m-0 mt-1 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+                  <p className="m-0 mt-1 font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                     #{data.task_id} · {data.bot_id}
                   </p>
                 </div>
@@ -148,7 +148,7 @@ export function ExecutionDetailModal({
             </div>
 
             {data.query_text ? (
-              <p className="m-0 mt-4 line-clamp-3 text-[length:var(--font-size-sm)] leading-[1.55] text-[var(--text-secondary)] lg:text-[0.9375rem]">
+              <p className="m-0 mt-4 line-clamp-3 text-[length:var(--font-size-sm)] leading-[1.55] text-[color:var(--text-secondary)] lg:text-[0.9375rem]">
                 {data.query_text}
               </p>
             ) : null}

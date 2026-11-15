@@ -402,9 +402,9 @@ export function ChatComposer({
       </Popover>
 
       {error ? (
-        <p className="mt-2 px-1 text-[0.75rem] text-[var(--tone-danger-dot)]">{error}</p>
+        <p className="mt-2 px-1 text-[0.75rem] text-[color:var(--tone-danger-dot)]">{error}</p>
       ) : helper ? (
-        <p className="mt-2 px-1 text-[0.75rem] text-[var(--text-tertiary)]">{helper}</p>
+        <p className="mt-2 px-1 text-[0.75rem] text-[color:var(--text-tertiary)]">{helper}</p>
       ) : null}
     </form>
   );

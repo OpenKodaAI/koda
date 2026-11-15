@@ -53,7 +53,7 @@ function readArtifactFilename(artifact: ExecutionArtifact) {
 }
 
 function ArtifactKindGlyph({ kind }: { kind: ExecutionArtifact["kind"] }) {
-  const className = "h-3.5 w-3.5 text-[var(--text-tertiary)]";
+  const className = "h-3.5 w-3.5 text-[color:var(--text-tertiary)]";
   switch (kind) {
     case "image":
       return <ImageIcon className={className} strokeWidth={1.75} />;
@@ -180,8 +180,8 @@ export function SessionArtifactRail({
           aria-expanded={open}
           className={cn(
             "inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)]",
-            "text-[var(--text-tertiary)] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-            "hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+            "text-[color:var(--text-tertiary)] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+            "hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
           )}
         >
           <PanelRight className="h-4 w-4" strokeWidth={1.75} aria-hidden />
@@ -193,7 +193,7 @@ export function SessionArtifactRail({
           <SuspendedCard
             title={t("sessions.context.artifacts.downloadsTitle", undefined)}
             trailing={
-              <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+              <span className="font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                 {items.length}
               </span>
             }
@@ -243,13 +243,13 @@ function ThreadReplyCard({
     >
       {openObligations.length > 0 ? (
         <div className="rounded-[var(--radius-panel-sm)] bg-[var(--tone-warning-bg)] px-2 py-1.5">
-          <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
+          <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--tone-warning-text)]">
             {t("sessions.context.thread.waiting", undefined)}
           </p>
           {openObligations.slice(0, 4).map((obligation) => (
             <p
               key={obligation.id}
-              className="m-0 mt-1 truncate text-[0.75rem] text-[var(--text-secondary)]"
+              className="m-0 mt-1 truncate text-[0.75rem] text-[color:var(--text-secondary)]"
             >
               {obligation.targetAgentId}
             </p>
@@ -262,16 +262,16 @@ function ThreadReplyCard({
           className="rounded-[var(--radius-panel-sm)] px-2 py-1.5 text-[0.75rem] hover:bg-[var(--hover-tint)]"
         >
           <div className="flex items-center justify-between gap-2">
-            <span className="truncate font-medium text-[var(--text-primary)]">
+            <span className="truncate font-medium text-[color:var(--text-primary)]">
               {message.from ?? "system"}
             </span>
-            <span className="font-mono text-[0.625rem] text-[var(--text-quaternary)]">
+            <span className="font-mono text-[0.625rem] text-[color:var(--text-quaternary)]">
               {message.type === "coordinator_synthesis"
                 ? t("sessions.context.thread.final", undefined)
                 : message.inReplyTo ?? `#${message.id}`}
             </span>
           </div>
-          <p className="m-0 mt-0.5 line-clamp-2 text-[var(--text-tertiary)]">
+          <p className="m-0 mt-0.5 line-clamp-2 text-[color:var(--text-tertiary)]">
             {message.content}
           </p>
         </div>
@@ -283,11 +283,11 @@ function ThreadReplyCard({
     return (
       <section className="border-t border-[color:var(--divider-hair)] px-4 pb-4 pt-3">
         <header className="mb-2 flex items-center justify-between gap-2">
-          <h3 className="m-0 text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+          <h3 className="m-0 text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-primary)]">
             {t("sessions.context.thread.title", undefined)}
           </h3>
           {openObligations.length > 0 ? (
-            <span className="font-mono text-[0.6875rem] text-[var(--tone-warning-text)]">
+            <span className="font-mono text-[0.6875rem] text-[color:var(--tone-warning-text)]">
               {openObligations.length}
             </span>
           ) : null}
@@ -302,7 +302,7 @@ function ThreadReplyCard({
       title={t("sessions.context.thread.title", undefined)}
       trailing={
         openObligations.length > 0 ? (
-          <span className="font-mono text-[0.6875rem] text-[var(--tone-warning-text)]">
+          <span className="font-mono text-[0.6875rem] text-[color:var(--tone-warning-text)]">
             {openObligations.length}
           </span>
         ) : null
@@ -325,7 +325,7 @@ function SuspendedCard({
   return (
     <section className="rounded-[var(--radius-panel)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] shadow-[var(--shadow-xs)]">
       <header className="flex items-center justify-between gap-2 px-3.5 pt-3 pb-2">
-        <h3 className="m-0 text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+        <h3 className="m-0 text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-primary)]">
           {title}
         </h3>
         {trailing}
@@ -360,17 +360,17 @@ function ArtifactRow({
         <ArtifactKindGlyph kind={artifact.kind} />
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+        <span className="truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
           {fileName}
         </span>
         {artifact.label && artifact.label !== fileName ? (
-          <span className="truncate text-[0.6875rem] text-[var(--text-quaternary)]">
+          <span className="truncate text-[0.6875rem] text-[color:var(--text-quaternary)]">
             {artifact.label}
           </span>
         ) : null}
       </span>
       <span
-        className="shrink-0 text-[var(--text-quaternary)] opacity-0 transition-opacity group-hover:opacity-100"
+        className="shrink-0 text-[color:var(--text-quaternary)] opacity-0 transition-opacity group-hover:opacity-100"
         aria-hidden
       >
         {isExternal ? (

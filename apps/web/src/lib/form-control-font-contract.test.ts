@@ -39,21 +39,53 @@ function rules(css: string): Rule[] {
   return out;
 }
 
-const BARE_CONTROL = /^(?:button|input|select|textarea)(?:\[[^\]]*\]|::?[\w-]+(?:\([^)]*\))?)*$/;
+const CONTROL = /^(?:button|input|select|textarea)/;
+const PSEUDO_SUFFIX = /^(?:\[[^\]]*\]|::?[\w-]+(?:\([^)]*\))?)*$/;
 const FONT_DECLARATION = /(?:^|[;{\s])(font|font-size|font-weight|font-family|line-height)\s*:/;
+
+/** The parts of a selector list, split on the commas outside parentheses. */
+function selectorParts(selector: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let start = 0;
+  for (let index = 0; index < selector.length; index += 1) {
+    if (selector[index] === "(") depth += 1;
+    else if (selector[index] === ")") depth -= 1;
+    else if (selector[index] === "," && depth === 0) {
+      parts.push(selector.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  return [...parts, selector.slice(start).trim()];
+}
+
+/** A bare control selector, also inside :where() or :is(), which change specificity but not the layer. */
+function isBareControl(part: string): boolean {
+  const element = CONTROL.exec(part);
+  if (element) return PSEUDO_SUFFIX.test(part.slice(element[0].length));
+  const wrapper = /^:(?:where|is)\(/.exec(part);
+  if (!wrapper) return false;
+  let depth = 1;
+  let index = wrapper[0].length;
+  for (; index < part.length && depth > 0; index += 1) {
+    if (part[index] === "(") depth += 1;
+    else if (part[index] === ")") depth -= 1;
+  }
+  const inner = part.slice(wrapper[0].length, index - 1);
+  return PSEUDO_SUFFIX.test(part.slice(index)) && selectorParts(inner).some(isBareControl);
+}
 
 /**
  * Unlayered rules that set a font property on every control of a kind (a bare
- * button, input, select or textarea selector). A component rule scoped by a
- * class (.agent-board-search input) styles its own field and is not a reset.
+ * button, input, select or textarea selector, also wrapped in :where() or
+ * :is()). A component rule scoped by a class (.agent-board-search input)
+ * styles its own field and is not a reset.
  */
 function unlayeredControlFonts(css: string): string[] {
   return rules(css)
     .filter(({ layers }) => layers.length === 0)
     .filter(({ body }) => FONT_DECLARATION.test(body))
-    .filter(({ selector }) =>
-      selector.split(",").some((part) => BARE_CONTROL.test(part.trim())),
-    )
+    .filter(({ selector }) => selectorParts(selector).some(isBareControl))
     .map(({ selector }) => selector.replace(/\s+/g, " "));
 }
 
@@ -73,7 +105,20 @@ describe("form control fonts (D-331)", () => {
       "@layer base { select { font: inherit; } }",
       ".composer textarea { font-size: 3px; }",
       "button:disabled { cursor: not-allowed; }",
+      // :where() and :is() do not put a rule in a layer: unlayered, it still
+      // beats every utility, whatever its specificity.
+      ":where(button) { font: inherit; }",
+      ":is(input):focus-visible { font-size: 2px; }",
+      ":where(button, input, select, textarea) { font: inherit; }",
+      ":where(.composer textarea) { font-size: 3px; }",
+      "@layer base { :where(select) { font: inherit; } }",
     ].join("\n");
-    expect(unlayeredControlFonts(css)).toEqual(["button, input", "textarea:focus-visible"]);
+    expect(unlayeredControlFonts(css)).toEqual([
+      "button, input",
+      "textarea:focus-visible",
+      ":where(button)",
+      ":is(input):focus-visible",
+      ":where(button, input, select, textarea)",
+    ]);
   });
 });

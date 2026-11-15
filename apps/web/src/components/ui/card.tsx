@@ -15,7 +15,7 @@ const CardContext = React.createContext<CardContextType>({
 const useCardContext = () => React.useContext(CardContext);
 
 const cardVariants = cva(
-  "flex flex-col items-stretch rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--text-primary)] shadow-none transition-[border-color,background-color] duration-[200ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+  "flex flex-col items-stretch rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel)] text-[color:var(--text-primary)] shadow-none transition-[border-color,background-color] duration-[200ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
   {
     variants: {
       variant: {
@@ -95,7 +95,7 @@ function CardDescription({ className, ...props }: React.HTMLAttributes<HTMLDivEl
   return (
     <div
       data-slot="card-description"
-      className={cn("text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]", className)}
+      className={cn("text-[length:var(--font-size-sm)] text-[color:var(--text-tertiary)]", className)}
       {...props}
     />
   );

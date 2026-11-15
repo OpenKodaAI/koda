@@ -71,21 +71,21 @@ function StatusIcon({
 }) {
   if (status === "completed") {
     return (
-      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--tone-success-dot)] text-[var(--accent-text)]">
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--tone-success-dot)] text-[color:var(--accent-text)]">
         <CheckCircle2 className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
       </span>
     );
   }
   if (status === "updates-found") {
     return (
-      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--tone-warning-dot)] text-[var(--accent-text)]">
+      <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-[var(--tone-warning-dot)] text-[color:var(--accent-text)]">
         <TriangleAlert className="h-3 w-3" strokeWidth={2} aria-hidden="true" />
       </span>
     );
   }
   return (
     <LoaderCircle
-      className={cn("h-4 w-4 text-[var(--tone-info-text)]", !reduceMotion && "animate-spin")}
+      className={cn("h-4 w-4 text-[color:var(--tone-info-text)]", !reduceMotion && "animate-spin")}
       strokeWidth={1.75}
       aria-hidden="true"
     />
@@ -171,15 +171,15 @@ export function AnimatedCardStatusList({
 
           <div className="min-w-0 flex-1">
             {eyebrow ? (
-              <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+              <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
                 {eyebrow}
               </p>
             ) : null}
-            <h2 className="m-0 truncate text-[0.9375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+            <h2 className="m-0 truncate text-[0.9375rem] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
               {title}
             </h2>
             {description ? (
-              <div className="mt-1 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
+              <div className="mt-1 text-[0.75rem] leading-5 text-[color:var(--text-tertiary)]">
                 {description}
               </div>
             ) : null}
@@ -275,11 +275,11 @@ export function AnimatedCardStatusList({
                           </AnimatePresence>
                         </span>
                         <span className="min-w-0">
-                          <span className="block truncate text-[0.8125rem] text-[var(--text-primary)]">
+                          <span className="block truncate text-[0.8125rem] text-[color:var(--text-primary)]">
                             {card.title}
                           </span>
                           {card.detail ? (
-                            <span className="mt-0.5 block text-[0.6875rem] leading-4 text-[var(--text-tertiary)]">
+                            <span className="mt-0.5 block text-[0.6875rem] leading-4 text-[color:var(--text-tertiary)]">
                               {card.detail}
                             </span>
                           ) : null}
@@ -288,7 +288,7 @@ export function AnimatedCardStatusList({
 
                       <div className="flex min-h-7 shrink-0 items-center gap-2">
                         {card.meta ? (
-                          <span className="font-mono text-[0.6875rem] tabular-nums text-[var(--text-quaternary)]">
+                          <span className="font-mono text-[0.6875rem] tabular-nums text-[color:var(--text-quaternary)]">
                             {card.meta}
                           </span>
                         ) : null}
@@ -312,7 +312,7 @@ export function AnimatedCardStatusList({
                               initial={{ opacity: 0 }}
                               animate={{ opacity: 1 }}
                               exit={{ opacity: 0 }}
-                              className="whitespace-nowrap font-mono text-[0.625rem] font-medium tracking-[var(--tracking-mono)] text-[var(--text-tertiary)]"
+                              className="whitespace-nowrap font-mono text-[0.625rem] font-medium tracking-[var(--tracking-mono)] text-[color:var(--text-tertiary)]"
                             >
                               {statusText}
                             </motion.span>

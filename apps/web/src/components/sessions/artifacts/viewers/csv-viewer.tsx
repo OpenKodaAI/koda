@@ -84,7 +84,7 @@ export function CsvViewer({
   return (
     <div className="flex flex-col">
       <div className="flex items-center justify-between border-b border-[color:var(--divider-hair)] px-4 py-2">
-        <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+        <span className="font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
           {filename ? `${filename} · ` : ""}
           {parsed.rows.length.toLocaleString()} {translate("generated.sessions.rows_bc4a72ac")}{parsed.truncated
             ? ` · truncated at ${MAX_CSV_ROWS.toLocaleString()}`
@@ -103,7 +103,7 @@ export function CsvViewer({
           >
             ‹
           </Button>
-          <span className="font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+          <span className="font-mono text-[0.6875rem] text-[color:var(--text-tertiary)]">
             {safePage + 1}/{totalPages}
           </span>
           <Button
@@ -125,7 +125,7 @@ export function CsvViewer({
                 <th
                   key={i}
                   scope="col"
-                  className="border-b border-[color:var(--divider-hair)] px-3 py-1.5 text-left font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[var(--text-quaternary)]"
+                  className="border-b border-[color:var(--divider-hair)] px-3 py-1.5 text-left font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono,0.12em)] text-[color:var(--text-quaternary)]"
                 >
                   {cell}
                 </th>
@@ -144,7 +144,7 @@ export function CsvViewer({
                   {parsed.header.map((_, colIndex) => (
                     <td
                       key={colIndex}
-                      className="border-b border-[color:var(--divider-hair)] px-3 py-1.5 text-[var(--text-secondary)]"
+                      className="border-b border-[color:var(--divider-hair)] px-3 py-1.5 text-[color:var(--text-secondary)]"
                     >
                       {row[colIndex] ?? ""}
                     </td>
@@ -156,7 +156,7 @@ export function CsvViewer({
         </table>
       </div>
       {parsed.truncated ? (
-        <p className="m-0 px-4 py-2 text-[0.75rem] text-[var(--tone-warning-text)]">
+        <p className="m-0 px-4 py-2 text-[0.75rem] text-[color:var(--tone-warning-text)]">
           {t("sessions.artifacts.csvTruncated", {
             defaultValue: `Preview is capped at ${MAX_CSV_ROWS.toLocaleString()} rows — download for full data.`,
           })}

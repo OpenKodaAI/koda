@@ -26,7 +26,7 @@ export function SettingsWarnings() {
           {localWarnings.map((warning, i) => (
             <li
               key={i}
-              className="text-[var(--text-secondary)] leading-snug"
+              className="text-[color:var(--text-secondary)] leading-snug"
             >
               {tl(warning)}
             </li>

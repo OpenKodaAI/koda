@@ -68,9 +68,9 @@ export function PromptEditor({
             aria-selected={previewOpen}
             aria-controls={`${editorId}-preview-panel`}
             className={cn(
-              "rounded-[5px] px-2.5 py-1 text-[11px] font-semibold leading-none text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)] disabled:pointer-events-none",
+              "rounded-[5px] px-2.5 py-1 text-[11px] font-semibold leading-none text-[color:var(--text-tertiary)] transition-colors hover:text-[color:var(--text-primary)] disabled:pointer-events-none",
               previewOpen &&
-                "bg-[var(--surface-hover)] text-[var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]",
+                "bg-[var(--surface-hover)] text-[color:var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]",
             )}
           >
             {t("controlPlane.prompt.preview", undefined)}
@@ -85,9 +85,9 @@ export function PromptEditor({
             aria-selected={!previewOpen}
             aria-controls={`${editorId}-markdown-panel`}
             className={cn(
-              "rounded-[5px] px-2.5 py-1 text-[11px] font-semibold leading-none text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)] disabled:pointer-events-none",
+              "rounded-[5px] px-2.5 py-1 text-[11px] font-semibold leading-none text-[color:var(--text-tertiary)] transition-colors hover:text-[color:var(--text-primary)] disabled:pointer-events-none",
               !previewOpen &&
-                "bg-[var(--surface-hover)] text-[var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]",
+                "bg-[var(--surface-hover)] text-[color:var(--text-primary)] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.03)]",
             )}
           >
             {t("controlPlane.prompt.markdown", undefined)}
@@ -99,13 +99,13 @@ export function PromptEditor({
             id={`${editorId}-preview-panel`}
             role="tabpanel"
             aria-labelledby={`${editorId}-preview-tab`}
-            className="min-h-[120px] max-h-[480px] overflow-y-auto px-4 pb-3 pt-11 text-[0.875rem] leading-[1.6] text-[var(--text-primary)]"
+            className="min-h-[120px] max-h-[480px] overflow-y-auto px-4 pb-3 pt-11 text-[0.875rem] leading-[1.6] text-[color:var(--text-primary)]"
             aria-label={t("controlPlane.prompt.preview", undefined)}
           >
             {value.trim() ? (
               <SessionRichText content={value} variant="assistant" />
             ) : (
-              <p className="m-0 text-[var(--text-quaternary)]">{resolvedPlaceholder}</p>
+              <p className="m-0 text-[color:var(--text-quaternary)]">{resolvedPlaceholder}</p>
             )}
           </div>
         ) : (
@@ -120,16 +120,16 @@ export function PromptEditor({
             autoComplete="off"
             className={cn(
               "resize-none bg-transparent px-4 pb-3 pt-11 font-mono text-[0.8125rem] leading-[1.55]",
-              "text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] outline-none",
+              "text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)] outline-none",
             )}
             style={{ minHeight, maxHeight }}
           />
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-3 px-1 text-[0.6875rem] text-[var(--text-tertiary)]">
+      <div className="flex items-center justify-between gap-3 px-1 text-[0.6875rem] text-[color:var(--text-tertiary)]">
         <div className="min-w-0">{hint ? <span className="hidden sm:inline">{hint}</span> : null}</div>
-        <span className="font-mono text-[var(--text-quaternary)]">
+        <span className="font-mono text-[color:var(--text-quaternary)]">
           {wordCount} · {charCount} {translate("generated.controlPlane.chars_cf66e897")}</span>
       </div>
     </div>

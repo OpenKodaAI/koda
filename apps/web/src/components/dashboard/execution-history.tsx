@@ -158,7 +158,7 @@ function ExecutionHistoryComponent({
 
   if (rows.length === 0) {
     return (
-      <p className={cn("m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]", className)}>
+      <p className={cn("m-0 text-[length:var(--font-size-sm)] text-[color:var(--text-tertiary)]", className)}>
         {strings.empty}
       </p>
     );
@@ -198,19 +198,19 @@ function ExecutionHistoryComponent({
                   color={agent.color}
                   size="xs"
                 />
-                <span className="truncate text-[length:var(--font-size-sm)] font-medium text-[var(--text-primary)]">
+                <span className="truncate text-[length:var(--font-size-sm)] font-medium text-[color:var(--text-primary)]">
                   {agent.label}
                 </span>
               </div>
 
               {/* Column 2: query preview */}
-              <p className="m-0 min-w-0 truncate text-[length:var(--font-size-sm)] text-[var(--text-secondary)]">
+              <p className="m-0 min-w-0 truncate text-[length:var(--font-size-sm)] text-[color:var(--text-secondary)]">
                 {query}
               </p>
 
               {/* Column 3: status + timestamp stacked */}
               <div className="flex shrink-0 flex-col items-end gap-0.5 text-right">
-                <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[0.75rem] font-medium text-[var(--text-secondary)]">
+                <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[0.75rem] font-medium text-[color:var(--text-secondary)]">
                   <span
                     className="inline-block h-1.5 w-1.5 rounded-full"
                     style={{ background: STATUS_TONE[status] }}
@@ -220,7 +220,7 @@ function ExecutionHistoryComponent({
                 </span>
                 <span
                   className={cn(
-                    "whitespace-nowrap text-[10.5px] tabular-nums text-[var(--text-quaternary)]",
+                    "whitespace-nowrap text-[10.5px] tabular-nums text-[color:var(--text-quaternary)]",
                     !timestamp && "invisible",
                   )}
                   aria-hidden={!timestamp}

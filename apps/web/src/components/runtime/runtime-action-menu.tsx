@@ -55,7 +55,7 @@ export function RuntimeActionMenu({
           variant="ghost"
           size="sm"
           selected={open}
-          className="h-8 gap-1.5 rounded-[var(--radius-chip)] border-transparent px-2.5 text-[0.8125rem] font-medium text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] data-[state=open]:bg-[var(--panel-strong)] data-[state=open]:text-[var(--text-primary)]"
+          className="h-8 gap-1.5 rounded-[var(--radius-chip)] border-transparent px-2.5 text-[0.8125rem] font-medium text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)] data-[state=open]:bg-[var(--panel-strong)] data-[state=open]:text-[color:var(--text-primary)]"
           aria-label={t("runtime.room.moreMenuLabel")}
           aria-haspopup="menu"
           aria-expanded={open}
@@ -174,10 +174,10 @@ function RuntimeMenuItem({
         "focus-visible:bg-[var(--hover-tint)]",
         "disabled:cursor-progress disabled:opacity-70",
         tone === "danger"
-          ? "text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)]"
+          ? "text-[color:var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)]"
           : tone === "warning"
-            ? "text-[var(--tone-warning-text)] hover:bg-[var(--tone-warning-bg)]"
-            : "text-[var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+            ? "text-[color:var(--tone-warning-text)] hover:bg-[var(--tone-warning-bg)]"
+            : "text-[color:var(--text-secondary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
       )}
     >
       {busy ? (

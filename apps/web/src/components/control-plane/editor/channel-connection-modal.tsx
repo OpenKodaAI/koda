@@ -68,13 +68,13 @@ function TagsInput({
       {tags.map((tag, i) => (
         <span
           key={tag}
-          className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-hover)] px-2 py-0.5 text-xs font-medium text-[var(--text-secondary)]"
+          className="inline-flex items-center gap-1 rounded-md bg-[var(--surface-hover)] px-2 py-0.5 text-xs font-medium text-[color:var(--text-secondary)]"
         >
           {tag}
           <button
             type="button"
             onClick={() => removeTag(i)}
-            className="ml-0.5 text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-primary)]"
+            className="ml-0.5 text-[color:var(--text-quaternary)] transition-colors hover:text-[color:var(--text-primary)]"
           >
             <X size={10} />
           </button>
@@ -103,7 +103,7 @@ function TagsInput({
         placeholder={tags.length === 0 ? placeholder : ""}
         disabled={disabled}
         style={{ outline: "none", boxShadow: "none", border: "none" }}
-        className="min-w-[80px] flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] disabled:cursor-not-allowed disabled:opacity-60"
+        className="min-w-[80px] flex-1 bg-transparent text-sm text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)] disabled:cursor-not-allowed disabled:opacity-60"
         autoComplete="off"
         data-1p-ignore
         data-lpignore="true"
@@ -179,10 +179,10 @@ export function ChannelGatewayMiniPanel({ agentId }: { agentId: string }) {
     <section className="border-t border-[color:var(--divider-hair)] pt-4">
       <div className="mb-2 flex items-center justify-between gap-3">
         <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
             {t("generated.controlPlane.gateway_de_canal_aa1c5785")}
           </div>
-          <p className="mt-0.5 text-[11px] text-[var(--text-quaternary)]">
+          <p className="mt-0.5 text-[11px] text-[color:var(--text-quaternary)]">
             {t("generated.controlPlane.unknown_senders_ficam_bloqueados_ate_aprovac_f110e376")}
           </p>
         </div>
@@ -192,7 +192,7 @@ export function ChannelGatewayMiniPanel({ agentId }: { agentId: string }) {
           disabled={busy !== null}
           aria-label={busy === "pairing:new" ? t("generated.controlPlane.gerando_f053245f") : undefined}
           aria-busy={busy === "pairing:new" || undefined}
-          className="inline-flex min-w-28 items-center justify-center rounded-lg bg-[var(--surface-hover)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-elevated)] disabled:opacity-60"
+          className="inline-flex min-w-28 items-center justify-center rounded-lg bg-[var(--surface-hover)] px-3 py-1.5 text-xs font-medium text-[color:var(--text-primary)] transition-colors hover:bg-[var(--surface-elevated)] disabled:opacity-60"
         >
           {busy === "pairing:new" ? (
             <InlineSpinner className="h-3.5 w-3.5" />
@@ -204,16 +204,16 @@ export function ChannelGatewayMiniPanel({ agentId }: { agentId: string }) {
 
       <div className="grid grid-cols-3 gap-2 text-xs">
         <div className="rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2">
-          <div className="text-[var(--text-quaternary)]">{t("generated.controlPlane.aprovados_82126cab")}</div>
-          <div className="mt-1 font-medium text-[var(--text-primary)]">{state?.summary.allowed ?? 0}</div>
+          <div className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.aprovados_82126cab")}</div>
+          <div className="mt-1 font-medium text-[color:var(--text-primary)]">{state?.summary.allowed ?? 0}</div>
         </div>
         <div className="rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2">
-          <div className="text-[var(--text-quaternary)]">{t("generated.controlPlane.pendentes_f87ac295")}</div>
-          <div className="mt-1 font-medium text-[var(--text-primary)]">{state?.summary.pending ?? 0}</div>
+          <div className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.pendentes_f87ac295")}</div>
+          <div className="mt-1 font-medium text-[color:var(--text-primary)]">{state?.summary.pending ?? 0}</div>
         </div>
         <div className="rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2">
-          <div className="text-[var(--text-quaternary)]">{t("generated.controlPlane.pairing_95dc72bd")}</div>
-          <div className="mt-1 font-medium text-[var(--text-primary)]">{activeCode ?? "-"}</div>
+          <div className="text-[color:var(--text-quaternary)]">{t("generated.controlPlane.pairing_95dc72bd")}</div>
+          <div className="mt-1 font-medium text-[color:var(--text-primary)]">{activeCode ?? "-"}</div>
         </div>
       </div>
 
@@ -225,10 +225,10 @@ export function ChannelGatewayMiniPanel({ agentId }: { agentId: string }) {
               className="flex items-center gap-2 rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2 text-xs"
             >
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-[var(--text-primary)]">
+                <div className="truncate font-medium text-[color:var(--text-primary)]">
                   {sender.display_name || sender.user_id}
                 </div>
-                <div className="truncate text-[var(--text-quaternary)]">
+                <div className="truncate text-[color:var(--text-quaternary)]">
                   {sender.user_id} · {sender.message_preview}
                 </div>
               </div>
@@ -236,7 +236,7 @@ export function ChannelGatewayMiniPanel({ agentId }: { agentId: string }) {
                 type="button"
                 onClick={() => runAction("approve", sender.identity_id)}
                 disabled={busy !== null}
-                className="rounded-md px-2 py-1 text-[11px] text-[var(--tone-success-text)] hover:bg-[var(--tone-success-bg)] disabled:opacity-60"
+                className="rounded-md px-2 py-1 text-[11px] text-[color:var(--tone-success-text)] hover:bg-[var(--tone-success-bg)] disabled:opacity-60"
               >
                 {t("generated.controlPlane.aprovar_eca28cca")}
               </button>
@@ -244,7 +244,7 @@ export function ChannelGatewayMiniPanel({ agentId }: { agentId: string }) {
                 type="button"
                 onClick={() => runAction("block", sender.identity_id)}
                 disabled={busy !== null}
-                className="rounded-md px-2 py-1 text-[11px] text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)] disabled:opacity-60"
+                className="rounded-md px-2 py-1 text-[11px] text-[color:var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg)] disabled:opacity-60"
               >
                 {t("generated.controlPlane.bloquear_ca99f1e4")}
               </button>
@@ -261,10 +261,10 @@ export function ChannelGatewayMiniPanel({ agentId }: { agentId: string }) {
               className="flex items-center gap-2 rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2 text-xs"
             >
               <div className="min-w-0 flex-1">
-                <div className="truncate font-medium text-[var(--text-primary)]">
+                <div className="truncate font-medium text-[color:var(--text-primary)]">
                   {identity.display_name || identity.user_id}
                 </div>
-                <div className="truncate text-[var(--text-quaternary)]">
+                <div className="truncate text-[color:var(--text-quaternary)]">
                   {identity.user_id} · {identity.source}
                 </div>
               </div>
@@ -272,7 +272,7 @@ export function ChannelGatewayMiniPanel({ agentId }: { agentId: string }) {
                 type="button"
                 onClick={() => revoke(identity.identity_id)}
                 disabled={busy !== null}
-                className="rounded-md px-2 py-1 text-[11px] text-[var(--text-quaternary)] hover:bg-[var(--surface-hover)] disabled:opacity-60"
+                className="rounded-md px-2 py-1 text-[11px] text-[color:var(--text-quaternary)] hover:bg-[var(--surface-hover)] disabled:opacity-60"
               >
                 {t("generated.controlPlane.revogar_5c086667")}
               </button>
@@ -281,7 +281,7 @@ export function ChannelGatewayMiniPanel({ agentId }: { agentId: string }) {
         </div>
       )}
 
-      {error && <p className="mt-2 text-xs text-[var(--tone-danger-text)]">{error}</p>}
+      {error && <p className="mt-2 text-xs text-[color:var(--tone-danger-text)]">{error}</p>}
     </section>
   );
 }
@@ -545,11 +545,11 @@ export function ChannelConnectionModal({
               <div>
                 <h3
                   id="channel-modal-title"
-                  className="text-base font-semibold text-[var(--text-primary)]"
+                  className="text-base font-semibold text-[color:var(--text-primary)]"
                 >
                   {channelLabel}
                 </h3>
-                <p className="text-xs text-[var(--text-quaternary)]">
+                <p className="text-xs text-[color:var(--text-quaternary)]">
                   {channelTagline}
                 </p>
               </div>
@@ -577,11 +577,11 @@ export function ChannelConnectionModal({
                     <Check size={16} style={{ color: "var(--tone-success-dot)" }} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <div className="text-sm font-semibold text-[var(--text-primary)]">
+                    <div className="text-sm font-semibold text-[color:var(--text-primary)]">
                       {localAgentInfo.username ? `@${localAgentInfo.username}` : t("generated.controlPlane.conectado_e04915ac")}
                     </div>
                     {localAgentInfo.name && (
-                      <div className="text-xs text-[var(--text-tertiary)]">
+                      <div className="text-xs text-[color:var(--text-tertiary)]">
                         {localAgentInfo.name}
                       </div>
                     )}
@@ -591,14 +591,14 @@ export function ChannelConnectionModal({
                 {/* Allowed users */}
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
                       {t("generated.controlPlane.usuarios_com_acesso_063979e6")}
                     </div>
                     {loadedAllowedUsers && editingUserIds === null && (
                       <button
                         type="button"
                         onClick={() => setEditingUserIds(allowedUsers.map((u) => u.id).join(","))}
-                        className="text-[11px] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-primary)]"
+                        className="text-[11px] text-[color:var(--text-quaternary)] transition-colors hover:text-[color:var(--text-primary)]"
                       >
                         {t("generated.controlPlane.editar_28e2e08e")}
                       </button>
@@ -611,7 +611,7 @@ export function ChannelConnectionModal({
                       role="status"
                       aria-label={t("generated.controlPlane.carregando_62b04e95")}
                     >
-                      <InlineSpinner className="h-3.5 w-3.5 text-[var(--text-quaternary)]" />
+                      <InlineSpinner className="h-3.5 w-3.5 text-[color:var(--text-quaternary)]" />
                     </div>
                   ) : editingUserIds !== null ? (
                     <div className="flex flex-col gap-2">
@@ -621,14 +621,14 @@ export function ChannelConnectionModal({
                         placeholder={t("generated.controlPlane.digite_o_id_e_pressione_enter_5f36b2ab")}
                         draftRef={userIdsDraftRef}
                       />
-                      <p className="text-[11px] text-[var(--text-quaternary)]">
+                      <p className="text-[11px] text-[color:var(--text-quaternary)]">
                         {t("generated.controlPlane.deixe_vazio_para_bloquear_todos_ate_aprovar__81d20d6b")}
                       </p>
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => setEditingUserIds(null)}
-                          className="rounded-lg px-3 py-1.5 text-xs text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-primary)]"
+                          className="rounded-lg px-3 py-1.5 text-xs text-[color:var(--text-quaternary)] transition-colors hover:text-[color:var(--text-primary)]"
                         >
                           {t("generated.controlPlane.cancelar_091200fb")}
                         </button>
@@ -668,7 +668,7 @@ export function ChannelConnectionModal({
                               setSavingUserIds(false);
                             }
                           }}
-                          className="inline-flex min-w-16 items-center justify-center rounded-lg bg-[var(--surface-hover)] px-3 py-1.5 text-xs font-medium text-[var(--text-primary)] transition-colors hover:bg-[var(--surface-elevated)]"
+                          className="inline-flex min-w-16 items-center justify-center rounded-lg bg-[var(--surface-hover)] px-3 py-1.5 text-xs font-medium text-[color:var(--text-primary)] transition-colors hover:bg-[var(--surface-elevated)]"
                         >
                           {savingUserIds ? (
                             <InlineSpinner className="h-3.5 w-3.5" />
@@ -685,14 +685,14 @@ export function ChannelConnectionModal({
                           key={user.id}
                           className="flex items-center gap-2.5 rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2"
                         >
-                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--surface-hover)] text-[10px] font-bold text-[var(--text-tertiary)]">
+                          <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--surface-hover)] text-[10px] font-bold text-[color:var(--text-tertiary)]">
                             {(user.name?.[0] ?? user.id[0] ?? "?").toUpperCase()}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <div className="truncate text-xs font-medium text-[var(--text-primary)]">
+                            <div className="truncate text-xs font-medium text-[color:var(--text-primary)]">
                               {user.name || t("generated.controlPlane.usuario_4c5adc5f")}
                             </div>
-                            <div className="truncate text-[11px] text-[var(--text-quaternary)]">
+                            <div className="truncate text-[11px] text-[color:var(--text-quaternary)]">
                               {translate("generated.controlPlane.id_823f6f82")}{user.id}
                             </div>
                           </div>
@@ -700,7 +700,7 @@ export function ChannelConnectionModal({
                       ))}
                     </div>
                   ) : (
-                    <div className="rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2 text-xs text-[var(--text-quaternary)]">
+                    <div className="rounded-lg bg-[var(--surface-elevated-soft)] px-3 py-2 text-xs text-[color:var(--text-quaternary)]">
                       {t("generated.controlPlane.nenhum_usuario_legado_aprovado_use_o_gateway_37b8bcd9")}
                     </div>
                   )}
@@ -715,7 +715,7 @@ export function ChannelConnectionModal({
                   disabled={disconnecting}
                   aria-label={disconnecting ? t("generated.controlPlane.desconectando_af25b81e") : undefined}
                   aria-busy={disconnecting || undefined}
-                  className="inline-flex min-h-5 min-w-20 items-center justify-center self-end text-xs text-[var(--text-quaternary)] transition-colors hover:text-[var(--tone-danger-text)]"
+                  className="inline-flex min-h-5 min-w-20 items-center justify-center self-end text-xs text-[color:var(--text-quaternary)] transition-colors hover:text-[color:var(--tone-danger-text)]"
                 >
                   {disconnecting ? (
                     <InlineSpinner className="h-3.5 w-3.5" />
@@ -729,7 +729,7 @@ export function ChannelConnectionModal({
               <div className="flex flex-col gap-4">
                 {formDisabled && (
                   <InlineAlert tone="info">
-                    <p className="font-medium text-[var(--text-primary)]">
+                    <p className="font-medium text-[color:var(--text-primary)]">
                       {t("controlPlane.channelCatalog.unavailable.title")}
                     </p>
                     <p className="mt-0.5">
@@ -743,11 +743,11 @@ export function ChannelConnectionModal({
                   return field.type === "tags" ? (
                     <div key={field.key} className="flex flex-col gap-2 px-1 py-1">
                       <div className="flex min-h-[3.1rem] flex-col">
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
                           {fieldLabel}
                         </div>
                         {fieldHelpText && (
-                          <p className="mt-0.5 max-w-[42rem] text-[11px] leading-snug text-[var(--text-quaternary)]">
+                          <p className="mt-0.5 max-w-[42rem] text-[11px] leading-snug text-[color:var(--text-quaternary)]">
                             {fieldHelpText}
                           </p>
                         )}
@@ -788,7 +788,7 @@ export function ChannelConnectionModal({
                           }}
                           placeholder={t("generated.controlPlane.digite_o_valor_aqui_084a14a7")}
                           disabled={formDisabled}
-                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] focus:border-[var(--border-strong)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[color:var(--text-primary)] placeholder:text-[color:var(--text-quaternary)] focus:border-[var(--border-strong)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                         />
                       )}
                     </FieldShell>
@@ -799,7 +799,7 @@ export function ChannelConnectionModal({
 
                 {/* Error */}
                 {error && (
-                  <p className="text-sm text-[var(--tone-danger-text)]">
+                  <p className="text-sm text-[color:var(--tone-danger-text)]">
                     {error}
                   </p>
                 )}
@@ -812,7 +812,7 @@ export function ChannelConnectionModal({
                   loading={connecting}
                   status={connecting ? "pending" : "idle"}
                   loadingLabel={t("generated.controlPlane.validando_e1031e1a")}
-                  className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-[var(--interactive-active-text)]"
+                  className="w-full rounded-xl px-4 py-2.5 text-sm font-semibold text-[color:var(--interactive-active-text)]"
                   style={{
                     background: "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
                     border: "1px solid var(--interactive-active-border)",
@@ -825,7 +825,7 @@ export function ChannelConnectionModal({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center gap-1.5 border-t border-[var(--border-subtle)] px-6 py-3 text-xs text-[var(--text-quaternary)]">
+          <div className="flex items-center gap-1.5 border-t border-[var(--border-subtle)] px-6 py-3 text-xs text-[color:var(--text-quaternary)]">
             <Lock size={11} />
             <span>{t("generated.controlPlane.credenciais_criptografadas_657054e7")}</span>
           </div>

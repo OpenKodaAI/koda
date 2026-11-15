@@ -80,13 +80,13 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
               <div className="flex items-start gap-4 pr-14 sm:pr-16">
                 <div className="space-y-2.5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-mono text-xs text-[var(--text-tertiary)]">#{renderedEntry.id}</span>
-                    <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
+                    <span className="font-mono text-xs text-[color:var(--text-tertiary)]">#{renderedEntry.id}</span>
+                    <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 font-mono text-[10px] text-[color:var(--text-secondary)]">
                       {renderedEntry.event_type}
                     </span>
                   </div>
                   <div>
-                    <h2 className="text-[1.55rem] font-semibold tracking-[-0.05em] text-[var(--text-primary)]">
+                    <h2 className="text-[1.55rem] font-semibold tracking-[-0.05em] text-[color:var(--text-primary)]">
                       {t("audit.detail.eventTitle", { id: renderedEntry.id })}
                     </h2>
                   </div>
@@ -117,7 +117,7 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-3">
                     <ScrollText className="empty-state-icon h-10 w-10" />
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-tertiary)]">
                       {t("common.payload")}
                     </span>
                   </div>
@@ -135,7 +135,7 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
               {renderedEntry.trace_id && (
                 <div className="app-code-panel p-4 sm:p-5">
                   <div className="mb-3 flex items-center justify-between gap-4">
-                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-tertiary)]">
+                    <span className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-tertiary)]">
                       {t("audit.detail.traceability")}
                     </span>
                     <button
@@ -146,7 +146,7 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
                       {t("common.copy")}
                     </button>
                   </div>
-                  <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-7 text-[var(--text-secondary)]">
+                  <pre className="whitespace-pre-wrap break-words font-mono text-sm leading-7 text-[color:var(--text-secondary)]">
                     {truncateText(renderedEntry.trace_id, 999)}
                   </pre>
                 </div>
@@ -162,10 +162,10 @@ export function AuditDetailDrawer({ entry, onClose }: AuditDetailDrawerProps) {
 function DrawerMetric({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="app-kpi-card">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
         {label}
       </p>
-      <p className={cn("mt-2 text-sm text-[var(--text-primary)]", mono && "font-mono tabular-nums")}>
+      <p className={cn("mt-2 text-sm text-[color:var(--text-primary)]", mono && "font-mono tabular-nums")}>
         {value}
       </p>
     </div>

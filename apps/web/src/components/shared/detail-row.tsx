@@ -26,12 +26,12 @@ export function DetailRow({
         className
       )}
     >
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
         {tl(label)}
       </p>
       <div
         className={cn(
-          "mt-1.5 break-words text-[13px] leading-6 text-[var(--text-secondary)] sm:text-sm",
+          "mt-1.5 break-words text-[13px] leading-6 text-[color:var(--text-secondary)] sm:text-sm",
           valueClassName
         )}
       >

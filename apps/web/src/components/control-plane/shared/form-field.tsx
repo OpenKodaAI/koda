@@ -45,13 +45,13 @@ export function FormField({
         <span className="eyebrow">
           {tl(label)}
           {required && (
-            <span className="text-[var(--tone-danger-dot)] ml-0.5">*</span>
+            <span className="text-[color:var(--tone-danger-dot)] ml-0.5">*</span>
           )}
         </span>
       )}
 
       {description && (
-        <span className="text-xs text-[var(--text-quaternary)] leading-relaxed">
+        <span className="text-xs text-[color:var(--text-quaternary)] leading-relaxed">
           {tl(description)}
         </span>
       )}
@@ -59,7 +59,7 @@ export function FormField({
       {children}
 
       {error && (
-        <span className="text-xs text-[var(--tone-danger-text)]">{tl(error)}</span>
+        <span className="text-xs text-[color:var(--tone-danger-text)]">{tl(error)}</span>
       )}
     </label>
   );
@@ -92,7 +92,7 @@ export function FormInput({
       error={error}
     >
       <input
-        className={`field-shell px-3 text-[var(--text-primary)] ${className ?? ""}`}
+        className={`field-shell px-3 text-[color:var(--text-primary)] ${className ?? ""}`}
         {...rest}
         placeholder={typeof rest.placeholder === "string" ? tl(rest.placeholder) : rest.placeholder}
       />
@@ -166,7 +166,7 @@ export function FormCurrencyInput({
         {...rest}
         inputMode="decimal"
         autoComplete="off"
-        className={`field-shell px-3 text-[var(--text-primary)] ${className ?? ""}`}
+        className={`field-shell px-3 text-[color:var(--text-primary)] ${className ?? ""}`}
         value={renderedValue}
         onFocus={(event) => {
           setIsFocused(true);
@@ -281,12 +281,12 @@ export function FormSelect({
                     {selectedOption.icon}
                   </span>
                 ) : null}
-                <span className="min-w-0 truncate text-left text-[var(--text-primary)]">
+                <span className="min-w-0 truncate text-left text-[color:var(--text-primary)]">
                   {tl(selectedOption.label)}
                 </span>
               </span>
             ) : (
-              <span className="truncate text-left text-[var(--text-quaternary)]">
+              <span className="truncate text-left text-[color:var(--text-quaternary)]">
                 {placeholderLabel}
               </span>
             )}
@@ -309,11 +309,11 @@ export function FormSelect({
                         </span>
                       ) : null}
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-sm text-[var(--text-primary)]">
+                        <span className="block truncate text-sm text-[color:var(--text-primary)]">
                           {tl(option.label)}
                         </span>
                         {option.description ? (
-                          <span className="mt-0.5 block truncate text-xs text-[var(--text-tertiary)]">
+                          <span className="mt-0.5 block truncate text-xs text-[color:var(--text-tertiary)]">
                             {tl(option.description)}
                           </span>
                         ) : null}
@@ -358,7 +358,7 @@ export function FormTextarea({
       error={error}
     >
       <textarea
-        className={`field-shell w-full px-3 py-2 leading-6 text-[var(--text-primary)] ${className ?? ""}`}
+        className={`field-shell w-full px-3 py-2 leading-6 text-[color:var(--text-primary)] ${className ?? ""}`}
         spellCheck
         {...rest}
         placeholder={typeof rest.placeholder === "string" ? tl(rest.placeholder) : rest.placeholder}

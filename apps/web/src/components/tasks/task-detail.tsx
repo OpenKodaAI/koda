@@ -97,19 +97,19 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
                   )}
                 </div>
                 <div>
-                  <h2 className="text-[1.35rem] font-semibold tracking-[-0.06em] text-[var(--text-primary)]">
+                  <h2 className="text-[1.35rem] font-semibold tracking-[-0.06em] text-[color:var(--text-primary)]">
                     {renderedTask.query_text
                       ? truncateText(renderedTask.query_text, 96)
                       : t("tasks.detail.executionFallback", { id: renderedTask.id })}
                   </h2>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
-                  <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-secondary)]">
+                <div className="flex flex-wrap items-center gap-2 text-[11px] text-[color:var(--text-tertiary)]">
+                  <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 font-mono text-[10px] text-[color:var(--text-secondary)]">
                     {renderedTask.model ?? t("tasks.table.noModel")}
                   </span>
                   <span>{formatRelativeTime(renderedTask.created_at)}</span>
                   {renderedTask.session_id && (
-                    <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 font-mono text-[10px] text-[var(--text-quaternary)]">
+                    <span className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-2.5 py-1 font-mono text-[10px] text-[color:var(--text-quaternary)]">
                       {t("tasks.table.session", { value: truncateText(renderedTask.session_id, 18) })}
                     </span>
                   )}
@@ -221,10 +221,10 @@ export function TaskDetail({ task, onClose }: TaskDetailProps) {
 function DrawerMetric({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="app-kpi-card">
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
         {label}
       </p>
-      <p className={cn("mt-2 text-sm text-[var(--text-primary)]", mono && "font-mono tabular-nums")}>
+      <p className={cn("mt-2 text-sm text-[color:var(--text-primary)]", mono && "font-mono tabular-nums")}>
         {value}
       </p>
     </div>

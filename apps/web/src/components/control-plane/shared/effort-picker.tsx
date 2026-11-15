@@ -80,7 +80,7 @@ export function EffortPicker(props: EffortPickerProps) {
             onClick={() => onChange(isInheriting ? (inheritedValue ?? capability.defaultValue ?? null) : null)}
             className={cn(
               "text-[0.6875rem] font-medium normal-case tracking-normal underline-offset-2",
-              "text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] hover:underline",
+              "text-[color:var(--text-tertiary)] hover:text-[color:var(--text-secondary)] hover:underline",
             )}
           >
             {t(isInheriting ? "modelEffort.customValue" : "modelEffort.inheritGlobal")}
@@ -89,7 +89,7 @@ export function EffortPicker(props: EffortPickerProps) {
       </span>
 
       {capability.kind === "enum" && (readOnly || capability.values.length <= 1) ? (
-        <div className="field-shell min-h-9 bg-[var(--panel-soft)] text-sm text-[var(--text-secondary)]">
+        <div className="field-shell min-h-9 bg-[var(--panel-soft)] text-sm text-[color:var(--text-secondary)]">
           {t(
             ENUM_VALUE_LABELS[String(effectiveValue ?? capability.defaultValue ?? capability.values[0] ?? "")] ??
               `modelEffort.enum.${String(effectiveValue ?? capability.defaultValue ?? "")}`,
@@ -132,16 +132,16 @@ export function EffortPicker(props: EffortPickerProps) {
             }}
             disabled={readOnly}
             className={cn(
-              "h-9 w-20 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-right text-sm font-mono text-[var(--text-primary)]",
+              "h-9 w-20 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2 text-right text-sm font-mono text-[color:var(--text-primary)]",
               "focus-visible:border-[var(--focus-ring)] focus-visible:ring-1 focus-visible:ring-[var(--focus-ring)]",
               isInheriting && "opacity-60 focus-visible:opacity-100",
             )}
           />
-          <span className="text-xs text-[var(--text-quaternary)]">{t("modelEffort.tokensUnit")}</span>
+          <span className="text-xs text-[color:var(--text-quaternary)]">{t("modelEffort.tokensUnit")}</span>
         </div>
       )}
 
-      <p className="text-xs text-[var(--text-quaternary)] leading-relaxed">
+      <p className="text-xs text-[color:var(--text-quaternary)] leading-relaxed">
         {t(
           capability.kind === "enum"
             ? "modelEffort.descriptionEnum"

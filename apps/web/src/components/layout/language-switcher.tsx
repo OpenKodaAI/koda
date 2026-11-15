@@ -113,7 +113,7 @@ export function LanguageSwitcher({ className }: { className?: string }) {
             <ChevronDown
               aria-hidden="true"
               className={cn(
-                "h-4 w-4 shrink-0 text-[var(--text-primary)] transition-transform duration-200",
+                "h-4 w-4 shrink-0 text-[color:var(--text-primary)] transition-transform duration-200",
                 open && "rotate-180",
               )}
             />

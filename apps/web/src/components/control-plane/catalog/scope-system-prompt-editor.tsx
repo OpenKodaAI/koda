@@ -80,21 +80,21 @@ export function ScopeSystemPromptEditor({
 
               <div className="border-b border-[var(--border-subtle)] px-6 py-5 pr-14 sm:pr-16">
                 <div className="flex items-start gap-4">
-                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.75rem] border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.03)] text-[var(--text-secondary)]">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[0.75rem] border border-[var(--border-subtle)] bg-[rgba(255,255,255,0.03)] text-[color:var(--text-secondary)]">
                     {icon}
                   </div>
                   <div className="min-w-0">
                     <h2
                       id="scope-system-prompt-editor-title"
-                      className="text-lg font-semibold tracking-[-0.04em] text-[var(--text-primary)]"
+                      className="text-lg font-semibold tracking-[-0.04em] text-[color:var(--text-primary)]"
                     >
                       {title}
                     </h2>
-                    <p className="mt-1 text-sm text-[var(--text-quaternary)]">
+                    <p className="mt-1 text-sm text-[color:var(--text-quaternary)]">
                       {description}
                     </p>
                     {!loading && subtitle ? (
-                      <p className="mt-2 text-xs uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+                      <p className="mt-2 text-xs uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                         {subtitle}
                       </p>
                     ) : null}
@@ -105,7 +105,7 @@ export function ScopeSystemPromptEditor({
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-5">
                 {loading ? (
                   <div
-                    className="flex min-h-0 flex-1 items-center justify-center text-sm text-[var(--text-quaternary)]"
+                    className="flex min-h-0 flex-1 items-center justify-center text-sm text-[color:var(--text-quaternary)]"
                     role="status"
                     aria-label={t("generated.controlPlane.carregando_62b04e95")}
                   >

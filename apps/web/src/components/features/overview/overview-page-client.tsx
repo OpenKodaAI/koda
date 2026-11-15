@@ -321,7 +321,7 @@ function OverviewPageContent() {
       <div className="relative" {...tourRoute("overview", tourVariant)}>
         <section className="mx-auto flex w-full max-w-[760px] flex-col items-stretch gap-7 pt-10 pb-2">
           <header className="flex flex-col items-center gap-3 text-center">
-            <h2 className="display-serif m-0 text-center font-medium text-[var(--text-primary)] [font-size:var(--font-size-display)]">
+            <h2 className="display-serif m-0 text-center font-medium text-[color:var(--text-primary)] [font-size:var(--font-size-display)]">
               {greeting}
             </h2>
           </header>
@@ -343,8 +343,8 @@ function OverviewPageContent() {
                         type="button"
                         onClick={pill.onSelect}
                         className={cn(
-                          "inline-flex h-8 items-center gap-2 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-transparent px-3 text-[0.8125rem] font-medium text-[var(--text-secondary)]",
-                          "transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]",
+                          "inline-flex h-8 items-center gap-2 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-transparent px-3 text-[0.8125rem] font-medium text-[color:var(--text-secondary)]",
+                          "transition-[background-color,border-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:border-[var(--border-strong)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]",
                         )}
                       >
                         <Icon className="h-3.5 w-3.5" aria-hidden="true" />
@@ -387,7 +387,7 @@ function OverviewPageContent() {
 
           <section className="w-full" {...tourAnchor("overview.history")}>
             <header className="mb-3 flex items-baseline justify-between px-3">
-              <h3 className="m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+              <h3 className="m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
                 {t("overview.history.title")}
               </h3>
               <span className="eyebrow">{t("overview.history.subtitle")}</span>

@@ -145,33 +145,33 @@ export default function OAuthCallbackPage() {
 
   const icon =
     callbackState.status === "success" ? (
-      <CheckCircle2 size={48} className="text-[var(--tone-success-dot)]" />
+      <CheckCircle2 size={48} className="text-[color:var(--tone-success-dot)]" />
     ) : callbackState.status === "error" ? (
-      <XCircle size={48} className="text-[var(--tone-danger-dot)]" />
+      <XCircle size={48} className="text-[color:var(--tone-danger-dot)]" />
     ) : (
-      <Loader2 size={32} className="animate-spin text-[var(--icon-secondary)]" />
+      <Loader2 size={32} className="animate-spin text-[color:var(--icon-secondary)]" />
     );
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] px-6 text-[var(--text-primary)]">
+    <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] px-6 text-[color:var(--text-primary)]">
       <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-[var(--radius-shell)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-8 py-10 text-center">
         {icon}
         <p className="text-lg font-semibold">{callbackState.message}</p>
         {serverKey ? (
-          <p className="text-xs text-[var(--text-quaternary)]">
+          <p className="text-xs text-[color:var(--text-quaternary)]">
             {serverKey}
           </p>
         ) : null}
         {callbackState.error ? (
-          <p className="text-sm text-[var(--text-secondary)]">{callbackState.error}</p>
+          <p className="text-sm text-[color:var(--text-secondary)]">{callbackState.error}</p>
         ) : null}
-        <p className="text-xs text-[var(--text-quaternary)]">
+        <p className="text-xs text-[color:var(--text-quaternary)]">
           {hasOpener ? "Fechando esta janela..." : "Você pode fechar esta janela manualmente."}
         </p>
         <button
           type="button"
           onClick={() => window.close()}
-          className="mt-4 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+          className="mt-4 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-2 text-sm text-[color:var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
         >
           {translate("generated.routes.fechar_a2a3b736")}</button>
       </div>

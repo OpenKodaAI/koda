@@ -53,7 +53,7 @@ export function UiChoice({ block, agentId, sessionId }: UiChoiceProps) {
       className="rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] p-3 flex flex-col gap-3"
       data-submitted={blockSubmit.isSubmitted || undefined}
     >
-      <p className="m-0 text-[length:var(--font-size-md)] text-[var(--text-primary)]">
+      <p className="m-0 text-[length:var(--font-size-md)] text-[color:var(--text-primary)]">
         {prompt}
       </p>
       <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
@@ -69,14 +69,14 @@ export function UiChoice({ block, agentId, sessionId }: UiChoiceProps) {
               className={cn(
                 "flex flex-col items-start rounded-[var(--radius-panel-sm)] border px-3 py-2 text-left text-[0.8125rem] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                 active
-                  ? "border-[var(--accent)] bg-[var(--panel)] text-[var(--text-primary)]"
-                  : "border-[color:var(--border-subtle)] bg-transparent text-[var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:text-[var(--text-primary)]",
+                  ? "border-[var(--accent)] bg-[var(--panel)] text-[color:var(--text-primary)]"
+                  : "border-[color:var(--border-subtle)] bg-transparent text-[color:var(--text-secondary)] hover:border-[color:var(--border-strong)] hover:text-[color:var(--text-primary)]",
                 "disabled:opacity-50 disabled:cursor-not-allowed",
               )}
             >
               <span className="font-medium">{option.label}</span>
               {option.description ? (
-                <span className="text-[0.75rem] text-[var(--text-quaternary)] mt-0.5">
+                <span className="text-[0.75rem] text-[color:var(--text-quaternary)] mt-0.5">
                   {option.description}
                 </span>
               ) : null}
@@ -85,7 +85,7 @@ export function UiChoice({ block, agentId, sessionId }: UiChoiceProps) {
         })}
       </div>
       {blockSubmit.error ? (
-        <p className="m-0 text-[0.75rem] text-[var(--tone-danger-dot)]">
+        <p className="m-0 text-[0.75rem] text-[color:var(--tone-danger-dot)]">
           {blockSubmit.error}
         </p>
       ) : null}

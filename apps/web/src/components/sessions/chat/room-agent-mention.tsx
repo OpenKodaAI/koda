@@ -97,8 +97,8 @@ export function RoomAgentMentionBadge({
         "inline-flex h-6 max-w-[14rem] items-center gap-1 align-middle",
         "rounded-[var(--radius-pill)] border shadow-[var(--shadow-xs)]",
         accentColor
-          ? "border-[color:var(--agent-mention-border)] bg-[var(--agent-mention-bg)] text-[var(--agent-mention-text)]"
-          : "border-[color:var(--border-subtle)] bg-[var(--panel-soft)] text-[var(--tone-info-dot)]",
+          ? "border-[color:var(--agent-mention-border)] bg-[var(--agent-mention-bg)] text-[color:var(--agent-mention-text)]"
+          : "border-[color:var(--border-subtle)] bg-[var(--panel-soft)] text-[color:var(--tone-info-dot)]",
         "px-2 text-[0.75rem] font-medium leading-none",
         className,
       )}
@@ -110,7 +110,7 @@ export function RoomAgentMentionBadge({
         <button
           type="button"
           onClick={() => onRemove(mention)}
-          className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+          className="ml-0.5 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
           aria-label={`Remove @${mention.label}`}
         >
           <X className="h-2.5 w-2.5" strokeWidth={2} aria-hidden />
@@ -140,7 +140,7 @@ export function RoomMentionRichText({
           return (
             <span
               key={`mention-${segment.mention.id}-${index}`}
-              className="font-medium text-[var(--tone-info-dot)]"
+              className="font-medium text-[color:var(--tone-info-dot)]"
             >
               {segment.raw}
             </span>

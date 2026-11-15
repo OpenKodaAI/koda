@@ -111,7 +111,7 @@ function statusTone(status: string | null | undefined): StatusDotTone {
 
 function StatusLabel({ status, label }: { status: string; label?: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2.5 py-1 text-[0.75rem] text-[var(--text-secondary)]">
+    <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2.5 py-1 text-[0.75rem] text-[color:var(--text-secondary)]">
       <StatusDot tone={statusTone(status)} pulse={status === "running" || status === "queued"} />
       <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)]">
         {label ?? status}
@@ -804,15 +804,15 @@ function EvalSidePanel({
       <div className="rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--panel)] p-4 shadow-none">
         <header className="mb-4 min-w-0">
           {eyebrow ? (
-            <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+            <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
               {eyebrow}
             </p>
           ) : null}
-          <h2 className="m-0 truncate text-[0.9375rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+          <h2 className="m-0 truncate text-[0.9375rem] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
             {title}
           </h2>
           {description ? (
-            <p className="m-0 mt-1 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
+            <p className="m-0 mt-1 text-[0.75rem] leading-5 text-[color:var(--text-tertiary)]">
               {description}
             </p>
           ) : null}
@@ -853,7 +853,7 @@ function CasesPanel({
         />
         <PageDataTableShell className="mt-3">
           <table className="min-w-full text-left text-[0.8125rem]">
-            <thead className="border-y border-[var(--divider-hair)] text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+            <thead className="border-y border-[var(--divider-hair)] text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
               <tr>
                 <th className="px-3 py-2 font-medium">{t("generated.evaluations.case_8ce99888")}</th>
                 <th className="px-3 py-2 font-medium">{t("generated.evaluations.status_c67b6f40")}</th>
@@ -872,14 +872,14 @@ function CasesPanel({
                   onClick={() => onSelectCase(item.case_key)}
                 >
                   <td className="max-w-[420px] px-3 py-3">
-                    <div className="truncate font-medium text-[var(--text-primary)]">{item.title}</div>
-                    <div className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                    <div className="truncate font-medium text-[color:var(--text-primary)]">{item.title}</div>
+                    <div className="truncate font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                       {item.case_key}
                     </div>
                   </td>
                   <td className="px-3 py-3"><StatusLabel status={item.status} /></td>
-                  <td className="px-3 py-3 text-[var(--text-secondary)]">{item.source}</td>
-                  <td className="px-3 py-3 text-[var(--text-tertiary)]">
+                  <td className="px-3 py-3 text-[color:var(--text-secondary)]">{item.source}</td>
+                  <td className="px-3 py-3 text-[color:var(--text-tertiary)]">
                     {formatRelativeTime(item.updated_at ?? item.created_at)}
                   </td>
                 </tr>
@@ -911,8 +911,8 @@ function CasesPanel({
           {selectedCase ? (
             <div className="mt-3 space-y-4">
               <div>
-                <p className="m-0 text-[0.875rem] font-medium text-[var(--text-primary)]">{selectedCase.title}</p>
-                <p className="m-0 mt-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                <p className="m-0 text-[0.875rem] font-medium text-[color:var(--text-primary)]">{selectedCase.title}</p>
+                <p className="m-0 mt-1 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                   {selectedCase.case_key}
                 </p>
               </div>
@@ -984,16 +984,16 @@ function RunsPanel({
               )}
             >
               <span className="min-w-0">
-                <span className="block truncate text-[0.875rem] font-medium text-[var(--text-primary)]">
+                <span className="block truncate text-[0.875rem] font-medium text-[color:var(--text-primary)]">
                   {run.suite_name || run.strategy}
                 </span>
-                <span className="block truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                <span className="block truncate font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                   {run.run_id}
                 </span>
               </span>
               <span className="flex flex-col items-end gap-1">
                 <StatusLabel status={run.status} />
-                <span className="text-[0.75rem] text-[var(--text-tertiary)]">
+                <span className="text-[0.75rem] text-[color:var(--text-tertiary)]">
                   {formatRelativeTime(run.completed_at ?? run.created_at ?? run.started_at)}
                 </span>
               </span>
@@ -1037,10 +1037,10 @@ function RunsPanel({
                 {selectedRun.cases.map((result) => (
                   <div key={result.case_key} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2.5">
                     <div className="min-w-0">
-                      <p className="m-0 truncate text-[0.8125rem] text-[var(--text-primary)]">
+                      <p className="m-0 truncate text-[0.8125rem] text-[color:var(--text-primary)]">
                         {result.title || result.case_key}
                       </p>
-                      <p className="m-0 truncate text-[0.75rem] text-[var(--text-tertiary)]">
+                      <p className="m-0 truncate text-[0.75rem] text-[color:var(--text-tertiary)]">
                         {result.message || result.failure_category || "No failure detail"}
                       </p>
                     </div>
@@ -1101,11 +1101,11 @@ function ProposalsPanel({
               )}
             >
               <span className="min-w-0">
-                <span className="block truncate text-[0.875rem] font-medium text-[var(--text-primary)]">
+                <span className="block truncate text-[0.875rem] font-medium text-[color:var(--text-primary)]">
                   {proposal.summary}
                 </span>
-                <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[0.72rem] text-[var(--text-tertiary)]">
-                  <span className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                <span className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5 text-[0.72rem] text-[color:var(--text-tertiary)]">
+                  <span className="truncate font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                     {proposal.proposal_id}
                   </span>
                   <span>{proposal.proposal_type}</span>
@@ -1118,7 +1118,7 @@ function ProposalsPanel({
                   // D-116: "applied" only marks the effect ledger; nothing changes the agent.
                   label={proposal.status === "applied" ? t("evaluations.proposals.status.applied") : undefined}
                 />
-                <span className="text-[0.75rem] text-[var(--text-tertiary)]">
+                <span className="text-[0.75rem] text-[color:var(--text-tertiary)]">
                   {formatRelativeTime(proposal.updated_at ?? proposal.created_at)}
                 </span>
               </span>
@@ -1154,10 +1154,10 @@ function ProposalsPanel({
           {selectedProposal ? (
             <div className="mt-3 space-y-4">
               <div>
-                <p className="m-0 text-[0.875rem] font-medium text-[var(--text-primary)]">
+                <p className="m-0 text-[0.875rem] font-medium text-[color:var(--text-primary)]">
                   {selectedProposal.summary}
                 </p>
-                <p className="m-0 mt-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                <p className="m-0 mt-1 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                   {selectedProposal.proposal_id}
                 </p>
               </div>
@@ -1215,10 +1215,10 @@ function ReleasePanel({
         <div className="mt-3 divide-y divide-[var(--divider-hair)]">
           {(releaseQuality?.gates ?? []).map((gate) => (
             <div key={gate.id} className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-3 py-3">
-              <ShieldCheck className="mt-1 h-4 w-4 text-[var(--text-tertiary)]" />
+              <ShieldCheck className="mt-1 h-4 w-4 text-[color:var(--text-tertiary)]" />
               <div className="min-w-0">
-                <p className="m-0 text-[0.875rem] font-medium text-[var(--text-primary)]">{gate.title}</p>
-                <p className="m-0 mt-1 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">{gate.summary}</p>
+                <p className="m-0 text-[0.875rem] font-medium text-[color:var(--text-primary)]">{gate.title}</p>
+                <p className="m-0 mt-1 text-[0.75rem] leading-5 text-[color:var(--text-tertiary)]">{gate.summary}</p>
               </div>
               <StatusLabel status={gate.status} />
             </div>
@@ -1316,10 +1316,10 @@ function ReleaseBlockerList({ releaseQuality }: { releaseQuality: ReleaseQuality
         {blockers.map((gate) => (
           <div key={gate.id} className="grid grid-cols-[1fr_auto] gap-3 px-3 py-2.5">
             <div className="min-w-0">
-              <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+              <p className="m-0 truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
                 {gate.title}
               </p>
-              <p className="m-0 mt-1 text-[0.72rem] leading-5 text-[var(--text-tertiary)]">
+              <p className="m-0 mt-1 text-[0.72rem] leading-5 text-[color:var(--text-tertiary)]">
                 {gate.summary || t("generated.evaluations.gate_is_not_passing_b60a50ea")}
               </p>
             </div>
@@ -1371,8 +1371,8 @@ function QualityCockpitPanel({ cockpit }: { cockpit: QualityCockpit | null }) {
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="m-0 text-[0.875rem] font-medium text-[var(--text-primary)]">{group.label}</p>
-                  <p className="m-0 mt-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                  <p className="m-0 text-[0.875rem] font-medium text-[color:var(--text-primary)]">{group.label}</p>
+                  <p className="m-0 mt-1 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                     {group.entity_type}
                   </p>
                 </div>
@@ -1419,10 +1419,10 @@ function QualityCockpitPanel({ cockpit }: { cockpit: QualityCockpit | null }) {
             {costRows.slice(0, 6).map((row) => (
               <div key={row.id} className="grid grid-cols-[1fr_auto] gap-3 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] px-3 py-2">
                 <div className="min-w-0">
-                  <p className="m-0 truncate text-[0.8125rem] text-[var(--text-primary)]">{row.label}</p>
-                  <p className="m-0 mt-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">{row.type}</p>
+                  <p className="m-0 truncate text-[0.8125rem] text-[color:var(--text-primary)]">{row.label}</p>
+                  <p className="m-0 mt-1 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">{row.type}</p>
                 </div>
-                <span className="text-right font-mono text-[0.6875rem] text-[var(--text-secondary)]">
+                <span className="text-right font-mono text-[0.6875rem] text-[color:var(--text-secondary)]">
                   ${row.cost.toFixed(4)} · {formatPercent(row.quality)}
                 </span>
               </div>
@@ -1434,12 +1434,12 @@ function QualityCockpitPanel({ cockpit }: { cockpit: QualityCockpit | null }) {
             {cockpit.route_quality_history.slice(0, 6).map((route) => (
               <div key={route.route_source} className="grid grid-cols-[1fr_auto] gap-3 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] px-3 py-2">
                 <div className="min-w-0">
-                  <p className="m-0 text-[0.8125rem] text-[var(--text-primary)]">{route.route_source}</p>
-                  <p className="m-0 mt-1 text-[0.6875rem] text-[var(--text-tertiary)]">
+                  <p className="m-0 text-[0.8125rem] text-[color:var(--text-primary)]">{route.route_source}</p>
+                  <p className="m-0 mt-1 text-[0.6875rem] text-[color:var(--text-tertiary)]">
                     {route.outcome_count} {translate("generated.evaluations.outcomes_timeout_e0215141")}{formatPercent(route.timeout_rate)}
                   </p>
                 </div>
-                <span className="font-mono text-[0.6875rem] text-[var(--text-secondary)]">
+                <span className="font-mono text-[0.6875rem] text-[color:var(--text-secondary)]">
                   {formatPercent(route.success_rate)}
                 </span>
               </div>
@@ -1465,12 +1465,12 @@ function QualityFailureCards({ failures }: { failures: QualityCockpitFailure[] }
         <div key={failure.failure_id} className="rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] px-3 py-2">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <p className="m-0 truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">{failure.title}</p>
-              <p className="m-0 mt-1 text-[0.72rem] leading-5 text-[var(--text-tertiary)]">{failure.summary}</p>
+              <p className="m-0 truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">{failure.title}</p>
+              <p className="m-0 mt-1 text-[0.72rem] leading-5 text-[color:var(--text-tertiary)]">{failure.summary}</p>
             </div>
             <StatusLabel status={failure.status} />
           </div>
-          <p className="m-0 mt-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+          <p className="m-0 mt-1 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
             {failure.failure_id} · {failure.risk_class} {translate("generated.evaluations.nodes_92d17592")}{failure.run_graph_node_ids.length}
           </p>
         </div>
@@ -1576,9 +1576,9 @@ function PanelSignal({
   return (
     <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2.5 rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-3 py-2.5">
       <StatusDot tone={tone} />
-      <span className="min-w-0 truncate text-[0.8125rem] text-[var(--text-primary)]">{label}</span>
+      <span className="min-w-0 truncate text-[0.8125rem] text-[color:var(--text-primary)]">{label}</span>
       {meta ? (
-        <span className="truncate font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+        <span className="truncate font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
           {meta}
         </span>
       ) : null}
@@ -1595,10 +1595,10 @@ function PanelMicroHeader({
 }) {
   return (
     <div>
-      <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+      <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
         {eyebrow}
       </p>
-      <p className="m-0 mt-1 text-[0.875rem] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+      <p className="m-0 mt-1 text-[0.875rem] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
         {title}
       </p>
     </div>
@@ -1608,10 +1608,10 @@ function PanelMicroHeader({
 function DetailDatum({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="min-w-0 border-l border-[var(--border-subtle)] py-1 pl-3">
-      <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+      <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
         {label}
       </p>
-      <p className="m-0 mt-1 truncate text-[0.8125rem] text-[var(--text-primary)]">{value}</p>
+      <p className="m-0 mt-1 truncate text-[0.8125rem] text-[color:var(--text-primary)]">{value}</p>
     </div>
   );
 }
@@ -1619,10 +1619,10 @@ function DetailDatum({ label, value }: { label: string; value: ReactNode }) {
 function CodePreview({ title, value }: { title: string; value: string }) {
   return (
     <div className="rounded-[var(--radius-panel-sm)] border border-[var(--border-subtle)] bg-[var(--panel-soft)]">
-      <div className="border-b border-[var(--divider-hair)] px-3 py-2 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+      <div className="border-b border-[var(--divider-hair)] px-3 py-2 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
         {title}
       </div>
-      <pre className="m-0 max-h-48 overflow-auto whitespace-pre-wrap break-words px-3 py-3 text-[0.75rem] leading-5 text-[var(--text-secondary)]">
+      <pre className="m-0 max-h-48 overflow-auto whitespace-pre-wrap break-words px-3 py-3 text-[0.75rem] leading-5 text-[color:var(--text-secondary)]">
         {value}
       </pre>
     </div>
@@ -1640,7 +1640,7 @@ function FailureList({ failures }: { failures: EvalRun["top_failures"] }) {
   }
   return (
     <div className="space-y-2">
-      <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]">
+      <p className="m-0 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]">
         {t("generated.evaluations.top_failures_3fd291c6")}
       </p>
       {failures.map((failure) => (
@@ -1650,12 +1650,12 @@ function FailureList({ failures }: { failures: EvalRun["top_failures"] }) {
         >
           <StatusDot tone={statusTone(failure.severity)} />
           <div className="min-w-0">
-            <p className="m-0 truncate text-[0.8125rem] text-[var(--text-primary)]">{failure.name}</p>
-            <p className="m-0 mt-0.5 text-[0.75rem] text-[var(--text-tertiary)]">
+            <p className="m-0 truncate text-[0.8125rem] text-[color:var(--text-primary)]">{failure.name}</p>
+            <p className="m-0 mt-0.5 text-[0.75rem] text-[color:var(--text-tertiary)]">
               {failure.kind}{failure.message ? ` · ${failure.message}` : ""}
             </p>
           </div>
-          <span className="font-mono text-[0.75rem] text-[var(--text-secondary)]">{failure.count}</span>
+          <span className="font-mono text-[0.75rem] text-[color:var(--text-secondary)]">{failure.count}</span>
         </div>
       ))}
     </div>

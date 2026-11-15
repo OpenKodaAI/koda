@@ -170,7 +170,7 @@ export const TimezonePicker = React.forwardRef<HTMLButtonElement, TimezonePicker
             aria-haspopup="listbox"
             title={title}
             className={cn(
-              "flex h-9 w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-primary)] outline-none",
+              "flex h-9 w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[color:var(--text-primary)] outline-none",
               "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
               "border-[var(--border-subtle)] hover:border-[var(--border-strong)]",
               "focus-visible:border-[var(--accent)] data-[state=open]:border-[var(--accent)]",
@@ -180,14 +180,14 @@ export const TimezonePicker = React.forwardRef<HTMLButtonElement, TimezonePicker
             )}
           >
             <span className="flex min-w-0 items-center gap-2">
-              <Globe2 className="icon-sm shrink-0 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+              <Globe2 className="icon-sm shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
               {value ? (
                 <span className="truncate">{value}</span>
               ) : (
-                <span className="truncate text-[var(--text-quaternary)]">{placeholder}</span>
+                <span className="truncate text-[color:var(--text-quaternary)]">{placeholder}</span>
               )}
             </span>
-            <span className="flex shrink-0 items-center gap-2 text-[var(--text-tertiary)]">
+            <span className="flex shrink-0 items-center gap-2 text-[color:var(--text-tertiary)]">
               {offset ? (
                 <span className="font-mono text-[0.6875rem] tabular-nums">{offset}</span>
               ) : null}
@@ -200,14 +200,14 @@ export const TimezonePicker = React.forwardRef<HTMLButtonElement, TimezonePicker
           className="w-[var(--radix-popover-trigger-width)] min-w-[18rem] p-0"
         >
           <div className="flex items-center gap-2 border-b border-[var(--divider-hair)] px-3">
-            <Search className="icon-sm shrink-0 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+            <Search className="icon-sm shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
             <input
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               onKeyDown={onKeyDown}
               placeholder={searchPlaceholder}
-              className="h-9 w-full bg-transparent text-[0.8125rem] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+              className="h-9 w-full bg-transparent text-[0.8125rem] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-quaternary)]"
               spellCheck={false}
               autoCapitalize="off"
               autoCorrect="off"
@@ -215,7 +215,7 @@ export const TimezonePicker = React.forwardRef<HTMLButtonElement, TimezonePicker
           </div>
           <div ref={listRef} role="listbox" className="max-h-[18rem] overflow-y-auto py-1">
             {filtered.length === 0 ? (
-              <div className="px-3 py-3 text-center text-[0.75rem] text-[var(--text-tertiary)]">
+              <div className="px-3 py-3 text-center text-[0.75rem] text-[color:var(--text-tertiary)]">
                 {emptyLabel}
               </div>
             ) : (
@@ -233,7 +233,7 @@ export const TimezonePicker = React.forwardRef<HTMLButtonElement, TimezonePicker
                     onMouseEnter={() => setActiveIndex(index)}
                     onClick={() => commit(zone)}
                     className={cn(
-                      "flex w-full items-center justify-between gap-3 rounded-[var(--radius-chip)] px-2.5 py-1.5 text-left text-[0.8125rem] text-[var(--text-primary)]",
+                      "flex w-full items-center justify-between gap-3 rounded-[var(--radius-chip)] px-2.5 py-1.5 text-left text-[0.8125rem] text-[color:var(--text-primary)]",
                       "transition-[background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                       active && "bg-[var(--hover-tint)]",
                       selected && "bg-[var(--panel-strong)]",
@@ -241,14 +241,14 @@ export const TimezonePicker = React.forwardRef<HTMLButtonElement, TimezonePicker
                   >
                     <span className="flex min-w-0 items-center gap-2">
                       {selected ? (
-                        <Check className="icon-sm shrink-0 text-[var(--accent)]" strokeWidth={1.75} />
+                        <Check className="icon-sm shrink-0 text-[color:var(--accent)]" strokeWidth={1.75} />
                       ) : (
                         <span className="inline-block w-[14px] shrink-0" aria-hidden />
                       )}
                       <span className="truncate">{zone}</span>
                     </span>
                     {zoneOffset ? (
-                      <span className="shrink-0 font-mono text-[0.6875rem] tabular-nums text-[var(--text-tertiary)]">
+                      <span className="shrink-0 font-mono text-[0.6875rem] tabular-nums text-[color:var(--text-tertiary)]">
                         {zoneOffset}
                       </span>
                     ) : null}

@@ -192,7 +192,7 @@ function ArtifactDownloadButton({
       disabled={downloader.isDownloading}
       aria-label={t("sessions.artifacts.download", undefined)}
       className={cn(
-        "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60",
+        "inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)] disabled:opacity-60",
         className,
       )}
     >
@@ -219,13 +219,13 @@ function LinkArtifactCard({
   const subtitle = artifact.description || artifact.summary || artifactDomain(artifact) || href;
   const content = (
     <>
-      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-chip)] bg-[var(--panel)] text-[var(--text-tertiary)]">
+      <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-chip)] bg-[var(--panel)] text-[color:var(--text-tertiary)]">
         <Icon className="h-4 w-4" strokeWidth={1.75} aria-hidden />
       </span>
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-[0.8125rem] text-[var(--text-primary)]">{title}</span>
+        <span className="truncate text-[0.8125rem] text-[color:var(--text-primary)]">{title}</span>
         {subtitle ? (
-          <span className="truncate text-[0.75rem] text-[var(--text-tertiary)]">
+          <span className="truncate text-[0.75rem] text-[color:var(--text-tertiary)]">
             {subtitle}
           </span>
         ) : null}
@@ -261,7 +261,7 @@ function LinkArtifactCard({
         </button>
       )}
       {href ? (
-        <ExternalLink className="h-3.5 w-3.5 shrink-0 text-[var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
+        <ExternalLink className="h-3.5 w-3.5 shrink-0 text-[color:var(--text-quaternary)]" strokeWidth={1.75} aria-hidden />
       ) : (
         <ArtifactDownloadButton artifact={artifact} agentId={agentId} activityAt={activityAt} />
       )}
@@ -299,18 +299,18 @@ function TextArtifactCard({
         className="flex min-w-0 flex-1 items-start gap-2.5 text-left disabled:cursor-default"
         aria-label={t("sessions.context.artifacts.openPreview", undefined)}
       >
-        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] bg-[var(--panel)] text-[var(--text-tertiary)]">
+        <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] bg-[var(--panel)] text-[color:var(--text-tertiary)]">
           <Icon className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
         </span>
         <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-          <span className="truncate text-[0.8125rem] text-[var(--text-primary)]">{filename}</span>
+          <span className="truncate text-[0.8125rem] text-[color:var(--text-primary)]">{filename}</span>
           {preview ? (
-            <span className="line-clamp-2 text-[0.75rem] leading-5 text-[var(--text-tertiary)]">
+            <span className="line-clamp-2 text-[0.75rem] leading-5 text-[color:var(--text-tertiary)]">
               {preview}
             </span>
           ) : null}
           {meta ? (
-            <span className="font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+            <span className="font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
               {meta}
             </span>
           ) : null}
@@ -351,13 +351,13 @@ function FileArtifactCard({
         className="flex min-w-0 flex-1 items-center gap-2.5 text-left disabled:cursor-default"
         aria-label={t("sessions.context.artifacts.openPreview", undefined)}
       >
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-chip)] bg-[var(--panel)] text-[var(--text-tertiary)]">
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-chip)] bg-[var(--panel)] text-[color:var(--text-tertiary)]">
           <Icon className="h-4 w-4" strokeWidth={1.75} aria-hidden />
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-[0.8125rem] text-[var(--text-primary)]">{filename}</span>
+          <span className="truncate text-[0.8125rem] text-[color:var(--text-primary)]">{filename}</span>
           {meta ? (
-            <span className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+            <span className="truncate font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
               {meta}
             </span>
           ) : null}
@@ -390,18 +390,18 @@ function ImageFallbackCard({
       data-artifact-visual="image-fallback"
       className="flex max-w-[420px] items-center gap-3 rounded-[var(--radius-panel-sm)] border border-[color:var(--border-subtle)] bg-[var(--panel-soft)] px-3 py-2.5"
     >
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-chip)] border border-[color:var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)]">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-chip)] border border-[color:var(--border-subtle)] bg-[var(--panel)] text-[color:var(--text-quaternary)]">
         <ImageOff className="h-4 w-4" strokeWidth={1.75} aria-hidden />
       </div>
       <div className="min-w-0 flex-1">
-        <p className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+        <p className="truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
           {filename}
         </p>
-        <p className="truncate text-[0.75rem] text-[var(--text-tertiary)]">
+        <p className="truncate text-[0.75rem] text-[color:var(--text-tertiary)]">
           {t("sessions.artifacts.imagePreviewUnavailable", undefined)}
         </p>
         {meta ? (
-          <p className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+          <p className="truncate font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
             {meta}
           </p>
         ) : null}
@@ -412,7 +412,7 @@ function ImageFallbackCard({
           onClick={() => void downloader.download(artifactDetail)}
           disabled={downloader.isDownloading}
           aria-label={t("sessions.artifacts.download", undefined)}
-          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)] disabled:opacity-60"
+          className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[color:var(--text-tertiary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)] disabled:opacity-60"
         >
           <Download className="icon-xs" strokeWidth={1.75} aria-hidden />
         </button>

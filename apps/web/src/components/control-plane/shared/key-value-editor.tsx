@@ -53,20 +53,20 @@ export function KeyValueEditor({
               type="text"
               value={entry.key}
               onChange={(e) => updateEntry(i, "key", e.target.value)}
-              className="field-shell flex-1 font-mono text-[var(--text-primary)]"
+              className="field-shell flex-1 font-mono text-[color:var(--text-primary)]"
               placeholder={t("generated.controlPlane.chave_d9d0b3d0")}
             />
             <input
               type="text"
               value={entry.value}
               onChange={(e) => updateEntry(i, "value", e.target.value)}
-              className="field-shell flex-1 text-[var(--text-primary)]"
+              className="field-shell flex-1 text-[color:var(--text-primary)]"
               placeholder={t("generated.controlPlane.valor_f2e480cb")}
             />
             <button
               type="button"
               onClick={() => removeEntry(i)}
-              className="p-1.5 text-[var(--text-quaternary)] hover:text-[var(--tone-danger-text)] transition-colors"
+              className="p-1.5 text-[color:var(--text-quaternary)] hover:text-[color:var(--tone-danger-text)] transition-colors"
               aria-label={t("generated.controlPlane.remover_5465770e")}
             >
               <Trash2 size={14} />

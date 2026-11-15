@@ -31,7 +31,7 @@ const alertVariants = cva(
         solid: "",
         outline: "",
         light: "",
-        stroke: "text-[var(--text-primary)]",
+        stroke: "text-[color:var(--text-primary)]",
       },
       size: {
         lg: "rounded-[1rem] p-4 text-base [&>[data-slot=alert-icon]>svg]:size-5.5 [&_[data-slot=alert-close]]:mt-0.5",
@@ -44,121 +44,121 @@ const alertVariants = cva(
         variant: "secondary",
         appearance: "solid",
         className:
-          "border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-primary)]",
+          "border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[color:var(--text-primary)]",
       },
       {
         variant: "primary",
         appearance: "solid",
         className:
-          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg-strong)] text-[var(--tone-info-text)]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg-strong)] text-[color:var(--tone-info-text)]",
       },
       {
         variant: "destructive",
         appearance: "solid",
         className:
-          "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg-strong)] text-[var(--tone-danger-text)]",
+          "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg-strong)] text-[color:var(--tone-danger-text)]",
       },
       {
         variant: "success",
         appearance: "solid",
         className:
-          "border-[var(--tone-success-border)] bg-[var(--tone-success-bg-strong)] text-[var(--tone-success-text)]",
+          "border-[var(--tone-success-border)] bg-[var(--tone-success-bg-strong)] text-[color:var(--tone-success-text)]",
       },
       {
         variant: "info",
         appearance: "solid",
         className:
-          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg-strong)] text-[var(--tone-info-text)]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg-strong)] text-[color:var(--tone-info-text)]",
       },
       {
         variant: "warning",
         appearance: "solid",
         className:
-          "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg-strong)] text-[var(--tone-warning-text)]",
+          "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg-strong)] text-[color:var(--tone-warning-text)]",
       },
       {
         variant: "mono",
         appearance: "solid",
         className:
-          "border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[var(--text-primary)]",
+          "border-[var(--border-subtle)] bg-[var(--surface-elevated)] text-[color:var(--text-primary)]",
       },
       {
         variant: "secondary",
         appearance: "outline",
         className:
-          "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)] [&_[data-slot=alert-close]]:text-[var(--text-secondary)]",
+          "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[color:var(--text-primary)] [&_[data-slot=alert-close]]:text-[color:var(--text-secondary)]",
       },
       {
         variant: "primary",
         appearance: "outline",
         className:
-          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[color:var(--text-primary)] [&_[data-slot=alert-icon]]:text-[color:var(--tone-info-dot)]",
       },
       {
         variant: "destructive",
         appearance: "outline",
         className:
-          "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-danger-dot)]",
+          "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[color:var(--text-primary)] [&_[data-slot=alert-icon]]:text-[color:var(--tone-danger-dot)]",
       },
       {
         variant: "success",
         appearance: "outline",
         className:
-          "border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-success-dot)]",
+          "border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[color:var(--text-primary)] [&_[data-slot=alert-icon]]:text-[color:var(--tone-success-dot)]",
       },
       {
         variant: "info",
         appearance: "outline",
         className:
-          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[color:var(--text-primary)] [&_[data-slot=alert-icon]]:text-[color:var(--tone-info-dot)]",
       },
       {
         variant: "warning",
         appearance: "outline",
         className:
-          "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-warning-dot)]",
+          "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[color:var(--text-primary)] [&_[data-slot=alert-icon]]:text-[color:var(--tone-warning-dot)]",
       },
       {
         variant: "mono",
         appearance: "outline",
         className:
-          "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)]",
+          "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[color:var(--text-primary)]",
       },
       {
         variant: "secondary",
         appearance: "light",
         className:
-          "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)]",
+          "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[color:var(--text-primary)]",
       },
       {
         variant: "primary",
         appearance: "light",
         className:
-          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[color:var(--text-primary)] [&_[data-slot=alert-icon]]:text-[color:var(--tone-info-dot)]",
       },
       {
         variant: "destructive",
         appearance: "light",
         className:
-          "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-danger-dot)]",
+          "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[color:var(--text-primary)] [&_[data-slot=alert-icon]]:text-[color:var(--tone-danger-dot)]",
       },
       {
         variant: "success",
         appearance: "light",
         className:
-          "border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-success-dot)]",
+          "border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[color:var(--text-primary)] [&_[data-slot=alert-icon]]:text-[color:var(--tone-success-dot)]",
       },
       {
         variant: "info",
         appearance: "light",
         className:
-          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
+          "border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] text-[color:var(--text-primary)] [&_[data-slot=alert-icon]]:text-[color:var(--tone-info-dot)]",
       },
       {
         variant: "warning",
         appearance: "light",
         className:
-          "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[var(--text-primary)] [&_[data-slot=alert-icon]]:text-[var(--tone-warning-dot)]",
+          "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[color:var(--text-primary)] [&_[data-slot=alert-icon]]:text-[color:var(--tone-warning-dot)]",
       },
       {
         variant: "mono",
@@ -168,22 +168,22 @@ const alertVariants = cva(
       {
         variant: "mono",
         icon: "warning",
-        className: "[&_[data-slot=alert-icon]]:text-[var(--tone-warning-dot)]",
+        className: "[&_[data-slot=alert-icon]]:text-[color:var(--tone-warning-dot)]",
       },
       {
         variant: "mono",
         icon: "success",
-        className: "[&_[data-slot=alert-icon]]:text-[var(--tone-success-dot)]",
+        className: "[&_[data-slot=alert-icon]]:text-[color:var(--tone-success-dot)]",
       },
       {
         variant: "mono",
         icon: "destructive",
-        className: "[&_[data-slot=alert-icon]]:text-[var(--tone-danger-dot)]",
+        className: "[&_[data-slot=alert-icon]]:text-[color:var(--tone-danger-dot)]",
       },
       {
         variant: "mono",
         icon: "info",
-        className: "[&_[data-slot=alert-icon]]:text-[var(--tone-info-dot)]",
+        className: "[&_[data-slot=alert-icon]]:text-[color:var(--tone-info-dot)]",
       },
     ],
     defaultVariants: {
@@ -233,7 +233,7 @@ function Alert({
           onClick={onClose}
           aria-label={translate("generated.ui.dismiss_c6ea6d98")}
           data-slot="alert-close"
-          className="group size-6 shrink-0 self-start rounded-full text-[var(--icon-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--icon-primary)]"
+          className="group size-6 shrink-0 self-start rounded-full text-[color:var(--icon-secondary)] hover:bg-[var(--surface-hover)] hover:text-[color:var(--icon-primary)]"
         >
           <X className="size-3.5" />
         </Button>
@@ -281,7 +281,7 @@ function AlertDescription({ className, ...props }: React.HTMLAttributes<HTMLPara
     <div
       data-slot="alert-description"
       className={cn(
-        "text-[13px] leading-relaxed text-[var(--text-secondary)] [&_p]:mb-2 [&_p]:leading-relaxed last:[&_p]:mb-0",
+        "text-[13px] leading-relaxed text-[color:var(--text-secondary)] [&_p]:mb-2 [&_p]:leading-relaxed last:[&_p]:mb-0",
         className,
       )}
       {...props}

@@ -41,7 +41,7 @@ export function InfiniteListFooter({
     >
       {loading ? (
         <div
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--border-subtle)] bg-[var(--panel)] text-[var(--text-tertiary)]"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[color:var(--border-subtle)] bg-[var(--panel)] text-[color:var(--text-tertiary)]"
           role="status"
           aria-label={label}
         >
@@ -51,7 +51,7 @@ export function InfiniteListFooter({
         <button
           type="button"
           onClick={onLoadMore}
-          className="inline-flex h-8 items-center justify-center rounded-full border border-[color:var(--border-subtle)] bg-[var(--panel)] px-3 text-[0.75rem] font-medium text-[var(--text-secondary)] transition-colors duration-[140ms] hover:bg-[var(--panel-strong)] hover:text-[var(--text-primary)]"
+          className="inline-flex h-8 items-center justify-center rounded-full border border-[color:var(--border-subtle)] bg-[var(--panel)] px-3 text-[0.75rem] font-medium text-[color:var(--text-secondary)] transition-colors duration-[140ms] hover:bg-[var(--panel-strong)] hover:text-[color:var(--text-primary)]"
         >
           {label}
         </button>

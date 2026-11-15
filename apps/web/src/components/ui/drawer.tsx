@@ -81,19 +81,19 @@ export function Drawer({
           <header className="flex items-start justify-between gap-3 border-b border-[var(--divider-hair)] px-5 py-4">
             <div className="min-w-0 flex-1">
               {title ? (
-                <DialogPrimitive.Title className="m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+                <DialogPrimitive.Title className="m-0 text-[length:var(--font-size-md)] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
                   {title}
                 </DialogPrimitive.Title>
               ) : null}
               {description ? (
-                <DialogPrimitive.Description className="m-0 mt-1 text-[0.8125rem] text-[var(--text-tertiary)]">
+                <DialogPrimitive.Description className="m-0 mt-1 text-[0.8125rem] text-[color:var(--text-tertiary)]">
                   {description}
                 </DialogPrimitive.Description>
               ) : null}
             </div>
             <DialogPrimitive.Close
               aria-label={closeLabel}
-              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-tertiary)] transition-[background-color,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
             >
               <X className="h-4 w-4" />
             </DialogPrimitive.Close>

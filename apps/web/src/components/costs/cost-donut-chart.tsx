@@ -106,8 +106,8 @@ export function CostDonutChart({
         activeItem ? (
           <span>
             {t("costs.page.allocationDominant", undefined)}{" "}
-            <span className="font-medium text-[var(--text-primary)]">{activeItem.label}</span>{" "}
-            <span className="text-[var(--text-tertiary)]">· {activeItem.share.toFixed(1)}%</span>
+            <span className="font-medium text-[color:var(--text-primary)]">{activeItem.label}</span>{" "}
+            <span className="text-[color:var(--text-tertiary)]">· {activeItem.share.toFixed(1)}%</span>
           </span>
         ) : (
           t("costs.page.noDominantAllocation", undefined)

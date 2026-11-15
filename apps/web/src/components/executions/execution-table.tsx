@@ -127,7 +127,7 @@ export function ExecutionTable({
     t(`runtime.labels.${status}`, { defaultValue: status });
 
   const headerClass =
-    "px-1 font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]";
+    "px-1 font-mono text-[0.6875rem] font-medium uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]";
 
   return (
     <div className="overflow-hidden rounded-[var(--radius-shell)] border border-[color:var(--border-subtle)] bg-[var(--panel)]">
@@ -195,13 +195,13 @@ export function ExecutionTable({
                     <StatusOverlay tone={tone} />
 
                   {/* # index */}
-                  <span className="relative font-mono text-[0.875rem] tabular-nums text-[var(--text-quaternary)]">
+                  <span className="relative font-mono text-[0.875rem] tabular-nums text-[color:var(--text-quaternary)]">
                     {String(index + 1).padStart(2, "0")}
                   </span>
 
                   {/* Action / query */}
                   <p
-                    className="relative m-0 line-clamp-1 text-[0.8125rem] text-[var(--text-primary)]"
+                    className="relative m-0 line-clamp-1 text-[0.8125rem] text-[color:var(--text-primary)]"
                     title={
                       execution.query_text ?? t("executions.table.noQuery")
                     }
@@ -217,24 +217,24 @@ export function ExecutionTable({
                       total={maxTools}
                       tone={tone}
                     />
-                    <span className="font-mono text-[0.6875rem] tabular-nums text-[var(--text-secondary)]">
+                    <span className="font-mono text-[0.6875rem] tabular-nums text-[color:var(--text-secondary)]">
                       {execution.tool_count ?? 0}
                     </span>
                   </span>
 
                   {/* Cost */}
-                  <span className="relative text-right font-mono text-[0.75rem] tabular-nums text-[var(--text-secondary)]">
+                  <span className="relative text-right font-mono text-[0.75rem] tabular-nums text-[color:var(--text-secondary)]">
                     {formatCost(execution.cost_usd)}
                   </span>
 
                   {/* Duration */}
-                  <span className="relative text-right font-mono text-[0.75rem] tabular-nums text-[var(--text-secondary)]">
+                  <span className="relative text-right font-mono text-[0.75rem] tabular-nums text-[color:var(--text-secondary)]">
                     {formatDuration(execution.duration_ms)}
                   </span>
 
                   {/* Created */}
                   <span
-                    className="relative text-right font-mono text-[0.75rem] tabular-nums text-[var(--text-secondary)]"
+                    className="relative text-right font-mono text-[0.75rem] tabular-nums text-[color:var(--text-secondary)]"
                     title={formatDateTime(execution.created_at)}
                   >
                     {formatRelativeTime(execution.created_at)}
@@ -254,11 +254,11 @@ export function ExecutionTable({
             {executions.length === 0 && !loading && (
               <div className="flex flex-col items-center gap-2 py-16 text-center">
                 <Workflow
-                  className="icon-lg text-[var(--text-quaternary)]"
+                  className="icon-lg text-[color:var(--text-quaternary)]"
                   strokeWidth={1.5}
                   aria-hidden
                 />
-                <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">
+                <p className="m-0 text-[length:var(--font-size-sm)] text-[color:var(--text-tertiary)]">
                   {t("executions.table.noResults")}
                 </p>
               </div>
@@ -294,11 +294,11 @@ export function ExecutionTable({
                 <StatusOverlay tone={tone} />
 
                 <div className="relative flex items-center gap-3">
-                  <span className="font-mono text-[0.75rem] tabular-nums text-[var(--text-quaternary)]">
+                  <span className="font-mono text-[0.75rem] tabular-nums text-[color:var(--text-quaternary)]">
                     {String(index + 1).padStart(2, "0")}
                   </span>
                   <div className="flex min-w-0 flex-1 flex-col leading-tight">
-                    <span className="truncate text-[0.8125rem] font-medium text-[var(--text-primary)]">
+                    <span className="truncate text-[0.8125rem] font-medium text-[color:var(--text-primary)]">
                       #{execution.task_id}
                     </span>
                   </div>
@@ -308,35 +308,35 @@ export function ExecutionTable({
                   />
                 </div>
 
-                <p className="relative m-0 line-clamp-2 text-[length:var(--font-size-sm)] leading-[1.5] text-[var(--text-primary)]">
+                <p className="relative m-0 line-clamp-2 text-[length:var(--font-size-sm)] leading-[1.5] text-[color:var(--text-primary)]">
                   {execution.query_text ||
                     t("executions.table.noQueryRegistered")}
                 </p>
 
-                <div className="relative flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                <div className="relative flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
                   <span className="inline-flex items-center gap-1.5">
                     <ActivityBars
                       count={execution.tool_count ?? 0}
                       total={maxTools}
                       tone={tone}
                     />
-                    <span className="text-[var(--text-secondary)]">
+                    <span className="text-[color:var(--text-secondary)]">
                       {execution.tool_count ?? 0}
                     </span>
                   </span>
                   <span>
                     {t("common.cost")}:{" "}
-                    <span className="text-[var(--text-secondary)]">
+                    <span className="text-[color:var(--text-secondary)]">
                       {formatCost(execution.cost_usd)}
                     </span>
                   </span>
                   <span>
                     {t("common.duration")}:{" "}
-                    <span className="text-[var(--text-secondary)]">
+                    <span className="text-[color:var(--text-secondary)]">
                       {formatDuration(execution.duration_ms)}
                     </span>
                   </span>
-                  <span className="ml-auto text-[var(--text-quaternary)]">
+                  <span className="ml-auto text-[color:var(--text-quaternary)]">
                     {formatRelativeTime(execution.created_at)}
                   </span>
                 </div>
@@ -347,11 +347,11 @@ export function ExecutionTable({
         {executions.length === 0 && !loading && (
           <div className="flex flex-col items-center gap-2 py-12 text-center">
             <Workflow
-              className="icon-lg text-[var(--text-quaternary)]"
+              className="icon-lg text-[color:var(--text-quaternary)]"
               strokeWidth={1.5}
               aria-hidden
             />
-            <p className="m-0 text-[length:var(--font-size-sm)] text-[var(--text-tertiary)]">
+            <p className="m-0 text-[length:var(--font-size-sm)] text-[color:var(--text-tertiary)]">
               {t("executions.table.noResults")}
             </p>
           </div>

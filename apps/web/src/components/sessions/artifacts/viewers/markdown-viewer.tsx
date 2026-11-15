@@ -20,7 +20,7 @@ export function MarkdownViewer({ content, filename }: MarkdownViewerProps) {
     <div className="flex flex-col">
       <div className="flex items-center justify-between border-b border-[color:var(--divider-hair)] px-4 py-2">
         {filename ? (
-          <span className="truncate text-[0.8125rem] text-[var(--text-secondary)]">
+          <span className="truncate text-[0.8125rem] text-[color:var(--text-secondary)]">
             {filename}
           </span>
         ) : (
@@ -49,7 +49,7 @@ export function MarkdownViewer({ content, filename }: MarkdownViewerProps) {
       {showRaw ? (
         <TextViewer text={content} filename={null} showLineCount={false} />
       ) : (
-        <div className="max-h-[60vh] overflow-auto px-4 py-3 text-[length:var(--font-size-md)] leading-[1.6] text-[var(--text-primary)]">
+        <div className="max-h-[60vh] overflow-auto px-4 py-3 text-[length:var(--font-size-md)] leading-[1.6] text-[color:var(--text-primary)]">
           <SessionRichText content={content} variant="assistant" />
         </div>
       )}

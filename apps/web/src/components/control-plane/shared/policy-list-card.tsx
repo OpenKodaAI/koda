@@ -58,14 +58,14 @@ export function PolicyListCard({
     >
       <header className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 flex-col gap-1">
-          <h4 className="m-0 text-[0.8125rem] font-medium text-[var(--text-primary)]">{title}</h4>
+          <h4 className="m-0 text-[0.8125rem] font-medium text-[color:var(--text-primary)]">{title}</h4>
           {description ? (
-            <p className="m-0 text-[0.75rem] leading-[1.5] text-[var(--text-tertiary)]">
+            <p className="m-0 text-[0.75rem] leading-[1.5] text-[color:var(--text-tertiary)]">
               {description}
             </p>
           ) : null}
         </div>
-        <span className="shrink-0 font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+        <span className="shrink-0 font-mono text-[0.6875rem] text-[color:var(--text-quaternary)]">
           {items.length}
         </span>
       </header>
@@ -75,7 +75,7 @@ export function PolicyListCard({
           {items.map((item, index) => (
             <li
               key={`${item}-${index}`}
-              className="flex items-center gap-2 rounded-[var(--radius-panel-sm)] bg-[var(--panel)] px-2.5 py-1.5 text-[0.8125rem] text-[var(--text-primary)]"
+              className="flex items-center gap-2 rounded-[var(--radius-panel-sm)] bg-[var(--panel)] px-2.5 py-1.5 text-[0.8125rem] text-[color:var(--text-primary)]"
             >
               <span className="min-w-0 flex-1 truncate">{item}</span>
               {!readOnly ? (
@@ -83,7 +83,7 @@ export function PolicyListCard({
                   type="button"
                   aria-label={t("controlPlane.policy.remove", undefined)}
                   onClick={() => remove(index)}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+                  className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-quaternary)] transition-colors hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
                 >
                   <X className="icon-xs" strokeWidth={1.75} aria-hidden />
                 </button>
@@ -92,7 +92,7 @@ export function PolicyListCard({
           ))}
         </ul>
       ) : (
-        <p className="mt-3 text-[0.75rem] text-[var(--text-quaternary)]">
+        <p className="mt-3 text-[0.75rem] text-[color:var(--text-quaternary)]">
           {emptyLabel ?? t("controlPlane.policy.empty", undefined)}
         </p>
       )}
@@ -117,8 +117,8 @@ export function PolicyListCard({
             className={cn(
               "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-[var(--radius-panel-sm)] border transition-colors",
               draft.trim()
-                ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"
-                : "border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--text-quaternary)]",
+                ? "border-[var(--accent)] bg-[var(--accent)] text-[color:var(--accent-text)] hover:bg-[var(--accent-hover)]"
+                : "border-[var(--border-subtle)] bg-[var(--panel)] text-[color:var(--text-quaternary)]",
             )}
           >
             <Plus className="icon-sm" strokeWidth={1.75} aria-hidden />

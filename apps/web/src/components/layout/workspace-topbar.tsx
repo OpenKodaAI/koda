@@ -35,7 +35,7 @@ export function WorkspaceTopbar({
           <button
             type="button"
             onClick={onOpenMobileNav}
-            className="button-shell button-shell--secondary button-shell--icon h-10 w-10 text-[var(--text-secondary)] lg:!hidden"
+            className="button-shell button-shell--secondary button-shell--icon h-10 w-10 text-[color:var(--text-secondary)] lg:!hidden"
             aria-label={t("topbar.openMenu")}
             {...tourAnchor("shell.topbar.menu-toggle")}
           >
@@ -87,11 +87,11 @@ export function WorkspaceTopbar({
 
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
-              <h1 className="truncate text-[1rem] font-semibold tracking-[-0.05em] text-[var(--text-primary)] sm:text-[1.08rem]">
+              <h1 className="truncate text-[1rem] font-semibold tracking-[-0.05em] text-[color:var(--text-primary)] sm:text-[1.08rem]">
                 {routeMeta.title}
               </h1>
               <span className="hidden h-1 w-1 rounded-full bg-[var(--text-quaternary)] lg:block" />
-              <p className="hidden truncate text-[12.5px] text-[var(--text-tertiary)] lg:block">
+              <p className="hidden truncate text-[12.5px] text-[color:var(--text-tertiary)] lg:block">
                 {routeMeta.summary}
               </p>
             </div>

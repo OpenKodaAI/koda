@@ -320,11 +320,11 @@ export default function CostsPage() {
             <p className="eyebrow truncate">
               {t("costs.page.distributionEyebrow", undefined)}
             </p>
-            <h3 className="mt-1 truncate text-[length:var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[var(--text-primary)]">
+            <h3 className="mt-1 truncate text-[length:var(--font-size-sm)] font-medium tracking-[var(--tracking-tight)] text-[color:var(--text-primary)]">
               {t("costs.page.distributionTitle", undefined)}
             </h3>
           </div>
-          <span className="shrink-0 font-mono text-[0.6875rem] text-[var(--text-tertiary)]">
+          <span className="shrink-0 font-mono text-[0.6875rem] text-[color:var(--text-tertiary)]">
             {formatCost(overview.total_cost_usd)}
           </span>
         </div>
@@ -349,7 +349,7 @@ export default function CostsPage() {
         <motion.div
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          className="truncate rounded-[var(--radius-panel-sm)] border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-3 py-2 text-sm text-[var(--tone-danger-text)]"
+          className="truncate rounded-[var(--radius-panel-sm)] border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-3 py-2 text-sm text-[color:var(--tone-danger-text)]"
         >
           {error}
         </motion.div>

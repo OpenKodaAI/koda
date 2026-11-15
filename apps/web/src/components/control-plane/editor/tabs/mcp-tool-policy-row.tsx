@@ -63,28 +63,28 @@ export function McpToolPolicyRow({
     <div className="flex flex-col gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-sm font-semibold text-[var(--text-primary)]">
+          <span className="text-sm font-semibold text-[color:var(--text-primary)]">
             {annotations?.title || tool.name}
           </span>
           {readOnly && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--tone-info-text)]">
+            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-info-border)] bg-[var(--tone-info-bg)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--tone-info-text)]">
               {t("generated.controlPlane.somente_leitura_0f78d76a")}
             </span>
           )}
           {destructive && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--tone-danger-text)]">
+            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--tone-danger-text)]">
               {t("generated.controlPlane.destrutivo_9a492f91")}
             </span>
           )}
           {idempotent && (
-            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium text-[var(--tone-success-text)]">
+            <span className="inline-flex items-center gap-1 rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] px-2 py-0.5 text-[10px] font-medium text-[color:var(--tone-success-text)]">
               {t("generated.controlPlane.idempotente_940705ab")}
             </span>
           )}
           <McpRiskBadgeGroup risk={risk} capabilityName={tool.name} />
         </div>
         {tool.description && (
-          <p className="mt-1 text-xs leading-relaxed text-[var(--text-tertiary)]">
+          <p className="mt-1 text-xs leading-relaxed text-[color:var(--text-tertiary)]">
             {tool.description}
           </p>
         )}

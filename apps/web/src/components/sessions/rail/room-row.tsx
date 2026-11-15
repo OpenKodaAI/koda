@@ -55,13 +55,13 @@ function RoomRowImpl({ entry, active, onSelect, onRequestDelete }: RoomRowProps)
         className={cn(
           "flex min-w-0 flex-1 items-center gap-2 rounded-[var(--radius-panel-sm)] px-2 py-1.5 text-left",
           active
-            ? "text-[var(--text-primary)]"
-            : "text-[var(--text-secondary)] group-hover:text-[var(--text-primary)]",
+            ? "text-[color:var(--text-primary)]"
+            : "text-[color:var(--text-secondary)] group-hover:text-[color:var(--text-primary)]",
         )}
       >
         <span
           aria-hidden
-          className="relative inline-flex h-7 w-8 shrink-0 items-center justify-center text-[var(--text-tertiary)]"
+          className="relative inline-flex h-7 w-8 shrink-0 items-center justify-center text-[color:var(--text-tertiary)]"
         >
           {roomPhotoUrl ? (
             <Image
@@ -80,19 +80,19 @@ function RoomRowImpl({ entry, active, onSelect, onRequestDelete }: RoomRowProps)
           <span
             className={cn(
               "absolute -right-0.5 top-0 inline-flex h-3.5 min-w-3.5 items-center justify-center rounded-full",
-              "bg-[var(--panel-strong)] px-1 font-mono text-[0.5625rem] leading-none text-[var(--text-secondary)]",
+              "bg-[var(--panel-strong)] px-1 font-mono text-[0.5625rem] leading-none text-[color:var(--text-secondary)]",
               "ring-1 ring-[var(--shell)]",
             )}
           >
             {entry.squad.memberCount}
           </span>
         </span>
-        <span className="min-w-0 flex-1 truncate text-[length:var(--font-size-sm)] font-medium leading-[1.3] text-[var(--text-primary)]">
+        <span className="min-w-0 flex-1 truncate text-[length:var(--font-size-sm)] font-medium leading-[1.3] text-[color:var(--text-primary)]">
           {title}
         </span>
         <span
           className={cn(
-            "shrink-0 font-mono text-xs text-[var(--text-quaternary)] transition-opacity duration-[120ms]",
+            "shrink-0 font-mono text-xs text-[color:var(--text-quaternary)] transition-opacity duration-[120ms]",
             onRequestDelete && "group-hover:opacity-0",
           )}
         >
@@ -107,8 +107,8 @@ function RoomRowImpl({ entry, active, onSelect, onRequestDelete }: RoomRowProps)
           aria-label={t("chat.rail.deleteRoom", undefined)}
           className={cn(
             "absolute right-1.5 top-1/2 inline-flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-[var(--radius-panel-sm)]",
-            "text-[var(--text-quaternary)] opacity-0 transition-[opacity,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-            "hover:text-[var(--tone-danger-dot)]",
+            "text-[color:var(--text-quaternary)] opacity-0 transition-[opacity,color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+            "hover:text-[color:var(--tone-danger-dot)]",
             "focus-visible:opacity-100",
             "group-hover:opacity-100",
           )}

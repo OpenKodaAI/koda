@@ -31,7 +31,7 @@ export function PolicyCard({
     const headerContent = (
       <>
         {Icon && (
-          <span className="inline-flex shrink-0 items-center justify-center text-[var(--text-quaternary)]">
+          <span className="inline-flex shrink-0 items-center justify-center text-[color:var(--text-quaternary)]">
             <Icon size={14} strokeWidth={1.75} />
           </span>
         )}
@@ -40,7 +40,7 @@ export function PolicyCard({
             {tl(title)}
           </span>
           {description ? (
-            <span className="text-xs text-[var(--text-tertiary)] leading-relaxed">
+            <span className="text-xs text-[color:var(--text-tertiary)] leading-relaxed">
               {tl(description)}
             </span>
           ) : null}
@@ -78,7 +78,7 @@ export function PolicyCard({
           <motion.span
             animate={{ rotate: isOpen ? 90 : 0 }}
             transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-            className="text-[var(--text-quaternary)] shrink-0"
+            className="text-[color:var(--text-quaternary)] shrink-0"
           >
             <ChevronRight size={13} />
           </motion.span>
@@ -120,7 +120,7 @@ export function PolicyCard({
         aria-expanded={isOpen}
       >
         {Icon && (
-          <span className="inline-flex shrink-0 items-center justify-center text-[var(--text-secondary)]">
+          <span className="inline-flex shrink-0 items-center justify-center text-[color:var(--text-secondary)]">
             <Icon size={16} />
           </span>
         )}
@@ -128,15 +128,15 @@ export function PolicyCard({
         <div className="flex flex-col flex-1 min-w-0">
           {description ? (
             <>
-              <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
+              <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[color:var(--text-quaternary)]">
                 {tl(title)}
               </span>
-              <span className="text-base font-semibold leading-6 text-[var(--text-primary)]">
+              <span className="text-base font-semibold leading-6 text-[color:var(--text-primary)]">
                 {tl(description)}
               </span>
             </>
           ) : (
-            <span className="text-sm font-semibold leading-6 text-[var(--text-primary)]">
+            <span className="text-sm font-semibold leading-6 text-[color:var(--text-primary)]">
               {tl(title)}
             </span>
           )}
@@ -145,7 +145,7 @@ export function PolicyCard({
         <motion.span
           animate={{ rotate: isOpen ? 90 : 0 }}
           transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-          className="text-[var(--text-quaternary)] shrink-0"
+          className="text-[color:var(--text-quaternary)] shrink-0"
         >
           <ChevronRight size={14} />
         </motion.span>

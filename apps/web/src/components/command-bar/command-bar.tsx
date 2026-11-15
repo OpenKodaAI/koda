@@ -185,7 +185,7 @@ export function CommandBar({
           }
         }}
       >
-        <Search className="h-4 w-4 shrink-0 text-[var(--text-quaternary)]" aria-hidden="true" />
+        <Search className="h-4 w-4 shrink-0 text-[color:var(--text-quaternary)]" aria-hidden="true" />
         <input
           ref={inputRef}
           type="text"
@@ -205,12 +205,12 @@ export function CommandBar({
           onFocus={() => setIsFocused(true)}
           onBlur={() => setIsFocused(false)}
           placeholder={placeholder}
-          className="block h-7 w-full min-w-0 bg-transparent text-[length:var(--font-size-md)] leading-[1.4] text-[var(--text-primary)] outline-none placeholder:text-[var(--text-quaternary)]"
+          className="block h-7 w-full min-w-0 bg-transparent text-[length:var(--font-size-md)] leading-[1.4] text-[color:var(--text-primary)] outline-none placeholder:text-[color:var(--text-quaternary)]"
           aria-label={placeholder}
         />
         {shortcutHint && isInline ? (
           <span
-            className="eyebrow hidden shrink-0 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-tertiary)] sm:inline-flex"
+            className="eyebrow hidden shrink-0 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] px-1.5 py-0.5 font-mono text-[10px] text-[color:var(--text-tertiary)] sm:inline-flex"
             aria-hidden="true"
           >
             {shortcutHint}
@@ -245,7 +245,7 @@ export function CommandBar({
               }
             >
               {flat.length === 0 ? (
-                <div role="status" className="px-4 py-6 text-center text-[12px] text-[var(--text-tertiary)]">
+                <div role="status" className="px-4 py-6 text-center text-[12px] text-[color:var(--text-tertiary)]">
                   {emptyState}
                 </div>
               ) : (
@@ -263,7 +263,7 @@ export function CommandBar({
                       <div key={group.category} role="group" aria-labelledby={headingId} className="flex flex-col">
                         <div
                           id={headingId}
-                          className="px-4 pt-3 pb-1 font-mono text-xs font-medium uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]"
+                          className="px-4 pt-3 pb-1 font-mono text-xs font-medium uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]"
                         >
                           {group.heading}
                         </div>
@@ -286,11 +286,11 @@ export function CommandBar({
                               className={cn(
                                 "flex w-full items-center gap-3 px-4 py-2 text-left text-[length:var(--font-size-sm)] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                                 active
-                                  ? "bg-[var(--hover-tint)] text-[var(--text-primary)]"
-                                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                                  ? "bg-[var(--hover-tint)] text-[color:var(--text-primary)]"
+                                  : "text-[color:var(--text-secondary)] hover:text-[color:var(--text-primary)]",
                               )}
                             >
-                              <Icon className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                              <Icon className="h-4 w-4 shrink-0 text-[color:var(--text-tertiary)]" />
                               <span className="min-w-0 flex-1 truncate">{command.label}</span>
                               {command.description ? (
                                 <span
@@ -298,7 +298,7 @@ export function CommandBar({
                                     "min-w-0 max-w-[40%] truncate text-xs",
                                     // D-267: --hover-tint on the light modal glass takes
                                     // --text-quaternary under 4.5:1, so the active row steps up.
-                                    active ? "text-[var(--text-tertiary)]" : "text-[var(--text-quaternary)]",
+                                    active ? "text-[color:var(--text-tertiary)]" : "text-[color:var(--text-quaternary)]",
                                   )}
                                 >
                                   {command.description}

@@ -345,15 +345,15 @@ export function AnimatedColorPicker({
           </motion.span>
 
           <div className="min-w-0 flex-1">
-            <p className="font-mono text-sm tracking-[0.08em] text-[var(--text-primary)]">
+            <p className="font-mono text-sm tracking-[0.08em] text-[color:var(--text-primary)]">
               {visibleHex}
             </p>
-            <p className="text-[11px] text-[var(--text-quaternary)]">
+            <p className="text-[11px] text-[color:var(--text-quaternary)]">
               {rgbString}
             </p>
           </div>
 
-          <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+          <span className="inline-flex items-center gap-2 text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
             <Palette className="h-3.5 w-3.5" />
             <ChevronDown
               className={cn(
@@ -419,12 +419,12 @@ export function AnimatedColorPicker({
                             className={cn(
                               "field-shell w-full px-3 py-2 text-sm font-mono tabular-nums tracking-[0.08em]",
                               !hasValidInput &&
-                                "border-[rgba(240,82,82,0.32)] text-[var(--tone-danger-text)]",
+                                "border-[rgba(240,82,82,0.32)] text-[color:var(--tone-danger-text)]",
                             )}
                             disabled={disabled}
                             spellCheck={false}
                           />
-                          <div className="flex items-center justify-between text-[11px] text-[var(--text-quaternary)]">
+                          <div className="flex items-center justify-between text-[11px] text-[color:var(--text-quaternary)]">
                             <span>{rgbString}</span>
                             <span>{hue}°</span>
                           </div>
@@ -434,10 +434,10 @@ export function AnimatedColorPicker({
                       <div className="space-y-2.5">
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+                            <span className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                               {t("generated.controlPlane.tom_11494f87")}
                             </span>
-                            <span className="text-[11px] text-[var(--text-quaternary)]">
+                            <span className="text-[11px] text-[color:var(--text-quaternary)]">
                               {hue}°
                             </span>
                           </div>
@@ -467,10 +467,10 @@ export function AnimatedColorPicker({
 
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+                            <span className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                               {t("generated.controlPlane.saturacao_82813d11")}
                             </span>
-                            <span className="text-[11px] text-[var(--text-quaternary)]">
+                            <span className="text-[11px] text-[color:var(--text-quaternary)]">
                               {saturation}%
                             </span>
                           </div>
@@ -498,10 +498,10 @@ export function AnimatedColorPicker({
 
                         <div className="space-y-1.5">
                           <div className="flex items-center justify-between">
-                            <span className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+                            <span className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                               {t("generated.controlPlane.luminosidade_108bafca")}
                             </span>
-                            <span className="text-[11px] text-[var(--text-quaternary)]">
+                            <span className="text-[11px] text-[color:var(--text-quaternary)]">
                               {lightness}%
                             </span>
                           </div>
@@ -529,7 +529,7 @@ export function AnimatedColorPicker({
                       </div>
 
                       <div className="space-y-1.5">
-                        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--text-quaternary)]">
+                        <p className="text-[11px] uppercase tracking-[0.14em] text-[color:var(--text-quaternary)]">
                           {t("generated.controlPlane.paleta_rapida_210b94fd")}
                         </p>
                         <div className="grid grid-cols-8 gap-2">
@@ -562,7 +562,7 @@ export function AnimatedColorPicker({
                       </div>
 
                       {!hasValidInput ? (
-                        <p className="text-xs text-[var(--tone-danger-text)]">
+                        <p className="text-xs text-[color:var(--tone-danger-text)]">
                           {t("generated.controlPlane.use_o_formato_hexadecimal_rrggbb_a3f2266c")}
                         </p>
                       ) : null}

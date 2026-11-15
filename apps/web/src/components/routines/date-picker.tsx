@@ -75,7 +75,7 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
           type="button"
           disabled={disabled}
           className={cn(
-            "flex h-9 w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[var(--text-primary)] outline-none",
+            "flex h-9 w-full items-center justify-between gap-2 rounded-[var(--radius-input)] border bg-[var(--panel-soft)] px-3 text-[0.8125rem] text-[color:var(--text-primary)] outline-none",
             "transition-[border-color,background-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
             "border-[var(--border-subtle)] hover:border-[var(--border-strong)]",
             "focus-visible:border-[var(--accent)] data-[state=open]:border-[var(--accent)]",
@@ -84,7 +84,7 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
           )}
         >
           <span className="flex min-w-0 items-center gap-2">
-            <CalendarDays className="icon-sm shrink-0 text-[var(--text-tertiary)]" strokeWidth={1.75} />
+            <CalendarDays className="icon-sm shrink-0 text-[color:var(--text-tertiary)]" strokeWidth={1.75} />
             <span className="truncate">{triggerLabel}</span>
           </span>
         </button>
@@ -96,18 +96,18 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
           <button
             type="button"
             onClick={() => setMonth((current) => subMonths(current, 1))}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
             aria-label={t("generated.routines.previous_month_3c384833")}
           >
             <ChevronLeft className="icon-sm" strokeWidth={1.75} />
           </button>
-          <span className="text-[0.8125rem] font-medium capitalize text-[var(--text-primary)]">
+          <span className="text-[0.8125rem] font-medium capitalize text-[color:var(--text-primary)]">
             {monthLabel}
           </span>
           <button
             type="button"
             onClick={() => setMonth((current) => addMonths(current, 1))}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-primary)]"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-panel-sm)] text-[color:var(--text-tertiary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-primary)]"
             aria-label={t("generated.routines.next_month_cfc56572")}
           >
             <ChevronRight className="icon-sm" strokeWidth={1.75} />
@@ -117,7 +117,7 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
           {dayLabels.map((label, index) => (
             <span
               key={`${label}-${index}`}
-              className="flex h-6 items-center justify-center font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[var(--text-quaternary)]"
+              className="flex h-6 items-center justify-center font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)] text-[color:var(--text-quaternary)]"
             >
               {label}
             </span>
@@ -135,10 +135,10 @@ export function DatePicker({ value, onChange, disabled = false, className }: Dat
                   "flex h-8 w-8 items-center justify-center rounded-[var(--radius-panel-sm)] text-[0.8125rem]",
                   "transition-[background-color,color,border-color] duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                   isSelected
-                    ? "bg-[var(--accent)] text-[var(--accent-text)]"
+                    ? "bg-[var(--accent)] text-[color:var(--accent-text)]"
                     : sameMonth
-                      ? "text-[var(--text-primary)] hover:bg-[var(--hover-tint)]"
-                      : "text-[var(--text-quaternary)] hover:bg-[var(--hover-tint)] hover:text-[var(--text-tertiary)]",
+                      ? "text-[color:var(--text-primary)] hover:bg-[var(--hover-tint)]"
+                      : "text-[color:var(--text-quaternary)] hover:bg-[var(--hover-tint)] hover:text-[color:var(--text-tertiary)]",
                   !isSelected && isToday && "ring-1 ring-[var(--border-strong)]",
                 )}
               >

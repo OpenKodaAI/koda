@@ -65,8 +65,8 @@ function StatusPill({ label, tone }: { label: string; tone: "accent" | "neutral"
       className={cn(
         "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium",
         tone === "accent"
-          ? "bg-[rgba(113,219,190,0.12)] text-[var(--text-primary)]"
-          : "bg-[rgba(255,255,255,0.04)] text-[var(--text-secondary)]",
+          ? "bg-[rgba(113,219,190,0.12)] text-[color:var(--text-primary)]"
+          : "bg-[rgba(255,255,255,0.04)] text-[color:var(--text-secondary)]",
       )}
     >
       {label}
@@ -95,10 +95,10 @@ export function CompactGrantToggle({
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold text-[var(--text-primary)]">{title}</h3>
-          <p className="mt-1 text-xs leading-relaxed text-[var(--text-quaternary)]">{description}</p>
+          <h3 className="text-sm font-semibold text-[color:var(--text-primary)]">{title}</h3>
+          <p className="mt-1 text-xs leading-relaxed text-[color:var(--text-quaternary)]">{description}</p>
         </div>
-        <span className="inline-flex items-center rounded-full bg-[rgba(255,255,255,0.04)] px-2.5 py-1 text-[11px] font-medium text-[var(--text-secondary)]">
+        <span className="inline-flex items-center rounded-full bg-[rgba(255,255,255,0.04)] px-2.5 py-1 text-[11px] font-medium text-[color:var(--text-secondary)]">
           {countLabel}
         </span>
       </div>
@@ -106,7 +106,7 @@ export function CompactGrantToggle({
       {/* Items */}
       <div className="mt-3">
         {options.length === 0 ? (
-          <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-3 text-xs text-[var(--text-quaternary)]">
+          <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-3 py-3 text-xs text-[color:var(--text-quaternary)]">
             {t("generated.controlPlane.nenhum_item_disponivel_8050255d")}
           </div>
         ) : (
@@ -131,7 +131,7 @@ export function CompactGrantToggle({
                   style={{ minHeight: 36 }}
                 >
                   {/* Name */}
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-[var(--text-primary)]">
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs text-[color:var(--text-primary)]">
                     {option.label}
                   </span>
 

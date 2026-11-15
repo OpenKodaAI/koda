@@ -454,11 +454,11 @@ export function TabRecursos() {
                 >
                   <ProviderLogo providerId={provider.value} active={isAllowed} size="sm" />
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-xs font-medium text-[var(--text-primary)]">{provider.label}</div>
-                    <div className="truncate text-[10px] text-[var(--text-quaternary)]">{providerDescription(provider.value, provider.label)}</div>
+                    <div className="truncate text-xs font-medium text-[color:var(--text-primary)]">{provider.label}</div>
+                    <div className="truncate text-[10px] text-[color:var(--text-quaternary)]">{providerDescription(provider.value, provider.label)}</div>
                   </div>
                   {isAllowed && (
-                    <Check size={12} className="shrink-0 text-[var(--text-tertiary)]" />
+                    <Check size={12} className="shrink-0 text-[color:var(--text-tertiary)]" />
                   )}
                 </button>
               );
@@ -481,8 +481,8 @@ export function TabRecursos() {
                     className={cn(
                       "inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all",
                       isDefault
-                        ? "border-[rgba(255,255,255,0.16)] bg-[rgba(255,255,255,0.06)] text-[var(--text-primary)]"
-                        : "border-[rgba(255,255,255,0.06)] text-[var(--text-tertiary)] hover:border-[rgba(255,255,255,0.12)]",
+                        ? "border-[rgba(255,255,255,0.16)] bg-[rgba(255,255,255,0.06)] text-[color:var(--text-primary)]"
+                        : "border-[rgba(255,255,255,0.06)] text-[color:var(--text-tertiary)] hover:border-[rgba(255,255,255,0.12)]",
                     )}
                   >
                     <ProviderLogo providerId={providerId} active={isDefault} size="sm" />

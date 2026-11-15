@@ -27,8 +27,8 @@ export function InheritedContext({ source, children }: InheritedContextProps) {
       : t("generated.controlPlane.herdado_do_squad_8330a5bf");
 
   return (
-    <div className={`text-xs text-[var(--text-quaternary)] border-l-2 ${borderColor} pl-2 mb-2`}>
-      <span className="font-medium text-[var(--text-tertiary)]">[{label}]</span>{" "}
+    <div className={`text-xs text-[color:var(--text-quaternary)] border-l-2 ${borderColor} pl-2 mb-2`}>
+      <span className="font-medium text-[color:var(--text-tertiary)]">[{label}]</span>{" "}
       {children}
     </div>
   );
@@ -94,11 +94,11 @@ export function InheritedPromptPreview({
   return (
     <section className={`overflow-hidden rounded-2xl border ${accentClass}`}>
       <div className="border-b border-[rgba(255,255,255,0.08)] px-4 py-3">
-        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
+        <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-[color:var(--text-quaternary)]">
           {label}
         </div>
       </div>
-      <div className="session-richtext max-h-56 overflow-auto px-4 py-4 text-sm leading-7 text-[var(--text-secondary)]">
+      <div className="session-richtext max-h-56 overflow-auto px-4 py-4 text-sm leading-7 text-[color:var(--text-secondary)]">
         <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{value}</ReactMarkdown>
       </div>
     </section>

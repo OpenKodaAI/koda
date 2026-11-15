@@ -92,17 +92,17 @@ function CapabilityRow({
     >
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)]">
         {Icon ? (
-          <Icon size={16} className="text-[var(--icon-primary)]" />
+          <Icon size={16} className="text-[color:var(--icon-primary)]" />
         ) : (
           <div className="h-4 w-4 rounded bg-[var(--field-bg)]" />
         )}
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium text-[var(--text-primary)]">{tl(label)}</div>
-        <div className="mt-0.5 text-xs text-[var(--text-quaternary)]">{tl(description)}</div>
+        <div className="text-sm font-medium text-[color:var(--text-primary)]">{tl(label)}</div>
+        <div className="mt-0.5 text-xs text-[color:var(--text-quaternary)]">{tl(description)}</div>
       </div>
       <span
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[color:var(--tone-success-text)]"
         aria-label={`${tl(label)} — ${t("generated.controlPlane.incluido_da69d9db")}`}
       >
         <Check size={12} />
@@ -127,8 +127,8 @@ function InfoTable({
             index % 2 === 0 ? "bg-[var(--surface-elevated-soft)]" : "bg-transparent",
           )}
         >
-          <span className="text-[var(--text-tertiary)]">{row.label}</span>
-          <span className="text-right font-medium text-[var(--text-primary)]">{row.value}</span>
+          <span className="text-[color:var(--text-tertiary)]">{row.label}</span>
+          <span className="text-right font-medium text-[color:var(--text-primary)]">{row.value}</span>
         </div>
       ))}
     </div>
@@ -146,9 +146,9 @@ function StatusBadge({
     <span
       className={cn(
         "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium",
-        tone === "verified" && "border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[var(--tone-success-text)]",
-        tone === "warning" && "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[var(--tone-warning-text)]",
-        tone === "neutral" && "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-secondary)]",
+        tone === "verified" && "border-[var(--tone-success-border)] bg-[var(--tone-success-bg)] text-[color:var(--tone-success-text)]",
+        tone === "warning" && "border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] text-[color:var(--tone-warning-text)]",
+        tone === "neutral" && "border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[color:var(--text-secondary)]",
       )}
     >
       {tone === "verified" ? <Check size={11} /> : <AlertTriangle size={11} />}
@@ -331,7 +331,7 @@ export function IntegrationDetailView({
           href={entry.metadata.documentationUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 text-sm text-[var(--tone-info-dot)] transition-colors hover:text-[var(--tone-info-text)]"
+          className="inline-flex items-center gap-1.5 text-sm text-[color:var(--tone-info-dot)] transition-colors hover:text-[color:var(--tone-info-text)]"
         >
           {t("generated.controlPlane.abrir_documentacao_f6e366c9")}
           <ExternalLink size={12} />
@@ -345,13 +345,13 @@ export function IntegrationDetailView({
       <button
         type="button"
         onClick={onBack}
-        className="inline-flex items-center gap-2 text-sm text-[var(--text-tertiary)] transition-colors hover:text-[var(--text-primary)]"
+        className="inline-flex items-center gap-2 text-sm text-[color:var(--text-tertiary)] transition-colors hover:text-[color:var(--text-primary)]"
       >
         <ArrowLeft size={14} />
         <span>
           {t("generated.controlPlane.integracoes_012889d2")}
-          <span className="mx-1.5 text-[var(--text-quaternary)]">/</span>
-          <span className="text-[var(--text-primary)]">{entry.label}</span>
+          <span className="mx-1.5 text-[color:var(--text-quaternary)]">/</span>
+          <span className="text-[color:var(--text-primary)]">{entry.label}</span>
         </span>
       </button>
 
@@ -366,10 +366,10 @@ export function IntegrationDetailView({
             {logo}
           </div>
           <div>
-            <h2 className="text-lg font-bold tracking-[-0.03em] text-[var(--text-primary)]">
+            <h2 className="text-lg font-bold tracking-[-0.03em] text-[color:var(--text-primary)]">
               {entry.label}
             </h2>
-            <p className="mt-0.5 text-sm text-[var(--text-tertiary)]">{tl(entry.tagline)}</p>
+            <p className="mt-0.5 text-sm text-[color:var(--text-tertiary)]">{tl(entry.tagline)}</p>
           </div>
         </div>
 
@@ -397,12 +397,12 @@ export function IntegrationDetailView({
         <div className="relative z-10 px-6 py-5">
           <div className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-2">
             {bannerLogo}
-            <span className="text-sm text-[var(--text-primary)]">{tl(entry.promptExample)}</span>
+            <span className="text-sm text-[color:var(--text-primary)]">{tl(entry.promptExample)}</span>
           </div>
         </div>
       </div>
 
-      <p className="text-sm leading-relaxed text-[var(--text-secondary)]">{tl(entry.description)}</p>
+      <p className="text-sm leading-relaxed text-[color:var(--text-secondary)]">{tl(entry.description)}</p>
 
       <section
         className="rounded-[26px] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-5 py-4"
@@ -415,10 +415,10 @@ export function IntegrationDetailView({
         <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 flex-1 space-y-4">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--text-tertiary)]">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[color:var(--text-tertiary)]">
                 {isCoreEntry ? t("generated.controlPlane.conexao_5d0e2f3c") : t("generated.controlPlane.catalogo_200920c4")}
               </div>
-              <p className="mt-2 text-sm leading-relaxed text-[var(--text-secondary)]">
+              <p className="mt-2 text-sm leading-relaxed text-[color:var(--text-secondary)]">
                 {isCoreEntry
                   ? coreEntry?.hasCredentials
                     ? t("generated.controlPlane.salvar_a_conexao_grava_as_credenciais_no_con_520a5e16")
@@ -428,7 +428,7 @@ export function IntegrationDetailView({
             </div>
 
             {isCoreEntry && connection?.last_error ? (
-              <div className="rounded-xl border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-4 py-3 text-sm text-[var(--tone-warning-text)]">
+              <div className="rounded-xl border border-[var(--tone-warning-border)] bg-[var(--tone-warning-bg)] px-4 py-3 text-sm text-[color:var(--tone-warning-text)]">
                 <span className="font-medium">{t("generated.controlPlane.ultimo_erro_9a793b25")}:</span> {connection.last_error}
               </div>
             ) : null}
@@ -441,7 +441,7 @@ export function IntegrationDetailView({
                   <button
                     type="button"
                     onClick={onConnect}
-                    className="inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium text-[var(--interactive-active-text)] transition-all"
+                    className="inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium text-[color:var(--interactive-active-text)] transition-all"
                     style={{
                       background:
                         "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
@@ -486,7 +486,7 @@ export function IntegrationDetailView({
                   <button
                     type="button"
                     onClick={() => onOpenMcpEditor?.(entry)}
-                    className="inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium text-[var(--interactive-active-text)] transition-all"
+                    className="inline-flex items-center gap-2 rounded-lg px-3.5 py-2 text-sm font-medium text-[color:var(--interactive-active-text)] transition-all"
                     style={{
                       background:
                         "linear-gradient(180deg, var(--interactive-active-top), var(--interactive-active-bottom))",
@@ -502,7 +502,7 @@ export function IntegrationDetailView({
                   <button
                     type="button"
                     onClick={() => onOpenMcpEditor?.(entry)}
-                    className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] px-3.5 py-2 text-sm font-medium text-[var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+                    className="inline-flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] px-3.5 py-2 text-sm font-medium text-[color:var(--text-secondary)] transition-colors hover:bg-[var(--surface-hover)] hover:text-[color:var(--text-primary)]"
                   >
                     <Pencil size={14} />
                     {t("generated.controlPlane.editar_servidor_ab1f64e7")}
@@ -519,8 +519,8 @@ export function IntegrationDetailView({
                     className={cn(
                       "inline-flex min-w-36 items-center justify-center gap-2 rounded-lg border px-3.5 py-2 text-sm font-medium transition-colors",
                       mcpRemoving
-                        ? "cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-quaternary)]"
-                        : "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg-strong)]",
+                        ? "cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[color:var(--text-quaternary)]"
+                        : "border-[var(--tone-danger-border)] bg-[var(--tone-danger-bg)] text-[color:var(--tone-danger-text)] hover:bg-[var(--tone-danger-bg-strong)]",
                     )}
                   >
                     {mcpRemoving ? (
@@ -540,7 +540,7 @@ export function IntegrationDetailView({
       </section>
 
       <div>
-        <span className="eyebrow mb-3 block text-[var(--text-quaternary)]">{t("generated.controlPlane.inclui_e11ae750")}</span>
+        <span className="eyebrow mb-3 block text-[color:var(--text-quaternary)]">{t("generated.controlPlane.inclui_e11ae750")}</span>
         {entry.capabilities.length > 0 ? (
           <div className="space-y-2">
             {entry.capabilities.map((capability, index) => (
@@ -554,14 +554,14 @@ export function IntegrationDetailView({
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-4 py-5 text-sm text-[var(--text-quaternary)]">
+          <div className="rounded-lg border border-dashed border-[var(--border-subtle)] px-4 py-5 text-sm text-[color:var(--text-quaternary)]">
             {t("generated.controlPlane.este_servidor_mcp_nao_possui_um_catalogo_cur_862373be")}
           </div>
         )}
       </div>
 
       <div>
-        <span className="eyebrow mb-3 block text-[var(--text-quaternary)]">{t("generated.controlPlane.informacoes_62821400")}</span>
+        <span className="eyebrow mb-3 block text-[color:var(--text-quaternary)]">{t("generated.controlPlane.informacoes_62821400")}</span>
         <InfoTable rows={metadataRows} />
       </div>
     </div>

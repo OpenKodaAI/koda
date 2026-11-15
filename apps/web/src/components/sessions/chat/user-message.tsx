@@ -14,7 +14,7 @@ export function UserMessage({ text, pending = false, failed = false }: UserMessa
     <div
       className={cn(
         "max-w-[75%] rounded-[var(--radius-panel-sm)] px-4 py-3",
-        "text-[length:var(--font-size-md)] leading-[1.55] text-[var(--text-primary)]",
+        "text-[length:var(--font-size-md)] leading-[1.55] text-[color:var(--text-primary)]",
         failed ? "bg-[var(--tone-danger-bg)]" : "bg-[var(--panel-soft)]",
         pending && "opacity-70 has-[:focus-visible]:opacity-100",
       )}

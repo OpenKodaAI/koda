@@ -101,7 +101,7 @@ export function ListEditorField({
     <FormField label={label} description={description}>
       <div className="rounded-[var(--radius-shell)] border border-[var(--border-subtle)] bg-[var(--canvas)] p-4">
         <div className="mb-4 flex items-center justify-between gap-3">
-          <span className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
+          <span className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--text-quaternary)]">
             {t("generated.controlPlane.uma_politica_por_linha_feb6d064")}
           </span>
           <div className="flex items-center gap-2">
@@ -113,7 +113,7 @@ export function ListEditorField({
               <ClipboardPaste size={13} />
               {t("generated.controlPlane.colar_lista_3daae85b")}
             </button>
-            <span className="text-xs text-[var(--text-quaternary)]">
+            <span className="text-xs text-[color:var(--text-quaternary)]">
               {items.length} {tl(items.length === 1 ? "item" : "itens")}
             </span>
           </div>
@@ -137,11 +137,11 @@ export function ListEditorField({
                   transition={{ duration: 0.15 }}
                 >
                   <div className="group flex items-start gap-2 rounded-[var(--radius-shell)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-3">
-                    <span className="mt-2 cursor-grab text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-tertiary)] touch-none">
+                    <span className="mt-2 cursor-grab text-[color:var(--text-quaternary)] transition-colors hover:text-[color:var(--text-tertiary)] touch-none">
                       <GripVertical size={14} />
                     </span>
 
-                    <span className="min-w-[1.4rem] pt-2 text-right text-xs tabular-nums text-[var(--text-quaternary)]">
+                    <span className="min-w-[1.4rem] pt-2 text-right text-xs tabular-nums text-[color:var(--text-quaternary)]">
                       {index + 1}.
                     </span>
 
@@ -149,14 +149,14 @@ export function ListEditorField({
                       value={item.text}
                       onChange={(event) => updateItem(item.id, event.target.value)}
                       rows={2}
-                      className="field-shell min-h-[72px] flex-1 resize-y rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--canvas)] px-4 py-3 text-sm leading-6 text-[var(--text-primary)]"
+                      className="field-shell min-h-[72px] flex-1 resize-y rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--canvas)] px-4 py-3 text-sm leading-6 text-[color:var(--text-primary)]"
                       spellCheck
                     />
 
                     <button
                       type="button"
                       onClick={() => removeItem(item.id)}
-                      className="mt-1 p-2 text-[var(--text-quaternary)] opacity-0 transition-colors group-hover:opacity-100 hover:text-[var(--tone-danger-text)]"
+                      className="mt-1 p-2 text-[color:var(--text-quaternary)] opacity-0 transition-colors group-hover:opacity-100 hover:text-[color:var(--tone-danger-text)]"
                       aria-label={t("generated.controlPlane.remover_item_index_2c84f589", { index: index + 1 })}
                     >
                       <Trash2 size={14} />
@@ -170,10 +170,10 @@ export function ListEditorField({
 
         <div className="mt-4 rounded-[var(--radius-shell)] border border-dashed border-[var(--border-subtle)] bg-[var(--surface-tint)] p-4">
           <div className="mb-2 flex items-center justify-between gap-3">
-            <span className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
+            <span className="text-xs font-medium uppercase tracking-[0.18em] text-[color:var(--text-quaternary)]">
               {t("generated.controlPlane.adicionar_novas_entradas_0039a37e")}
             </span>
-            <span className="text-xs text-[var(--text-quaternary)]">
+            <span className="text-xs text-[color:var(--text-quaternary)]">
               {t("generated.controlPlane.cole_varias_linhas_ou_escreva_uma_por_vez_f2ef284a")}
             </span>
           </div>
@@ -188,7 +188,7 @@ export function ListEditorField({
               }
             }}
             rows={4}
-            className="field-shell w-full resize-y rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--canvas)] px-4 py-4 text-sm leading-6 text-[var(--text-primary)]"
+            className="field-shell w-full resize-y rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--canvas)] px-4 py-4 text-sm leading-6 text-[color:var(--text-primary)]"
             placeholder={
               maxItems && items.length >= maxItems
                 ? t("generated.controlPlane.maximo_de_maxitems_itens_70694d18", { maxItems })
@@ -199,7 +199,7 @@ export function ListEditorField({
           />
 
           <div className="mt-3 flex items-center justify-between gap-3">
-            <span className="text-xs text-[var(--text-quaternary)]">
+            <span className="text-xs text-[color:var(--text-quaternary)]">
               {t("generated.controlPlane.use_ctrl_cmd_enter_para_adicionar_rapidament_1020229a")}
             </span>
             <button
@@ -209,7 +209,7 @@ export function ListEditorField({
                 !newItem.trim() ||
                 (maxItems !== undefined && items.length >= maxItems)
               }
-              className="inline-flex items-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-2 text-sm text-[var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:opacity-30"
+              className="inline-flex items-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-2 text-sm text-[color:var(--text-secondary)] transition-colors hover:border-[var(--border-strong)] hover:text-[color:var(--text-primary)] disabled:opacity-30"
               aria-label={t("generated.controlPlane.adicionar_item_36d10784")}
             >
               <Plus size={14} />
