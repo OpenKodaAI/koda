@@ -287,7 +287,9 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   message sent to the runtime API runs as the thread's owner and chat, not as a `user_id`
   or `chat_id` the caller supplies; the response lists such a field under `ignored` and
   the runtime logs it. The memory engine refuses a recall without a positive `user_id`
-  instead of returning every user's memories. (M1-E5-T2, D-040, D-134, D-137)
+  instead of returning every user's memories, and the runtime refuses such a recall before
+  it calls the engine, with `MemoryRecallUserRequiredError` and a
+  `memory_recall_user_required` log line. (M1-E5-T2, D-040, D-134, D-137)
 - A skill package that runs code through a route the verified-bytes check does not cover
   (`runpy.run_path`, `compile`, `exec` or `eval` through builtins, `source_to_code`,
   `marshal` or `pickle`, a loader of its own, another interpreter through `os.exec*`,

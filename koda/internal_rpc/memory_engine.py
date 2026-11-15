@@ -16,6 +16,13 @@ from koda.internal_rpc.common import (
     select_engine_backend,
 )
 from koda.internal_rpc.metadata import build_rpc_metadata
+from koda.logging_config import get_logger
+
+log = get_logger(__name__)
+
+
+class MemoryRecallUserRequiredError(ValueError):
+    """A recall names no positive ``user_id``; the memory engine recalls one user's memories only (D-137)."""
 
 
 def _coerce_score(raw: object) -> float:
@@ -732,6 +739,10 @@ class GrpcMemoryEngineClient:
         allowed_layers: list[str] | None = None,
         allowed_retrieval_sources: list[str] | None = None,
     ) -> list[dict[str, object]]:
+        # Refused here, before the RPC, so the caller gets a typed error instead of a gRPC status.
+        if user_id is None or int(user_id) <= 0:
+            log.warning("memory_recall_user_required", agent_id=self.selection.agent_id, user_id=user_id)
+            raise MemoryRecallUserRequiredError("memory recall requires a positive user_id")
         if self._stub is None or self._memory_pb2 is None:
             raise RuntimeError("grpc_memory_engine_unavailable")
         recall_context_type = self._memory_pb2.RecallContext
@@ -743,7 +754,7 @@ class GrpcMemoryEngineClient:
                 query=query,
                 limit=max(0, int(limit)),
                 context=recall_context_type(
-                    user_id=max(0, int(user_id or 0)),
+                    user_id=int(user_id),
                     memory_types=[str(item) for item in list(memory_types or []) if str(item)],
                     project_key=str(project_key or ""),
                     environment=str(environment or ""),

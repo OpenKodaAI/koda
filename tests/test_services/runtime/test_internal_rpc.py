@@ -1213,6 +1213,33 @@ async def test_grpc_memory_engine_client_recall_sources_authoritative_rows(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("user_id", [None, 0, -3])
+async def test_grpc_memory_engine_client_refuses_a_recall_without_a_positive_user_before_the_rpc(
+    user_id: int | None,
+) -> None:
+    """A recall needs a positive user_id; Python refuses it with a typed error and a log line (M1-E5-T2, D-137)."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from koda.internal_rpc.memory_engine import MemoryRecallUserRequiredError
+
+    client = GrpcMemoryEngineClient(
+        selection=EngineSelection(backend="grpc", reason="rust-default", mode="rust", agent_id="agent_a")
+    )
+    recall_rpc = AsyncMock()
+    client._stub = SimpleNamespace(Recall=recall_rpc)
+    client._memory_pb2 = MagicMock()
+
+    with (
+        patch("koda.internal_rpc.memory_engine.log") as log,
+        pytest.raises(MemoryRecallUserRequiredError, match="positive user_id"),
+    ):
+        await client.recall(query="deploy API", limit=2, user_id=user_id)
+
+    recall_rpc.assert_not_awaited()
+    log.warning.assert_called_once_with("memory_recall_user_required", agent_id="agent_a", user_id=user_id)
+
+
+@pytest.mark.asyncio
 async def test_grpc_memory_engine_client_sends_typed_cluster_and_dedupe_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
