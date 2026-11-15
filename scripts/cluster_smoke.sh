@@ -32,10 +32,15 @@ pg_query() {
 }
 
 # POST a /cluster/* hook inside a container. Drain and undrain need an operator bearer token:
-# the container's first CONTROL_PLANE_API_TOKEN, sent on stdin so it stays off the command line.
+# the first item of the container's CONTROL_PLANE_API_TOKEN that the control plane accepts
+# (trimmed; empty items and replace-with- placeholders skipped), sent on stdin so it stays
+# off the command line.
 cluster_post() {
-  docker exec "$1" sh -c \
-    'printf "Authorization: Bearer %s\n" "${CONTROL_PLANE_API_TOKEN%%,*}" | curl -fs -X POST -H @- "$0"' \
+  docker exec "$1" sh -c '
+    token=$(printf "%s\n" "${CONTROL_PLANE_API_TOKEN:-}" | tr "," "\n" \
+      | sed -e "s/^[[:space:]]*//" -e "s/[[:space:]]*\$//" \
+      | grep -iv -e "^\$" -e "^replace-with-" | head -n 1)
+    printf "Authorization: Bearer %s\n" "$token" | curl -fs -X POST -H @- "$0"' \
     "http://127.0.0.1:${SUPERVISOR_PORT}$2"
 }
 

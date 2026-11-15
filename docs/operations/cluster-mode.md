@@ -61,11 +61,17 @@ Drain and undrain take `Authorization: Bearer <token>`, checked like every
 `/api/control-plane/*` route: an operator session, a personal API token or
 the break-glass `CONTROL_PLANE_API_TOKEN` (during a rotation, any token of
 the list). Without one they answer `401` and change nothing. A deploy script
-normally sends the break-glass token, here the first one of the list:
+normally sends the break-glass token: the first item of the list the control
+plane accepts, trimmed, skipping empty items and unedited `replace-with-`
+placeholders (the token `koda auth issue-code` sends). It passes the header to
+curl on stdin (`-H @-`), so the token stays out of `ps` and the shell history:
 
 ```bash
-curl -fs -X POST -H "Authorization: Bearer ${CONTROL_PLANE_API_TOKEN%%,*}" \
-  http://127.0.0.1:8090/cluster/drain
+token=$(printf '%s\n' "$CONTROL_PLANE_API_TOKEN" | tr ',' '\n' \
+  | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+  | grep -iv -e '^$' -e '^replace-with-' | head -n 1)
+printf 'Authorization: Bearer %s\n' "$token" \
+  | curl -fs -X POST -H @- http://127.0.0.1:8090/cluster/drain
 ```
 
 The control-plane port (8090) is published on the host's loopback only, so
