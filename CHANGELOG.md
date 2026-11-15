@@ -182,6 +182,20 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - The repository no longer tracks two third-party JavaScript bundles at its root, or
   another project's `CHANGELOG.md`. Neither was in the npm package or the images.
   (M1-E7-T6, D-128, D-084)
+- Twenty configuration keys that nothing read are gone. Setting one never had an effect,
+  and it is now ignored without a warning: `INTER_AGENT_MESSAGE_TIMEOUT`,
+  `WORKFLOW_MAX_PARALLEL`, `RUNTIME_PTY_ENABLED`, `RUNTIME_BUNDLE_RETENTION_DAYS`,
+  `RUNTIME_LOCAL_UI_BIND`, `RUNTIME_ATTACH_IDLE_TIMEOUT_SECONDS`,
+  `RUNTIME_BROWSER_DISPLAY_BASE`, `RUNTIME_PTY_CHUNK_BYTES`, `RUNTIME_PTY_BACKPRESSURE_KB`,
+  `RUNTIME_LOOP_MAX_CYCLES`, `RUNTIME_LOOP_MAX_RETRIES_PER_PHASE`,
+  `RUNTIME_LOOP_NO_CHANGE_LIMIT`, `RUNTIME_CHECKPOINT_MAX_UNTRACKED_BYTES`,
+  `SNAPSHOT_MAX_SIZE_MB`, `PLUGIN_DIRS`, `PLUGIN_MAX_EXECUTION_TIMEOUT`,
+  `MEMORY_LEXICAL_CANDIDATES`, and `KNOWLEDGE_V2_NEO4J_URI`, `_USER` and `_PASSWORD`.
+  The control-plane system settings no longer offer four of them in their `runtime`
+  section (`runtime_pty_enabled`, `runtime_local_ui_bind`,
+  `runtime_attach_idle_timeout_seconds`, `runtime_browser_display_base`); a value saved
+  there before now shows under `additional_env_vars`. `PLUGIN_SANDBOX_ENABLED` stays
+  until M1-E4-T4. (M4-E1-T2, TD-003, D-194)
 
 ### Fixed
 
