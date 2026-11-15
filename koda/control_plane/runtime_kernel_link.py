@@ -8,6 +8,8 @@ generated proto classes so business code never touches protobuf directly.
 from __future__ import annotations
 
 import inspect
+import os
+import sys
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,6 +25,27 @@ from koda.internal_rpc.metadata import build_rpc_metadata
 from koda.logging_config import get_logger
 
 log = get_logger(__name__)
+
+# ``sockaddr_un.sun_path`` holds 108 bytes on Linux and 104 on macOS, NUL included.
+UNIX_SOCKET_PATH_MAX_BYTES = 103 if sys.platform == "darwin" else 107
+
+
+class RuntimeKernelTargetError(ValueError):
+    """The configured runtime-kernel target can never be dialled."""
+
+
+def _validate_kernel_target(target: str) -> None:
+    """Fail fast on a ``unix://`` path gRPC rejects: its channel never connects and its close hangs SIGTERM."""
+    if not target.startswith("unix://"):
+        return
+    path = target.removeprefix("unix://")
+    length = len(os.fsencode(path))
+    if length > UNIX_SOCKET_PATH_MAX_BYTES:
+        raise RuntimeKernelTargetError(
+            f"the runtime-kernel socket path is {length} bytes, over the {UNIX_SOCKET_PATH_MAX_BYTES}-byte "
+            f"unix socket limit: {path}. Set RUNTIME_KERNEL_SOCKET (or RUNTIME_KERNEL_GRPC_TARGET) to a "
+            "shorter path or a host:port target, or use a shorter RUNTIME_EPHEMERAL_ROOT."
+        )
 
 
 class AgentWorkerState:
@@ -126,6 +149,7 @@ class RuntimeKernelLink:
     def __init__(self, *, target: str | None = None) -> None:
         raw_target = target if target is not None else config.RUNTIME_KERNEL_SOCKET
         self._target, self._transport = resolve_grpc_target(raw_target)
+        _validate_kernel_target(self._target)
         self._channel: Any | None = None
         self._stub: Any | None = None
         self._runtime_pb2: Any | None = None
@@ -191,18 +215,11 @@ class RuntimeKernelLink:
         request = self._runtime_pb2.EnsureAgentWorkersRequest(
             desired=[self._spec_to_proto(spec) for spec in desired],
         )
-        try:
-            response = await self._stub.EnsureAgentWorkers(
-                request,
-                metadata=self._rpc_metadata(),
-            )
-        except Exception:
-            log.exception(
-                "ensure_agent_workers_rpc_failed",
-                target=self._target,
-                desired_count=len(desired),
-            )
-            raise
+        # Failures propagate: the reconcile loop logs them once per state change.
+        response = await self._stub.EnsureAgentWorkers(
+            request,
+            metadata=self._rpc_metadata(),
+        )
         return EnsureOutcome(
             current=tuple(_status_from_proto(s) for s in response.current),
             spawned=int(response.spawned),

@@ -67,7 +67,7 @@ open /setup
 
 ### Source install
 
-Use the repository wrapper on apt-based Linux hosts:
+Use the repository wrapper on Debian, Ubuntu or a derivative (it installs Docker and Node.js 20+ when they are missing):
 
 ```bash
 git clone https://github.com/OpenKodaAI/koda.git /opt/koda

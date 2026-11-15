@@ -15,15 +15,15 @@ services:
       seaweedfs-init:
         condition: service_completed_successfully
       security:
-        condition: service_started
+        condition: service_healthy
       memory:
-        condition: service_started
+        condition: service_healthy
       artifact:
-        condition: service_started
+        condition: service_healthy
       retrieval:
-        condition: service_started
+        condition: service_healthy
       runtime-kernel:
-        condition: service_started
+        condition: service_healthy
     environment:
       AGENT_ID: "${AGENT_ID:-KODA}"
       HOME: "/var/lib/koda/runtime/home"
@@ -50,7 +50,10 @@ services:
       BOT_GATEWAY_ENABLED: "${BOT_GATEWAY_ENABLED:-false}"
       POLICY_ENGINE_GRPC_TARGET: "policy-engine:50067"
       POLICY_ENGINE_ENABLED: "${POLICY_ENGINE_ENABLED:-false}"
-      HEALTHCHECK_URL: "http://127.0.0.1:8090/health"
+      # /ready answers 503 while Postgres or the runtime kernel is down, so
+      # `depends_on: service_healthy` on app waits for real readiness.
+      # /health stays the liveness probe (always 200, "degraded" in the body).
+      HEALTHCHECK_URL: "http://127.0.0.1:8090/ready"
       STATE_BACKEND: "${STATE_BACKEND:-postgres}"
       OBJECT_STORAGE_REQUIRED: "${OBJECT_STORAGE_REQUIRED:-true}"
       STATE_ROOT_DIR: "${STATE_ROOT_DIR:-/var/lib/koda/state}"
@@ -79,7 +82,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "python -c \"import os, urllib.request; urllib.request.urlopen(os.environ.get('HEALTHCHECK_URL', 'http://127.0.0.1:8090/health'), timeout=4)\""
+          "python -c \"import os, urllib.request; urllib.request.urlopen(os.environ.get('HEALTHCHECK_URL', 'http://127.0.0.1:8090/ready'), timeout=4)\""
         ]
       interval: 30s
       timeout: 5s
@@ -153,6 +156,15 @@ services:
       SECURITY_GRPC_TARGET: "0.0.0.0:50065"
     networks:
       - backend
+    # The image carries only the Rust binary, so this checks that the gRPC
+    # port accepts connections (bash /dev/tcp). The sidecar folds into Python
+    # under ADR-001.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/50065"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
     deploy:
       resources:
         limits:
@@ -174,6 +186,15 @@ services:
       KNOWLEDGE_V2_POSTGRES_SCHEMA: "${KNOWLEDGE_V2_POSTGRES_SCHEMA:-knowledge_v2}"
     networks:
       - backend
+    # The image carries only the Rust binary, so this checks that the gRPC
+    # port accepts connections (bash /dev/tcp). The sidecar folds into Python
+    # under ADR-001.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/50063"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
     deploy:
       resources:
         limits:
@@ -207,6 +228,15 @@ services:
       - /tmp/koda/artifact-store
     networks:
       - backend
+    # The image carries only the Rust binary, so this checks that the gRPC
+    # port accepts connections (bash /dev/tcp). The sidecar folds into Python
+    # under ADR-001.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/50064"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
     deploy:
       resources:
         limits:
@@ -228,6 +258,15 @@ services:
       KNOWLEDGE_V2_POSTGRES_SCHEMA: "${KNOWLEDGE_V2_POSTGRES_SCHEMA:-knowledge_v2}"
     networks:
       - backend
+    # The image carries only the Rust binary, so this checks that the gRPC
+    # port accepts connections (bash /dev/tcp). The sidecar folds into Python
+    # under ADR-001.
+    healthcheck:
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/50062"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
     deploy:
       resources:
         limits:
@@ -252,6 +291,19 @@ services:
       - /tmp/koda-runtime
     networks:
       - backend
+    # gRPC probe: the HTTP/2 handshake must complete on the kernel port.
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import grpc; grpc.channel_ready_future(grpc.insecure_channel('127.0.0.1:50061')).result(timeout=3)"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
     deploy:
       resources:
         limits:
