@@ -162,7 +162,7 @@ class TestHandlerPathContainment:
         assert reg.reload("demo") is None
 
         assert sys.path == before
-        module = sys.modules["_koda_plugin_demo__handlers"]
+        module = sys.modules["_koda_plugin_demo/handlers"]
         assert str(plugin_dir) not in module.SYS_PATH_AT_IMPORT
         assert reg.get_handler("demo_run") is not None
         reg.unregister("demo")
@@ -206,6 +206,37 @@ class TestHandlerLoadIsAtomic:
         assert handler_fn is None
         assert not (outside / "pwned").exists()
 
+    def test_a_parent_directory_flipped_back_for_each_later_path_lookup_still_does_not_load_outside_code(
+        self, tmp_path: Path
+    ) -> None:
+        """The load trusts the file it opened, not a second lookup of the path, which a flip can satisfy."""
+        from koda.skills import _package
+
+        outside = _write_evil(tmp_path)
+        (outside / "handlers.py").write_text(_EVIL_SOURCE.replace("def fn", "def run"), encoding="utf-8")
+        plugin_dir = _write_plugin(tmp_path, "sub.handlers.run")
+        (plugin_dir / "sub").mkdir()
+        (plugin_dir / "sub" / "handlers.py").write_text(_HANDLER_SOURCE, encoding="utf-8")
+        real_check = _package._safe_child_path
+        checks: list[Path | None] = []
+
+        def flipping_check(root: Path, value: str) -> Path | None:
+            # Every check sees the real directory; right after it, `sub` points outside again.
+            if checks:
+                (plugin_dir / "sub").unlink()
+                (plugin_dir / "sub_real").rename(plugin_dir / "sub")
+            checks.append(real_check(root, value))
+            (plugin_dir / "sub").rename(plugin_dir / "sub_real")
+            (plugin_dir / "sub").symlink_to(outside, target_is_directory=True)
+            return checks[-1]
+
+        with patch.object(_package, "_safe_child_path", flipping_check):
+            handler_fn = PluginRegistry()._load_handler(plugin_dir, "sub.handlers.run")
+
+        assert checks
+        assert handler_fn is None
+        assert not (outside / "pwned").exists()
+
     def test_the_handler_module_has_a_flat_name_so_a_relative_import_cannot_reach_another_package(
         self, tmp_path: Path
     ) -> None:
@@ -243,8 +274,48 @@ class TestHandlerLoadIsAtomic:
 
         assert reg.register(manifest) is None
         names = [name for name in sys.modules if name.startswith("_koda_plugin_demo")]
-        assert names == ["_koda_plugin_demo__sub__handlers"]
+        assert names == ["_koda_plugin_demo/sub/handlers"]
         assert sys.modules[names[0]].__package__ == ""
 
         reg.unregister("demo")
         assert not [name for name in sys.modules if name.startswith("_koda_plugin_demo")]
+
+    def test_handler_module_names_stay_unique_when_plugin_or_module_names_contain_double_underscores(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name in [name for name in sys.modules if name.startswith("_koda_plugin_foo")]:
+            monkeypatch.delitem(sys.modules, name)
+        foo = tmp_path / "plugins" / "foo"
+        (foo / "a").mkdir(parents=True)
+        foo_bar = tmp_path / "plugins" / "foo__bar"
+        foo_bar.mkdir()
+        files = [foo / "bar__x.py", foo / "a" / "b.py", foo / "a__b.py", foo_bar / "x.py"]
+        for path in files:
+            path.write_text(_HANDLER_SOURCE, encoding="utf-8")
+
+        def manifest(name: str, plugin_dir: Path, handlers: list[str]) -> PluginManifest:
+            tools = [
+                PluginToolDef(id=f"{name}_{index}", title="t", category="test", description="d", handler_path=handler)
+                for index, handler in enumerate(handlers)
+            ]
+            return PluginManifest(
+                name=name, version="1.0.0", description="", author="", plugin_dir=plugin_dir, tools=tools
+            )
+
+        reg = PluginRegistry()
+        assert reg.register(manifest("foo", foo, ["bar__x.run", "a.b.run", "a__b.run"])) is None
+        assert reg.register(manifest("foo__bar", foo_bar, ["x.run"])) is None
+
+        def loaded_files() -> set[str]:
+            return {
+                str(Path(str(module.__file__)).resolve())
+                for name, module in sys.modules.items()
+                if name.startswith("_koda_plugin_foo")
+            }
+
+        assert loaded_files() == {str(path.resolve()) for path in files}
+
+        reg.unregister("foo")
+        assert loaded_files() == {str((foo_bar / "x.py").resolve())}
+        reg.unregister("foo__bar")
+        assert loaded_files() == set()

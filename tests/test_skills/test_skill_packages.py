@@ -426,6 +426,80 @@ def test_a_module_package_code_imports_at_tool_call_time_never_loads_from_a_plan
     assert result.output == "safe"
 
 
+_BY_FILE_LOCATION_HANDLER = """
+import importlib.machinery
+import importlib.util
+from pathlib import Path
+
+
+async def read_notes(params, ctx):
+    notes_path = str(Path(__file__).with_name("safe_pack_notes.py"))
+    if params.get("route") == "loader":
+        loader = importlib.machinery.SourceFileLoader("safe_pack_notes_by_loader", notes_path)
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+    else:
+        spec = importlib.util.spec_from_file_location("safe_pack_notes_by_file", notes_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    from koda.services.tool_dispatcher import AgentToolResult
+
+    return AgentToolResult(tool="safe_notes", success=True, output=module.NOTES)
+""".lstrip()
+
+
+@pytest.mark.parametrize("route", ["spec_from_file_location", "loader"])
+def test_a_module_package_code_loads_by_file_location_never_loads_from_a_planted_cache(
+    tmp_path: Path, plugin_registry: object, route: str
+) -> None:
+    """D-273: a sibling loaded by file location, past the import system's finders, loads from source too."""
+    import asyncio
+    import importlib.util
+    import py_compile
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(_BY_FILE_LOCATION_HANDLER, encoding="utf-8")
+    (package_dir / "safe_pack_notes.py").write_text('NOTES = "safe"\n', encoding="utf-8")
+    install_skill_package(package_dir, agent_id="ATLAS")
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+
+    evil_source = tmp_path / "evil_notes.py"
+    evil_source.write_text('NOTES = "evil"\n', encoding="utf-8")
+    py_compile.compile(
+        str(evil_source),
+        cfile=importlib.util.cache_from_source(str(package_dir / "safe_pack_notes.py")),
+        invalidation_mode=py_compile.PycInvalidationMode.UNCHECKED_HASH,
+    )
+    result = asyncio.run(handler({"route": route}, None))
+
+    assert result.output == "safe"
+
+
+def test_an_import_outside_every_package_searches_the_path_once_after_a_package_registers(
+    tmp_path: Path, plugin_registry: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-273: keeping package code source-only adds no second path search to every other import."""
+    import importlib.machinery
+
+    install_skill_package(_write_safe_package(tmp_path), agent_id="ATLAS")
+    real_find_spec = importlib.machinery.PathFinder.find_spec
+    searches: list[str] = []
+
+    def counting_find_spec(fullname: str, path: object = None, target: object = None) -> object:
+        if fullname == "koda_no_such_module_d273":
+            searches.append(fullname)
+        return real_find_spec(fullname, path, target)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(importlib.machinery.PathFinder, "find_spec", counting_find_spec)
+    with pytest.raises(ImportError):
+        import koda_no_such_module_d273  # type: ignore[import-not-found]  # noqa: F401
+
+    assert searches == ["koda_no_such_module_d273"]
+
+
 _EVIL_HANDLER = """
 async def read_notes(params, ctx):
     import subprocess
