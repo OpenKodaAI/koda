@@ -125,6 +125,7 @@ from koda.services.provider_auth import (
     verify_provider_subscription_login,
 )
 from koda.services.runtime.redaction import redact_value
+from koda.services.sandbox_policy import state_roots_in
 from koda.services.supertonic_manager import (
     SUPERTONIC_DEFAULT_LANGUAGE_ID,
     SUPERTONIC_DEFAULT_MODEL_ID,
@@ -12534,6 +12535,26 @@ class ControlPlaneManager:
             (normalized, version),
         )
         return json_load(str(row["snapshot_json"]), {}) if row else None
+
+    def published_state_roots(self) -> tuple[str, ...]:
+        """The state roots agents' applied and desired snapshots give their workers.
+
+        The supervisor forces its own ``STATE_ROOT_DIR`` onto every worker when its
+        environment sets one. Otherwise a worker's state root is the one its
+        snapshot's env sets, which no process's environment names.
+        """
+        rows = fetch_all(
+            """
+            SELECT v.snapshot_json FROM cp_agent_config_versions v
+            JOIN cp_agent_definitions a ON a.id = v.agent_id
+            WHERE v.version = a.applied_version OR v.version = a.desired_version
+            """
+        )
+        roots: list[str] = []
+        for row in rows:
+            snapshot = _safe_json_object(json_load(str(row["snapshot_json"]), {}))
+            roots.extend(state_roots_in(_safe_json_object(snapshot.get("process_env") or snapshot.get("env"))))
+        return tuple(dict.fromkeys(roots))
 
     def build_draft_snapshot(self, agent_id: str) -> dict[str, Any]:
         normalized = _normalize_agent_id(agent_id)

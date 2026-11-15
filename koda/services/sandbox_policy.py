@@ -489,12 +489,14 @@ def _is_forbidden_env_key(key: str) -> bool:
     return normalized in _FORBIDDEN_ENV_NAMES or normalized.startswith("KODA_")
 
 
-def is_forbidden_mount(host: str) -> bool:
+def is_forbidden_mount(host: str, *, state_roots: Iterable[str] = ()) -> bool:
     """Whether ``host`` must never be bind-mounted into a sandbox, read-only or not.
 
-    The sandbox doctor applies this rule, and so does saving a custom MCP server.
-    The kernel, bwrap and docker follow symlinks, so the path is checked both as
-    written and resolved.
+    The sandbox doctor applies this rule, and so does saving or starting an MCP
+    server. The kernel, bwrap and docker follow symlinks, so the path is checked
+    both as written and resolved. ``state_roots`` names state directories this
+    process's configuration does not, such as those agents' stored settings give
+    their workers.
     """
     normalized = _normalize_path(host)
     if not normalized:
@@ -502,10 +504,11 @@ def is_forbidden_mount(host: str) -> bool:
     resolved = _resolve_path(normalized)
     if not resolved:
         return True
-    return any(_is_forbidden_mount_path(path) for path in dict.fromkeys((normalized, resolved)))
+    protected = _protected_mount_paths(tuple(state_roots))
+    return any(_is_forbidden_mount_path(path, protected) for path in dict.fromkeys((normalized, resolved)))
 
 
-def _is_forbidden_mount_path(normalized: str) -> bool:
+def _is_forbidden_mount_path(normalized: str, protected_paths: tuple[str, ...]) -> bool:
     if normalized in _FORBIDDEN_MOUNT_EXACT:
         return True
     for root in _with_resolved(_FORBIDDEN_MOUNT_ROOTS):
@@ -521,34 +524,43 @@ def _is_forbidden_mount_path(normalized: str) -> bool:
     if any(part in normalized for part in _FORBIDDEN_MOUNT_PARTS if "/" in part):
         return True
     # A mount on, inside or above a protected path exposes it.
-    return any(_paths_overlap(normalized, protected) for protected in _protected_mount_paths())
+    return any(_paths_overlap(normalized, protected) for protected in protected_paths)
 
 
-def _protected_mount_paths() -> tuple[str, ...]:
+# koda.config's state root when no STATE_ROOT_DIR is set. The control plane uses it
+# then, while a worker whose agent settings set STATE_ROOT_DIR has its own.
+_DEFAULT_STATE_ROOT_DIR = "~/.koda-state"
+
+
+def _protected_mount_paths(state_roots: tuple[str, ...] = ()) -> tuple[str, ...]:
     """Koda's state directories, its master keys and the Docker socket."""
     from koda.config import STATE_ROOT_DIR
     from koda.control_plane.settings import CONTROL_PLANE_MASTER_KEY_FILE, CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE
 
     koda_paths = (
         STATE_ROOT_DIR,
-        *_configured_state_roots(),
+        _DEFAULT_STATE_ROOT_DIR,
+        *state_roots_in(os.environ),
+        *state_roots,
         CONTROL_PLANE_MASTER_KEY_FILE,
         CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE,
     )
     return _with_resolved(tuple(_normalize_path(str(path)) for path in koda_paths) + _FORBIDDEN_MOUNT_EXACT)
 
 
-def _configured_state_roots() -> tuple[str, ...]:
-    """``STATE_ROOT_DIR`` and every per-agent ``{AGENT_ID}_STATE_ROOT_DIR`` in the environment.
+def state_roots_in(env: Mapping[str, Any]) -> tuple[str, ...]:
+    """The values of ``STATE_ROOT_DIR`` and every per-agent ``{AGENT_ID}_STATE_ROOT_DIR`` in ``env``.
 
-    In the control plane this names each worker's state root it can see; in a
-    worker ``koda.config.STATE_ROOT_DIR`` is already the worker's own.
+    This process's environment names its own state root and the overrides set
+    in ``.env`` or the environment, not those set in agents' stored settings.
     """
-    return tuple(
-        value
-        for key, value in os.environ.items()
-        if (key == "STATE_ROOT_DIR" or key.endswith("_STATE_ROOT_DIR")) and value.strip()
-    )
+    roots: list[str] = []
+    for key, value in env.items():
+        name = str(key).strip().upper()
+        text = str(value or "").strip()
+        if text and (name == "STATE_ROOT_DIR" or name.endswith("_STATE_ROOT_DIR")):
+            roots.append(text)
+    return tuple(roots)
 
 
 def _with_resolved(paths: tuple[str, ...]) -> tuple[str, ...]:

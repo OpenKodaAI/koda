@@ -8,6 +8,7 @@ from koda.services.sandbox_policy import (
     SandboxEffectivePolicy,
     SandboxMount,
     evaluate_sandbox_effective_policy,
+    is_forbidden_mount,
 )
 
 
@@ -243,3 +244,36 @@ def test_remote_unsafe_policy_is_denied() -> None:
 
     assert evaluation.allowed is False
     assert "sandbox_remote_unsafe_default" in evaluation.reason_codes
+
+
+def test_a_worker_with_a_per_agent_state_root_protects_the_default_state_root(monkeypatch, tmp_path) -> None:
+    """D-318: with no STATE_ROOT_DIR of its own, the control plane keeps its state in ~/.koda-state.
+
+    The worker's env is what the supervisor builds from a STATE_ROOT_DIR override
+    in the agent's stored settings.
+    """
+    import koda.config as config
+
+    home = tmp_path / "home"
+    agent_state = tmp_path / "srv" / "agent-a"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("AGENT_ID", "AGENT_A")
+    monkeypatch.setenv("STATE_ROOT_DIR", str(agent_state))
+    monkeypatch.setenv("AGENT_A_STATE_ROOT_DIR", str(agent_state))
+    monkeypatch.setattr(config, "STATE_ROOT_DIR", agent_state)
+
+    assert is_forbidden_mount(str(home / ".koda-state"))
+    assert is_forbidden_mount(str(home / ".koda-state" / "control_plane" / "bootstrap.txt"))
+    assert is_forbidden_mount("~/.koda-state")
+    assert is_forbidden_mount(str(agent_state))
+    assert not is_forbidden_mount(str(home / "data"))
+
+
+def test_state_roots_passed_in_are_protected(tmp_path) -> None:
+    other_agent_state = tmp_path / "srv" / "agent-b"
+
+    assert not is_forbidden_mount(str(other_agent_state))
+    assert is_forbidden_mount(str(other_agent_state), state_roots=(str(other_agent_state),))
+    assert is_forbidden_mount(str(other_agent_state / "control_plane"), state_roots=(str(other_agent_state),))
+    assert is_forbidden_mount(str(tmp_path / "srv"), state_roots=(str(other_agent_state),))
+    assert not is_forbidden_mount(str(tmp_path / "data"), state_roots=(str(other_agent_state),))

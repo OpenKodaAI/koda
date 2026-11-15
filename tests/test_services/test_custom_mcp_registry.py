@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -164,6 +166,11 @@ def koda_secret_paths(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "STATE_ROOT_DIR", paths["state"])
     monkeypatch.setattr(settings, "CONTROL_PLANE_MASTER_KEY_FILE", paths["key"])
     monkeypatch.setattr(settings, "CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE", paths["previous_key"])
+    # No agent's published settings name a state root of their own.
+    monkeypatch.setattr(
+        "koda.control_plane.manager.get_control_plane_manager",
+        lambda: SimpleNamespace(published_state_roots=lambda: ()),
+    )
     return paths
 
 
@@ -272,4 +279,52 @@ def test_upsert_refuses_mounts_of_a_per_agent_state_root(suffix, koda_secret_pat
         pytest.raises(ValidationError, match="mount"),
     ):
         upsert_custom_server(_mount_payload(f"{agent_state}{suffix}", read_only=True))
+    execute.assert_not_called()
+
+
+# D-318: the state root an agent's stored settings give its worker is protected too
+
+
+def _agents_publish(monkeypatch, snapshots: list[dict]) -> None:
+    """The real manager lookup, over these published snapshots."""
+    import koda.control_plane.manager as manager_mod
+
+    rows = [{"snapshot_json": json.dumps(snapshot)} for snapshot in snapshots]
+    monkeypatch.setattr(manager_mod, "fetch_all", lambda query, params=(): rows)
+    manager = manager_mod.ControlPlaneManager.__new__(manager_mod.ControlPlaneManager)
+    monkeypatch.setattr(manager_mod, "get_control_plane_manager", lambda: manager)
+
+
+@pytest.mark.parametrize("key", ["STATE_ROOT_DIR", "AGENT_A_STATE_ROOT_DIR"])
+@pytest.mark.parametrize("suffix", ["", "/control_plane"])
+def test_upsert_refuses_mounts_of_a_state_root_from_an_agents_settings(
+    key, suffix, koda_secret_paths, monkeypatch, tmp_path
+):
+    """The control plane's environment names no STATE_ROOT_DIR; agent A's stored settings give its worker one."""
+    monkeypatch.delenv("STATE_ROOT_DIR", raising=False)
+    agent_state = tmp_path / "agent-a-state"
+    env = {key: str(agent_state), "LOG_LEVEL": "INFO"}
+    _agents_publish(monkeypatch, [{"env": env, "process_env": env}, {"env": {"LOG_LEVEL": "DEBUG"}}])
+    with (
+        patch("koda.integrations.custom_mcp_registry.execute") as execute,
+        pytest.raises(ValidationError, match="sensitive host path"),
+    ):
+        upsert_custom_server(_mount_payload(f"{agent_state}{suffix}", read_only=True))
+    execute.assert_not_called()
+    validate_payload(_mount_payload(str(tmp_path / "data"), read_only=True))
+
+
+def test_upsert_refuses_mounts_when_the_agents_state_roots_cannot_be_read(koda_secret_paths, monkeypatch, tmp_path):
+    def unreadable() -> tuple[str, ...]:
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(
+        "koda.control_plane.manager.get_control_plane_manager",
+        lambda: SimpleNamespace(published_state_roots=unreadable),
+    )
+    with (
+        patch("koda.integrations.custom_mcp_registry.execute") as execute,
+        pytest.raises(ValidationError, match="state roots.*database unavailable"),
+    ):
+        upsert_custom_server(_mount_payload(str(tmp_path / "data"), read_only=True))
     execute.assert_not_called()

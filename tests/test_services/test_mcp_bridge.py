@@ -240,6 +240,8 @@ async def test_lazy_start_passes_the_catalog_isolation_settings_to_the_server():
         ),
         patch("koda.services.mcp_bridge.mcp_server_manager") as mock_manager,
         patch("koda.services.mcp_bridge.register_mcp_tools_for_agent"),
+        # The mount check reads agents' published state roots; none here.
+        patch("koda.control_plane.manager.get_control_plane_manager", return_value=MagicMock()),
     ):
         mock_manager.ensure_started = AsyncMock(return_value=instance)
         await _lazy_start_mcp_server("github", "agent-1")

@@ -222,10 +222,11 @@ def validate_isolation_constraints(constraints: dict[str, Any]) -> None:
     """Refuse constraints the runtime cannot parse or mounts of sensitive host paths.
 
     Saving a custom server and starting any server apply this check. Mounts
-    follow the sandbox doctor's rule, read-only or not: the state directories,
-    the master keys, ``/etc``, the Docker socket and the like. A mount host
-    must be absolute (``~`` is expanded): the control plane and the worker
-    would resolve a relative one against different working directories.
+    follow the sandbox doctor's rule, read-only or not: the state directories
+    (each agent's published one too), the master keys, ``/etc``, the Docker
+    socket and the like. A mount host must be absolute (``~`` is expanded): the
+    control plane and the worker would resolve a relative one against
+    different working directories.
     """
     try:
         parsed = IsolationConstraints.from_dict(constraints)
@@ -234,8 +235,23 @@ def validate_isolation_constraints(constraints: dict[str, Any]) -> None:
     for mount in parsed.mounts:
         if not os.path.isabs(os.path.expanduser(mount.host)):
             raise ValidationError(f"isolation mount host {mount.host!r} must be an absolute path")
-        if is_forbidden_mount(mount.host):
+    state_roots = _published_state_roots() if parsed.mounts else ()
+    for mount in parsed.mounts:
+        if is_forbidden_mount(mount.host, state_roots=state_roots):
             raise ValidationError(f"isolation mount host {mount.host!r} is a sensitive host path and cannot be mounted")
+
+
+def _published_state_roots() -> tuple[str, ...]:
+    """Every agent's state root from its published settings, which no process's environment names.
+
+    When they cannot be read, the mount is refused rather than checked without them.
+    """
+    try:
+        from koda.control_plane.manager import get_control_plane_manager
+
+        return tuple(get_control_plane_manager().published_state_roots())
+    except Exception as exc:
+        raise ValidationError(f"cannot read the agents' state roots to check isolation mounts: {exc}") from exc
 
 
 def validate_stdio_command(command: list[Any]) -> list[str]:

@@ -196,9 +196,11 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   them is not started: the worker logs `mcp_server_start_refused` and the
   connection's last error reads `refused to start: ...` until the constraint is
   corrected. Mount hosts must be absolute paths (`~` is expanded), on save and at
-  start. The protected state directories now include every `STATE_ROOT_DIR` and
-  per-agent `<AGENT_ID>_STATE_ROOT_DIR` the control plane sees, and the worker's
-  own state root at start. (D-316, D-317, D-318)
+  start. The protected state directories now include the default `~/.koda-state`,
+  every `STATE_ROOT_DIR` and per-agent `<AGENT_ID>_STATE_ROOT_DIR` set in the
+  environment or `.env`, the one each agent's published settings (its applied and
+  desired versions) give its worker, and, at start, the worker's own. A mount is
+  refused when those settings cannot be read. (D-316, D-317, D-318)
 - Channel gateway pairing: codes are 8 letters and digits, one message tries at most
   one code (the whole message, or `/start CODE`) and other messages are not attempts,
   and a sender (one user across all its chats) with 5 failed attempts in 15 minutes is

@@ -396,6 +396,10 @@ def test_constraints_from_dict_defaults_an_unset_network_mode():
         ("{state}", "sensitive host path"),  # the worker's own state root
         ("{state}/control_plane", "sensitive host path"),
         ("{agent_state}", "sensitive host path"),  # D-318: a per-agent override
+        # D-318: the control plane's state root when its environment sets none
+        ("{home}/.koda-state", "sensitive host path"),
+        ("{home}/.koda-state/control_plane/bootstrap.txt", "sensitive host path"),
+        ("{other_agent_state}", "sensitive host path"),  # D-318: another agent's, from its published settings
         ("relative/data", "absolute"),  # D-317
         ("/etc", "sensitive host path"),
     ],
@@ -406,13 +410,21 @@ async def test_bootstrap_refuses_a_stored_mount_the_save_check_would_refuse(host
     from koda.services.mcp_manager import McpServerManager
 
     monkeypatch.delenv("KODA_MCP_ISOLATION", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.delenv("STATE_ROOT_DIR", raising=False)
     monkeypatch.setattr(config, "STATE_ROOT_DIR", tmp_path / "state")
     monkeypatch.setenv("AGENT_1_STATE_ROOT_DIR", str(tmp_path / "agent-1-state"))
-    host = host.format(state=tmp_path / "state", agent_state=tmp_path / "agent-1-state")
+    host = host.format(
+        state=tmp_path / "state",
+        agent_state=tmp_path / "agent-1-state",
+        home=tmp_path / "home",
+        other_agent_state=tmp_path / "agent-2-state",
+    )
     _FakeStdioTransport.spawned = []
     manager = McpServerManager()
     manager._loops_started = True
     control_plane = MagicMock()
+    control_plane.published_state_roots.return_value = (str(tmp_path / "agent-2-state"),)
     catalog = {
         "server_key": "legacy",
         "transport_type": "stdio",
