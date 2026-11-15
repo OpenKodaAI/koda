@@ -6892,7 +6892,14 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
     response_text: str,
     squad_message_id: str | None,
     artifact_ids: list[str],
+    swept_handoff_id: str | None = None,
 ) -> None:
+    """Queue the coordinator synthesis once the cycle's tasks have ended, then record each handoff's outcome.
+
+    With ``swept_handoff_id`` the squad router's sweep runs the check for that handoff: it queues
+    nothing unless the handoff is open in the cycle it reads, and it adds no result for the swept
+    task, whose turn did not run here.
+    """
     if not ctx.squad_thread_id or not ctx.squad_task_id:
         return
     try:
@@ -6943,7 +6950,15 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         answered_obligations: list[dict[str, Any]] = []
         source_message_id = message_ref_to_id(ctx.parent_message_id)
         with contextlib.suppress(Exception):
-            history = await thread_store.thread_history(thread_id=ctx.squad_thread_id, limit=120)
+            if ctx.parent_message_id:
+                # The cycle's own messages, however far back in the room they are.
+                history = await thread_store.thread_history(
+                    thread_id=ctx.squad_thread_id,
+                    limit=500,
+                    cycle_parent_message_ids=[ref for ref in (ctx.parent_message_id, squad_message_id) if ref],
+                )
+            else:
+                history = await thread_store.thread_history(thread_id=ctx.squad_thread_id, limit=120)
             for message in history:
                 raw_metadata = message.get("metadata")
                 metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
@@ -6996,11 +7011,17 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             for event in handoff_events
             if str(event["payload"].get("status") or "").lower() not in {"requested", "accepted"}
         }
-        if handoff_events and {event["payload"].get("handoff_id") for event in handoff_events} <= closed_ids:
+        handoff_ids = {event["payload"].get("handoff_id") for event in handoff_events}
+        if handoff_events and handoff_ids <= closed_ids:
             # Every handoff of the cycle has its outcome, which is recorded only once the synthesis
             # is queued, so running the check again queues nothing.
             return
-        if not any(ctx.squad_task_id and f"/ {ctx.squad_task_id}:" in item for item in visible_results):
+        if swept_handoff_id is not None and (swept_handoff_id not in handoff_ids or swept_handoff_id in closed_ids):
+            return
+        if swept_handoff_id is None and not any(
+            ctx.squad_task_id and f"/ {ctx.squad_task_id}:" in item for item in visible_results
+        ):
+            # This turn's answer, in case the read above did not return it.
             visible_results.append(f"{executing_agent} / {ctx.squad_task_id}:\n{response_text[:1500]}")
             result_messages.append(
                 {
@@ -7497,14 +7518,16 @@ async def _dispatch_squad_follow_ups(
     )
 
 
-async def complete_open_squad_handoff(*, thread_id: str, squad_task_id: str) -> None:
+async def complete_open_squad_handoff(*, thread_id: str, squad_task_id: str, handoff_id: str) -> None:
     """Run the task-cycle check again for a handoff still open after its cycle's tasks ended (D-074).
 
     The squad router's sweep calls this. The check that runs after a destination's turn can be
     lost: to a graceful restart, a cancel while the turn's follow-ups run, or a refused dispatch,
     and nothing else runs it again. It runs here as the follow-up of ``squad_task_id``, one of the
-    cycle's tasks, would. The check queues nothing once the handoff has its outcome, and nothing
-    is queued while this runtime shuts down: the next runtime's sweep completes the handoff.
+    cycle's tasks, would, but without a turn: it queues nothing unless ``handoff_id`` is open in the
+    cycle it reads, and only the results posted to the room count. The check queues nothing once
+    the handoff has its outcome, and nothing is queued while this runtime shuts down: the next
+    runtime's sweep completes the handoff.
     """
     if _shutting_down:
         return
@@ -7544,6 +7567,7 @@ async def complete_open_squad_handoff(*, thread_id: str, squad_task_id: str) -> 
         response_text="",
         squad_message_id=None,
         artifact_ids=[],
+        swept_handoff_id=handoff_id,
     )
 
 

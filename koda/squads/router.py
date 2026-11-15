@@ -30,6 +30,9 @@ _DEFAULT_BATCH_SIZE = 50
 # that runs after its last destination's turn, so the sweep does not queue a second synthesis
 # beside it.
 _HANDOFF_COMPLETION_GRACE_S = 30.0
+# A handoff requested longer ago than this is not swept: the sweep completes a check lost to a
+# restart, a cancel or a refused dispatch, not a request nobody answered long ago.
+_HANDOFF_COMPLETION_MAX_AGE_S = 24 * 3600.0
 
 
 def _decode_json_object(value: Any) -> dict[str, Any]:
@@ -87,6 +90,8 @@ class SquadRouter:
         self._batch_size = max(1, int(batch_size))
         self._task: asyncio.Task[None] | None = None
         self._stopping = asyncio.Event()
+        # The last open handoff a full batch of the sweep reached; the next sweep starts after it.
+        self._open_handoff_cursor = 0
 
     @property
     def is_running(self) -> bool:
@@ -419,10 +424,15 @@ class SquadRouter:
     async def _sweep_open_handoffs(self) -> int:
         """Run the task-cycle check again for each handoff left open after its cycle's tasks ended (D-074).
 
-        A handoff is checked when it is still ``requested`` or ``accepted``, its cycle has a task,
-        no task of its thread is open (the check waits for every open task of the thread), and its
-        cycle's tasks have not changed for ``_HANDOFF_COMPLETION_GRACE_S``. The check runs as the
+        A handoff is checked when it was requested less than ``_HANDOFF_COMPLETION_MAX_AGE_S`` ago
+        in an open thread, is still ``requested`` or ``accepted``, its cycle has a task, no task of
+        its thread is open (the check waits for every open task of the thread), and its cycle's
+        tasks have not changed for ``_HANDOFF_COMPLETION_GRACE_S``. The check runs as the
         follow-up of the cycle's most recently changed task that the coordinator does not own.
+        Each sweep takes the next batch after the last one, so handoffs the check cannot close do
+        not keep it from the others. A runtime checks a handoff only while it holds a transaction
+        advisory lock on its id, so two runtimes do not check it at the same time.
+        Returns the number of handoffs checked.
         """
         if self._thread_store is None:
             return 0
@@ -430,7 +440,8 @@ class SquadRouter:
         schema = self._thread_store._schema  # noqa: SLF001
         async with pool.acquire() as conn:
             rows = await conn.fetch(
-                f"""SELECT h.thread_id, cycle.task_id
+                f"""SELECT h.id, h.thread_id, h.metadata_json->'payload'->>'handoff_id' AS handoff_id,
+                           cycle.task_id
                       FROM "{schema}"."squad_messages" AS h
                       JOIN "{schema}"."squad_threads" AS th ON th.id = h.thread_id
                       CROSS JOIN LATERAL (
@@ -442,7 +453,11 @@ class SquadRouter:
                         ORDER BY t.updated_at DESC
                            LIMIT 1
                       ) AS cycle
-                     WHERE h.thread_id IS NOT NULL
+                     WHERE h.created_at > NOW() - make_interval(secs => $1)
+                       AND h.id > $4
+                       AND h.thread_id IS NOT NULL
+                       AND th.status = 'open'
+                       AND th.coordinator_agent_id IS NOT NULL
                        AND h.message_type = 'system_event'
                        AND h.metadata_json->>'event_type' = 'handoff_event'
                        AND h.metadata_json->'payload'->>'status' IN ('requested', 'accepted')
@@ -450,6 +465,7 @@ class SquadRouter:
                            SELECT 1
                              FROM "{schema}"."squad_messages" AS c
                             WHERE c.thread_id = h.thread_id
+                              AND c.correlation_id = h.correlation_id
                               AND c.metadata_json->>'event_type' = 'handoff_event'
                               AND c.metadata_json->'payload'->>'handoff_id'
                                   = h.metadata_json->'payload'->>'handoff_id'
@@ -462,19 +478,36 @@ class SquadRouter:
                               AND (
                                   o.status IN ('pending', 'claimed', 'in_progress', 'blocked')
                                   OR (o.metadata_json->>'handoff_correlation_id' = h.correlation_id
-                                      AND o.updated_at > NOW() - make_interval(secs => $1))
+                                      AND o.updated_at > NOW() - make_interval(secs => $2))
                               )
                        )
                   ORDER BY h.id ASC
-                     LIMIT $2""",
+                     LIMIT $3""",
+                float(_HANDOFF_COMPLETION_MAX_AGE_S),
                 float(_HANDOFF_COMPLETION_GRACE_S),
                 self._batch_size,
+                self._open_handoff_cursor,
             )
+        self._open_handoff_cursor = int(rows[-1]["id"]) if len(rows) >= self._batch_size else 0
         from koda.services.queue_manager import complete_open_squad_handoff
 
+        checked = 0
         for row in rows:
-            await complete_open_squad_handoff(thread_id=str(row["thread_id"]), squad_task_id=str(row["task_id"]))
-        return len(rows)
+            handoff_id = str(row["handoff_id"] or "")
+            if not handoff_id:
+                continue
+            async with pool.acquire() as conn, conn.transaction():
+                claimed = await conn.fetchval(
+                    "SELECT pg_try_advisory_xact_lock(hashtext($1))", f"squad_handoff_completion:{handoff_id}"
+                )
+                if not claimed:
+                    # Another runtime is checking this handoff now.
+                    continue
+                await complete_open_squad_handoff(
+                    thread_id=str(row["thread_id"]), squad_task_id=str(row["task_id"]), handoff_id=handoff_id
+                )
+                checked += 1
+        return checked
 
     async def _emit_system_event(
         self,

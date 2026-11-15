@@ -1112,14 +1112,59 @@ async def test_a_handoff_left_open_after_its_tasks_ended_is_completed_once_by_th
 
     # A completed handoff is not checked again, and running the check again queues nothing.
     assert await _sweep(squad_stores) == 0
+    [handoff_id] = {
+        row["metadata"]["payload"]["handoff_id"]
+        for row in history
+        if ((row.get("metadata") or {}).get("payload") or {}).get("schema_version") == "handoff_event.v1"
+    }
     for task in tasks:
-        await qm.complete_open_squad_handoff(thread_id=thread.id, squad_task_id=task.id)
+        await qm.complete_open_squad_handoff(thread_id=thread.id, squad_task_id=task.id, handoff_id=handoff_id)
     await _wait_for_queue_worker_to_finish()
     assert len([query for query in provider.queries if SYNTHESIS_MARKER in query]) == 1
     history = await thread_store.thread_history(thread_id=thread.id, limit=200)
     assert _handoff_statuses(history) == ["requested", "returned"]
     assert not _dispatch_unavailable_events(history)
     _assert_one_final_answer(history)
+
+
+async def test_a_handoff_whose_cycle_is_older_than_the_rooms_last_messages_is_completed_once_by_the_sweep(
+    agent_db: str,
+    squad_stores: tuple[Any, Any],
+    queue_state: None,
+    application: Any,
+    started_runtime: Any,
+    routing_inputs: ExitStack,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The check after QA's turn is lost, and the room moves on before the sweep runs it again."""
+    from koda.services import queue_manager as qm
+
+    thread_store, _task_store = squad_stores
+    provider = _ScriptedClaude(_answers).install(monkeypatch)
+    _use_planner(routing_inputs, HANDOFF_TO_FE_AND_QA)
+
+    with patch.object(qm, "_maybe_enqueue_squad_coordinator_synthesis", AsyncMock(return_value=None)):
+        thread = await _post_telegram_message(thread_store, application)
+        await _wait_for_queue_worker_to_finish()
+    # The cycle's handoff event and task results are no longer among the room's latest 120 messages.
+    for index in range(130):
+        await thread_store.post_thread_message(
+            thread_id=thread.id, from_agent="FE", content=f"later chatter {index}", message_type="agent_text"
+        )
+
+    observed = []
+    for _ in range(3):
+        checked = await _sweep(squad_stores)
+        await _wait_for_queue_worker_to_finish()
+        observed.append((checked, len([query for query in provider.queries if SYNTHESIS_MARKER in query])))
+
+    # The first sweep queues the one synthesis with both real results and closes the handoff.
+    assert observed == [(1, 1), (0, 1), (0, 1)]
+    [synthesis_query] = [query for query in provider.queries if SYNTHESIS_MARKER in query]
+    assert "FE: launch page built." in synthesis_query and "QA: launch page reviewed." in synthesis_query
+    history = await thread_store.thread_history(thread_id=thread.id, limit=500)
+    assert _handoff_statuses(history) == ["requested", "returned"]
+    _assert_one_final_answer(history, application.bot.texts(GROUP_CHAT_ID))
 
 
 async def test_a_synthesis_refused_during_a_graceful_shutdown_is_queued_by_the_first_sweep_after_restart(

@@ -323,3 +323,160 @@ async def test_a_task_whose_dependency_ended_is_cancelled_by_the_system_with_a_r
     # The result is for QA's task, but QA never ran, so the system posts it.
     assert kwargs["ctx"].executing_agent_id == "QA"
     assert kwargs["posted_by"] == "system"
+
+
+async def _strand_handoff(threads: SquadThreadStore, tasks: SquadTaskStore) -> tuple[str, str, dict[str, str]]:
+    """A handoff whose destinations both answered while the check after their turns was lost."""
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    with patch("koda.services.queue_manager._maybe_enqueue_squad_coordinator_synthesis", AsyncMock()):
+        for agent_id in ("FE", "QA"):
+            await _finish_turn(thread_id=thread_id, parent=parent, task_id=task_ids[agent_id], agent_id=agent_id)
+    return thread_id, parent, task_ids
+
+
+def _router(threads: SquadThreadStore, tasks: SquadTaskStore, **kwargs: Any) -> Any:
+    from koda.squads.router import SquadRouter
+
+    return SquadRouter(task_store=tasks, thread_store=threads, **kwargs)
+
+
+async def _sweep(router: Any) -> int:
+    """One sweep with no grace period; returns the number of open handoffs it checked."""
+    with patch("koda.squads.router._HANDOFF_COMPLETION_GRACE_S", 0.0):
+        return int((await router.sweep_once()).open_handoffs_checked)
+
+
+async def _handoff_statuses(threads: SquadThreadStore, thread_id: str) -> list[str]:
+    rows = _handoff_rows(await threads.thread_history(thread_id=thread_id, limit=100))
+    return [row["metadata"]["payload"]["status"] for row in rows]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_the_sweep_queues_nothing_for_a_destination_whose_task_ended_without_a_result(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    threads, tasks = stores
+    thread_id, parent, task_ids = await _start_handoff(threads, tasks)
+    with patch("koda.services.queue_manager._maybe_enqueue_squad_coordinator_synthesis", AsyncMock()):
+        await _finish_turn(thread_id=thread_id, parent=parent, task_id=task_ids["FE"], agent_id="FE")
+    # QA's task ends without a turn, as the squad_task_update tool can end it, so QA posts no result.
+    await tasks.update_task_status(
+        task_id=task_ids["QA"], new_status="cancelled", agent_id="PM", coordinator_override=True
+    )
+
+    assert await _sweep(_router(threads, tasks)) == 1
+
+    # The sweep does not answer for QA, so the gate still waits for QA's result.
+    assert _final_syntheses(turn_stubs) == []
+    assert await _handoff_statuses(threads, thread_id) == ["requested"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_the_sweep_queues_nothing_for_a_handoff_the_check_does_not_read(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    from koda.services.queue_manager import complete_open_squad_handoff
+
+    threads, tasks = stores
+    thread_id, _parent, task_ids = await _strand_handoff(threads, tasks)
+
+    await complete_open_squad_handoff(
+        thread_id=thread_id, squad_task_id=task_ids["QA"], handoff_id="handoff-of-another-cycle"
+    )
+
+    assert _final_syntheses(turn_stubs) == []
+    assert await _handoff_statuses(threads, thread_id) == ["requested"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["paused", "completed", "archived"])
+async def test_the_sweep_leaves_the_handoffs_of_a_thread_that_is_not_open(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock, status: str
+) -> None:
+    threads, tasks = stores
+    thread_id, _parent, _task_ids = await _strand_handoff(threads, tasks)
+    await threads.update_thread_status(thread_id, status)
+
+    assert await _sweep(_router(threads, tasks)) == 0
+    assert _final_syntheses(turn_stubs) == []
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_the_sweep_leaves_a_handoff_requested_before_its_cutoff(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    from koda.squads import router as router_mod
+
+    threads, tasks = stores
+    thread_id, _parent, _task_ids = await _strand_handoff(threads, tasks)
+    pool = await threads._ensure_pool()
+    async with pool.acquire() as conn:
+        await conn.execute(
+            f"""UPDATE "{_schema()}"."squad_messages"
+                   SET created_at = NOW() - make_interval(secs => $2)
+                 WHERE thread_id = $1 AND metadata_json->>'event_type' = 'handoff_event'""",
+            thread_id,
+            router_mod._HANDOFF_COMPLETION_MAX_AGE_S + 60.0,
+        )
+
+    assert await _sweep(_router(threads, tasks)) == 0
+    assert _final_syntheses(turn_stubs) == []
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_handoff_the_sweep_cannot_close_does_not_keep_it_from_a_newer_one(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    from types import SimpleNamespace
+
+    threads, tasks = stores
+    older_thread_id, _parent, _task_ids = await _strand_handoff(threads, tasks)
+    newer_thread_id, _parent, _task_ids = await _strand_handoff(threads, tasks)
+    # The older cycle's synthesis is always refused, so its handoff stays open.
+    turn_stubs.side_effect = lambda **kwargs: SimpleNamespace(dispatched=kwargs["thread"].id != older_thread_id)
+    router = _router(threads, tasks, batch_size=1)
+
+    for _ in range(2):
+        assert await _sweep(router) == 1
+
+    assert [call["thread"].id for call in _final_syntheses(turn_stubs)] == [older_thread_id, newer_thread_id]
+    assert await _handoff_statuses(threads, older_thread_id) == ["requested"]
+    assert await _handoff_statuses(threads, newer_thread_id) == ["requested", "returned"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_two_runtimes_sweeping_the_same_handoff_at_once_queue_one_synthesis(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    from types import SimpleNamespace
+
+    threads, tasks = stores
+    thread_id, _parent, _task_ids = await _strand_handoff(threads, tasks)
+    first_dispatch_started = asyncio.Event()
+    release_first_dispatch = asyncio.Event()
+
+    async def dispatch(**kwargs: Any) -> Any:
+        if (kwargs.get("metadata") or {}).get("delivery_intent") == "final_synthesis" and (
+            not first_dispatch_started.is_set()
+        ):
+            first_dispatch_started.set()
+            await release_first_dispatch.wait()
+        return SimpleNamespace(dispatched=True)
+
+    turn_stubs.side_effect = dispatch
+
+    # The first runtime's sweep is still queueing the synthesis when the second runtime's sweep runs.
+    first_sweep = asyncio.create_task(_sweep(_router(threads, tasks)))
+    await asyncio.wait_for(first_dispatch_started.wait(), timeout=30)
+    assert await _sweep(_router(threads, tasks)) == 0
+    release_first_dispatch.set()
+    assert await first_sweep == 1
+
+    assert len(_final_syntheses(turn_stubs)) == 1
+    assert await _handoff_statuses(threads, thread_id) == ["requested", "returned"]

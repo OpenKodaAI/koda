@@ -84,15 +84,31 @@ runtime restarts, or a cancel lands while the turn's follow-ups run (the
 follow-ups run before the turn's own answer is sent, so that answer, already in
 the room, is not sent to Telegram either). The squad router's sweep, which each
 runtime runs every `SQUAD_ROUTER_SWEEP_INTERVAL_S` (15 s by default), is the
-safety net (`SquadRouter._sweep_open_handoffs`). It finds each handoff that is
-still `requested` or `accepted` while its cycle has a task, no task of its
-thread is open, and none of its cycle's tasks changed in the last 30 s. For each
-one it runs the same check (`complete_open_squad_handoff`) as the follow-up of
-the cycle's most recently changed task that the coordinator does not own, with
-the thread's owner as the user. The check reads the thread from the database, so the handoff completes on the first
-sweep after a restart. A runtime that is shutting down skips it, and the next
-runtime's sweep completes the handoff. While a dispatch keeps failing, each
-sweep records one more `[agent_dispatch_unavailable]` event.
+safety net (`SquadRouter._sweep_open_handoffs`). It finds each handoff that was
+requested in the last 24 h in an `open` thread with a coordinator, is still
+`requested` or `accepted`, whose cycle has a task, while no task of its thread
+is open and none of its cycle's tasks changed in the last 30 s. A handoff in a
+paused, completed or archived thread, or requested longer ago, is left alone,
+so an upgraded install does not answer old requests. Each sweep checks up to
+50 handoffs, oldest first, and the next sweep starts after the last one it
+checked, so handoffs the check cannot close (a destination task that ended
+without a result in the room, or a dispatch that keeps failing) do not keep
+it from the others. For each handoff the runtime takes a transaction advisory
+lock on its `handoff_id` (`pg_try_advisory_xact_lock`) and holds it until the
+check has queued the synthesis and recorded the outcome; a runtime that finds
+the lock taken skips the handoff, so two runtimes that sweep it at the same
+moment queue one synthesis. It then runs the same check
+(`complete_open_squad_handoff`) as the follow-up of the cycle's most recently
+changed task that the coordinator does not own, with the thread's owner as the
+user, but without a turn: it queues nothing unless that handoff is open among
+the cycle's events it reads, and only the results already posted to the room
+count, so the sweep never answers for a destination. The check reads the
+cycle's own messages from the database (the cycle's source message and every
+message whose `parent_message_id` names it, however far back in the room), so
+the handoff completes on the first sweep after a restart, even after the room
+has moved on. A runtime that is shutting down skips it, and the next runtime's
+sweep completes the handoff. While a dispatch keeps failing, each sweep records
+one more `[agent_dispatch_unavailable]` event.
 
 The check is not atomic yet (D-058, M2-E4-T3), and nothing stops a second
 dispatch of the synthesis, only a second outcome event. Its open-task read is
@@ -105,9 +121,9 @@ check before it starts the next turn, so one user's turns do not race. Under
 the supervisor, where each destination runs in its own runtime, two
 destinations that finish within about 1.5 s of each other can each queue a
 synthesis, and the room then gets two final answers. The sweep's 30 s wait
-keeps it away from the check after a destination's turn, but two runtimes that
-sweep the same open handoff at the same moment can each queue one too. Nothing
-times a handoff out yet. The reply-cycle path has no handoffs.
+keeps it away from the check after a destination's turn, and the advisory lock
+keeps two sweeps apart. Nothing times a handoff out yet. The reply-cycle path
+has no handoffs.
 
 ## Route Quality
 

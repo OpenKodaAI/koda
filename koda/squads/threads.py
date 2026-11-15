@@ -581,7 +581,14 @@ class SquadThreadStore:
         limit: int = 50,
         before_id: int | None = None,
         visible_after: datetime | None = None,
+        cycle_parent_message_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
+        """The thread's messages, newest first.
+
+        With ``cycle_parent_message_ids`` only the messages of the cycles those message refs
+        (``msg-<id>``) started: the messages themselves, and the messages whose metadata or payload
+        names one of them as ``parent_message_id``, however old they are.
+        """
         params: list[Any] = [thread_id]
         sql = f"""SELECT id, from_agent, to_agent, content, message_type,
                        message_uuid, to_agent_ids, kind, payload_json,
@@ -589,6 +596,15 @@ class SquadThreadStore:
                        requires_response_by, idempotency_key, created_at
                   FROM "{self._schema}"."squad_messages"
                  WHERE thread_id = $1"""
+        if cycle_parent_message_ids is not None:
+            refs = [str(ref) for ref in cycle_parent_message_ids if ref]
+            params.append([ref_id for ref in refs if (ref_id := _message_ref_to_id(ref)) is not None])
+            params.append(refs)
+            sql += (
+                f" AND (id = ANY(${len(params) - 1}::bigint[])"
+                f" OR metadata_json->>'parent_message_id' = ANY(${len(params)}::text[])"
+                f" OR metadata_json->'payload'->>'parent_message_id' = ANY(${len(params)}::text[]))"
+            )
         if before_id is not None:
             params.append(int(before_id))
             sql += f" AND id < ${len(params)}"
