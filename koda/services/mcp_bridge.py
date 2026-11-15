@@ -20,11 +20,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from koda.logging_config import get_logger
 from koda.services.mcp_client import McpToolAnnotations
 from koda.services.mcp_manager import McpServerInstance, mcp_server_manager
+from koda.utils.prompt_sanitizer import escape_protocol_delimiters
 
 log = get_logger(__name__)
 
@@ -32,6 +34,27 @@ MCP_TOOL_PREFIX = "mcp_"
 MCP_TOOL_SEPARATOR = "__"
 MCP_RESOURCE_INFIX = "read_resource__"
 MCP_PROMPT_INFIX = "prompt__"
+
+# Caps on third-party text that reaches the system prompt.
+MCP_TOOL_DESCRIPTION_MAX_CHARS = 1500
+MCP_PARAM_DESCRIPTION_MAX_CHARS = 300
+
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def sanitize_mcp_description(text: object, *, max_chars: int = MCP_TOOL_DESCRIPTION_MAX_CHARS) -> str:
+    """Return a third-party MCP description fit for one line of the system prompt.
+
+    Control characters are dropped and all whitespace, newlines included,
+    collapses to single spaces, so the text cannot start a prompt section or a
+    heading. Runtime protocol tags are escaped, and the result is capped at
+    *max_chars*, ending in an ellipsis when cut.
+    """
+    collapsed = " ".join(_CONTROL_CHARS_RE.sub(" ", str(text or "")).split())
+    escaped = escape_protocol_delimiters(collapsed)
+    if len(escaped) <= max_chars:
+        return escaped
+    return escaped[: max_chars - 1].rstrip() + "…"
 
 
 def mcp_tool_id(server_key: str, tool_name: str) -> str:
