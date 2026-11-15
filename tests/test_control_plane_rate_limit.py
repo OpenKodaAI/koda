@@ -581,29 +581,47 @@ async def test_client_ip_treats_unresolvable_hostname_as_untrusted() -> None:
 
 @pytest.mark.asyncio
 async def test_real_loopback_proxy_gets_per_client_login_buckets() -> None:
-    """End to end over a socket: the dashboard (on loopback) forwards each browser's address."""
+    """End to end over a socket: the dashboard (on loopback) forwards each browser's address.
+
+    The real login route rejects every sign-in, as the service does a wrong password, and the
+    control plane's error middleware answers it with a 401 (D-135). Each 401 also spends the
+    client's auth-failure bucket (5 a minute), so the attacker's sixth failure in a burst is a
+    429 from that bucket, which frees one attempt every 12 s. The owner's address has its own
+    buckets and is still answered.
+    """
     from aiohttp import web
     from aiohttp.test_utils import TestClient, TestServer
 
-    async def login(_request: web.Request) -> web.Response:
-        return web.json_response({"error": "Invalid credentials."}, status=400)
+    from koda.control_plane import api as control_plane_api
+    from koda.control_plane import operator_auth
 
-    app = web.Application(middlewares=[control_plane_rate_limit_middleware])
-    app.router.add_post(LOGIN_PATH, login)
+    class _RejectingAuthService:
+        def login(self, *, identifier: str, password: str) -> dict[str, object]:
+            raise operator_auth.AuthError("Invalid credentials.")
+
+    app = web.Application(
+        middlewares=[control_plane_rate_limit_middleware, control_plane_api.control_plane_error_middleware]
+    )
+    app.router.add_post(LOGIN_PATH, control_plane_api.auth_login)
+    credentials = {"identifier": "owner", "password": "wrong-password-XX"}
 
     with (
         patch("koda.control_plane.rate_limit.CONTROL_PLANE_TRUSTED_PROXIES", ("127.0.0.1", "::1")),
+        patch("koda.control_plane.rate_limit.CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", 5),
         patch("koda.control_plane.rate_limit.emit_security"),
+        patch.object(control_plane_api, "_auth_service", _RejectingAuthService),
+        patch.object(operator_auth, "_FAILURE_TIMING_FLOOR_SECONDS", 0.0),
     ):
         async with TestClient(TestServer(app, host="127.0.0.1")) as client:
             attacker = [
-                (await client.post(LOGIN_PATH, headers={"X-Forwarded-For": "198.51.100.66"})).status for _ in range(11)
+                await client.post(LOGIN_PATH, json=credentials, headers={"X-Forwarded-For": "198.51.100.66"})
+                for _ in range(6)
             ]
-            owner = await client.post(LOGIN_PATH, headers={"X-Forwarded-For": "192.0.2.10"})
+            owner = await client.post(LOGIN_PATH, json=credentials, headers={"X-Forwarded-For": "192.0.2.10"})
 
-    assert attacker[:10] == [400] * 10
-    assert attacker[10] == 429
-    assert owner.status == 400
+    assert [response.status for response in attacker] == [401] * 5 + [429]
+    assert attacker[5].headers["Retry-After"] == "12"
+    assert owner.status == 401
 
 
 # --- defaults, configuration checks and bucket keys ---------------------------
