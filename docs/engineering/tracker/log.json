@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L18",
+   "at": "2026-11-15 01:05",
+   "event": "Onda 7: lanes de dados (M2) e código morto (M4) terminaram as rodadas de revisão; as pendências menores (schema do Postgres sem reescrita de SQL, registro da retenção, teste do modo OFF, arquivo de bootstrap) estão sendo corrigidas antes da integração, para não virar débito"
+  },
+  {
    "id": "L17",
    "at": "2026-11-14 23:59",
    "event": "Onda 2A mesclada (dae8c39): governança de git e shell em background, um único resolvedor de caminhos seguros, credenciais dos CLIs protegidas; 8198 testes Python, gates Rust e web passando"

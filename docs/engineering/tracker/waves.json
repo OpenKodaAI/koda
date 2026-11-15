@@ -73,7 +73,7 @@
   {
    "wave": "W7",
    "name": "Onda 7",
-   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), retenção e codecs do Postgres (M2-E5-T1, M2-E2-T4), código morto do knowledge e catálogo MCP duplicado (M4-E1-T6, T9)",
+   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), retenção e codecs do Postgres (M2-E5-T1, M2-E2-T4), código morto do knowledge e catálogo MCP duplicado (M4-E1-T6, T9). Rodadas de dados e código morto concluídas; pendências menores em correção antes da integração",
    "status": "implementing",
    "ref": "task/M1-E1-*, task/M2-*, task/M4-*"
   },
