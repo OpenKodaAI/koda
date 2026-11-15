@@ -228,6 +228,20 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   user with the same id no longer share snapshots. Snapshots saved before this release
   under the old layout are not listed. `snapshot_restore` is described as loading a
   snapshot for inspection. The feature stays off by default (`SNAPSHOT_ENABLED`). (M6-E3-T6)
+- Creating or cloning an agent with an id that is already taken answers 409 with
+  `{"error": "agent id MY_AGENT already exists"}`. Ids are compared after
+  normalisation, so `my-agent` collides with `My Agent`. Before, create answered 201
+  with the existing agent, and clone copied the source's sections, documents and
+  assets into it. Without an `id`, the server now generates one from `display_name`
+  (`NOVO_AGENTE`, then `NOVO_AGENTE_2`) and allocates the health port; the dashboard
+  no longer picks either. (M2-E3-T1, D-055)
+- `PATCH /api/control-plane/agents/{agent_id}` changes `status` the way the pause and
+  activate endpoints do: a pause rolls running and retrying queue items back to
+  queued, and both wake the supervisor and write the `control_plane.agent_paused` or
+  `control_plane.agent_activated` audit row. A change to any other status, such as
+  `archived`, answers 400 and changes nothing. Before, PATCH wrote the status alone,
+  so a paused agent could keep queue items in `running` after its worker was
+  stopped. (M2-E3-T4, D-150)
 
 
 ### Removed

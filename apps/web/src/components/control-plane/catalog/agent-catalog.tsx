@@ -50,6 +50,7 @@ import {
 } from "@/hooks/use-animated-presence";
 import { useToast } from "@/hooks/use-toast";
 import { useUrlSyncedSearch } from "@/hooks/use-url-synced-search";
+import { isAgentIdConflict } from "@/lib/agent-id-conflict";
 import { cn } from "@/lib/utils";
 import type {
   ControlPlaneAgentSummary,
@@ -867,26 +868,6 @@ export function AgentCatalog({
       cancelled = true;
     };
   }, [showToast, t, tl, workspaceImportOpen, workspaceTree]);
-
-  function normalizeCloneBase(base: string): string {
-    const raw = base.toUpperCase().replace(/[^A-Z0-9]/g, "_");
-    return raw.length === 0 ? "BOT" : raw.slice(0, 20);
-  }
-
-  function generateDuplicateBotId(baseId: string): string {
-    const base = `${normalizeCloneBase(baseId)}_COPY`;
-    const usedIds = new Set(catalogAgents.map((item) => item.id));
-    if (!usedIds.has(base)) {
-      return base;
-    }
-
-    for (let suffix = 2; ; suffix += 1) {
-      const candidate = `${base}_${suffix}`;
-      if (!usedIds.has(candidate)) {
-        return candidate;
-      }
-    }
-  }
 
   useEffect(() => {
     if (!laneRailDraggingKey) {
@@ -1781,14 +1762,13 @@ export function AgentCatalog({
   }
 
   async function handleDuplicateAgent(agent: ControlPlaneAgentSummary) {
-    const cloneId = generateDuplicateBotId(agent.id);
     const cloneDisplayName = `${agent.display_name} (${t("generated.controlPlane.copia_2624990d")})`;
     setDuplicatingBotId(agent.id);
     try {
+      // The control plane generates the clone's id from its display name.
       const duplicated = (await requestJson(`/api/control-plane/agents/${agent.id}/clone`, {
         method: "POST",
         body: JSON.stringify({
-          id: cloneId,
           display_name: cloneDisplayName,
         }),
       })) as ControlPlaneAgentSummary;
@@ -1796,7 +1776,6 @@ export function AgentCatalog({
       const duplicatedAgent: ControlPlaneAgentSummary = {
         ...agent,
         ...duplicated,
-        id: duplicated.id ?? cloneId,
         display_name: duplicated.display_name || cloneDisplayName,
         default_model_label:
           duplicated.default_model_label || agent.default_model_label,
@@ -1805,11 +1784,15 @@ export function AgentCatalog({
 
       setCatalogAgents((current) => [...current, duplicatedAgent]);
       await refreshWorkspaces();
-      showToast(t("generated.controlPlane.duplicata_criada_id_f23c956e", { id: cloneId }), "success");
+      showToast(t("generated.controlPlane.duplicata_criada_id_f23c956e", { id: duplicatedAgent.id }), "success");
       router.refresh();
     } catch (error) {
       showToast(
-        error instanceof Error ? error.message : t("generated.controlPlane.erro_ao_duplicar_agente_68ed6819"),
+        isAgentIdConflict(error)
+          ? t("controlPlane.agent.idConflict")
+          : error instanceof Error
+            ? error.message
+            : t("generated.controlPlane.erro_ao_duplicar_agente_68ed6819"),
         "error",
       );
     } finally {

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { ToastNotification } from "@/components/ui/toast-notification";
 import { ToastProvider } from "@/hooks/use-toast";
 import {
   AgentCatalog,
@@ -162,9 +163,11 @@ function setLocation(path: string) {
 function renderCatalog({
   catalogAgents = agents,
   workspaces = workspaceTree,
+  withToasts = false,
 }: {
   catalogAgents?: ControlPlaneAgentSummary[];
   workspaces?: ControlPlaneWorkspaceTree;
+  withToasts?: boolean;
 } = {}) {
   return render(
     <I18nProvider initialLanguage="pt-BR">
@@ -174,6 +177,7 @@ function renderCatalog({
           coreProviders={coreProviders}
           workspaces={workspaces}
         />
+        {withToasts ? <ToastNotification /> : null}
       </ToastProvider>
     </I18nProvider>,
   );
@@ -812,7 +816,7 @@ describe("AgentCatalog organization board", () => {
 
   it("duplicates a agent and dispatches clone request", async () => {
     const user = userEvent.setup();
-    renderCatalog();
+    renderCatalog({ withToasts: true });
 
     await user.click(
       screen.getByRole("button", { name: /Abrir ações do agente ATLAS/i }),
@@ -826,11 +830,35 @@ describe("AgentCatalog organization board", () => {
         expect.objectContaining({
           method: "POST",
           body: JSON.stringify({
-            id: "ATLAS_COPY",
             display_name: "ATLAS (Cópia)",
           }),
         }),
       );
     });
+    expect(await screen.findByText("Duplicado criado: ATLAS_COPY")).toBeInTheDocument();
+  });
+
+  it("shows the id conflict when the clone answers 409", async () => {
+    const user = userEvent.setup();
+    const defaultFetch = globalThis.fetch;
+    globalThis.fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input) === "/api/control-plane/agents/ATLAS/clone") {
+        return Promise.resolve(
+          new Response(JSON.stringify({ error: "agent id ATLAS_COPIA already exists" }), {
+            status: 409,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
+      return defaultFetch(input, init);
+    }) as typeof fetch;
+    renderCatalog({ withToasts: true });
+
+    await user.click(
+      screen.getByRole("button", { name: /Abrir ações do agente ATLAS/i }),
+    );
+    await user.click(within(screen.getByRole("menu")).getAllByRole("menuitem")[1]);
+
+    expect(await screen.findByText("Já existe um agente com este ID.")).toBeInTheDocument();
   });
 });

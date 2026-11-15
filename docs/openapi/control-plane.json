@@ -742,6 +742,18 @@
           }
         }
       },
+      "AgentIdConflictResponse": {
+        "type": "object",
+        "required": [
+          "error"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "For example `agent id MY_AGENT already exists`."
+          }
+        }
+      },
       "GenericJsonObject": {
         "type": "object",
         "description": "Endpoint-specific JSON object. Some dashboard and runtime bundle routes intentionally return broad server-shaped payloads; see the route handler and dashboard contract for field-level detail.",
@@ -812,12 +824,22 @@
         "responses": {
           "201": {
             "description": "Agent created"
+          },
+          "409": {
+            "description": "An agent with this id already exists. Ids are normalised to upper case with underscores, so `my-agent` collides with `My Agent`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentIdConflictResponse"
+                }
+              }
+            }
           }
         },
         "tags": [
           "Agents"
         ],
-        "description": "Stable Koda control-plane route. See linked architecture and runbook docs for domain behavior."
+        "description": "Stable Koda control-plane route. See linked architecture and runbook docs for domain behavior. Without an `id`, the server generates one from `display_name` and allocates the health port."
       }
     },
     "/api/control-plane/agents/{agent_id}": {
@@ -1369,6 +1391,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/GenericJsonObject"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "An agent with the requested `id` already exists, after normalisation. Nothing is copied. Without an `id`, the server generates one from `display_name`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentIdConflictResponse"
                 }
               }
             }

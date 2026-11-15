@@ -13,6 +13,7 @@ import { FormInput } from "@/components/control-plane/shared/form-field";
 import { AsyncActionButton, InlineSpinner } from "@/components/ui/async-feedback";
 import { InlineAlert } from "@/components/ui/inline-alert";
 import { StatusDot } from "@/components/ui/status-dot";
+import { isAgentIdConflict } from "@/lib/agent-id-conflict";
 import { getAgentLifecycleState } from "@/lib/agent-lifecycle";
 import { requestJson } from "@/lib/http-client";
 
@@ -50,27 +51,19 @@ export function TabPublicacao() {
       showToast(t("generated.controlPlane.nome_do_clone_e_obrigatorio_350c2e21"), "warning");
       return;
     }
-    const cloneId =
-      state.cloneDisplayName
-        .trim()
-        .normalize("NFD")
-        .replace(/[̀-ͯ]/g, "")
-        .toLowerCase()
-        .replace(/[^a-z0-9_\s-]/g, "")
-        .replace(/[\s-]+/g, "_")
-        .replace(/^_+|_+$/g, "")
-        .slice(0, 80) + `-${Date.now().toString(36)}`;
     await runAction(
       "clone",
       async () => {
-        await requestJson(`/api/control-plane/agents/${agentId}/clone`, {
+        // The control plane generates the clone's id from its display name.
+        const cloned = await requestJson<{ id: string }>(`/api/control-plane/agents/${agentId}/clone`, {
           method: "POST",
           body: JSON.stringify({
-            id: cloneId,
             display_name: state.cloneDisplayName.trim(),
           }),
+        }).catch((error: unknown) => {
+          throw isAgentIdConflict(error) ? new Error(t("controlPlane.agent.idConflict")) : error;
         });
-        router.push(`/control-plane/agents/${cloneId}`);
+        router.push(`/control-plane/agents/${cloned.id}`);
       },
       {
         successMessage: t("generated.controlPlane.bot_clonado_com_sucesso_0862a4f1"),

@@ -10222,6 +10222,7 @@ mutableResources["en-US"].translation.controlPlane = {
   agent: {
     loadTitle: "Failed to load {{agentId}}",
     loadDescription: "Could not load the configuration for bot {{agentId}}.",
+    idConflict: "An agent with this ID already exists.",
   },
   skillPackages: {
     modifiedNotLoaded:
@@ -10256,6 +10257,7 @@ mutableResources["pt-BR"].translation.controlPlane = {
   agent: {
     loadTitle: "Falha ao carregar {{agentId}}",
     loadDescription: "Não foi possível carregar a configuração do bot {{agentId}}.",
+    idConflict: "Já existe um agente com este ID.",
   },
   skillPackages: {
     modifiedNotLoaded:
@@ -10290,6 +10292,7 @@ mutableResources["es-ES"].translation.controlPlane = {
   agent: {
     loadTitle: "Error al cargar {{agentId}}",
     loadDescription: "No fue posible cargar la configuración del bot {{agentId}}.",
+    idConflict: "Ya existe un agente con este ID.",
   },
   skillPackages: {
     modifiedNotLoaded:
@@ -10324,6 +10327,7 @@ mutableResources["fr-FR"].translation.controlPlane = {
   agent: {
     loadTitle: "Échec du chargement de {{agentId}}",
     loadDescription: "Impossible de charger la configuration du bot {{agentId}}.",
+    idConflict: "Un agent avec cet identifiant existe déjà.",
   },
   skillPackages: {
     modifiedNotLoaded:
@@ -10358,6 +10362,7 @@ mutableResources["de-DE"].translation.controlPlane = {
   agent: {
     loadTitle: "{{agentId}} konnte nicht geladen werden",
     loadDescription: "Konfiguration für Bot {{agentId}} konnte nicht geladen werden.",
+    idConflict: "Ein Agent mit dieser ID existiert bereits.",
   },
   skillPackages: {
     modifiedNotLoaded:
