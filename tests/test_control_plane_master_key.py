@@ -134,6 +134,23 @@ def test_worker_decrypt_path_leaves_no_key_file(key_paths: SimpleNamespace) -> N
     assert not key_paths.state_root.exists()
 
 
+def test_worker_connection_env_uses_the_single_decrypt_helper(key_paths: SimpleNamespace) -> None:
+    """M4-E1-T9: MCP bootstrap decrypts stored env values with ``decrypt_env_values`` only."""
+    import koda.control_plane.manager as manager_mod
+    from koda.services.mcp_bootstrap import _decrypt_connection_env
+
+    key = Fernet.generate_key()
+    _write_key(key_paths.key_file, key)
+    ciphertext = Fernet(key).encrypt(b"value").decode()
+    stored = {"env_values_json": f'{{"API_TOKEN": "{ciphertext}"}}'}
+
+    with patch.object(manager_mod, "get_control_plane_manager", side_effect=AssertionError("no manager hop")):
+        assert _decrypt_connection_env(stored) == {"API_TOKEN": "value"}
+        assert _decrypt_connection_env({**stored, "env_values": {"API_TOKEN": "plain"}}) == {"API_TOKEN": "plain"}
+        assert _decrypt_connection_env({"env_values_json": "{}"}) == {}
+    assert not hasattr(manager_mod.ControlPlaneManager, "_decrypt_mcp_env_values")
+
+
 @pytest.mark.parametrize(
     "operation",
     [

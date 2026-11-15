@@ -92,7 +92,7 @@ class TestVerifiedStatusTruthfulness:
 
 
 class TestS3ClientConsolidation:
-    """Verify _build_s3_client passes credentials correctly."""
+    """Verify build_s3_client passes credentials correctly."""
 
     def test_passes_all_configured_credentials(self, monkeypatch):
         from koda.knowledge.v2 import common as common_mod
@@ -107,8 +107,7 @@ class TestS3ClientConsolidation:
         mock_boto3.client.return_value = mock_client
 
         with patch.dict("sys.modules", {"boto3": mock_boto3}):
-            store = common_mod.V2StoreSupport.__new__(common_mod.V2StoreSupport)
-            result = store._build_s3_client()
+            result = common_mod.build_s3_client()
 
         mock_boto3.client.assert_called_once_with(
             "s3",
@@ -129,8 +128,7 @@ class TestS3ClientConsolidation:
 
         mock_boto3 = MagicMock()
         with patch.dict("sys.modules", {"boto3": mock_boto3}):
-            store = common_mod.V2StoreSupport.__new__(common_mod.V2StoreSupport)
-            store._build_s3_client(
+            common_mod.build_s3_client(
                 credentials={
                     "aws_access_key_id": "new-key",
                     "aws_secret_access_key": "new-secret",
@@ -151,8 +149,7 @@ class TestS3ClientConsolidation:
 
         mock_boto3 = MagicMock()
         with patch.dict("sys.modules", {"boto3": mock_boto3}):
-            store = common_mod.V2StoreSupport.__new__(common_mod.V2StoreSupport)
-            store._build_s3_client()
+            common_mod.build_s3_client()
 
         call_kwargs = mock_boto3.client.call_args[1]
         assert call_kwargs["aws_access_key_id"] == "config-key"

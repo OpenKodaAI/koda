@@ -50,7 +50,7 @@ from koda.knowledge.config import (
     KNOWLEDGE_V2_POSTGRES_DSN,
     KNOWLEDGE_V2_POSTGRES_SCHEMA,
 )
-from koda.knowledge.v2.common import V2StoreSupport, get_shared_postgres_backend
+from koda.knowledge.v2.common import get_shared_postgres_backend, object_store_health
 from koda.logging_config import get_logger
 from koda.provider_models import (
     MODEL_FUNCTION_IDS,
@@ -100,7 +100,7 @@ from koda.services.kokoro_manager import (
     kokoro_voice_file_path,
     kokoro_voice_metadata,
 )
-from koda.services.mcp_connection_broker import decrypt_env_values, resolve_mcp_runtime_connection
+from koda.services.mcp_connection_broker import resolve_mcp_runtime_connection
 from koda.services.prompt_budget import PromptSegment, preview_compiled_prompt, preview_modeled_runtime_prompt
 from koda.services.provider_auth import (
     LOGOUT_NOT_SUPPORTED,
@@ -5674,11 +5674,7 @@ class ControlPlaneManager:
         }
 
     def _object_storage_health_payload(self) -> dict[str, Any]:
-        support = V2StoreSupport(
-            agent_id="CONTROL_PLANE",
-            storage_mode=self._merged_global_env().get("KNOWLEDGE_V2_STORAGE_MODE", "primary"),
-        )
-        return dict(support.object_store_health())
+        return object_store_health(self._merged_global_env().get("KNOWLEDGE_V2_STORAGE_MODE", "primary"))
 
     def get_onboarding_status(self) -> dict[str, Any]:
         self.ensure_seeded()
@@ -14119,9 +14115,6 @@ class ControlPlaneManager:
             "created_at": str(row.get("created_at") or ""),
             "updated_at": str(row.get("updated_at") or ""),
         }
-
-    def _decrypt_mcp_env_values(self, env_values_json: str) -> dict[str, str]:
-        return decrypt_env_values(env_values_json)
 
     def get_mcp_runtime_config(self, agent_id: str) -> list[dict[str, Any]]:
         """Get full MCP config with decrypted credentials for runtime bootstrap."""

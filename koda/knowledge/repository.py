@@ -530,68 +530,6 @@ class KnowledgeRepository:
             )
         return
 
-    def list_artifact_evidence(
-        self,
-        *,
-        task_id: int | None,
-        project_key: str,
-        workspace_fingerprint: str,
-        limit: int = 100,
-    ) -> list[dict[str, Any]]:
-        self._require_primary_backend()
-        where: list[str] = []
-        params: list[Any] = []
-        if self._agent_id is not None:
-            where.append("agent_id = ?")
-            params.append(self._scope)
-        if task_id is not None:
-            where.append("task_id = ?")
-            params.append(task_id)
-        if project_key:
-            where.append("project_key = ?")
-            params.append(project_key)
-        if workspace_fingerprint:
-            where.append("workspace_fingerprint = ?")
-            params.append(workspace_fingerprint)
-        params.append(max(1, limit))
-        clause = f" WHERE {' AND '.join(where)}" if where else ""
-        rows = self._run_coro_sync(
-            primary_fetch_all(
-                "SELECT id, evidence_key, agent_id, task_id, artifact_id, "
-                "project_key, workspace_fingerprint, modality, "
-                "label, extracted_text, source_path, source_url, source_hash, embedding_json, confidence, "
-                "trust_level, time_span, frame_ref, metadata_json, created_at "
-                f"FROM artifact_evidence_nodes{clause} ORDER BY id DESC LIMIT ?",
-                tuple(params),
-                agent_id=self._scope,
-            )
-        )
-        return [
-            {
-                "id": row["id"],
-                "evidence_key": row.get("evidence_key") or "",
-                "agent_id": row.get("agent_id"),
-                "task_id": row.get("task_id"),
-                "artifact_id": row.get("artifact_id") or "",
-                "project_key": row.get("project_key") or "",
-                "workspace_fingerprint": row.get("workspace_fingerprint") or "",
-                "modality": row.get("modality") or "",
-                "label": row.get("label") or "",
-                "extracted_text": row.get("extracted_text") or "",
-                "source_path": row.get("source_path") or "",
-                "source_url": row.get("source_url") or "",
-                "source_hash": row.get("source_hash") or "",
-                "embedding": _json_load(row.get("embedding_json"), []),
-                "confidence": float(row.get("confidence") or 0.0),
-                "trust_level": row.get("trust_level") or "untrusted",
-                "time_span": row.get("time_span") or "",
-                "frame_ref": row.get("frame_ref") or "",
-                "metadata": _json_load(row.get("metadata_json"), {}),
-                "created_at": row.get("created_at"),
-            }
-            for row in rows
-        ]
-
     def get_retrieval_trace(self, trace_id: int) -> dict[str, Any] | None:
         self._require_primary_backend()
         return cast(dict[str, Any] | None, self._run_coro_sync(self._postgres.get_retrieval_trace(trace_id)))

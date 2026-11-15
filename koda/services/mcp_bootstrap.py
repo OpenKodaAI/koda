@@ -250,8 +250,8 @@ def _decrypt_connection_env(conn: dict[str, Any]) -> dict[str, str]:
     """Extract environment values from a connection.
 
     Runtime snapshots may inline already-decrypted values under ``env_values``.
-    Manager-backed rows still store encrypted ``env_values_json`` that must be
-    decrypted on demand.
+    Manager-backed rows still store encrypted ``env_values_json``, which
+    ``decrypt_env_values`` (the one MCP env decrypt helper) decrypts on demand.
     """
     # Already-decrypted values from the runtime snapshot payload.
     plain = conn.get("env_values")
@@ -261,10 +261,6 @@ def _decrypt_connection_env(conn: dict[str, Any]) -> dict[str, str]:
     raw_json = conn.get("env_values_json", "{}")
     if not raw_json or raw_json == "{}":
         return {}
-    try:
-        from koda.control_plane.manager import get_control_plane_manager
+    from koda.services.mcp_connection_broker import decrypt_env_values
 
-        manager = get_control_plane_manager()
-        return manager._decrypt_mcp_env_values(raw_json)
-    except Exception:
-        return {}
+    return decrypt_env_values(str(raw_json))
