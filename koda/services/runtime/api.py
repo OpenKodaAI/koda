@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import mimetypes
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
 from urllib.parse import quote
@@ -299,13 +300,158 @@ def _task_runtime_root(task_id: int) -> Path:
     return Path(get_runtime_controller().runtime_root) / "tasks" / str(task_id)
 
 
+def _projected(
+    source: Mapping[str, Any],
+    fields: tuple[str, ...],
+    path_fields: tuple[str, ...],
+    task_root: Path,
+) -> dict[str, object]:
+    """``fields`` of ``source`` as they are and ``path_fields`` relative to ``task_root``; nothing else."""
+    payload: dict[str, object] = {key: source[key] for key in fields if key in source}
+    for key in path_fields:
+        if key in source:
+            payload[key] = _task_relative_path(source[key], task_root)
+    return payload
+
+
+# The environment row's columns other than its host paths; ``workspace_path``, ``runtime_dir``,
+# ``base_work_dir``, ``source_root_path`` and ``checkpoint_path`` are given relative to the task's
+# runtime directory, or null outside it (D-358).
+_ENVIRONMENT_FIELDS = (
+    "id",
+    "task_id",
+    "user_id",
+    "chat_id",
+    "classification",
+    "environment_kind",
+    "isolation",
+    "duration",
+    "status",
+    "current_phase",
+    "branch_name",
+    "created_worktree",
+    "worktree_mode",
+    "is_pinned",
+    "checkpoint_status",
+    "parent_env_id",
+    "lineage_root_env_id",
+    "source_checkpoint_id",
+    "recovery_state",
+    "revision",
+    "browser_transport",
+    "display_id",
+    "vnc_port",
+    "novnc_port",
+    "pause_state",
+    "pause_reason",
+    "save_verified_at",
+    "process_pid",
+    "process_pgid",
+    "browser_scope_id",
+    "created_at",
+    "updated_at",
+    "last_heartbeat_at",
+    "retention_expires_at",
+    "source_root_exists",
+)
+_ENVIRONMENT_PATH_FIELDS = ("workspace_path", "runtime_dir", "base_work_dir", "source_root_path", "checkpoint_path")
+
+
+def _environment_payload(env: Mapping[str, Any]) -> dict[str, object]:
+    task_root = _task_runtime_root(int(env.get("task_id") or 0))
+    return _projected(env, _ENVIRONMENT_FIELDS, _ENVIRONMENT_PATH_FIELDS, task_root)
+
+
+# A terminal row's columns; its ``path`` and ``stream_path`` are relative to the task's runtime
+# directory or null, and a ``kernel://`` session reference, which is no host path, passes (D-358).
+_TERMINAL_FIELDS = (
+    "id",
+    "task_id",
+    "env_id",
+    "terminal_kind",
+    "label",
+    "interactive",
+    "cursor_offset",
+    "last_offset",
+    "created_at",
+    "updated_at",
+)
+
+
+def _terminal_payload(row: Mapping[str, Any]) -> dict[str, object]:
+    task_root = _task_runtime_root(int(row.get("task_id") or 0))
+    payload = _projected(row, _TERMINAL_FIELDS, (), task_root)
+    for key in ("path", "stream_path"):
+        if key in row:
+            value = row[key]
+            kernel_ref = str(value or "").startswith("kernel://")
+            payload[key] = value if kernel_ref else _task_relative_path(value, task_root)
+    return payload
+
+
+# Runtime events are answered through an explicit projection (D-357): the envelope's named fields,
+# ``artifact_refs`` relative to the task's runtime directory (a ref outside it is left out), and,
+# for the event types that carry the browser session, a kernel answer or a host path, a payload of
+# named fields with each path relative to the task's runtime directory or null. The other event
+# types are built by the runtime from named scalar fields, and their payload passes as it is.
+_EVENT_FIELDS = ("seq", "ts", "task_id", "env_id", "attempt", "phase", "type", "severity", "resource_snapshot_ref")
+_EVENT_PAYLOAD_PROJECTIONS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    # event type: (fields passed as they are, host-path fields made task-relative)
+    "browser.frame": ((), ("path",)),
+    "browser.video_ready": ((), ("path",)),
+    "browser.trace_ready": ((), ("path",)),
+    "worktree.created": (("branch_name", "created", "mode"), ("workspace_path", "metadata_path")),
+    "env.provisioning.started": (("classification",), ("base_work_dir",)),
+    "env.provisioning.finished": ((), ("workspace_path",)),
+    "checkpoint.saved": (("checkpoint_id", "kernel_checkpoint_id"), ("checkpoint_dir",)),
+}
+# A ``runtime_kernel.<operation>`` event records the kernel's whole answer and its health; only these
+# scalars are sent.
+_RUNTIME_KERNEL_EVENT_FIELDS = ("operation", "recorded_at", "required", "forwarded", "ok", "status", "reason", "error")
+
+
+def _browser_session_payload(session: Mapping[str, Any], task_root: Path) -> dict[str, object]:
+    return _projected(session, _BROWSER_FIELDS, ("runtime_dir",), task_root)
+
+
+def _runtime_event(event: Mapping[str, Any]) -> dict[str, object]:
+    task_root = _task_runtime_root(int(event.get("task_id") or 0))
+    projected: dict[str, object] = {key: event[key] for key in _EVENT_FIELDS if key in event}
+    raw_payload = event.get("payload")
+    if isinstance(raw_payload, str):
+        # A live event carries the stored JSON text; a stored one, the decoded object.
+        try:
+            raw_payload = json.loads(raw_payload)
+        except ValueError:
+            raw_payload = {}
+    payload: Mapping[str, Any] = raw_payload if isinstance(raw_payload, Mapping) else {}
+    event_type = str(event.get("type") or "")
+    if event_type == "browser.started":
+        projected["payload"] = _browser_session_payload(payload, task_root)
+    elif event_type.startswith("runtime_kernel."):
+        projected["payload"] = _projected(payload, _RUNTIME_KERNEL_EVENT_FIELDS, (), task_root)
+    elif event_type in _EVENT_PAYLOAD_PROJECTIONS:
+        fields, path_fields = _EVENT_PAYLOAD_PROJECTIONS[event_type]
+        projected["payload"] = _projected(payload, fields, path_fields, task_root)
+    else:
+        projected["payload"] = dict(payload)
+    raw_refs = event.get("artifact_refs")
+    refs = raw_refs if isinstance(raw_refs, list) else []
+    projected["artifact_refs"] = [
+        relative for ref in refs if (relative := _task_relative_path(ref, task_root)) is not None
+    ]
+    return projected
+
+
+def _runtime_events(events: list[dict[str, Any]]) -> list[dict[str, object]]:
+    return [_runtime_event(event) for event in events]
+
+
 def _browser_payload(task_id: int) -> dict[str, object]:
     controller = get_runtime_controller()
     task_root = _task_runtime_root(task_id)
     snapshot = controller.get_browser_snapshot(task_id)
-    browser: dict[str, object] = {key: snapshot[key] for key in _BROWSER_FIELDS if key in snapshot}
-    if "runtime_dir" in snapshot:
-        browser["runtime_dir"] = _task_relative_path(snapshot["runtime_dir"], task_root)
+    browser = _browser_session_payload(snapshot, task_root)
     preview_path = _latest_browser_preview_path(task_id)
     browser["screenshot_url"] = f"/api/runtime/tasks/{task_id}/browser/screenshot"
     browser["preview_url"] = str(browser["screenshot_url"])
@@ -332,7 +478,8 @@ async def _runtime_environments(request: web.Request) -> web.Response:
     auth = _authorize_runtime_access(request)
     if auth:
         return auth
-    return web.json_response({"items": get_runtime_controller().store.list_environments()})
+    environments = get_runtime_controller().store.list_environments()
+    return web.json_response({"items": [_environment_payload(env) for env in environments]})
 
 
 def _page_payload(items: list[object], *, limit: int, offset: int) -> dict[str, object]:
@@ -763,7 +910,7 @@ async def _runtime_environment_detail(request: web.Request) -> web.Response:
     env = get_runtime_controller().store.get_environment(env_id)
     if env is None:
         return web.json_response({"error": "environment not found"}, status=404)
-    return web.json_response(env)
+    return web.json_response(_environment_payload(env))
 
 
 async def _runtime_task_detail(request: web.Request) -> web.Response:
@@ -859,14 +1006,9 @@ async def _runtime_task_detail(request: web.Request) -> web.Response:
     from koda.knowledge.presentation import redact_runtime_knowledge_payload
 
     environment = controller.store.get_environment_by_task(task_id)
-    environment_payload = dict(environment) if environment else environment
-    if environment_payload and "runtime_dir" in environment_payload:
-        # The dashboard gets the task-relative directory, never the host path (M3-E8-T4).
-        environment_payload["runtime_dir"] = _task_relative_path(
-            environment_payload["runtime_dir"], _task_runtime_root(task_id)
-        )
+    environment_payload = _environment_payload(environment) if environment else None
     list_events = getattr(controller.store, "list_events", None)
-    runtime_events = list_events(task_id=task_id, after_seq=0) if callable(list_events) else []
+    runtime_events = _runtime_events(list_events(task_id=task_id, after_seq=0)) if callable(list_events) else []
     run_graph_payload: dict[str, object] | None = None
     run_replay_payload: dict[str, object] | None = None
     sandbox_doctor_payload: dict[str, object] | None = None
@@ -894,7 +1036,7 @@ async def _runtime_task_detail(request: web.Request) -> web.Response:
             agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
             task_id=task_id,
             task=task,
-            environment=environment,
+            environment=environment_payload,
             runtime_kernel=runtime_kernel_snapshot,
         )
     except Exception:
@@ -965,7 +1107,7 @@ async def _runtime_task_events(request: web.Request) -> web.Response:
     task_id = int(request.match_info["task_id"])
     after_seq = _parse_after_seq(request)
     items = get_runtime_controller().store.list_events(task_id=task_id, after_seq=after_seq)
-    return web.json_response({"items": items})
+    return web.json_response({"items": _runtime_events(items)})
 
 
 async def _runtime_task_run_graph(request: web.Request) -> web.Response:
@@ -977,7 +1119,7 @@ async def _runtime_task_run_graph(request: web.Request) -> web.Response:
     task = controller.store.get_task_runtime(task_id)
     if task is None:
         return web.json_response({"error": "task not found"}, status=404)
-    events = controller.store.list_events(task_id=task_id, after_seq=0)
+    events = _runtime_events(controller.store.list_events(task_id=task_id, after_seq=0))
     from koda.services.run_graph_store import graph_payload_for_execution
 
     return web.json_response(
@@ -999,7 +1141,7 @@ async def _runtime_task_replay(request: web.Request) -> web.Response:
     task = controller.store.get_task_runtime(task_id)
     if task is None:
         return web.json_response({"error": "task not found"}, status=404)
-    events = controller.store.list_events(task_id=task_id, after_seq=0)
+    events = _runtime_events(controller.store.list_events(task_id=task_id, after_seq=0))
     from koda.services.run_graph_store import replay_payload_for_execution
 
     return web.json_response(
@@ -1028,12 +1170,13 @@ async def _runtime_task_sandbox_doctor(request: web.Request) -> web.Response:
         log.exception("runtime_task_sandbox_doctor_kernel_snapshot_failed", task_id=task_id)
     from koda.services.sandbox_doctor import build_sandbox_doctor_payload
 
+    environment = controller.store.get_environment_by_task(task_id)
     return web.json_response(
         build_sandbox_doctor_payload(
             agent_id=str(task.get("agent_id") or AGENT_ID or "").strip().upper(),
             task_id=task_id,
             task=task,
-            environment=controller.store.get_environment_by_task(task_id),
+            environment=_environment_payload(environment) if environment else None,
             runtime_kernel=runtime_kernel_snapshot,
         )
     )
@@ -1110,7 +1253,7 @@ async def _runtime_task_terminals(request: web.Request) -> web.Response:
         preview = ""
         if path and Path(str(path)).exists():
             preview = _tail_text(Path(str(path)))
-        enriched.append({**terminal, "preview": redact_value(preview)})
+        enriched.append({**_terminal_payload(terminal), "preview": redact_value(preview)})
     return web.json_response({"items": enriched})
 
 
@@ -1375,6 +1518,7 @@ async def _runtime_task_sessions(request: web.Request) -> web.Response:
     task_id = int(request.match_info["task_id"])
     sessions = dict(get_runtime_controller().list_sessions(task_id))
     sessions["browser_sessions"] = _browser_session_rows(sessions.get("browser_sessions") or [])
+    sessions["terminals"] = [_terminal_payload(row) for row in sessions.get("terminals") or []]
     return web.json_response(sessions)
 
 
@@ -1413,7 +1557,7 @@ async def _runtime_stream_sse(request: web.Request) -> web.StreamResponse:
         env_id=env_id,
         after_seq=after_seq,
     ):
-        await response.write(f"data: {json.dumps(event, ensure_ascii=False)}\n\n".encode())
+        await response.write(f"data: {json.dumps(_runtime_event(event), ensure_ascii=False)}\n\n".encode())
     return response
 
 
@@ -1444,7 +1588,7 @@ async def _runtime_stream_ws(request: web.Request) -> web.WebSocketResponse:
             env_id=env_id,
             after_seq=after_seq,
         ):
-            await ws.send_json(event)
+            await ws.send_json(_runtime_event(event))
     finally:
         RUNTIME_WS_CLIENTS_ACTIVE.dec()
     return ws
@@ -1913,7 +2057,7 @@ async def _runtime_attach_terminal(request: web.Request) -> web.Response:
         {
             "attach": attach,
             "terminal": {
-                **terminal_row,
+                **_terminal_payload(terminal_row),
                 **(
                     {"kernel_session_id": attach["kernel_session_id"]}
                     if str(attach.get("kernel_session_id") or "").strip()

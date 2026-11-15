@@ -653,7 +653,10 @@ async def test_runtime_task_detail_skips_legacy_local_knowledge_in_postgres_prim
     ],
 )
 async def test_runtime_task_detail_environment_runtime_dir_is_task_relative(tmp_path, runtime_dir, expected):
-    """The environment's runtime_dir is relative to the task's runtime directory, or null (M3-E8-T4)."""
+    """The environment's runtime_dir is relative to the task's runtime directory, or null (M3-E8-T4).
+
+    A workspace outside it, like any host path there, is null (D-358).
+    """
     env = {"id": 3, "task_id": 12, "runtime_dir": str(tmp_path / runtime_dir), "workspace_path": "/work/repo"}
     controller = _ControllerStub(runtime_root=tmp_path / "runtime", env=env)
     request = _request(task_id=12, headers={"X-Runtime-Token": "secret"})
@@ -674,7 +677,7 @@ async def test_runtime_task_detail_environment_runtime_dir_is_task_relative(tmp_
     assert str(tmp_path) not in response.text
     environment = json.loads(response.text)["environment"]
     assert environment["runtime_dir"] == expected
-    assert environment["workspace_path"] == "/work/repo"
+    assert environment["workspace_path"] is None
     # The store's row is not changed.
     assert env["runtime_dir"] == str(tmp_path / runtime_dir)
 
