@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import html
+import itertools
 from typing import Any
 
-from telegram.error import RetryAfter
+from telegram.error import BadRequest, NetworkError, RetryAfter
 
 from koda.config import SQUAD_DEBOUNCE_MS
 from koda.logging_config import get_logger
@@ -22,6 +23,7 @@ from koda.squads.threads import ThreadDescriptor
 log = get_logger(__name__)
 
 _TELEGRAM_MAX_TEXT = 4096
+_NETWORK_RETRY_DELAY_SECONDS = 1.0
 _BOT_CACHE: dict[str, Any] = {}
 _BUFFERS: dict[tuple[int, int, int | None], _OutboundBuffer] = {}
 
@@ -53,9 +55,28 @@ class _OutboundBuffer:
         async with self.lock:
             items = list(self.items)
             self.items.clear()
-        if not items:
-            return
-        parse_mode = next((item[2] for item in reversed(items) if item[2]), None)
+        # Replies go out in order. Consecutive replies that share a parse_mode
+        # are combined into one message; a reply is never sent under another
+        # reply's parse_mode. A failed send is logged and the rest still go out.
+        for parse_mode, run in itertools.groupby(items, key=lambda item: item[2]):
+            group = list(run)
+            try:
+                await self._send_group(group, parse_mode=parse_mode)
+            except Exception:
+                log.exception(
+                    "squad_outbound_send_failed",
+                    chat_id=self.chat_id,
+                    message_thread_id=self.message_thread_id,
+                    items=len(group),
+                    parse_mode=parse_mode,
+                )
+
+    async def _send_group(
+        self,
+        items: list[tuple[str | None, str, str | None, Any | None]],
+        *,
+        parse_mode: str | None,
+    ) -> None:
         reply_markup = next((item[3] for item in reversed(items) if item[3] is not None), None)
         combined = _combine_items(items, parse_mode=parse_mode)
         for index, chunk in enumerate(_split_telegram_text(combined)):
@@ -104,12 +125,17 @@ def _combine_items(items: list[tuple[str | None, str, str | None, Any | None]], 
 
 
 async def _send_with_retry(bot: Any, kwargs: dict[str, Any]) -> Any:
+    """Send once more after a flood-wait or a transient network error; anything else raises."""
     try:
         return await bot.send_message(**kwargs)
     except RetryAfter as exc:
         delay = float(getattr(exc, "retry_after", 1.0) or 1.0)
         await asyncio.sleep(max(0.1, delay))
-        return await bot.send_message(**kwargs)
+    except BadRequest:
+        raise
+    except NetworkError:
+        await asyncio.sleep(_NETWORK_RETRY_DELAY_SECONDS)
+    return await bot.send_message(**kwargs)
 
 
 def get_outbound_bot(token: str) -> Any:
