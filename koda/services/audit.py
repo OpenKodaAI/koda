@@ -143,10 +143,16 @@ def _primary_audit_backend() -> Any | None:
 
 
 async def _insert_audit_primary(event: AuditEvent) -> None:
+    """Write ``event`` through the primary backend, raising when it is not written."""
     backend = _primary_audit_backend()
     if backend is None:
         raise RuntimeError("primary audit backend unavailable")
-    await backend.persist_audit_event(
+    # On a transient ``asyncio.run`` loop (no bridge loop running) the shared
+    # backend cache was just cleared, so this backend is fresh, and
+    # ``persist_audit_event`` writes nothing until it is bootstrapped.
+    if not backend.bootstrapped and not await backend.start():
+        raise RuntimeError("primary audit backend unavailable")
+    event_id = await backend.persist_audit_event(
         event_type=event.event_type,
         timestamp=event.timestamp,
         pod_name=str(event.pod_name or ""),
@@ -157,6 +163,8 @@ async def _insert_audit_primary(event: AuditEvent) -> None:
         cost_usd=event.cost_usd,
         duration_ms=event.duration_ms,
     )
+    if event_id is None:
+        raise RuntimeError("audit event not written")
 
 
 def _run_coro_sync(coro: Any) -> Any:

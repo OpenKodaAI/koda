@@ -109,12 +109,12 @@ function statusTone(status: string | null | undefined): StatusDotTone {
   return "neutral";
 }
 
-function StatusLabel({ status }: { status: string }) {
+function StatusLabel({ status, label }: { status: string; label?: string }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--panel-soft)] px-2.5 py-1 text-[0.75rem] text-[var(--text-secondary)]">
       <StatusDot tone={statusTone(status)} pulse={status === "running" || status === "queued"} />
       <span className="font-mono text-[0.6875rem] uppercase tracking-[var(--tracking-mono)]">
-        {status}
+        {label ?? status}
       </span>
     </span>
   );
@@ -1113,7 +1113,11 @@ function ProposalsPanel({
                 </span>
               </span>
               <span className="flex flex-col items-end gap-1">
-                <StatusLabel status={proposal.status} />
+                <StatusLabel
+                  status={proposal.status}
+                  // D-116: "applied" only marks the effect ledger; nothing changes the agent.
+                  label={proposal.status === "applied" ? t("evaluations.proposals.status.applied") : undefined}
+                />
                 <span className="text-[0.75rem] text-[var(--text-tertiary)]">
                   {formatRelativeTime(proposal.updated_at ?? proposal.created_at)}
                 </span>
@@ -1134,7 +1138,7 @@ function ProposalsPanel({
         <EvalSidePanel
           eyebrow={translate("generated.evaluations.improvement_proposal_v1_2bb34a73")}
           title={t("generated.evaluations.proposal_review_fec2ddd7")}
-          description={t("generated.evaluations.validate_apply_or_roll_back_approved_operati_5b37b9ab")}
+          description={t("evaluations.proposals.reviewDescription")}
         >
           <PanelSignal
             tone={activeCount > 0 ? "warning" : "success"}
@@ -1511,7 +1515,8 @@ function ProposalActions({
     },
     {
       action: "apply",
-      label: t("generated.evaluations.apply_56548d17"),
+      // D-116: apply only records the decision until typed executors exist.
+      label: t("evaluations.proposals.accept"),
       icon: CheckCircle2,
       enabled: proposal.status === "approved" && proposalValidationPassed(proposal) && proposalHasRollbackPlan(proposal),
     },

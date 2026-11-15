@@ -789,3 +789,19 @@ Rules:
 - **Consequences:**
   - An operator who set `AGENT_EXECUTION_POLICY_JSON` by hand with interior-wildcard allow rules sees those rules follow fnmatch after AG-06. `docs/operations/upgrade.md` says so, and AG-09 reports the affected rules.
   - Dashboard-authored rules keep the meaning they had in validation and simulation once delivered.
+
+## ADR-040 — The knowledge backend's schema is a per-connection startup search_path
+
+- **Status:** accepted (2026-11-15, Principal Architect, under the operator's delegated decision authority). Implemented by M2-E2-T4 (df47c84, 06a552a).
+- **Context:**
+  - M2-E2-T4 asked to schema-qualify the SQL so that the shared pool no longer runs `SET search_path` on every call, which dropped asyncpg's statement cache.
+  - About 240 `primary_*` queries name tables without a schema. A first attempt qualified them at run time with a regex rewriter. Review showed that it silently sent a CTE named like a table to the real table, which skips an agent filter, and left quoted names, comments and some comma lists unqualified.
+- **Decision:**
+  - Each pooled and direct connection gets `search_path` as an asyncpg startup setting: the backend schema, followed by the database's own default (read once with `SHOW search_path` at bootstrap). A startup setting survives `RESET ALL` on release and keeps the statement cache.
+  - No SQL is rewritten. Schema names come from configuration only.
+  - A connection pooler must forward `search_path`. For PgBouncer, list it in `track_extra_parameters` (1.20 or later; 1.25.1 or later for its search_path fix) and never in `ignore_startup_parameters`. `docs/config/reference.md` states this, and the pooler notes in the operations docs link to it.
+- **Alternatives considered:**
+  - Qualify every SQL literal by hand: about 240 edits across 22 modules for no behaviour gain, and every new query must remember the prefix.
+  - Keep the run-time rewriter: correct only for the query shapes it parses, silently wrong for the rest.
+  - `SET search_path` on each acquire: a round trip per call, and the statement cache problem returns.
+- **Consequences:** an operator who puts PgBouncer in front of Postgres must forward `search_path`; the docs say how. D-263 records that schema names are interpolated without quote escaping (configuration-only input).

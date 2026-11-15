@@ -83,3 +83,14 @@ def test_scaling_runbook_preserves_current_phase0_budgets() -> None:
 
     for marker in ["`bench`", "`chaos`", "Security / deny", "Observability / replay"]:
         assert marker in runbook
+
+
+def test_docs_never_claim_accepting_a_proposal_changes_the_agent() -> None:
+    # M6-E1-T9: apply only marks ledger_only effects; no executor changes the agent.
+    proposal_contract = " ".join(_read("docs/architecture/improvement-proposal.md").split())
+    phase_contracts = " ".join(_read("docs/architecture/top-tier-phase-contracts.md").split())
+
+    assert "remain inactive until explicit approval, validation, and apply" not in proposal_contract
+    assert "non-mutating until the proposal lifecycle approves" not in phase_contracts
+    assert "accepting them does not change the agent" in proposal_contract
+    assert "accepting the proposal does not change the agent" in phase_contracts

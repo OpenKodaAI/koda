@@ -1365,12 +1365,12 @@ Owner BE · Risk med · Gate none · **ready** · Deps —
 - **Tests:** G-RS; G-PG migration test · **Evidence:** —
 
 #### M2-E2-T4 · Pool-level codecs and schema-qualified SQL
-Owner BE · Risk med · Gate none · **ready** · Deps —
+Owner BE · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-076, F-PLT-01
 - **Files:** `koda/state/primary.py` (~334)
-- **Do:** install type codecs once in the pool `init` hook and schema-qualify the SQL, instead of calling `set_type_codec` and `SET search_path` on every call.
+- **Do:** install type codecs once in the pool `init` hook and set the backend schema once per connection as a startup `search_path` (ADR-040; this replaces the earlier "schema-qualify the SQL"), instead of calling `set_type_codec` and `SET search_path` on every call.
 - **Done when:** knowledge-backend queries on a shared pool always get datetimes, and the statement cache is no longer dropped per call.
-- **Tests:** G-PG regression test that mixes callers on one pool · **Evidence:** —
+- **Tests:** G-PG regression test that mixes callers on one pool · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": codecs installed once per connection; the backend schema is a startup `search_path` (ADR-040); Postgres tests show a CTE named like a table, quoted names and `current_schema()` resolve to the schema, and the statement cache is kept
 
 #### M2-E2-T5 · A migrations gate that detects drift
 Owner OPS · Risk low · Gate none · **ready** · Deps —
@@ -1475,12 +1475,12 @@ Owner BE (FE, PROD) · Risk med · Gate decision Q-23 · **blocked** · Deps M2-
 #### M2-E5 — Retention and privacy
 
 #### M2-E5-T1 · Retention job in report-only mode
-Owner BE (OPS) · Risk low · Gate none · **ready** · Deps —
+Owner BE (OPS) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-053 (part), F-PLT-06, TD-028
 - **Files:** `koda/state/history_store.py` (~1431), `koda/services/audit.py` (~376), `koda/services/lifecycle_supervisor.py`, `koda/__main__.py` (~807 stale comment)
 - **Do:** target the real tables (`query_history`, `audit_events`) with TIMESTAMPTZ comparisons. Log what would be deleted, without deleting, until M2-E5-T2 is approved. The daily job stops failing.
 - **Done when:** the job runs daily without warnings and reports counts.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": the retention job reports per table and deletes nothing; one report per deployment per day under a transaction advisory lock; the record is written without the bridge loop
 
 #### M2-E5-T2 · Enable retention deletes
 Owner BE (OPS) · Risk high · Gate needs-approval (§13: destructive data operation; retention defaults) · **blocked** · Deps M2-E5-T1, M2-E6-T1
@@ -2683,12 +2683,12 @@ Owner FE · Risk low · Gate none · **ready** · Deps —
 M6-E1-T1 moved to M3-E5-T3 (section 4.2).
 
 #### M6-E1-T2 · Mark non-Telegram channels unavailable
-Owner PROD (FE) · Risk low · Gate none · **ready** · Deps —
+Owner PROD (FE) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-017, F-CHN-06
 - **Files:** `apps/web/src/components/control-plane/editor/channel-catalog-data.ts` (~48), the channel cards, `README.md` (~108)
 - **Do:** show the 8 adapters as "Not available", with credential forms disabled. This is reversible. Correct the README.
 - **Done when:** no non-Telegram channel can show "connected".
-- **Tests:** web tests; G · **Evidence:** —
+- **Tests:** web tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": the 8 non-Telegram adapters show "Not available", run no status probe and never read as connected; the README no longer claims them
 
 #### M6-E1-T3 · Remove the non-Telegram channel adapters (Q-3 remove outcome)
 Owner AIM · Risk med · Gate needs-approval (§13: removes advertised functionality; Q-3; approval batch 3) · **blocked** · Deps M6-E1-T2
@@ -2741,20 +2741,20 @@ Owner BE · Risk low · Gate none · **ready** · Deps —
 - **Tests:** G-PG with `RUNTIME_ENVIRONMENTS_ENABLED=true` · **Evidence:** —
 
 #### M6-E1-T9 · Improvement proposals say what they do
-Owner PROD (FE) · Risk low · Gate none (Q-16 default) · **ready** · Deps —
+Owner PROD (FE) · Risk low · Gate none (Q-16 default) · **done** · Deps —
 - **Addresses:** D-116, TD-194, F-MON-24
 - **Files:** `koda/services/improvement_proposals.py` (~505), the evaluations UI, `README.md` (~28)
 - **Do:** relabel "apply" as "accept (recorded)" in the API docs, UI and README until typed executors exist.
 - **Done when:** no surface claims that accepting a proposal changes an agent.
-- **Tests:** web tests; G · **Evidence:** —
+- **Tests:** web tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": "Accept (recorded)" in the UI, OpenAPI, docs and README; nothing claims that accepting a proposal changes the agent
 
 #### M6-E1-T10 · Label the knowledge assets UI "Not available yet"
-Owner FE (PROD) · Risk low · Gate none · **ready** · Deps —
+Owner FE (PROD) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** F-MEM-25 (operator knowledge assets are saved but never used), R-53, MISSION §6.3
 - **Files:** the control-plane knowledge-assets screens, i18n resources
 - **Do:** show the asset editor as "Not available yet: saved assets are not used in answers", and disable creating new assets. Existing assets stay stored. The Q-6 outcome task removes the label or the screen.
 - **Done when:** no screen implies that a saved asset influences answers, in either locale.
-- **Tests:** web component test; G · **Evidence:** —
+- **Tests:** web component test; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": apps/web has no knowledge-assets screen, so no screen implies a saved asset influences answers; the API is unchanged until Q-6
 
 #### M6-E2 — Governance surfaces
 
@@ -2849,20 +2849,20 @@ Owner BE · Risk low · Gate none · **ready** · Deps —
 - **Tests:** handler tests; G; changelog entry · **Evidence:** —
 
 #### M6-E3-T5 · Label the video and music slots "Not available yet"
-Owner FE (PROD) · Risk low · Gate none · **ready** · Deps —
+Owner FE (PROD) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** F-ADM-06 (operators can pick defaults for slots whose functions only raise), R-53, MISSION §6.3
 - **Files:** the models settings UI, i18n resources
 - **Do:** show both slots as "Not available yet" and disable selecting a default. Stored values stay. M6-E3-T3 removes or implements them under Q-14.
 - **Done when:** no models screen offers a video or music default as if it worked, in either locale.
-- **Tests:** web component test; G · **Evidence:** —
+- **Tests:** web component test; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": the video and music slots are locked and read "Not available yet" on the system models screen and the agent resources tab; stored values are kept
 
 #### M6-E3-T6 · Snapshot tools say what they do
-Owner AIM · Risk low · Gate none · **ready** · Deps —
+Owner AIM · Risk low · Gate none · **done** · Deps —
 - **Addresses:** F-SKL-14 (`snapshot_restore` only loads a snapshot for inspection; task and user ids share a namespace)
 - **Files:** `koda/snapshots/store.py`, `koda/snapshots/capture.py`, `tool_dispatcher.py` (~2190-2290), `tool_prompt.py`
 - **Do:** describe `snapshot_restore` in the tool prompt as "load for inspection" (keeping the existing PT-BR text untranslated, and adding the clarification), and key snapshots by an explicit scope (`task:<id>` or `user:<id>`), so the two never collide. The feature stays off by default (`SNAPSHOT_ENABLED`).
 - **Done when:** a task id equal to a user id no longer reads the other's snapshot, and the tool description matches the behaviour.
-- **Tests:** snapshot tests; G · **Evidence:** —
+- **Tests:** snapshot tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": snapshots are keyed `task:<id>` or `user:<id>`, and the tool prompt says snapshot_restore loads for inspection only
 
 #### M6-E3-T7 · Skill package version and compatibility checks
 Owner SEC (AIM) · Risk low · Gate none · **pending** · Deps M1-E4-T3
@@ -2907,20 +2907,20 @@ Owner AIM (FE) · Risk med · Gate none · **pending** · Deps M3-E4-T1
 #### M7-E1 — Health and recovery
 
 #### M7-E1-T1 · Health that reflects failure
-Owner OPS · Risk med · Gate none · **ready** · Deps —
+Owner OPS · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-105, F-MON-02
 - **Files:** `koda/control_plane/supervisor.py` (~297), compose healthchecks, gRPC health probes
 - **Do:** `/ready` returns 503 when a critical dependency is down, while `/health` stays a liveness probe. Add gRPC health checks for the sidecars that remain, and use `depends_on: service_healthy`.
 - **Done when:** stopping Postgres makes `/ready` return 503, and compose orders startup on health.
-- **Tests:** unit tests; G-CI · **Evidence:** —
+- **Tests:** unit tests; G-CI · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": `/ready` answers 503 while Postgres or the runtime kernel is down and `/health` stays liveness; compose orders startup on service health
 
 #### M7-E1-T2 · Reconcile backoff and socket-path validation
-Owner OPS · Risk low · Gate none · **ready** · Deps —
+Owner OPS · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-177, D-178, SM-12, SM-13, F-ORC-19, J-17
 - **Files:** `koda/control_plane/supervisor.py`, `koda/config.py` (the kernel target)
 - **Do:** back off exponentially while the kernel is unreachable, and log the traceback once per state change. Validate the UDS path length at startup, and close gRPC channels on shutdown.
 - **Done when:** the log grows by less than 50 KB in 10 minutes with the kernel down, and SIGTERM exits within 5 s on a bad socket path.
-- **Tests:** unit tests; G · **Evidence:** —
+- **Tests:** unit tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": reconcile backs off from 5 s to 60 s with one traceback per state change (25 KB of log in 10 minutes with the kernel down); an over-long socket path exits in 1.7 s
 
 #### M7-E1-T3 · Runtime-kernel graceful shutdown
 Owner OPS (BE) · Risk med · Gate none · **ready** · Deps —
@@ -2931,12 +2931,12 @@ Owner OPS (BE) · Risk med · Gate none · **ready** · Deps —
 - **Tests:** G-RS; G-CI · **Evidence:** —
 
 #### M7-E1-T4 · Telegram outbound flush
-Owner AIM · Risk low · Gate none · **ready** · Deps —
+Owner AIM · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-168, F-SQD-24
 - **Files:** `koda/squads/telegram_outbound.py` (~51)
 - **Do:** group buffered items by `parse_mode`, and log or retry on send errors.
 - **Done when:** a send error no longer silently drops buffered replies.
-- **Tests:** unit tests; G · **Evidence:** —
+- **Tests:** unit tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": buffered squad replies are grouped by parse_mode in order, a transient network error is retried once, and a failed send is logged while the rest are sent
 
 #### M7-E1-T5 · Checkpoint restore after a kernel restart
 Owner OPS (BE) · Risk med · Gate decision Q-8 · **blocked** · Deps M7-E1-T3
@@ -2991,12 +2991,12 @@ Owner OPS · Risk high · Gate needs-approval (§13: data-volume operation on ex
 - **Tests:** CLI tests; changelog entry · **Evidence:** —
 
 #### M7-E2-T4 · `install.sh` prerequisites
-Owner OPS · Risk low · Gate none · **ready** · Deps —
+Owner OPS · Risk low · Gate none · **in-review** · Deps —
 - **Addresses:** D-218, F-PLT-22
 - **Files:** `scripts/install.sh` (~59)
 - **Do:** check for Node 20 or later, or install it from NodeSource. Detect the distro for the Docker apt repository.
 - **Done when:** an old Node aborts with a clear message, and a Debian host works.
-- **Tests:** shellcheck; unit test of the script logic · **Evidence:** —
+- **Tests:** shellcheck; unit test of the script logic · **Evidence:** VALIDATION_REPORT.md "Integration batch 2": an installed Node below 20 aborts with a clear message and the Docker apt repository follows /etc/os-release (13 tests); shellcheck has not run (not available in this environment), so the task stays in review until CI runs it
 
 #### M7-E2-T5 · Drop the Python `koda` console script
 Owner OPS · Risk low · Gate needs-approval (§13: removes an exposed command) · **blocked** · Deps —

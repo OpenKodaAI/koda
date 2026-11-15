@@ -183,6 +183,8 @@ class KnowledgeV2PostgresBackend:
         self._start_retries = max(0, int(start_retries))
         self._retry_base_seconds = max(0.05, float(retry_base_seconds))
         self._ready = False
+        # The database or role default search_path, read at bootstrap.
+        self._default_search_path = ""
         self._vector_enabled = False
         self._ensure_lock = asyncio.Lock()
         self._pool: Any | None = None
@@ -312,6 +314,8 @@ class KnowledgeV2PostgresBackend:
             try:
                 conn = await self._open_direct_connection()
                 try:
+                    # This connection has no startup search_path, so it reports the default.
+                    self._default_search_path = str(await conn.fetchval("SHOW search_path") or "")
                     await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{self._schema}"')
                     await conn.execute(
                         f"""CREATE TABLE IF NOT EXISTS "{self._schema}"."schema_migrations" (
@@ -392,7 +396,41 @@ class KnowledgeV2PostgresBackend:
             timeout=self._acquire_timeout_seconds,
             command_timeout=self._query_timeout_seconds,
             max_inactive_connection_lifetime=max(1, KNOWLEDGE_V2_POSTGRES_IDLE_TIMEOUT_SECONDS),
+            server_settings=self._session_server_settings(),
+            init=self._init_connection,
         )
+
+    def _session_server_settings(self) -> dict[str, str]:
+        """Startup settings for the connections ``_connection()`` hands out.
+
+        ``search_path`` resolves the unqualified names in the
+        ``koda.state.primary`` helpers' SQL to the backend schema. A startup
+        setting overrides the database or role default search_path, so that
+        default, read at bootstrap, follows the schema: it can list the schema
+        of the ``vector`` extension type (Supabase's ``extensions``). A startup
+        setting survives the ``RESET ALL`` asyncpg runs when a pooled
+        connection is released, so no query sets it first (D-076).
+
+        A connection pooler in front of Postgres must forward it: PgBouncer
+        refuses the connection unless ``search_path`` is listed in
+        ``track_extra_parameters``, and drops the setting if it is listed in
+        ``ignore_startup_parameters`` (docs/config/reference.md, Postgres).
+        """
+        parts = (f'"{self._schema}"', self._default_search_path)
+        return {"search_path": ", ".join(part for part in parts if part)}
+
+    async def _init_connection(self, conn: Any) -> None:
+        """Set a connection up once, when it opens (the pool ``init`` hook, ADR-012).
+
+        asyncpg drops a connection's prepared-statement cache whenever a type
+        codec changes, so the timestamp codec is installed here instead of per
+        query, and every caller on the connection decodes timestamps alike.
+        A failure propagates: asyncpg then closes the connection, and the next
+        acquire opens a new one instead of reusing one without the codec.
+        """
+        from koda.state import primary as primary_state
+
+        await primary_state._install_timestamptz_str_codec(conn)
 
     @asynccontextmanager
     async def _probe_connection(self) -> AsyncIterator[tuple[Any, str]]:
@@ -438,8 +476,9 @@ class KnowledgeV2PostgresBackend:
         # connection rather than poisoning the cached pool. This happens
         # when a caller on a second event loop in the same process needs
         # DB access (worker main loop while bridge loop owns the pool).
-        conn = await self._open_direct_connection()
+        conn = await self._open_direct_connection(server_settings=self._session_server_settings())
         try:
+            await self._init_connection(conn)
             yield conn
         finally:
             await self._close_direct_connection(conn)
@@ -474,7 +513,7 @@ class KnowledgeV2PostgresBackend:
         except TypeError:
             return self._pool.acquire()
 
-    async def _open_direct_connection(self) -> Any:
+    async def _open_direct_connection(self, *, server_settings: dict[str, str] | None = None) -> Any:
         try:
             await asyncio.wait_for(
                 self._direct_connection_gate.acquire(),
@@ -492,6 +531,7 @@ class KnowledgeV2PostgresBackend:
                     self._dsn,
                     timeout=self._acquire_timeout_seconds,
                     command_timeout=self._query_timeout_seconds,
+                    server_settings=server_settings,
                 )
             except TypeError:
                 return await asyncpg.connect(self._dsn)
@@ -3649,6 +3689,16 @@ class KnowledgeV2PostgresBackend:
                             created_at TEXT NOT NULL,
                             updated_at TEXT NOT NULL
                         )""",
+                ),
+            ),
+            _Migration(
+                "049_audit_events_type_lookup",
+                (
+                    # The deployment-wide lookup of the last retention.report
+                    # filters on event_type alone; idx_audit_events_lookup
+                    # leads with agent_id, so it would scan the whole table.
+                    f"""CREATE INDEX IF NOT EXISTS idx_audit_events_type_time
+                           ON "{schema}"."audit_events" (event_type, timestamp DESC)""",
                 ),
             ),
         )

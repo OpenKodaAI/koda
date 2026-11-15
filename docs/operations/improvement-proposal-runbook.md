@@ -12,12 +12,15 @@ Memory quality and knowledge-candidate evidence may appear in `evidence_refs`.
 3. Reject proposals that are unsafe, duplicate, unclear, or missing evidence.
 4. Approve proposals that should proceed to validation.
 5. Run validation. The proposal must record a passing `validation_result`.
-6. Apply only after post-approval validation passes and rollback effects are
-   present.
-7. Roll back if the applied effect regresses behavior.
+6. Accept (recorded) only after post-approval validation passes and rollback
+   effects are present. The UI button reads "Accept (recorded)"; the API route
+   is still `/apply`.
+7. Roll back to revert the recorded acceptance.
 
-No proposal applies persistent runtime changes at creation time. P1 applies only
-safe ledger effects unless a proposal type has a registered, tested executor.
+Accepting a proposal records the decision and marks its `ledger_only` effects as
+applied. It does not change the agent: no executor edits prompts, skills,
+memory, routing, policy, evals or docs yet (D-116). A proposal type changes its
+target only once it has a registered, tested executor.
 
 ## Common Outcomes
 
@@ -29,8 +32,8 @@ safe ledger effects unless a proposal type has a registered, tested executor.
 | `rejected` | Closed without mutation. | No action unless new evidence appears. |
 | `validating` | Validation is in progress or awaiting result. | Wait for result. |
 | `failed` | Validation or lifecycle guard failed. | Inspect failure and create a new proposal if needed. |
-| `applied` | Ledger effect is active; runtime mutation requires a typed executor. | Monitor evals and runtime quality. |
-| `rolled_back` | Applied ledger effect was reverted. | Keep evidence for postmortem. |
+| `applied` | Accepted and recorded (the UI shows "accepted (recorded)"). Only the ledger effect is marked; the agent is unchanged. | Act on the proposal yourself if the change is wanted. |
+| `rolled_back` | The recorded acceptance was reverted. | Keep evidence for postmortem. |
 
 ## Eval Failure Path
 

@@ -576,3 +576,38 @@ Gates at 937f20b (`int/w5`):
 - `pytest -m postgres`: 275 passed, 2 skipped, 2 xfailed.
 - Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 184 files and 1104 tests passed; `pnpm build:web` ok.
 - `pnpm audit --audit-level=moderate` and `pnpm audit --prod`: no known vulnerabilities.
+
+## Integration batch 2 (2026-11-15, `int/b2`, rule 10 lean lanes)
+
+Lanes, each one lean workflow (implement, one review, one fix pass, a confirm review only for critical or major findings):
+- M2-E2-T4 + M2-E5-T1 (data):
+  - The run-time SQL rewriter was replaced by a per-connection startup `search_path` (ADR-040): the backend schema followed by the database default.
+  - Binary timestamp codec; POSIX numeric-offset session zones are read correctly; an unknown zone raises instead of assuming UTC.
+  - The daily retention report deletes nothing, runs once per deployment per day under a transaction advisory lock keyed by schema, and is recorded even without the bridge loop.
+  - Migration 049 adds its lookup index.
+  - Commits: e20d1df, f147c8a, 4ca700d, 200ace3, df47c84, 9435c8c, 06a552a.
+- M7-E1-T1/T2/T4 + M7-E2-T4 (reliability):
+  - `/ready` answers 503 while Postgres or the kernel is down; compose orders startup on sidecar health.
+  - Reconcile backs off from 5 s to 60 s with one traceback per state change: 25 KB of log in 10 minutes with the kernel down. A bad socket path exits in 1.7 s.
+  - Telegram squad replies are grouped by parse mode; one send failure no longer drops the rest.
+  - `install.sh` checks Node 20+ and maps the distro to its Docker repository. Shellcheck has not run: it is not available here, and its download was refused. M7-E2-T4 stays in review.
+  - The confirm review covered a major found in review: an unbounded backoff exponent overflowed and ended the reconcile loop.
+- M6-E1-T2/T9/T10 + M6-E3-T5/T6 (honest labels):
+  - The non-Telegram channels and the video and music slots read "Not available", and stored values are kept.
+  - Proposals say "Accept (recorded)".
+  - Snapshots are keyed by explicit scope.
+  - M6-E1-T10 needed no code: there is no knowledge-assets screen.
+
+At integration:
+- The first gate run failed 10 IDNA URL tests. The shared venv was behind the wave-5 lock; `uv sync --locked` fixed it, and the rule is now in EXECUTION_STATUS "Environment facts".
+- It also failed 2 auth-matrix tests: `/ready` was missing from OpenAPI and from the pinned anonymous routes (a908497). The lane had run only its own module's tests. This is the class of gap that full gates at integration exist to catch.
+
+Recorded: ADR-040; D-262 to D-268; CHANGELOG entries for every lane.
+
+Gates at a908497 (`int/b2`):
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: 750 files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 354 source files.
+- `pytest --cov=koda`: 8482 passed, 34 skipped, 171 xfailed; 67 % coverage.
+- `pytest -m postgres`: 299 passed, 2 skipped, 2 xfailed. This ran before a908497, which changes only OpenAPI and one test.
+- Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 185 files and 1118 tests passed; `pnpm build:web` ok.

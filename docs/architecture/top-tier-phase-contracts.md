@@ -113,9 +113,10 @@ Phase 5 squad intelligence contract:
 - `quality_cockpit.v1` aggregates quality evidence from existing evals,
   metrics, RunGraph refs, executions, and proposals. It does not replace
   `release_quality.v1`.
-- Failure-to-proposal always reuses `improvement_proposal.v1` and is
-  non-mutating until the proposal lifecycle approves, validates, applies, and
-  can roll back.
+- Failure-to-proposal always reuses `improvement_proposal.v1` and never
+  mutates the agent: the proposal lifecycle approves, validates, records the
+  accepted decision as `ledger_only` effects, and can roll it back; accepting
+  the proposal does not change the agent.
 
 Phase 6 contract artifacts:
 

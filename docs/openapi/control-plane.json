@@ -3382,7 +3382,7 @@
     },
     "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/apply": {
       "post": {
-        "summary": "Apply improvement proposal",
+        "summary": "Accept improvement proposal (recorded)",
         "parameters": [
           {
             "name": "agent_id",
@@ -3413,7 +3413,7 @@
         },
         "responses": {
           "200": {
-            "description": "Proposal applied",
+            "description": "Proposal accepted and recorded",
             "content": {
               "application/json": {
                 "schema": {
@@ -3436,7 +3436,7 @@
         "tags": [
           "Agents"
         ],
-        "description": "Stable Koda control-plane route. See linked architecture and runbook docs for domain behavior."
+        "description": "Accept (recorded): marks the proposal's ledger-only effects as applied and records the decision. No executor changes the agent's prompts, skills, policy or memory yet. See linked architecture and runbook docs for domain behavior."
       }
     },
     "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/approve": {
@@ -3593,7 +3593,7 @@
         "tags": [
           "Agents"
         ],
-        "description": "Stable Koda control-plane route. See linked architecture and runbook docs for domain behavior."
+        "description": "Reverts the recorded acceptance: marks the applied ledger-only effects as rolled back. No agent state changes. See linked architecture and runbook docs for domain behavior."
       }
     },
     "/api/control-plane/agents/{agent_id}/improvement-proposals/{proposal_id}/validate": {
@@ -11330,6 +11330,24 @@
           "Runtime"
         ],
         "security": []
+      }
+    },
+    "/ready": {
+      "get": {
+        "summary": "Control-plane readiness",
+        "description": "Answers 200 when every critical dependency answers (the runtime kernel, and Postgres when STATE_BACKEND=postgres) and 503 while one is down. /health stays a liveness probe. The body names the failed check, never an internal target.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Every critical dependency answered"
+          },
+          "503": {
+            "description": "A critical dependency is down"
+          }
+        },
+        "tags": [
+          "Health"
+        ]
       }
     },
     "/health": {

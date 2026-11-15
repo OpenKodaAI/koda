@@ -7,6 +7,7 @@ import { Check, X, Lock } from "lucide-react";
 import { AsyncActionButton, InlineSpinner } from "@/components/ui/async-feedback";
 import { SecretInput } from "@/components/ui/secret-controls";
 import { FieldShell } from "@/components/control-plane/system/shared/field-shell";
+import { InlineAlert } from "@/components/ui/inline-alert";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import { requestJson, requestJsonAllowError } from "@/lib/http-client";
 import { translate } from "@/lib/i18n";
@@ -28,11 +29,13 @@ function TagsInput({
   onChange,
   placeholder,
   draftRef,
+  disabled = false,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   draftRef?: MutableRefObject<string>;
+  disabled?: boolean;
 }) {
   const tags = useMemo(
     () => (value ? value.split(",").map((t) => t.trim()).filter(Boolean) : []),
@@ -98,8 +101,9 @@ function TagsInput({
           }
         }}
         placeholder={tags.length === 0 ? placeholder : ""}
+        disabled={disabled}
         style={{ outline: "none", boxShadow: "none", border: "none" }}
-        className="min-w-[80px] flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)]"
+        className="min-w-[80px] flex-1 bg-transparent text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] disabled:cursor-not-allowed disabled:opacity-60"
         autoComplete="off"
         data-1p-ignore
         data-lpignore="true"
@@ -325,7 +329,9 @@ export function ChannelConnectionModal({
   const [localAgentInfo, setLocalAgentInfo] = useState<AgentInfo | null>(initialAgentInfo);
   const [localStatus, setLocalStatus] = useState<ChannelStatus>(initialStatus);
 
-  const isConnected = localStatus === "connected";
+  // A channel Koda never starts (D-017) is never shown as connected.
+  const isConnected = channel.available && localStatus === "connected";
+  const formDisabled = !channel.available;
   const [loadingAgentInfo, setLoadingAgentInfo] = useState(false);
   const [allowedUsers, setAllowedUsers] = useState<{ id: string; name: string }[]>([]);
   const [loadedAllowedUsers, setLoadedAllowedUsers] = useState(false);
@@ -721,6 +727,16 @@ export function ChannelConnectionModal({
             ) : (
               /* ---- Disconnected state ---- */
               <div className="flex flex-col gap-4">
+                {formDisabled && (
+                  <InlineAlert tone="info">
+                    <p className="font-medium text-[var(--text-primary)]">
+                      {t("controlPlane.channelCatalog.unavailable.title")}
+                    </p>
+                    <p className="mt-0.5">
+                      {t("controlPlane.channelCatalog.unavailable.description")}
+                    </p>
+                  </InlineAlert>
+                )}
                 {channel.fields.map((field) => {
                   const fieldLabel = t(field.labelKey);
                   const fieldHelpText = field.helpTextKey ? t(field.helpTextKey) : undefined;
@@ -743,6 +759,7 @@ export function ChannelConnectionModal({
                           setError(null);
                         }}
                         placeholder={t("generated.controlPlane.digite_e_pressione_enter_a2bf9a1f")}
+                        disabled={formDisabled}
                       />
                     </div>
                   ) : (
@@ -759,6 +776,7 @@ export function ChannelConnectionModal({
                             setError(null);
                           }}
                           placeholder={t("generated.controlPlane.cole_o_valor_aqui_a94321b7")}
+                          disabled={formDisabled}
                         />
                       ) : (
                         <input
@@ -769,7 +787,8 @@ export function ChannelConnectionModal({
                             setError(null);
                           }}
                           placeholder={t("generated.controlPlane.digite_o_valor_aqui_084a14a7")}
-                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] focus:border-[var(--border-strong)] focus:outline-none"
+                          disabled={formDisabled}
+                          className="w-full rounded-lg border border-[var(--border-subtle)] bg-[var(--field-bg)] px-3 py-2 text-sm text-[var(--text-primary)] placeholder:text-[var(--text-quaternary)] focus:border-[var(--border-strong)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                         />
                       )}
                     </FieldShell>
@@ -789,6 +808,7 @@ export function ChannelConnectionModal({
                 <AsyncActionButton
                   type="button"
                   onClick={handleConnect}
+                  disabled={formDisabled}
                   loading={connecting}
                   status={connecting ? "pending" : "idle"}
                   loadingLabel={t("generated.controlPlane.validando_e1031e1a")}

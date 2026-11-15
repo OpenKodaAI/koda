@@ -503,6 +503,12 @@ class ImprovementProposalService:
         return updated
 
     def _apply_effect_ledger(self, proposal: dict[str, Any], rollback_plan: dict[str, Any]) -> None:
+        """Mark the proposal's ``ledger_only`` effects as applied.
+
+        This records the decision only ("accept (recorded)" in the UI and API
+        docs): no executor changes prompts, skills, memory, routing, policy,
+        evals or docs yet, and any other effect kind is rejected (D-116).
+        """
         proposal_id = str(proposal.get("proposal_id") or "")
         effects = self.repository.list_improvement_proposal_effects(proposal_id)
         if not effects:

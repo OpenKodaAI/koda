@@ -138,6 +138,14 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - A refresh of a scheduled job's policy snapshot is recorded as a
   `job.policy_snapshot_refreshed` event. A half-open circuit breaker is audited as
   `system.circuit_half_open`. (D-001, D-020)
+- `GET /ready` on the control plane answers 503 while Postgres or the runtime kernel is
+  down; `/health` stays a liveness probe. The compose healthcheck uses `/ready`, every
+  sidecar has a healthcheck, and the app waits for them to be healthy. (M7-E1-T1)
+- A daily retention report counts the rows past their retention in `audit_events` and
+  `query_history`, deletes nothing, and records a `retention.report` audit event once per
+  deployment per day. Schema migration `049_audit_events_type_lookup` adds its index.
+  (M2-E5-T1)
+
 
 ### Changed
 
@@ -173,6 +181,21 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - The OpenAPI document no longer marks four session-protected control-plane routes
   as public: the two OAuth callbacks, the OAuth relay and onboarding readiness.
   (M0-E3-T1)
+- The knowledge backend sets its schema once per connection as a startup `search_path`.
+  A connection pooler must forward `search_path`: for PgBouncer, list it in
+  `track_extra_parameters` (1.20 or later). See `docs/config/reference.md`. (M2-E2-T4)
+- The supervisor backs off from 5 s to 60 s while the runtime kernel is unreachable and
+  logs one traceback per state change. It refuses to start when the kernel socket path
+  is longer than the platform allows. (M7-E1-T2)
+- The eight non-Telegram channels show "Not available" and their forms are disabled;
+  stored credentials are kept. The video and music model slots read "Not available yet";
+  stored defaults are kept. Improvement proposals say "Accept (recorded)": accepting
+  records the decision and does not change the agent. (M6-E1-T2, M6-E3-T5, M6-E1-T9)
+- Snapshots are stored per explicit scope (`task:<id>` or `user:<id>`), so a task and a
+  user with the same id no longer share snapshots. Snapshots saved before this release
+  under the old layout are not listed. `snapshot_restore` is described as loading a
+  snapshot for inspection. The feature stays off by default (`SNAPSHOT_ENABLED`). (M6-E3-T6)
+
 
 ### Removed
 
@@ -219,6 +242,13 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - Knowledge: with `KNOWLEDGE_V2_STORAGE_MODE=off`, the agent no longer queries the
   never-created `artifact_evidence_nodes` table, so asset references come back in
   that mode. (M4-E1-T6)
+- Buffered squad replies to Telegram are no longer dropped when one send fails: replies
+  are grouped by parse mode in order, a transient network error is retried once, and a
+  failed send is logged. (M7-E1-T4)
+- `scripts/install.sh` stops with a clear message on Node older than 20, installs Node
+  from NodeSource when it is missing, and picks the Docker apt repository from
+  `/etc/os-release` (Debian, Ubuntu and derivatives). (M7-E2-T4)
+
 
 ## [1.0.18] - 2026-05-20
 
