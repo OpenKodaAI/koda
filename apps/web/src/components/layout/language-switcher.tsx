@@ -1,11 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as SelectPrimitive from "@radix-ui/react-select";
 import { ChevronDown } from "lucide-react";
 import { ActionButton } from "@/components/ui/action-button";
 import { tourAnchor } from "@/components/tour/tour-attrs";
-import { useAnimatedPresence } from "@/hooks/use-animated-presence";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { AppLanguage } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -29,14 +28,51 @@ const LANGUAGE_FLAGS: Record<AppLanguage, string> = {
 // Built on the Radix Select primitive (M8-E1-T2), which supplies the
 // combobox/listbox roles, arrow-key and typeahead navigation, Enter to pick,
 // Escape to close, and moves focus into the list and back to the trigger.
-// Radix Select unmounts the list as soon as it closes, so the Root stays open
-// for MENU_EXIT_MS after `open` turns false while the list fades out.
 const MENU_EXIT_MS = 160;
+const MENU_ENTER = ["animate-in", "fade-in-0", "zoom-in-95", "data-[side=bottom]:slide-in-from-top-1"];
+const MENU_EXIT = ["animate-out", "fade-out-0", "zoom-out-95", "fill-mode-forwards"];
+
+/**
+ * Radix Select unmounts its list the moment it closes, so the exit fade plays
+ * on an inert copy of it. Radix has by then returned focus to the trigger and
+ * released the page, and the copy takes no keys, clicks or screen-reader focus.
+ * Returns a function that removes the copy early.
+ */
+function fadeOutCopy(content: HTMLElement | null): (() => void) | undefined {
+  // The content's parent is Radix's fixed-position popper frame.
+  const frame = content?.parentElement;
+  if (!content || !frame) return undefined;
+  const copy = frame.cloneNode(true) as HTMLElement;
+  copy.setAttribute("aria-hidden", "true");
+  copy.setAttribute("inert", "");
+  copy.style.pointerEvents = "none";
+  for (const node of [copy, ...copy.querySelectorAll("[id], [data-tour-anchor]")]) {
+    node.removeAttribute("id");
+    node.removeAttribute("data-tour-anchor");
+  }
+  copy.firstElementChild?.classList.remove(...MENU_ENTER);
+  copy.firstElementChild?.classList.add(...MENU_EXIT);
+  document.body.append(copy);
+  const timer = window.setTimeout(() => copy.remove(), MENU_EXIT_MS);
+  return () => {
+    window.clearTimeout(timer);
+    copy.remove();
+  };
+}
 
 export function LanguageSwitcher({ className }: { className?: string }) {
   const { language, options, setLanguage, t } = useAppI18n();
   const [open, setOpen] = useState(false);
-  const presence = useAnimatedPresence(open, null, { duration: MENU_EXIT_MS });
+  const contentRef = useRef<HTMLDivElement>(null);
+  const removeCopyRef = useRef<(() => void) | undefined>(undefined);
+
+  useEffect(() => () => removeCopyRef.current?.(), []);
+
+  const handleOpenChange = (next: boolean) => {
+    removeCopyRef.current?.();
+    removeCopyRef.current = next ? undefined : fadeOutCopy(contentRef.current);
+    setOpen(next);
+  };
 
   const currentOption = useMemo(
     () => options.find((option) => option.value === language) ?? options[0],
@@ -51,8 +87,8 @@ export function LanguageSwitcher({ className }: { className?: string }) {
       <SelectPrimitive.Root
         value={currentOption.value}
         onValueChange={(value) => setLanguage(value as AppLanguage)}
-        open={open || presence.shouldRender}
-        onOpenChange={setOpen}
+        open={open}
+        onOpenChange={handleOpenChange}
       >
         <SelectPrimitive.Trigger asChild>
           <ActionButton
@@ -84,18 +120,14 @@ export function LanguageSwitcher({ className }: { className?: string }) {
 
         <SelectPrimitive.Portal>
           <SelectPrimitive.Content
+            ref={contentRef}
             position="popper"
             side="bottom"
             align="end"
             sideOffset={8}
             collisionPadding={12}
             aria-label={t("language.label")}
-            className={cn(
-              "app-floating-panel language-switcher__menu",
-              open
-                ? "animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-1"
-                : "pointer-events-none animate-out fade-out-0 zoom-out-95 fill-mode-forwards",
-            )}
+            className={cn("app-floating-panel language-switcher__menu", ...MENU_ENTER)}
             {...tourAnchor("shell.topbar.language-switcher.menu")}
           >
             <SelectPrimitive.Viewport className="language-switcher__menu-list">

@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { I18nProvider } from "@/components/providers/i18n-provider";
@@ -99,7 +100,7 @@ describe("LanguageSwitcher keyboard support (M8-E1-T2)", () => {
     }
   });
 
-  it("fades the menu out before it unmounts", async () => {
+  it("fades a copy of the menu out after Radix has closed it", async () => {
     const trigger = renderSwitcher();
     const listbox = await openWithKeyboard(trigger, "ArrowDown");
     expect(listbox.className).toContain("animate-in");
@@ -108,11 +109,80 @@ describe("LanguageSwitcher keyboard support (M8-E1-T2)", () => {
 
     fireEvent.keyDown(english, { key: "Escape" });
 
-    // Still mounted for the exit animation, and no longer clickable.
-    expect(screen.getByRole("listbox")).toBe(listbox);
-    expect(listbox.className).toContain("animate-out");
-    expect(listbox.className).toContain("pointer-events-none");
-    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
-    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    // The live list is gone at once; what stays on screen is an inert copy.
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    const ghost = document.querySelector<HTMLElement>(".language-switcher__menu");
+    expect(ghost).not.toBeNull();
+    expect(ghost).not.toBe(listbox);
+    expect(ghost?.className).toContain("animate-out");
+    const frame = ghost?.parentElement;
+    expect(frame).toHaveAttribute("aria-hidden", "true");
+    expect(frame).toHaveAttribute("inert");
+    expect(frame?.style.pointerEvents).toBe("none");
+    await waitFor(() =>
+      expect(document.querySelector(".language-switcher__menu")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("does not pick the highlighted language when Enter follows Escape during the fade", async () => {
+    const trigger = renderSwitcher();
+    await openWithKeyboard(trigger, "ArrowDown");
+    const english = screen.getByRole("option", { name: /English/ });
+    await waitFor(() => expect(document.activeElement).toBe(english));
+    fireEvent.keyDown(english, { key: "ArrowDown" });
+    const portuguese = screen.getByRole("option", { name: /Português/ });
+    await waitFor(() => expect(document.activeElement).toBe(portuguese));
+
+    fireEvent.keyDown(portuguese, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Enter" });
+
+    expect(trigger).toHaveTextContent("EN");
+    expect(trigger).not.toHaveTextContent("PT-BR");
+  });
+
+  it("hands focus and the page back at once, so Tab moves on during the fade", async () => {
+    const user = userEvent.setup();
+    render(
+      <I18nProvider initialLanguage="en-US">
+        <LanguageSwitcher />
+        <button type="button">Theme</button>
+      </I18nProvider>,
+    );
+    const trigger = screen.getByRole("combobox", { name: "Language" });
+    await openWithKeyboard(trigger, "ArrowDown");
+    const english = screen.getByRole("option", { name: /English/ });
+    await waitFor(() => expect(document.activeElement).toBe(english));
+
+    fireEvent.keyDown(english, { key: "Escape" });
+    // Radix returns focus on its next tick; the fade lasts 160ms.
+    await act(() => new Promise((resolve) => window.setTimeout(resolve, 20)));
+
+    expect(document.activeElement).toBe(trigger);
+    expect(document.body.style.pointerEvents).not.toBe("none");
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Theme" })).toHaveFocus();
+  });
+
+  it("ignores clicks on the fading copy of the menu", async () => {
+    const trigger = renderSwitcher();
+    await openWithKeyboard(trigger, "ArrowDown");
+    const english = screen.getByRole("option", { name: /English/ });
+    await waitFor(() => expect(document.activeElement).toBe(english));
+
+    fireEvent.keyDown(english, { key: "Escape" });
+    const fading = document.querySelector<HTMLElement>(".language-switcher__menu");
+    const deutsch = [...(fading?.querySelectorAll<HTMLElement>("[data-radix-collection-item]") ?? [])].find(
+      (option) => option.textContent?.includes("Deutsch"),
+    );
+    expect(deutsch, "the fading copy shows the options").toBeDefined();
+    fireEvent.pointerDown(deutsch as HTMLElement, { pointerType: "mouse" });
+    fireEvent.pointerUp(deutsch as HTMLElement, { pointerType: "mouse" });
+    fireEvent.click(deutsch as HTMLElement);
+
+    expect(trigger).toHaveTextContent("EN");
+    await waitFor(() =>
+      expect(document.querySelector(".language-switcher__menu")).not.toBeInTheDocument(),
+    );
+    expect(trigger).toHaveTextContent("EN");
   });
 });
