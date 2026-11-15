@@ -1845,6 +1845,19 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
         thread = await thread_store.get_thread(squad_thread_id)
         if thread is None:
             return web.json_response({"error": f"thread {squad_thread_id} not found"}, status=404)
+        # The turn runs as the executing agent in this thread's room, so that agent must be one of
+        # the thread's active participants (D-355).
+        target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"
+        participants = {
+            str(participant.agent_id).strip().upper()
+            for participant in await thread_store.list_participants(thread_id=squad_thread_id, active_only=True)
+        }
+        if target_agent_id.upper() not in participants:
+            log.warning("squad_message_non_participant_refused", thread_id=squad_thread_id, agent_id=target_agent_id)
+            return web.json_response(
+                {"error": f"agent {target_agent_id} is not a participant of thread {squad_thread_id}"},
+                status=403,
+            )
         user_id = int(thread.owner_user_id or 0) or _dashboard_actor_id(namespace="squad-user", session_id=session_id)
         chat_id = int(thread.telegram_chat_id or 0) or -_dashboard_actor_id(
             namespace="squad-chat", session_id=session_id
@@ -1855,6 +1868,30 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
             for name, used in (("user_id", user_id), ("chat_id", chat_id), ("telegram_chat_id", chat_id))
             if str(squad_payload.get(name) or "").strip() and optional_int(squad_payload.get(name)) != used
         ]
+        # The delegation the turn continues comes from the server's record of the thread and the
+        # parent message, not from the caller (D-355). The turn answers the parent message, so the
+        # parent's sender is the delegation's origin and, when it is a participant, the chain's last
+        # hop. The caller's chain is kept only when it ends with that hop: it may name earlier hops
+        # the record does not hold, never drop the ones it holds. The caller's origin is kept only
+        # when it is the parent's sender or the thread's coordinator.
+        parent_message_id = str(squad_payload.get("parent_message_id") or "").strip() or None
+        parent_sender = (
+            await thread_store.get_message_sender(thread_id=squad_thread_id, message_ref=parent_message_id)
+            if parent_message_id
+            else None
+        )
+        recorded_chain = [parent_sender] if parent_sender and parent_sender.strip().upper() in participants else []
+        chain_raw = squad_payload.get("delegation_chain")
+        caller_chain = [str(item) for item in chain_raw] if isinstance(chain_raw, list) else []
+        delegation_chain = caller_chain
+        if caller_chain[len(caller_chain) - len(recorded_chain) :] != recorded_chain:
+            delegation_chain = recorded_chain
+            ignored.append("squad.delegation_chain")
+        caller_origin = str(squad_payload.get("delegation_origin_agent_id") or "").strip() or None
+        delegation_origin = caller_origin if caller_origin in {parent_sender, thread.coordinator_agent_id} else None
+        if caller_origin and delegation_origin is None:
+            ignored.append("squad.delegation_origin_agent_id")
+        delegation_origin = delegation_origin or parent_sender
         if ignored:
             log.warning(
                 "squad_message_identity_ignored",
@@ -1862,9 +1899,6 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
                 session_id=session_id,
                 ignored=ignored,
             )
-        chain_raw = squad_payload.get("delegation_chain")
-        delegation_chain = [str(item) for item in chain_raw] if isinstance(chain_raw, list) else []
-        target_agent_id = str(squad_payload.get("target_agent_id") or AGENT_ID or "default").strip() or "default"
 
         from koda.services.queue_manager import enqueue_squad_agent_task
         from koda.squads import SquadThreadNotFoundError, SquadThreadNotRunnableError
@@ -1878,10 +1912,10 @@ async def _runtime_send_session_message(request: web.Request) -> web.Response:
                 executing_agent_id=target_agent_id,
                 squad_thread_id=squad_thread_id,
                 squad_task_id=str(squad_payload.get("squad_task_id") or "").strip() or None,
-                parent_message_id=str(squad_payload.get("parent_message_id") or "").strip() or None,
+                parent_message_id=parent_message_id,
                 delegation_chain=delegation_chain,
                 delegation_request_id=str(squad_payload.get("delegation_request_id") or "").strip() or None,
-                delegation_origin_agent_id=str(squad_payload.get("delegation_origin_agent_id") or "").strip() or None,
+                delegation_origin_agent_id=delegation_origin,
                 telegram_message_thread_id=optional_int(squad_payload.get("telegram_message_thread_id")),
                 bot_override=_SilentRuntimeBot(),
             )
