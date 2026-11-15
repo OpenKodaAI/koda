@@ -37,6 +37,7 @@ logger = get_logger(__name__)
 
 
 IsolationKind = Literal["native", "bwrap", "sandbox-exec", "docker"]
+_NETWORK_MODES: tuple[str, ...] = ("none", "egress_allowlist", "any")
 
 
 # Constraints
@@ -82,10 +83,18 @@ class IsolationConstraints:
                     )
         domains_raw = data.get("egress_domains") or ()
         domains = tuple(str(item) for item in domains_raw) if isinstance(domains_raw, (list, tuple)) else ()
+        network_mode = data.get("network_mode")
+        if network_mode is None:
+            network_mode = "egress_allowlist"
+        # An unknown mode would otherwise share the host network silently.
+        if network_mode not in _NETWORK_MODES:
+            raise ValueError(
+                f"unknown isolation network_mode {network_mode!r}; expected one of: {', '.join(sorted(_NETWORK_MODES))}"
+            )
         return cls(
             cpu_quota=float(data.get("cpu_quota", 0.5)),
             memory_limit_bytes=int(data.get("memory_limit_bytes", 256 * 1024 * 1024)),
-            network_mode=str(data.get("network_mode", "egress_allowlist")),  # type: ignore[arg-type]
+            network_mode=network_mode,  # type: ignore[arg-type]  # checked against _NETWORK_MODES above
             egress_domains=domains,
             mounts=tuple(mounts),
             timeout_seconds=int(data.get("timeout_seconds", 600)),
@@ -140,7 +149,7 @@ class NativeIsolation:
                 hint="OS-level sandbox unavailable; consider installing bwrap (Linux) or enabling Docker.",
             )
             NativeIsolation._warned = True
-        return command, env
+        return command, _server_env(env)
 
 
 class BwrapIsolation:
@@ -216,8 +225,7 @@ class BwrapIsolation:
 
         argv.append("--")
         argv.extend(command)
-        scrubbed_env = _scrub_env(env)
-        return argv, scrubbed_env
+        return argv, _server_env(_scrub_env(env))
 
 
 class SandboxExecIsolation:
@@ -243,7 +251,7 @@ class SandboxExecIsolation:
         # sandbox-exec wants the profile as a string via -p, not a file.
         argv: list[str] = [self._bin, "-p", profile]
         argv.extend(command)
-        return argv, _scrub_env(env)
+        return argv, _server_env(_scrub_env(env))
 
     @staticmethod
     def _build_profile(constraints: IsolationConstraints) -> str:
@@ -391,6 +399,19 @@ _BLOCKED_ENV_NAMES: frozenset[str] = frozenset(
         "DYLD_FRAMEWORK_PATH",
     }
 )
+
+
+# Non-secret basics a stdio server may need from Koda's own environment. Nothing
+# else is inherited: the sandboxed process must never see Koda's os.environ
+# (control-plane token, database DSN, provider keys). Docker gets the same
+# result by passing only the server's own names with ``-e``.
+_BASE_ENV_NAMES: tuple[str, ...] = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
+
+
+def _server_env(env: dict[str, str]) -> dict[str, str]:
+    """The explicit environment for a sandboxed server: the basics plus its own env."""
+    base = {name: os.environ[name] for name in _BASE_ENV_NAMES if name in os.environ}
+    return {**base, **env}
 
 
 def _read_by_docker_cli(name: str) -> bool:

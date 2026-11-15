@@ -26,6 +26,8 @@ from typing import Any
 
 from koda.control_plane.database import execute, fetch_all, fetch_one, json_dump, json_load, now_iso
 from koda.logging_config import get_logger
+from koda.services.mcp_isolation import IsolationConstraints
+from koda.services.sandbox_policy import is_forbidden_mount
 
 logger = get_logger(__name__)
 
@@ -211,6 +213,23 @@ def validate_payload(payload: CustomServerPayload) -> None:
 
     if payload.auth_strategy not in {"no_auth", "api_key", "oauth", "connection_string", "dual_token"}:
         raise ValidationError(f"unsupported auth_strategy: {payload.auth_strategy!r}")
+
+    validate_isolation_constraints(payload.isolation_constraints)
+
+
+def validate_isolation_constraints(constraints: dict[str, Any]) -> None:
+    """Refuse constraints the runtime cannot parse or mounts of sensitive host paths.
+
+    Mounts follow the sandbox doctor's rule, read-only or not: the state
+    directory, the master keys, ``/etc``, the Docker socket and the like.
+    """
+    try:
+        parsed = IsolationConstraints.from_dict(constraints)
+    except (TypeError, ValueError) as exc:
+        raise ValidationError(f"invalid isolation_constraints: {exc}") from exc
+    for mount in parsed.mounts:
+        if is_forbidden_mount(mount.host):
+            raise ValidationError(f"isolation mount host {mount.host!r} is a sensitive host path and cannot be mounted")
 
 
 def validate_stdio_command(command: list[Any]) -> list[str]:

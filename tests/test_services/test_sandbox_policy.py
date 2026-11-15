@@ -110,6 +110,23 @@ def test_forbidden_mount_denies_execution() -> None:
     assert "sandbox_forbidden_mount" in evaluation.reason_codes
 
 
+def test_doctor_mount_rule_covers_the_state_directory(tmp_path, monkeypatch) -> None:
+    import koda.config as config
+
+    monkeypatch.setattr(config, "STATE_ROOT_DIR", tmp_path / "state")
+    policy = SandboxEffectivePolicy(
+        isolation_kind="bwrap",
+        risk_class="read_context",
+        network_mode="none",
+        mounts=(SandboxMount(host=str(tmp_path / "state"), container="/state", read_only=False),),
+    )
+
+    evaluation = evaluate_sandbox_effective_policy(policy)
+
+    assert evaluation.allowed is False
+    assert "sandbox_forbidden_mount" in evaluation.reason_codes
+
+
 def test_forbidden_env_denies_execution_without_storing_values() -> None:
     policy = SandboxEffectivePolicy.from_runtime(
         isolation_kind="bwrap",

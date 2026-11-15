@@ -348,7 +348,7 @@ def _check_remote_unsafe_default(policy: SandboxEffectivePolicy) -> SandboxPolic
 
 
 def _check_forbidden_mounts(policy: SandboxEffectivePolicy) -> SandboxPolicyCheck:
-    forbidden = [mount.to_payload() for mount in policy.mounts if _is_forbidden_mount(mount.host)]
+    forbidden = [mount.to_payload() for mount in policy.mounts if is_forbidden_mount(mount.host)]
     if forbidden:
         return SandboxPolicyCheck(
             check_id="sandbox_forbidden_mount",
@@ -489,13 +489,26 @@ def _is_forbidden_env_key(key: str) -> bool:
     return normalized in _FORBIDDEN_ENV_NAMES or normalized.startswith("KODA_")
 
 
-def _is_forbidden_mount(host: str) -> bool:
+def is_forbidden_mount(host: str) -> bool:
+    """Whether ``host`` must never be bind-mounted into a sandbox, read-only or not.
+
+    The sandbox doctor applies this rule, and so does saving a custom MCP server.
+    The kernel, bwrap and docker follow symlinks, so the path is checked both as
+    written and resolved.
+    """
     normalized = _normalize_path(host)
     if not normalized:
         return True
+    resolved = _resolve_path(normalized)
+    if not resolved:
+        return True
+    return any(_is_forbidden_mount_path(path) for path in dict.fromkeys((normalized, resolved)))
+
+
+def _is_forbidden_mount_path(normalized: str) -> bool:
     if normalized in _FORBIDDEN_MOUNT_EXACT:
         return True
-    for root in _FORBIDDEN_MOUNT_ROOTS:
+    for root in _with_resolved(_FORBIDDEN_MOUNT_ROOTS):
         if root == "/":
             if normalized == root:
                 return True
@@ -505,7 +518,32 @@ def _is_forbidden_mount(host: str) -> bool:
     parts = set(Path(normalized).parts)
     if parts & _FORBIDDEN_MOUNT_PARTS:
         return True
-    return any(part in normalized for part in _FORBIDDEN_MOUNT_PARTS if "/" in part)
+    if any(part in normalized for part in _FORBIDDEN_MOUNT_PARTS if "/" in part):
+        return True
+    # A mount on, inside or above a protected path exposes it.
+    return any(_paths_overlap(normalized, protected) for protected in _protected_mount_paths())
+
+
+def _protected_mount_paths() -> tuple[str, ...]:
+    """Koda's state directory, its master keys and the Docker socket."""
+    from koda.config import STATE_ROOT_DIR
+    from koda.control_plane.settings import CONTROL_PLANE_MASTER_KEY_FILE, CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE
+
+    koda_paths = (STATE_ROOT_DIR, CONTROL_PLANE_MASTER_KEY_FILE, CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE)
+    return _with_resolved(tuple(_normalize_path(str(path)) for path in koda_paths) + _FORBIDDEN_MOUNT_EXACT)
+
+
+def _with_resolved(paths: tuple[str, ...]) -> tuple[str, ...]:
+    """``paths`` and, where a symlink leads elsewhere, their resolved forms."""
+    return tuple(path for path in dict.fromkeys(paths + tuple(_resolve_path(path) for path in paths)) if path)
+
+
+def _paths_overlap(path: str, protected: str) -> bool:
+    return (
+        path == protected
+        or path.startswith(protected.rstrip("/") + "/")
+        or protected.startswith(path.rstrip("/") + "/")
+    )
 
 
 def _normalize_path(path: str) -> str:
@@ -516,7 +554,16 @@ def _normalize_path(path: str) -> str:
     normalized = os.path.normpath(expanded)
     if not normalized.startswith("/"):
         normalized = os.path.normpath(str(Path.cwd() / normalized))
-    return normalized
+    # normpath keeps a POSIX double leading slash; the kernel reads "//etc" as "/etc".
+    return "/" + normalized.lstrip("/")
+
+
+def _resolve_path(path: str) -> str:
+    """``path`` with every symlink followed, or "" when it cannot be resolved."""
+    try:
+        return _normalize_path(os.path.realpath(path))
+    except (OSError, ValueError):
+        return ""
 
 
 def _is_private_egress_target(value: str) -> bool:

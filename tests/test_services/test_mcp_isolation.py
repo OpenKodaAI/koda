@@ -26,7 +26,7 @@ def test_native_isolation_passes_through():
     strategy = NativeIsolation()
     cmd, env = strategy.wrap(["npx", "-y", "pkg"], {"K": "v"}, IsolationConstraints())
     assert cmd == ["npx", "-y", "pkg"]
-    assert env == {"K": "v"}
+    assert env["K"] == "v"
 
 
 def test_native_strips_blocked_env_only_when_explicitly_set_via_other_strategies():
@@ -35,7 +35,7 @@ def test_native_strips_blocked_env_only_when_explicitly_set_via_other_strategies
     # don't accidentally start scrubbing env in native mode and break devs.
     strategy = NativeIsolation()
     _, env = strategy.wrap(["sh"], {"LD_PRELOAD": "/tmp/x.so"}, IsolationConstraints())
-    assert env == {"LD_PRELOAD": "/tmp/x.so"}
+    assert env["LD_PRELOAD"] == "/tmp/x.so"
 
 
 def test_select_isolation_uses_env_override_when_available():
@@ -280,3 +280,107 @@ async def test_bwrap_status_reports_the_egress_it_can_enforce(network_mode, expe
     assert instance.isolation_status == {"isolation": "bwrap", "egress": expected_egress}
     warnings = [call.args[0] for call in manager_logger.warning.call_args_list]
     assert ("mcp_isolation_egress_allowlist_unenforced" in warnings) is warned
+
+
+# D-300: a stdio server never inherits Koda's environment
+
+
+_BASIC_ENV_NAMES = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
+
+
+async def _spawn_env(profile: str, system: str, env: dict[str, str] | None = None) -> dict[str, Any]:
+    from koda.services.mcp_manager import McpServerInstance
+
+    _FakeStdioTransport.spawned = []
+    with (
+        patch("koda.services.mcp_isolation.shutil.which", side_effect=_which),
+        patch("koda.services.mcp_isolation.platform.system", return_value=system),
+        patch("koda.services.mcp_manager.StdioTransport", _FakeStdioTransport),
+        patch("koda.services.mcp_manager.McpSession", return_value=_fake_session()),
+    ):
+        instance = McpServerInstance(
+            "third-party", "agent-1", "stdio", command=["mcp-third-party"], env=env, isolation_profile=profile
+        )
+        await instance.start()
+    assert instance.isolation_status["isolation"] == profile
+    assert len(_FakeStdioTransport.spawned) == 1
+    return _FakeStdioTransport.spawned[0]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("profile", "system"),
+    [("native", "Linux"), ("bwrap", "Linux"), ("sandbox-exec", "Darwin"), ("docker", "Linux")],
+)
+async def test_server_without_env_does_not_see_koda_secrets(profile, system, monkeypatch):
+    monkeypatch.delenv("KODA_MCP_ISOLATION", raising=False)
+    monkeypatch.setenv("CONTROL_PLANE_API_TOKEN", "planted-control-plane-token")
+    monkeypatch.setenv("KODA_DATABASE_URL", "postgresql://koda:planted-password@db/koda")
+    monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
+    monkeypatch.setenv("HOME", "/srv/koda-home")
+    monkeypatch.setenv("LANG", "C.UTF-8")
+
+    spawned = await _spawn_env(profile, system)
+
+    joined = " ".join(spawned["argv"])
+    assert "planted" not in joined
+    if profile == "docker":
+        # Regression guard, not part of D-300: docker already gave the container only
+        # the names passed with ``-e``, so this case passes before the fix too.
+        assert "-e" not in spawned["argv"]
+        return
+    env = spawned["env"]
+    assert env is not None, "env=None makes the server inherit Koda's whole environment"
+    assert "CONTROL_PLANE_API_TOKEN" not in env
+    assert "KODA_DATABASE_URL" not in env
+    assert not any("planted" in value for value in env.values())
+    assert set(env) <= set(_BASIC_ENV_NAMES)
+    assert (env["PATH"], env["HOME"], env["LANG"]) == ("/usr/local/bin:/usr/bin", "/srv/koda-home", "C.UTF-8")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("profile", "system"), [("native", "Linux"), ("bwrap", "Linux"), ("sandbox-exec", "Darwin")])
+async def test_server_env_is_the_basics_plus_its_own_env(profile, system, monkeypatch):
+    monkeypatch.delenv("KODA_MCP_ISOLATION", raising=False)
+    for name in _BASIC_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("CONTROL_PLANE_API_TOKEN", "planted-control-plane-token")
+    monkeypatch.setenv("HOME", "/srv/koda-home")
+
+    with_env = await _spawn_env(profile, system, env={"API_TOKEN": "server-token"})
+    without_env = await _spawn_env(profile, system)
+
+    assert with_env["env"] == {"HOME": "/srv/koda-home", "API_TOKEN": "server-token"}
+    assert without_env["env"] == {"HOME": "/srv/koda-home"}
+
+
+@pytest.mark.asyncio
+async def test_server_env_stays_explicit_when_koda_has_no_basic_variables(monkeypatch):
+    monkeypatch.delenv("KODA_MCP_ISOLATION", raising=False)
+    for name in _BASIC_ENV_NAMES:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("CONTROL_PLANE_API_TOKEN", "planted-control-plane-token")
+
+    spawned = await _spawn_env("native", "Linux")
+
+    # An empty mapping, not None: None would inherit the planted token.
+    assert spawned["env"] == {}
+
+
+# D-301: unknown network modes are refused, not treated as shared network
+
+
+@pytest.mark.parametrize("network_mode", ["bridge", "host", "off", "None"])
+def test_constraints_from_dict_rejects_unknown_network_mode(network_mode):
+    with pytest.raises(ValueError, match=f"unknown isolation network_mode '{network_mode}'"):
+        IsolationConstraints.from_dict({"network_mode": network_mode})
+
+
+@pytest.mark.parametrize("network_mode", ["none", "egress_allowlist", "any"])
+def test_constraints_from_dict_accepts_known_network_modes(network_mode):
+    assert IsolationConstraints.from_dict({"network_mode": network_mode}).network_mode == network_mode
+
+
+def test_constraints_from_dict_defaults_an_unset_network_mode():
+    assert IsolationConstraints.from_dict({"cpu_quota": 1}).network_mode == "egress_allowlist"
+    assert IsolationConstraints.from_dict({"network_mode": None}).network_mode == "egress_allowlist"
