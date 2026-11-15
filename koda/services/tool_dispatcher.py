@@ -1010,7 +1010,7 @@ def format_tool_results(results: list[AgentToolResult]) -> str:
         if STRUCTURED_DATA_OUTPUT_ENABLED and r.data is not None:
             try:
                 data_json = escape_protocol_delimiters(json.dumps(r.data, ensure_ascii=False, default=str))
-                fmt = r.data_format or "json"
+                fmt = html.escape(r.data_format or "json", quote=True)
                 body += f'\n<structured_data format="{fmt}">{data_json}</structured_data>'
             except (TypeError, ValueError):
                 pass  # silently skip if data is not serializable
