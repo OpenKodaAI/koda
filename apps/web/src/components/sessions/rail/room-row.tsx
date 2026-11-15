@@ -95,8 +95,8 @@ function RoomRowImpl({ entry, active, onSelect, onRequestDelete }: RoomRowProps)
             "shrink-0 font-mono text-[0.6875rem] text-[var(--text-quaternary)] transition-opacity duration-[120ms]",
             onRequestDelete && "group-hover:opacity-0",
           )}
-          aria-label={t("chat.timestamp.lastActivity", undefined)}
         >
+          <span className="sr-only">{t("chat.timestamp.lastActivity", undefined)} </span>
           {time}
         </span>
       </button>

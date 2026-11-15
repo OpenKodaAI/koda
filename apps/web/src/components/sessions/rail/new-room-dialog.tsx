@@ -296,11 +296,9 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                         ) : null}
                       </div>
                       {isPaused ? (
-                        <span
-                          aria-label={t("sessions.room.create.pausedLabel", undefined)}
-                          className="shrink-0 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]"
-                        >
-                          {t("sessions.room.create.pausedBadge", undefined)}
+                        <span className="shrink-0 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
+                          <span className="sr-only">{t("sessions.room.create.pausedLabel", undefined)}</span>
+                          <span aria-hidden="true">{t("sessions.room.create.pausedBadge", undefined)}</span>
                         </span>
                       ) : null}
                       <span

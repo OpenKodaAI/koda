@@ -253,49 +253,51 @@ export function CommandBar({
                     isInline ? "max-h-[60vh] overflow-y-auto" : "flex-1 overflow-y-auto",
                   )}
                 >
-                  {groups.map((group) => (
-                    <div key={group.category} className="flex flex-col">
-                      <div className="eyebrow px-4 pt-3 pb-1 text-[10px] text-[var(--text-quaternary)]">
-                        {group.heading}
-                      </div>
-                      <ul className="flex flex-col">
+                  {groups.map((group) => {
+                    // Options must be owned by the listbox or by a group in it
+                    // (D-282): no ul/li, whose list roles break that chain.
+                    const headingId = `${listId}-group-${group.category}`;
+                    return (
+                      <div key={group.category} role="group" aria-labelledby={headingId} className="flex flex-col">
+                        <div id={headingId} className="eyebrow px-4 pt-3 pb-1 text-[10px] text-[var(--text-quaternary)]">
+                          {group.heading}
+                        </div>
                         {group.commands.map((command) => {
                           const index = resolveIndex(command.id);
                           const active = index === activeIndex;
                           const Icon = command.icon;
                           return (
-                            <li key={command.id}>
-                              <button
-                                type="button"
-                                id={`${listId}-${command.id}`}
-                                role="option"
-                                aria-selected={active}
-                                onMouseEnter={() => setActiveIndex(index)}
-                                onMouseDown={(event) => {
-                                  event.preventDefault();
-                                  execute(command);
-                                }}
-                                className={cn(
-                                  "flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-                                  active
-                                    ? "bg-[var(--hover-tint)] text-[var(--text-primary)]"
-                                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
-                                )}
-                              >
-                                <Icon className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
-                                <span className="min-w-0 flex-1 truncate">{command.label}</span>
-                                {command.description ? (
-                                  <span className="min-w-0 max-w-[40%] truncate text-[12px] text-[var(--text-quaternary)]">
-                                    {command.description}
-                                  </span>
-                                ) : null}
-                              </button>
-                            </li>
+                            <button
+                              key={command.id}
+                              type="button"
+                              id={`${listId}-${command.id}`}
+                              role="option"
+                              aria-selected={active}
+                              onMouseEnter={() => setActiveIndex(index)}
+                              onMouseDown={(event) => {
+                                event.preventDefault();
+                                execute(command);
+                              }}
+                              className={cn(
+                                "flex w-full items-center gap-3 px-4 py-2 text-left text-[13px] transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                                active
+                                  ? "bg-[var(--hover-tint)] text-[var(--text-primary)]"
+                                  : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                              )}
+                            >
+                              <Icon className="h-4 w-4 shrink-0 text-[var(--text-tertiary)]" />
+                              <span className="min-w-0 flex-1 truncate">{command.label}</span>
+                              {command.description ? (
+                                <span className="min-w-0 max-w-[40%] truncate text-[12px] text-[var(--text-quaternary)]">
+                                  {command.description}
+                                </span>
+                              ) : null}
+                            </button>
                           );
                         })}
-                      </ul>
-                    </div>
-                  ))}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

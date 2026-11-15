@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { CommandBar } from "@/components/command-bar/command-bar";
@@ -126,3 +126,59 @@ describe("CommandBar inline dropdown (M8-E1-T1)", () => {
     expect(classes()).not.toContain("border-[var(--focus-ring)]");
   });
 });
+
+// D-282: axe reported aria-required-parent (critical) on every option and
+// aria-required-children on the listbox, because the options sat in plain
+// ul/li elements, whose list and listitem roles broke the ownership chain.
+const IMPLICIT_ROLES: Record<string, string> = { UL: "list", OL: "list", LI: "listitem" };
+
+/** The roles between an option and the listbox, skipping generic and presentational elements. */
+function rolesBetween(option: HTMLElement, listbox: HTMLElement): string[] {
+  const roles: string[] = [];
+  for (let node = option.parentElement; node && node !== listbox; node = node.parentElement) {
+    const role = node.getAttribute("role") ?? IMPLICIT_ROLES[node.tagName] ?? null;
+    if (role && role !== "presentation" && role !== "none") roles.push(role);
+  }
+  return roles;
+}
+
+describe("CommandBar listbox structure (D-282)", () => {
+  it("owns every option directly or through one labelled group", async () => {
+    const user = userEvent.setup();
+    const input = renderBar();
+    await user.click(input);
+    const listbox = await screen.findByRole("listbox");
+    const options = within(listbox).getAllByRole("option");
+    expect(options.length).toBeGreaterThan(1);
+    for (const option of options) {
+      const roles = rolesBetween(option, listbox);
+      expect(roles.every((role) => role === "group") && roles.length <= 1, `${option.id}: ${roles}`).toBe(true);
+    }
+    const groups = within(listbox).getAllByRole("group");
+    expect(groups.length).toBeGreaterThan(0);
+    for (const group of groups) {
+      const heading = document.getElementById(group.getAttribute("aria-labelledby") ?? "");
+      expect(heading?.textContent?.trim(), "each group is named by its heading").toBeTruthy();
+      expect(within(group).getAllByRole("option").length).toBeGreaterThan(0);
+    }
+  });
+
+  it("moves aria-activedescendant through the grouped options with the arrow keys", async () => {
+    const user = userEvent.setup();
+    const input = renderBar();
+    await user.click(input);
+    const listbox = await screen.findByRole("listbox");
+    const options = within(listbox).getAllByRole("option");
+    expect(input).toHaveAttribute("aria-activedescendant", options[0].id);
+    expect(options[0]).toHaveAttribute("aria-selected", "true");
+
+    await user.keyboard("{ArrowDown}");
+    expect(input).toHaveAttribute("aria-activedescendant", options[1].id);
+    expect(options[1]).toHaveAttribute("aria-selected", "true");
+    expect(options[0]).toHaveAttribute("aria-selected", "false");
+
+    await user.keyboard("{ArrowUp}");
+    expect(input).toHaveAttribute("aria-activedescendant", options[0].id);
+  });
+});
+
