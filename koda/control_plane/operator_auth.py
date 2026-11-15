@@ -605,14 +605,22 @@ class OperatorAuthService:
             and not str(bootstrap_code or "").strip()
             and is_loopback_request(remote_ip, forwarded_for)
         )
+        # An invalid token or setup code hashes the password before it answers,
+        # as a registration that passes the check and loses the race does
+        # below, so the two take about the same time (D-283).
         if str(registration_token or "").strip():
             row = self._registration_row(registration_token)
             if row is None or row.get("exchange_consumed_at") or _is_expired(row.get("exchange_expires_at")):
+                _password_hasher().hash(password)
                 raise ValueError("Registration token is invalid or expired.")
         elif str(bootstrap_code or "").strip():
             # The setup code is consumed in the registration transaction below,
             # so a failed registration leaves it usable.
-            row = self._redeemable_bootstrap_code(bootstrap_code)
+            try:
+                row = self._redeemable_bootstrap_code(bootstrap_code)
+            except ValueError:
+                _password_hasher().hash(password)
+                raise
             redeem_setup_code = True
         elif not trusted_loopback:
             raise ValueError("Bootstrap code is invalid or expired.")
@@ -770,9 +778,15 @@ class OperatorAuthService:
         user_id = str(row["id"])
 
         def _reset(conn: Any) -> None:
-            # The code is consumed first and only while unused (D-283): a
-            # concurrent reset with the same code waits for this one's row
-            # lock, then matches no row, and its whole transaction rolls back.
+            # The user row is written first, as in _regenerate, so concurrent
+            # resets and regenerations of one account queue on it instead of
+            # deadlocking on each other's codes. The code is then consumed only
+            # while unused (D-283): a reset that waited on the row and finds
+            # its code spent matches no row, and its whole transaction rolls back.
+            conn.execute(
+                "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
+                (password_hash, now_iso(), user_id),
+            )
             conn.execute(
                 """
                 UPDATE cp_operator_recovery_codes
@@ -781,10 +795,6 @@ class OperatorAuthService:
                 """,
                 (now_iso(), "password_reset", str(code_row["id"])),
                 require_row=True,
-            )
-            conn.execute(
-                "UPDATE cp_operator_users SET password_hash = ?, updated_at = ? WHERE id = ?",
-                (password_hash, now_iso(), user_id),
             )
             conn.execute(
                 """
@@ -990,6 +1000,12 @@ class OperatorAuthService:
         user_id = context.user_id
 
         def _regenerate(conn: Any) -> list[str]:
+            # The user row first, as in the password reset, so the two queue
+            # on it instead of deadlocking on the codes.
+            conn.execute(
+                "UPDATE cp_operator_users SET recovery_generation = ?, updated_at = ? WHERE id = ?",
+                (generation, now_iso(), user_id),
+            )
             conn.execute(
                 """
                 UPDATE cp_operator_recovery_codes
@@ -998,12 +1014,7 @@ class OperatorAuthService:
                 """,
                 (now_iso(), "regenerated", user_id, current_generation),
             )
-            codes = self._issue_recovery_codes(user_id=user_id, generation=generation, conn=conn)
-            conn.execute(
-                "UPDATE cp_operator_users SET recovery_generation = ?, updated_at = ? WHERE id = ?",
-                (generation, now_iso(), user_id),
-            )
-            return codes
+            return self._issue_recovery_codes(user_id=user_id, generation=generation, conn=conn)
 
         # The old codes' invalidation, the new codes and the new generation
         # commit together (D-284): a failure leaves the current codes usable.

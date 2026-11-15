@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -59,7 +60,10 @@ def _normalize_primary_query(query: str) -> str:
 
 def init_control_plane_db() -> None:
     backend = _require_primary_backend()
-    run_coro_sync(backend.start())
+    # start() applies the schema migrations. The control plane calls this from
+    # its running event loop, so through the bridge, whose time limit would
+    # cancel an index build on a large table at every boot (D-285).
+    run_coro_sync(backend.start(), timeout=math.inf)
 
 
 def fetch_all(query: str, params: tuple[Any, ...] = ()) -> list[Any]:

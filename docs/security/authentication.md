@@ -99,7 +99,10 @@ transaction's first write marks it consumed on that condition, and a write that 
 row rolls the whole transaction back. Two registrations sent at once with the same code
 therefore create one owner. The other request waits for the first to commit, writes nothing,
 and gets the answer of any other invalid code: `Setup code is invalid or expired.`, or
-`Registration token is invalid or expired.` for a token.
+`Registration token is invalid or expired.` for a token. That request has already hashed its
+password, so a registration with an invalid setup code or token hashes the submitted password
+too before it answers: the two answer in about the same time, the loser later only by the
+wait for the winner's commit. The setup routes have no timing floor.
 `POST /api/control-plane/auth/bootstrap/exchange` consumes the setup code on the same
 condition, so of two exchanges sent at once with one code, one gets a registration token and
 the other `Setup code is invalid or expired.`
@@ -364,16 +367,18 @@ their stronger password checks.
 
   These writes are one database transaction: if any of them fails, the password, the
   codes and the sessions all stay as they were, and the same code still works. Its first
-  write marks the code consumed only while it is still unused, and a write that matches no
-  row rolls the transaction back, so of two resets sent at once with the same code, one
-  sets its password and the other changes nothing and fails with the generic
-  `Invalid identifier or recovery code.`
+  write is the password hash on the user row, so concurrent resets and regenerations of
+  one account wait for each other on that row instead of deadlocking on each other's codes.
+  Its second marks the code consumed only while it is still unused, and a write that
+  matches no row rolls the transaction back, so of two resets sent at once with the same
+  code, or with two codes of the same account, one sets its password and the other changes
+  nothing and fails with the generic `Invalid identifier or recovery code.`
 - The owner must regenerate a fresh batch from `/settings/account` › Security (calling
   `POST /api/control-plane/auth/recovery-codes/regenerate`, which requires the current
-  password). Marking the current codes consumed (`consumed_reason = "regenerated"`), storing
-  the new batch and moving `cp_operator_users.recovery_generation` to it are one database
-  transaction: if any of these writes fails, the current codes stay usable and no new code
-  is kept.
+  password). Moving `cp_operator_users.recovery_generation` to a new batch, marking the
+  current codes consumed (`consumed_reason = "regenerated"`) and storing the new batch are
+  one database transaction, written in that order (the user row first, as in a reset): if
+  any of these writes fails, the current codes stay usable and no new code is kept.
 
 This mirrors Google and GitHub's policy: a printed sheet of codes is useful once, but once
 one of them is compromised the whole sheet has to be rotated.

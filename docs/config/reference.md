@@ -130,7 +130,11 @@ Claude, Codex, Gemini, ElevenLabs and Ollama Cloud.
 
 `KNOWLEDGE_V2_POSTGRES_QUERY_TIMEOUT_MS` (default `30000`) limits each query. The schema
 migrations that run at startup and in `koda migrate` have no time limit, because an index
-build on a large table can take longer than any query.
+build on a large table can take longer than any query. The control plane applies them before
+it starts serving, and waits for them however long they take: the
+`PRIMARY_STATE_BRIDGE_TIMEOUT_SECONDS` limit (default `30`) of its other database calls does
+not apply. Its database health check does stop waiting after that limit and reports the
+database not ready, but the migrations it started keep running to the end.
 
 The Python workers open each Postgres connection with `search_path` set to
 `KNOWLEDGE_V2_POSTGRES_SCHEMA` as a startup parameter, followed by the database or role
