@@ -364,3 +364,22 @@ async def test_server_env_stays_explicit_when_koda_has_no_basic_variables(monkey
 
     # An empty mapping, not None: None would inherit the planted token.
     assert spawned["env"] == {}
+
+
+# D-301: unknown network modes are refused, not treated as shared network
+
+
+@pytest.mark.parametrize("network_mode", ["bridge", "host", "off", "None"])
+def test_constraints_from_dict_rejects_unknown_network_mode(network_mode):
+    with pytest.raises(ValueError, match=f"unknown isolation network_mode '{network_mode}'"):
+        IsolationConstraints.from_dict({"network_mode": network_mode})
+
+
+@pytest.mark.parametrize("network_mode", ["none", "egress_allowlist", "any"])
+def test_constraints_from_dict_accepts_known_network_modes(network_mode):
+    assert IsolationConstraints.from_dict({"network_mode": network_mode}).network_mode == network_mode
+
+
+def test_constraints_from_dict_defaults_an_unset_network_mode():
+    assert IsolationConstraints.from_dict({"cpu_quota": 1}).network_mode == "egress_allowlist"
+    assert IsolationConstraints.from_dict({"network_mode": None}).network_mode == "egress_allowlist"

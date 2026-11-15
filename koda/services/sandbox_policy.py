@@ -348,7 +348,7 @@ def _check_remote_unsafe_default(policy: SandboxEffectivePolicy) -> SandboxPolic
 
 
 def _check_forbidden_mounts(policy: SandboxEffectivePolicy) -> SandboxPolicyCheck:
-    forbidden = [mount.to_payload() for mount in policy.mounts if _is_forbidden_mount(mount.host)]
+    forbidden = [mount.to_payload() for mount in policy.mounts if is_forbidden_mount(mount.host)]
     if forbidden:
         return SandboxPolicyCheck(
             check_id="sandbox_forbidden_mount",
@@ -489,7 +489,11 @@ def _is_forbidden_env_key(key: str) -> bool:
     return normalized in _FORBIDDEN_ENV_NAMES or normalized.startswith("KODA_")
 
 
-def _is_forbidden_mount(host: str) -> bool:
+def is_forbidden_mount(host: str) -> bool:
+    """Whether ``host`` must never be bind-mounted into a sandbox, read-only or not.
+
+    The sandbox doctor applies this rule, and so does saving a custom MCP server.
+    """
     normalized = _normalize_path(host)
     if not normalized:
         return True
@@ -505,7 +509,27 @@ def _is_forbidden_mount(host: str) -> bool:
     parts = set(Path(normalized).parts)
     if parts & _FORBIDDEN_MOUNT_PARTS:
         return True
-    return any(part in normalized for part in _FORBIDDEN_MOUNT_PARTS if "/" in part)
+    if any(part in normalized for part in _FORBIDDEN_MOUNT_PARTS if "/" in part):
+        return True
+    # A mount on, inside or above a protected path exposes it.
+    return any(_paths_overlap(normalized, protected) for protected in _protected_mount_paths())
+
+
+def _protected_mount_paths() -> tuple[str, ...]:
+    """Koda's state directory, its master keys and the Docker socket."""
+    from koda.config import STATE_ROOT_DIR
+    from koda.control_plane.settings import CONTROL_PLANE_MASTER_KEY_FILE, CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE
+
+    koda_paths = (STATE_ROOT_DIR, CONTROL_PLANE_MASTER_KEY_FILE, CONTROL_PLANE_MASTER_KEY_PREVIOUS_FILE)
+    return tuple(_normalize_path(str(path)) for path in koda_paths) + _FORBIDDEN_MOUNT_EXACT
+
+
+def _paths_overlap(path: str, protected: str) -> bool:
+    return (
+        path == protected
+        or path.startswith(protected.rstrip("/") + "/")
+        or protected.startswith(path.rstrip("/") + "/")
+    )
 
 
 def _normalize_path(path: str) -> str:

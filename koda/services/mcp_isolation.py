@@ -37,6 +37,7 @@ logger = get_logger(__name__)
 
 
 IsolationKind = Literal["native", "bwrap", "sandbox-exec", "docker"]
+_NETWORK_MODES: tuple[str, ...] = ("none", "egress_allowlist", "any")
 
 
 # Constraints
@@ -82,10 +83,18 @@ class IsolationConstraints:
                     )
         domains_raw = data.get("egress_domains") or ()
         domains = tuple(str(item) for item in domains_raw) if isinstance(domains_raw, (list, tuple)) else ()
+        network_mode = data.get("network_mode")
+        if network_mode is None:
+            network_mode = "egress_allowlist"
+        # An unknown mode would otherwise share the host network silently.
+        if network_mode not in _NETWORK_MODES:
+            raise ValueError(
+                f"unknown isolation network_mode {network_mode!r}; expected one of: {', '.join(sorted(_NETWORK_MODES))}"
+            )
         return cls(
             cpu_quota=float(data.get("cpu_quota", 0.5)),
             memory_limit_bytes=int(data.get("memory_limit_bytes", 256 * 1024 * 1024)),
-            network_mode=str(data.get("network_mode", "egress_allowlist")),  # type: ignore[arg-type]
+            network_mode=network_mode,  # type: ignore[arg-type]  # checked against _NETWORK_MODES above
             egress_domains=domains,
             mounts=tuple(mounts),
             timeout_seconds=int(data.get("timeout_seconds", 600)),
