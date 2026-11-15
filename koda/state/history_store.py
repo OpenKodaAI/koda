@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Iterator
+from collections.abc import Awaitable, Callable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -1422,36 +1423,88 @@ def dlq_mark_retried(dlq_id: int, *, metadata_json: str | None = None) -> bool:
 
 # The daily retention job only reports for now: deletes wait until the
 # retention defaults are approved. Query history has no setting yet.
+# Retention applies to whole tables, so the counts cover every agent scope:
+# control-plane and squad scopes ("admin", "system", ...) and deleted agents.
 _QUERY_HISTORY_RETENTION_DAYS = 90
 _EXPIRED_ROWS_SQL = {
-    "query_history": "SELECT COUNT(*) FROM query_history WHERE agent_id = ? AND timestamp < ?",
-    "audit_events": "SELECT COUNT(*) FROM audit_events WHERE agent_id = ? AND timestamp < ?",
+    "query_history": "SELECT COUNT(*) FROM query_history WHERE timestamp < ?",
+    "audit_events": "SELECT COUNT(*) FROM audit_events WHERE timestamp < ?",
 }
+_MAINTENANCE_INTERVAL = timedelta(days=1)
+_MAINTENANCE_REPORT_EVENT = "retention.report"
 
 
 def run_maintenance() -> dict[str, Any]:
     """Daily retention job, report-only: count rows past retention, delete nothing.
 
-    Counts this agent's ``query_history`` rows older than 90 days and
-    ``audit_events`` rows older than ``AUDIT_RETENTION_DAYS``, comparing the
-    TIMESTAMPTZ ``timestamp`` column with an aware UTC cutoff.
+    Counts the ``query_history`` rows older than 90 days and the
+    ``audit_events`` rows older than ``AUDIT_RETENTION_DAYS``, under every
+    agent scope, comparing the TIMESTAMPTZ ``timestamp`` column with an aware
+    UTC cutoff. Failures, including an unavailable backend, come back as an
+    ``error`` entry.
     """
     now = datetime.now(UTC)
     windows = {
         "query_history": _QUERY_HISTORY_RETENTION_DAYS,
         "audit_events": int(config_module.AUDIT_RETENTION_DAYS),
     }
-    scope = _current_agent_scope()
     result: dict[str, Any] = {"mode": "report_only"}
-    _primary_backend()
     try:
+        _primary_backend()
         for table, days in windows.items():
             cutoff = now - timedelta(days=days)
             result[f"{table}_retention_days"] = days
             result[f"{table}_cutoff"] = cutoff.isoformat()
-            expired = run_coro_sync(primary_fetch_val(_EXPIRED_ROWS_SQL[table], (scope, cutoff), agent_id=AGENT_ID))
+            expired = run_coro_sync(primary_fetch_val(_EXPIRED_ROWS_SQL[table], (cutoff,), agent_id=AGENT_ID))
             result[f"{table}_expired"] = int(expired or 0)
     except Exception as exc:  # noqa: BLE001
         log.warning("db_maintenance_error", error=str(exc))
         result["error"] = str(exc)
     return result
+
+
+def last_maintenance_report_at() -> datetime | None:
+    """When this agent last recorded a retention report, or ``None``."""
+    try:
+        _primary_backend()
+        value = run_coro_sync(
+            primary_fetch_val(
+                "SELECT timestamp FROM audit_events WHERE agent_id = ? AND event_type = ? "
+                "ORDER BY timestamp DESC LIMIT 1",
+                (_current_agent_scope(), _MAINTENANCE_REPORT_EVENT),
+                agent_id=AGENT_ID,
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        log.warning("db_maintenance_last_report_unavailable", error=str(exc))
+        return None
+    return datetime.fromisoformat(str(value)) if value else None
+
+
+def record_maintenance_report(result: dict[str, Any]) -> None:
+    """Record a report as a ``retention.report`` audit event."""
+    from koda.services.audit import AuditEvent, emit
+
+    emit(AuditEvent(event_type=_MAINTENANCE_REPORT_EVENT, details=dict(result)))
+
+
+async def run_maintenance_loop(*, sleep: Callable[[float], Awaitable[object]] = asyncio.sleep) -> None:
+    """Run the retention report once a day, under the lifecycle supervisor.
+
+    The last report is recorded as an audit event, so a restart does not push
+    the next one back: the report runs at once when this agent's last one is
+    missing or a day old, and otherwise a day after it (as the memory
+    maintenance loop does). Each report is logged as ``db_maintenance_complete``.
+    """
+    loop = asyncio.get_running_loop()
+    last_run = await loop.run_in_executor(None, last_maintenance_report_at)
+    while True:
+        if last_run is not None:
+            wait = (last_run + _MAINTENANCE_INTERVAL - datetime.now(UTC)).total_seconds()
+            if wait > 0:
+                await sleep(min(wait, _MAINTENANCE_INTERVAL.total_seconds()))
+        result = await loop.run_in_executor(None, run_maintenance)
+        last_run = datetime.now(UTC)
+        if "error" not in result:
+            log.info("db_maintenance_complete", **result)
+            await loop.run_in_executor(None, record_maintenance_report, result)

@@ -2,14 +2,19 @@
 
 ``run_maintenance`` used to delete from ``queries`` and ``audit_log``, tables
 that do not exist in Postgres, so it failed every day with a warning. It now
-counts this agent's ``query_history`` and ``audit_events`` rows that are past
-retention, with TIMESTAMPTZ comparisons, and deletes nothing: deletes wait for
-the approved retention defaults (M2-E5-T2).
+counts the ``query_history`` and ``audit_events`` rows past retention, under
+every agent scope, with TIMESTAMPTZ comparisons, and deletes nothing: deletes
+wait for the approved retention defaults (M2-E5-T2).
+
+The lifecycle supervisor runs it through ``run_maintenance_loop``, which
+records each report as a ``retention.report`` audit event, so a restart does
+not push the next report back.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import json
+from collections.abc import AsyncIterator, Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock
@@ -20,95 +25,120 @@ import pytest
 pytestmark = [pytest.mark.postgres]
 
 _AGENT = "RETENTION_REPORT"
-_OTHER_AGENT = "RETENTION_OTHER"
-_AGENTS = (_AGENT, _OTHER_AGENT)
+# Rows of this worker's agent, of control-plane and squad scopes, and of an
+# agent that has been deleted (no worker is left to report its rows).
+_SCOPES = (_AGENT, "admin", "squad_router", "system", "RETENTION_DELETED_AGENT")
+_USER_ID = 70531  # marks this test's query_history rows
+_EVENT = "retention.test"  # marks this test's audit_events rows
+_REPORT_EVENT = "retention.report"
+_DAY = 86400
 
 
-async def _row_counts(conn: Any, schema: str) -> tuple[int, int]:
-    history = await conn.fetchval(
-        f'SELECT count(*) FROM "{schema}"."query_history" WHERE agent_id = ANY($1::text[])', list(_AGENTS)
-    )
-    audit = await conn.fetchval(
-        f'SELECT count(*) FROM "{schema}"."audit_events" WHERE agent_id = ANY($1::text[])', list(_AGENTS)
-    )
+async def _seeded_counts(conn: Any, schema: str) -> tuple[int, int]:
+    history = await conn.fetchval(f'SELECT count(*) FROM "{schema}"."query_history" WHERE user_id = $1', _USER_ID)
+    audit = await conn.fetchval(f'SELECT count(*) FROM "{schema}"."audit_events" WHERE event_type = $1', _EVENT)
     return int(history), int(audit)
 
 
+async def _insert_report(conn: Any, schema: str, timestamp: datetime) -> None:
+    await conn.execute(
+        f"""INSERT INTO "{schema}"."audit_events" (agent_id, timestamp, event_type)
+               VALUES ($1, $2, $3)""",
+        _AGENT,
+        timestamp,
+        _REPORT_EVENT,
+    )
+
+
 @pytest.fixture
-async def seeded(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[tuple[Any, str]]:
-    """Rows on both sides of each retention window, plus an old row of another agent."""
+async def seeded(
+    migrated_postgres: str, monkeypatch: pytest.MonkeyPatch
+) -> AsyncIterator[tuple[Any, str, dict[str, Any]]]:
+    """Rows on both sides of each retention window, under several agent scopes.
+
+    Yields the connection, the schema and the report taken before seeding, so
+    tests compare counts against rows other tests left in the shared tables.
+    """
     import koda.config as config_module
     from koda.knowledge.config import KNOWLEDGE_V2_POSTGRES_SCHEMA
     from koda.state import history_store
 
     schema = KNOWLEDGE_V2_POSTGRES_SCHEMA
     monkeypatch.setattr(history_store, "AGENT_ID", _AGENT)
+    # Audit events are written under the worker's agent id.
+    monkeypatch.setattr(config_module, "AGENT_ID", _AGENT)
     monkeypatch.setattr(config_module, "AUDIT_RETENTION_DAYS", 30)
-    now = datetime.now(UTC)
     conn = await asyncpg.connect(migrated_postgres)
 
     async def _clear() -> None:
-        for table in ("query_history", "audit_events"):
-            await conn.execute(f'DELETE FROM "{schema}"."{table}" WHERE agent_id = ANY($1::text[])', list(_AGENTS))
+        await conn.execute(f'DELETE FROM "{schema}"."query_history" WHERE user_id = $1', _USER_ID)
+        await conn.execute(f'DELETE FROM "{schema}"."audit_events" WHERE event_type = $1', _EVENT)
+        await conn.execute(
+            f'DELETE FROM "{schema}"."audit_events" WHERE agent_id = $1 AND event_type = $2', _AGENT, _REPORT_EVENT
+        )
 
     await _clear()
-    history_rows = [
-        (_AGENT, now - timedelta(days=120)),  # past the 90-day window
+    baseline = history_store.run_maintenance()
+    assert "error" not in baseline, baseline
+    now = datetime.now(UTC)
+    history_rows = [(scope, now - timedelta(days=120)) for scope in _SCOPES] + [
         (_AGENT, now - timedelta(days=91)),  # past the 90-day window
         (_AGENT, now - timedelta(days=89)),  # inside the window
-        (_OTHER_AGENT, now - timedelta(days=120)),  # another agent's row
     ]
     for agent_id, timestamp in history_rows:
         await conn.execute(
             f"""INSERT INTO "{schema}"."query_history"
                    (agent_id, user_id, timestamp, query_text, response_text)
-                   VALUES ($1, 1, $2, 'q', 'r')""",
+                   VALUES ($1, $2, $3, 'q', 'r')""",
             agent_id,
+            _USER_ID,
             timestamp,
         )
-    audit_rows = [
-        (_AGENT, now - timedelta(days=31)),  # past AUDIT_RETENTION_DAYS=30
-        (_AGENT, now - timedelta(days=29)),  # inside the window
-        (_OTHER_AGENT, now - timedelta(days=60)),  # another agent's row
+    audit_rows = [(scope, now - timedelta(days=31)) for scope in _SCOPES] + [
+        (_AGENT, now - timedelta(days=29)),  # inside AUDIT_RETENTION_DAYS=30
     ]
     for agent_id, timestamp in audit_rows:
         await conn.execute(
             f"""INSERT INTO "{schema}"."audit_events" (agent_id, timestamp, event_type)
-                   VALUES ($1, $2, 'retention.test')""",
+                   VALUES ($1, $2, $3)""",
             agent_id,
             timestamp,
+            _EVENT,
         )
     try:
-        yield conn, schema
+        yield conn, schema, baseline
     finally:
         await _clear()
         await conn.close()
 
 
-async def test_run_maintenance_reports_expired_rows_without_deleting(
-    seeded: tuple[Any, str], monkeypatch: pytest.MonkeyPatch
+async def test_run_maintenance_counts_every_agent_scope_without_deleting(
+    seeded: tuple[Any, str, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    """Retention applies to the whole table, so the report counts rows of
+    every scope: this worker's agent, admin, squad_router and system rows, and
+    rows of a deleted agent that no worker reports for."""
     from koda.state import history_store
 
-    conn, schema = seeded
+    conn, schema, baseline = seeded
     log = MagicMock()
     monkeypatch.setattr(history_store, "log", log)
-    before = await _row_counts(conn, schema)
+    before = await _seeded_counts(conn, schema)
 
     result = history_store.run_maintenance()
 
     assert "error" not in result, result
     log.warning.assert_not_called()
     assert result["mode"] == "report_only"
-    assert result["query_history_expired"] == 2
-    assert result["audit_events_expired"] == 1
+    assert result["query_history_expired"] - baseline["query_history_expired"] == len(_SCOPES) + 1
+    assert result["audit_events_expired"] - baseline["audit_events_expired"] == len(_SCOPES)
     assert result["query_history_retention_days"] == 90
     assert result["audit_events_retention_days"] == 30
     # Report-only: every seeded row is still there.
-    assert await _row_counts(conn, schema) == before == (4, 3)
+    assert await _seeded_counts(conn, schema) == before == (len(_SCOPES) + 2, len(_SCOPES) + 1)
 
 
-async def test_run_maintenance_cutoffs_are_utc_timestamps(seeded: tuple[Any, str]) -> None:
+async def test_run_maintenance_cutoffs_are_utc_timestamps(seeded: tuple[Any, str, dict[str, Any]]) -> None:
     from koda.state import history_store
 
     started = datetime.now(UTC)
@@ -118,3 +148,100 @@ async def test_run_maintenance_cutoffs_are_utc_timestamps(seeded: tuple[Any, str
         cutoff = datetime.fromisoformat(result[f"{table}_cutoff"])
         assert cutoff.tzinfo is not None
         assert abs(cutoff - (started - timedelta(days=days))) < timedelta(minutes=1)
+
+
+class _StopLoop(Exception):
+    pass
+
+
+@pytest.fixture
+def report_loop(
+    seeded: tuple[Any, str, dict[str, Any]], monkeypatch: pytest.MonkeyPatch
+) -> tuple[Callable[[], Awaitable[None]], list[float], MagicMock]:
+    """Start ``run_maintenance_loop`` the way the lifecycle supervisor does,
+    with a sleep that records its delay and then stops the loop."""
+    from koda.state import history_store
+
+    log = MagicMock()
+    monkeypatch.setattr(history_store, "log", log)
+    sleeps: list[float] = []
+
+    async def _sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        raise _StopLoop
+
+    async def _start() -> None:
+        with pytest.raises(_StopLoop):
+            await history_store.run_maintenance_loop(sleep=_sleep)
+
+    return _start, sleeps, log
+
+
+def _completed_reports(log: MagicMock) -> list[dict[str, Any]]:
+    return [call.kwargs for call in log.info.call_args_list if call.args == ("db_maintenance_complete",)]
+
+
+async def test_maintenance_loop_reports_at_start_and_records_the_report(
+    seeded: tuple[Any, str, dict[str, Any]],
+    report_loop: tuple[Callable[[], Awaitable[None]], list[float], MagicMock],
+) -> None:
+    """With no report recorded, the first report runs when the worker starts,
+    not a day later, and is recorded for the next start."""
+    conn, schema, _ = seeded
+    start, sleeps, log = report_loop
+
+    await start()
+
+    reports = _completed_reports(log)
+    assert len(reports) == 1
+    assert reports[0]["mode"] == "report_only"
+    assert reports[0]["query_history_expired"] >= len(_SCOPES) + 1
+    recorded = await conn.fetch(
+        f'SELECT details_json FROM "{schema}"."audit_events" WHERE agent_id = $1 AND event_type = $2',
+        _AGENT,
+        _REPORT_EVENT,
+    )
+    assert len(recorded) == 1
+    details = json.loads(recorded[0]["details_json"])
+    assert details["query_history_expired"] == reports[0]["query_history_expired"]
+    assert details["audit_events_expired"] == reports[0]["audit_events_expired"]
+    log.warning.assert_not_called()
+    assert sleeps == [pytest.approx(_DAY, abs=60)]
+
+
+async def test_maintenance_loop_after_a_restart_waits_for_the_rest_of_the_day(
+    report_loop: tuple[Callable[[], Awaitable[None]], list[float], MagicMock],
+) -> None:
+    """A worker restarted soon after a report does not report again at start;
+    it waits until a day after the recorded report."""
+    start, sleeps, log = report_loop
+
+    await start()
+    await start()  # the restart
+
+    assert len(_completed_reports(log)) == 1
+    assert sleeps == [pytest.approx(_DAY, abs=60), pytest.approx(_DAY, abs=60)]
+
+
+@pytest.mark.parametrize(
+    ("hours_ago", "reports_at_start", "first_sleep"),
+    [
+        (30, 1, _DAY),  # more than a day old: catch up at once
+        (2, 0, _DAY - 2 * 3600),  # recent: wait for the rest of the day
+    ],
+)
+async def test_maintenance_loop_schedules_from_the_last_recorded_report(
+    seeded: tuple[Any, str, dict[str, Any]],
+    report_loop: tuple[Callable[[], Awaitable[None]], list[float], MagicMock],
+    hours_ago: int,
+    reports_at_start: int,
+    first_sleep: int,
+) -> None:
+    conn, schema, _ = seeded
+    start, sleeps, log = report_loop
+    await _insert_report(conn, schema, datetime.now(UTC) - timedelta(hours=hours_ago))
+
+    await start()
+
+    assert len(_completed_reports(log)) == reports_at_start
+    assert sleeps == [pytest.approx(first_sleep, abs=60)]
