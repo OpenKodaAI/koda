@@ -14186,6 +14186,8 @@ class ControlPlaneManager:
         and constraints, checked by the worker's own rule: constraints it would
         refuse raise ``McpStartRefusedError`` with its reason, so a probe neither
         runs the server outside its sandbox nor reports a refused server healthy.
+        ``resolved`` carries that isolation from the same catalog row as the
+        command (see ``_resolve_mcp_runtime_payload``).
         """
         from koda.services.mcp_bootstrap import _catalog_isolation
         from koda.services.mcp_manager import McpServerInstance
@@ -14198,7 +14200,7 @@ class ControlPlaneManager:
             url=resolved.get("url"),
             env=resolved.get("env_values") or None,
             headers=resolved.get("headers") or None,
-            **_catalog_isolation(self.get_mcp_catalog_entry(server_key)),
+            **_catalog_isolation(resolved),
         )
 
     def _resolve_mcp_runtime_payload(self, agent_id: str, server_key: str) -> dict[str, Any] | None:
@@ -14211,12 +14213,18 @@ class ControlPlaneManager:
         )
         if connection_row is None:
             return None
-        return resolve_mcp_runtime_connection(
+        resolved = resolve_mcp_runtime_connection(
             agent_id,
             server_key,
             connection_row=connection_row,
             catalog_row=catalog_row,
         )
+        if resolved is not None:
+            # A probe isolates the server with the row its command came from.
+            catalog = self._serialize_mcp_catalog_row(catalog_row)
+            resolved["isolation_profile"] = catalog["isolation_profile"]
+            resolved["isolation_constraints"] = catalog["isolation_constraints"]
+        return resolved
 
     def _tool_to_payload(self, tool: Any) -> dict[str, Any]:
         from koda.services.mcp_risk import assess_mcp_tool_risk, evaluate_mcp_risk

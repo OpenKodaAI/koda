@@ -882,3 +882,31 @@ class TestMCPProbeIsolation:
         assert "--unshare-net" in argv
         assert "--ro-bind /srv/data /data" in " ".join(argv)
         assert argv[-2:] == ["npx", "server-linear"]
+
+    def test_probe_takes_isolation_from_the_row_its_command_came_from(self, probe, monkeypatch):
+        mgr, db = probe
+        self._store_isolation(db, "bwrap", {"mounts": [{"host": "/srv/data", "container": "/data", "read_only": True}]})
+        resolve = manager_mod.resolve_mcp_runtime_connection
+
+        def resolve_then_operator_saves(*args: Any, **kwargs: Any) -> Any:
+            resolved = resolve(*args, **kwargs)
+            # An operator saves a new catalog version after the probe read the row.
+            row = db.tables["cp_mcp_server_catalog"][0]
+            db.tables["cp_mcp_server_catalog"][0] = {
+                **row,
+                "command_json": json.dumps(["npx", "server-linear-v2"]),
+                "isolation_constraints_json": json.dumps(
+                    {"mounts": [{"host": "/srv/other", "container": "/data", "read_only": True}]}
+                ),
+            }
+            return resolved
+
+        monkeypatch.setattr(manager_mod, "resolve_mcp_runtime_connection", resolve_then_operator_saves)
+
+        result = mgr.test_mcp_connection("agent-1", "linear")
+
+        assert result["success"] is True, result
+        [argv] = _FakeStdioTransport.spawned
+        assert argv[-2:] == ["npx", "server-linear"]
+        assert "--ro-bind /srv/data /data" in " ".join(argv)
+        assert "/srv/other" not in argv
