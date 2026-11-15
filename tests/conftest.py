@@ -44,19 +44,19 @@ _REAL_HOME = os.path.expanduser("~")
 _REAL_STATE_ROOT = Path(_REAL_HOME) / ".koda-state"
 _SESSION_STATE_ROOT = Path(tempfile.mkdtemp(prefix="koda-test-state-"))
 atexit.register(shutil.rmtree, _SESSION_STATE_ROOT, True)
-os.environ["STATE_ROOT_DIR"] = str(_SESSION_STATE_ROOT)
-os.environ.pop(f"{os.environ['AGENT_ID']}_STATE_ROOT_DIR", None)
+# koda.config runs load_dotenv(), which refills any key missing from the environment out of the
+# repo .env, and the AGENT_ID-prefixed key wins in _env, so the prefixed keys are set, not popped.
+for _key in ("STATE_ROOT_DIR", f"{os.environ['AGENT_ID']}_STATE_ROOT_DIR"):
+    os.environ[_key] = str(_SESSION_STATE_ROOT)
 # Runtime scratch (task dirs and their events.ndjson, image and artifact scratch) lives under
 # RUNTIME_EPHEMERAL_ROOT, <tmp>/koda-runtime/<agent> by default, which every session on the machine
 # shares; task ids restart at 1 in each test database, so sessions appended to each other's task
-# logs (D-276). Give it this session's own directory too; RUNTIME_ROOT_DIR follows it.
+# logs (D-276). Give it and RUNTIME_ROOT_DIR this session's own directory too.
 _SHARED_RUNTIME_ROOT = Path(tempfile.gettempdir()) / "koda-runtime"
 _SESSION_RUNTIME_ROOT = Path(tempfile.mkdtemp(prefix="koda-test-runtime-"))
 atexit.register(shutil.rmtree, _SESSION_RUNTIME_ROOT, True)
-os.environ["RUNTIME_EPHEMERAL_ROOT"] = str(_SESSION_RUNTIME_ROOT)
 for _key in ("RUNTIME_EPHEMERAL_ROOT", "RUNTIME_ROOT_DIR"):
-    os.environ.pop(f"{os.environ['AGENT_ID']}_{_key}", None)
-os.environ.pop("RUNTIME_ROOT_DIR", None)
+    os.environ[_key] = os.environ[f"{os.environ['AGENT_ID']}_{_key}"] = str(_SESSION_RUNTIME_ROOT)
 
 
 def _koda_paths_under(root: Path) -> list[str]:

@@ -11,7 +11,9 @@ points into the shared one.
 from __future__ import annotations
 
 import importlib
+import io
 import json
+import os
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -80,3 +82,35 @@ def test_the_session_guard_catches_a_path_in_the_shared_runtime_root(monkeypatch
     leaks = conftest._session_root_leaks()
 
     assert f"koda.config.RUNTIME_ROOT_DIR = {shared}" in "\n".join(leaks), leaks
+
+
+# What a developer .env might set. koda.config loads .env without override, so it refills any of
+# these keys the environment lacks, and in ``_env`` the AGENT_A_-prefixed key wins over the
+# unprefixed one tests/conftest.py points at the session directory.
+_DOTENV_ROOTS = {
+    "AGENT_A_STATE_ROOT_DIR": "/var/lib/koda/state",
+    "AGENT_A_RUNTIME_EPHEMERAL_ROOT": "/var/lib/koda/runtime/agent_a",
+    "AGENT_A_RUNTIME_ROOT_DIR": "/var/lib/koda/runtime/agent_a",
+    "RUNTIME_ROOT_DIR": "/var/lib/koda/runtime/agent_a",
+}
+
+
+def test_a_dotenv_cannot_move_the_session_roots(session_state_root: Path, session_runtime_root: Path) -> None:
+    from dotenv import load_dotenv
+
+    from koda import config
+
+    before = {key: os.environ.get(key) for key in _DOTENV_ROOTS}
+    try:
+        load_dotenv(stream=io.StringIO("".join(f"{key}={value}\n" for key, value in _DOTENV_ROOTS.items())))
+
+        assert config.AGENT_ID == "AGENT_A"
+        assert config._env("STATE_ROOT_DIR") == str(session_state_root)
+        assert config._env("RUNTIME_EPHEMERAL_ROOT") == str(session_runtime_root)
+        assert config._env("RUNTIME_ROOT_DIR") == str(session_runtime_root)
+    finally:
+        for key, value in before.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
