@@ -941,6 +941,78 @@ class TestRuntimeTerminalCutover:
             assert _requires_kernel_terminal(runtime_env_id, run_result) is required
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize("scenario", ["no_eligible_provider", "provider_unavailable"])
+    async def test_error_result_that_ran_no_provider_skips_the_kernel_terminal_check(self, scenario):
+        # D-297: with RUNTIME_ENVIRONMENTS_ENABLED a task with an environment whose provider never ran
+        # failed with "runtime terminal output requires a kernel-backed terminal path", hiding the
+        # provider error. Such an error result has no terminal, so the check does not apply to it.
+        ctx = QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            runtime_env_id=7,
+            fallback_chain=[] if scenario == "no_eligible_provider" else ["claude"],
+        )
+        unavailable_ctx = QueryContext(
+            provider="claude",
+            work_dir="/tmp",
+            model="claude-sonnet-4-6",
+            session_id="canon-1",
+            provider_session_id=None,
+            system_prompt="system",
+            agent_mode="autonomous",
+            permission_mode="bypassPermissions",
+            max_turns=5,
+            runtime_env_id=7,
+            warnings=["claude is not connected"],
+            provider_available=False,
+        )
+        with (
+            patch("koda.services.queue_manager.RUNTIME_ENVIRONMENTS_ENABLED", True),
+            patch("koda.services.queue_manager.get_provider_fallback_chain", return_value=[]),
+            patch("koda.services.queue_manager.get_provider_runtime_eligibility", return_value={}),
+            patch("koda.services.queue_manager._resolve_provider_context", AsyncMock(return_value=unavailable_ctx)),
+            patch("koda.services.queue_manager._run_streaming", AsyncMock()) as run_streaming,
+            patch("koda.services.audit.emit_task_lifecycle"),
+        ):
+            result = await _run_with_provider_fallback(
+                ctx, QueueItem(chat_id=111, query_text="hello"), 111, 111, MagicMock(), task_id=7
+            )
+            required = _requires_kernel_terminal(7, result)
+
+        run_streaming.assert_not_awaited()
+        assert result.error is True
+        expected = (
+            "No verified providers are eligible for runtime fallback."
+            if scenario == "no_eligible_provider"
+            else "claude is not connected"
+        )
+        assert result.result == expected
+        assert required is False
+
+    def test_error_result_from_a_provider_run_still_needs_a_kernel_terminal(self):
+        # D-297: a provider that ran in a runtime environment registered its terminal, error or not.
+        run_result = RunResult(
+            provider="claude",
+            model="claude-sonnet-4-6",
+            result="provider failed",
+            session_id="canon-1",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=True,
+            stop_reason="error",
+            runtime_terminal_path="kernel-stream://stdout",
+        )
+        with patch("koda.services.queue_manager.RUNTIME_ENVIRONMENTS_ENABLED", True):
+            assert _requires_kernel_terminal(7, run_result) is True
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize("runtime_env_id", [7, None])
     async def test_run_fallback_registers_a_kernel_terminal_for_runtime_env(self, runtime_env_id):
         # M6-E1-T8 (D-064): the non-streaming fallback registers its terminal as streaming does, so a task

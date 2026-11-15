@@ -3996,8 +3996,12 @@ def _requires_kernel_terminal(runtime_env_id: int | None, run_result: RunResult)
     """Whether a run must carry a kernel-backed terminal path (D-064).
 
     Only a task with a runtime environment runs its provider on a kernel terminal: a light task
-    gets no environment, and a cache hit runs no provider.
+    gets no environment, and a cache hit runs no provider. An error result without a terminal ran
+    no provider either (no eligible or available provider), so its error reaches the user (D-297);
+    a provider run in an environment registers its terminal before it starts.
     """
+    if run_result.error and not run_result.runtime_terminal_path:
+        return False
     return RUNTIME_ENVIRONMENTS_ENABLED and runtime_env_id is not None and run_result.stop_reason != "cache_hit"
 
 
