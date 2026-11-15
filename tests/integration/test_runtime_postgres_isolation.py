@@ -100,7 +100,9 @@ def _build_store(agent_id: str):
     return ps_mod.PostgresRuntimeStore()
 
 
-async def _seed_task(dsn: str, *, agent_id: str, task_id: int, user_id: int = 100, chat_id: int = 100) -> None:
+async def _seed_task(
+    dsn: str, *, agent_id: str, task_id: int, user_id: int = 100, chat_id: int = 100, status: str = "queued"
+) -> None:
     """Insert a task row under the ``agent_id`` scope ``koda.state.history_store`` writes (D-293)."""
     conn = await asyncpg.connect(dsn)
     try:
@@ -114,7 +116,7 @@ async def _seed_task(dsn: str, *, agent_id: str, task_id: int, user_id: int = 10
             task_agent_scope(agent_id),
             user_id,
             chat_id,
-            "queued",
+            status,
             f"task {task_id} for {agent_id}",
             1,
             3,
@@ -316,6 +318,37 @@ async def test_list_environments_scoped_per_agent(runtime_db: str) -> None:
     b_envs = store_b.list_environments()
     assert {e["task_id"] for e in a_envs} == {1}
     assert {e["task_id"] for e in b_envs} == {2}
+
+
+# list_runtime_queues joins tasks on the scope their writer uses
+
+
+async def test_list_runtime_queues_reports_terminal_status_of_upper_case_task_row(runtime_db: str) -> None:
+    """A terminal ``tasks.status`` overrides a stale queue status (D-293).
+
+    ``koda.state.history_store`` writes ``tasks.agent_id`` upper-cased while
+    ``runtime_queue_items`` carries the lower-case runtime scope. Startup
+    recovery (``queue_manager.recover_pending_tasks``) reads the queue through
+    this join, so a task that finished while its queue row still says
+    ``running`` must come back with the task's terminal status.
+    """
+    await _seed_task(runtime_db, agent_id="agent_a", task_id=1, status="completed")
+    await _seed_task(runtime_db, agent_id="agent_a", task_id=2, status="cancelled")
+    await _seed_task(runtime_db, agent_id="agent_a", task_id=3)
+    conn = await asyncpg.connect(runtime_db)
+    try:
+        scopes = await conn.fetch("SELECT DISTINCT agent_id FROM knowledge_v2.tasks")
+    finally:
+        await conn.close()
+    assert [row["agent_id"] for row in scopes] == ["AGENT_A"]
+
+    store = _build_store("agent_a")
+    store.upsert_runtime_queue_item(task_id=1, user_id=100, chat_id=100, query_text="task 1", status="running")
+    store.upsert_runtime_queue_item(task_id=2, user_id=100, chat_id=100, query_text="task 2", status="queued")
+    store.upsert_runtime_queue_item(task_id=3, user_id=100, chat_id=100, query_text="task 3", status="running")
+
+    statuses = {int(item["task_id"]): item["status"] for item in store.list_runtime_queues()}
+    assert statuses == {1: "completed", 2: "cancelled", 3: "running"}
 
 
 # Port allocation persistence + cross-agent uniqueness
