@@ -186,7 +186,7 @@ class KnowledgeManager:
         """Return no evidence nodes: this manager does not ingest artifact dossiers.
 
         No mode writes artifact evidence here. Before M4-E1-T6 the OFF storage
-        mode wrote ``artifact_evidence_nodes`` and graph rows from the dossiers.
+        mode tried to write ``artifact_evidence_nodes``, which no schema creates.
         """
         if not KNOWLEDGE_MULTIMODAL_GRAPH_ENABLED or not dossiers or query_context.task_id is None:
             return []

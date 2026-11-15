@@ -1623,21 +1623,58 @@ async def test_off_mode_artifact_ingest_writes_no_evidence_rows(off_storage_mode
 
 @pytest.mark.asyncio
 async def test_off_mode_artifact_evidence_read_returns_no_rows(off_storage_mode: _GovernanceWrites):
-    """Nothing writes artifact_evidence_nodes any more, so the OFF-mode read
-    returns no rows instead of querying that table (needs operator sign-off)."""
-    repository = KnowledgeRepository("AGENT_A")
-    storage = KnowledgeStorageV2(repository, "AGENT_A")
-    stale_row = {"evidence_key": "old", "label": "invoice.pdf p1"}
+    """OFF mode returns no artifact evidence rows and runs no query.
 
-    with patch.object(repository, "list_artifact_evidence", return_value=[stale_row]) as legacy_read:
-        rows = await storage.list_artifact_evidence_rows_async(
-            task_id=None,
-            project_key="",
-            workspace_fingerprint="",
-        )
+    Before M4-E1-T6 this read went to ``KnowledgeRepository.list_artifact_evidence``,
+    which selected from ``artifact_evidence_nodes``, a table no schema creates,
+    so with a state backend configured it raised instead of returning rows.
+    """
+    storage = KnowledgeStorageV2(KnowledgeRepository("AGENT_A"), "AGENT_A")
+    backend_read = AsyncMock(return_value=[{"evidence_key": "art-1:0", "label": "invoice.pdf p1"}])
+    storage._postgres = SimpleNamespace(  # type: ignore[assignment]
+        enabled=True,
+        bootstrapped=True,
+        list_artifact_derivative_rows=backend_read,
+    )
 
+    rows = await storage.list_artifact_evidence_rows_async(
+        task_id=None,
+        project_key="",
+        workspace_fingerprint="",
+    )
+
+    assert not storage.primary_read_enabled()
     assert rows == []
-    legacy_read.assert_not_called()
+    backend_read.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_primary_mode_artifact_evidence_read_returns_backend_derivative_rows():
+    """PRIMARY mode reads artifact evidence from the backend's derivative rows,
+    the rows the turn's asset_memory provenance is built from."""
+    storage = KnowledgeStorageV2(KnowledgeRepository("AGENT_A"), "AGENT_A", storage_mode="primary")
+    row = {"evidence_key": "art-1:0", "label": "invoice.pdf p1", "modality": "pdf"}
+    backend_read = AsyncMock(return_value=[row])
+    storage._postgres = SimpleNamespace(  # type: ignore[assignment]
+        enabled=True,
+        bootstrapped=True,
+        list_artifact_derivative_rows=backend_read,
+    )
+
+    rows = await storage.list_artifact_evidence_rows_async(
+        task_id=8,
+        project_key="billing",
+        workspace_fingerprint="/srv/billing",
+        limit=12,
+    )
+
+    assert rows == [row]
+    backend_read.assert_awaited_once_with(
+        task_id=8,
+        project_key="billing",
+        workspace_fingerprint="/srv/billing",
+        limit=12,
+    )
 
 
 @pytest.mark.asyncio
@@ -1686,6 +1723,8 @@ def test_dead_knowledge_paths_are_removed():
     assert not hasattr(manager, "ArtifactEvidenceMatch")
     for name in ("persist_entries", "persist_artifact_derivatives", "persist_retrieval_bundle"):
         assert not hasattr(storage_v2.KnowledgeStorageV2, name), name
+    # Its last caller was the OFF-mode artifact evidence read.
+    assert not hasattr(KnowledgeRepository, "list_artifact_evidence")
     for name in (
         "citation_coverage_from_response",
         "evaluate_runtime_answer",

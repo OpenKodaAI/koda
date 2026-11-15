@@ -176,8 +176,8 @@ class KnowledgeStorageV2:
     ) -> list[dict[str, Any]]:
         self._require_primary_backend()
         if not self.primary_read_enabled():
-            # Only the OFF-mode artifact ingest wrote artifact_evidence_nodes,
-            # and M4-E1-T6 removed it.
+            # OFF mode keeps no artifact evidence. Before M4-E1-T6 this read
+            # selected from artifact_evidence_nodes, which no schema creates.
             return []
         return await self._postgres.list_artifact_derivative_rows(
             task_id=task_id,
