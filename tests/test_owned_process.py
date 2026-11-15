@@ -72,6 +72,12 @@ def _read_line(stream: IO[bytes], seconds: float) -> bytes:
     return line
 
 
+def _pid(line: bytes) -> int:
+    """A process or group id from a whole line, never from a line cut short by a timeout."""
+    assert line.endswith(b"\n") and line[:-1].isdigit(), f"expected a whole line holding an id, got {line!r}"
+    return int(line)
+
+
 def _closed_within(stream: IO[bytes], seconds: float) -> bool:
     """Whether every process holding the write end of ``stream`` exits within ``seconds``."""
     fd = stream.fileno()
@@ -103,7 +109,7 @@ def test_command_does_not_outlive_its_owner(signum: signal.Signals, with_watchdo
         assert owner.stdout is not None
         lines = {_read_line(owner.stdout, 30), _read_line(owner.stdout, 30)}
         assert b"ready\n" in lines, f"the command did not start (owner exit {owner.poll()})"
-        (watchdog,) = (int(line) for line in lines - {b"ready\n"})
+        (watchdog,) = (_pid(line) for line in lines - {b"ready\n"})
 
         if with_watchdog:
             # First: until its owner dies, the watchdog stays the owner's child, so its pid cannot be reused.
@@ -218,7 +224,7 @@ def test_the_watchdog_reports_a_command_whose_whole_group_was_killed(tmp_path: P
     proc = spawn_owned([sys.executable, "-c", code], cleanup_dir=str(cleanup_dir), stdout=subprocess.PIPE)
     try:
         assert proc.stdout is not None
-        group = int(_read_line(proc.stdout, 30))
+        group = _pid(_read_line(proc.stdout, 30))
 
         # The watchdog has not reaped the anchor that leads this group, so the id cannot name another group.
         os.killpg(group, signal.SIGKILL)
@@ -276,3 +282,10 @@ def test_imports_where_the_resource_module_is_missing() -> None:
     result = subprocess.run([sys.executable, "-c", code], cwd=ROOT_DIR, capture_output=True, text=True, timeout=60)
 
     assert result.returncode == 0, result.stderr
+
+
+def test_an_id_is_read_only_from_a_whole_line() -> None:
+    assert _pid(b"12345\n") == 12345
+    for cut in (b"123", b"", b"12a\n"):
+        with pytest.raises(AssertionError):
+            _pid(cut)
