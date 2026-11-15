@@ -34,7 +34,7 @@ def _no_primary_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Magi
         lambda: approval_grants.remove_approval_grant("grant-1", agent_id="AGENT_A"),
         lambda: approval_grants.remove_approval_grants(agent_id="AGENT_A", user_id=42),
         lambda: approval_grants.cleanup_expired_approval_grants(),
-        lambda: approval_grants.load_approval_grants(),
+        lambda: approval_grants.load_approval_grants(agent_id="AGENT_A"),
     ],
     ids=["save", "update", "remove", "remove_matching", "cleanup", "load"],
 )

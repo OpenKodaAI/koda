@@ -607,6 +607,17 @@ def main() -> None:
             noncritical_startup_issues.append("approval_json_import_error")
             log.exception("approval_json_import_error")
 
+        # Then load this agent's grants and expire the pending approvals its previous
+        # process left, each with an audit row: their handlers cannot be restored (D-163).
+        # On failure, each approval request tries again.
+        from koda.utils.approval import _ensure_persistence_loaded
+
+        try:
+            await _ensure_persistence_loaded()
+        except Exception:
+            noncritical_startup_issues.append("approval_persistence_load_error")
+            log.exception("approval_persistence_load_error")
+
         try:
             from koda.services.queue_manager import (
                 _stale_task_lease_janitor,

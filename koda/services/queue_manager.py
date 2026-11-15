@@ -5169,7 +5169,10 @@ async def _run_agent_loop(
         executed_pairs: list[tuple[AgentToolCall, AgentToolResult]] = []
         skip_following_reads = False
 
-        for call in tool_calls:
+        # A call goes back to the front when an edit sends it through approval again (D-370).
+        calls_to_run = list(tool_calls)
+        while calls_to_run:
+            call = calls_to_run.pop(0)
             if skip_following_reads:
                 executed_pairs.append(
                     (
@@ -5334,6 +5337,17 @@ async def _run_agent_loop(
                                 if _is_write_tool(call.tool, call.params):
                                     skip_following_reads = True
                                 continue
+                            if approval_grant is not None and policy_evaluation.requires_confirmation:
+                                # D-370: the grant peeked for the original call did not lift its
+                                # confirmation, so it approves nothing for the edited call. The
+                                # edited call goes through approval again: a grant is consumed for it
+                                # only within its scope and policy; otherwise the operator is asked
+                                # again, about the edited call.
+                                metrics.HUMAN_OVERRIDE.labels(agent_id=_agent_id_label, decision="edited").inc()
+                                calls_to_run.insert(0, call)
+                                continue
+                            # An edited call that needs no approval runs without consuming that grant.
+                            approval_grant = None
                             if policy_evaluation.requires_confirmation:
                                 policy_evaluation = evaluate_execution_policy(
                                     call.tool,

@@ -70,6 +70,7 @@ from koda.state.knowledge_governance_store import (
     update_execution_reliability_stats,
     upsert_knowledge_candidate,
 )
+from koda.state.pending_approvals import remove_pending_op
 from koda.telegram_types import BotContext
 from koda.telegram_types import CallbackUpdate as Update
 from koda.utils.approval import (
@@ -1576,7 +1577,7 @@ async def callback_approval(update: Update, context: BotContext) -> None:
     pending = _PENDING_OPS.get(op_id)
     if not pending:
         with contextlib.suppress(Exception):
-            await query.edit_message_text("Operacao expirada ou invalida.")
+            await query.edit_message_text("Operacao expirada ou invalida. Solicite novamente.")
         return
 
     # Verify the pressing user is the same who initiated the operation
@@ -1605,6 +1606,10 @@ async def callback_approval(update: Update, context: BotContext) -> None:
 
     if action == "deny":
         _PENDING_OPS.pop(op_id, None)
+        # A denied op is decided: its row goes too, so the next start does not expire it as pending.
+        # A row left behind expires with its TTL; the store logs the failure.
+        with contextlib.suppress(Exception):
+            await remove_pending_op(op_id, agent_id=str(pending.get("agent_id") or config.AGENT_ID or "default"))
         log.info(
             "approval_denied",
             op_id=op_id,
@@ -1684,7 +1689,7 @@ async def callback_agent_cmd_approval(update: Update, context: BotContext) -> No
     pending = _PENDING_AGENT_CMD_OPS.get(op_id)
     if not pending:
         with contextlib.suppress(Exception):
-            await query.edit_message_text("Operacao expirada ou invalida.")
+            await query.edit_message_text("Operacao expirada ou invalida. Solicite novamente.")
         return
 
     # Verify the pressing user is the same who initiated the operation
