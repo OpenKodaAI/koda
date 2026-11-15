@@ -103,7 +103,10 @@ _DEFAULT_CORE_ARGS_SCHEMAS: dict[str, JsonObject] = {
                     "additionalProperties": False,
                 },
             },
-            "target_agent_id": {"type": "string", "description": "Optional target agent prompt/profile."},
+            "target_agent_id": {
+                "type": "string",
+                "description": "Optional; must be the parent's own agent: a child run never acts as another.",
+            },
             "toolset": {
                 "type": "string",
                 "description": "Child toolset. Phase 3 allows read_only, analysis, or research.",

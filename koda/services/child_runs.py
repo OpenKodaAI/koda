@@ -109,6 +109,46 @@ def error_envelope(code: str, message: str, *, retryable: bool = False, category
     }
 
 
+def _parent_agent_id(ctx: Any) -> str:
+    return str(getattr(ctx, "executing_agent_id", None) or AGENT_ID or "default").strip()
+
+
+def parent_capability_envelope(ctx: Any) -> dict[str, Any]:
+    """Return what a child run of this parent may use: never more than the parent has.
+
+    The child acts as the parent's agent, so its workspace, inbox, squad access and memory
+    scope are the parent's. Its core tools are the parent's tool allowlist, the one the
+    policy gate applies and the parent's prompt names, less the Delegate Task tool, since
+    child runs do not nest. The child is judged by the parent's task kind, so execution
+    policy rules keyed on it bind the child too. :func:`child_run_tool_denial` applies it.
+    """
+    from koda.services.execution_policy import resolve_execution_policy_allowed_tool_ids
+
+    tool_ids = {str(tool_id) for tool_id in resolve_execution_policy_allowed_tool_ids()} - {"task"}
+    return {
+        "agent_id": _parent_agent_id(ctx),
+        "allowed_tool_ids": sorted(tool_ids),
+        "task_kind": str(getattr(ctx, "task_kind", None) or "general"),
+    }
+
+
+def child_run_tool_denial(tool_id: str, capabilities: Mapping[str, Any] | None) -> str | None:
+    """Return why a child run may not call ``tool_id``, or ``None`` when its parent could.
+
+    A child without a parent envelope gets no tools. A core tool outside the parent's
+    allowlist is denied. Other tools (MCP, skill packages) resolve against the parent's
+    agent, which the child acts as, so the usual policy gate decides them as for the parent.
+    """
+    if not capabilities:
+        return f"Child runs cannot use `{tool_id}`: the run has no parent capability envelope."
+    from koda.agent_contract import CORE_TOOL_CATALOG
+
+    allowed = {str(item) for item in capabilities.get("allowed_tool_ids") or []}
+    if tool_id in CORE_TOOL_CATALOG and tool_id not in allowed:
+        return f"Child runs cannot use `{tool_id}`: the parent run does not have it."
+    return None
+
+
 def normalize_child_run_requests(params: Mapping[str, Any]) -> list[dict[str, Any]]:
     base = {str(key): item for key, item in params.items() if key != "tasks"}
     tasks = params.get("tasks")
@@ -443,9 +483,7 @@ async def _execute_one_child_request(
     agent_id = _normalize_agent_id()
     goal = str(request.get("goal") or request.get("prompt") or "").strip()
     prompt = str(request.get("prompt") or goal).strip()
-    target_agent_id = str(
-        request.get("target_agent_id") or getattr(ctx, "executing_agent_id", None) or AGENT_ID or "default"
-    ).strip()
+    target_agent_id = _parent_agent_id(ctx)
     toolset = str(request.get("toolset") or "read_only").strip().lower()
     timeout_seconds = max(
         1,
@@ -528,6 +566,7 @@ async def _execute_one_child_request(
         context_policy=context_policy,
         toolset=toolset,
         target_agent_id=target_agent_id,
+        capabilities=parent_capability_envelope(ctx),
         bot_override=getattr(ctx, "bot", None),
         user_data_overlay={
             "child_run_depth": _int(ctx.user_data.get("child_run_depth"), 0) + 1,
@@ -640,6 +679,14 @@ async def delegate_child_task_tool(params: Mapping[str, Any], ctx: Any) -> Any:
         prompt = str(request.get("prompt") or request.get("goal") or "").strip()
         if not prompt:
             error = error_envelope("subagent.validation", "Each child run requires a `prompt` or `goal`.")
+            return AgentToolResult(tool="task", success=False, output=error["message"], data={"error": error})
+        target_agent_id = str(request.get("target_agent_id") or "").strip()
+        parent_agent_id = _parent_agent_id(ctx)
+        if target_agent_id and target_agent_id.upper() != parent_agent_id.upper():
+            error = error_envelope(
+                "subagent.policy_denied",
+                f"A child run acts as its parent agent `{parent_agent_id}`; it cannot act as `{target_agent_id}`.",
+            )
             return AgentToolResult(tool="task", success=False, output=error["message"], data={"error": error})
         toolset = str(request.get("toolset") or "read_only").strip().lower()
         if toolset in BLOCKED_CHILD_TOOLSETS or toolset not in ALLOWED_CHILD_TOOLSETS:

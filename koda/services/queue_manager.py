@@ -623,6 +623,7 @@ class QueueItem:
     child_context_prompt: str | None = None
     child_context_policy: dict[str, Any] = field(default_factory=dict)
     child_toolset: str | None = None
+    child_capabilities: dict[str, Any] | None = None
     silent_response: bool = False
 
 
@@ -695,6 +696,7 @@ class QueryContext:
     parent_task_id: int | None = None
     child_context_policy: dict[str, Any] = field(default_factory=dict)
     child_toolset: str | None = None
+    child_capabilities: dict[str, Any] | None = None
     context_governance: dict[str, Any] | None = None
 
 
@@ -2318,6 +2320,7 @@ async def start_child_run_task(
     context_policy: dict[str, Any],
     toolset: str,
     target_agent_id: str | None = None,
+    capabilities: dict[str, Any] | None = None,
     bot_override: Any | None = None,
     user_data_overlay: dict[str, Any] | None = None,
 ) -> tuple[int, asyncio.Task[None]]:
@@ -2385,6 +2388,7 @@ async def start_child_run_task(
         "child_context_prompt": child_context_prompt,
         "child_context_policy": dict(context_policy or {}),
         "child_toolset": toolset,
+        "child_capabilities": dict(capabilities) if capabilities else None,
     }
     task_info = TaskInfo(
         task_id=task_id,
@@ -2772,6 +2776,7 @@ def _parse_queue_item(item: Any) -> QueueItem:
 
     def child_run_fields(raw: dict[str, Any]) -> dict[str, Any]:
         policy = raw.get("child_context_policy")
+        capabilities = raw.get("child_capabilities")
         return {
             "is_child_run": bool(raw.get("_child_run")),
             "child_run_id": raw.get("child_run_id"),
@@ -2779,6 +2784,7 @@ def _parse_queue_item(item: Any) -> QueueItem:
             "child_context_prompt": raw.get("child_context_prompt"),
             "child_context_policy": dict(policy) if isinstance(policy, dict) else {},
             "child_toolset": raw.get("child_toolset"),
+            "child_capabilities": dict(capabilities) if isinstance(capabilities, dict) else None,
             "silent_response": bool(raw.get("silent_response")),
         }
 
@@ -3007,6 +3013,9 @@ async def _prepare_query_context(
     if source_root_path:
         context.user_data["source_root_path"] = source_root_path
     task_kind = classify_task_kind(item.query_text)
+    if item.is_child_run and item.child_capabilities and item.child_capabilities.get("task_kind"):
+        # A child run is judged by its parent's task kind, so policy rules keyed on it still bind.
+        task_kind = str(item.child_capabilities["task_kind"])
     project_key = Path(work_dir).name.lower()
     environment = ""
     runtime_agent_id = str(item.executing_agent_id or AGENT_ID or "default").strip() or "default"
@@ -3920,6 +3929,7 @@ async def _prepare_query_context(
         parent_task_id=item.parent_task_id,
         child_context_policy=dict(item.child_context_policy or {}),
         child_toolset=item.child_toolset,
+        child_capabilities=item.child_capabilities,
         context_governance=context_governance,
     )
 
@@ -4709,6 +4719,7 @@ async def _run_agent_loop(
     from dataclasses import asdict
 
     from koda.knowledge import default_execution_policy
+    from koda.services.child_runs import child_run_tool_denial
     from koda.services.execution_confidence import evaluate_write_confidence, parse_action_plan
     from koda.services.execution_policy import evaluate_execution_policy
     from koda.services.runtime import get_runtime_controller
@@ -4872,6 +4883,7 @@ async def _run_agent_loop(
                     parent_task_id=ctx.parent_task_id,
                     child_context_policy=dict(ctx.child_context_policy or {}),
                     child_toolset=ctx.child_toolset,
+                    child_capabilities=ctx.child_capabilities,
                     context_governance=ctx.context_governance,
                 )
                 resume_item = QueueItem(
@@ -5082,6 +5094,28 @@ async def _run_agent_loop(
                         ),
                     )
                 )
+                continue
+
+            child_denial = child_run_tool_denial(call.tool, ctx.child_capabilities) if ctx.is_child_run else None
+            if child_denial:
+                log.info("child_run_tool_denied", child_run_id=ctx.child_run_id, tool=call.tool)
+                executed_pairs.append(
+                    (
+                        call,
+                        AgentToolResult(
+                            tool=call.tool,
+                            success=False,
+                            output=child_denial,
+                            metadata={
+                                "category": _infer_tool_category(call.tool),
+                                "policy_blocked": True,
+                                "policy_reason_code": "child_run_capability_denied",
+                            },
+                        ),
+                    )
+                )
+                if _is_write_tool(call.tool, call.params):
+                    skip_following_reads = True
                 continue
 
             policy_params = _policy_params_for_call(call, tool_ctx)
@@ -5545,6 +5579,7 @@ async def _run_agent_loop(
             parent_task_id=ctx.parent_task_id,
             child_context_policy=dict(ctx.child_context_policy or {}),
             child_toolset=ctx.child_toolset,
+            child_capabilities=ctx.child_capabilities,
             context_governance=ctx.context_governance,
         )
         resume_item = QueueItem(

@@ -1827,3 +1827,49 @@ class TestAgentLoop:
         assert "print" not in spoken_text
         context.bot.send_voice.assert_awaited_once()
         context.bot.send_document.assert_awaited()
+
+
+class TestChildRunCapabilities:
+    """M6-E2-T6: a child run's tools are a subset of its parent's."""
+
+    @staticmethod
+    async def _run_child(capabilities: dict | None):
+        ctx = _make_ctx(
+            is_child_run=True,
+            child_run_id="childrun_x",
+            parent_task_id=42,
+            child_capabilities=capabilities,
+        )
+        initial = _make_result(
+            result='<agent_cmd tool="job_list">{}</agent_cmd><agent_cmd tool="web_search">{"query": "x"}</agent_cmd>',
+        )
+        resume = AsyncMock(return_value=_make_result(result="done"))
+        from koda.services.tool_dispatcher import AgentToolResult
+
+        handlers = {
+            "job_list": AsyncMock(return_value=AgentToolResult(tool="job_list", success=True, output="No jobs.")),
+            "web_search": AsyncMock(return_value=AgentToolResult(tool="web_search", success=True, output="hits")),
+        }
+        with (
+            patch("koda.services.queue_manager._run_with_provider_fallback", resume),
+            patch("koda.services.tool_dispatcher._TOOL_HANDLERS", handlers),
+        ):
+            await _run_agent_loop(ctx, _make_item(), 111, 111, _make_context(), initial)
+        return handlers, resume.await_args.args[1].query_text
+
+    @pytest.mark.asyncio
+    async def test_child_is_denied_a_tool_its_parent_lacks(self):
+        handlers, resume_prompt = await self._run_child({"agent_id": "default", "allowed_tool_ids": ["job_list"]})
+
+        handlers["job_list"].assert_awaited_once()
+        handlers["web_search"].assert_not_awaited()
+        assert '<tool_result tool="web_search" success="false">' in resume_prompt
+        assert "parent run does not have" in resume_prompt
+
+    @pytest.mark.asyncio
+    async def test_child_without_a_parent_envelope_gets_no_tools(self):
+        handlers, resume_prompt = await self._run_child(None)
+
+        handlers["job_list"].assert_not_awaited()
+        handlers["web_search"].assert_not_awaited()
+        assert '<tool_result tool="job_list" success="false">' in resume_prompt
