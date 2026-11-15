@@ -154,3 +154,24 @@ test("edit: Enter in the name field on Basics moves to Schedule without saving",
   await expect(dialog.getByRole("button", { name: "Delete routine" })).toBeVisible();
   expect(writes).toEqual([]);
 });
+
+// Schedule has no submit button either. In edit mode the interval field is its only text input,
+// so Enter there must only advance to Refine, never save and close before Refine and Delete.
+test("edit: Enter in the interval field on Schedule moves to Refine without saving", async ({ page }) => {
+  const writes = await openRoutines(page);
+
+  await page.getByRole("button", { name: "Edit" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Edit routine #7")).toBeVisible();
+  await dialog.getByRole("button", { name: "Next" }).click();
+  await expectStep(dialog, "Schedule");
+
+  await dialog.getByRole("textbox", { name: /^Every/ }).press("Enter");
+  await expectStep(dialog, "Refine");
+  await page.waitForTimeout(750);
+  expect(writes).toEqual([]);
+  await expect(dialog).toBeVisible();
+  await expectStep(dialog, "Refine");
+  await expect(dialog.getByRole("button", { name: "Delete routine" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Save changes" })).toBeFocused();
+});
