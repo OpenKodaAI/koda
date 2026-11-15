@@ -19,6 +19,14 @@ threads only: a private thread keeps its explicit participant list. When a
 participant joins after messages already exist, history and prompt context are
 filtered by `joined_at`.
 
+An agent's task tools may set only `notes` and `progress` in a task's
+metadata: `squad_task_create` in its `metadata`, and `squad_task_update`,
+`squad_task_complete` and `squad_task_escalate` in their `metadata_patch`.
+Every other key is the server's, such as the claim bookkeeping the router
+reads to escalate a task (`claim_expiry_count`, `claim_refused`) and the fields
+the coordinator writes when it plans the task, and a call that sets one is
+refused with a tool error that names it.
+
 Operator break-glass access to private content is disabled by default with
 `SQUAD_OPERATOR_BREAK_GLASS_ENABLED=false`. When enabled, callers must provide
 a reason and the access service writes a governance audit event first. If that

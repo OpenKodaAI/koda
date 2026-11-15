@@ -208,6 +208,7 @@ class InMemoryMessageBus:
                 "request_id": request.request_id,
                 "context": request.context,
                 "delegation_depth": request.delegation_depth,
+                "delegation_chain": list(request.delegation_chain),
             },
             message_id=self._next_id(),
         )
@@ -247,12 +248,13 @@ class InMemoryMessageBus:
             )
         finally:
             self._delegation_results.pop(request.request_id, None)
+            self._delegation_data.pop(request.request_id, None)
 
     def resolve_delegation(self, request_id: str, result: DelegationResult) -> None:
-        """Resolve a pending delegation with a result."""
-        self._delegation_data[request_id] = result
+        """Resolve a pending delegation with a result; one nobody waits for is dropped (D-185)."""
         event = self._delegation_results.get(request_id)
         if event:
+            self._delegation_data[request_id] = result
             event.set()
 
     async def broadcast(

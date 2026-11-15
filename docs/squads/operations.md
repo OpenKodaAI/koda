@@ -15,7 +15,10 @@ Production rollout should be canary-first:
    command surfaces.
 4. Switch the canary workspace to `INTER_AGENT_BUS_BACKEND=postgres`.
 5. Watch inbox depth, delivery attempts, delegation latency, router sweep
-   counts, dead-letter rows, Telegram retry counts, and SSE client count.
+   counts, dead-letter rows, Telegram retry counts, and SSE client count. A
+   delegator in another process reads its result only from Postgres, so a
+   result the bus could not write is logged as
+   `delegation_result_persist_failed`, with its `request_id`.
 6. Promote more workspaces only after no unauthorized access, duplicate run, or
    dead-letter growth is observed.
 
@@ -99,11 +102,12 @@ Before broad rollout, run these in canary:
   after 2, 5, 15, 30 and 60 seconds before it refuses it; a thread that does
   not exist refuses the turn at once, and a runtime API squad message to it
   gets 404 (one to a paused or spent thread gets 409). When the queue worker
-  refuses a queued turn, or the unblocked-task follow-ups or the inbox are
-  refused a task's turn, the task's claim is released without counting an
-  expiry, so pauses never escalate a task, and the first router sweep after
-  the thread is open again under its cap dispatches the task again, without
-  waiting for `SQUAD_CLAIM_TTL_S` and without a `claim_expired` event. A
+  refuses a queued turn, or the unblocked-task follow-ups, the inbox or the
+  router's dispatch of a task whose claim expired are refused a task's turn,
+  the task's claim is released without counting an expiry, so pauses never
+  escalate a task, and the first router sweep after the thread is open again
+  under its cap dispatches the task again, without waiting for
+  `SQUAD_CLAIM_TTL_S` and without a `claim_expired` event. A
   later claim of the task is a live one again: it is renewed, and its expiry
   counts.
   A dashboard post or Telegram topic message to such a thread is not routed;
@@ -111,6 +115,22 @@ Before broad rollout, run these in canary:
   `metadata`; keys the server keeps, such as the budget flags, are refused.
 - Pause a room from the dashboard; the room must show a `thread_paused`
   system event with reason `operator`.
+- Have agents delegate A to B to C and back to A, delegate past
+  `INTER_AGENT_MAX_DELEGATION_DEPTH`, and answer each other with `agent_send`
+  past 6 hops (`MAX_REPLY_DEPTH`, the bound `squad_reply` has). Each delegation
+  request and `agent_send` message carries the whole chain of agents that led
+  to it, ending with its sender, and every entry counts, the router's included.
+  A `squad_reply` or synthesis turn keeps the chain on every path that delivers
+  it: the local queue, the runtime API and the bus fallback.
+  The sender's tool refuses the cycle, the depth or the hop count, and the
+  receiving inbox refuses the same before it queues a turn, whichever runtime
+  sent it: the inbox adds the sender to a chain that does not end with it, so
+  it counts every hop even from a sender that does not add itself. A
+  delegator the inbox refuses gets the failure at once. The inbox runs squad
+  turns only, so a delegation sent outside a squad thread also fails at once,
+  with a reason that says so, instead of waiting for its timeout. Each refusal
+  must show one `delegation_limit_reached` system event whose `limit` is
+  `cycle`, `depth` or `hop_count`.
 - Disable a Telegram bot admin permission; bind/strict checks must fail closed.
 
 ## Rollback

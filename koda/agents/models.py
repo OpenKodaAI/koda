@@ -201,6 +201,9 @@ class DelegationRequest:
     task: str
     context: dict[str, Any] = field(default_factory=dict)
     delegation_depth: int = 0
+    # The agents that led to this request, ending with ``from_agent``; the receiver's inbox
+    # dispatcher refuses a cycle or a chain past the depth cap from it (D-095).
+    delegation_chain: list[str] = field(default_factory=list)
     timeout: float = 60.0
     request_id: str = ""
     thread_id: str | None = None
