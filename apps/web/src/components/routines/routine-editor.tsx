@@ -29,6 +29,7 @@ import {
   useEscapeToClose,
 } from "@/hooks/use-animated-presence";
 import { ConnectorPicker } from "@/components/routines/connector-picker";
+import { getRoutineName } from "@/components/schedules/cron-table";
 import {
   useSchedulePreview,
   type SchedulePreview,
@@ -120,13 +121,6 @@ function defaultDateTimeLocal(timezone: string, now: Date = new Date()): string 
   return `${wallTimeIn(new Date(now.getTime() + 60 * 60 * 1000), timezone).slice(0, 14)}00`;
 }
 
-// The routine name is stored in `payload.name` (D-063). Routines created outside the dashboard
-// have none, so the editor falls back to `summary` (the query text), as the table does.
-function jobName(job: CronJob): string {
-  const name = job.payload?.name;
-  return (typeof name === "string" ? name.trim() : "") || job.summary?.trim() || "";
-}
-
 function jobInstructions(job: CronJob | null | undefined): string {
   if (!job) return "";
   const payload = job.payload || {};
@@ -186,7 +180,10 @@ function buildInitialState(
       "post_write_if_any") as VerificationMode;
 
     return {
-      name: jobName(job),
+      // The routine name is stored in `payload.name` (D-063). Routines created outside the
+      // dashboard have none, so the editor opens with the label the table shows; it is only
+      // written when the user saves.
+      name: getRoutineName(job),
       instructions: jobInstructions(job),
       agentId: job.bot_id ?? defaultAgentId ?? fallbackAgentId,
       modelPreference: job.model_preference ?? "",
@@ -580,9 +577,12 @@ export function RoutineEditor({
                   ) : null}
                 </div>
 
+                {/* Distinct keys keep Next and the submit button separate DOM elements; a reused
+                    button switches to type=submit during the click and submits the form (D-268). */}
                 <div className="flex items-center gap-2">
                   {step < 3 ? (
                     <Button
+                      key="next"
                       type="button"
                       variant="accent"
                       size="md"
@@ -593,7 +593,7 @@ export function RoutineEditor({
                       <ArrowRight className="icon-sm" strokeWidth={1.75} aria-hidden />
                     </Button>
                   ) : (
-                    <Button type="submit" variant="accent" size="md" disabled={disabled}>
+                    <Button key="submit" type="submit" variant="accent" size="md" disabled={disabled}>
                       {submitting ? (
                         <Loader2 className="icon-sm animate-spin" strokeWidth={1.75} aria-hidden />
                       ) : null}

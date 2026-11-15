@@ -47,6 +47,23 @@ Specs that intentionally exercise a browser-visible 4xx deny path must declare
 that specific status in their local guard allowlist; 5xx responses are never
 allowlisted.
 
+## Stub-Backed Browser Specs
+
+`apps/web/tests/e2e-stub/` holds specs for browser-only behaviour that jsdom
+does not reproduce (for example, the routine editor's Next button submitting
+the form, D-268). They run against the production build served by
+`server.mjs`, with `stub-control-plane.mjs` standing in for the control plane
+and agent runtime, so no Docker stack is needed:
+
+```bash
+pnpm build:web
+pnpm --filter koda-web test:e2e:stub
+```
+
+`KODA_STUB_WEB_PORT` and `KODA_STUB_CONTROL_PLANE_PORT` choose the ports
+(defaults 3417 and 3418). `KODA_E2E_CHROMIUM_PATH` points at a Chromium
+binary when Playwright's own browser is not installed.
+
 ## Documentation Screenshots
 
 ```bash

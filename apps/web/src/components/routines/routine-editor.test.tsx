@@ -300,6 +300,38 @@ describe("RoutineEditor", () => {
     expect(screen.getByPlaceholderText(/Daily code review/i)).toHaveValue("Check deploy health");
   });
 
+  // With neither a name nor a summary, the table labels the routine with its truncated command;
+  // the editor opens with that same label, and nothing is written until the user saves.
+  it("falls back to the table's command label when there is no name or summary", async () => {
+    const command = "Run the nightly release checklist against every staging environment, then report";
+    const job: CronJob = {
+      id: 8,
+      bot_id: "beta",
+      user_id: 1,
+      chat_id: 1,
+      cron_expression: "0 * * * *",
+      trigger_type: "cron",
+      schedule_expr: "0 * * * *",
+      timezone: "UTC",
+      summary: "",
+      command,
+      description: "",
+      created_at: null,
+      enabled: 1,
+      status: "active",
+      work_dir: "/repo",
+      payload: {},
+    };
+
+    const { onSubmit } = renderEditor({ mode: "edit", job });
+
+    expect(await screen.findByText(/Edit routine #8/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Daily code review/i)).toHaveValue(
+      `${command.slice(0, 56)}…`,
+    );
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("uses defaultTimezone when provided", async () => {
     const { onSubmit } = renderEditor({ defaultTimezone: "America/Sao_Paulo" });
 
