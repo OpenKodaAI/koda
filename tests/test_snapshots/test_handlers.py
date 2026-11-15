@@ -174,3 +174,29 @@ class TestSnapshotSuccess:
         result = await _handle_snapshot_diff({"from": "before", "to": "after"}, ctx)
         assert result.success
         store._base_dir = ""
+
+    @pytest.mark.asyncio
+    @patch("koda.services.tool_dispatcher.SNAPSHOT_ENABLED", True)
+    async def test_task_snapshot_is_not_read_from_user_scope_with_same_id(self, tmp_path):
+        """F-SKL-14 (M6-E3-T6): a task id equal to a user id no longer shares snapshots."""
+        from koda.services.tool_dispatcher import _handle_snapshot_restore, _handle_snapshot_save
+        from koda.snapshots.store import get_snapshot_store
+
+        store = get_snapshot_store()
+        store._base_dir = str(tmp_path)
+        try:
+            task_ctx = _make_ctx(work_dir=str(tmp_path), user_id=500, task_id=111)
+            user_ctx = _make_ctx(work_dir=str(tmp_path), user_id=111, task_id=None)
+
+            saved = await _handle_snapshot_save({"name": "collide"}, task_ctx)
+            assert saved.success
+
+            leaked = await _handle_snapshot_restore({"name": "collide"}, user_ctx)
+            assert not leaked.success
+            assert "not found" in leaked.output
+
+            own = await _handle_snapshot_restore({"name": "collide"}, task_ctx)
+            assert own.success
+            assert "inspection" in own.output
+        finally:
+            store._base_dir = ""

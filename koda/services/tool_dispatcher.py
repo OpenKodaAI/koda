@@ -2249,11 +2249,11 @@ async def _handle_snapshot_save(params: dict, ctx: ToolContext) -> AgentToolResu
     if not name:
         return AgentToolResult(tool="snapshot_save", success=False, output="Missing 'name'.")
     from koda.snapshots.capture import capture_snapshot
-    from koda.snapshots.store import get_snapshot_store
+    from koda.snapshots.store import get_snapshot_store, snapshot_scope
 
     scope_id = ctx.task_id if ctx.task_id else ctx.user_id
     data = await capture_snapshot(scope_id, ctx.work_dir)
-    err = await get_snapshot_store().save(scope_id, name, data)
+    err = await get_snapshot_store().save(snapshot_scope(task_id=ctx.task_id, user_id=ctx.user_id), name, data)
     if err:
         return AgentToolResult(tool="snapshot_save", success=False, output=err)
     subs = list(data.get("subsystems", {}).keys())
@@ -2268,10 +2268,10 @@ async def _handle_snapshot_restore(params: dict, ctx: ToolContext) -> AgentToolR
     name = params.get("name", "")
     if not name:
         return AgentToolResult(tool="snapshot_restore", success=False, output="Missing 'name'.")
-    from koda.snapshots.store import get_snapshot_store
+    from koda.snapshots.store import get_snapshot_store, snapshot_scope
 
-    scope_id = ctx.task_id if ctx.task_id else ctx.user_id
-    data = get_snapshot_store().load(scope_id, name)
+    scope = snapshot_scope(task_id=ctx.task_id, user_id=ctx.user_id)
+    data = get_snapshot_store().load(scope, name)
     if isinstance(data, str):
         return AgentToolResult(tool="snapshot_restore", success=False, output=data)
     subs = list(data.get("subsystems", {}).keys())
@@ -2279,8 +2279,8 @@ async def _handle_snapshot_restore(params: dict, ctx: ToolContext) -> AgentToolR
         tool="snapshot_restore",
         success=True,
         output=(
-            f"Snapshot '{name}' loaded. Contains: {', '.join(subs)}\n"
-            "Note: state inspection only. Use individual tools to restore specific subsystem state."
+            f"Snapshot '{name}' loaded for inspection. Contains: {', '.join(subs)}\n"
+            "Note: nothing was restored. Use individual tools to restore specific subsystem state."
         ),
         metadata={"snapshot_data": data},
     )
@@ -2289,10 +2289,10 @@ async def _handle_snapshot_restore(params: dict, ctx: ToolContext) -> AgentToolR
 async def _handle_snapshot_list(params: dict, ctx: ToolContext) -> AgentToolResult:
     if not SNAPSHOT_ENABLED:
         return AgentToolResult(tool="snapshot_list", success=False, output="Snapshots not enabled.")
-    from koda.snapshots.store import get_snapshot_store
+    from koda.snapshots.store import get_snapshot_store, snapshot_scope
 
-    scope_id = ctx.task_id if ctx.task_id else ctx.user_id
-    snapshots = get_snapshot_store().list_snapshots(scope_id)
+    scope = snapshot_scope(task_id=ctx.task_id, user_id=ctx.user_id)
+    snapshots = get_snapshot_store().list_snapshots(scope)
     if not snapshots:
         return AgentToolResult(tool="snapshot_list", success=True, output="No snapshots.")
     lines = [f"Snapshots ({len(snapshots)}):"]
@@ -2308,10 +2308,10 @@ async def _handle_snapshot_diff(params: dict, ctx: ToolContext) -> AgentToolResu
     name_to = params.get("to", "")
     if not name_from or not name_to:
         return AgentToolResult(tool="snapshot_diff", success=False, output="Missing 'from' and 'to'.")
-    from koda.snapshots.store import get_snapshot_store
+    from koda.snapshots.store import get_snapshot_store, snapshot_scope
 
-    scope_id = ctx.task_id if ctx.task_id else ctx.user_id
-    result = get_snapshot_store().diff(scope_id, name_from, name_to)
+    scope = snapshot_scope(task_id=ctx.task_id, user_id=ctx.user_id)
+    result = get_snapshot_store().diff(scope, name_from, name_to)
     if isinstance(result, str):
         return AgentToolResult(tool="snapshot_diff", success=False, output=result)
     changes = result.get("changes", {})
@@ -2329,10 +2329,10 @@ async def _handle_snapshot_delete(params: dict, ctx: ToolContext) -> AgentToolRe
     name = params.get("name", "")
     if not name:
         return AgentToolResult(tool="snapshot_delete", success=False, output="Missing 'name'.")
-    from koda.snapshots.store import get_snapshot_store
+    from koda.snapshots.store import get_snapshot_store, snapshot_scope
 
-    scope_id = ctx.task_id if ctx.task_id else ctx.user_id
-    err = get_snapshot_store().delete(scope_id, name)
+    scope = snapshot_scope(task_id=ctx.task_id, user_id=ctx.user_id)
+    err = get_snapshot_store().delete(scope, name)
     if err:
         return AgentToolResult(tool="snapshot_delete", success=False, output=err)
     return AgentToolResult(tool="snapshot_delete", success=True, output=f"Snapshot '{name}' deleted.")

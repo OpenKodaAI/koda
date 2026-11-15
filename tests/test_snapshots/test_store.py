@@ -14,7 +14,7 @@ def store(tmp_path):
     return s
 
 
-SCOPE = 42
+SCOPE = "task:42"
 
 
 class TestSave:
@@ -132,3 +132,29 @@ class TestDiff:
         result = store.diff(SCOPE, "exists", "nope")
         assert isinstance(result, str)
         assert "not found" in result
+
+
+class TestScope:
+    """F-SKL-14 (M6-E3-T6): task and user snapshots live in separate scopes."""
+
+    @pytest.mark.asyncio
+    async def test_task_and_user_with_the_same_id_do_not_collide(self, store):
+        await store.save("task:111", "shared-name", {"subsystems": {"owner": "task"}})
+        await store.save("user:111", "user-only", {"subsystems": {"owner": "user"}})
+
+        missing = store.load("user:111", "shared-name")
+        assert isinstance(missing, str)
+        assert "not found" in missing
+        assert [s["name"] for s in store.list_snapshots("user:111")] == ["user-only"]
+        assert [s["name"] for s in store.list_snapshots("task:111")] == ["shared-name"]
+
+    def test_scope_helper_prefers_the_task(self):
+        from koda.snapshots.store import snapshot_scope
+
+        assert snapshot_scope(task_id=7, user_id=111) == "task:7"
+        assert snapshot_scope(task_id=None, user_id=111) == "user:111"
+
+    @pytest.mark.parametrize("scope", ["42", "task:", "task:abc", "group:1", "task:1/../2"])
+    def test_rejects_unscoped_or_malformed_ids(self, store, scope):
+        with pytest.raises(ValueError):
+            store.list_snapshots(scope)
