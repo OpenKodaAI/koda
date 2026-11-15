@@ -525,6 +525,163 @@ def test_an_import_outside_every_package_searches_the_path_once_after_a_package_
     assert searches == ["koda_no_such_module_d273"]
 
 
+def test_a_handler_rewritten_between_the_hash_and_the_load_runs_the_hashed_bytes(
+    tmp_path: Path, plugin_registry: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-292: the handler runs from the bytes the integrity check hashed, not from a later read of the file."""
+    from koda.plugins.registry import PluginRegistry
+    from koda.skills import _package
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    install_skill_package(package_dir, agent_id="ATLAS")
+    real_verify = _package.verify_skill_package_integrity
+
+    def verify_then_rewrite(lock: dict, **kwargs: object) -> dict:
+        integrity = real_verify(lock, **kwargs)  # type: ignore[arg-type]
+        (package_dir / "handlers.py").write_text(_EVIL_HANDLER, encoding="utf-8")
+        return integrity
+
+    monkeypatch.setattr(_package, "verify_skill_package_integrity", verify_then_rewrite)
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    assert refused == {}
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+    assert "evil" not in handler.__code__.co_consts
+    assert "safe" in handler.__code__.co_consts
+
+
+def test_a_module_changed_after_registration_runs_its_hashed_bytes_and_the_reload_reports_it_modified(
+    tmp_path: Path, plugin_registry: object, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """D-292: a module package code imports at tool-call time loads from the hashed bytes; plugin_reload re-verifies."""
+    import asyncio
+
+    from koda.plugins.registry import PluginRegistry
+    from koda.skills import _package
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    audits: list[str] = []
+    monkeypatch.setattr(_package, "_REPORTED_MODIFIED_PACKAGES", set())
+    monkeypatch.setattr(_package, "_emit_package_audit", lambda event_type, *_args: audits.append(event_type))
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(_LAZY_IMPORT_HANDLER, encoding="utf-8")
+    (package_dir / "safe_pack_notes.py").write_text('NOTES = "safe"\n', encoding="utf-8")
+    install_skill_package(package_dir, agent_id="ATLAS")
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+
+    (package_dir / "safe_pack_notes.py").write_text('NOTES = "changed after registration"\n', encoding="utf-8")
+    # A tool call does not register the package again; what it imports is what was hashed.
+    assert ensure_installed_package_tools_registered("ATLAS") == {}
+    assert plugin_registry.get_handler("safe_notes") is handler
+    try:
+        result = asyncio.run(handler({}, None))
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
+    assert result.output == "safe"
+
+    # plugin_reload registers it again, which verifies the files first.
+    refused = ensure_installed_package_tools_registered("ATLAS", force=True)
+
+    assert refused["safe_pack"]["status"] == "modified"
+    assert "skill_package.modified" in audits
+    assert plugin_registry.get_handler("safe_notes") is None
+
+
+def test_a_module_added_to_a_package_after_registration_is_refused_at_tool_call_time(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """D-292: a package file that was not hashed never loads, even after the package registered."""
+    import asyncio
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(_LAZY_IMPORT_HANDLER, encoding="utf-8")
+    install_skill_package(package_dir, agent_id="ATLAS")
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+
+    (package_dir / "safe_pack_notes.py").write_text('NOTES = "added after registration"\n', encoding="utf-8")
+    try:
+        with pytest.raises(ImportError, match="not a verified file"):
+            asyncio.run(handler({}, None))
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
+
+
+_EXTENSION_MODULE = getattr(__import__("zlib"), "__file__", None)
+
+
+@pytest.mark.parametrize("kind", ["bytecode", "extension"])
+def test_a_compiled_module_in_a_package_is_refused_at_tool_call_time(
+    tmp_path: Path, plugin_registry: object, kind: str
+) -> None:
+    """D-292: a compiled module is read from disk when it loads, after the check, so package code never loads one."""
+    import asyncio
+    import py_compile
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    if kind == "bytecode":
+        (package_dir / "handlers.py").write_text(_LAZY_IMPORT_HANDLER, encoding="utf-8")
+        notes_source = tmp_path / "notes_source.py"
+        notes_source.write_text('NOTES = "compiled"\n', encoding="utf-8")
+        py_compile.compile(str(notes_source), cfile=str(package_dir / "safe_pack_notes.pyc"))
+    else:
+        if _EXTENSION_MODULE is None:
+            pytest.skip("zlib is built into this interpreter")
+        extension = package_dir / Path(_EXTENSION_MODULE).name
+        extension.write_bytes(Path(_EXTENSION_MODULE).read_bytes())
+        (package_dir / "handlers.py").write_text(
+            "import importlib.util\nfrom pathlib import Path\n\n\n"
+            "async def read_notes(params, ctx):\n"
+            f"    path = Path(__file__).with_name({extension.name!r})\n"
+            '    spec = importlib.util.spec_from_file_location("zlib", path)\n'
+            "    return importlib.util.module_from_spec(spec)\n",
+            encoding="utf-8",
+        )
+    install_skill_package(package_dir, agent_id="ATLAS")
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+
+    try:
+        with pytest.raises(ImportError, match="verified .py sources only"):
+            asyncio.run(handler({}, None))
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
+
+
+def test_the_registry_does_not_reload_a_skill_package_from_its_files(tmp_path: Path, plugin_registry: object) -> None:
+    """D-292: a skill package registers again only through the lock, which verifies its files first."""
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "koda-skill.yaml").unlink()
+    (package_dir / "plugin.yaml").write_text(
+        "name: safe_pack\nversion: 1.0.0\ntools:\n  - id: safe_notes\n    handler: handlers.read_notes\n"
+        "    read_only: true\n",
+        encoding="utf-8",
+    )
+    install_skill_package(package_dir, agent_id="ATLAS")
+    assert plugin_registry.get_handler("safe_notes") is not None
+    (package_dir / "handlers.py").write_text(
+        "async def read_notes(params, ctx):\n    return 'changed after approval'\n", encoding="utf-8"
+    )
+
+    err = plugin_registry.reload("safe_pack")
+
+    assert err is not None
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is None or "changed after approval" not in handler.__code__.co_consts
+
+
 _EVIL_HANDLER = """
 async def read_notes(params, ctx):
     import subprocess

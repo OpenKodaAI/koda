@@ -40,6 +40,9 @@ class PluginManifest:
     tools: list[PluginToolDef] = field(default_factory=list)
     prompt_section: str = ""
     requires: dict[str, Any] = field(default_factory=dict)
+    # The verified bytes of a skill package's files, by real path. When set, the handlers load
+    # from these bytes only, never from a later read of the files (D-292).
+    sources: dict[str, bytes] | None = None
 
 
 ToolHandler = Callable[[dict, Any], Awaitable[Any]]
@@ -147,6 +150,9 @@ class PluginRegistry:
         manifest = self._plugins.get(plugin_name)
         if not manifest:
             return f"Plugin '{plugin_name}' not found."
+        if manifest.sources is not None:
+            # A skill package registers again only from its lock, which verifies its files first (D-292).
+            return f"Plugin '{plugin_name}' is a skill package: plugin_reload reloads it from its lock."
         plugin_dir = manifest.plugin_dir
         err = self.unregister(plugin_name)
         if err:
@@ -165,7 +171,9 @@ class PluginRegistry:
         traversal or a symlink out of the plugin is rejected before anything is
         imported. The source is then read from a handle opened by walking down
         from the plugin directory without following a symlink, so a file or a
-        directory swapped in after the check is not loaded (D-270). The module
+        directory swapped in after the check is not loaded (D-270); a skill
+        package's handler source is the verified bytes in ``manifest.sources``
+        instead, and a file missing there is not loaded (D-292). The module
         gets a flat name, with no parent package, so a relative import in it fails
         instead of resolving against another package; the name starts with the
         plugin's prefix, which ``unregister`` removes (D-291). ``sys.path`` is left
@@ -187,7 +195,13 @@ class PluginRegistry:
         # Create a unique module name to avoid conflicts
         module_name = _plugin_module_prefix(manifest.name) + module_path.replace(".", "/")
         try:
-            source = _read_checked_source(plugin_dir, file_path)
+            if manifest.sources is not None:
+                source = manifest.sources.get(str(file_path))
+                if source is None:
+                    log.warning("plugin_handler_not_verified", handler=handler_path, plugin_dir=str(plugin_dir))
+                    return None
+            else:
+                source = _read_checked_source(plugin_dir, file_path)
             if source is None:
                 log.warning("plugin_handler_path_changed", handler=handler_path, plugin_dir=str(plugin_dir))
                 return None

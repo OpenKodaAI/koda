@@ -572,26 +572,33 @@ def get_installed_package_tool_definitions(agent_id: str | None = None) -> list[
     return definitions
 
 
-def verify_skill_package_integrity(lock: dict[str, Any]) -> dict[str, Any]:
+def verify_skill_package_integrity(lock: dict[str, Any], *, sources: dict[str, bytes] | None = None) -> dict[str, Any]:
     """Hash the package files on disk and compare them with the approved ``package_hash`` (D-037).
 
     ``status`` is ``verified`` when they match and ``modified`` otherwise, including when the
     package directory is gone or no longer passes the scanner's file checks (too many files,
     a path escape), which would leave files outside the hash.
+
+    Each file is read once. When *sources* is given, it receives the bytes that were hashed,
+    by the file's real path, so the caller can load exactly those (D-292).
     """
 
     approved = str(lock.get("package_hash") or "")
     raw_path = str(lock.get("package_path") or "").strip()
     current = ""
     findings: list[SkillScanFinding] = []
+    hashed: dict[str, bytes] = {}
     if raw_path and Path(raw_path).is_dir():
-        current, _ = _hash_package(Path(raw_path), findings)
+        current, _ = _hash_package(Path(raw_path), findings, contents=hashed)
         if current != approved and not findings:
             # Earlier releases hashed bytecode caches too. Such a lock still matches when every
             # file, caches included, is the one that was approved.
-            legacy, _ = _hash_package(Path(raw_path), findings, include_bytecode_caches=True)
+            hashed = {}
+            legacy, _ = _hash_package(Path(raw_path), findings, include_bytecode_caches=True, contents=hashed)
             if legacy == approved:
                 current = legacy
+    if sources is not None:
+        sources.update(hashed)
     return {
         "status": "verified" if approved and current == approved and not findings else "modified",
         "approved_package_hash": approved,
@@ -620,42 +627,75 @@ _GetCode = Callable[[importlib.machinery.SourceFileLoader, str], types.CodeType 
 
 
 class _PackageSourceOnlyCode:
-    """Compile every module file inside an installed package's directory from its source (D-273).
+    """Compile every module file inside an installed package's directory from its verified bytes.
 
-    Bytecode caches are not part of the package hash, so a ``__pycache__`` entry planted next
-    to a package module must never run in place of the verified source: not while the
-    handlers register, and not later, at tool-call time, whichever way package code loads
-    the module (an import statement, ``importlib.util.spec_from_file_location`` or a
-    ``SourceFileLoader`` of its own). Every one of those ends in
+    Neither a bytecode cache, which the package hash leaves out (D-273), nor a file changed
+    after the integrity check (D-292) may run in place of the bytes that were hashed: not
+    while the handlers register, and not later, at tool-call time, whichever way package
+    code loads the module (an import statement, ``importlib.util.spec_from_file_location``
+    or a ``SourceFileLoader`` of its own). Every one of those ends in
     ``SourceFileLoader.get_code``, so once a package registers, that method compiles a file
-    inside a package directory from its source, for the rest of the process. It never reads
-    or writes a cache for such a file and leaves every other file to the usual cache lookup,
-    and no import searches the path more than it did before.
+    inside a package directory from the bytes its integrity check read and hashed, for the
+    rest of the process, and refuses a file that was not hashed. Python reads a compiled
+    module (a ``.pyc`` without its source, an extension module) from disk when it loads it,
+    so one inside a package directory is refused. Every other file keeps the usual cache
+    lookup, and no import searches the path more than it did before.
     """
 
     def __init__(self) -> None:
-        self._roots: tuple[str, ...] = ()
+        # Package root (real path, ending in a separator) -> verified bytes by real file path.
+        self._sources: dict[str, dict[str, bytes]] = {}
         self._default_get_code: _GetCode | None = None
 
-    def add_root(self, package_dir: Path) -> None:
+    def add_root(self, package_dir: Path, sources: dict[str, bytes]) -> None:
         root = os.path.join(os.path.realpath(package_dir), "")
-        if root not in self._roots:
-            self._roots = (*self._roots, root)
+        self._sources = {**self._sources, root: dict(sources)}
         if self._default_get_code is None:
             self._default_get_code = importlib.machinery.SourceFileLoader.get_code
+            default_sourceless_get_code = importlib.machinery.SourcelessFileLoader.get_code
+            default_create_module = importlib.machinery.ExtensionFileLoader.create_module
             source_only = self
 
             def get_code(loader: importlib.machinery.SourceFileLoader, fullname: str) -> types.CodeType | None:
                 return source_only.get_code(loader, fullname)
 
+            def sourceless_get_code(
+                loader: importlib.machinery.SourcelessFileLoader, fullname: str
+            ) -> types.CodeType | None:
+                source_only.refuse_compiled(loader.get_filename(fullname), fullname)
+                return default_sourceless_get_code(loader, fullname)
+
+            def create_module(
+                loader: importlib.machinery.ExtensionFileLoader, spec: importlib.machinery.ModuleSpec
+            ) -> types.ModuleType:
+                source_only.refuse_compiled(loader.path, spec.name)
+                return default_create_module(loader, spec)
+
             importlib.machinery.SourceFileLoader.get_code = get_code  # type: ignore[method-assign, assignment]
+            importlib.machinery.SourcelessFileLoader.get_code = sourceless_get_code  # type: ignore[method-assign, assignment]
+            importlib.machinery.ExtensionFileLoader.create_module = create_module  # type: ignore[method-assign, assignment]
+
+    def _package_sources(self, real_path: str) -> dict[str, bytes] | None:
+        roots = [root for root in self._sources if real_path.startswith(root)]
+        return self._sources[max(roots, key=len)] if roots else None
 
     def get_code(self, loader: importlib.machinery.SourceFileLoader, fullname: str) -> types.CodeType | None:
         path = loader.get_filename(fullname)
-        if os.path.realpath(path).startswith(self._roots):
-            return loader.source_to_code(loader.get_data(path), path)
-        assert self._default_get_code is not None
-        return self._default_get_code(loader, fullname)
+        real_path = os.path.realpath(path)
+        package_sources = self._package_sources(real_path)
+        if package_sources is None:
+            assert self._default_get_code is not None
+            return self._default_get_code(loader, fullname)
+        source = package_sources.get(real_path)
+        if source is None:
+            raise ImportError(f"{path} is not a verified file of an installed skill package.", name=fullname, path=path)
+        return loader.source_to_code(source, path)
+
+    def refuse_compiled(self, path: str, fullname: str) -> None:
+        if self._package_sources(os.path.realpath(path)) is not None:
+            raise ImportError(
+                f"{path}: skill package code loads from verified .py sources only.", name=fullname, path=path
+            )
 
 
 _PACKAGE_SOURCE_ONLY_CODE = _PackageSourceOnlyCode()
@@ -743,7 +783,9 @@ def ensure_installed_package_tools_registered(
         if not tools:
             continue
         _unregister_plugin_if_present(package_id)
-        integrity = verify_skill_package_integrity(lock)
+        # The files are read once: the handlers and every module they load run from these bytes (D-292).
+        sources: dict[str, bytes] = {}
+        integrity = verify_skill_package_integrity(lock, sources=sources)
         if integrity["status"] != "verified":
             _REGISTERED_PACKAGE_IDS.discard(key)
             refused[package_id] = integrity
@@ -758,8 +800,9 @@ def ensure_installed_package_tools_registered(
             tools=tools,
             prompt_section="",
             requires={"source": "skill_package"},
+            sources=sources,
         )
-        _PACKAGE_SOURCE_ONLY_CODE.add_root(manifest.plugin_dir)
+        _PACKAGE_SOURCE_ONLY_CODE.add_root(manifest.plugin_dir, sources)
         with _source_only_imports():
             err = registry.register(manifest)
         if err:
@@ -931,8 +974,13 @@ def _normalize_manifest_tool(item: Any) -> dict[str, Any]:
 
 
 def _hash_package(
-    package_dir: Path, findings: list[SkillScanFinding], *, include_bytecode_caches: bool = False
+    package_dir: Path,
+    findings: list[SkillScanFinding],
+    *,
+    include_bytecode_caches: bool = False,
+    contents: dict[str, bytes] | None = None,
 ) -> tuple[str, dict[str, str]]:
+    """Hash the package files; *contents*, when given, receives the bytes hashed, by real file path."""
     files = _iter_package_files(package_dir, findings)
     package_hasher = hashlib.sha256()
     file_hashes: dict[str, str] = {}
@@ -961,6 +1009,8 @@ def _hash_package(
                     file_path,
                 )
             )
+        if contents is not None:
+            contents[os.path.realpath(file_path)] = content
         digest = hashlib.sha256(content).hexdigest()
         file_hashes[rel] = digest
         package_hasher.update(rel.encode("utf-8"))

@@ -79,15 +79,25 @@ after approval, and the registry item's `integrity.status` is `modified`
 (otherwise `verified`), which the Skills tab shows on the package's card. An
 operator reinstalls and reviews the package to load it again.
 
-Handler code loads from the `.py` sources only. Python neither reads nor writes
-a bytecode cache while the runtime registers a package's handlers, so a cache
-file planted next to a handler, or next to a module the handler imports when it
-loads, does not run in place of the verified source. Once a package registers,
-the runtime also compiles every module file inside a package's directory from
-its source for the rest of the process, however package code loads it later, at
-tool-call time: an `import` statement, `importlib.util.spec_from_file_location`
-or a `SourceFileLoader` of its own all end in `SourceFileLoader.get_code`, which
-then skips `__pycache__` for those files (D-273).
+The check reads each package file once, and the code that runs is the bytes it
+hashed, never a later read of the files, so a file rewritten after the check
+does not run (D-292). The handlers compile from those bytes, and from the time
+a package registers, for the rest of the process, so does every module file
+inside its directory, however package code loads it, while the handlers
+register or later, at tool-call time: an `import` statement,
+`importlib.util.spec_from_file_location` or a `SourceFileLoader` of its own all
+end in `SourceFileLoader.get_code`, which for those files reads neither a
+`__pycache__` entry (D-273) nor the file on disk. A module file
+that was not hashed, for example one added after the check, is refused with an
+`ImportError`. A compiled module inside a package's directory (a `.pyc` without
+its source, an extension module) is refused too, because Python would read it
+from disk when it loads: package code loads from its verified `.py` sources
+only.
+
+A registered package changed on disk keeps running the bytes that were
+verified, and is checked again whenever it registers again: `plugin_reload`
+reloads a package from its lock, which hashes the files first, and the plugin
+registry never reloads a skill package from its files.
 
 A rollback restores the previous lock, not the previous files. When the files
 on disk no longer hash to that revision's `package_hash`, for example because
