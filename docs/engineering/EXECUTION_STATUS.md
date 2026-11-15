@@ -90,11 +90,11 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-15 09:55 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 10:40 UTC. The progress tracker mirrors this list for the operator.)
 
-- Integration batch 8 merged: M2-E1-T1 + M2-E1-T2, M6-E2-T6, M3-E6-T4 + SQ-D352, M1-E5-T2 + M3-E8-T4, M8-D330 + M8-D349.
-- Approved, waiting for integration batch 9: M2-D366 (D-163, D-366, D-367, D-370), SQ-D336 (D-336, D-337, D-340 to D-342, D-361, D-363), M6-D371 (D-371 to D-374), RT-D357 (D-355, D-357 to D-359).
-- Lean lanes running: SEC-D326 closure round (scanner, D-326 to D-329), M8-E3 (M8-E3-T1 to T3, D-375 to D-378), M6-D385 (D-385 to D-389), RT-D390 (D-390, D-392 to D-396, live-view design note).
+- Integration batch 9 merged: M2-D366, SQ-D336, M6-D371, RT-D357; M3-E1-T5 recorded done.
+- Approved, waiting for integration batch 10: SEC-D326 (scanner, D-326 to D-329), M3-REL (M3-E3-T3, M3-E6-T6), SEC-SUP (M1-E7-T9, M5-E8-T5).
+- Lean lanes running: SEC-D397 (package-local re-exports, D-397, D-398), M8-E3 (M8-E3-T1 to T3, D-375 to D-378), M6-D385 (D-385 to D-389), RT-D390 (D-390, D-392 to D-396, live-view design note), SEC-D403 (D-403 to D-405).
 - Awaiting the operator: Q-33 (MCP isolation fallback, D-324); M3-E3-T1 (needs-approval gate, which blocks the cross-process dashboard approvals of M3-E3-T2); ADR-002 OQ-1..OQ-12 and plan Q-25..Q-31; the web Docker image build; shellcheck for `scripts/install.sh`; actionlint and a first GitHub Actions run of `migrations-gate.yml`.
 
 ## Pending findings for the plan (verified by the orchestrator)

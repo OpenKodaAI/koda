@@ -829,3 +829,43 @@ Gates at eaece17 (`int/b8`):
   - `cargo fmt --all --check`: ok.
   - `cargo clippy --workspace --all-targets -- -D warnings`: clean.
   - `cargo test --workspace`: 22 suites, 101 passed, 0 failed, 3 ignored.
+
+## Integration batch 9 (2026-11-15, `int/b9`, rule 10 lean lanes)
+
+Lanes (each built on the approved branch it extends, merged at its tip):
+- M2-D366 (approvals, on M2-E1-T2):
+  - Pending approvals left by a restart expire at start with one audit row each, and a button pressed on one runs nothing.
+  - A worker loads, expires and removes only its own agent's rows.
+  - An edited call uses a grant only within its scope.
+  - A denied request is removed.
+- SQ-D336 (squads, on SQ-D352):
+  - Every refused redispatch releases its claim, and a refused delegate synthesis runs once after the reopen.
+  - Unblocking is scoped to the cycle; the budget sweep handles each room alone and alerts again after a cap raise.
+  - `/dlq retry` refuses a finished task's turn, and correlation ids match on every path.
+- M6-D371 (child runs, on M6-E2-T6):
+  - Read-only denies every write whatever the rule or grant.
+  - A child of a dry-run parent is a dry run.
+  - Every child tool call, workflow steps included, is held to the envelope.
+  - Child cost counts against the parent, and finished children are pruned.
+- RT-D357 (runtime API, on M1-E5-T2):
+  - Runtime events, environment rows and terminal rows are explicit projections.
+  - An API-wide contract test calls every runtime GET route and WebSocket.
+  - A squad message runs only as a thread participant, on the thread's delegation record.
+  - The kernel's unavailable reason reaches the dashboard.
+
+At integration:
+- No merge conflicts.
+- M3-E1-T5 recorded as done: commit 08bd0f4 is already on the branch, and its Postgres test recovers a run with a lost callback without a restart (the M3-REL lane confirmed it).
+- Full pytest failed one case of the redaction linear-time guard (`flag chain`, `text:runtime_store`) while six lanes loaded the 4 CPUs.
+  - Cause: the guard's 2 s wall-clock stop. It exists only to end a catastrophic backtrack; the CPU-time median and ratio checks are what hold the patterns linear.
+  - Fixed in 2901982 by raising the stop to 10 s. The file then reruns 1168 passed.
+  - A CPU-time `ITIMER_PROF` stop was tried first and reverted: with it armed, `time.process_time` reads in 4 ms steps and four ratio cases failed.
+
+Gates at 0f417a7 (`int/b9`), then the test fix 2901982:
+- `ruff check .`: all checks passed.
+- `ruff format --check .`: all files already formatted.
+- `mypy koda/ --ignore-missing-imports`: no issues in 351 source files.
+- `pytest --cov=koda`: 10690 passed, 1 failed (the guard above), 34 skipped, 175 xfailed; 71 % coverage. After the fix, `tests/security/test_redaction_vectors.py`: 1168 passed.
+- `pytest -m postgres`: 504 passed, 2 skipped.
+- Web: `pnpm lint:web` 0 errors and 40 warnings; `pnpm test:web` 200 files and 1256 tests passed; `pnpm build:web` ok.
+- Rust: not run, because the batch changes nothing under `rust/` or `proto/`.
