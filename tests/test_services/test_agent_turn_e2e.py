@@ -28,6 +28,7 @@ import contextlib
 import json
 from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import asyncpg
@@ -478,8 +479,20 @@ async def test_write_task_completes_when_knowledge_is_disabled(
     seguranca...", because there was no knowledge resolution to ground it.
     """
     from koda.knowledge import config as knowledge_config
+    from koda.services import queue_manager
 
     monkeypatch.setattr(knowledge_config, "KNOWLEDGE_ENABLED", False)
+    # Only the gate is skipped: the answer is still evaluated and the action plan still built.
+    real_service = queue_manager._get_knowledge_orchestration_service()
+    plan_payloads: list[dict[str, Any]] = []
+
+    def build_plan_payload(**kwargs: Any) -> dict[str, Any]:
+        payload = real_service.build_plan_payload(**kwargs)
+        plan_payloads.append(payload)
+        return payload
+
+    service = SimpleNamespace(evaluate_response=real_service.evaluate_response, build_plan_payload=build_plan_payload)
+    monkeypatch.setattr(queue_manager, "_get_knowledge_orchestration_service", lambda: service)
     user_id = chat_id = 910008
     provider = StubProvider(
         [
@@ -502,6 +515,8 @@ async def test_write_task_completes_when_knowledge_is_disabled(
     bot: FakeBot = application.bot
     answer = bot.visible(chat_id)[-1]
     assert (answer.text or "").startswith("I could not save the note: writing files is not allowed here.")
+    [plan] = plan_payloads
+    assert {"answer_trace", "judge_result"} <= set(plan)
 
 
 _CANCEL_REASON = "Cancelled by /cancel command."

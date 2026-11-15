@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
-from koda.services.chat_settings import maybe_apply_agent_local_settings_from_chat
+from koda.services.chat_settings import _find_provider_in_text, maybe_apply_agent_local_settings_from_chat
 
 
 def _runtime_settings() -> dict[str, object]:
@@ -139,3 +139,41 @@ def test_non_setting_message_is_ignored() -> None:
     user_data: dict[str, object] = {}
     message = maybe_apply_agent_local_settings_from_chat("qual o melhor modelo para mim?", user_data)
     assert message is None
+
+
+def test_ordinary_message_with_a_setting_verb_logs_no_unknown_provider() -> None:
+    # M6-E3-T2 (D-157): the unknown_provider_id warning must stay a signal. Scanning the text for a
+    # general provider used to normalise elevenlabs, kokoro and whispercpp as general providers and warn.
+    user_data: dict[str, object] = {}
+    with (
+        patch("koda.services.chat_settings.get_agent_runtime_settings", return_value=_runtime_settings()),
+        patch("koda.utils.command_helpers.log") as mock_log,
+    ):
+        message = maybe_apply_agent_local_settings_from_chat("can you use the tests", user_data)
+        assert _find_provider_in_text("please use the new thing", ["claude", "codex"]) is None
+
+    assert message is None
+    mock_log.warning.assert_not_called()
+
+
+def test_non_general_provider_name_does_not_select_the_default_general_provider() -> None:
+    # Before, "elevenlabs" resolved to the default general provider when the text named it.
+    with patch("koda.utils.command_helpers.DEFAULT_PROVIDER", "claude"):
+        assert _find_provider_in_text("mude o provider para elevenlabs", ["claude", "codex"]) is None
+        assert _find_provider_in_text("mude o provider para openai", ["claude", "codex"]) == "codex"
+
+
+def test_failed_publish_is_reported_instead_of_a_model_change() -> None:
+    # M6-E3-T2 (D-068): when the agent cannot be published the chat says so, not "updated".
+    user_data: dict[str, object] = {}
+    with (
+        patch("koda.services.chat_settings.get_agent_runtime_settings", return_value=_runtime_settings()),
+        patch(
+            "koda.services.chat_settings.set_agent_general_model",
+            side_effect=ValueError("A publicacao do agent falhou <detalhe>."),
+        ),
+    ):
+        message = maybe_apply_agent_local_settings_from_chat("use gpt-5.2 como modelo geral", user_data)
+
+    assert message == "A publicacao do agent falhou &lt;detalhe&gt;."
+    assert "model" not in user_data

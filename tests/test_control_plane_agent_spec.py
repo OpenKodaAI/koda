@@ -444,3 +444,18 @@ def test_validate_agent_spec_accepts_known_provider_ids_in_model_maps() -> None:
     )
 
     assert not [error for error in validation["errors"] if "unknown providers" in error]
+
+
+@pytest.mark.parametrize("provider", ["llamacpp", "mlx"])
+@pytest.mark.parametrize("field", ["default_models", "tier_models", "available_models_by_provider"])
+def test_validate_agent_spec_accepts_local_runtime_providers_in_model_maps(provider: str, field: str) -> None:
+    # llamacpp and mlx are runtime providers (PROVIDER_MODELS, HTTP runners) outside the core catalog;
+    # publish exports their map entries to LLAMACPP_* / MLX_* settings.
+    value: object = {
+        "default_models": "qwen2.5-0.5b",
+        "tier_models": {"small": "qwen2.5-0.5b"},
+        "available_models_by_provider": ["qwen2.5-0.5b"],
+    }[field]
+    validation = validate_agent_spec({"model_policy": {field: {provider: value}}})
+
+    assert validation["ok"] is True, validation["errors"]

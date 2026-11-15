@@ -33,6 +33,7 @@ def control_plane(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             "functional_defaults": {"general": {"provider_id": "claude", "model_id": "claude-sonnet-4-6"}},
         },
         "published": [],
+        "publish_error": None,
     }
 
     class FakeManager:
@@ -45,6 +46,8 @@ def control_plane(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
             return payload
 
         def publish_agent(self, agent_id: str) -> dict[str, Any]:
+            if state["publish_error"]:
+                raise ValueError(state["publish_error"])
             # What the new version carries: the supervisor restarts the worker with it.
             state["published"].append((agent_id, copy.deepcopy(state["policy"]["functional_defaults"]["general"])))
             return {"agent_id": agent_id, "version": len(state["published"]) + 1}
@@ -90,3 +93,21 @@ def test_functional_default_change_is_published_by_default(control_plane: dict[s
 
     assert updated is not None and updated["general_model"] == "claude-opus-4-6"
     assert control_plane["published"] == [("KODA", {"provider_id": "claude", "model_id": "claude-opus-4-6"})]
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda: module.set_agent_general_model("claude", "claude-opus-4-6"),
+        lambda: module.set_agent_general_provider("codex"),
+        lambda: module.set_agent_functional_default("general", "claude", "claude-opus-4-6"),
+    ],
+    ids=["general_model", "general_provider", "functional_default"],
+)
+def test_model_change_that_cannot_be_published_is_reported(control_plane: dict[str, Any], change: Any) -> None:
+    # A failed publish leaves the running agent on its old version, so the setter must not report the change.
+    control_plane["publish_error"] = "model_policy.default_models contains unknown providers: claudee"
+
+    with pytest.raises(ValueError, match="continua com o modelo anterior"):
+        change()
+    assert control_plane["published"] == []

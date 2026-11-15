@@ -340,6 +340,7 @@ async def cmd_help(update: Update, context: BotContext) -> None:
         f"/sessions — list sessions\n"
         f"/setdir [path] — change working directory\n"
         f"/voice — voice &amp; TTS\n"
+        f"/fetch [url] — fetch a URL (alias: /curl)\n"
         f"/tasks — running tasks\n"
         f"/cancel — cancel execution\n"
         f"/help — this help\n\n"

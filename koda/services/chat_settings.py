@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from typing import Any
@@ -117,7 +118,10 @@ def _find_provider_in_text(text: str, candidates: list[str], *, feature: bool = 
         if str(item).strip()
     }
     for raw_token, resolved in sorted(alias_map.items(), key=lambda item: len(item[0]), reverse=True):
-        normalized = normalize_feature_provider(resolved) if feature else normalize_provider(resolved)
+        # The aliases resolve to canonical ids. normalize_provider would map the function-only
+        # providers (elevenlabs, kokoro, whispercpp) to the default general provider and log
+        # unknown_provider_id for every message scanned here.
+        normalized = normalize_feature_provider(resolved) if feature else resolved
         if normalized in normalized_candidates and _word_match(text, raw_token):
             return normalized
     return None
@@ -294,20 +298,24 @@ def maybe_apply_agent_local_settings_from_chat(query_text: str, user_data: dict[
     if settings is None:
         return None
 
-    voice_message = _apply_voice_change(normalized_text, user_data)
-    if voice_message:
-        return voice_message
+    try:
+        voice_message = _apply_voice_change(normalized_text, user_data)
+        if voice_message:
+            return voice_message
 
-    feature_message = _apply_feature_model_change(normalized_text, user_data, settings)
-    if feature_message:
-        return feature_message
+        feature_message = _apply_feature_model_change(normalized_text, user_data, settings)
+        if feature_message:
+            return feature_message
 
-    provider_message = _apply_provider_change(normalized_text, user_data, settings)
-    if provider_message:
-        return provider_message
+        provider_message = _apply_provider_change(normalized_text, user_data, settings)
+        if provider_message:
+            return provider_message
 
-    model_message = _apply_general_model_change(normalized_text, user_data, settings)
-    if model_message:
-        return model_message
+        model_message = _apply_general_model_change(normalized_text, user_data, settings)
+        if model_message:
+            return model_message
+    except ValueError as exc:
+        # A setter raises ValueError for a change it could not apply, such as a failed publish.
+        return html.escape(str(exc), quote=False)
 
     return None
