@@ -24,9 +24,10 @@ database in ``POSTGRES_TEST_DSN``.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import os
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 import pytest
@@ -226,6 +227,43 @@ async def db_connection(migrated_postgres: str) -> AsyncIterator[Any]:
             await transaction.rollback()
         finally:
             await conn.close()
+
+
+@contextlib.contextmanager
+def injected_fault(table: str, event: str, *, rows_before: int = 0) -> Iterator[None]:
+    """Make each ``event`` (INSERT, UPDATE or DELETE) on ``table`` fail once it holds ``rows_before`` rows.
+
+    A row-level BEFORE trigger raises ``injected fault`` from inside
+    Postgres, so the write fails however the code under test sends it. The
+    trigger and its function are dropped on exit. Use it from tests that
+    run on ``migrated_postgres``.
+    """
+    from koda.control_plane import database
+
+    database.execute(
+        f"""
+        CREATE OR REPLACE FUNCTION koda_test_injected_fault() RETURNS trigger AS $$
+        BEGIN
+            IF (SELECT count(*) FROM {table}) >= {int(rows_before)} THEN
+                RAISE EXCEPTION 'injected fault';
+            END IF;
+            IF TG_OP = 'DELETE' THEN
+                RETURN OLD;
+            END IF;
+            RETURN NEW;
+        END
+        $$ LANGUAGE plpgsql
+        """
+    )
+    database.execute(
+        f"CREATE TRIGGER koda_test_injected_fault BEFORE {event} ON {table} "
+        "FOR EACH ROW EXECUTE FUNCTION koda_test_injected_fault()"
+    )
+    try:
+        yield
+    finally:
+        database.execute(f"DROP TRIGGER IF EXISTS koda_test_injected_fault ON {table}")
+        database.execute("DROP FUNCTION IF EXISTS koda_test_injected_fault()")
 
 
 def pytest_collection_modifyitems(config: Any, items: list[Any]) -> None:

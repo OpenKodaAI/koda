@@ -1,27 +1,34 @@
 name: migrations-gate
 
-# Phase 2C of docs/architecture/production-deployment-roadmap.md.
+# Detects schema drift between an upgraded install and a fresh one (D-106).
 #
-# Refuses a deploy whose code expects a schema that has not been
-# applied to the target database yet. The job spins up an ephemeral
-# Postgres, applies migrations, then runs `python -m koda migrate
-# --check` against it. The check returns:
-#   - exit 0 → no pending migrations (deploy may proceed)
-#   - exit 3 → pending migrations found (block the deploy and surface
-#     the version list)
-#   - exit 1 → infra error (DSN unreachable, asyncpg missing) — same
-#     blocking effect, but distinguishable in logs.
+# On an ephemeral Postgres the job builds two schemas:
+#   - gate_upgrade: the previous release's migrations (its own code and
+#     uv.lock, from the latest v* tag reachable from this commit's parent, so
+#     never a tag on this commit), then this commit's migrations on top, as an
+#     operator upgrade runs them;
+#   - gate_fresh: this commit's migrations on an empty schema.
+# It then diffs their pg_dump --schema-only, with the schema name, pg_dump
+# comments and column order normalized (scripts/migrations_gate.py normalize).
 #
-# The workflow runs migrations from THIS commit, then runs --check —
-# so a PR that adds a migration without bumping the schema_migrations
-# expectation always passes. The intent is to catch the inverse: a PR
-# that uses a column added by a migration that was reverted on main.
+# A PR that changes the DDL of a released migration, instead of adding a new
+# migration, changes the fresh install but not the upgraded one, so the diff
+# fails the job. The job also fails when a migration added since the previous
+# release, or bootstrap's unversioned DDL, builds a plain index (CREATE INDEX,
+# or an ALTER TABLE adding a UNIQUE, PRIMARY KEY or EXCLUDE constraint) on a
+# table scripts/migrations_gate.py lists as large: it must use the online kind,
+# CREATE INDEX CONCURRENTLY (ADR-028).
+#
+# This gate checks the migrations, not a deployment's database: operators run
+# `python -m koda migrate --check` against their own database before an
+# upgrade (docs/operations/upgrade.md).
 
 on:
   pull_request:
     paths:
       - 'koda/knowledge/v2/postgres_backend.py'
       - 'koda/cli/migrate.py'
+      - 'scripts/migrations_gate.py'
       - '.github/workflows/migrations-gate.yml'
   workflow_dispatch: {}
 
@@ -29,9 +36,20 @@ concurrency:
   group: migrations-gate-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.10.7"
+
 jobs:
-  check-pending-migrations:
+  migrations-drift:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        # bash with -o pipefail, so a failed pg_dump or psql fails its step.
+        shell: bash
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -49,16 +67,61 @@ jobs:
 
     env:
       KNOWLEDGE_V2_POSTGRES_DSN: postgresql://koda:koda@127.0.0.1:5432/koda
-      KNOWLEDGE_V2_POSTGRES_SCHEMA: knowledge_v2
 
     steps:
       - uses: actions/checkout@v6.0.2
+        with:
+          # The previous release is found among the tags.
+          fetch-depth: 0
       - uses: actions/setup-python@v6.2.0
         with:
           python-version: '3.12'
-      - name: Install runtime deps
-        run: pip install -e .[dev] || pip install -e .
-      - name: Apply migrations
-        run: python -m koda migrate
+      - uses: astral-sh/setup-uv@v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Sync Python dependencies
+        run: uv sync --locked
+      - name: Find the previous release
+        id: previous
+        # From HEAD^, not HEAD: dispatched on a release tag, HEAD's own tag is
+        # the release under test, and the gate would upgrade it to itself.
+        run: |
+          tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD^)"
+          echo "previous release: $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Check out the previous release
+        env:
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+        run: git worktree add --detach "$RUNNER_TEMP/previous" "$PREVIOUS_TAG"
+      - name: Apply the previous release's migrations
+        working-directory: ${{ runner.temp }}/previous
+        run: |
+          uv sync --locked
+          uv run --locked python -m koda migrate --schema gate_upgrade
+      - name: Refuse a plain index build on a large table
+        run: |
+          psql "$KNOWLEDGE_V2_POSTGRES_DSN" -At -c 'SELECT version FROM gate_upgrade.schema_migrations' \
+            > "$RUNNER_TEMP/previous_versions.txt"
+          uv run --locked python scripts/migrations_gate.py check-indexes \
+            --previous-versions "$RUNNER_TEMP/previous_versions.txt"
+      - name: Upgrade to this commit's migrations
+        run: uv run --locked python -m koda migrate --schema gate_upgrade
+      - name: Install this commit's migrations on an empty schema
+        run: uv run --locked python -m koda migrate --schema gate_fresh
       - name: Verify no pending migrations remain
-        run: python -m koda migrate --check
+        run: |
+          uv run --locked python -m koda migrate --check --schema gate_upgrade
+          uv run --locked python -m koda migrate --check --schema gate_fresh
+      - name: Diff the upgraded schema against a fresh install
+        run: |
+          for schema in gate_upgrade gate_fresh; do
+            pg_dump --schema-only --no-owner --no-privileges --schema="$schema" "$KNOWLEDGE_V2_POSTGRES_DSN" \
+              | uv run --locked python scripts/migrations_gate.py normalize "$schema" > "$RUNNER_TEMP/$schema.sql"
+          done
+          if ! diff -u "$RUNNER_TEMP/gate_fresh.sql" "$RUNNER_TEMP/gate_upgrade.sql"; then
+            echo "::error::An upgrade from the previous release does not produce the schema of a fresh install." \
+              "Change DDL by adding a migration, not by editing a released one."
+            exit 1
+          fi

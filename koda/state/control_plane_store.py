@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from typing import Any, cast
 
 from koda.config import STATE_BACKEND
 from koda.state.primary import (
+    _normalize_qmark_placeholders,
     get_primary_state_backend,
     primary_execute,
     primary_fetch_all,
@@ -103,7 +106,36 @@ def execute_many(query: str, items: list[tuple[Any, ...]]) -> None:
         run_coro_sync(primary_execute(normalized, item))
 
 
+class Transaction:
+    """The statements of one open Postgres transaction, all on one connection."""
+
+    def __init__(self, conn: Any) -> None:
+        self._conn = conn
+
+    async def execute(self, query: str, params: tuple[Any, ...] = ()) -> None:
+        await self._conn.execute(_normalize_qmark_placeholders(_normalize_primary_query(query)), *tuple(params))
+
+
+@asynccontextmanager
+async def transaction() -> AsyncIterator[Transaction]:
+    """Open a transaction: its statements commit together when the block ends, or none do if it raises."""
+    backend = _require_primary_backend()
+    async with backend._connection() as conn, conn.transaction():  # noqa: SLF001 - controlled shared backend bridge
+        yield Transaction(conn)
+
+
+async def _apply_in_transaction(operations: list[tuple[str, tuple[Any, ...]]]) -> None:
+    async with transaction() as tx:
+        for query, params in operations:
+            await tx.execute(query, params)
+
+
 def with_connection(fn: Any) -> Any:
+    """Call ``fn`` with a recorder, then apply the statements it recorded in one transaction.
+
+    ``fn`` only records writes: they run after it returns, so a read inside
+    ``fn`` does not see them. If any statement fails, none of them is applied.
+    """
     _require_primary_backend()
 
     class _PrimaryConnectionRecorder:
@@ -115,8 +147,8 @@ def with_connection(fn: Any) -> Any:
 
     recorder = _PrimaryConnectionRecorder()
     result = fn(recorder)
-    for query, params in recorder.operations:
-        run_coro_sync(primary_execute(query, params))
+    if recorder.operations:
+        run_coro_sync(_apply_in_transaction(recorder.operations))
     return result
 
 

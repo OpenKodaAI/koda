@@ -18,6 +18,8 @@ These tests pin the contract:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 import koda.control_plane.manager as manager_mod
@@ -52,7 +54,7 @@ def test_delete_agent_issues_delete_for_main_row(monkeypatch) -> None:
     monkeypatch.setattr(manager_mod, "fetch_one", _fake_fetch_one)
     monkeypatch.setattr(manager_mod, "fetch_all", lambda *args, **kwargs: [])
     monkeypatch.setattr(manager_mod, "execute", _fake_execute)
-    monkeypatch.setattr(manager_mod, "with_connection", lambda fn: fn(object()))
+    monkeypatch.setattr(manager_mod, "with_connection", lambda fn: fn(SimpleNamespace(execute=_fake_execute)))
     manager._require_agent_row = lambda agent_id: (agent_id.upper(), {"id": agent_id.upper(), "status": "active"})  # type: ignore[attr-defined]
 
     result = manager.delete_agent("atlas")
@@ -82,7 +84,7 @@ def test_delete_agent_cascades_to_dependent_tables(monkeypatch) -> None:
     monkeypatch.setattr(manager_mod, "execute", _fake_execute)
     monkeypatch.setattr(manager_mod, "fetch_all", lambda *args, **kwargs: [])
     monkeypatch.setattr(manager_mod, "fetch_one", lambda *args, **kwargs: None)
-    monkeypatch.setattr(manager_mod, "with_connection", lambda fn: fn(object()))
+    monkeypatch.setattr(manager_mod, "with_connection", lambda fn: fn(SimpleNamespace(execute=_fake_execute)))
     manager._require_agent_row = lambda agent_id: (agent_id.upper(), {"id": agent_id.upper(), "status": "active"})  # type: ignore[attr-defined]
 
     manager.delete_agent("atlas")

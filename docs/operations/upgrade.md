@@ -225,9 +225,22 @@ docker compose run --rm app python -m koda migrate
 docker compose run --rm app python -m koda migrate --check  # must now exit 0
 ```
 
-The `migrate --check` step is also enforced in CI via
-`.github/workflows/migrations-gate.yml` so a PR that adds a migration
-without bumping the schema_migrations expectation cannot merge.
+`migrate --check` looks at your database. CI does not: its migrations
+gate (`.github/workflows/migrations-gate.yml`) checks the migrations
+themselves, on pull requests that change them. It applies the previous
+release's migrations and then this commit's to one schema, as an upgrade
+does, installs this commit's migrations on an empty schema, and fails
+when the two schemas differ. A change to the DDL of a migration that was
+already released, instead of a new migration, therefore fails the gate:
+upgraded installs would never run it. The gate also fails a migration
+added since the previous release, or a statement in the DDL that startup
+runs after the migrations on every install, that builds a plain index on
+a table it lists as large (`scripts/migrations_gate.py`): a `CREATE INDEX`
+without `CONCURRENTLY`, or an `ALTER TABLE` adding a `UNIQUE`, `PRIMARY
+KEY` or `EXCLUDE` constraint, because the build would block writes to
+that table during your upgrade. Such an index is built with `CREATE
+INDEX CONCURRENTLY`, and a constraint then takes it over with `USING
+INDEX`.
 
 ## Step 2 — single-host restart
 
