@@ -122,7 +122,9 @@ Before broad rollout, run these in canary:
   receiving inbox refuses the same before it queues a turn, whichever runtime
   sent it: the inbox adds the sender to a chain that does not end with it, so
   it counts every hop even from a sender that does not add itself. A
-  delegator the inbox refuses gets the failure at once. Each refusal
+  delegator the inbox refuses gets the failure at once. The inbox runs squad
+  turns only, so a delegation sent outside a squad thread also fails at once,
+  with a reason that says so, instead of waiting for its timeout. Each refusal
   must show one `delegation_limit_reached` system event whose `limit` is
   `cycle`, `depth` or `hop_count`.
 - Disable a Telegram bot admin permission; bind/strict checks must fail closed.

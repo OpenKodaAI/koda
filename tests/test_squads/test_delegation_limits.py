@@ -393,3 +393,20 @@ async def test_a_ping_pong_through_the_bus_fallback_stops_at_the_hop_limit_with_
     # Every hop counts: the router's, then A and B in turn, up to the one past the limit.
     hops = ["squad_router", *(["A", "B"] * MAX_REPLY_DEPTH)]
     assert event["metadata"]["delegation_chain"] == hops[: MAX_REPLY_DEPTH + 1]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_delegation_outside_a_squad_thread_fails_at_once_over_the_postgres_bus(
+    room: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The Postgres bus runs squad turns only: a thread-less delegator is told so, not left to time out (D-353)."""
+    request = DelegationRequest(from_agent="A", to_agent="B", task="review", timeout=60, delegation_chain=["A"])
+    delegation = asyncio.create_task(room.bus.delegate(request))
+    try:
+        assert await _deliver(room, monkeypatch, "B") == []
+        result = await asyncio.wait_for(delegation, timeout=10)
+        assert not result.success
+        assert "squad thread" in (result.error or "")
+    finally:
+        await _stop(delegation)

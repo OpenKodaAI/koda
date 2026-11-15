@@ -2653,6 +2653,7 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
     requiring an agent to call ``squad_inbox_drain`` manually.
     """
     from koda.agents import get_message_bus
+    from koda.agents.models import DelegationResult
     from koda.config import SQUAD_POLL_INTERVAL_S, SQUADS_ENABLED
     from koda.squads import SquadThreadNotRunnableError, squad_delegation_limit
 
@@ -2695,6 +2696,23 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
                         has_thread=bool(thread_id),
                     )
                     await bus.ack(agent_id, msg.message_id)
+                    request_id = metadata.get("request_id")
+                    if not thread_id and msg.message_type == "delegation_request" and request_id:
+                        # The inbox runs squad turns only: a delegation outside a squad thread is
+                        # answered at once with why, instead of its delegator's timeout (D-353).
+                        bus.resolve_delegation(
+                            str(request_id),
+                            DelegationResult(
+                                request_id=str(request_id),
+                                from_agent=agent_id,
+                                to_agent=str(msg.from_agent or ""),
+                                success=False,
+                                error=(
+                                    f"Agent '{agent_id}' runs a delegated turn only in a squad thread, "
+                                    "and this delegation has none."
+                                ),
+                            ),
+                        )
                     continue
 
                 user_id = _coerce_int_or_zero(metadata.get("user_id"))
