@@ -86,8 +86,10 @@ Before broad rollout, run these in canary:
   whose turn it has queued or is running on every router sweep, so a turn that
   waits or runs longer than the TTL is neither dispatched twice nor escalated.
   A squad turn requeued from the dead-letter queue stays a squad turn, and its
-  claim is renewed the same way. Claims of a paused or spent thread wait until
-  it is open again.
+  claim is renewed the same way. The requeue of a turn whose task already
+  ended (done, failed, cancelled or escalated) is refused, so the room gets
+  no second result, and `/dlq retry` tells the operator why. Claims of a
+  paused or spent thread wait until it is open again.
 - Exceed 80% and then 100% of a thread budget; router must emit alert and
   auto-pause the thread (`budget_exceeded_auto_pause`, reason `budget`), one
   event per pause. A room reopened at its cap is paused again, with a new

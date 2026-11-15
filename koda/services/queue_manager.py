@@ -10100,6 +10100,13 @@ async def recover_pending_tasks(application: Any) -> dict[str, int]:
     return summary
 
 
+class DLQRequeueRefusedError(ValueError):
+    """A DLQ entry that is not requeued; the message says why, for the operator (D-342)."""
+
+
+_SQUAD_TASK_TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled", "escalated"})
+
+
 async def requeue_dlq_entry(
     entry: dict[str, Any],
     *,
@@ -10107,7 +10114,12 @@ async def requeue_dlq_entry(
     actor: str | int,
     bot_override: Any | None = None,
 ) -> int:
-    """Create a fresh task from a DLQ entry and enqueue it with retry history."""
+    """Create a fresh task from a DLQ entry and enqueue it with retry history.
+
+    The turn of a squad task that already ended (done, failed, cancelled or escalated) is not
+    requeued: it would run in its room again and post a second task result. That raises
+    ``DLQRequeueRefusedError`` and leaves the entry as it was (D-342).
+    """
     from koda.services import audit
     from koda.utils.command_helpers import init_user_data
 
@@ -10115,6 +10127,16 @@ async def requeue_dlq_entry(
     payload = metadata.get("queue_payload")
     if not isinstance(payload, dict):
         payload = None
+    squad_task_id = str((payload or {}).get("squad_task_id") or "").strip()
+    if squad_task_id:
+        from koda.squads import get_squad_task_store
+
+        task_store = get_squad_task_store()
+        squad_task = await task_store.get_task(squad_task_id) if task_store is not None else None
+        if squad_task is not None and squad_task.status in _SQUAD_TASK_TERMINAL_STATUSES:
+            raise DLQRequeueRefusedError(
+                f"squad task {squad_task_id} is already {squad_task.status}; its turn is not run again"
+            )
 
     user_id = int(entry["user_id"])
     chat_id = int(entry["chat_id"])
