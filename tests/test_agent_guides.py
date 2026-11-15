@@ -14,6 +14,26 @@ GUIDE_PAIRS = [
     pytest.param(ROOT / "AGENTS.md", ROOT / "CLAUDE.md", id="root"),
     pytest.param(WEB / "AGENTS.md", WEB / "CLAUDE.md", id="apps-web"),
 ]
+# The whole body of each pointer: any line added to an AGENTS.md is an instruction CLAUDE.md lacks.
+POINTER_BODIES = {
+    ROOT / "AGENTS.md": [
+        "# Koda Repository Guide (pointer)",
+        "[CLAUDE.md](CLAUDE.md) is the canonical guide for every coding agent working in this repository;"
+        " this file only points to it.",
+        "Read it in full before any work and follow all of it: the Obsidian vault reads, the read order,"
+        " the core invariants, the safe editing rules and the required validation.",
+        "Change agent instructions in CLAUDE.md, never here.",
+    ],
+    WEB / "AGENTS.md": [
+        "# Koda Web Agent Guide (pointer)",
+        "[CLAUDE.md](CLAUDE.md) in this folder is the canonical guide for every coding agent working under"
+        " `apps/web/`; this file only points to it.",
+        "Read it in full before any work under `apps/web/` and follow all of it: the Obsidian vault reads,"
+        " the root guide, the design system and the required validation.",
+        "Change agent instructions in `apps/web/CLAUDE.md`, never here.",
+    ],
+}
+AGENTS_LINK_RE = re.compile(r"\]\(([^)\s]*AGENTS\.md)\)")
 
 VAULT_READS = [
     'obsidian vault=Koda read path="00_Index/Koda Workspace.md"',
@@ -26,19 +46,22 @@ FALLBACK_READER_RE = re.compile(r"^(\S*bin/koda-vault-read) ", re.MULTILINE)
 SCREENSHOT_ITEM_RE = re.compile(r"^- `([\w-]+\.png)`$", re.MULTILINE)
 
 
-def _content_lines(path: Path) -> set[str]:
-    return {line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()}
+def _content_lines(path: Path) -> list[str]:
+    return [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
 @pytest.mark.parametrize(("pointer", "canonical"), GUIDE_PAIRS)
 def test_agents_md_is_only_a_pointer_to_claude_md(pointer: Path, canonical: Path) -> None:
-    """AGENTS.md links to the CLAUDE.md beside it and repeats none of it, so the two cannot drift."""
-    text = pointer.read_text(encoding="utf-8")
+    """AGENTS.md is the fixed pointer to the CLAUDE.md beside it: no copied line and no instruction of its own."""
+    assert "](CLAUDE.md)" in pointer.read_text(encoding="utf-8")
+    assert _content_lines(pointer) == POINTER_BODIES[pointer]
+    assert not set(_content_lines(pointer)) & set(_content_lines(canonical))
 
-    assert "](CLAUDE.md)" in text
-    assert "```" not in text
-    assert len(_content_lines(pointer)) <= 6
-    assert not _content_lines(pointer) & _content_lines(canonical)
+
+@pytest.mark.parametrize("guide", [ROOT / "CLAUDE.md", WEB / "CLAUDE.md"], ids=["root", "apps-web"])
+def test_canonical_guides_do_not_send_agents_to_an_agents_md_pointer(guide: Path) -> None:
+    """Each AGENTS.md only points back to a CLAUDE.md, so no canonical guide links one as a source of rules."""
+    assert AGENTS_LINK_RE.findall(guide.read_text(encoding="utf-8")) == []
 
 
 @pytest.mark.parametrize("guide", [ROOT / "CLAUDE.md", WEB / "CLAUDE.md"], ids=["root", "apps-web"])

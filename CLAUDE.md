@@ -29,7 +29,7 @@ Before non-trivial changes, read in this order:
 1. Root Obsidian memory listed above.
 2. [`README.md`](README.md) — product overview, install paths, public surface
 3. The closest module the change touches (handler, service, memory, etc.)
-4. [`apps/web/AGENTS.md`](apps/web/AGENTS.md) and [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md) — UI design system & principles (mandatory for any `apps/web/` change)
+4. [`apps/web/CLAUDE.md`](apps/web/CLAUDE.md) — UI design system & principles (mandatory for any `apps/web/` change)
 
 Public product and contributor documentation lives in [`docs/`](docs/README.md).
 
