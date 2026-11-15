@@ -62,6 +62,32 @@ function fadeOutCopy(content: HTMLElement | null): (() => void) | undefined {
   };
 }
 
+/**
+ * While the list is open, Radix hides the rest of the page from assistive tech
+ * (aria-hidden, marked data-aria-hidden), traps focus and blocks outside clicks,
+ * but the hidden controls stay focusable: axe reports aria-hidden-focus on the
+ * skip link, the sidebar, the topbar and the main content (D-350). Make the
+ * hidden subtrees inert too, and restore only what this set on close. Radix
+ * hides the page from an effect after the list mounts, hence the frame.
+ */
+function useInertWhileOpen(open: boolean) {
+  useEffect(() => {
+    if (!open) return undefined;
+    const madeInert: Element[] = [];
+    const frame = window.requestAnimationFrame(() => {
+      for (const node of document.querySelectorAll('[data-aria-hidden="true"]')) {
+        if (node.hasAttribute("inert")) continue;
+        node.setAttribute("inert", "");
+        madeInert.push(node);
+      }
+    });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      for (const node of madeInert) node.removeAttribute("inert");
+    };
+  }, [open]);
+}
+
 export function LanguageSwitcher({ className }: { className?: string }) {
   const { language, options, setLanguage, t } = useAppI18n();
   const [open, setOpen] = useState(false);
@@ -69,6 +95,7 @@ export function LanguageSwitcher({ className }: { className?: string }) {
   const removeCopyRef = useRef<(() => void) | undefined>(undefined);
 
   useEffect(() => () => removeCopyRef.current?.(), []);
+  useInertWhileOpen(open);
 
   const handleOpenChange = (next: boolean) => {
     removeCopyRef.current?.();
@@ -121,53 +148,57 @@ export function LanguageSwitcher({ className }: { className?: string }) {
         </SelectPrimitive.Trigger>
 
         <SelectPrimitive.Portal>
-          <SelectPrimitive.Content
-            ref={contentRef}
-            position="popper"
-            side="bottom"
-            align="end"
-            sideOffset={8}
-            collisionPadding={12}
-            aria-label={t("language.label")}
-            className={cn("app-floating-panel language-switcher__menu", ...MENU_ENTER)}
-            {...tourAnchor("shell.topbar.language-switcher.menu")}
-          >
-            <SelectPrimitive.Viewport className="language-switcher__menu-list">
-              {options.map((option) => {
-                const value = option.value as AppLanguage;
-                const isActive = value === currentOption.value;
+          {/* The list sits in a named landmark (axe region, D-350); closed, the
+              region is hidden, since Radix keeps the closed list off the page. */}
+          <div role="region" aria-label={t("language.label")} hidden={!open}>
+            <SelectPrimitive.Content
+              ref={contentRef}
+              position="popper"
+              side="bottom"
+              align="end"
+              sideOffset={8}
+              collisionPadding={12}
+              aria-label={t("language.label")}
+              className={cn("app-floating-panel language-switcher__menu", ...MENU_ENTER)}
+              {...tourAnchor("shell.topbar.language-switcher.menu")}
+            >
+              <SelectPrimitive.Viewport className="language-switcher__menu-list">
+                {options.map((option) => {
+                  const value = option.value as AppLanguage;
+                  const isActive = value === currentOption.value;
 
-                return (
-                  <SelectPrimitive.Item
-                    key={value}
-                    value={value}
-                    className={cn(
-                      "language-switcher__option",
-                      isActive && "language-switcher__option--active",
-                    )}
-                    {...tourAnchor(`shell.topbar.language-switcher.option.${value}`)}
-                  >
-                    <span className="language-switcher__option-copy">
-                      <span className="language-switcher__flag" aria-hidden="true">
-                        {LANGUAGE_FLAGS[value]}
-                      </span>
-                      {/* ItemText drops className, so the label styles sit on a wrapper. */}
-                      <span className="language-switcher__option-label">
-                        <SelectPrimitive.ItemText>{t(option.labelKey)}</SelectPrimitive.ItemText>
-                      </span>
-                    </span>
-                    <span
-                      aria-hidden="true"
+                  return (
+                    <SelectPrimitive.Item
+                      key={value}
+                      value={value}
                       className={cn(
-                        "language-switcher__option-dot",
-                        isActive && "language-switcher__option-dot--active",
+                        "language-switcher__option",
+                        isActive && "language-switcher__option--active",
                       )}
-                    />
-                  </SelectPrimitive.Item>
-                );
-              })}
-            </SelectPrimitive.Viewport>
-          </SelectPrimitive.Content>
+                      {...tourAnchor(`shell.topbar.language-switcher.option.${value}`)}
+                    >
+                      <span className="language-switcher__option-copy">
+                        <span className="language-switcher__flag" aria-hidden="true">
+                          {LANGUAGE_FLAGS[value]}
+                        </span>
+                        {/* ItemText drops className, so the label styles sit on a wrapper. */}
+                        <span className="language-switcher__option-label">
+                          <SelectPrimitive.ItemText>{t(option.labelKey)}</SelectPrimitive.ItemText>
+                        </span>
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className={cn(
+                          "language-switcher__option-dot",
+                          isActive && "language-switcher__option-dot--active",
+                        )}
+                      />
+                    </SelectPrimitive.Item>
+                  );
+                })}
+              </SelectPrimitive.Viewport>
+            </SelectPrimitive.Content>
+          </div>
         </SelectPrimitive.Portal>
       </SelectPrimitive.Root>
     </div>
