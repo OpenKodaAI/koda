@@ -315,12 +315,45 @@ def _release_run(
     )
 
 
+def _refresh_inflight_leases() -> int:
+    """Extend the lease of every run still dispatching in this process.
+
+    Only this process knows that these runs are live. Another process of the same agent (an overlapping
+    restart, a cluster handover) sees only the lease, so it must never see it expire mid-dispatch.
+    """
+    run_ids = sorted(set(_inflight_run_ids.values()))
+    if not run_ids:
+        return 0
+    jobs = _jobs()
+    now = jobs._utcnow()
+    placeholders = ", ".join("?" for _ in run_ids)
+    return int(
+        _store().execute(
+            f"""
+            UPDATE scheduled_job_runs
+            SET lease_expires_at = ?, lease_heartbeat_at = ?, updated_at = ?
+            WHERE id IN ({placeholders}) AND status = ? AND lease_owner = ?
+            """,
+            (
+                jobs._iso(now + timedelta(seconds=jobs.SCHEDULER_LEASE_SECONDS)),
+                jobs._iso(now),
+                jobs._iso(now),
+                *run_ids,
+                jobs.RUN_STATUS_RUNNING,
+                _dispatcher_id,
+            ),
+        )
+        or 0
+    )
+
+
 async def run_dispatch_cycle(application: Any) -> dict[str, int]:
     from koda.services.scheduled_job_runtime import _dispatch_run
 
     # Every cycle, not only at startup: a run whose completion callback was lost
     # would otherwise stay `running` and block its job until a restart.
     recover_expired_leases()
+    _refresh_inflight_leases()
     materialized = _materialize_due_runs()
     claimed = _claim_due_runs()
     for run in claimed:

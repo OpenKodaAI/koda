@@ -14,7 +14,10 @@ Pinned guarantees:
     callback was lost leaves ``running`` once its lease expires and is re-run,
     without restarting the dispatcher. A live run keeps its lease instead: one
     whose runtime task is still active, or whose dispatch is still running in
-    this process, is never recovered or dispatched a second time.
+    this process, is never recovered or dispatched a second time. Each cycle
+    also extends the lease of every run still dispatching in this process, so
+    a second process of the same agent (an overlapping restart, a cluster
+    handover) never sees that lease expire.
   * Each agent's process materializes, claims and dispatches only its own
     agent's jobs, through its own bot and under its own policy, so a job's
     policy snapshot never flips between agents. Lease recovery is scoped the
@@ -554,6 +557,59 @@ async def test_another_agents_process_never_recovers_a_run_this_agent_still_disp
     assert finished_run["lease_recovery_count"] == 0
     assert _reminders_sent(application_a) == ["⏰ Reminder: Stretch break"]
     application_b.bot.send_message.assert_not_called()
+
+
+async def test_a_second_process_of_the_same_agent_never_recovers_a_run_the_first_still_dispatches(
+    scheduler_db: str,
+) -> None:
+    # An overlapping restart or a cluster handover runs two processes of one agent. The second cannot
+    # see the first's in-flight run, so the first keeps that run's lease alive every cycle.
+    from koda.services import scheduled_job_dispatcher, scheduled_jobs
+
+    first, second = _fake_application(), _fake_application()
+    send_started = asyncio.Event()
+    release_send = asyncio.Event()
+
+    async def _slow_send(**_kwargs: Any) -> None:
+        send_started.set()
+        await release_send.wait()
+
+    with _as_agent("AGENT_A", _POLICY_A):
+        job_id = await _active_reminder_job(first)
+        first.bot.send_message = AsyncMock(side_effect=_slow_send)
+        scheduled_jobs._touch_job(
+            job_id, next_run_at=scheduled_jobs._iso(scheduled_jobs._utcnow() - timedelta(seconds=5))
+        )
+        assert (await scheduled_jobs.run_dispatch_cycle(first))["claimed"] == 1
+        await asyncio.wait_for(send_started.wait(), timeout=10)
+        [run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+        # The send outlives most of a short lease; the first process's next cycle extends it.
+        about_to_expire = scheduled_jobs._utcnow() + timedelta(seconds=1)
+        scheduled_jobs._touch_run(int(run["id"]), lease_expires_at=scheduled_jobs._iso(about_to_expire))
+        await scheduled_jobs.run_dispatch_cycle(first)
+
+    # The second process cycles after the old lease would have run out.
+    later = scheduled_jobs._utcnow() + timedelta(seconds=5)
+    with (
+        _as_agent("AGENT_A", _POLICY_A),
+        _another_process(),
+        patch.object(scheduled_jobs, "_utcnow", return_value=later),
+    ):
+        cycle = await scheduled_jobs.run_dispatch_cycle(second)
+
+    assert cycle["claimed"] == 0
+    [live_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert live_run["status"] == scheduled_jobs.RUN_STATUS_RUNNING
+    assert live_run["lease_recovery_count"] == 0
+    assert _events(job_id, "run.lease_recovered") == []
+
+    with _as_agent("AGENT_A", _POLICY_A):
+        release_send.set()
+        await asyncio.gather(*list(scheduled_job_dispatcher._inflight_dispatch_tasks))
+    [finished_run] = _runs(job_id, scheduled_jobs.RUN_TRIGGER_NORMAL)
+    assert finished_run["status"] == scheduled_jobs.RUN_STATUS_SUCCEEDED, finished_run.get("error_message")
+    assert _reminders_sent(first) == ["⏰ Reminder: Stretch break"]
+    second.bot.send_message.assert_not_called()
 
 
 async def test_an_agent_never_lists_validates_or_runs_another_agents_job(scheduler_db: str) -> None:
