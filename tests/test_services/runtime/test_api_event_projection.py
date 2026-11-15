@@ -256,6 +256,24 @@ async def test_event_websocket_projects_each_event(client: TestClient, roots: tu
     _assert_projected([json.loads(str(message.data)) for message in messages])
 
 
+async def test_browser_started_lifts_the_kernel_unavailable_reason(client: TestClient, controller: _Controller) -> None:
+    """The kernel answers missing_display_or_ports only in the session's metadata (D-359)."""
+    controller.store.events = [
+        _event(
+            1,
+            "browser.started",
+            {"status": "unavailable", "metadata": {"unavailable_reason": "missing_display_or_ports"}},
+        )
+    ]
+
+    response = await client.get(f"/api/runtime/tasks/{_TASK_ID}/events", headers=_HEADERS)
+
+    assert json.loads(await response.text())["items"][0]["payload"] == {
+        "status": "unavailable",
+        "unavailable_reason": "missing_display_or_ports",
+    }
+
+
 async def test_other_event_types_keep_their_payload_and_paths_outside_the_task_are_dropped(
     client: TestClient, controller: _Controller, roots: tuple[Path, Path, Path]
 ) -> None:

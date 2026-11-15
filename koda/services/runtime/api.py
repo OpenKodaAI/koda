@@ -411,7 +411,13 @@ _RUNTIME_KERNEL_EVENT_FIELDS = ("operation", "recorded_at", "required", "forward
 
 
 def _browser_session_payload(session: Mapping[str, Any], task_root: Path) -> dict[str, object]:
-    return _projected(session, _BROWSER_FIELDS, ("runtime_dir",), task_root)
+    payload = _projected(session, _BROWSER_FIELDS, ("runtime_dir",), task_root)
+    # The kernel gives an unavailable session's reason (missing_display_or_ports) only in its
+    # metadata; the dashboard reads it at the top level (D-359).
+    metadata = session.get("metadata")
+    if not payload.get("unavailable_reason") and isinstance(metadata, Mapping) and metadata.get("unavailable_reason"):
+        payload["unavailable_reason"] = str(metadata["unavailable_reason"])
+    return payload
 
 
 def _runtime_event(event: Mapping[str, Any]) -> dict[str, object]:

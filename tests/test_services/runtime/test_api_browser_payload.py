@@ -270,3 +270,40 @@ async def test_text_fields_pass_unchanged_and_a_runtime_dir_outside_the_task_is_
     )
     assert (browser["status"], browser["last_known_status"]) == ("unavailable", "running")
     assert (browser["visual_available"], browser["session_persisted_only"]) == (False, True)
+
+
+async def test_the_kernel_unavailable_reason_is_lifted_to_the_top_level(
+    client: TestClient, roots: tuple[Path, Path, Path]
+) -> None:
+    """The kernel answers missing_display_or_ports only in the session's metadata (D-359)."""
+    _runtime_root, _state_root, task_root = roots
+    unavailable = {
+        "session_id": "kbs-7",
+        "scope_id": _TASK_ID,
+        "transport": "novnc",
+        "status": "unavailable",
+        "runtime_dir": str(task_root / "browser"),
+        "missing_binaries": [],
+        "forwarded": True,
+        "metadata": {"requested_transport": "novnc", "unavailable_reason": "missing_display_or_ports"},
+    }
+    with patch.object(_Controller, "get_browser_snapshot", lambda self, task_id: dict(unavailable)):
+        response = await client.get(f"/api/runtime/tasks/{_TASK_ID}/browser", headers=_HEADERS)
+
+    browser = json.loads(await response.text())["browser"]
+    assert (browser["status"], browser["unavailable_reason"]) == ("unavailable", "missing_display_or_ports")
+    assert "metadata" not in browser
+
+
+async def test_a_top_level_unavailable_reason_is_kept(client: TestClient) -> None:
+    snapshot = {
+        "status": "unavailable",
+        "unavailable_reason": "Browser session metadata was retained.",
+        "metadata": {"unavailable_reason": "missing_display_or_ports"},
+    }
+    with patch.object(_Controller, "get_browser_snapshot", lambda self, task_id: dict(snapshot)):
+        response = await client.get(f"/api/runtime/tasks/{_TASK_ID}/browser", headers=_HEADERS)
+
+    assert json.loads(await response.text())["browser"]["unavailable_reason"] == (
+        "Browser session metadata was retained."
+    )
