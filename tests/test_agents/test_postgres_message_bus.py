@@ -267,6 +267,33 @@ async def test_a_delegation_result_without_a_local_waiter_is_only_persisted(monk
 
 
 @pytest.mark.asyncio
+async def test_a_delegation_result_that_races_the_timeout_is_not_kept(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A local result stored after the last pop, while its row is not yet committed, is dropped (D-185)."""
+    from unittest.mock import AsyncMock
+
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    monkeypatch.setattr(bus, "_ensure_started", AsyncMock())
+    monkeypatch.setattr(bus, "_inbox_size", AsyncMock(return_value=0))
+    monkeypatch.setattr(bus, "_insert", AsyncMock(return_value="msg-1"))
+    monkeypatch.setattr(bus, "_persist_delegation_result", AsyncMock())
+
+    async def fetched_before_the_result_commits(request: DelegationRequest) -> None:
+        await asyncio.sleep(0.05)
+        bus.resolve_delegation(
+            request.request_id,
+            DelegationResult(request_id=request.request_id, from_agent="b", to_agent="a", success=True, result="x"),
+        )
+        return None
+
+    monkeypatch.setattr(bus, "_fetch_delegation_result", fetched_before_the_result_commits)
+
+    timed_out = await bus.delegate(DelegationRequest(from_agent="a", to_agent="b", task="x", timeout=0.01))
+
+    assert not timed_out.success
+    assert bus._delegation_data == {}
+
+
+@pytest.mark.asyncio
 async def test_a_delegation_request_persists_its_chain(monkeypatch: pytest.MonkeyPatch) -> None:
     from unittest.mock import AsyncMock
 

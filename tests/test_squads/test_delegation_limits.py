@@ -228,6 +228,32 @@ async def test_agent_send_ping_pong_stops_at_the_hop_limit_with_one_event(
 
 @pytest.mark.postgres
 @pytest.mark.asyncio
+async def test_the_inbox_counts_agent_send_hops_when_the_sender_does_not_add_itself(
+    room: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A sender that passes its turn's chain on as is (an older runtime) still stops at the hop limit."""
+    from koda.squads import MAX_REPLY_DEPTH
+
+    sender, chain = "A", ["squad_router"]
+    delivered = 0
+    for _ in range(2 * MAX_REPLY_DEPTH):
+        to = "B" if sender == "A" else "A"
+        await room.bus.send(
+            sender, to, "ping", {"thread_id": room.thread.id, "delegation_chain": chain, "kind": "agent_text"}
+        )
+        turns = await _deliver(room, monkeypatch, to)
+        if not turns:
+            break
+        delivered += 1
+        sender, chain = to, turns[0]["delegation_chain"]
+
+    assert delivered == MAX_REPLY_DEPTH - 1, "A and B kept answering each other"
+    [event] = await _limit_events(room)
+    assert event["metadata"]["limit"] == "hop_count"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("chain", "limit"),
     [

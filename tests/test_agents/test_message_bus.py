@@ -152,6 +152,29 @@ async def test_a_delegation_result_nobody_waits_for_is_not_kept(bus: InMemoryMes
 
 
 @pytest.mark.asyncio
+async def test_a_delegation_result_that_races_the_timeout_is_not_kept(
+    bus: InMemoryMessageBus, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A result stored as the delegator's wait times out is dropped with its waiter (D-185)."""
+    req = DelegationRequest(from_agent="a1", to_agent="a2", task="slow", timeout=5)
+
+    async def resolved_as_it_times_out(awaitable: object, timeout: float) -> None:
+        awaitable.close()  # type: ignore[attr-defined]
+        bus.resolve_delegation(
+            req.request_id,
+            DelegationResult(request_id=req.request_id, from_agent="a2", to_agent="a1", success=True, result="late"),
+        )
+        raise TimeoutError
+
+    with monkeypatch.context() as m:
+        m.setattr(asyncio, "wait_for", resolved_as_it_times_out)
+        timed_out = await bus.delegate(req)
+
+    assert not timed_out.success
+    assert bus._delegation_data == {}
+
+
+@pytest.mark.asyncio
 async def test_a_delegation_request_carries_its_chain(bus: InMemoryMessageBus) -> None:
     req = DelegationRequest(
         from_agent="a1", to_agent="a2", task="x", timeout=0.05, delegation_chain=["squad_router", "a1"]

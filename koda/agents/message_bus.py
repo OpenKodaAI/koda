@@ -248,6 +248,7 @@ class InMemoryMessageBus:
             )
         finally:
             self._delegation_results.pop(request.request_id, None)
+            self._delegation_data.pop(request.request_id, None)
 
     def resolve_delegation(self, request_id: str, result: DelegationResult) -> None:
         """Resolve a pending delegation with a result; one nobody waits for is dropped (D-185)."""

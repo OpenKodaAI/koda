@@ -2705,7 +2705,9 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
                     chat_id = chat_id or default_chat_id
                 delegation_chain = metadata.get("delegation_chain")
                 chain = [str(value) for value in delegation_chain] if isinstance(delegation_chain, list) else []
-                if msg.from_agent and msg.from_agent not in chain:
+                # The chain ends with its sender; one a sender did not add itself to still counts
+                # that hop (D-096).
+                if msg.from_agent and (not chain or chain[-1] != msg.from_agent):
                     chain.append(msg.from_agent)
                 request_id = metadata.get("request_id") if kind in {"task_request", "delegation_request"} else None
                 # A delegation past a cycle or the depth cap, or an agent_send past the hop limit,

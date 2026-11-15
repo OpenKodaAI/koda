@@ -118,7 +118,9 @@ Before broad rollout, run these in canary:
   to it, ending with its sender, and every entry counts, the router's included.
   The sender's tool refuses the cycle, the depth or the hop count, and the
   receiving inbox refuses the same before it queues a turn, whichever runtime
-  sent it; a delegator the inbox refuses gets the failure at once. Each refusal
+  sent it: the inbox adds the sender to a chain that does not end with it, so
+  it counts every hop even from a sender that does not add itself. A
+  delegator the inbox refuses gets the failure at once. Each refusal
   must show one `delegation_limit_reached` system event whose `limit` is
   `cycle`, `depth` or `hop_count`.
 - Disable a Telegram bot admin permission; bind/strict checks must fail closed.

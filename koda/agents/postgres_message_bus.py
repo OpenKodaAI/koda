@@ -525,6 +525,7 @@ class PostgresMessageBus:
             )
         finally:
             self._delegation_results.pop(request.request_id, None)
+            self._delegation_data.pop(request.request_id, None)
 
     def resolve_delegation(self, request_id: str, result: DelegationResult) -> None:
         # The result is kept in memory only for a delegator waiting in this process; any other
