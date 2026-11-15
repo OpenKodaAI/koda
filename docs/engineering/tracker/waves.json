@@ -122,9 +122,16 @@
   {
    "wave": "W14",
    "name": "Onda 14",
-   "scope": "Segurança: restrições MCP validadas também na partida e caminhos de teste do painel com o sandbox (D-316..D-318, D-321); scanner de pacotes cobre rotas de execução fora do import e aliases (D-309..D-311, D-323). Squads: pausa por orçamento e por operador, reenvio de reivindicações expiradas (M3-E6-T5, D-287). Design: tokens definidos e contraste do texto (M8-E5-T3, D-267), erros ARIA críticos da paleta (D-282)",
+   "scope": "Segurança: restrições MCP validadas também na partida e caminhos de teste do painel com o sandbox (D-316..D-318, D-321); scanner de pacotes cobre rotas de execução fora do import e aliases (D-309..D-311, D-323). Squads: pausa por orçamento e por operador, reenvio de reivindicações expiradas (M3-E6-T5, D-287). Design: tokens definidos e contraste do texto (M8-E5-T3, D-267), erros ARIA críticos da paleta (D-282); aprovados para o lote 7 exceto M3-E6-T5 (segunda rodada: uma pausa não pode gastar as expirações da reivindicação)",
+   "status": "final_review",
+   "ref": "int/b7, task/M3-E6-T5"
+  },
+  {
+   "wave": "W15",
+   "name": "Onda 15",
+   "scope": "Segurança: rotas estáticas restantes do scanner de pacotes (D-326..D-329); tabelas de aprovação em migration com BIGINT e agent_id, sem apagar concessões de outro agente (M2-E1-T1); broadcast só para participantes, identidade de squad no servidor e recall rejeita user_id <= 0 (M1-E5-T2); API de runtime responde 400 a parâmetros inválidos e não expõe caminhos locais (M3-E8-T4). Design: classes de tamanho de fonte que viravam cor e reset que anulava tamanhos em botões (D-330, D-331), listbox e landmarks (D-332, D-333), chaves i18n cruas (D-334)",
    "status": "implementing",
-   "ref": "task/SEC-D316, task/SEC-D321, task/SEC-D311, task/SEC-D323, task/M3-E6-T5, task/M8-E5-T3"
+   "ref": "task/SEC-D326, task/M8-D330, task/M2-E1-T1, task/M1-E5-T2"
   }
  ],
  "meta": [

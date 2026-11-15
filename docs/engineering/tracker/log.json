@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L30",
+   "at": "2026-11-15 07:10",
+   "event": "Aprovados para o lote 7: scanner de pacotes nega os.system, subprocess, exec e eval por alias, import com estrela e __import__ literal, e nega posix, nt, _posixsubprocess e _winapi (D-323); todos os tokens de design definidos, texto mais discreto com contraste AA nos dois temas, paleta de comandos válida para leitores de tela e anéis de foco em superfícies esmaecidas (M8-E5-T3, D-267, D-281, D-282). Integração do lote 7 iniciada (int/b7: FIX-D276, SEC-D316/D321, SEC-D311/D323, M8-E5-T3). Novas faixas: rotas restantes do scanner (D-326..D-329), tamanhos de fonte que nunca se aplicavam (D-330, D-331) e acessibilidade (D-332..D-334), tabelas de aprovação com agent_id e ids BIGINT (M2-E1-T1), escopo de broadcast, identidade de squad e recall (M1-E5-T2) e parâmetros da API de runtime (M3-E8-T4)"
+  },
+  {
    "id": "L29",
    "at": "2026-11-15 06:25",
    "event": "Lote 6 mesclado (1f6697c) com todos os gates verdes: 10.327 testes Python, 426 Postgres, 1212 web, 100 Rust. Entraram: códigos de setup e recuperação de uso único mesmo com requisições simultâneas e um só dono; pacotes de skill rodam exatamente os bytes verificados; administração de squads só pelo coordenador ou operador e threads privadas protegidas; redirecionamento do OAuth só para a origem configurada; isolamento MCP aplicado com ambiente mínimo (Q-32); pareamento de canais com bloqueio; /cancel funciona no Postgres; troca de modelo vale sem reiniciar; um único redator com padrões em tempo linear"
