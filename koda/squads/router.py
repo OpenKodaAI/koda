@@ -6,7 +6,7 @@ silent. When a thread store is available, each reverted claim emits a
 ``system_event`` so the transcript shows what happened.
 
 Phase 5 will wire this into ``supervisor.start()``. Until then, callers can
-start it manually (or trigger a one-off sweep via ``squad_router_tick``).
+start it manually (``squad_router_tick`` sweeps one squad's expired claims).
 """
 
 from __future__ import annotations
@@ -121,11 +121,11 @@ class SquadRouter:
             with suppress(BaseException):
                 await task
 
-    async def sweep_once(self) -> SweepReport:
+    async def _sweep_claims(self, *, squad_id: str | None = None) -> list[ExpiredClaim]:
         try:
-            expired = await self._task_store.sweep_expired_claims(batch_size=self._batch_size)
+            expired = await self._task_store.sweep_expired_claims(batch_size=self._batch_size, squad_id=squad_id)
         except Exception:
-            log.exception("squad_router_sweep_failed")
+            log.exception("squad_router_sweep_failed", squad_id=squad_id)
             expired = []
         if expired and self._thread_store is not None:
             for claim in expired:
@@ -137,6 +137,19 @@ class SquadRouter:
                         thread_id=claim.thread_id,
                         task_id=claim.task_id,
                     )
+        return expired
+
+    async def sweep_squad_claims(self, squad_id: str) -> SweepReport:
+        """Revert the expired claims of ``squad_id``'s threads, and nothing else.
+
+        This is the ``squad_router_tick`` sweep: a coordinator reaches only its own squad. The
+        other sweeps (auto-election, timeouts, dead letters, budgets, open handoffs) cover every
+        squad, so they run only in the background loop.
+        """
+        return SweepReport(expired_claims=await self._sweep_claims(squad_id=squad_id))
+
+    async def sweep_once(self) -> SweepReport:
+        expired = await self._sweep_claims()
         elections: list[AutoElection] = []
         try:
             elections = await self._sweep_auto_elections()

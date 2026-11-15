@@ -719,7 +719,7 @@ Communicate with other agents, delegate tasks, and coordinate work.
 ### Squad Threads
 Persistent multi-agent conversations scoped to a (workspace_id, squad_id).
 
-- `squad_thread_create` — Open a new thread.
+- `squad_thread_create` — Open a new thread (the squad's current coordinator only).
   Params: `{"workspace_id": "...", "squad_id": "...", "title": "...",
             "participants": [{"agent_id": "FRONTEND", "role": "worker"}],
             "coordinator_agent_id": "PM"}`
@@ -760,23 +760,30 @@ Decompose squad work into tracked tasks. Single-owner-per-task via optimistic lo
 A squad MAY have an elected coordinator that orchestrates the team. Without one,
 routing falls back to @mention + capability scoring.
 
-- `squad_coordinator_elect` — Promote an agent to coordinator.
-  Params: `{"squad_id": "<id>", "agent_id": "PM", "force_replace": false, "reason": "..."}`
+Squad administration tools (`squad_coordinator_elect`, `squad_coordinator_demote`,
+`squad_router_tick`, `squad_telegram_bind`, `squad_telegram_unbind`,
+`squad_thread_create`) work only for the squad's current coordinator; anyone else
+gets `Forbidden`. Operators elect the first coordinator from the control plane.
+
+- `squad_coordinator_elect` — Hand the coordinator seat to another agent of the squad
+  (or an agent of its workspace that is in no squad).
+  Params: `{"squad_id": "<id>", "agent_id": "PM", "reason": "..."}`
   Validation reads the real AgentSpec from the control plane; caller-provided
   tool lists are ignored.
 - `squad_coordinator_demote` — Demote the current coordinator. Params: `{"squad_id": "<id>", "reason": "..."}`
 - `squad_coordinator_get` — Show current coordinator + recent history.
   Params: `{"squad_id": "<id>", "history_limit": 5}`
-- `squad_router_tick` — Run one synchronous sweep that reverts expired claims to `pending`.
-  Admin tool — the router daemon does this periodically once started. Params: `{}`
+- `squad_router_tick` — Run one synchronous sweep that reverts this squad's expired claims to `pending`.
+  Admin tool — the router daemon does this periodically once started. Params: `{"squad_id": "<id>"}`
 
 ### Squad ↔ Telegram Binding
 Bind a squad to a Telegram supergroup so inbound messages (and forum-topic
 posts) route to the right squad thread.
 
-- `squad_telegram_bind` — Bind a squad to a chat.
-  Params: `{"squad_id": "<id>", "telegram_chat_id": -100123, "chat_title": "...",
-            "is_forum": true, "force": false}`
+- `squad_telegram_bind` — Bind a squad to a chat. Runs the `/squad_bind` checks
+  against Telegram: a forum-enabled supergroup where the bot (and, with the strict
+  check, every squad bot) is an admin.
+  Params: `{"workspace_id": "<id>", "squad_id": "<id>", "telegram_chat_id": -100123}`
 - `squad_telegram_unbind` — Remove the binding. Params: `{"squad_id": "<id>"}`
 - `squad_telegram_binding_get` — Look up by squad or by chat.
   Params: `{"squad_id": "<id>"}` or `{"telegram_chat_id": -100123}`

@@ -1733,6 +1733,23 @@ class ControlPlaneManager:
             raise KeyError(normalized)
         return row
 
+    def is_squad_member_agent(self, agent_id: str, squad_id: str) -> bool:
+        """Whether ``agent_id`` may serve ``squad_id``, as its coordinator for one.
+
+        It must belong to the squad, or be an agent of the squad's workspace that is in no
+        squad. Unknown agents and squads are not members.
+        """
+        try:
+            squad_row = self._squad_row(squad_id)
+            _, agent_row = self._require_agent_row(agent_id)
+        except (KeyError, ValueError):
+            return False
+        squad_workspace_id = _normalize_optional_org_id(squad_row["workspace_id"])
+        if not squad_workspace_id or _normalize_optional_org_id(agent_row["workspace_id"]) != squad_workspace_id:
+            return False
+        agent_squad_id = _normalize_optional_org_id(agent_row["squad_id"])
+        return agent_squad_id is None or agent_squad_id == str(squad_row["id"])
+
     def _next_workspace_entity_id(self, table: str, base_value: str) -> str:
         base = _slug(base_value)
         candidate = base

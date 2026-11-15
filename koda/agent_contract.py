@@ -634,6 +634,20 @@ def is_known_dispatcher_tool(tool_id: str) -> bool:
     return tool_id in DISPATCHER_TOOL_IDS or tool_id.startswith("mcp_")
 
 
+# Squad administration tools. They sit in their own ``squad_admin`` category so a
+# messaging (``agent_comm``) grant never implies them, and their handlers accept only
+# the squad's current coordinator (operators use the control-plane routes).
+SQUAD_ADMIN_TOOL_IDS: frozenset[str] = frozenset(
+    {
+        "squad_coordinator_elect",
+        "squad_coordinator_demote",
+        "squad_telegram_bind",
+        "squad_telegram_unbind",
+        "squad_router_tick",
+        "squad_thread_create",
+    }
+)
+
 _CORE_PROVIDER_DEFINITIONS: tuple[CoreProviderDefinition, ...] = (
     CoreProviderDefinition(
         id="claude",

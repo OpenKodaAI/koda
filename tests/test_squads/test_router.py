@@ -275,3 +275,63 @@ async def test_router_full_path_emits_thread_message(
     assert report.reverted_count == 1
     history = await threads.thread_history(thread_id=thread.id, limit=10)
     assert any(m["type"] == "system_event" and "claim_expired" in (m["content"] or "") for m in history)
+
+
+@pytest.mark.asyncio
+async def test_sweep_squad_claims_runs_only_that_squads_claim_sweep() -> None:
+    claim = ExpiredClaim(
+        task_id="00000000-0000-0000-0000-000000000aa1",
+        thread_id="00000000-0000-0000-0000-000000000bb1",
+        previously_assigned_agent_id="FE",
+        version_after=4,
+    )
+    task_store = AsyncMock()
+    task_store.sweep_expired_claims = AsyncMock(return_value=[claim])
+    thread_store = AsyncMock()
+    thread_store.post_thread_message = AsyncMock(return_value=1)
+    coordinator = AsyncMock()
+    router = SquadRouter(task_store=task_store, thread_store=thread_store, coordinator_service=coordinator)
+    report = await router.sweep_squad_claims("build")
+    assert report.expired_claims == [claim]
+    assert task_store.sweep_expired_claims.await_args.kwargs["squad_id"] == "build"
+    assert thread_store.post_thread_message.await_args.kwargs["thread_id"] == claim.thread_id
+    # The global sweeps (auto-election, timeouts, dead letters, budgets, handoffs) stay with the loop.
+    assert coordinator.mock_calls == []
+    assert thread_store._ensure_pool.await_count == 0
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_squad_scoped_sweep_leaves_other_squads_alone(clean_state: str) -> None:
+    from koda.squads.coordinator import CoordinatorService
+
+    threads = SquadThreadStore(dsn=clean_state, schema=_schema())
+    tasks = SquadTaskStore(dsn=clean_state, schema=_schema())
+    coord = CoordinatorService(dsn=clean_state, schema=_schema(), agent_spec_loader=lambda _agent_id: _eligible_spec())
+    try:
+        build = await threads.create_thread(workspace_id="acme", squad_id="build", title="t")
+        other = await threads.create_thread(workspace_id="beta", squad_id="ops", title="t")
+        await threads.add_participant(thread_id=other.id, agent_id="BETA_W", role="worker")
+        await coord.set_election_policy(squad_id="ops", policy="auto_first_active")
+        build_task = await tasks.create_task(thread_id=build.id, title="t", assigner_agent_id="PM")
+        other_task = await tasks.create_task(thread_id=other.id, title="t", assigner_agent_id="BETA_PM")
+        await tasks.claim_task(task_id=build_task.id, agent_id="W", ttl_seconds=1)
+        await tasks.claim_task(task_id=other_task.id, agent_id="BETA_W", ttl_seconds=1)
+        await asyncio.sleep(1.2)
+        router = SquadRouter(task_store=tasks, thread_store=threads, coordinator_service=coord)
+        report = await router.sweep_squad_claims("build")
+        assert [c.task_id for c in report.expired_claims] == [build_task.id]
+        assert report.auto_elections == []
+        fresh_other = await tasks.get_task(other_task.id)
+        assert fresh_other is not None
+        assert fresh_other.status == "claimed"
+        assert fresh_other.assigned_agent_id == "BETA_W"
+        state = await coord.current_coordinator("ops")
+        assert state is not None and state.coordinator_agent_id is None
+    finally:
+        with suppress(Exception):
+            await threads.close()
+        with suppress(Exception):
+            await tasks.close()
+        with suppress(Exception):
+            await coord.close()

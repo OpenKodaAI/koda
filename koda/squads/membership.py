@@ -132,7 +132,8 @@ async def sync_thread_participants_from_squad(
     The function is intentionally additive: it never removes participants and
     does not rewrite ``joined_at`` for already-active members. If the control
     plane cannot be read, callers still get the current thread membership so
-    routing can continue best-effort.
+    routing can continue best-effort. A private thread keeps its explicit
+    participant list: squad sync never adds anyone to it.
     """
 
     try:
@@ -140,6 +141,8 @@ async def sync_thread_participants_from_squad(
     except Exception:
         log.exception("squad_participant_sync_current_lookup_failed", thread_id=thread.id)
         participants = []
+    if thread.visibility == "private":
+        return cast(list[ParticipantInfo], participants)
 
     active_ids = {p.agent_id for p in participants if p.left_at is None}
     squad_agents = await _list_squad_agents(thread.squad_id, thread_store=thread_store)

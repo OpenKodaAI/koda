@@ -14,6 +14,7 @@ from typing import Any, cast
 
 from koda.agent_contract import (
     FILE_TOOL_PATH_PARAMS,
+    SQUAD_ADMIN_TOOL_IDS,
     WORK_DIR_DEFAULT_PATH_TOOLS,
     evaluate_integration_grant,
     is_known_dispatcher_tool,
@@ -368,6 +369,8 @@ def _infer_tool_category(tool: str) -> str:
         return "agent_comm"
     if tool in {"agent_send", "agent_receive", "agent_delegate", "agent_list_agents", "agent_broadcast"}:
         return "agent_comm"
+    if tool in SQUAD_ADMIN_TOOL_IDS:
+        return "squad_admin"
     if tool.startswith("squad_"):
         return "agent_comm"
     return "tool"
@@ -3558,6 +3561,57 @@ async def _require_squad_task_access(
     return None
 
 
+def _resolve_squad_workspace_id(squad_id: str) -> str:
+    """Return the workspace that owns ``squad_id`` in the control plane (KeyError if unknown)."""
+    from koda.control_plane.manager import get_control_plane_manager
+
+    return str(get_control_plane_manager()._squad_row(squad_id)["workspace_id"] or "")
+
+
+async def _require_squad_admin(
+    *,
+    tool: str,
+    ctx: ToolContext,
+    squad_id: str,
+    workspace_id: str | None = None,
+) -> AgentToolResult | None:
+    """Squad administration (the ``squad_admin`` tools) needs the squad's current coordinator.
+
+    ``workspace_id`` is the caller's claim, checked against the squad's real workspace.
+    """
+    from koda.squads import SquadAccessError, SquadPrincipal, get_squad_access_service
+
+    service = get_squad_access_service()
+    if service is None:
+        return AgentToolResult(tool=tool, success=False, output="Squad access service unavailable.")
+    try:
+        squad_workspace_id = _resolve_squad_workspace_id(squad_id)
+    except (KeyError, ValueError):
+        return AgentToolResult(tool=tool, success=False, output=f"Squad {squad_id!r} not found.")
+    except Exception as exc:
+        log.exception("squad_admin_workspace_lookup_failed", tool=tool, squad_id=squad_id)
+        return AgentToolResult(
+            tool=tool,
+            success=False,
+            output=f"Forbidden: cannot resolve the squad's workspace: {exc}",
+        )
+    if workspace_id is not None and str(workspace_id) != squad_workspace_id:
+        return AgentToolResult(
+            tool=tool,
+            success=False,
+            output=f"Forbidden: squad {squad_id!r} does not belong to workspace {workspace_id!r}",
+        )
+    try:
+        await service.require_squad_admin(
+            squad_id=squad_id,
+            squad_workspace_id=squad_workspace_id,
+            principal=SquadPrincipal.agent(_ctx_agent_id(ctx)),
+        )
+    except SquadAccessError as exc:
+        return AgentToolResult(tool=tool, success=False, output=f"Forbidden: {exc}")
+    return None
+
+
 async def _handle_agent_send(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_inter_agent_available("agent_send")
     if err:
@@ -3753,6 +3807,15 @@ async def _handle_squad_thread_create(params: dict, ctx: ToolContext) -> AgentTo
             success=False,
             output="Missing 'workspace_id' or 'squad_id'.",
         )
+    # Opening a thread names its coordinator and participants: a coordination action.
+    admin_err = await _require_squad_admin(
+        tool="squad_thread_create",
+        ctx=ctx,
+        squad_id=str(squad_id),
+        workspace_id=str(workspace_id),
+    )
+    if admin_err:
+        return admin_err
 
     from koda.squads import get_squad_thread_store
 
@@ -4864,12 +4927,6 @@ async def _handle_squad_telegram_bind(params: dict, ctx: ToolContext) -> AgentTo
             success=False,
             output="Missing 'workspace_id', 'squad_id', or 'telegram_chat_id'.",
         )
-    if not bool(params.get("is_forum", False)):
-        return AgentToolResult(
-            tool="squad_telegram_bind",
-            success=False,
-            output="Telegram squad binding requires a forum-enabled supergroup.",
-        )
     try:
         chat_id = int(raw_chat)
     except (TypeError, ValueError):
@@ -4878,8 +4935,18 @@ async def _handle_squad_telegram_bind(params: dict, ctx: ToolContext) -> AgentTo
             success=False,
             output="'telegram_chat_id' must be an integer.",
         )
+    admin_err = await _require_squad_admin(
+        tool="squad_telegram_bind",
+        ctx=ctx,
+        squad_id=str(squad_id),
+        workspace_id=str(workspace_id),
+    )
+    if admin_err:
+        return admin_err
 
-    from koda.squads import TelegramBindingConflictError, get_telegram_binding_service
+    from koda.config import AGENT_TOKEN
+    from koda.handlers.squad_handlers import verify_squad_bind_chat
+    from koda.squads import TelegramBindingConflictError, get_outbound_bot, get_telegram_binding_service
 
     service = get_telegram_binding_service()
     if service is None:
@@ -4888,13 +4955,20 @@ async def _handle_squad_telegram_bind(params: dict, ctx: ToolContext) -> AgentTo
             success=False,
             output="Telegram binding service unavailable: POSTGRES_URL is not configured.",
         )
-    raw_user = params.get("bound_by_user_id")
-    bound_by = None
-    if raw_user is not None:
-        try:
-            bound_by = int(raw_user)
-        except (TypeError, ValueError):
-            bound_by = None
+    bot = ctx.bot
+    if bot is None:
+        if not AGENT_TOKEN:
+            return AgentToolResult(
+                tool="squad_telegram_bind",
+                success=False,
+                output="No bot available to verify the chat and AGENT_TOKEN is not configured.",
+            )
+        bot = get_outbound_bot(AGENT_TOKEN)
+    # Same checks as /squad_bind, on the chat as Telegram reports it: the caller's
+    # is_forum, chat_title, force and bound_by_user_id are not trusted.
+    chat, chat_err = await verify_squad_bind_chat(bot, chat_id, squad_id=str(squad_id))
+    if chat_err:
+        return AgentToolResult(tool="squad_telegram_bind", success=False, output=chat_err)
     raw_metadata = params.get("metadata")
     metadata = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
     metadata["workspace_id"] = str(workspace_id)
@@ -4902,10 +4976,10 @@ async def _handle_squad_telegram_bind(params: dict, ctx: ToolContext) -> AgentTo
         binding = await service.bind(
             squad_id=squad_id,
             telegram_chat_id=chat_id,
-            chat_title=str(params.get("chat_title", "")),
-            is_forum=bool(params.get("is_forum", False)),
-            bound_by_user_id=bound_by if bound_by is not None else ctx.user_id,
-            force=bool(params.get("force", False)),
+            chat_title=str(getattr(chat, "title", "") or ""),
+            is_forum=True,
+            bound_by_user_id=ctx.user_id,
+            force=False,
             metadata=metadata,
         )
     except TelegramBindingConflictError as exc:
@@ -4931,6 +5005,9 @@ async def _handle_squad_telegram_unbind(params: dict, ctx: ToolContext) -> Agent
     squad_id = params.get("squad_id", "")
     if not squad_id:
         return AgentToolResult(tool="squad_telegram_unbind", success=False, output="Missing 'squad_id'.")
+    admin_err = await _require_squad_admin(tool="squad_telegram_unbind", ctx=ctx, squad_id=str(squad_id))
+    if admin_err:
+        return admin_err
 
     from koda.squads import get_telegram_binding_service
 
@@ -5021,6 +5098,12 @@ async def _handle_squad_router_tick(params: dict, ctx: ToolContext) -> AgentTool
     err = await _check_inter_agent_available("squad_router_tick")
     if err:
         return err
+    squad_id = params.get("squad_id", "")
+    if not squad_id:
+        return AgentToolResult(tool="squad_router_tick", success=False, output="Missing 'squad_id'.")
+    admin_err = await _require_squad_admin(tool="squad_router_tick", ctx=ctx, squad_id=str(squad_id))
+    if admin_err:
+        return admin_err
 
     from koda.squads import get_squad_router
 
@@ -5031,7 +5114,8 @@ async def _handle_squad_router_tick(params: dict, ctx: ToolContext) -> AgentTool
             success=False,
             output="Squad router unavailable: POSTGRES_URL is not configured.",
         )
-    report = await router.sweep_once()
+    # Only this squad's claims: the global sweeps would reach other squads and workspaces.
+    report = await router.sweep_squad_claims(str(squad_id))
     if report.reverted_count == 0:
         return AgentToolResult(
             tool="squad_router_tick",
@@ -5074,6 +5158,9 @@ async def _handle_squad_coordinator_elect(params: dict, ctx: ToolContext) -> Age
             success=False,
             output="Missing 'squad_id' or 'agent_id'.",
         )
+    admin_err = await _require_squad_admin(tool="squad_coordinator_elect", ctx=ctx, squad_id=str(squad_id))
+    if admin_err:
+        return admin_err
 
     from koda.config import AGENT_ID
     from koda.squads import (
@@ -5093,12 +5180,27 @@ async def _handle_squad_coordinator_elect(params: dict, ctx: ToolContext) -> Age
     triggered_by = (
         (ctx.executing_agent_id if isinstance(ctx.executing_agent_id, str) else None) or AGENT_ID or "operator"
     )
-    force_replace = bool(params.get("force_replace", False))
     reason = params.get("reason") if isinstance(params.get("reason"), str) else None
     try:
         from koda.control_plane.manager import get_control_plane_manager
 
-        agent_spec = get_control_plane_manager().get_agent_spec(agent_id)
+        manager = get_control_plane_manager()
+        is_member = manager.is_squad_member_agent(str(agent_id), str(squad_id))
+    except Exception as exc:
+        log.exception("squad_coordinator_membership_lookup_failed", squad_id=squad_id, agent_id=agent_id)
+        return AgentToolResult(
+            tool="squad_coordinator_elect",
+            success=False,
+            output=f"Forbidden: cannot check whether {agent_id!r} belongs to squad {squad_id!r}: {exc}",
+        )
+    if not is_member:
+        return AgentToolResult(
+            tool="squad_coordinator_elect",
+            success=False,
+            output=f"Forbidden: agent {agent_id!r} is not a member of squad {squad_id!r} or of its workspace",
+        )
+    try:
+        agent_spec = manager.get_agent_spec(agent_id)
     except Exception as exc:
         return AgentToolResult(
             tool="squad_coordinator_elect",
@@ -5112,7 +5214,9 @@ async def _handle_squad_coordinator_elect(params: dict, ctx: ToolContext) -> Age
             agent_id=agent_id,
             triggered_by=triggered_by,
             reason=reason,
-            force_replace=force_replace,
+            # No caller-controlled force_replace: the coordinator may only hand its own seat over.
+            force_replace=False,
+            replace_agent_id=_ctx_agent_id(ctx),
             agent_spec=agent_spec,
             thread_store=get_squad_thread_store(),
         )
@@ -5142,9 +5246,17 @@ async def _handle_squad_coordinator_demote(params: dict, ctx: ToolContext) -> Ag
     squad_id = params.get("squad_id", "")
     if not squad_id:
         return AgentToolResult(tool="squad_coordinator_demote", success=False, output="Missing 'squad_id'.")
+    admin_err = await _require_squad_admin(tool="squad_coordinator_demote", ctx=ctx, squad_id=str(squad_id))
+    if admin_err:
+        return admin_err
 
     from koda.config import AGENT_ID
-    from koda.squads import CoordinatorNotFoundError, get_coordinator_service, get_squad_thread_store
+    from koda.squads import (
+        CoordinatorConflictError,
+        CoordinatorNotFoundError,
+        get_coordinator_service,
+        get_squad_thread_store,
+    )
 
     service = get_coordinator_service()
     if service is None:
@@ -5163,6 +5275,8 @@ async def _handle_squad_coordinator_demote(params: dict, ctx: ToolContext) -> Ag
             triggered_by=triggered_by,
             reason=reason,
             thread_store=get_squad_thread_store(),
+            # Re-checked under the row lock: the caller must still be the coordinator.
+            expected_coordinator_agent_id=_ctx_agent_id(ctx),
         )
     except CoordinatorNotFoundError:
         return AgentToolResult(
@@ -5170,6 +5284,8 @@ async def _handle_squad_coordinator_demote(params: dict, ctx: ToolContext) -> Ag
             success=False,
             output=f"Squad '{squad_id}' has no active coordinator.",
         )
+    except CoordinatorConflictError as exc:
+        return AgentToolResult(tool="squad_coordinator_demote", success=False, output=f"Forbidden: {exc}")
     return AgentToolResult(
         tool="squad_coordinator_demote",
         success=True,

@@ -136,6 +136,65 @@ async def test_elect_force_replace(service: CoordinatorService) -> None:
 
 @pytest.mark.postgres
 @pytest.mark.asyncio
+async def test_elect_replaces_only_the_named_coordinator(service: CoordinatorService) -> None:
+    await service.elect(squad_id="build", agent_id="PM", agent_spec=_eligible_spec())
+    with pytest.raises(CoordinatorConflictError):
+        await service.elect(
+            squad_id="build",
+            agent_id="OPS",
+            replace_agent_id="STALE",
+            agent_spec=_eligible_spec(),
+        )
+    state = await service.current_coordinator("build")
+    assert state is not None and state.coordinator_agent_id == "PM"
+    state = await service.elect(
+        squad_id="build",
+        agent_id="OPS",
+        replace_agent_id="PM",
+        triggered_by="PM",
+        agent_spec=_eligible_spec(),
+    )
+    assert state.coordinator_agent_id == "OPS"
+    history = await service.list_history(squad_id="build", limit=1)
+    assert history[0].event_type == "replaced"
+    assert history[0].previous_coordinator_agent_id == "PM"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_demoted_coordinator_cannot_hand_over_the_empty_seat(service: CoordinatorService) -> None:
+    # PM passed the coordinator check, then an operator demoted it before its elect took the lock.
+    await service.elect(squad_id="build", agent_id="PM", agent_spec=_eligible_spec())
+    await service.demote(squad_id="build", triggered_by="operator:owner")
+    for agent_id in ("PM", "OPS"):
+        with pytest.raises(CoordinatorConflictError):
+            await service.elect(
+                squad_id="build",
+                agent_id=agent_id,
+                replace_agent_id="PM",
+                triggered_by="PM",
+                agent_spec=_eligible_spec(),
+            )
+    state = await service.current_coordinator("build")
+    assert state is not None and state.coordinator_agent_id is None
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_demote_removes_only_the_expected_coordinator(service: CoordinatorService) -> None:
+    # A stale coordinator's demote must not remove the coordinator an operator force-elected since.
+    await service.elect(squad_id="build", agent_id="PM", agent_spec=_eligible_spec())
+    await service.elect(squad_id="build", agent_id="OPS", force_replace=True, agent_spec=_eligible_spec())
+    with pytest.raises(CoordinatorConflictError):
+        await service.demote(squad_id="build", triggered_by="PM", expected_coordinator_agent_id="PM")
+    state = await service.current_coordinator("build")
+    assert state is not None and state.coordinator_agent_id == "OPS"
+    state = await service.demote(squad_id="build", triggered_by="OPS", expected_coordinator_agent_id="OPS")
+    assert state.coordinator_agent_id is None
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
 async def test_demote_clears_state(service: CoordinatorService) -> None:
     await service.elect(squad_id="build", agent_id="PM", agent_spec=_eligible_spec())
     state = await service.demote(squad_id="build", reason="paused")

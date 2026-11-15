@@ -292,10 +292,16 @@ class CoordinatorService:
         triggered_by: str | None = None,
         reason: str | None = None,
         force_replace: bool = False,
+        replace_agent_id: str | None = None,
         agent_spec: dict[str, Any] | None = None,
         auto: bool = False,
         thread_store: Any | None = None,
     ) -> CoordinatorState:
+        """Elect ``agent_id``. An existing coordinator is replaced only with
+        ``force_replace`` (operators) or when it is ``replace_agent_id`` (a
+        coordinator handing its own seat over). Without ``force_replace``, a
+        ``replace_agent_id`` must still hold the seat under the row lock, so a
+        coordinator demoted or replaced since its check cannot elect anyone."""
         if not squad_id or not agent_id:
             raise ValueError("squad_id and agent_id are required")
         resolved_spec = agent_spec if agent_spec is not None else self._load_agent_spec(agent_id)
@@ -309,7 +315,11 @@ class CoordinatorService:
                 squad_id,
             )
             previous = current["coordinator_agent_id"] if current is not None else None
-            if previous and previous != agent_id and not force_replace:
+            if not force_replace and replace_agent_id is not None and previous != replace_agent_id:
+                raise CoordinatorConflictError(
+                    f"squad {squad_id!r} coordinator is {previous!r}, not {replace_agent_id!r}"
+                )
+            if previous and previous != agent_id and not force_replace and previous != replace_agent_id:
                 raise CoordinatorConflictError(
                     f"squad {squad_id!r} already has coordinator {previous!r}; pass force_replace=True"
                 )
@@ -375,7 +385,11 @@ class CoordinatorService:
         reason: str | None = None,
         auto: bool = False,
         thread_store: Any | None = None,
+        expected_coordinator_agent_id: str | None = None,
     ) -> CoordinatorState:
+        """Demote the squad's coordinator. With ``expected_coordinator_agent_id``
+        (a coordinator demoting itself), that agent must still hold the seat under
+        the row lock, so a stale coordinator cannot remove its successor."""
         pool = await self._ensure_pool()
         async with pool.acquire() as conn, conn.transaction():
             current = await conn.fetchrow(
@@ -385,6 +399,10 @@ class CoordinatorService:
             if current is None or current["coordinator_agent_id"] is None:
                 raise CoordinatorNotFoundError(f"squad {squad_id!r} has no active coordinator")
             previous = current["coordinator_agent_id"]
+            if expected_coordinator_agent_id is not None and previous != expected_coordinator_agent_id:
+                raise CoordinatorConflictError(
+                    f"squad {squad_id!r} coordinator is {previous!r}, not {expected_coordinator_agent_id!r}"
+                )
             row = await conn.fetchrow(
                 f"""UPDATE "{self._schema}"."squad_coordinator_state"
                        SET coordinator_agent_id = NULL,
