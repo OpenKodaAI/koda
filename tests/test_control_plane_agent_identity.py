@@ -13,6 +13,7 @@ These tests run against the real control-plane tables on Postgres.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 import pytest
 from aiohttp import web
@@ -124,3 +125,59 @@ async def test_create_and_clone_routes_answer_409_on_collision(
 
         clone = await client.post("/api/control-plane/agents/MY_AGENT/clone", json={"id": "my agent"})
         assert clone.status == 409
+
+
+@pytest.mark.postgres
+def test_legacy_import_that_loses_the_create_race_skips_the_agent(
+    manager: manager_mod.ControlPlaneManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Two processes seed a fresh database: both see KODA missing, the other one inserts it first.
+    real_create = manager.create_agent
+
+    def create_after_the_other_process(payload: dict[str, Any]) -> dict[str, Any]:
+        real_create({**payload, "display_name": "Other process"})
+        return real_create(payload)
+
+    published: list[str] = []
+    monkeypatch.setattr(manager, "create_agent", create_after_the_other_process)
+    monkeypatch.setattr(manager, "_load_legacy_env", lambda: {})
+    monkeypatch.setattr(manager, "_discover_legacy_agent_ids", lambda env_values: ["KODA"])
+    monkeypatch.setattr(manager, "patch_global_defaults", lambda payload: {})
+    monkeypatch.setattr(manager, "publish_agent", lambda agent_id: published.append(agent_id) or {"version": 1})
+    manager._seeding_legacy_state = False
+
+    manager.import_legacy_state()
+
+    assert _definition("KODA")["display_name"] == "Other process"
+    assert published == []
+
+
+@pytest.mark.postgres
+def test_create_without_an_id_tries_one_candidate_when_the_name_is_taken(
+    manager: manager_mod.ControlPlaneManager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    for agent_id in ("NOVO_AGENTE", *(f"NOVO_AGENTE_{suffix}" for suffix in range(2, 6))):
+        manager.create_agent({"id": agent_id, "display_name": "Novo agente"})
+    endpoint_calls: list[str] = []
+    inserts: list[str] = []
+    real_endpoint = manager._normalize_runtime_endpoint_for_agent
+    real_fetch_one = manager_mod.fetch_one
+
+    def spy_endpoint(agent_id: str, runtime_endpoint: dict[str, Any]) -> dict[str, Any]:
+        endpoint_calls.append(agent_id)
+        return real_endpoint(agent_id, runtime_endpoint)
+
+    def spy_fetch_one(query: str, params: tuple[Any, ...] = ()) -> Any:
+        if "INSERT INTO cp_agent_definitions" in query:
+            inserts.append(str(params[0]))
+        return real_fetch_one(query, params)
+
+    monkeypatch.setattr(manager, "_normalize_runtime_endpoint_for_agent", spy_endpoint)
+    monkeypatch.setattr(manager_mod, "fetch_one", spy_fetch_one)
+
+    created = manager.create_agent({"display_name": "Novo agente"})
+
+    assert created["id"] == "NOVO_AGENTE_6"
+    # No health-port scan or INSERT for the five taken ids (get_agent may resolve the endpoint again).
+    assert set(endpoint_calls) == {"NOVO_AGENTE_6"}
+    assert inserts == ["NOVO_AGENTE_6"]

@@ -2339,31 +2339,36 @@ class ControlPlaneManager:
     def _apply_workspace_agent_import(self, workspace_id: str, root_path: str, source: Any) -> dict[str, Any]:
         base_name = source.name or Path(source.relative_path).stem
         agent_id = _normalize_agent_id(f"IMPORTED_{workspace_id}_{base_name}")[:64].strip("_")
+        agent_exists = {
+            "created": False,
+            "action": "agent_draft",
+            "agent_id": agent_id,
+            "source_id": source.source_id,
+            "reason": "agent_exists",
+        }
         if fetch_one("SELECT id FROM cp_agent_definitions WHERE id = ?", (agent_id,)) is not None:
-            return {
-                "created": False,
-                "action": "agent_draft",
-                "agent_id": agent_id,
-                "source_id": source.source_id,
-                "reason": "agent_exists",
-            }
-        agent = self.create_agent(
-            {
-                "id": agent_id,
-                "display_name": base_name,
-                "status": "paused",
-                "organization": {"workspace_id": workspace_id, "squad_id": None},
-                "metadata": {
-                    "imported_from": {
-                        "schema_version": WORKSPACE_SCAN_SCHEMA_VERSION,
-                        "source_id": source.source_id,
-                        "tool": source.tool,
-                        "relative_path": source.relative_path,
-                        "risk": source.risk,
-                    }
-                },
-            }
-        )
+            return agent_exists
+        try:
+            agent = self.create_agent(
+                {
+                    "id": agent_id,
+                    "display_name": base_name,
+                    "status": "paused",
+                    "organization": {"workspace_id": workspace_id, "squad_id": None},
+                    "metadata": {
+                        "imported_from": {
+                            "schema_version": WORKSPACE_SCAN_SCHEMA_VERSION,
+                            "source_id": source.source_id,
+                            "tool": source.tool,
+                            "relative_path": source.relative_path,
+                            "risk": source.risk,
+                        }
+                    },
+                }
+            )
+        except AgentIdConflictError:
+            # A concurrent import created the agent after the check above.
+            return agent_exists
         prompt = read_importable_source_content(root_path, source)
         if prompt:
             self.upsert_document(agent_id, "system_prompt_md", {"content_md": prompt})
@@ -9926,11 +9931,17 @@ class ControlPlaneManager:
         (``_generated_agent_id_candidates``) and allocates the health port.
         """
         requested_id = str(payload.get("id") or "").strip()
-        candidates: Iterable[str] = (
-            [_normalize_agent_id(requested_id)]
-            if requested_id
-            else _generated_agent_id_candidates(str(payload.get("display_name") or ""))
-        )
+        candidates: Iterable[str]
+        if requested_id:
+            candidates = [_normalize_agent_id(requested_id)]
+        else:
+            # One read skips the ids already taken; ON CONFLICT below still covers concurrent creates.
+            taken = {str(row["id"]) for row in fetch_all("SELECT id FROM cp_agent_definitions")}
+            candidates = (
+                candidate
+                for candidate in _generated_agent_id_candidates(str(payload.get("display_name") or ""))
+                if candidate not in taken
+            )
         appearance = _safe_json_object(payload.get("appearance"))
         metadata = _safe_json_object(payload.get("metadata"))
         status = _normalize_status(str(payload.get("status") or "paused"))
@@ -13183,6 +13194,7 @@ class ControlPlaneManager:
             if target_agent_ids and not has_global_sections:
                 self.patch_global_defaults({"sections": shared_sections})
 
+            imported_agent_ids: list[str] = []
             for agent_id in target_agent_ids:
                 general_env = _section_env(agent_sections[agent_id]["general"])
                 display_name = str(
@@ -13203,16 +13215,21 @@ class ControlPlaneManager:
                     "runtime_base_url": f"http://127.0.0.1:{health_port}",
                 }
                 runtime_endpoint = self._normalize_runtime_endpoint_for_agent(agent_id, runtime_endpoint)
-                self.create_agent(
-                    {
-                        "id": agent_id,
-                        "display_name": display_name,
-                        "appearance": appearance,
-                        "storage_namespace": storage_namespace,
-                        "runtime_endpoint": runtime_endpoint,
-                        "status": "active",
-                    }
-                )
+                try:
+                    self.create_agent(
+                        {
+                            "id": agent_id,
+                            "display_name": display_name,
+                            "appearance": appearance,
+                            "storage_namespace": storage_namespace,
+                            "runtime_endpoint": runtime_endpoint,
+                            "status": "active",
+                        }
+                    )
+                except AgentIdConflictError:
+                    # Another process seeding at the same time imported this agent first.
+                    continue
+                imported_agent_ids.append(agent_id)
                 for section, data in agent_sections[agent_id].items():
                     if data:
                         self.put_section(agent_id, section, {"data": data})
@@ -13228,10 +13245,10 @@ class ControlPlaneManager:
                         continue
                     self.upsert_global_secret_asset(secret_key, {"value": value})
 
-            if target_agent_ids:
-                self._import_legacy_templates(target_agent_ids)
+            if imported_agent_ids:
+                self._import_legacy_templates(imported_agent_ids)
 
-            for agent_id in target_agent_ids:
+            for agent_id in imported_agent_ids:
                 publish = self.publish_agent(agent_id)
                 execute(
                     """
@@ -13244,7 +13261,7 @@ class ControlPlaneManager:
             log.info(
                 "control_plane_import_finished",
                 discovered_agent_count=len(agent_ids),
-                imported_agent_count=len(target_agent_ids),
+                imported_agent_count=len(imported_agent_ids),
             )
         finally:
             self._seeding_legacy_state = False

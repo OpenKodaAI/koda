@@ -371,6 +371,33 @@ def test_workspace_import_creates_paused_draft_agent(
     assert db.documents[0]["kind"] == "system_prompt_md"
 
 
+def test_workspace_import_that_loses_the_create_race_reports_agent_exists(
+    workspace_manager: tuple[manager_mod.ControlPlaneManager, _WorkspaceMemDB],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager, db = workspace_manager
+    _write_sample_workspace(tmp_path)
+    scan = manager.scan_workspace_directory({"path": str(tmp_path)})
+    agent_source = next(source for source in scan["sources"] if source["import_action"] == "create_agent_draft")
+
+    def create_after_concurrent_import(payload: dict[str, Any]) -> dict[str, Any]:
+        # A concurrent import of the same workspace inserted the agent after the existence check.
+        raise manager_mod.AgentIdConflictError(str(payload["id"]))
+
+    monkeypatch.setattr(manager, "create_agent", create_after_concurrent_import)
+
+    result = manager.import_workspace_from_directory(
+        {"path": str(tmp_path), "selectedSourceIds": [agent_source["source_id"]]}
+    )
+
+    conflict = result["import_result"]["conflicts"][0]
+    assert conflict["reason"] == "agent_exists"
+    assert conflict["source_id"] == agent_source["source_id"]
+    assert result["import_result"]["applied"] == []
+    assert db.documents == []
+
+
 def test_workspace_import_creates_disabled_mcp_candidate_without_env_values(
     workspace_manager: tuple[manager_mod.ControlPlaneManager, _WorkspaceMemDB],
     tmp_path: Path,

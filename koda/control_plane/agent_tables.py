@@ -1,10 +1,15 @@
 """Canonical list of the tables that hold per-agent control-plane rows.
 
 Every table in the schema with an ``agent_id`` column is either listed in
-``PER_AGENT_TABLES`` or in ``AGENT_ID_TABLE_EXEMPTIONS``.
-``tests/test_control_plane_agent_tables.py`` enumerates the migrated schema and
-fails when a table is in neither list, so a new per-agent table cannot be
-forgotten by the legacy id repair or by agent delete.
+``PER_AGENT_TABLES`` or in ``AGENT_ID_TABLE_EXEMPTIONS``. That covers the tables
+the migrations create and the three the runtime creates on first use in the
+same schema: ``pending_approvals`` (``koda/state/pending_approvals.py``),
+``approval_grants`` (``koda/state/approval_grants.py``) and
+``artifact_objects`` (``rust/koda-artifact-engine``).
+``tests/test_control_plane_agent_tables.py`` creates those three from their own
+DDL, enumerates the migrated schema and fails when a table is in neither list,
+so a new per-agent table cannot be forgotten by the legacy id repair or by
+agent delete.
 """
 
 from __future__ import annotations
@@ -144,5 +149,11 @@ AGENT_ID_TABLE_EXEMPTIONS: frozenset[str] = frozenset(
         "tasks",
         "trajectory_exports",
         "user_cost_totals",
+        # Created at runtime, outside the migrations, so they may not exist and
+        # the legacy id repair cannot rewrite them. Per-agent approval and
+        # artifact state: M2-E3-T3 decides whether hard delete purges them.
+        "approval_grants",
+        "artifact_objects",
+        "pending_approvals",
     }
 )

@@ -5,11 +5,15 @@ per-agent rows. The legacy default-agent id repair and agent hard delete both
 read that list (M2-E3-T2, D-054, TD-079). The schema test enumerates every
 table with an ``agent_id`` column in the migrated database and fails when one
 is neither listed nor explicitly exempt, so a new per-agent table cannot be
-forgotten.
+forgotten. Tables the runtime creates on first use, outside the migrations,
+are created from their own DDL before the enumeration.
 """
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterator
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -22,6 +26,9 @@ from koda.control_plane.agent_tables import (
     AGENT_ID_TABLE_EXEMPTIONS,
     PER_AGENT_TABLES,
 )
+from koda.state import approval_grants, pending_approvals
+
+ROOT = Path(__file__).resolve().parents[1]
 
 # What hard delete purged before the canonical list existed. Delete behaviour
 # does not change in M2-E3-T2; M2-E3-T3 changes it.
@@ -42,8 +49,36 @@ _DELETE_TABLES_BEFORE_CANONICAL_LIST = {
 }
 
 
+def _create_artifact_objects() -> None:
+    # The Rust artifact engine creates artifact_objects in this schema when it starts.
+    source = (ROOT / "rust" / "koda-artifact-engine" / "src" / "main.rs").read_text(encoding="utf-8")
+    match = re.search(r'CREATE TABLE IF NOT EXISTS "\{schema\}"\."artifact_objects" \((.*?)\n\s*\);', source, re.S)
+    assert match, "artifact_objects DDL not found in the artifact engine"
+    columns = match.group(1).replace("{{}}", "{}")
+    control_plane_db.execute(f"CREATE TABLE IF NOT EXISTS artifact_objects ({columns})")
+
+
+@pytest.fixture()
+def runtime_created_tables(migrated_postgres: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Create the agent_id tables the runtime adds outside the migrations, as it does on first use."""
+    absent = [
+        table
+        for table in ("pending_approvals", "approval_grants", "artifact_objects")
+        if control_plane_db.fetch_one("SELECT to_regclass(?) AS oid", (table,))["oid"] is None
+    ]
+    for module in (pending_approvals, approval_grants):
+        monkeypatch.setattr(module, "_PRIMARY_SCHEMA_READY", False)
+        monkeypatch.setattr(module, "_primary_enabled", lambda: True)
+        module._ensure_primary_schema()
+    _create_artifact_objects()
+    yield
+    for table in absent:
+        control_plane_db.execute(f"DROP TABLE IF EXISTS {table}")
+
+
 @pytest.mark.postgres
-def test_every_agent_id_table_in_the_schema_is_listed_or_exempt(migrated_postgres: str) -> None:
+@pytest.mark.usefixtures("runtime_created_tables")
+def test_every_agent_id_table_in_the_schema_is_listed_or_exempt() -> None:
     rows = control_plane_db.fetch_all(
         """
         SELECT DISTINCT table_name
@@ -53,6 +88,7 @@ def test_every_agent_id_table_in_the_schema_is_listed_or_exempt(migrated_postgre
     )
     live = {str(row["table_name"]) for row in rows}
     assert "cp_secret_values" in live, "the schema enumeration found no control-plane tables"
+    assert {"pending_approvals", "approval_grants", "artifact_objects"} <= live, "runtime tables were not created"
 
     classified = set(PER_AGENT_TABLES) | AGENT_ID_TABLE_EXEMPTIONS
     unclassified = sorted(live - classified)
