@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "@/components/providers/i18n-provider";
+import { EffortPicker, type EffortCapability } from "@/components/control-plane/shared/effort-picker";
 import { TagInputField } from "@/components/control-plane/shared/tag-input-field";
 import { RailSearch } from "@/components/sessions/rail/rail-search";
 import { Button } from "@/components/ui/button";
@@ -169,6 +170,44 @@ function deadFocusUtilities(path: string, text = readFileSync(path, "utf8")): st
   };
   visit(source);
   return found;
+}
+
+const DIM_UTILITY = /^opacity-(?:\d+|\[[^\]]+\])$/;
+
+/**
+ * Every element from the focused control up that an opacity utility dims
+ * while focus is on the control. Opacity dims the outline or ring painted
+ * inside it too, so the control returns to full opacity on
+ * `focus-visible:opacity-100`, and a dimmed group around it on
+ * `has-[:focus-visible]:opacity-100`.
+ */
+function dimmedOnFocus(focused: Element): string[] {
+  const found: string[] = [];
+  for (let element: Element | null = focused; element; element = element.parentElement) {
+    const classes = (element.getAttribute("class") ?? "").split(/\s+/);
+    const dim = classes.find((name) => DIM_UTILITY.test(name) && name !== "opacity-100");
+    if (!dim) continue;
+    const restore = element === focused ? "focus-visible:opacity-100" : "has-[:focus-visible]:opacity-100";
+    if (!classes.includes(restore)) {
+      const role = element.getAttribute("role");
+      found.push(`${element.tagName.toLowerCase()}${role ? `[role=${role}]` : ""} is ${dim} without ${restore}`);
+    }
+  }
+  return found;
+}
+
+/** Tabs through `container`, returning each element that took focus. */
+async function tabStops(container: HTMLElement): Promise<HTMLElement[]> {
+  const user = userEvent.setup();
+  const stops: HTMLElement[] = [];
+  for (;;) {
+    await user.tab();
+    const active = document.activeElement;
+    if (!(active instanceof HTMLElement) || !container.contains(active) || stops.includes(active)) {
+      return stops;
+    }
+    stops.push(active);
+  }
 }
 
 // Every surface a focused control can sit on.
@@ -469,13 +508,83 @@ describe("focus ring contract (M8-E1-T1)", () => {
     const controls = within(toast).getAllByRole("button");
     expect(controls).toHaveLength(2);
     for (const control of controls) {
-      const classes = control.className.split(/\s+/);
-      const dimmed = classes.filter((name) => /^opacity-\d+$/.test(name) && name !== "opacity-100");
-      if (dimmed.length > 0) {
-        expect(classes, `${control.getAttribute("aria-label")} is ${dimmed[0]}`).toContain(
-          "focus-visible:opacity-100",
-        );
-      }
+      expect(dimmedOnFocus(control), control.textContent ?? "").toEqual([]);
     }
+  });
+
+  it("every range input draws its own 2px --focus-ring ring, with or without .ui-slider", () => {
+    // The form-field rule removes a range input's outline, like any input's.
+    const rings = CSS_RULES.filter(({ body }) =>
+      /(?:^|[;\s])box-shadow:\s*0 0 0 2px var\(--focus-ring\)\s*;/.test(body),
+    ).flatMap(({ selectors }) => selectors.filter((selector) => selector.endsWith(":focus-visible")));
+    const host = document.createElement("div");
+    host.innerHTML = '<input type="range">';
+    document.body.append(host);
+    try {
+      const bare = host.querySelector("input") as HTMLInputElement;
+      const matching = rings.filter((selector) => bare.matches(selector.replace(/:focus-visible$/, "")));
+      expect(matching, "a ring rule that matches a range input with no class").not.toEqual([]);
+    } finally {
+      host.remove();
+    }
+  });
+
+  it("no form-field ring uses the translucent --accent-muted", () => {
+    const translucent = /focus(?:-visible|-within)?:(?:ring|border|outline)-\[(?:color:)?var\(--accent-muted\)\]/;
+    const offenders = sourceFiles(SRC)
+      .filter((path) => translucent.test(readFileSync(path, "utf8")))
+      .map((path) => relative(SRC, path));
+    expect(offenders).toEqual([]);
+  });
+
+  describe("a control dimmed while it inherits keeps a full-strength ring on focus", () => {
+    const inheriting = (capability: EffortCapability) =>
+      render(
+        <I18nProvider initialLanguage="en-US">
+          <EffortPicker
+            capability={capability}
+            value={null}
+            inheritedValue={capability.kind === "enum" ? "medium" : 2000}
+            onChange={() => {}}
+            context="agent"
+          />
+        </I18nProvider>,
+      ).container;
+
+    it("EffortPicker effort tabs", async () => {
+      const container = inheriting({ kind: "enum", values: ["low", "medium", "high"] });
+      const stops = await tabStops(container);
+      expect(stops.map((stop) => stop.getAttribute("role") ?? stop.tagName.toLowerCase())).toContain("tab");
+      for (const stop of stops) {
+        expect(dimmedOnFocus(stop), stop.textContent ?? "").toEqual([]);
+      }
+    });
+
+    it("EffortPicker token slider and number field", async () => {
+      const container = inheriting({ kind: "tokens", min: 0, max: 8000 });
+      const stops = await tabStops(container);
+      expect(stops.map((stop) => stop.getAttribute("type"))).toEqual(
+        expect.arrayContaining(["range", "number"]),
+      );
+      for (const stop of stops) {
+        expect(dimmedOnFocus(stop), stop.getAttribute("type") ?? "").toEqual([]);
+      }
+      const number = within(container).getByRole("spinbutton");
+      expect(number.className).toContain("focus-visible:border-[var(--focus-ring)]");
+      expect(number.className).toContain("focus-visible:ring-[var(--focus-ring)]");
+    });
+
+    it("the dimmed-focus check sees a dimmed ancestor and a dimmed control", () => {
+      const host = document.createElement("div");
+      host.innerHTML = [
+        '<div class="opacity-60"><button class="a">a</button></div>',
+        '<div class="opacity-60 has-[:focus-visible]:opacity-100"><button class="opacity-50">b</button></div>',
+        '<div class="opacity-60 has-[:focus-visible]:opacity-100"><button class="opacity-50 focus-visible:opacity-100">c</button></div>',
+      ].join("");
+      const [a, b, c] = [...host.querySelectorAll("button")];
+      expect(dimmedOnFocus(a)).toEqual(["div is opacity-60 without has-[:focus-visible]:opacity-100"]);
+      expect(dimmedOnFocus(b)).toEqual(["button is opacity-50 without focus-visible:opacity-100"]);
+      expect(dimmedOnFocus(c)).toEqual([]);
+    });
   });
 });

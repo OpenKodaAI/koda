@@ -3736,8 +3736,9 @@ input[type="range"] {
     inset 0 0 24px rgba(255, 255, 255, 0.14);
 }
 
-.agent-board-color-slider:focus-visible,
-.ui-slider:focus-visible {
+/* Every range input, with or without .ui-slider, is a form field: the
+   global rule removes its outline, so it draws its own ring (M8-E1-T1). */
+input[type="range"]:focus-visible {
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
