@@ -75,3 +75,6 @@ def test_the_worker_runs_the_import_at_startup_before_it_recovers_tasks() -> Non
     # Then, still before recovery, it loads the grants and expires what a restart left (D-163).
     loaded_at = source.index("await _ensure_persistence_loaded()")
     assert imported_at < loaded_at < source.index("await get_runtime_controller().start(app)")
+    # A failed load is reported like a failed import, and the next approval request tries it again.
+    reported_at = source.index('noncritical_startup_issues.append("approval_persistence_load_error")')
+    assert loaded_at < reported_at < source.index("await get_runtime_controller().start(app)")

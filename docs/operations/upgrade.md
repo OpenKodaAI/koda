@@ -246,9 +246,12 @@ These changes apply with or without rules:
   the pending approvals of its agent that its previous process left, with one
   `approval.pending_expired` audit event (reason `restart`) each. Pressing a
   button on one of them runs nothing and answers that the request expired and
-  must be asked again; before, approving one failed with an error. Approval
-  grants keep working across the restart. A worker loads only its own agent's
-  grants, and leaves the rows of other agents, and rows with no agent, alone.
+  must be asked again; before, approving one failed with an error. A denied
+  request is removed when it is denied, so a restart does not report it.
+  Approval grants keep working across the restart. A worker loads only its own
+  agent's grants, and leaves the rows of other agents, and rows with no agent,
+  alone. When that load fails at startup, the worker reports
+  `approval_persistence_load_error` and tries again on each approval request.
 
 ## Step 1 — schema migration gate
 

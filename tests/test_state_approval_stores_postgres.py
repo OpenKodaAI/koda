@@ -459,7 +459,8 @@ async def test_the_sql_expiry_filter_is_exact_to_the_second(postgres_url: str, m
 
         assert set(await approval_grants.load_approval_grants(agent_id="AGENT_A")) == {"grant-in-10s"}
         # The startup expiry takes the live op only: the one 10 seconds from expiry.
-        assert await pending_approvals.expire_pending_ops(agent_id="AGENT_A") == 1
+        started = _ON_A_FLOAT4_STEP + 1
+        assert await pending_approvals.expire_pending_ops(agent_id="AGENT_A", created_before=started) == 1
         await approval_grants.cleanup_expired_approval_grants()
         await pending_approvals.cleanup_expired_ops()
         assert [row["grant_id"] for row in await conn.fetch(f'SELECT grant_id FROM "{schema}"."approval_grants"')] == [
@@ -639,6 +640,14 @@ def _approval_button(data: str) -> tuple[Any, Any]:
     return update, context
 
 
+async def _restart(approval: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A restart: memory is empty, every pool is closed, and startup reads what Postgres holds."""
+    close_shared_postgres_backends()
+    monkeypatch.setattr(approval, "_persistence_loaded", False)
+    monkeypatch.setattr(approval, "_PROCESS_STARTED_AT", time.time())
+    await approval._ensure_persistence_loaded()
+
+
 async def _pending_op_ids(conn: Any, schema: str) -> set[str]:
     return {str(row["op_id"]) for row in await conn.fetch(f'SELECT op_id FROM "{schema}"."pending_approvals"')}
 
@@ -681,10 +690,7 @@ async def test_approving_a_pending_op_left_by_a_restart_runs_nothing_and_tells_t
             ttl_seconds=300,
         )
 
-    # A restart: memory is empty, every pool is closed, and startup reads what Postgres holds.
-    close_shared_postgres_backends()
-    monkeypatch.setattr(approval, "_persistence_loaded", False)
-    await approval._ensure_persistence_loaded()
+    await _restart(approval, monkeypatch)
 
     buttons = {f"op-user-{suffix}": callback_approval, f"op-agent-cmd-{suffix}": callback_agent_cmd_approval}
     for op_id, callback in buttons.items():
@@ -700,6 +706,67 @@ async def test_approving_a_pending_op_left_by_a_restart_runs_nothing_and_tells_t
     assert await _expired_at_restart(conn, schema, set(ops)) == {op_id: ("AGENT_A", "restart") for op_id in ops}
     used = await _use(approval)
     assert used is not None and used["grant_id"] == "grant-a"
+
+
+async def test_a_denied_pending_op_is_not_expired_by_a_restart(
+    approval_db: tuple[Any, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Denying an op removes its row, so the next start does not audit it as a pending request it expired."""
+    from koda.handlers.callbacks import callback_approval
+    from koda.state import pending_approvals
+    from koda.utils import approval
+
+    conn, schema = approval_db
+    monkeypatch.setattr(approval, "AGENT_ID", "AGENT_A")
+    op_id = f"op-denied-{uuid.uuid4().hex[:8]}"
+    await pending_approvals.save_pending_op(
+        op_id,
+        {"op_type": "user", "user_id": 111, "chat_id": 111, "agent_id": "AGENT_A", "description": "/rm a.txt"},
+        ttl_seconds=300,
+    )
+    approval._PENDING_OPS[op_id] = {
+        "user_id": 111,
+        "timestamp": time.time(),
+        "cmd_name": "rm",
+        "args": "a.txt",
+        "agent_id": "AGENT_A",
+        "requests": [],
+        "grants": [],
+    }
+
+    update, context = _approval_button(f"approve:deny:{op_id}")
+    await callback_approval(update, context)
+    update.callback_query.edit_message_text.assert_awaited_once_with("Negado.")
+    assert op_id not in await _pending_op_ids(conn, schema)
+
+    await _restart(approval, monkeypatch)
+    assert await _expired_at_restart(conn, schema, {op_id}) == {}
+
+
+async def test_a_load_tried_again_later_expires_only_what_the_previous_process_left(
+    approval_db: tuple[Any, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The startup load failed, so a later approval request tries it again (D-163).
+
+    By then this process may have stored pending ops of its own: they stay, and only the ops
+    its agent's previous process left expire.
+    """
+    from koda.state import pending_approvals
+    from koda.utils import approval
+
+    conn, schema = approval_db
+    monkeypatch.setattr(approval, "AGENT_ID", "AGENT_A")
+    entry = {"op_type": "agent_cmd", "user_id": 111, "chat_id": 111, "agent_id": "AGENT_A"}
+    await pending_approvals.save_pending_op("op-previous-process", entry, ttl_seconds=300)
+    monkeypatch.setattr(approval, "_PROCESS_STARTED_AT", time.time())
+    monkeypatch.setattr(approval, "_persistence_loaded", False)
+    await pending_approvals.save_pending_op("op-this-process", entry, ttl_seconds=300)
+
+    await approval._ensure_persistence_loaded()
+
+    assert await _pending_op_ids(conn, schema) == {"op-this-process"}
+    expired = await _expired_at_restart(conn, schema, {"op-previous-process", "op-this-process"})
+    assert expired == {"op-previous-process": ("AGENT_A", "restart")}
 
 
 async def test_startup_reads_only_this_agents_rows(

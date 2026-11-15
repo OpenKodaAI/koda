@@ -52,8 +52,11 @@ command, or the agent turn waiting on it, cannot be restored. On start, each
 worker deletes the pending approvals of its agent that its previous process
 left, with one `approval.pending_expired` audit event (reason `restart`) each,
 and a button pressed on one of them answers that the request expired and must
-be asked again. Approval grants survive a restart. Each worker loads only its
-own agent's grants.
+be asked again. A denied request is removed when it is denied, so a restart
+does not report it. Approval grants survive a restart. Each worker loads only
+its own agent's grants. When that load fails at startup, the worker reports
+`approval_persistence_load_error` and tries again on each approval request
+until it succeeds; the pending approvals it stored itself meanwhile are kept.
 
 ## Operator Guidance
 

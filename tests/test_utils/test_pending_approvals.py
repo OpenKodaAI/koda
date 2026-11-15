@@ -33,7 +33,7 @@ def _no_primary_backend(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Magi
         lambda: pending_approvals.remove_pending_op("op1", agent_id="AGENT_A"),
         lambda: pending_approvals.remove_pending_ops(user_id=42),
         lambda: pending_approvals.cleanup_expired_ops(),
-        lambda: pending_approvals.expire_pending_ops(agent_id="AGENT_A"),
+        lambda: pending_approvals.expire_pending_ops(agent_id="AGENT_A", created_before=0.0),
     ],
     ids=["save", "remove", "remove_matching", "cleanup", "expire"],
 )

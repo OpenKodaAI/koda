@@ -154,20 +154,21 @@ async def save_pending_op(
     )
 
 
-async def expire_pending_ops(*, agent_id: str) -> int:
-    """Delete the live pending ops of ``agent_id``, with one ``approval.pending_expired`` audit row each.
+async def expire_pending_ops(*, agent_id: str, created_before: float) -> int:
+    """Delete the live pending ops of ``agent_id`` stored before ``created_before``, with one audit row each.
 
-    A worker calls it once at startup, before it asks for any approval: the ops an
-    earlier process of its agent left cannot run, as their handlers cannot be restored
-    (D-163). Rows of another agent, or with no agent, are left as they are (D-366).
-    Returns how many ops expired.
+    A worker calls it at startup with the time its process started: the ops an earlier
+    process of its agent left cannot run, as their handlers cannot be restored (D-163).
+    Each gets one ``approval.pending_expired`` audit row. Ops the worker stored itself,
+    and rows of another agent or with no agent, are left as they are (D-366). Returns how
+    many ops expired.
     """
     return _execute(
         "expire",
         """
         WITH expired AS (
             DELETE FROM pending_approvals
-             WHERE agent_id = ? AND expires_at > ?
+             WHERE agent_id = ? AND expires_at > ? AND created_at < ?
             RETURNING op_id, op_type, user_id, agent_id, session_id, chat_id
         )
         INSERT INTO audit_events (agent_id, timestamp, event_type, user_id, details_json)
@@ -181,7 +182,7 @@ async def expire_pending_ops(*, agent_id: str) -> int:
                )
           FROM expired
         """,
-        (agent_id, time.time()),
+        (agent_id, time.time(), created_before),
     )
 
 

@@ -84,6 +84,8 @@ APPROVAL_TIMEOUT = 300  # 5 minutes
 MAX_PENDING_OPS_PER_USER = 10
 
 _persistence_loaded = False
+# Pending ops stored before this process started are the ones its agent's previous process left.
+_PROCESS_STARTED_AT = time.time()
 
 
 class ApprovalGrantNotSavedError(RuntimeError):
@@ -101,22 +103,22 @@ async def _ensure_persistence_loaded() -> None:
     or the agent loop waiting on it, cannot be restored (D-163). So each one expires, with
     an audit row, and approving it answers that it expired. Grants keep working across a
     restart (TD-043). Rows of another agent, or with no agent, are left alone (D-366).
+
+    A failure is raised, and the startup reports it; until a load succeeds, each approval
+    request tries again. Ops this process stored meanwhile are not expired.
     """
     global _persistence_loaded
     if _persistence_loaded:
         return
-    _persistence_loaded = True
     agent_id = AGENT_ID or "default"
-    try:
-        persisted_grants = await load_approval_grants(agent_id=agent_id)
-        for grant_id, entry in persisted_grants.items():
-            if grant_id not in _APPROVAL_GRANTS and isinstance(entry, dict):
-                _APPROVAL_GRANTS[grant_id] = entry
-        expired = await expire_pending_ops(agent_id=agent_id)
-        if expired:
-            log.info("pending_approvals_expired_at_startup", agent_id=agent_id, count=expired)
-    except Exception:
-        log.warning("Failed to load persisted approvals", exc_info=True)
+    persisted_grants = await load_approval_grants(agent_id=agent_id)
+    for grant_id, entry in persisted_grants.items():
+        if grant_id not in _APPROVAL_GRANTS and isinstance(entry, dict):
+            _APPROVAL_GRANTS[grant_id] = entry
+    expired = await expire_pending_ops(agent_id=agent_id, created_before=_PROCESS_STARTED_AT)
+    if expired:
+        log.info("pending_approvals_expired_at_startup", agent_id=agent_id, count=expired)
+    _persistence_loaded = True
 
 
 def _cleanup_stale_ops() -> None:
@@ -1085,7 +1087,9 @@ async def _show_approval_keyboard(
     ``approved_target`` pins a file command to the path its gate resolved, so the approval
     runs it only on that path (:func:`dispatch_approved_operation`).
     """
-    await _ensure_persistence_loaded()
+    # The store logs a failure; the next request tries again.
+    with contextlib.suppress(Exception):
+        await _ensure_persistence_loaded()
     _cleanup_stale_ops()
     message = require_message(update)
     user_id = require_user_id(update)
@@ -1118,8 +1122,9 @@ async def _show_approval_keyboard(
     }
     user_data["_pending_op_id"] = op_id
 
-    # Persist in Postgres so the request survives a restart. Without its row it
-    # still works in this process; the store logs the failure.
+    # Store it in Postgres so that, after a restart, the next start of this agent's worker
+    # expires it with an audit row: the request itself does not survive a restart (D-163).
+    # Without its row it still works in this process; the store logs the failure.
     with contextlib.suppress(Exception):
         await save_pending_op(
             op_id,
@@ -1797,7 +1802,9 @@ async def request_agent_cmd_approval(
     run_graph_node_id: str | None = None,
 ) -> str:
     """Show inline keyboard for agent-cmd write approval. Returns op_id."""
-    await _ensure_persistence_loaded()
+    # The store logs a failure; the next request tries again.
+    with contextlib.suppress(Exception):
+        await _ensure_persistence_loaded()
     _cleanup_stale_agent_cmd_ops()
 
     op_id = secrets.token_urlsafe(8)
@@ -1827,8 +1834,9 @@ async def request_agent_cmd_approval(
         "rationale": None,
     }
 
-    # Persist in Postgres so the request survives a restart. Without its row it
-    # still works in this process; the store logs the failure.
+    # Store it in Postgres so that, after a restart, the next start of this agent's worker
+    # expires it with an audit row: the request itself does not survive a restart (D-163).
+    # Without its row it still works in this process; the store logs the failure.
     with contextlib.suppress(Exception):
         await save_pending_op(
             op_id,
