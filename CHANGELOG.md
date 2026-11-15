@@ -127,19 +127,24 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   significant characters logs `bootstrap_code_seed_weak`. A seed the `/setup` field
   cannot take (1 to 12 characters from its alphabet) logs
   `bootstrap_code_seed_not_typeable`. (M1-E1-T17)
-- One redactor, in process, masks secrets in audit details, runtime streams and store
-  rows, run graphs, eval exports, memory previews and structured logs, with the same
-  output on every path. Its rules are the union of the lists those paths kept apart, so
-  each now also masks what the others did: audit details mask a `session` key, URL
-  credentials, long random tokens, AWS key IDs and `sk-` and `ghp_` keys, and runtime
-  payloads mask `credentials`, `access_key`, `private_key`, `auth`, `basic_auth`,
-  `auth_header` and `recovery_code` keys, a key named exactly `code`, and `token=` values.
-  PT-BR names (`senha`, `segredo`, `chave_api`, `credenciais`) are masked as keys and in
-  `name=value` text. Identifiers that hold no secret stay readable on every path:
-  `session_id`, `auth_mode`, `author` and `authoritative` keys, tool names, UUIDs and
-  `snake_case` file names (a long token is masked only when it has 16 letters or digits in
-  a row). Run graphs no longer blank a whole string because it mentions a secret word.
-  Runtime redaction no longer calls the security sidecar. Structured logs write
+- One redactor, in process, masks secrets in audit details, runtime streams, store rows
+  and API previews, run graphs, eval exports, memory previews, workspace-import excerpts
+  and structured logs, with the same output on every path. A value under a sensitive key
+  is masked whole; keys are split into words, so camelCase and PT-BR keys count
+  (`basicAuth`, `authKey`, `auth_key`, `senha`, `novaSenha`, `chave`, `chave_api`), while
+  `author`, `auth_mode`, `authority` and `session_id` do not. In text it masks bearer and
+  basic credentials (the whole token, with `+`, `/` and `=` padding), `name=value`,
+  `name: value` and env-style lines under a sensitive name (`HEROKU_API_KEY=…`,
+  `AWS_SECRET_ACCESS_KEY=…`, `senha=…`, `"apiKey": "…"`), credentials in any URL scheme,
+  query-string secrets (including an OAuth `code`), whole cookie headers and provider keys
+  (`sk-`, AWS key IDs, `ghp_`/`gho_`/`github_pat_`, Slack `xox*-`, Google `AIza`), each
+  only where it starts a word. Any other run of 24 or more letters, digits, `-` and `_`
+  that mixes letters and digits is masked, except Koda's own identifiers: UUIDs,
+  `session-`, `squad-` and operator-shell session ids, prefixed ids and tool, file and
+  model names made of words. Run graphs no longer blank a whole string because it
+  mentions a secret word. Runtime redaction no longer calls the security sidecar, and
+  the sidecar no longer serves a `RedactValue` RPC. A terminal attach no longer sends its
+  attach token to the runtime kernel as the kernel session id. Structured logs write
   `[REDACTED]` instead of `***`, also for an empty value, under every key the redactor
   treats as sensitive. (M5-E3-T8)
 

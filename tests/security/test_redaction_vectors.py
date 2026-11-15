@@ -4,16 +4,23 @@ Each vector is an input payload and the literal output every redacting path must
 it: the shared redactor itself, the runtime store, the audit trail, the eval trajectory
 export and, for the top-level key vectors, the structured-log processor. The paths are
 resolved lazily so a path that still runs its own patterns fails on the vector it handles
-differently instead of on an import. Field names come in English and PT-BR.
+differently instead of on an import. Field names come in English and PT-BR. The labelled
+corpus also runs each text through the runtime API terminal preview, both memory previews
+and the workspace-import excerpt.
 """
 
 from __future__ import annotations
 
+import asyncio
 import importlib
 import importlib.util
 import json
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -100,6 +107,104 @@ VALUE_VECTORS: list[tuple[Any, Any]] = [
     ({"n": 1, "f": 1.5, "b": True, "z": None}, {"n": 1, "f": 1.5, "b": True, "z": None}),
 ]
 
+# The labelled corpus (M5-E3-T8 follow-up). Each text runs through every path that redacts
+# text and each key payload through every path that redacts keys. Cases marked "guard"
+# already passed before the fix; they pin what the new rules must keep doing.
+_UUID = "7c9e6679-7425-40de-944b-e07fc1f90ae7"
+_UUID_HEX = "7c9e6679742540de944be07fc1f90ae7"
+
+# (label, text, expected): secrets in free text.
+MASKED_TEXT: list[tuple[str, str, str]] = [
+    ("bearer keeps + / = in the token", "Authorization: Bearer abc+def/ghi==", f"Authorization: Bearer {R}"),
+    ("bearer in free text with + / =", "use bearer abc+def/ghi== now", f"use bearer {R} now"),
+    ("basic auth header", "Authorization: Basic dXNlcjpwYXNz", f"Authorization: Basic {R}"),
+    ("basic auth in free text", "send Basic YWRtaW46aHVudGVyMg== upstream", f"send Basic {R} upstream"),
+    ("curl header", 'curl -H "Authorization: Basic dXNlcjpwYXNz" x', f'curl -H "Authorization: Basic {R}" x'),
+    ("base64url secret with - and _", "secret Xk9_aB-3vQ7_pL2-mN8_rT5-wZ1_yH4 here", f"secret {R} here"),
+    ("base64url secret, mixed case", "id 3q2-K8x_Vb7nR4t-Y9wE1uI6_oP0aS5dF ok", f"id {R} ok"),
+    ("guard: hex secret that is not a UUID", "dd 0123456789abcdef0123456789abcdef", f"dd {R}"),
+    ("env line, API key holding a UUID", "HEROKU_API_KEY=3f1c2b5e-0d4a-4c7e-9b8a-6e5d4c3b2a10", f"HEROKU_API_KEY={R}"),
+    (
+        "env line, AWS secret",
+        "AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLE",
+        f"AWS_SECRET_ACCESS_KEY={R}",
+    ),
+    ("export line", "export DB_PASSWORD=hunter2", f"export DB_PASSWORD={R}"),
+    ("JSON key and quoted value", '{"OPENAI_API_KEY": "x"}', f'{{"OPENAI_API_KEY": "{R}"}}'),
+    ("quoted assignment", "token = 'sk-test-secret-value'", f"token = '{R}'"),
+    ("camelCase auth key in text", "basicAuth: admin:hunter2", f"basicAuth: {R}"),
+    ("camelCase auth key, = form", "authKey=k-1", f"authKey={R}"),
+    ("PT-BR camelCase key", "minhaSenha=abc", f"minhaSenha={R}"),
+    ("PT-BR spaced key", "token de acesso: abc123", f"token de acesso: {R}"),
+    ("PT-BR chave de api", "chave de api = xyz", f"chave de api = {R}"),
+    ("PT-BR chave in JSON", '{"chave": "valor-secreto"}', f'{{"chave": "{R}"}}'),
+    ("DSN credentials", "postgresql://koda:s3cret@db:5432/koda", f"postgresql://{R}:{R}@db:5432/koda"),
+    ("URL with empty user", "redis://:p4ss@cache:6379", f"redis://{R}:{R}@cache:6379"),
+    ("OAuth code in query", "https://x.test/cb?code=4/0Aabc&state=xyz", f"https://x.test/cb?code={R}&state=xyz"),
+    ("guard: cookie header, every cookie", "Cookie: sid=abc123; theme=dark", f"Cookie: {R}"),
+    ("set-cookie header", "Set-Cookie: sid=abc; Path=/; HttpOnly", f"Set-Cookie: {R}"),
+    ("Google key with short segments", "key AIzaSyB-4kd8_Qw2-x9Zt_Lm3q-Rv7_Np0Yc5 end", f"key {R} end"),
+    ("Slack token with short segments", "xoxp-1234-5678-9abc-def0-AbCd-EfGh", R),
+    ("GitHub fine-grained PAT", "github_pat_11AB_cd34_EF56_gh78_IJ90_kl12_MN34", R),
+    ("guard: OpenAI project key", "use sk-proj-AbC1_dEf2-GhI3_jKl4-MnO5_pQr6", f"use {R}"),
+    ("guard: old Rust core vector", "token abcdefghijklmnopqrstuvwxyz123456", f"token {R}"),
+]
+
+# (label, text): identifiers and plain text that hold no secret, unchanged.
+KEPT_TEXT: list[tuple[str, str]] = [
+    ("operator-shell session id", "task-42-operator-shell-a1b2c3d4e5f6"),
+    ("runtime API default session", "session-9f1c2b5e0d4a4c7e9b8a6e5d4c3b2a10"),
+    ("squad delegation session", "squad-3f9a1c7e5b2d8f0a6c4e1b9d"),
+    ("bare uuid4 hex", _UUID_HEX),
+    ("prefixed uuid4 hex", f"imp_{_UUID_HEX}"),
+    ("guard: queue worker id", "worker_12345_a1b2c3d4e5f6"),
+    ("kebab name with risk-", "risk-assessment-checklist-final"),
+    ("kebab name with desk-", "desk-booking-service-production"),
+    ("tool name with task- and -sk-", "mcp__linear__task-sk-compat-layer-2026"),
+    ("camelCase MCP tool name", "mcp__atlassian__getConfluencePageDescendants"),
+    ("snake name with a long word and digits", "internationalization_settings_2026"),
+    ("file path with risk-desk", "/srv/koda/reports/risk-desk-summary-2026-q3.md"),
+    ("UUID artifact path", f"/srv/koda/artifacts/{_UUID}/internationalization_report_2026.pdf"),
+    ("guard: model name", "claude-sonnet-4-5-20250929"),
+    ("guard: the word basic", "a basic example of basic usage"),
+    ("guard: exit and status codes", "exit code: 1, status code: 200"),
+    ("guard: non-secret auth keys in text", "author: Ana, auth_mode: oauth"),
+]
+
+# (label, payload, expected): keys whose whole value is masked, or kept.
+KEY_CORPUS: list[tuple[str, dict[str, Any], dict[str, Any]]] = [
+    (
+        "camelCase and snake auth keys",
+        {"basicAuth": "admin:hunter2", "proxyAuth": "u:p", "auth_key": "k-1", "authKey": "k", "httpAuth": "x"},
+        {"basicAuth": R, "proxyAuth": R, "auth_key": R, "authKey": R, "httpAuth": R},
+    ),
+    (
+        "more auth keys",
+        {"auth_pass": "y", "HTTPAuth": "z", "x-auth-key": "w"},
+        {"auth_pass": R, "HTTPAuth": R, "x-auth-key": R},
+    ),
+    (
+        "PT-BR keys",
+        {"chave": "x", "chave_de_acesso": "y", "novaSenha": "z", "segredos": "w", "senhaAtual": "v"},
+        {"chave": R, "chave_de_acesso": R, "novaSenha": R, "segredos": R, "senhaAtual": R},
+    ),
+    (
+        "guard: PT-BR keys that are not secrets",
+        {"palavra_chave": "busca", "chave_primaria": "id", "desenho": "x"},
+        {"palavra_chave": "busca", "chave_primaria": "id", "desenho": "x"},
+    ),
+    (
+        "Koda session ids",
+        {"session_id": "squad-3f9a1c7e5b2d8f0a6c4e1b9d", "provider_session_id": f"session-{_UUID_HEX}"},
+        {"session_id": "squad-3f9a1c7e5b2d8f0a6c4e1b9d", "provider_session_id": f"session-{_UUID_HEX}"},
+    ),
+    (
+        "guard: auth-like keys that are not secrets",
+        {"auth_mode": "oauth", "auth_provider": "github", "authority": "x", "author": "Ana"},
+        {"auth_mode": "oauth", "auth_provider": "github", "authority": "x", "author": "Ana"},
+    ),
+]
+
 
 def _shared(value: dict[str, Any]) -> Any:
     return importlib.import_module("koda.security.redaction").redact_value(value)
@@ -169,6 +274,68 @@ VALUE_PATHS: dict[str, Callable[[dict[str, Any]], Any]] = {
 KEY_PATHS: dict[str, Callable[[dict[str, Any]], Any]] = {**VALUE_PATHS, "structured_log": _structured_log}
 
 
+def _runtime_api(text: str) -> str:
+    # The terminal list route: the preview is the tail of the terminal log, redacted.
+    api = importlib.import_module("koda.services.runtime.api")
+    with tempfile.TemporaryDirectory() as tmp:
+        log = Path(tmp) / "terminal.log"
+        log.write_text(text, encoding="utf-8")
+        store = SimpleNamespace(list_terminals=lambda task_id: [{"id": 1, "path": str(log)}])
+        request = SimpleNamespace(match_info={"task_id": "1"}, headers={}, query={})
+        with (
+            patch.object(api, "_authorize_runtime_access", return_value=None),
+            patch.object(api, "get_runtime_controller", return_value=SimpleNamespace(store=store)),
+        ):
+            response = asyncio.run(api._runtime_task_terminals(request))
+    return str(json.loads(response.text)["items"][0]["preview"])
+
+
+def _memory_safety(text: str) -> str:
+    return str(importlib.import_module("koda.memory.safety")._redacted_preview(text, limit=1000))
+
+
+def _memory_recall(text: str) -> str:
+    return str(importlib.import_module("koda.memory.recall")._redacted_memory_preview(text, limit=1000))
+
+
+def _workspace_import(text: str) -> str:
+    workspace_import = importlib.import_module("koda.control_plane.workspace_import")
+    root = Path("/srv/workspace")
+    source = workspace_import._source(root, root / "AGENTS.md", kind="instructions", tool="codex", text=text)
+    return str(source.content_excerpt)
+
+
+def _in_payload(path: Callable[[dict[str, Any]], Any]) -> Callable[[str], Any]:
+    return lambda text: path({"payload": text})["payload"]
+
+
+TEXT_PATHS: dict[str, Callable[[str], Any]] = {
+    **{name: _in_payload(path) for name, path in VALUE_PATHS.items()},
+    "runtime_api": _runtime_api,
+    "memory_safety": _memory_safety,
+    "memory_recall": _memory_recall,
+    "workspace_import": _workspace_import,
+}
+
+
+@pytest.mark.parametrize("path", sorted(TEXT_PATHS))
+@pytest.mark.parametrize(("text", "expected"), [v[1:] for v in MASKED_TEXT], ids=[v[0] for v in MASKED_TEXT])
+def test_corpus_secrets_are_masked_on_every_path(path: str, text: str, expected: str) -> None:
+    assert TEXT_PATHS[path](text) == expected
+
+
+@pytest.mark.parametrize("path", sorted(TEXT_PATHS))
+@pytest.mark.parametrize("text", [v[1] for v in KEPT_TEXT], ids=[v[0] for v in KEPT_TEXT])
+def test_corpus_identifiers_survive_every_path(path: str, text: str) -> None:
+    assert TEXT_PATHS[path](text) == text
+
+
+@pytest.mark.parametrize("path", sorted(KEY_PATHS))
+@pytest.mark.parametrize(("payload", "expected"), [v[1:] for v in KEY_CORPUS], ids=[v[0] for v in KEY_CORPUS])
+def test_corpus_keys_on_every_path(path: str, payload: dict[str, Any], expected: dict[str, Any]) -> None:
+    assert KEY_PATHS[path](payload) == expected
+
+
 @pytest.mark.parametrize("path", sorted(KEY_PATHS))
 @pytest.mark.parametrize(("payload", "expected"), KEY_VECTORS, ids=[str(sorted(v[0])) for v in KEY_VECTORS])
 def test_key_vectors_give_the_same_output_on_every_path(
@@ -197,9 +364,20 @@ def test_old_modules_no_longer_carry_a_redactor() -> None:
         "koda.services.run_graph": ("_SENSITIVE_KEY_PARTS", "_fallback_redact_value"),
         "koda.services.provider_env": ("redact_runtime_value",),
         "koda.logging_config": ("_REDACTED_KEYS",),
+        "koda.control_plane.workspace_import": ("SECRET_RE", "_redact_text"),
     }
     for module_name, names in owned_elsewhere.items():
         module = importlib.import_module(module_name)
         assert [name for name in names if hasattr(module, name)] == [], module_name
     client = importlib.import_module("koda.internal_rpc.security_guard").SecurityGuardClient
     assert not hasattr(client, "redact_value")
+
+
+def test_security_sidecar_no_longer_serves_redaction() -> None:
+    root = Path(__file__).resolve().parents[2]
+    assert "Redact" not in (root / "proto/security/v1/security.proto").read_text(encoding="utf-8")
+    assert "redact" not in (root / "rust/koda-security-service/src/main.rs").read_text(encoding="utf-8")
+    assert "redact_value" not in (root / "rust/koda-security-core/src/lib.rs").read_text(encoding="utf-8")
+    generated = root / "koda/internal_rpc/generated/security/v1"
+    for name in ("security_pb2.py", "security_pb2_grpc.py"):
+        assert "RedactValue" not in (generated / name).read_text(encoding="utf-8"), name
