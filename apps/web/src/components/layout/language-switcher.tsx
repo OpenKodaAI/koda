@@ -5,6 +5,7 @@ import * as SelectPrimitive from "@radix-ui/react-select";
 import { ChevronDown } from "lucide-react";
 import { ActionButton } from "@/components/ui/action-button";
 import { tourAnchor } from "@/components/tour/tour-attrs";
+import { useAnimatedPresence } from "@/hooks/use-animated-presence";
 import { useAppI18n } from "@/hooks/use-app-i18n";
 import type { AppLanguage } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
@@ -28,9 +29,14 @@ const LANGUAGE_FLAGS: Record<AppLanguage, string> = {
 // Built on the Radix Select primitive (M8-E1-T2), which supplies the
 // combobox/listbox roles, arrow-key and typeahead navigation, Enter to pick,
 // Escape to close, and moves focus into the list and back to the trigger.
+// Radix Select unmounts the list as soon as it closes, so the Root stays open
+// for MENU_EXIT_MS after `open` turns false while the list fades out.
+const MENU_EXIT_MS = 160;
+
 export function LanguageSwitcher({ className }: { className?: string }) {
   const { language, options, setLanguage, t } = useAppI18n();
   const [open, setOpen] = useState(false);
+  const presence = useAnimatedPresence(open, null, { duration: MENU_EXIT_MS });
 
   const currentOption = useMemo(
     () => options.find((option) => option.value === language) ?? options[0],
@@ -45,7 +51,7 @@ export function LanguageSwitcher({ className }: { className?: string }) {
       <SelectPrimitive.Root
         value={currentOption.value}
         onValueChange={(value) => setLanguage(value as AppLanguage)}
-        open={open}
+        open={open || presence.shouldRender}
         onOpenChange={setOpen}
       >
         <SelectPrimitive.Trigger asChild>
@@ -86,7 +92,9 @@ export function LanguageSwitcher({ className }: { className?: string }) {
             aria-label={t("language.label")}
             className={cn(
               "app-floating-panel language-switcher__menu",
-              "data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-1",
+              open
+                ? "animate-in fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-1"
+                : "pointer-events-none animate-out fade-out-0 zoom-out-95 fill-mode-forwards",
             )}
             {...tourAnchor("shell.topbar.language-switcher.menu")}
           >
@@ -109,9 +117,10 @@ export function LanguageSwitcher({ className }: { className?: string }) {
                       <span className="language-switcher__flag" aria-hidden="true">
                         {LANGUAGE_FLAGS[value]}
                       </span>
-                      <SelectPrimitive.ItemText className="language-switcher__option-label">
-                        {t(option.labelKey)}
-                      </SelectPrimitive.ItemText>
+                      {/* ItemText drops className, so the label styles sit on a wrapper. */}
+                      <span className="language-switcher__option-label">
+                        <SelectPrimitive.ItemText>{t(option.labelKey)}</SelectPrimitive.ItemText>
+                      </span>
                     </span>
                     <span
                       aria-hidden="true"

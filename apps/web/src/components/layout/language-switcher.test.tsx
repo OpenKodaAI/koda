@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 import { LanguageSwitcher } from "@/components/layout/language-switcher";
 import { I18nProvider } from "@/components/providers/i18n-provider";
@@ -81,6 +81,38 @@ describe("LanguageSwitcher keyboard support (M8-E1-T2)", () => {
     await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
     expect(trigger).toHaveTextContent("EN");
     expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it("keeps the label styles on every option", async () => {
+    const trigger = renderSwitcher();
+    await openWithKeyboard(trigger, "ArrowDown");
+
+    for (const [name, label] of [
+      [/English/, "English (US)"],
+      [/Português/, "Português (Brasil)"],
+    ] as const) {
+      const option = screen.getByRole("option", { name });
+      const labelElement = option.querySelector(".language-switcher__option-label");
+      expect(labelElement, `${label} option renders the label wrapper`).not.toBeNull();
+      expect(within(labelElement as HTMLElement).getByText(label)).toBeInTheDocument();
+    }
+  });
+
+  it("fades the menu out before it unmounts", async () => {
+    const trigger = renderSwitcher();
+    const listbox = await openWithKeyboard(trigger, "ArrowDown");
+    expect(listbox.className).toContain("animate-in");
+    const english = screen.getByRole("option", { name: /English/ });
+    await waitFor(() => expect(document.activeElement).toBe(english));
+
+    fireEvent.keyDown(english, { key: "Escape" });
+
+    // Still mounted for the exit animation, and no longer clickable.
+    expect(screen.getByRole("listbox")).toBe(listbox);
+    expect(listbox.className).toContain("animate-out");
+    expect(listbox.className).toContain("pointer-events-none");
+    await waitFor(() => expect(screen.queryByRole("listbox")).not.toBeInTheDocument());
     await waitFor(() => expect(document.activeElement).toBe(trigger));
   });
 });
