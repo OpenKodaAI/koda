@@ -91,14 +91,6 @@ groups:
           summary: "Channel gateway policy denied spike"
           description: "Many channel identities were denied before queueing. Check pairing/block/revoke state and possible abuse."
 
-      - alert: KodaOpsBenchmarkFailed
-        expr: increase(koda_ops_benchmark_runs_total{status!="passed"}[30m]) > 0
-        labels:
-          severity: medium
-        annotations:
-          summary: "Ops benchmark failed"
-          description: "The queue/runtime/channel benchmark reported a failure. Inspect ops_benchmark.v1 output before release."
-
   - name: koda-postgres
     interval: 30s
     rules:

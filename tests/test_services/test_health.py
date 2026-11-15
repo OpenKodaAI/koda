@@ -165,6 +165,59 @@ class TestHealthHandlers:
         assert payload["background_loops"]["critical_ready"] is True
 
     @pytest.mark.asyncio
+    async def test_health_payload_fields_and_breakers_snapshot(self):
+        """M4-E1-T3 keeps every field /health reports and every breaker it lists (M7-E1-T9 changes them)."""
+        backend = AsyncMock()
+        backend.health = AsyncMock(return_value={"enabled": True, "ready": True, "pool_active": True})
+        background_loops = {"started": True, "ready": True, "critical_ready": True, "loops": {}}
+        with (
+            patch("koda.services.health.postgres_primary_mode", return_value=True),
+            patch("koda.services.health.get_primary_state_backend", return_value=backend),
+            patch(
+                "koda.services.health.get_runtime_startup_state",
+                return_value={"phase": "ready", "details": {}, "expected_background_loops": []},
+            ),
+            patch("koda.services.health._background_loop_health", return_value=background_loops),
+            patch("koda.services.runtime.get_runtime_controller", return_value=_RuntimeStub()),
+            patch(
+                "koda.services.llm_runner.get_provider_health_snapshot",
+                new=AsyncMock(return_value={"claude": {"status": "ready", "can_execute": True}}),
+            ),
+            _patch_scheduled_jobs_module({"status": "ok"}),
+        ):
+            response = await _health_handler(object())
+
+        payload = json.loads(response.text)
+        assert sorted(payload) == [
+            "active_processes",
+            "active_tasks",
+            "background_loops",
+            "circuit_breakers",
+            "database",
+            "disk",
+            "knowledge_v2",
+            "providers",
+            "runtime",
+            "runtime_readiness",
+            "scheduler",
+            "startup",
+            "status",
+            "uptime_seconds",
+        ]
+        assert sorted(payload["circuit_breakers"]) == [
+            "browser",
+            "claude_cli",
+            "codex_cli",
+            "elevenlabs",
+            "http_external",
+            "memory_vector",
+            "postgres",
+            "scheduler_dispatcher",
+            "telegram_api",
+        ]
+        assert set(payload["circuit_breakers"].values()) <= {"closed", "open", "half-open"}
+
+    @pytest.mark.asyncio
     async def test_ready_fails_when_no_provider_can_execute(self):
         backend = AsyncMock()
         backend.health = AsyncMock(return_value={"enabled": True, "ready": True, "pool_active": True})

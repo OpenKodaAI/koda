@@ -90,6 +90,39 @@ async def test_cron_list_empty(mock_update, mock_context):
     assert "No cron jobs" in mock_update.message.reply_text.call_args[0][0]
 
 
+_CRON_ROWS = [
+    {
+        "id": 5,
+        "job_type": "shell_command",
+        "status": "active",
+        "schedule_expr": "*/5 * * * *",
+        "payload": {"command": "uptime", "description": "load"},
+        "work_dir": "/tmp",
+    },
+    {
+        "id": 6,
+        "job_type": "shell_command",
+        "status": "paused",
+        "schedule_expr": "0 * * * *",
+        "payload": {"command": "df -h"},
+        "work_dir": "/tmp",
+    },
+]
+
+
+@pytest.mark.asyncio
+async def test_cron_list_lines(mock_update, mock_context):
+    mock_context.args = ["list"]
+    with (
+        patch("koda.services.cron_store.list_jobs", return_value=_CRON_ROWS),
+        patch("koda.handlers.automation.send_long_message", new_callable=AsyncMock) as mock_send,
+    ):
+        await cmd_cron(mock_update, mock_context)
+    assert mock_send.call_args[0][1] == (
+        "Your legacy cron jobs:\n\n#5 [ON] `*/5 * * * *` → uptime (load)\n#6 [OFF] `0 * * * *` → df -h"
+    )
+
+
 @pytest.mark.asyncio
 async def test_cron_add_missing_args(mock_update, mock_context):
     mock_context.args = ["add"]

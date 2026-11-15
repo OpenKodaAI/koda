@@ -54,7 +54,7 @@ class TestParseInterval:
 
 @pytest.mark.asyncio
 async def test_schedule_reminder_reports_auto_activation():
-    with patch("koda.services.scheduler.create_reminder_job", return_value=12):
+    with patch("koda.services.scheduled_jobs.create_reminder_job", return_value=12):
         message = await schedule_reminder(MagicMock(), 222, 111, timedelta(minutes=5), "Check the build")
 
     assert "job #12" in message
@@ -66,7 +66,7 @@ async def test_schedule_recurring_reports_auto_activation():
     context = MagicMock()
     context.user_data = {"provider": "codex", "model": "gpt-5.4-mini", "work_dir": "/tmp", "session_id": "sess-1"}
 
-    with patch("koda.services.scheduler.create_agent_query_job", return_value=18):
+    with patch("koda.services.scheduled_jobs.create_agent_query_job", return_value=18):
         message = await schedule_recurring(context, 222, 111, timedelta(hours=2), "Check deploy status")
 
     assert "job #18" in message

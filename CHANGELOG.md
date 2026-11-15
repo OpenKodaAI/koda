@@ -196,6 +196,14 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   `runtime_attach_idle_timeout_seconds`, `runtime_browser_display_base`); a value saved
   there before now shows under `additional_env_vars`. `PLUGIN_SANDBOX_ENABLED` stays
   until M1-E4-T4. (M4-E1-T2, TD-003, D-194)
+- `DASHBOARD_ENABLED` is gone with the in-process stats aggregator it switched on, which
+  recorded tool runs that nothing read; the dashboard reads its data from Postgres.
+  Three Prometheus metrics that were never set are gone: `koda_ops_benchmark_runs_total`,
+  `koda_ops_benchmark_duration_seconds` and `koda_runtime_worktree_disk_bytes`. So are
+  the `KodaOpsBenchmarkFailed` alert in `docs/operations/alerts.yml` and the "Ops
+  benchmark" panel of the bundled Grafana dashboard, which could never show data.
+  `scripts/ops_benchmark.py` is unchanged. `/health` reports the same fields and
+  breakers. (M4-E1-T3, TD-057, TD-058)
 
 ### Fixed
 

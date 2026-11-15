@@ -30,7 +30,6 @@ as labels. Use bounded labels such as `agent_id`, `status`, `reason`,
 | Squads and RunGraph | `koda_squad_handoff_events_total`, `koda_squad_synthesis_gate_total`, `koda_route_outcomes_total`, `koda_run_graph_completeness_gates_total` | Prove routing, handoffs, synthesis gates and causal graph completeness. |
 | Self-improvement and skills | `koda_improvement_proposal_events_total`, `koda_skill_package_events_total` | Track proposal lifecycle and local-first skill scanner/eval/install/rollback state. |
 | Channels and release quality | `koda_channel_gateway_events_total`, `koda_release_quality_gates_total`, `koda_release_blockers`, `koda_trajectory_exports_total` | Prove fail-closed channel policy, release gates, blockers and redacted exports. |
-| Ops benchmark | `koda_ops_benchmark_runs_total`, `koda_ops_benchmark_duration_seconds` | Track deterministic queue/runtime/channel fault benchmark runs. |
 
 ## Minimum stack for self-hosters
 
@@ -124,7 +123,6 @@ Eight alerts that catch most incidents:
 | `run_graph_completeness_failed` | `increase(koda_run_graph_completeness_gates_total{status="failed"}[10m]) > 0` | high |
 | `critical_release_blockers` | `sum(koda_release_blockers{severity=~"critical\\|high"}) > 0` | high |
 | `channel_gateway_deny_spike` | `increase(koda_channel_gateway_events_total{event="policy_denied"}[15m]) > 10` | medium |
-| `ops_benchmark_failed` | `increase(koda_ops_benchmark_runs_total{status!="passed"}[30m]) > 0` | medium |
 
 ## Top-Tier Roadmap Gate
 

@@ -21,7 +21,7 @@ from koda.internal_rpc.common import (
 from koda.internal_rpc.metadata import build_rpc_metadata
 
 if TYPE_CHECKING:
-    from koda.services.runtime.store import RuntimeStore
+    from koda.services.runtime.postgres_store import PostgresRuntimeStore
 
 
 def _stringify_metadata(metadata: Mapping[str, object] | None) -> dict[str, str]:
@@ -277,7 +277,7 @@ class GrpcRuntimeKernelClient:
         self,
         *,
         runtime_root: Path,
-        store: RuntimeStore,
+        store: PostgresRuntimeStore,
         mode: str,
         selection_reason: str | None = None,
         agent_id: str | None = None,
@@ -1330,7 +1330,7 @@ class GrpcRuntimeKernelClient:
         }
 
 
-def build_runtime_kernel_client(*, runtime_root: Path, store: RuntimeStore) -> RuntimeKernelClient:
+def build_runtime_kernel_client(*, runtime_root: Path, store: PostgresRuntimeStore) -> RuntimeKernelClient:
     """Build the Rust runtime-kernel client."""
 
     selection = select_engine_backend(

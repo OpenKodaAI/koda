@@ -14,6 +14,7 @@ from koda.knowledge.config import (
 )
 from koda.knowledge.v2.common import get_shared_postgres_backend
 from koda.logging_config import get_logger
+from koda.state.primary import run_coro_sync
 
 log = get_logger(__name__)
 
@@ -159,27 +160,12 @@ async def _insert_audit_primary(event: AuditEvent) -> None:
     )
 
 
-def _run_coro_sync(coro: Any) -> Any:
-    """Delegate to the canonical ``koda.state.primary.run_coro_sync``.
-
-    The primary-state helper clears the shared asyncpg pool cache around
-    each transient ``asyncio.run`` boundary. Audit inserts reuse the same
-    backend, so keeping them on the same bridge avoids the pool pathology
-    where one insert's transient loop leaves a dangling pool that the next
-    insert tries to acquire from (``InterfaceError: another operation in
-    progress``).
-    """
-    from koda.state.primary import run_coro_sync as _primary_run_coro_sync
-
-    return _primary_run_coro_sync(coro)
-
-
 def _insert_audit(event: AuditEvent) -> None:
     """Synchronous insert into the active audit backend."""
     backend = _primary_audit_backend()
     if backend is not None:
         try:
-            _run_coro_sync(_insert_audit_primary(event))
+            run_coro_sync(_insert_audit_primary(event))
             return
         except Exception:
             log.warning("audit_primary_insert_failed", event_type=event.event_type, exc_info=True)
@@ -418,7 +404,7 @@ def get_audit_log(
         try:
             return cast(
                 list[dict],
-                _run_coro_sync(backend.list_audit_events(limit=limit, user_id=user_id, event_type=event_type)),
+                run_coro_sync(backend.list_audit_events(limit=limit, user_id=user_id, event_type=event_type)),
             )
         except Exception:
             log.warning("audit_primary_query_failed", exc_info=True)

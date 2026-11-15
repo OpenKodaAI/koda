@@ -30,34 +30,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
-try:
-    import pybreaker
-except ModuleNotFoundError:  # pragma: no cover - exercised in lean test envs
-
-    class _FallbackState:
-        def __init__(self, name: str):
-            self.name = name
-
-    class _FallbackListener:
-        def state_change(self, cb: Any, old_state: Any, new_state: Any) -> None:
-            return
-
-    class _FallbackCircuitBreaker:
-        def __init__(self, fail_max: int, reset_timeout: int, name: str, listeners: list[Any] | None = None):
-            self.fail_max = fail_max
-            self.reset_timeout = reset_timeout
-            self.name = name
-            self.listeners = listeners or []
-            self.current_state = _FallbackState("closed")
-
-        def call(self, func: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-            return func(*args, **kwargs)
-
-    class _PyBreakerModule:
-        CircuitBreaker = _FallbackCircuitBreaker
-        CircuitBreakerListener = _FallbackListener
-
-    pybreaker = _PyBreakerModule()  # type: ignore[assignment]
+import pybreaker
 
 from koda.config import AGENT_ID
 from koda.logging_config import get_logger

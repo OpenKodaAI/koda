@@ -6,13 +6,13 @@ import socket
 import threading
 from collections.abc import Iterable
 
-from koda.services.runtime.store import RuntimeStore
+from koda.services.runtime.postgres_store import PostgresRuntimeStore
 
 
 class PortAllocator:
     """Reserve localhost ports and persist the reservation in the runtime store."""
 
-    def __init__(self, store: RuntimeStore) -> None:
+    def __init__(self, store: PostgresRuntimeStore) -> None:
         self.store = store
         self._lock = threading.Lock()
 

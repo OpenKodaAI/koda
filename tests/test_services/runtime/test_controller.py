@@ -581,7 +581,9 @@ def _build_controller(
     store: _StoreStub,
     kernel: _KernelStub,
 ) -> controller_module.RuntimeController:
-    monkeypatch.setattr(controller_module, "RuntimeStore", lambda: store)
+    monkeypatch.setattr(controller_module, "postgres_primary_mode", lambda: True)
+    monkeypatch.setattr(controller_module, "get_primary_state_backend", lambda: object())
+    monkeypatch.setattr(controller_module, "PostgresRuntimeStore", lambda: store)
     monkeypatch.setattr(controller_module, "build_runtime_kernel_client", lambda runtime_root, store: kernel)
     monkeypatch.setattr(controller_module, "RecoveryManager", lambda store: SimpleNamespace())
     monkeypatch.setattr(controller_module, "PortAllocator", _PortAllocatorStub)
@@ -619,7 +621,9 @@ async def test_start_records_application_when_runtime_environments_are_disabled(
 ) -> None:
     store = _StoreStub()
     kernel = _KernelStub()
-    monkeypatch.setattr(controller_module, "RuntimeStore", lambda: store)
+    monkeypatch.setattr(controller_module, "postgres_primary_mode", lambda: True)
+    monkeypatch.setattr(controller_module, "get_primary_state_backend", lambda: object())
+    monkeypatch.setattr(controller_module, "PostgresRuntimeStore", lambda: store)
     monkeypatch.setattr(controller_module, "build_runtime_kernel_client", lambda runtime_root, store: kernel)
     monkeypatch.setattr(controller_module, "RecoveryManager", lambda store: SimpleNamespace())
     monkeypatch.setattr(controller_module, "PortAllocator", _PortAllocatorStub)
@@ -3091,3 +3095,71 @@ async def test_cancel_task_with_environment_stops_without_fallback_when_the_prov
         queue_manager.active_processes.pop(task_id, None)
         queue_manager._user_tasks.pop(user_id, None)
         queue_manager._queue_workers.pop(user_id, None)
+
+
+class _StaleStore:
+    """Stale environments for the recovery sweep: one with a live process, one with a
+    checkpoint only, and one with neither (an orphan)."""
+
+    def list_stale_environments(self, *, stale_before: str) -> list[dict[str, Any]]:
+        return [{"id": 1, "task_id": 10}, {"id": 2, "task_id": 20}, {"id": 3, "task_id": 30}]
+
+    def get_latest_checkpoint(self, task_id: int) -> dict[str, Any] | None:
+        return {"id": 200} if task_id == 20 else None
+
+    def list_processes(self, task_id: int, *, env_id: int | None = None) -> list[dict[str, Any]]:
+        return [{"pid": 1, "status": "running"}] if task_id == 10 else []
+
+
+@pytest.mark.asyncio
+async def test_recovery_sweep_recovers_every_stale_environment_and_counts_orphans(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """M4-E1-T3: the sweep recovers each stale environment; orphans go to the orphan counter."""
+    from koda.services.runtime.recovery_manager import RecoveryManager
+
+    recovered: list[tuple[int, str]] = []
+    counted: list[str] = []
+
+    async def _recover_task(*, task_id: int, actor: str = "runtime_api") -> dict[str, Any] | None:
+        recovered.append((task_id, actor))
+        return None
+
+    controller = object.__new__(controller_module.RuntimeController)
+    controller.recovery = RecoveryManager(_StaleStore())  # type: ignore[arg-type]
+    controller.recover_task = _recover_task  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        controller_module, "RUNTIME_RECOVERIES_TOTAL", SimpleNamespace(inc=lambda: counted.append("recovered"))
+    )
+    monkeypatch.setattr(controller_module, "RUNTIME_ORPHAN_ENVS", SimpleNamespace(inc=lambda: counted.append("orphan")))
+
+    await controller.run_recovery_sweep()
+
+    assert recovered == [(10, "recovery_sweep"), (20, "recovery_sweep"), (30, "recovery_sweep")]
+    assert counted == ["recovered", "recovered", "orphan"]
+
+
+def test_controller_refuses_to_start_outside_postgres_primary_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import koda.config as config_module
+
+    monkeypatch.setattr(config_module, "STATE_BACKEND", "sqlite")
+
+    with pytest.raises(RuntimeError, match="runtime_primary_mode_required"):
+        controller_module.RuntimeController(runtime_root=tmp_path / "runtime")
+
+
+def test_controller_refuses_to_start_without_the_primary_backend(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import koda.config as config_module
+    import koda.knowledge.v2.common as knowledge_common
+
+    monkeypatch.setattr(config_module, "STATE_BACKEND", "postgres")
+    monkeypatch.setattr(
+        knowledge_common, "get_shared_postgres_backend", lambda **_kwargs: SimpleNamespace(enabled=False)
+    )
+
+    with pytest.raises(RuntimeError, match="runtime_primary_backend_unavailable"):
+        controller_module.RuntimeController(runtime_root=tmp_path / "runtime")

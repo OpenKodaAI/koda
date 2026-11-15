@@ -9,13 +9,13 @@ from pathlib import Path
 from typing import Any, cast
 
 from koda.config import RUNTIME_EVENT_STREAM_ENABLED
-from koda.services.runtime.store import RuntimeStore
+from koda.services.runtime.postgres_store import PostgresRuntimeStore
 
 
 class RuntimeEventBroker:
     """Persist and fan out runtime events."""
 
-    def __init__(self, store: RuntimeStore, runtime_root: Path) -> None:
+    def __init__(self, store: PostgresRuntimeStore, runtime_root: Path) -> None:
         self.store = store
         self.runtime_root = runtime_root
         self._subscribers: set[asyncio.Queue[dict[str, Any]]] = set()

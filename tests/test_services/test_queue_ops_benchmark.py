@@ -62,14 +62,7 @@ def test_ops_benchmark_evaluator_fails_on_missing_terminal_state() -> None:
 
 
 def test_ops_benchmark_script_passes_quick_mode(capsys: pytest.CaptureFixture[str]) -> None:
-    from koda.services.metrics import OPS_BENCHMARK_RUNS
-
-    child = OPS_BENCHMARK_RUNS.labels(mode="quick", status="passed")
-    before = float(child._value.get()) if hasattr(child, "_value") else 0.0
     result = ops_benchmark.main([])
-    after = float(child._value.get()) if hasattr(child, "_value") else 0.0
 
     assert result == 0
     assert "ops benchmark passed (quick)" in capsys.readouterr().out
-    if after > before:
-        assert after == before + 1

@@ -1750,9 +1750,6 @@ BROWSER_SESSION_PERSISTENCE_ENABLED: bool = _env("BROWSER_SESSION_PERSISTENCE_EN
 BROWSER_SESSION_DIR: str = _env("BROWSER_SESSION_DIR", "")
 BROWSER_SESSION_MAX_AGE: int = int(_env("BROWSER_SESSION_MAX_AGE", "86400"))
 
-# --- Observability dashboard ---
-DASHBOARD_ENABLED: bool = _env("DASHBOARD_ENABLED", "false").lower() == "true"
-
 # --- Snapshots ---
 SNAPSHOT_ENABLED: bool = _env("SNAPSHOT_ENABLED", "false").lower() == "true"
 SNAPSHOT_RETENTION_HOURS: int = int(_env("SNAPSHOT_RETENTION_HOURS", "168"))

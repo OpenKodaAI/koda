@@ -39,10 +39,12 @@ async def cmd_cron(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             return
 
         lines = ["Your legacy cron jobs:\n"]
-        for job_id, expr, cmd, desc, enabled in jobs:
-            status = "ON" if enabled else "OFF"
+        for job in jobs:
+            payload = job.get("payload") or {}
+            status = "ON" if job["status"] == "active" else "OFF"
+            desc = payload.get("description", "")
             label = f" ({desc})" if desc else ""
-            lines.append(f"#{job_id} [{status}] `{expr}` → {cmd}{label}")
+            lines.append(f"#{job['id']} [{status}] `{job['schedule_expr']}` → {payload.get('command', '')}{label}")
         await send_long_message(update, "\n".join(lines))
 
     elif action == "add":
@@ -136,11 +138,10 @@ async def cmd_cron(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text("Invalid job ID.")
             return
 
-        from koda.services.cron_store import cancel_cron_task, delete_cron_job
+        from koda.services.cron_store import delete_cron_job
 
         user_id = update.effective_user.id
         if delete_cron_job(user_id, job_id):
-            cancel_cron_task(job_id)
             await update.message.reply_text(f"Cron job #{job_id} deleted.")
         else:
             await update.message.reply_text(f"Cron job #{job_id} not found.")
@@ -155,22 +156,11 @@ async def cmd_cron(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             await update.message.reply_text("Invalid job ID.")
             return
 
-        from koda.services.cron_store import (
-            cancel_cron_task,
-            get_cron_job,
-            schedule_cron_task,
-            toggle_cron_job,
-        )
+        from koda.services.cron_store import toggle_cron_job
 
         user_id = update.effective_user.id
         enabled = action == "enable"
         if toggle_cron_job(user_id, job_id, enabled):
-            if enabled:
-                job = get_cron_job(job_id)
-                if job:
-                    schedule_cron_task(job_id, context.bot, job[2], job[3], job[4], work_dir=job[7] or "/tmp")
-            else:
-                cancel_cron_task(job_id)
             await update.message.reply_text(f"Cron job #{job_id} {'enabled' if enabled else 'disabled'}.")
         else:
             await update.message.reply_text(f"Cron job #{job_id} not found.")
