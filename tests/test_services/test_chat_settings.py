@@ -177,3 +177,40 @@ def test_failed_publish_is_reported_instead_of_a_model_change() -> None:
 
     assert message == "A publicacao do agent falhou &lt;detalhe&gt;."
     assert "model" not in user_data
+
+
+def test_feature_only_provider_without_a_feature_is_not_a_general_provider_change() -> None:
+    # D-296: "switch to kokoro" named no feature, and kokoro resolved to the default general provider.
+    user_data: dict[str, object] = {}
+    with (
+        patch("koda.utils.command_helpers.DEFAULT_PROVIDER", "claude"),
+        patch("koda.services.chat_settings.get_agent_runtime_settings", return_value=_runtime_settings()),
+        patch("koda.services.chat_settings.set_agent_general_provider") as mock_provider,
+        patch("koda.services.chat_settings.set_agent_general_model") as mock_model,
+        patch("koda.services.chat_settings.set_agent_functional_default") as mock_feature,
+    ):
+        message = maybe_apply_agent_local_settings_from_chat("switch to kokoro", user_data)
+
+    assert message is None
+    mock_provider.assert_not_called()
+    mock_model.assert_not_called()
+    mock_feature.assert_not_called()
+
+
+def test_feature_only_provider_with_its_feature_changes_that_feature() -> None:
+    # D-296: naming the feature routes the feature-only provider to that feature's setting.
+    user_data: dict[str, object] = {}
+    with (
+        patch("koda.utils.command_helpers.DEFAULT_PROVIDER", "claude"),
+        patch("koda.services.chat_settings.get_agent_runtime_settings", return_value=_runtime_settings()),
+        patch("koda.services.chat_settings.set_agent_general_provider") as mock_provider,
+        patch(
+            "koda.services.chat_settings.set_agent_functional_default",
+            return_value=_runtime_settings(),
+        ) as mock_feature,
+    ):
+        message = maybe_apply_agent_local_settings_from_chat("switch tts to kokoro", user_data)
+
+    mock_feature.assert_called_once_with("audio", "kokoro", "kokoro-v1")
+    mock_provider.assert_not_called()
+    assert "Agent default for <code>audio</code>" in str(message)
