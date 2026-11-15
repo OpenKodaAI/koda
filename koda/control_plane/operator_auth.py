@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import re
 import secrets
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -46,13 +49,24 @@ from .settings import (
 
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 _BOOTSTRAP_INSERT_ATTEMPTS = 5
-_FAILURE_TIMING_FLOOR_SECONDS = 0.0
+# A rejected sign-in or password recovery answers no sooner than this after its route has read
+# it, so the response time does not tell which accounts exist (D-136). The routes wait with
+# `pad_failed_login`.
+_FAILURE_TIMING_FLOOR_SECONDS = 0.3
 _DISPLAY_NAME_MAX_LENGTH = 80
 _CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
 # Public auth status fields a caller without an operator credential never gets.
 _OPERATOR_ONLY_AUTH_STATUS_FIELDS: tuple[str, ...] = ("recovery_available",)
 # Public auth status fields the setup screen needs, sent before login only while no owner exists.
 _SETUP_ONLY_AUTH_STATUS_FIELDS: tuple[str, ...] = ("bootstrap_file_path", "loopback_trust_enabled")
+
+
+class AuthError(Exception):
+    """Rejected credentials: the control-plane API answers with 401 and the message (D-135).
+
+    Every bad credential raises the same message, so the answer never tells which accounts exist.
+    A malformed request (a missing field) stays a ``ValueError``, which the API answers with 400.
+    """
 
 
 @dataclass(slots=True)
@@ -137,6 +151,32 @@ def _normalize_bootstrap_code(value: Any) -> str:
 @lru_cache(maxsize=1)
 def _password_hasher() -> PasswordHasher:
     return PasswordHasher()
+
+
+@lru_cache(maxsize=1)
+def _dummy_password_hash() -> str:
+    """An Argon2 hash of a random secret, for sign-ins that have no stored hash to check (D-136)."""
+    return _password_hasher().hash(secrets.token_urlsafe(32))
+
+
+def _check_dummy_password(password: str) -> None:
+    """Do a wrong password's Argon2 work for a sign-in rejected before its stored hash is checked."""
+    with contextlib.suppress(VerificationError, InvalidHashError):
+        _password_hasher().verify(_dummy_password_hash(), password)
+
+
+async def pad_failed_login(started: float) -> None:
+    """Wait until ``_FAILURE_TIMING_FLOOR_SECONDS`` have passed since ``started`` (``time.monotonic()``).
+
+    The login and password-recovery routes await this before they answer a rejection, so every
+    rejection takes the same time and the event loop keeps serving other requests meanwhile.
+    The floor is fixed: a rejection whose own work took longer answers as soon as it ends. On
+    login, what can then show is only the failure-count write that a wrong password for an
+    existing account does, never a whole extra floor.
+    """
+    deadline = started + _FAILURE_TIMING_FLOOR_SECONDS
+    while (remaining := deadline - time.monotonic()) > 0:
+        await asyncio.sleep(remaining)
 
 
 def _normalize_username(value: Any) -> str:
@@ -648,28 +688,22 @@ class OperatorAuthService:
             "SELECT * FROM cp_operator_users WHERE lower(username) = lower(?) OR lower(email) = lower(?)",
             (normalized_id, normalized_id),
         )
-        if not row:
-            # Constant-time-ish side-effect to prevent enumeration
-            _password_hasher().hash("dummy")
-            raise ValueError("Invalid identifier or recovery code.")
-
-        if row.get("locked_until") and not _is_expired(row["locked_until"]):
-            raise ValueError("Invalid identifier or recovery code.")
-
-        generation = str(row.get("recovery_generation") or "")
+        # An unknown identifier and a locked account look up and compare codes like a wrong code
+        # does, so every rejection does the same work; the route pads them all to the floor (D-136).
+        generation = str(row.get("recovery_generation") or "") if row else ""
         active_codes = fetch_all(
             """
             SELECT id, code_hash FROM cp_operator_recovery_codes
             WHERE user_id = ? AND consumed_at = '' AND generation = ?
             """,
-            (str(row["id"]), generation),
+            (str(row["id"]) if row else "", generation),
         )
         code_hash = _hash_secret(_normalize_recovery_code(recovery_code))
         code_row = next(
             (item for item in active_codes if compare_digest(str(item.get("code_hash") or ""), code_hash)),
             None,
         )
-        if not code_row:
+        if not row or (row.get("locked_until") and not _is_expired(row["locked_until"])) or not code_row:
             raise ValueError("Invalid identifier or recovery code.")
 
         self._validate_operator_password(
@@ -925,6 +959,8 @@ class OperatorAuthService:
         normalized = str(identifier or "").strip()
         if not normalized or not password:
             raise ValueError("Identifier and password are required.")
+        # Made on the first sign-in of any kind, so no single rejection path pays for it (D-136).
+        _dummy_password_hash()
         row = fetch_one(
             """
             SELECT * FROM cp_operator_users
@@ -935,19 +971,22 @@ class OperatorAuthService:
             (normalized, normalized),
         )
         if row is None:
+            _check_dummy_password(password)
             self._set_login_failure(None, identifier=normalized)
-            raise ValueError("Invalid credentials.")
+            raise AuthError("Invalid credentials.")
         if row.get("disabled"):
+            _check_dummy_password(password)
             emit_security("security.operator_login_failed", identifier=normalized, reason="disabled")
-            raise ValueError("Invalid credentials.")
+            raise AuthError("Invalid credentials.")
         if row.get("locked_until") and not _is_expired(row.get("locked_until")):
+            _check_dummy_password(password)
             emit_security("security.operator_login_failed", identifier=normalized, reason="locked")
-            raise ValueError("Invalid credentials.")
+            raise AuthError("Invalid credentials.")
         try:
             _password_hasher().verify(str(row["password_hash"]), password)
         except (VerifyMismatchError, VerificationError, InvalidHashError) as exc:
             self._set_login_failure(row, identifier=normalized)
-            raise ValueError("Invalid credentials.") from exc
+            raise AuthError("Invalid credentials.") from exc
         execute(
             """
             UPDATE cp_operator_users

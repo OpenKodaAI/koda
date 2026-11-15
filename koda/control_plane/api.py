@@ -8,6 +8,7 @@ import functools
 import hashlib
 import json
 import mimetypes
+import time
 import urllib.parse
 import urllib.request
 from collections.abc import Awaitable, Callable, Mapping
@@ -39,7 +40,13 @@ from .dashboard_service import (
 )
 from .manager import GeneralPayloadValidationError, get_control_plane_manager
 from .onboarding import load_control_plane_openapi_spec
-from .operator_auth import OperatorAuthContext, OperatorAuthService, get_operator_auth_service
+from .operator_auth import (
+    AuthError,
+    OperatorAuthContext,
+    OperatorAuthService,
+    get_operator_auth_service,
+    pad_failed_login,
+)
 from .settings import (
     AGENT_SECTIONS,
     DOCUMENT_KINDS,
@@ -400,6 +407,8 @@ async def control_plane_error_middleware(
 ) -> web.StreamResponse:
     try:
         return await handler(request)
+    except AuthError as exc:
+        return web.json_response({"error": str(exc)}, status=401)
     except KeyError:
         return web.json_response({"error": "agent or asset not found"}, status=404)
     except ValueError as exc:
@@ -681,13 +690,18 @@ async def auth_delete_profile_photo(request: web.Request) -> web.Response:
 
 async def auth_password_recover(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
-    return web.json_response(
-        _auth_service().reset_password_with_recovery_code(
+    # Like a rejected sign-in, every rejected recovery takes the same time from here (D-136).
+    started = time.monotonic()
+    try:
+        result = _auth_service().reset_password_with_recovery_code(
             identifier=str(payload.get("identifier") or ""),
             recovery_code=str(payload.get("recovery_code") or ""),
             new_password=str(payload.get("new_password") or ""),
         )
-    )
+    except ValueError:
+        await pad_failed_login(started)
+        raise
+    return web.json_response(result)
 
 
 async def auth_password_change(request: web.Request) -> web.Response:
@@ -718,12 +732,18 @@ async def auth_recovery_codes_regenerate(request: web.Request) -> web.Response:
 
 async def auth_login(request: web.Request) -> web.Response:
     payload = await _json_payload(request)
-    return web.json_response(
-        _auth_service().login(
+    # The floor counts from here, so a client that holds its body back cannot use it up (D-136).
+    started = time.monotonic()
+    try:
+        session = _auth_service().login(
             identifier=str(payload.get("identifier") or ""),
             password=str(payload.get("password") or ""),
         )
-    )
+    except AuthError:
+        # Every rejected sign-in takes the same time, whichever check rejected it (D-136).
+        await pad_failed_login(started)
+        raise
+    return web.json_response(session)
 
 
 async def auth_logout(request: web.Request) -> web.Response:

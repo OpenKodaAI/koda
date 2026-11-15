@@ -45,7 +45,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from koda.control_plane import api as control_plane_api
-from koda.control_plane import rate_limit
+from koda.control_plane import operator_auth, rate_limit
 from koda.control_plane.operator_auth import OperatorAuthContext
 from koda.control_plane.supervisor import ControlPlaneSupervisor
 
@@ -144,10 +144,14 @@ class _StubAuthService:
         )
 
 
-def _build_supervisor_app() -> web.Application:
+def _build_supervisor_app_without_probe() -> web.Application:
     with patch("koda.control_plane.supervisor.get_control_plane_manager", return_value=object()):
         supervisor = ControlPlaneSupervisor()
-    app = supervisor.build_app()
+    return supervisor.build_app()
+
+
+def _build_supervisor_app() -> web.Application:
+    app = _build_supervisor_app_without_probe()
     app.middlewares.append(_answer_in_place_of_handler)
     return app
 
@@ -455,6 +459,43 @@ def test_cluster_drain_endpoints_require_an_operator_session(route_matrix: Route
         assert probe.anonymous_body == UNAUTHORIZED_BODY
         assert probe.operator_reached == probe.identity
     assert cluster[("GET", "/cluster/status")].public
+
+
+class _RejectingLoginService(_StubAuthService):
+    """Rejects every sign-in, as the real service does for any bad credential."""
+
+    def login(self, *, identifier: str, password: str) -> dict[str, Any]:
+        raise operator_auth.AuthError("Invalid credentials.")
+
+
+async def test_a_failed_login_is_a_401_that_spends_the_auth_failure_bucket() -> None:
+    """D-135: the public login route answers rejected credentials like any other auth failure.
+
+    Through the supervisor stack, the 401 reaches the rate limiter, which charges it to the
+    stricter auth-failure bucket; with a budget of 2 the third rejected sign-in is a 429.
+    """
+    app = _build_supervisor_app_without_probe()
+    login = "/api/control-plane/auth/login"
+    body = {"identifier": "owner@example.com", "password": "wrong-password-XX"}
+
+    rate_limit.clear_limiters()
+    try:
+        with (
+            patch.object(control_plane_api, "_auth_service", _RejectingLoginService),
+            patch.object(rate_limit, "CONTROL_PLANE_AUTH_FAILURE_RATE_LIMIT", 2),
+            patch.object(rate_limit, "emit_security") as audit,
+        ):
+            async with TestClient(TestServer(app)) as client:
+                responses = [await client.post(login, json=body) for _ in range(3)]
+                statuses = [response.status for response in responses]
+                first_body = await responses[0].json()
+    finally:
+        rate_limit.clear_limiters()
+
+    assert statuses == [401, 401, 429]
+    assert first_body == {"error": "Invalid credentials."}
+    charged = [call.kwargs for call in audit.call_args_list if call.args == ("security.control_plane_auth_failure",)]
+    assert [(fields["path"], fields["status"]) for fields in charged] == [(login, 401)] * 3
 
 
 async def _unreachable_handler(_request: web.Request) -> web.Response:
