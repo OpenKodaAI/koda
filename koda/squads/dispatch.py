@@ -700,6 +700,12 @@ async def dispatch_squad_turn(
     # A turn delivered through the bus keeps the whole chain too, as the local queue and the
     # runtime API pass it, so its cycle, depth and hop checks do not start again (D-352).
     base_metadata["delegation_chain"] = list(delegation_chain or [])
+    # ... and its correlation, as they pass it: a squad_reply turn's obligation key, a synthesis's
+    # idempotency key and who asked, so the turn is correlated the same on every path (D-363).
+    if delegation_request_id:
+        base_metadata["delegation_request_id"] = delegation_request_id
+    if delegation_origin_agent_id:
+        base_metadata["delegation_origin_agent_id"] = delegation_origin_agent_id
 
     if runtime_application is not None and resolved_user_id and resolved_chat_id:
         try:

@@ -2731,6 +2731,13 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
                 if msg.from_agent and (not chain or chain[-1] != msg.from_agent):
                     chain.append(msg.from_agent)
                 request_id = metadata.get("request_id") if kind in {"task_request", "delegation_request"} else None
+                # A squad_reply or synthesis turn the bus delivers carries its correlation as the
+                # local queue and the runtime API pass it: the obligation or synthesis key, and
+                # who asked (D-363).
+                delegation_request_id = request_id or metadata.get("delegation_request_id")
+                delegation_origin_agent_id = (
+                    (metadata.get("delegation_origin_agent_id") or msg.from_agent) if delegation_request_id else None
+                )
                 # A delegation past a cycle or the depth cap, or an agent_send past the hop limit,
                 # runs no turn, whichever runtime sent it (D-095, D-096).
                 limit = None
@@ -2765,8 +2772,8 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
                     squad_task_id=metadata.get("squad_task_id") or metadata.get("task_id"),
                     parent_message_id=metadata.get("parent_message_id") or msg.causation_id or msg.message_id,
                     delegation_chain=chain,
-                    delegation_request_id=str(request_id) if request_id else None,
-                    delegation_origin_agent_id=msg.from_agent if request_id else None,
+                    delegation_request_id=str(delegation_request_id) if delegation_request_id else None,
+                    delegation_origin_agent_id=str(delegation_origin_agent_id) if delegation_origin_agent_id else None,
                     telegram_message_thread_id=_coerce_int_or_zero(metadata.get("telegram_message_thread_id")) or None,
                     bot_override=getattr(application, "bot", None),
                 )

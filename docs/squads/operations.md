@@ -133,7 +133,10 @@ Before broad rollout, run these in canary:
   request and `agent_send` message carries the whole chain of agents that led
   to it, ending with its sender, and every entry counts, the router's included.
   A `squad_reply` or synthesis turn keeps the chain on every path that delivers
-  it: the local queue, the runtime API and the bus fallback.
+  it: the local queue, the runtime API and the bus fallback. It keeps its
+  correlation on each of them too: the reply obligation's key or the
+  synthesis idempotency key as its delegation request id, and the agent that
+  asked.
   The sender's tool refuses the cycle, the depth or the hop count, and the
   receiving inbox refuses the same before it queues a turn, whichever runtime
   sent it: the inbox adds the sender to a chain that does not end with it, so

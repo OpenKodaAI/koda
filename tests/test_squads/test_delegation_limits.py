@@ -357,6 +357,62 @@ async def test_a_squad_turn_carries_its_whole_chain_on_every_dispatch_path(
 
 @pytest.mark.postgres
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("metadata", "request_id"),
+    [
+        # A squad_reply turn is correlated by its reply obligation's key.
+        ({"from_agent": "B", "source": "squad_reply", "correlation_id": "obligation-1"}, "obligation-1"),
+        # A coordinator synthesis is correlated by its idempotency key.
+        (
+            {"from_agent": "B", "kind": "task_result", "delivery_intent": "final_synthesis"},
+            "squad_synthesis:thread:msg-1:C",
+        ),
+    ],
+    ids=["squad_reply", "synthesis"],
+)
+async def test_a_squad_reply_or_synthesis_turn_carries_its_correlation_on_every_dispatch_path(
+    room: SimpleNamespace, monkeypatch: pytest.MonkeyPatch, metadata: dict[str, Any], request_id: str
+) -> None:
+    """The local queue, the runtime API and the bus fallback deliver the same request id and origin (D-363)."""
+    from koda.services import queue_manager as qm
+    from koda.squads import dispatch_squad_turn
+
+    async def dispatch(application: Any = None) -> Any:
+        return await dispatch_squad_turn(
+            target_agent_id="C",
+            thread=room.thread,
+            thread_store=room.threads,
+            query_text="answer",
+            parent_message_id="msg-1",
+            metadata=dict(metadata),
+            application=application,
+            delegation_chain=["B"],
+            delegation_request_id=request_id,
+            delegation_origin_agent_id="B",
+        )
+
+    local = AsyncMock(return_value=11)
+    with patch.object(qm, "enqueue_squad_agent_task", local):
+        assert (await dispatch(application=SimpleNamespace(bot=None))).transport == "local_queue"
+    assert local.await_args.kwargs["delegation_request_id"] == request_id
+    assert local.await_args.kwargs["delegation_origin_agent_id"] == "B"
+
+    manager = Mock()
+    manager.send_dashboard_squad_message.return_value = {"task_id": 12, "session_id": "s-1"}
+    with _no_local_runtime(), patch("koda.control_plane.manager.get_control_plane_manager", return_value=manager):
+        assert (await dispatch()).transport == "runtime_http"
+        assert manager.send_dashboard_squad_message.call_args.kwargs["delegation_request_id"] == request_id
+        assert manager.send_dashboard_squad_message.call_args.kwargs["delegation_origin_agent_id"] == "B"
+
+        manager.send_dashboard_squad_message.side_effect = RuntimeError("runtime API down")
+        assert (await dispatch()).transport == "bus"
+    [turn] = await _deliver(room, monkeypatch, "C")
+    assert turn["delegation_request_id"] == request_id
+    assert turn["delegation_origin_agent_id"] == "B"
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
 async def test_a_ping_pong_through_the_bus_fallback_stops_at_the_hop_limit_with_one_event(
     room: SimpleNamespace, monkeypatch: pytest.MonkeyPatch
 ) -> None:
