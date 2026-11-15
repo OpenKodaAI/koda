@@ -140,7 +140,7 @@ class NativeIsolation:
                 hint="OS-level sandbox unavailable; consider installing bwrap (Linux) or enabling Docker.",
             )
             NativeIsolation._warned = True
-        return command, env
+        return command, _server_env(env)
 
 
 class BwrapIsolation:
@@ -216,8 +216,7 @@ class BwrapIsolation:
 
         argv.append("--")
         argv.extend(command)
-        scrubbed_env = _scrub_env(env)
-        return argv, scrubbed_env
+        return argv, _server_env(_scrub_env(env))
 
 
 class SandboxExecIsolation:
@@ -243,7 +242,7 @@ class SandboxExecIsolation:
         # sandbox-exec wants the profile as a string via -p, not a file.
         argv: list[str] = [self._bin, "-p", profile]
         argv.extend(command)
-        return argv, _scrub_env(env)
+        return argv, _server_env(_scrub_env(env))
 
     @staticmethod
     def _build_profile(constraints: IsolationConstraints) -> str:
@@ -391,6 +390,19 @@ _BLOCKED_ENV_NAMES: frozenset[str] = frozenset(
         "DYLD_FRAMEWORK_PATH",
     }
 )
+
+
+# Non-secret basics a stdio server may need from Koda's own environment. Nothing
+# else is inherited: the sandboxed process must never see Koda's os.environ
+# (control-plane token, database DSN, provider keys). Docker gets the same
+# result by passing only the server's own names with ``-e``.
+_BASE_ENV_NAMES: tuple[str, ...] = ("PATH", "HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TZ")
+
+
+def _server_env(env: dict[str, str]) -> dict[str, str]:
+    """The explicit environment for a sandboxed server: the basics plus its own env."""
+    base = {name: os.environ[name] for name in _BASE_ENV_NAMES if name in os.environ}
+    return {**base, **env}
 
 
 def _read_by_docker_cli(name: str) -> bool:

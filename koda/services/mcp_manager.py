@@ -135,7 +135,8 @@ class McpServerInstance:
             if not self._command:
                 raise ValueError("stdio transport requires a command")
             command, env = self._isolated_command(self._command, self._env or {})
-            transport = StdioTransport(command[0], args=command[1:], env=env or None)
+            # Always an explicit mapping: ``env=None`` would inherit Koda's whole environment.
+            transport = StdioTransport(command[0], args=command[1:], env=env)
             await transport.start()
             self._transport = transport
         elif self._transport_type == "http_sse":
