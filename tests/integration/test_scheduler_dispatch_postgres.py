@@ -42,7 +42,7 @@ import contextlib
 import json
 import re
 from collections.abc import AsyncIterator, Iterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -756,11 +756,26 @@ async def test_the_documented_assignment_of_a_job_without_an_agent_keeps_it_runn
     from koda.services import scheduled_jobs
 
     job_id = await _standalone_job_with_leftover_runs()
+    open_runs = {int(run["id"]): str(run["status"]) for run in _runs(job_id, scheduled_jobs.RUN_TRIGGER_CATCHUP)}
+    before = scheduled_jobs._utcnow()
     conn = await asyncpg.connect(scheduler_db)
     try:
         await conn.execute(_documented_assignment_sql(job_id))
     finally:
         await conn.close()
+
+    # The SQL closes each run as the scheduler's own cancellation does: a completion time, a fresh
+    # updated_at, and one run.cancelled event that says what closed it.
+    closed = {int(run["id"]): run for run in _runs(job_id, scheduled_jobs.RUN_TRIGGER_CATCHUP)}
+    assert set(closed) == set(open_runs)
+    for run_id, run in closed.items():
+        assert run["status"] == scheduled_jobs.RUN_STATUS_CANCELLED
+        assert run["completed_at"] is not None and datetime.fromisoformat(run["completed_at"]) >= before
+        assert datetime.fromisoformat(run["updated_at"]) >= before
+        [event] = [event for event in _events(job_id, "run.cancelled") if event["scheduled_run_id"] == run_id]
+        assert (event["status_from"], event["status_to"]) == (open_runs[run_id], scheduled_jobs.RUN_STATUS_CANCELLED)
+        assert event["reason"] == "Closed before assigning the job to an agent."
+        assert datetime.fromisoformat(event["created_at"]) >= before
 
     application_a = _fake_application()
     with _as_agent("AGENT_A", _POLICY_A):

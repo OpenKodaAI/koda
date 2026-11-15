@@ -103,16 +103,41 @@ its own. Left open, the first such run the agent claims ends `blocked`
 validation."), the job moves to `validation_pending` with no next run,
 its other queued and retrying runs end `blocked`, and the agent's bot
 tells the user the run was blocked. Close the runs, then assign the jobs,
-in one transaction:
+in one transaction. The first statement closes each run as the scheduler
+does when it cancels one: it sets the run's completion and update times,
+and records a `run.cancelled` event that names its earlier status and the
+reason, so the run history shows why the run ended.
 
 ```sql
 BEGIN;
-UPDATE knowledge_v2.scheduled_job_runs
-SET status = 'cancelled', lease_owner = NULL, lease_expires_at = NULL,
-    next_attempt_at = NULL,
-    error_message = 'Closed before assigning the job to an agent.'
-WHERE scheduled_job_id IN (12, 15)
-  AND status IN ('queued', 'retrying', 'running');
+WITH open_runs AS (
+    SELECT id, status FROM knowledge_v2.scheduled_job_runs
+    WHERE scheduled_job_id IN (12, 15)
+      AND status IN ('queued', 'retrying', 'running')
+    FOR UPDATE
+), stamp AS (
+    SELECT to_char(now() AT TIME ZONE 'UTC',
+                   'YYYY-MM-DD"T"HH24:MI:SS.US"+00:00"') AS at
+), closed AS (
+    UPDATE knowledge_v2.scheduled_job_runs AS run
+    SET status = 'cancelled', lease_owner = NULL, lease_expires_at = NULL,
+        next_attempt_at = NULL,
+        completed_at = COALESCE(run.completed_at, stamp.at),
+        updated_at = stamp.at,
+        error_message = 'Closed before assigning the job to an agent.'
+    FROM open_runs, stamp
+    WHERE run.id = open_runs.id
+    RETURNING run.id, run.scheduled_job_id, run.trace_id,
+              open_runs.status AS status_from, stamp.at
+)
+INSERT INTO knowledge_v2.scheduled_job_events (
+    scheduled_job_id, scheduled_run_id, trace_id, event_type, actor_type,
+    source, status_from, status_to, reason, created_at
+)
+SELECT scheduled_job_id, id, trace_id, 'run.cancelled', 'operator',
+       'upgrade', status_from, 'cancelled',
+       'Closed before assigning the job to an agent.', at
+FROM closed;
 UPDATE knowledge_v2.scheduled_jobs
 SET agent_id = 'AGENT_A'
 WHERE agent_id IS NULL AND id IN (12, 15);
