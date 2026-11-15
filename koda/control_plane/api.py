@@ -3500,6 +3500,7 @@ def _skill_package_error_status(code: str) -> int:
         "skill.scan_denied",
         "skill.policy_denied",
         "skill.review_hash_mismatch",
+        "skill.package_modified",
         "skill.tool_conflict",
         "skill.rollback_unavailable",
     }:

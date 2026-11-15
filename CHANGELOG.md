@@ -135,6 +135,16 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   `skill.review_hash_mismatch` (409) when the files changed since, and records the
   reviewer, hash, scanner version and verdict in the lock's `operator_review`.
   (M1-E4-T3, D-031)
+- Skill package code loads only while its files still hash to the approved
+  `package_hash`. A package changed after approval is not loaded: the runtime logs
+  `skill_package_modified_not_loaded`, `plugin_reload` says the package changed, and
+  the skills registry reports `integrity.status: modified`. Handlers load from their
+  `.py` sources only, never from a `__pycache__` file, and the package hash no longer
+  covers `__pycache__` entries. A rollback whose files no longer match its revision
+  (an update that overwrote the same directory) is refused with
+  `skill.package_modified` (409) and asks for a reinstall. A package whose directory
+  already held `__pycache__` files when it was scanned reports `modified` after this
+  update until it is reinstalled. (M1-E4-T11, D-037)
 
 ### Added
 

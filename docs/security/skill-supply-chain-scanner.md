@@ -60,6 +60,29 @@ Imported or legacy locks with `decision=review_required` but no preserved
 `operator_review.accepted` evidence stay `blocked` and cannot become
 `recommended`.
 
+## Load-Time Integrity
+
+The package hash covers every file in the package except `__pycache__`
+entries. Before the runtime loads a package's handler code (at startup, on
+install, on `plugin_reload`), it hashes the files on disk again and compares
+the result with the approved `package_hash` in the lock. When they differ, the
+package is not loaded: its tools stay unregistered, the runtime logs
+`skill_package_modified_not_loaded` and emits a `skill_package.modified` audit
+event once per changed hash, `plugin_reload` answers that the package changed
+after approval, and the registry item's `integrity.status` is `modified`
+(otherwise `verified`). An operator reinstalls and reviews the package to load
+it again.
+
+Handler code loads from the `.py` sources only. Python neither reads nor writes
+a bytecode cache while it loads package code, so a `__pycache__` file planted
+next to a handler never runs in place of the verified source.
+
+A rollback restores the previous lock, not the previous files. When the files
+on disk no longer hash to that revision's `package_hash`, for example because
+the update overwrote the same directory, the rollback is refused with
+`skill.package_modified` and the current revision stays installed; reinstall
+the wanted version instead (D-037).
+
 ## Audit And Observability
 
 Every scan/install/uninstall/rollback emits audit events. Runtime use of

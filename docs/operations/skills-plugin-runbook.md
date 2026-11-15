@@ -52,6 +52,7 @@ Skill package operations use the shared operational envelope. Common codes:
 - `skill.scan_denied`
 - `skill.policy_denied`
 - `skill.review_hash_mismatch`
+- `skill.package_modified`
 - `skill.tool_conflict`
 - `skill.rollback_unavailable`
 
@@ -81,7 +82,15 @@ Rollback should:
 - leave custom skills untouched
 
 If no previous lock exists, return `skill.rollback_unavailable` and keep the
-current package unchanged.
+current package unchanged. If the previous revision's files no longer match its
+approved `package_hash` (an update that overwrote the same directory), return
+`skill.package_modified` and keep the current package unchanged; reinstall the
+wanted version instead.
+
+A package whose files changed after approval is not loaded at all. The registry
+reports it with `integrity.status: modified`, and the runtime logs
+`skill_package_modified_not_loaded`. Reinstall it from a known-good source and
+review it again.
 
 ## Troubleshooting
 

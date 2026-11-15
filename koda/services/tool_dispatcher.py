@@ -3341,7 +3341,17 @@ async def _handle_plugin_reload(params: dict, ctx: ToolContext) -> AgentToolResu
     from koda.skills._package import ensure_installed_package_tools_registered, get_skill_package_lock
 
     if get_skill_package_lock(AGENT_ID or "default", name):
-        ensure_installed_package_tools_registered(AGENT_ID or "default", force=True)
+        refused = ensure_installed_package_tools_registered(AGENT_ID or "default", force=True)
+        if name in refused:
+            return AgentToolResult(
+                tool="plugin_reload",
+                success=False,
+                output=(
+                    f"Plugin package '{name}' was not loaded: its files changed after approval "
+                    "(package hash mismatch). An operator must reinstall and review it."
+                ),
+                metadata={"data": {"integrity": refused[name]}, "data_format": "json"},
+            )
         return AgentToolResult(tool="plugin_reload", success=True, output=f"Plugin package '{name}' reloaded.")
     from koda.plugins import get_registry
 

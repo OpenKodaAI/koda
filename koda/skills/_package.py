@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 import hashlib
 import json
 import re
+import sys
+import tempfile
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -46,6 +50,8 @@ _VALID_TOOL_ID = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 
 log = get_logger(__name__)
 _REGISTERED_PACKAGE_IDS: set[tuple[str, str]] = set()
+# (agent_id, package_id, current_package_hash) already reported as modified in this process.
+_REPORTED_MODIFIED_PACKAGES: set[tuple[str, str, str]] = set()
 
 
 class SkillPackageError(ValueError):
@@ -386,6 +392,18 @@ def rollback_skill_package(agent_id: str | None, package_id: str) -> dict[str, A
             category="non_retryable",
             user_action="Reinstall a known-good package version manually.",
         )
+    integrity = verify_skill_package_integrity(previous)
+    if integrity["status"] != "verified":
+        raise SkillPackageError(
+            "skill.package_modified",
+            (
+                f"Package '{package_id}' version {previous.get('version') or 'unknown'} cannot be rolled back: "
+                "its files no longer match the approved package hash."
+            ),
+            category="non_retryable",
+            user_action="Reinstall the package version you want from its source, and review it again.",
+            payload={"integrity": integrity},
+        )
     restored = dict(previous)
     restored["rolled_back_at"] = _now_iso()
     restored["previous_revision"] = current
@@ -465,6 +483,7 @@ def list_skill_registry(agent_id: str | None = None) -> dict[str, Any]:
                 "tools": [dict(item) for item in lock.get("installed_tools") or [] if isinstance(item, dict)],
                 "rollback_available": bool(lock.get("rollback_ref")),
                 "run_graph_evidence": _safe_dict(lock.get("run_graph_evidence")),
+                "integrity": verify_skill_package_integrity(lock),
             }
         )
     return {"schema_version": SKILL_REGISTRY_VERSION, "agent_id": normalized_agent, "items": items}
@@ -547,11 +566,79 @@ def get_installed_package_tool_definitions(agent_id: str | None = None) -> list[
     return definitions
 
 
-def ensure_installed_package_tools_registered(agent_id: str | None = None, *, force: bool = False) -> None:
-    """Register installed package handlers in the process plugin registry."""
+def verify_skill_package_integrity(lock: dict[str, Any]) -> dict[str, Any]:
+    """Hash the package files on disk and compare them with the approved ``package_hash`` (D-037).
 
-    if not PLUGIN_SYSTEM_ENABLED:
+    ``status`` is ``verified`` when they match and ``modified`` otherwise, including when the
+    package directory is gone or no longer passes the scanner's file checks (too many files,
+    a path escape), which would leave files outside the hash.
+    """
+
+    approved = str(lock.get("package_hash") or "")
+    raw_path = str(lock.get("package_path") or "").strip()
+    current = ""
+    findings: list[SkillScanFinding] = []
+    if raw_path and Path(raw_path).is_dir():
+        current, _ = _hash_package(Path(raw_path), findings)
+    return {
+        "status": "verified" if approved and current == approved and not findings else "modified",
+        "approved_package_hash": approved,
+        "current_package_hash": current,
+    }
+
+
+@contextlib.contextmanager
+def _source_only_imports() -> Iterator[None]:
+    """Load package code from its source files only.
+
+    Bytecode caches are not part of the package hash, so Python must neither read a
+    ``__pycache__`` entry next to the source (one planted there would run instead of the
+    verified source) nor write one. Both settings are process-wide and restored on exit.
+    """
+
+    previous_dont_write, previous_prefix = sys.dont_write_bytecode, sys.pycache_prefix
+    with tempfile.TemporaryDirectory(prefix="koda-skill-pycache-") as empty_prefix:
+        sys.dont_write_bytecode = True
+        sys.pycache_prefix = empty_prefix
+        try:
+            yield
+        finally:
+            sys.dont_write_bytecode = previous_dont_write
+            sys.pycache_prefix = previous_prefix
+
+
+def _report_modified_package(agent_id: str, lock: dict[str, Any], integrity: dict[str, Any]) -> None:
+    package_id = str(lock.get("package_id") or "")
+    key = (agent_id, package_id, str(integrity.get("current_package_hash") or ""))
+    if key in _REPORTED_MODIFIED_PACKAGES:
         return
+    _REPORTED_MODIFIED_PACKAGES.add(key)
+    log.warning(
+        "skill_package_modified_not_loaded",
+        agent_id=agent_id,
+        package_id=package_id,
+        approved_package_hash=integrity.get("approved_package_hash"),
+        current_package_hash=integrity.get("current_package_hash"),
+    )
+    _emit_package_audit(
+        "skill_package.modified",
+        agent_id,
+        {"lock": _lock_summary(lock), "integrity": dict(integrity)},
+    )
+
+
+def ensure_installed_package_tools_registered(
+    agent_id: str | None = None, *, force: bool = False
+) -> dict[str, dict[str, Any]]:
+    """Register installed package handlers in the process plugin registry.
+
+    A package whose files no longer hash to its approved ``package_hash`` is not loaded
+    (D-037). Returns those packages, by package id, with their integrity status.
+    """
+
+    refused: dict[str, dict[str, Any]] = {}
+    if not PLUGIN_SYSTEM_ENABLED:
+        return refused
     normalized_agent = _normalize_agent_id(agent_id)
     from koda.plugins import get_registry
     from koda.plugins.registry import PluginManifest, PluginToolDef
@@ -580,6 +667,12 @@ def ensure_installed_package_tools_registered(agent_id: str | None = None, *, fo
         if not tools:
             continue
         _unregister_plugin_if_present(package_id)
+        integrity = verify_skill_package_integrity(lock)
+        if integrity["status"] != "verified":
+            _REGISTERED_PACKAGE_IDS.discard(key)
+            refused[package_id] = integrity
+            _report_modified_package(normalized_agent, lock, integrity)
+            continue
         manifest = PluginManifest(
             name=package_id,
             version=str(lock.get("version") or "0.0.0"),
@@ -590,11 +683,13 @@ def ensure_installed_package_tools_registered(agent_id: str | None = None, *, fo
             prompt_section="",
             requires={"source": "skill_package"},
         )
-        err = registry.register(manifest)
+        with _source_only_imports():
+            err = registry.register(manifest)
         if err:
             log.warning("skill_package_tool_registration_failed", package_id=package_id, error=err)
             continue
         _REGISTERED_PACKAGE_IDS.add(key)
+    return refused
 
 
 def skill_package_error_response(exc: SkillPackageError) -> dict[str, Any]:
@@ -765,6 +860,10 @@ def _hash_package(package_dir: Path, findings: list[SkillScanFinding]) -> tuple[
     total_bytes = 0
     for file_path in files:
         rel = _rel(package_dir, file_path)
+        if "__pycache__" in Path(rel).parts:
+            # Bytecode caches change whenever Python imports the package and are never loaded
+            # (see _source_only_imports), so they are not part of the approved package.
+            continue
         try:
             content = file_path.read_bytes()
         except OSError as exc:

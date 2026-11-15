@@ -155,6 +155,45 @@ class TestPluginInstall:
         assert _package.get_skill_package_lock("ATLAS", "legacy_plugin") is None
 
 
+class TestPluginReload:
+    @pytest.mark.asyncio
+    async def test_reload_reports_a_package_changed_after_approval_as_not_loaded(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """D-037: the reload does not claim success for a package whose files changed."""
+        from koda import plugins
+        from koda.plugins.registry import PluginRegistry
+        from koda.services import tool_registry
+        from koda.services.tool_dispatcher import _handle_plugin_reload
+        from koda.skills import _package
+
+        registry = PluginRegistry()
+        monkeypatch.setattr(plugins, "get_registry", lambda: registry)
+        monkeypatch.setattr(_package, "PLUGIN_SYSTEM_ENABLED", True)
+        monkeypatch.setattr(_package, "_REGISTERED_PACKAGE_IDS", set())
+        monkeypatch.setattr(_package, "STATE_ROOT_DIR", tmp_path / "state")
+        monkeypatch.setattr(_package, "_primary_backend", lambda _agent_id: None)
+        monkeypatch.setattr(_package, "AGENT_ID", "ATLAS")
+        monkeypatch.setattr("koda.config.AGENT_ID", "ATLAS")
+        tool_registry._DEFAULT_REGISTRY_CACHE.clear()
+        package_dir = _write_plugin_package(tmp_path)
+        _package.install_skill_package(package_dir, agent_id="ATLAS")
+        assert registry.get_handler("legacy_read_value") is not None
+        (package_dir / "handlers.py").write_text(
+            "async def read_value(params, ctx):\n    return 'changed'\n",
+            encoding="utf-8",
+        )
+
+        with patch("koda.services.tool_dispatcher.PLUGIN_SYSTEM_ENABLED", True):
+            result = await _handle_plugin_reload({"name": "legacy_plugin"}, _make_ctx())
+
+        assert not result.success
+        assert "changed after" in result.output
+        assert registry.get_handler("legacy_read_value") is None
+
+
 class TestPluginUninstall:
     @pytest.mark.asyncio
     async def test_missing_name(self) -> None:

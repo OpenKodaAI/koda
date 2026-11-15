@@ -171,3 +171,22 @@ async def test_operator_install_route_refuses_a_review_of_another_package_hash(t
     assert response.status == 409
     assert json.loads(response.text)["error"]["code"] == "skill.review_hash_mismatch"
     assert get_skill_package_lock("KODA", "net_pack") is None
+
+
+@pytest.mark.asyncio
+async def test_rollback_route_answers_409_for_a_revision_whose_files_changed() -> None:
+    from koda.skills._package import SkillPackageError
+
+    error = SkillPackageError(
+        "skill.package_modified",
+        "Package 'safe_pack' version 1.0.0 cannot be rolled back.",
+        category="non_retryable",
+        user_action="Reinstall the package version you want from its source, and review it again.",
+    )
+    request = _JsonRequest(match_info={"agent_id": "KODA", "package_id": "safe_pack"})
+
+    with patch("koda.skills._package.rollback_skill_package", side_effect=error):
+        response = await control_plane_api.rollback_skill_package_route(request)
+
+    assert response.status == 409
+    assert json.loads(response.text)["error"]["code"] == "skill.package_modified"
