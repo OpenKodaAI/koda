@@ -86,7 +86,7 @@ operator reinstalls and reviews the package to load it again.
 The check reads each package file once, and the code that runs is the bytes it
 hashed, never a later read of the files, so a file rewritten after the check
 does not run (D-292). The handlers compile from those bytes, and from the time
-a package registers, for the rest of the process, so does every module file
+a package registers until it is unregistered or uninstalled, so does every module file
 inside its directory, however package code loads it, while the handlers
 register or later, at tool-call time: an `import` statement,
 `importlib.util.spec_from_file_location` or a `SourceFileLoader` of its own all
@@ -163,6 +163,13 @@ A registered package changed on disk keeps running the bytes that were
 verified, and is checked again whenever it registers again: `plugin_reload`
 reloads a package from its lock, which hashes the files first, and the plugin
 registry never reloads a skill package from its files.
+
+Unregistering a skill package (on uninstall, and before it registers again on
+install, reinstall, rollback or `plugin_reload`) drops its directory from that
+lookup and removes from `sys.modules` every module whose file lies under it,
+the modules package code imported under its own names included, so an import
+after a reinstall runs the bytes verified for that install rather than a module
+object kept from before (D-310).
 
 A rollback restores the previous lock, not the previous files. When the files
 on disk no longer hash to that revision's `package_hash`, for example because

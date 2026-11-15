@@ -436,6 +436,10 @@ def uninstall_skill_package(agent_id: str | None, package_id: str) -> dict[str, 
     _delete_skill_package_lock(normalized_agent, package_id)
     _emit_package_audit("skill_package.uninstall", normalized_agent, {"lock": _lock_summary(lock)})
     _unregister_plugin_if_present(package_id)
+    package_path = str(lock.get("package_path") or "").strip()
+    if package_path:
+        # Unregistering drops a registered package's root; this also drops one that never registered (D-310).
+        _PACKAGE_SOURCE_ONLY_CODE.remove_root(Path(package_path))
     _clear_tool_registry_cache()
     _emit_package_metric(
         agent_id=normalized_agent,
@@ -694,15 +698,15 @@ class _PackageSourceOnlyCode:
     code loads the module (an import statement, ``importlib.util.spec_from_file_location``
     or a ``SourceFileLoader`` of its own). Every one of those ends in
     ``SourceFileLoader.get_code``, so once a package registers, that method compiles a file
-    inside a package directory from the bytes its integrity check read and hashed, for the
-    rest of the process, and refuses a file that was not hashed. A file is found by the
-    path the loader was given, so a file or directory inside a package swapped for a symlink
-    after the check still maps to the bytes hashed at that place. Only when no bytes were
-    hashed at that path is it matched by its real path too: inside the same package, which
-    is how a file reached through a directory symlink inside the package (``alias -> real``,
-    which the hash does not enter) maps to the bytes hashed at ``real`` (D-309), and outside
-    every package for a path that is. Python reads a compiled
-    module (a ``.pyc`` without its source, an extension module) or a module in an archive
+    inside a package directory from the bytes its integrity check read and hashed, until the
+    package is unregistered or uninstalled (D-310), and refuses a file that was not hashed. A
+    file is found by the path the loader was given, so a file or directory inside a package
+    swapped for a symlink after the check still maps to the bytes hashed at that place. Only
+    when no bytes were hashed at that path is it matched by its real path too: inside the
+    same package, which is how a file reached through a directory symlink inside the package
+    (``alias -> real``, which the hash does not enter) maps to the bytes hashed at ``real``
+    (D-309), and outside every package for a path that is. Python reads a compiled module (a
+    ``.pyc`` without its source, an extension module) or a module in an archive
     (``zipimport``) from disk when it loads it, so one inside a package directory is
     refused. Every other file keeps the usual cache lookup, and no import searches the path
     more than it did before.
@@ -754,6 +758,22 @@ class _PackageSourceOnlyCode:
             importlib.machinery.ExtensionFileLoader.create_module = create_module  # type: ignore[method-assign, assignment]
             zipimport.zipimporter.get_code = zip_get_code  # type: ignore[method-assign, assignment]
             zipimport.zipimporter.load_module = zip_load_module  # type: ignore[method-assign, assignment]
+
+    def remove_root(self, package_dir: Path) -> None:
+        """Forget a package that is unregistered or uninstalled, and every module loaded from under it (D-310).
+
+        Its files no longer map to bytes verified for a registration that ended, and a module
+        package code imported under its own name is not kept, so the next import after a
+        reinstall loads the bytes verified then instead of returning the old module object.
+        """
+        roots = (os.path.join(os.path.abspath(package_dir), ""), os.path.join(os.path.realpath(package_dir), ""))
+        self._sources = {root: sources for root, sources in self._sources.items() if root not in roots}
+        for name, module in list(sys.modules.items()):
+            file = module.__dict__.get("__file__") if isinstance(module, types.ModuleType) else None
+            if isinstance(file, str) and (
+                os.path.abspath(file).startswith(roots) or os.path.realpath(file).startswith(roots)
+            ):
+                sys.modules.pop(name, None)
 
     def _package_file(self, path: str) -> tuple[dict[str, bytes], str] | None:
         """The verified bytes of the package *path* is in, and *path* under its root; None outside every package."""

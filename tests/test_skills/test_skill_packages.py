@@ -804,6 +804,48 @@ def test_a_module_or_handler_reached_through_a_directory_symlink_in_the_package_
     assert result.output == "safe"
 
 
+def test_a_reinstalled_package_imports_its_new_bytes_and_an_uninstalled_one_leaves_no_module_or_root_behind(
+    tmp_path: Path, plugin_registry: object
+) -> None:
+    """D-310: unregistering a package drops its root and every module loaded from under it."""
+    import asyncio
+
+    from koda.plugins.registry import PluginRegistry
+    from koda.skills import _package
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    (package_dir / "handlers.py").write_text(_LAZY_IMPORT_HANDLER, encoding="utf-8")
+    notes = package_dir / "safe_pack_notes.py"
+    notes.write_text('NOTES = "first install"\n', encoding="utf-8")
+    root = str(package_dir.resolve())
+
+    def call_handler() -> object:
+        handler = plugin_registry.get_handler("safe_notes")  # type: ignore[attr-defined]
+        assert handler is not None
+        return asyncio.run(handler({}, None)).output
+
+    try:
+        install_skill_package(package_dir, agent_id="ATLAS")
+        first = call_handler()
+        notes.write_text('NOTES = "reinstalled"\n', encoding="utf-8")
+        install_skill_package(package_dir, agent_id="ATLAS")
+        second = call_handler()
+        uninstall_skill_package("ATLAS", "safe_pack")
+        left_behind = [
+            name
+            for name, module in list(sys.modules.items())
+            if str(getattr(module, "__file__", "") or "").startswith(root)
+        ]
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
+
+    assert first == "first install"
+    assert second == "reinstalled"
+    assert left_behind == []
+    assert _package._PACKAGE_SOURCE_ONLY_CODE._package_file(str(notes)) is None
+
+
 _ZIP_IMPORT_HANDLER = """
 import sys
 from pathlib import Path

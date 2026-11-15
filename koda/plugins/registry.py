@@ -88,6 +88,11 @@ class PluginRegistry:
         to_remove = [k for k in sys.modules if k.startswith(prefix)]
         for k in to_remove:
             del sys.modules[k]
+        if manifest.sources is not None:
+            # A skill package: drop its root and the modules its code imported under its own names (D-310).
+            from koda.skills._package import _PACKAGE_SOURCE_ONLY_CODE
+
+            _PACKAGE_SOURCE_ONLY_CODE.remove_root(manifest.plugin_dir)
         log.info("plugin_unregistered", name=plugin_name)
         return None
 
