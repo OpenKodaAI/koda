@@ -697,8 +697,11 @@ class _PackageSourceOnlyCode:
     inside a package directory from the bytes its integrity check read and hashed, for the
     rest of the process, and refuses a file that was not hashed. A file is found by the
     path the loader was given, so a file or directory inside a package swapped for a symlink
-    after the check still maps to the bytes hashed at that place, or to none; only a path
-    outside every package is matched by its real path as well. Python reads a compiled
+    after the check still maps to the bytes hashed at that place. Only when no bytes were
+    hashed at that path is it matched by its real path too: inside the same package, which
+    is how a file reached through a directory symlink inside the package (``alias -> real``,
+    which the hash does not enter) maps to the bytes hashed at ``real`` (D-309), and outside
+    every package for a path that is. Python reads a compiled
     module (a ``.pyc`` without its source, an extension module) or a module in an archive
     (``zipimport``) from disk when it loads it, so one inside a package directory is
     refused. Every other file keeps the usual cache lookup, and no import searches the path
@@ -769,6 +772,15 @@ class _PackageSourceOnlyCode:
             return self._default_get_code(loader, fullname)
         package_sources, relative_path = package_file
         source = package_sources.get(relative_path)
+        if source is None:
+            real_path = os.path.realpath(path)
+            real_roots = [
+                root
+                for root, sources in self._sources.items()
+                if sources is package_sources and real_path.startswith(root)
+            ]
+            if real_roots:
+                source = package_sources.get(real_path[len(max(real_roots, key=len)) :])
         if source is None:
             raise ImportError(f"{path} is not a verified file of an installed skill package.", name=fullname, path=path)
         return loader.source_to_code(source, path)

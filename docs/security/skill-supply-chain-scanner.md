@@ -95,9 +95,14 @@ end in `SourceFileLoader.get_code`, which for those files reads neither a
 the path the module is loaded from, under the package directory, not by where
 a symlink there points: a file or a directory in the package swapped for a
 symlink after the check, to a file outside the package or to another package
-file, still runs the bytes hashed at that path. A module file that was not
-hashed, for example one added after the check, is refused with an
-`ImportError`. A compiled module inside a package's directory (a `.pyc` without
+file, still runs the bytes hashed at that path. Only when no bytes were hashed
+at that path is a module looked up by its real path in the same package too:
+a directory symlink inside the package that points inside it (`alias -> real`)
+is allowed, the hash covers its files once, at `real/`, and a module or a
+declared handler reached through `alias/` runs the bytes hashed at its real
+path (D-309); a symlink out of the package is denied at scan. A module file
+that was not hashed at its path or at its real path, for example one added
+after the check, is refused with an `ImportError`. A compiled module inside a package's directory (a `.pyc` without
 its source, an extension module) and a module in an archive there (a `.zip`
 that package code puts on `sys.path` or opens with `zipimport`) are refused
 too, because Python would read them from disk when they load: package code

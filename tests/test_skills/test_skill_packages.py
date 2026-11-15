@@ -765,6 +765,45 @@ def test_a_package_path_swapped_for_a_symlink_after_registration_runs_the_bytes_
     assert result.output == "safe"
 
 
+@pytest.mark.parametrize("handler_through", ["real", "alias"])
+def test_a_module_or_handler_reached_through_a_directory_symlink_in_the_package_runs_the_bytes_hashed_at_its_real_path(
+    tmp_path: Path, plugin_registry: object, handler_through: str
+) -> None:
+    """D-309: a directory symlink inside the package is allowed; what loads through it runs the bytes of its target."""
+    import asyncio
+
+    from koda.plugins.registry import PluginRegistry
+
+    assert isinstance(plugin_registry, PluginRegistry)
+    package_dir = _write_safe_package(tmp_path)
+    real = package_dir / "real"
+    real.mkdir()
+    (real / "handlers.py").write_text(
+        _LAZY_IMPORT_HANDLER.replace("Path(__file__).parent)", 'Path(__file__).parent.parent / "alias")'),
+        encoding="utf-8",
+    )
+    (real / "safe_pack_notes.py").write_text('NOTES = "safe"\n', encoding="utf-8")
+    (package_dir / "alias").symlink_to("real", target_is_directory=True)
+    manifest = package_dir / "koda-skill.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace(
+            "handler: handlers.read_notes", f"handler: {handler_through}.handlers.read_notes"
+        ),
+        encoding="utf-8",
+    )
+    install_skill_package(package_dir, agent_id="ATLAS")
+    handler = plugin_registry.get_handler("safe_notes")
+    assert handler is not None
+
+    (real / "safe_pack_notes.py").write_text('NOTES = "changed after registration"\n', encoding="utf-8")
+    try:
+        result = asyncio.run(handler({}, None))
+    finally:
+        sys.modules.pop("safe_pack_notes", None)
+
+    assert result.output == "safe"
+
+
 _ZIP_IMPORT_HANDLER = """
 import sys
 from pathlib import Path
