@@ -32,3 +32,18 @@ def test_memory_safety_assert_raises_actionable_error() -> None:
     assert envelope["category"] == "policy_denied"
     assert envelope["retryable"] is False
     assert "Remove" in envelope["user_action"]
+
+
+@pytest.mark.parametrize(
+    "secret",
+    ["AKIAIOSFODNN7EXAMPLE", "sk-abcdefghijklmnopqrst", "api key: hunter2hunter2hunter2"],
+)
+def test_credential_leakage_preview_never_carries_the_credential(secret: str) -> None:
+    result = scan_memory_text(f"note {secret} end")
+
+    (finding,) = [item for item in result.findings if item.category == "credential_leakage"]
+    assert "[REDACTED]" in finding.match_preview
+    for part in ("AKIAIOSFODNN7EXAMPLE", "abcdefghijklmnopqrst", "hunter2hunter2hunter2"):
+        assert part not in finding.match_preview
+        assert part not in str(finding.to_dict())
+        assert part not in result.redacted_preview

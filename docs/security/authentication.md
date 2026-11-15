@@ -469,11 +469,13 @@ message would reveal that the account exists.
   it at startup. `LOG_FORMAT=json` writes one JSON object per line on stdout; any other value
   writes console lines. The pipeline replaces with `[REDACTED]` the value of every top-level event
   key that the shared redactor (`koda/security/redaction.py`, the one audit, runtime and evals use)
-  treats as sensitive: a key that contains, in any case, `auth`, `token`, `secret`, `password`,
-  `passwd`, `cookie`, `session`, `credential`, `api_key`/`apikey`, `access_key`, `private_key`,
-  `recovery_code` or `bootstrap_code`, or a key that is exactly `code` (so `password`,
-  `session_token`, `totp_secret` and `authorization` are masked, while `exit_code` and
-  `code_source` are not). It does not look inside nested values or rewrite other values, and
+  treats as sensitive: a key that contains, in any case, `authorization`, `token`, `secret`,
+  `password`, `passwd`, `cookie`, `credential`, `api_key`/`apikey`, `access_key`, `private_key`,
+  `recovery_code`, `bootstrap_code` or the PT-BR `senha`, `segredo`, `chave_api`,
+  `credencial`/`credenciais`; a key whose last word is `auth` or `auth_header` (`auth`,
+  `basic_auth`); or a key that is exactly `code` or `session` (so `password`, `session_token`,
+  `totp_secret` and `authorization` are masked, while `exit_code`, `code_source`, `session_id`
+  and `auth_mode` are not). It does not look inside nested values or rewrite other values, and
   records from the standard `logging` module, such as third-party libraries', are formatted (with
   the same `level`, `logger` and `timestamp` keys) but not redacted. Both formats print an
   exception's plain traceback, its type, message and stack, without local variables: a console

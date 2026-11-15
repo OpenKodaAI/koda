@@ -84,15 +84,6 @@ RUN_GRAPH_EDGE_TYPES = frozenset(
 
 _TEXT_PREVIEW_CHARS = 240
 _HASH_PREVIEW_CHARS = 12
-_SENSITIVE_KEY_PARTS = (
-    "api_key",
-    "auth",
-    "credential",
-    "password",
-    "private_key",
-    "secret",
-    "token",
-)
 
 
 def _now_iso() -> str:
@@ -154,31 +145,7 @@ def _clip_text(value: Any, *, limit: int = _TEXT_PREVIEW_CHARS) -> str | None:
 
 
 def _redacted_payload(value: Any) -> dict[str, Any]:
-    try:
-        redacted = redact_value(value)
-    except Exception:
-        redacted = _fallback_redact_value(value)
-    return _dict(_fallback_redact_value(redacted))
-
-
-def _fallback_redact_value(value: Any, *, key_hint: str | None = None) -> Any:
-    """Conservative local redaction used when the security sidecar is down."""
-
-    key = str(key_hint or "").lower()
-    if any(part in key for part in _SENSITIVE_KEY_PARTS):
-        return "[REDACTED]"
-    if isinstance(value, Mapping):
-        return {str(item_key): _fallback_redact_value(item, key_hint=str(item_key)) for item_key, item in value.items()}
-    if isinstance(value, list):
-        return [_fallback_redact_value(item, key_hint=key_hint) for item in value]
-    if isinstance(value, tuple):
-        return [_fallback_redact_value(item, key_hint=key_hint) for item in value]
-    if isinstance(value, str):
-        stripped = value.strip()
-        lowered = stripped.lower()
-        if any(part in lowered for part in _SENSITIVE_KEY_PARTS) and len(stripped) > 12:
-            return "[REDACTED]"
-    return value
+    return _dict(redact_value(value))
 
 
 def make_graph_id(agent_id: str, task_id: int, attempt: int = 1) -> str:

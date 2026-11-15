@@ -4,7 +4,7 @@ Each vector is an input payload and the literal output every redacting path must
 it: the shared redactor itself, the runtime store, the audit trail, the eval trajectory
 export and, for the top-level key vectors, the structured-log processor. The paths are
 resolved lazily so a path that still runs its own patterns fails on the vector it handles
-differently instead of on an import.
+differently instead of on an import. Field names come in English and PT-BR.
 """
 
 from __future__ import annotations
@@ -26,11 +26,12 @@ KEY_VECTORS: list[tuple[dict[str, Any], dict[str, Any]]] = [
     ({"password": "hunter2", "user": "admin"}, {"password": R, "user": "admin"}),
     ({"Authorization": "abc", "status": "ok"}, {"Authorization": R, "status": "ok"}),
     ({"SESSION_TOKEN": "kodas_abc"}, {"SESSION_TOKEN": R}),
-    ({"session_id": "s-1"}, {"session_id": R}),
+    ({"session": "cookie-value"}, {"session": R}),
     ({"credentials": "admin:123"}, {"credentials": R}),
     ({"access_key": "AKIA1"}, {"access_key": R}),
     ({"private_key": "-----BEGIN"}, {"private_key": R}),
     ({"auth_header": "x"}, {"auth_header": R}),
+    ({"auth": "u:p", "basic_auth": "u:p", "x-auth": "k"}, {"auth": R, "basic_auth": R, "x-auth": R}),
     ({"recovery_code": "aaaa-bbbb"}, {"recovery_code": R}),
     ({"bootstrap_code": "ABCD-EFGH"}, {"bootstrap_code": R}),
     ({"code": "123456"}, {"code": R}),
@@ -38,6 +39,24 @@ KEY_VECTORS: list[tuple[dict[str, Any], dict[str, Any]]] = [
     (
         {"exit_code": 0, "status_code": 200, "code_source": "generated", "phase": "executing"},
         {"exit_code": 0, "status_code": 200, "code_source": "generated", "phase": "executing"},
+    ),
+    # Identifiers that hold no secret: a session id and keys that only contain "auth".
+    (
+        {"session_id": "s-1", "provider_session_id": "p-1", "author": "Ana", "auth_mode": "oauth"},
+        {"session_id": "s-1", "provider_session_id": "p-1", "author": "Ana", "auth_mode": "oauth"},
+    ),
+    (
+        {"authoritative": True, "authority_scope": "full", "full_authority": False},
+        {"authoritative": True, "authority_scope": "full", "full_authority": False},
+    ),
+    # PT-BR field names.
+    (
+        {"senha": "hunter2", "nova_senha": "x", "chave_api": "k", "segredo": "s", "credenciais": "c"},
+        {"senha": R, "nova_senha": R, "chave_api": R, "segredo": R, "credenciais": R},
+    ),
+    (
+        {"token_de_acesso": "t", "usuario": "ana", "descricao": "ok", "desenhar": "x"},
+        {"token_de_acesso": R, "usuario": "ana", "descricao": "ok", "desenhar": "x"},
     ),
 ]
 
@@ -56,6 +75,23 @@ VALUE_VECTORS: list[tuple[Any, Any]] = [
     ("https://example.com/api?token=mytoken123&x=1", f"https://example.com/api?token={R}&x=1"),
     ("deploy with token=sk-live", f"deploy with token={R}"),
     ("your token is abcdefghijklmnopqrstuvwxyz123456", f"your token is {R}"),
+    # Credential shapes from the memory-safety fallback.
+    ("key AKIAIOSFODNN7EXAMPLE here", f"key {R} here"),
+    ("sk-abcdefghijklmnopqrst", R),
+    ("ghp_abcdefghijklmnopqrstuvwxyz0123", R),
+    ("api key: hunter2hunter2", f"api key: {R}"),
+    ("access token = abc", f"access token = {R}"),
+    # PT-BR inline secrets.
+    ("senha=hunter2 e mais", f"senha={R} e mais"),
+    ("segredo: abc", f"segredo: {R}"),
+    ("chave_api=k1", f"chave_api={R}"),
+    # Long identifiers that are not secrets: tool names, directories, UUID and file names.
+    ("mcp__github__pull_request_review_write", "mcp__github__pull_request_review_write"),
+    ("/home/user/projects/my_very_long_project_directory", "/home/user/projects/my_very_long_project_directory"),
+    (
+        "/srv/koda/artifacts/1b4e28ba-2fa1-11d2-883f-0016d3cca427/quarterly_financial_report_2026.pdf",
+        "/srv/koda/artifacts/1b4e28ba-2fa1-11d2-883f-0016d3cca427/quarterly_financial_report_2026.pdf",
+    ),
     (
         {"a": [{"api_key": "k", "name": "alice"}, "Bearer xyz"]},
         {"a": [{"api_key": R, "name": "alice"}, f"Bearer {R}"]},
@@ -96,6 +132,27 @@ def _evals_export(value: dict[str, Any]) -> Any:
     return node["payload"]
 
 
+def _run_graph(value: dict[str, Any]) -> Any:
+    run_graph = importlib.import_module("koda.services.run_graph")
+    node = run_graph.RunGraphNode(
+        node_id="n1",
+        graph_id="g1",
+        agent_id="KODA",
+        task_id=1,
+        attempt=1,
+        node_type="tool_result",
+        status="completed",
+        ordinal=0,
+        summary="",
+        payload=value,
+    )
+    edge = run_graph.RunGraphEdge(
+        edge_id="e1", graph_id="g1", from_node_id="n1", to_node_id="n1", edge_type="emits", ordinal=0, payload=value
+    )
+    assert edge.payload == node.payload
+    return node.payload
+
+
 def _structured_log(value: dict[str, Any]) -> Any:
     logging_config = importlib.import_module("koda.logging_config")
     return dict(logging_config._redact_sensitive(object(), "info", dict(value)))
@@ -106,6 +163,7 @@ VALUE_PATHS: dict[str, Callable[[dict[str, Any]], Any]] = {
     "runtime_store": _runtime_store,
     "audit": _audit,
     "evals_export": _evals_export,
+    "run_graph": _run_graph,
 }
 # The log processor only masks top-level keys: it never rewrites event names or ids.
 KEY_PATHS: dict[str, Callable[[dict[str, Any]], Any]] = {**VALUE_PATHS, "structured_log": _structured_log}
@@ -136,6 +194,7 @@ def test_old_modules_no_longer_carry_a_redactor() -> None:
     owned_elsewhere = {
         "koda.services.audit": ("_SENSITIVE_KEY_RE", "_INLINE_SECRET_PATTERNS", "_redact_string", "_sanitize_payload"),
         "koda.services.evals": ("redacted", "_fallback_redact"),
+        "koda.services.run_graph": ("_SENSITIVE_KEY_PARTS", "_fallback_redact_value"),
         "koda.services.provider_env": ("redact_runtime_value",),
         "koda.logging_config": ("_REDACTED_KEYS",),
     }
