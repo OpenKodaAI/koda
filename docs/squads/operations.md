@@ -23,7 +23,9 @@ For dense multi-agent deployments, size Postgres connections explicitly. The
 Postgres bus defaults to `pool_min_size=0` to avoid idle connection fan-out. If
 the supervisor/API process owns LISTEN fan-out or the deployment is behind a
 pooler that does not support LISTEN, set `SQUAD_BUS_LISTEN_ENABLED=false` and
-rely on the bus polling interval.
+rely on the bus polling interval. A pooler must also forward the `search_path`
+startup parameter the workers send (for PgBouncer, `track_extra_parameters`; see
+[Postgres settings](../config/reference.md#postgres)).
 
 ## Required Validation
 

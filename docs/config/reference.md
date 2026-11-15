@@ -128,6 +128,14 @@ Claude, Codex, Gemini, ElevenLabs and Ollama Cloud.
 - `KODA_MEMORY_POSTGRES_POOL_MAX_SIZE`
 - `KODA_ARTIFACT_POSTGRES_POOL_MAX_SIZE`
 
+The Python workers open each Postgres connection with `search_path` set to
+`KNOWLEDGE_V2_POSTGRES_SCHEMA` (then `public`) as a startup parameter, and their state
+queries rely on it to find their tables. A connection pooler between the workers and
+Postgres must forward that parameter. With PgBouncer, list `search_path` in
+`track_extra_parameters` (PgBouncer 1.20 or later; use 1.25.1 or later, which fixes a
+vulnerability in that configuration) and never in `ignore_startup_parameters`, which
+drops it. PgBouncer releases before 1.26 refuse the connection without that setting.
+
 ### Object Storage
 
 - `KNOWLEDGE_V2_STORAGE_MODE`

@@ -9,41 +9,17 @@ import functools
 import os
 import re
 import threading
-from datetime import UTC, date, datetime, timedelta, tzinfo
+from datetime import UTC, date, datetime, timedelta, timezone, tzinfo
 from typing import Any, cast
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import koda.config as config_module
 
-# Parts of a statement whose text is not SQL to rewrite: string literals
-# (escape strings first, so a backslash-escaped quote does not end them),
-# quoted identifiers, dollar-quoted bodies and comments.
-_SQL_OPAQUE_RE = re.compile(
-    r"(?<!\w)[Ee]'(?:[^'\\]|\\.|'')*'"
-    r"|'(?:[^']|'')*'"
-    r'|"(?:[^"]|"")*"'
-    r"|\$(?P<tag>[A-Za-z_]\w*|)\$.*?\$(?P=tag)\$"
-    r"|--[^\n]*"
-    r"|/\*.*?\*/",
-    re.DOTALL,
-)
-# Bare names where a statement names tables: after FROM, USING, TRUNCATE and
-# TABLE a comma-separated list ("TRUNCATE a, b"; "FROM a x, b y", where an
-# alias counts only when a comma follows it, so "FROM a JOIN b" still sees
-# JOIN), after the other keywords one name. A name followed by "." is
-# already qualified, or is a column reference such as ``tasks.id``.
-_SQL_TABLE_ITEM = r"[A-Za-z_]\w*(?:\s+(?:AS\s+)?[A-Za-z_]\w*(?=\s*,))?"
-_SQL_TABLE_POSITION_RE = re.compile(
-    r"(?P<lead>\b(?P<keyword>FROM|USING|TRUNCATE(?:\s+TABLE)?|TABLE|JOIN|INTO|UPDATE|REFERENCES|ON)\s+"
-    r"(?:(?:ONLY|IF\s+NOT\s+EXISTS|IF\s+EXISTS)\s+)?)"
-    rf"(?P<names>{_SQL_TABLE_ITEM}(?:\s*,\s*{_SQL_TABLE_ITEM})*)\b(?!\s*\.)",
-    re.IGNORECASE,
-)
-_SQL_TABLE_LIST_KEYWORDS = ("FROM", "USING", "TRUNCATE", "TABLE")
-_SQL_ITEM_NAME_RE = re.compile(r"(?P<space>\s*)(?P<name>[A-Za-z_]\w*)(?P<rest>.*)", re.DOTALL)
-_SQL_CREATE_TABLE_RE = re.compile(
-    r"\bCREATE\s+(?:UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?P<name>[A-Za-z_]\w*)\b(?!\s*\.)",
-    re.IGNORECASE,
+# A numeric-offset TimeZone as Postgres reports it, in POSIX form: an optional
+# zone name (``<-03>``, ``UTC``) and an offset west of UTC, so ``<-03>+03`` is
+# UTC-3. A form with a daylight-saving part (``EST5EDT``) does not match.
+_POSIX_OFFSET_ZONE_RE = re.compile(
+    r"(?:<[^<>]*>|[A-Za-z]{3,})?(?P<sign>[+-]?)(?P<hours>\d{1,2})(?::(?P<minutes>\d{2})(?::(?P<seconds>\d{2}))?)?"
 )
 
 # asyncpg's ``tuple`` format for timestamps: microseconds since 2000-01-01,
@@ -257,55 +233,6 @@ def _normalize_primary_value(value: Any) -> Any:
     return value
 
 
-def _schema_qualified(query: str, schema: str, tables: set[str]) -> str:
-    """Return ``query`` with each table of the backend schema schema-qualified.
-
-    The ``primary_*`` helpers run SQL that names tables without a schema. They
-    qualify it here instead of setting ``search_path`` on the connection,
-    which a pooler such as PgBouncer refuses as a startup parameter (D-076).
-    Only names in ``tables`` change, so columns, functions and CTEs stay as
-    written. A ``CREATE TABLE`` puts its table in the schema and adds the name
-    to ``tables``, for the stores that create their table on first use.
-    """
-    prefix = '"' + schema.replace('"', '""') + '".'
-
-    def _qualify_item(item: str) -> str:
-        parts = _SQL_ITEM_NAME_RE.match(item)
-        if parts is None or parts.group("name").lower() not in tables:
-            return item
-        return parts.group("space") + prefix + parts.group("name") + parts.group("rest")
-
-    def _qualify(match: re.Match[str]) -> str:
-        items = match.group("names").split(",")
-        if match.group("keyword").split()[0].upper() in _SQL_TABLE_LIST_KEYWORDS:
-            items = [_qualify_item(item) for item in items]
-        else:
-            items[0] = _qualify_item(items[0])
-        return match.group("lead") + ",".join(items)
-
-    chunks: list[str] = []
-    position = 0
-    for opaque in _SQL_OPAQUE_RE.finditer(query):
-        chunks.append(query[position : opaque.start()])
-        chunks.append(opaque.group(0))
-        position = opaque.end()
-    chunks.append(query[position:])
-    for index in range(0, len(chunks), 2):
-        for created in _SQL_CREATE_TABLE_RE.finditer(chunks[index]):
-            tables.add(created.group("name").lower())
-        chunks[index] = _SQL_TABLE_POSITION_RE.sub(_qualify, chunks[index])
-    return "".join(chunks)
-
-
-def _primary_sql(backend: Any, query: str) -> str:
-    """The statement a ``primary_*`` helper sends: schema-qualified, ``$n`` placeholders."""
-    schema = getattr(backend, "schema", None)
-    tables = getattr(backend, "table_names", None)
-    if isinstance(schema, str) and isinstance(tables, set):
-        query = _schema_qualified(query, schema, tables)
-    return _normalize_qmark_placeholders(query)
-
-
 def _parse_timestamp_text(value: str) -> datetime:
     """Parse the ISO-8601 text legacy callers pass for timestamp parameters.
 
@@ -327,11 +254,26 @@ def _parse_timestamp_text(value: str) -> datetime:
 
 @functools.lru_cache(maxsize=32)
 def _time_zone(name: str) -> tzinfo:
+    """The session TimeZone, for ISO strings without an offset.
+
+    An IANA name, or a numeric offset in the POSIX form Postgres reports it in
+    (``SET TimeZone = '-03'`` reports ``<-03>+03``). Any other zone raises
+    ``ValueError``, which asyncpg reports as ``DataError``: reading the string
+    as UTC would shift the stored value by the zone's offset.
+    """
     try:
         return ZoneInfo(name)
     except (ValueError, ZoneInfoNotFoundError):
-        # A POSIX-style zone such as "<-03>+03" has no IANA entry.
-        return UTC
+        pass
+    posix = _POSIX_OFFSET_ZONE_RE.fullmatch(name)
+    if posix is None:
+        raise ValueError(f"cannot resolve the session TimeZone {name!r} for an ISO-8601 string without an offset")
+    west = timedelta(
+        hours=int(posix["hours"]),
+        minutes=int(posix["minutes"] or 0),
+        seconds=int(posix["seconds"] or 0),
+    )
+    return timezone(west if posix["sign"] == "-" else -west)
 
 
 def _session_time_zone(conn: Any) -> tzinfo:
@@ -460,7 +402,7 @@ async def primary_fetch_all(
         _fail_missing_backend("fetch_all")
         return []
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        rows = await conn.fetch(_primary_sql(backend, query), *tuple(params))
+        rows = await conn.fetch(_normalize_qmark_placeholders(query), *tuple(params))
     return [_normalize_primary_value(dict(row)) for row in rows]
 
 
@@ -475,7 +417,7 @@ async def primary_fetch_one(
         _fail_missing_backend("fetch_one")
         return None
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        row = await conn.fetchrow(_primary_sql(backend, query), *tuple(params))
+        row = await conn.fetchrow(_normalize_qmark_placeholders(query), *tuple(params))
     if row is None:
         return None
     return cast(dict[str, Any], _normalize_primary_value(dict(row)))
@@ -492,7 +434,7 @@ async def primary_fetch_val(
         _fail_missing_backend("fetch_val")
         return None
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        value = await conn.fetchval(_primary_sql(backend, query), *tuple(params))
+        value = await conn.fetchval(_normalize_qmark_placeholders(query), *tuple(params))
     return _normalize_primary_value(value)
 
 
@@ -507,7 +449,7 @@ async def primary_execute(
         _fail_missing_backend("execute")
         return 0
     async with backend._connection() as conn:  # noqa: SLF001 - controlled shared backend bridge
-        status = await conn.execute(_primary_sql(backend, query), *tuple(params))
+        status = await conn.execute(_normalize_qmark_placeholders(query), *tuple(params))
     try:
         return int(str(status).rsplit(" ", 1)[-1])
     except (TypeError, ValueError):

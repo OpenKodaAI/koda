@@ -6,9 +6,9 @@ connection after release, so a later knowledge-backend query on that connection
 got a string instead of a ``datetime``. Every ``set_type_codec`` call also
 dropped the connection's prepared-statement cache.
 
-The codec is now installed once per connection, when the backend opens it,
-and the helpers schema-qualify the SQL they run, so callers can be mixed on one
-pool and no connection carries a ``search_path`` of its own.
+The codec is now installed once per connection, when the backend opens it, and
+the schema is the connection's startup ``search_path``, so callers can be mixed
+on one pool and no call sets anything on the connection.
 """
 
 from __future__ import annotations
@@ -142,32 +142,36 @@ async def test_primary_helpers_on_a_direct_connection_get_the_same_setup(one_con
     assert row == {"timestamp": "2026-04-20T12:00:00+00:00"}
 
 
-async def test_primary_sql_is_schema_qualified_and_needs_no_search_path(
+async def test_primary_sql_resolves_names_through_the_startup_search_path(
     one_connection_backend: Any, migrated_postgres: str
 ) -> None:
-    """A connection pooler such as PgBouncer refuses a ``search_path`` startup
-    parameter by default, and drops it when told to ignore it. The pool must
-    therefore keep the server's own search_path, and the primary helpers must
-    reach the backend schema through schema-qualified SQL: a same-named table
-    in ``public`` must not be read."""
+    """Connections start with ``search_path`` set to the backend schema, so the
+    primary helpers' SQL resolves names the way Postgres does: a CTE named like
+    a schema table reads the CTE, a quoted name reads the schema table (not a
+    same-named table in ``public``), and ``current_schema()`` is the backend
+    schema. The setting is a startup parameter, so it survives the ``RESET ALL``
+    asyncpg runs when the pooled connection is released between calls."""
     from koda.state.primary import primary_fetch_val
 
     backend = one_connection_backend
     await _insert_history_row("2026-04-20T12:00:00+00:00")
     plain = await asyncpg.connect(migrated_postgres)
     try:
-        server_search_path = await plain.fetchval("SHOW search_path")
         await plain.execute("CREATE TABLE public.query_history (user_id BIGINT, timestamp TIMESTAMPTZ)")
         await plain.execute(
             "INSERT INTO public.query_history VALUES ($1, now()), ($1, now()), ($1, now())",
             _USER_ID,
         )
-        async with backend._connection() as conn:
-            assert await conn.fetchval("SHOW search_path") == server_search_path
-
-        count = await primary_fetch_val(
-            "SELECT count(*) FROM query_history WHERE user_id = ?", (_USER_ID,), agent_id=_AGENT
+        cte = await primary_fetch_val(
+            "WITH query_history AS (SELECT ?::bigint AS user_id, 'cte' AS source) "
+            "SELECT source FROM query_history WHERE user_id = ?",
+            (_USER_ID, _USER_ID),
+            agent_id=_AGENT,
         )
+        quoted = await primary_fetch_val(
+            'SELECT count(*) FROM "query_history" WHERE user_id = ?', (_USER_ID,), agent_id=_AGENT
+        )
+        schema = await primary_fetch_val("SELECT current_schema()", agent_id=_AGENT)
         joined = await primary_fetch_val(
             """SELECT count(*) FROM query_history h
                  JOIN audit_events a ON a.agent_id = h.agent_id
@@ -179,8 +183,11 @@ async def test_primary_sql_is_schema_qualified_and_needs_no_search_path(
         await plain.execute("DROP TABLE IF EXISTS public.query_history")
         await plain.close()
 
-    assert count == 1
+    assert cte == "cte"
+    assert quoted == 1
+    assert schema == backend.schema
     assert joined == 0
+    assert backend._pool.get_size() == 1
 
 
 async def test_knowledge_backend_decodes_timestamps_inside_composites_and_ranges(
@@ -268,6 +275,28 @@ async def test_iso_strings_are_read_in_the_session_time_zone(migrated_postgres: 
         assert await conn.fetchval("SELECT $1::timestamp::text", "2026-04-20T12:00:00+02:00") == "2026-04-20 12:00:00"
         with pytest.raises(asyncpg.exceptions.DataError):
             await conn.fetchval("SELECT $1::timestamptz", "not a timestamp")
+        # Numeric-offset zones are reported in POSIX form, whose sign is
+        # inverted: '-03' is reported as '<-03>+03' and '+05:30' means UTC-5:30.
+        for zone, meant in (
+            ("-03", "2026-04-20 12:00:00-03"),
+            ("+05:30", "2026-04-20 12:00:00-05:30"),
+            ("UTC+3", "2026-04-20 12:00:00-03"),
+        ):
+            await conn.execute(f"SET TimeZone = '{zone}'")
+            assert await conn.fetchval(
+                "SELECT $1::timestamptz = $2::text::timestamptz", "2026-04-20T12:00:00", meant
+            ), zone
+        await conn.execute("SET TIME ZONE INTERVAL '+05:30' HOUR TO MINUTE")
+        assert await conn.fetchval(
+            "SELECT $1::timestamptz = $2::text::timestamptz", "2026-04-20T12:00:00", "2026-04-20 12:00:00+05:30"
+        )
+        # A zone the codec cannot resolve is refused, not read as UTC.
+        await conn.execute("SET TimeZone = 'XYZ3ABC'")
+        with pytest.raises(asyncpg.exceptions.DataError):
+            await conn.fetchval("SELECT $1::timestamptz", "2026-04-20T12:00:00")
+        assert await conn.fetchval("SELECT $1::timestamptz", "2026-04-20T12:00:00Z") == datetime(
+            2026, 4, 20, 12, tzinfo=UTC
+        )
     finally:
         await conn.close()
 
