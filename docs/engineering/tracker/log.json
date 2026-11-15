@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L28",
+   "at": "2026-11-15 05:32",
+   "event": "Lote 5 mesclado (e4091eb): 8938 testes Python, 382 Postgres, 1212 web. Entraram: limites para o prompt de MCP e cache de bytecode de pacotes; transações em cadastro do dono, recuperação de senha e exclusão de agentes; gate de migrations; corpus rotulado do scanner de memória; coordenador de squad sempre responde (o teste de deadlock D-019 agora passa); foco visível, seletor de idioma por teclado e um h1 por página; varreduras do runtime 70.008 -> 8 consultas; testes web 3,6x mais rápidos. Achado novo: /cancel não funcionava no Postgres (D-293), corrigido e aprovado para o lote 6"
+  },
+  {
    "id": "L27",
    "at": "2026-11-15 04:25",
    "event": "Novas faixas: autorização de squads (M1-E5-T1/T4), redirecionamento OAuth, isolamento MCP e pareamento de canais (M1-E3-T6, M1-E4-T6, M1-E5-T3), uso único de códigos de setup e recuperação (D-283). O redator único volta para uma terceira rodada: a revisão achou backtracking catastrófico (ReDoS) e custo quadrático"

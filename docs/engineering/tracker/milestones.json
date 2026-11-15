@@ -22,17 +22,17 @@
    "milestone": "M2",
    "name": "Integridade de dados",
    "total": 24,
-   "done": 5,
-   "in_progress": 2,
-   "awaiting_evidence": 0,
+   "done": 6,
+   "in_progress": 0,
+   "awaiting_evidence": 1,
    "remaining": 17
   },
   {
    "milestone": "M3",
    "name": "Jornadas críticas quebradas",
    "total": 43,
-   "done": 8,
-   "in_progress": 4,
+   "done": 12,
+   "in_progress": 0,
    "awaiting_evidence": 3,
    "remaining": 28
   },
@@ -76,8 +76,8 @@
    "milestone": "M8",
    "name": "UX e acessibilidade",
    "total": 32,
-   "done": 2,
-   "in_progress": 3,
+   "done": 5,
+   "in_progress": 0,
    "awaiting_evidence": 0,
    "remaining": 27
   },
@@ -85,8 +85,8 @@
    "milestone": "M9",
    "name": "Performance e manutenibilidade",
    "total": 20,
-   "done": 0,
-   "in_progress": 3,
+   "done": 3,
+   "in_progress": 0,
    "awaiting_evidence": 0,
    "remaining": 17
   },
@@ -94,8 +94,8 @@
    "milestone": "M10",
    "name": "Polimento e prontidão de release",
    "total": 5,
-   "done": 0,
-   "in_progress": 1,
+   "done": 1,
+   "in_progress": 0,
    "awaiting_evidence": 0,
    "remaining": 4
   }
