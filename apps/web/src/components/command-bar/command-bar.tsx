@@ -228,8 +228,10 @@ export function CommandBar({
                   ? "app-floating-panel app-floating-anim overflow-hidden !rounded-[var(--radius-input)]"
                   : "flex min-h-0 flex-1 flex-col",
               )}
-              role="listbox"
-              id={listId}
+              // An empty query has no options, so no listbox either
+              // (D-332): its text is a status message instead.
+              role={flat.length > 0 ? "listbox" : undefined}
+              id={flat.length > 0 ? listId : undefined}
               style={
                 isInline && anchorRect
                   ? {
@@ -243,7 +245,7 @@ export function CommandBar({
               }
             >
               {flat.length === 0 ? (
-                <div className="px-4 py-6 text-center text-[12px] text-[var(--text-tertiary)]">
+                <div role="status" className="px-4 py-6 text-center text-[12px] text-[var(--text-tertiary)]">
                   {emptyState}
                 </div>
               ) : (

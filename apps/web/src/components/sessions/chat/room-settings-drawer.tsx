@@ -1018,65 +1018,70 @@ function RoleSelect({
         className="w-[200px] p-1"
         onOpenAutoFocus={(event) => event.preventDefault()}
       >
-        <ul role="listbox" className="flex flex-col">
+        {/* Options sit directly in the listbox (D-332): an li's listitem role
+            breaks the listbox > option chain. */}
+        <div
+          role="listbox"
+          aria-label={t("sessions.room.settings.role", undefined)}
+          className="flex flex-col"
+        >
           {ROLE_OPTIONS.map((role) => {
             const optionMeta = ROLE_META[role];
             const OptionIcon = optionMeta.icon;
             const selected = role === value;
             return (
-              <li key={role}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={selected}
-                  onClick={() => {
-                    setOpen(false);
-                    if (role !== value) onChange(role);
-                  }}
+              <button
+                key={role}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => {
+                  setOpen(false);
+                  if (role !== value) onChange(role);
+                }}
+                className={cn(
+                  "flex w-full items-start gap-2 rounded-[var(--radius-panel-sm)] px-2 py-2 text-left",
+                  "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
+                  "hover:bg-[var(--hover-tint)]",
+                  selected
+                    ? "text-[var(--text-primary)]"
+                    : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                )}
+              >
+                <span
+                  aria-hidden
                   className={cn(
-                    "flex w-full items-start gap-2 rounded-[var(--radius-panel-sm)] px-2 py-2 text-left",
-                    "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
-                    "hover:bg-[var(--hover-tint)]",
+                    "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
                     selected
-                      ? "text-[var(--text-primary)]"
-                      : "text-[var(--text-secondary)] hover:text-[var(--text-primary)]",
+                      ? "bg-[var(--accent)] text-[var(--accent-text)]"
+                      : "bg-[var(--panel-strong)] text-[var(--text-tertiary)]",
                   )}
                 >
-                  <span
+                  <OptionIcon className="h-3 w-3" strokeWidth={2} />
+                </span>
+                <span className="flex min-w-0 flex-1 flex-col">
+                  <span className="text-[0.8125rem] font-medium">
+                    {t(optionMeta.labelKey, {
+                      defaultValue: optionMeta.fallbackLabel,
+                    })}
+                  </span>
+                  <span className="text-[0.6875rem] text-[var(--text-tertiary)] leading-[1.35]">
+                    {t(optionMeta.descriptionKey, {
+                      defaultValue: optionMeta.fallbackDescription,
+                    })}
+                  </span>
+                </span>
+                {selected ? (
+                  <Check
+                    className="mt-0.5 h-3 w-3 shrink-0 text-[var(--accent)]"
+                    strokeWidth={2.5}
                     aria-hidden
-                    className={cn(
-                      "mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
-                      selected
-                        ? "bg-[var(--accent)] text-[var(--accent-text)]"
-                        : "bg-[var(--panel-strong)] text-[var(--text-tertiary)]",
-                    )}
-                  >
-                    <OptionIcon className="h-3 w-3" strokeWidth={2} />
-                  </span>
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span className="text-[0.8125rem] font-medium">
-                      {t(optionMeta.labelKey, {
-                        defaultValue: optionMeta.fallbackLabel,
-                      })}
-                    </span>
-                    <span className="text-[0.6875rem] text-[var(--text-tertiary)] leading-[1.35]">
-                      {t(optionMeta.descriptionKey, {
-                        defaultValue: optionMeta.fallbackDescription,
-                      })}
-                    </span>
-                  </span>
-                  {selected ? (
-                    <Check
-                      className="mt-0.5 h-3 w-3 shrink-0 text-[var(--accent)]"
-                      strokeWidth={2.5}
-                      aria-hidden
-                    />
-                  ) : null}
-                </button>
-              </li>
+                  />
+                ) : null}
+              </button>
             );
           })}
-        </ul>
+        </div>
       </PopoverContent>
     </Popover>
   );

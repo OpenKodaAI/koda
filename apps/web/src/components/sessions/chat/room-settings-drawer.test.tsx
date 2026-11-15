@@ -162,4 +162,21 @@ describe("RoomSettingsPanel", () => {
       );
     });
   });
+
+  it("puts every role option directly in a named listbox (D-332)", async () => {
+    // The options sat in li elements inside a ul with role=listbox, so the
+    // listitem role broke the listbox > option chain (axe aria-required-parent).
+    const user = userEvent.setup();
+    renderSettingsPanel();
+
+    expect(await screen.findByDisplayValue("Smoke test room")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Manage$/i }));
+    await user.click(await screen.findByRole("button", { name: /^Role$/i }));
+
+    const listbox = await screen.findByRole("listbox", { name: /^Role$/i });
+    const options = within(listbox).getAllByRole("option");
+    expect(options).toHaveLength(3);
+    for (const option of options) expect(option.parentElement).toBe(listbox);
+    expect(listbox.querySelector("ul, ol, li")).toBeNull();
+  });
 });
