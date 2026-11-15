@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L23",
+   "at": "2026-11-15 02:10",
+   "event": "Lote de integração 2 (dados, confiabilidade e rótulos honestos) mesclado no branch de integração. A primeira rodada de gates achou o ambiente Python compartilhado desatualizado em relação às dependências da onda 5 (corrigido) e a rota /ready fora do OpenAPI (corrigido); os gates rodam de novo. Aprovadas para o lote 3: segurança de ferramentas (M1-E4-T2/T5/T12), código morto (M4-E1-T1/T10/T14) e rotinas (M3-E1). Iniciadas: infraestrutura de testes (M0) e a primeira tarefa de arquitetura (M5, um único redator de segredos)"
+  },
+  {
    "id": "L22",
    "at": "2026-11-15 02:05",
    "event": "Onda 5 mesclada (5656abc) com todos os gates verdes: 8418 testes Python, 275 Postgres, 1104 web, build e auditorias de dependências sem vulnerabilidades. Junto entraram autenticação (logs com redação, arquivo de bootstrap atômico, drain do cluster autenticado). 35 tarefas do plano concluídas. Aprovadas e na fila da próxima integração: dados (M2-E2-T4, M2-E5-T1) e confiabilidade (M7)"

@@ -90,6 +90,13 @@
    "scope": "Segurança de ferramentas e pacotes (M1-E4-T2, T3, T5, T11, T12), IDs de agente e tabelas por agente (M2-E3-T1, T2, T4), código morto (M4-E1-T1, T2, T3, T8, T10, T14)",
    "status": "implementing",
    "ref": "task/M1-E4-*, task/M2-E3-T1, task/M4-E1-*"
+  },
+  {
+   "wave": "W10",
+   "name": "Onda 10",
+   "scope": "Infraestrutura de testes (M0-E2-T4, T5 e isolamento do diretório de estado), arquitetura (M5-E3-T8 um único redator)",
+   "status": "implementing",
+   "ref": "task/M0-E2-T4, task/M5-E3-T8"
   }
  ],
  "meta": [

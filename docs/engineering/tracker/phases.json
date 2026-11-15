@@ -26,14 +26,14 @@
    "phase": "Fase 3",
    "name": "Plataforma de agentes",
    "status": "in_progress",
-   "note": "Jornadas (M3) em andamento, incluindo rotinas na onda 8; funcionalidades (M6) começaram na onda 8; arquitetura (M5) ainda não começou"
+   "note": "Jornadas (M3) em andamento (rotinas aprovadas, squads na última rodada); funcionalidades (M6) aprovadas no lote 2; arquitetura (M5) começou na onda 10"
   },
   {
    "seq": "4",
    "phase": "Fase 4",
    "name": "Segurança, infraestrutura e dados",
    "status": "in_progress",
-   "note": "Segurança (M1) é a frente principal; dados (M2) na onda 7; confiabilidade (M7) começou na onda 8"
+   "note": "Segurança (M1): 19 tarefas concluídas, mais 5 em lanes; dados (M2) no lote 2 e na onda 9; confiabilidade (M7) no lote 2"
   },
   {
    "seq": "5",

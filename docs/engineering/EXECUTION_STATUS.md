@@ -33,6 +33,8 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 
 ## Environment facts
 
+- Shared venv (2026-11-15 02:05): every worktree runs tests with the main checkout's `.venv`. After a merge that changes `uv.lock`, run `uv sync --locked` in the main checkout, or tests in every lane run against stale packages. Batch 2's first gate run failed 10 IDNA tests until the venv was synced to the wave-5 lock (yarl, urllib3, pillow and others).
+
 - Cloud environment `koda` (personal): limited network (package registries + Google Fonts); `AGENT_TOKEN` / `ALLOWED_USER_IDS` set to CI dummy values in fresh sessions.
 - 4 CPUs / 15 GB RAM: workflow subagent concurrency is effectively 2.
 - PostgreSQL 16 + pgvector can be installed locally (`apt-get install -y postgresql-16-pgvector`); Docker is not available, so testcontainers-based fixtures skip.
@@ -84,16 +86,14 @@ Learned from waves 2A–7 and the ADR-002 rounds. Every workflow script follows 
 
 ## Active tasks
 
-(2026-11-15 01:40 UTC. The progress tracker mirrors this list for the operator.)
+(2026-11-15 02:10 UTC. The progress tracker mirrors this list for the operator.)
 
-- Merged on this branch with all gates green at a506f90 (pytest 8196 passed, Postgres 274 passed, web lint 0 errors, 1081 web tests, build ok): M8-E5-T2 + M8-E2-T1 (one error state, mobile exit from /sessions) and M4-E1-T6 + M4-E1-T9 (dead knowledge paths, one MCP catalog; about 4,100 lines removed).
-- Integration branch `int/w5` (937f20b): WAVE-5 M1-E7-T2, M1-E7-T3 + T11 (with the relay smoke-check fix), M1-E7-T6, D-254, and WAVE-7 M1-E1-T4/T14/T15, plus their records. Full gates running; it merges when green.
-- Lean lanes (rule 10), one workflow each:
-  - WAVE-7: M2-E2-T4 + M2-E5-T1 `wf_babf7dde-90d` (fix pass).
-  - WAVE-8: M3-E1-T3/T6/T7/T8 `wf_be283964-996`; M6-E1-T2/T9/T10, M6-E3-T5/T6 `wf_918e8026-8ae`; M7-E1-T1/T2/T4, M7-E2-T4 `wf_367d777a-dce`.
-  - WAVE-9 (base 937f20b): M1-E4-T2/T5/T12 `wf_088cf47b-ef3`; M1-E4-T3/T11 `wf_86f447cd-1f9`; M2-E3-T1/T2/T4 `wf_4e92c024-9b5`; M4-E1-T1/T10/T14 `wf_3a621325-c17`; M4-E1-T2/T3/T8 `wf_1b87f931-6b8`.
-- Old-format runs finishing their last round: WAVE-6 web M8-E1-T1..T3 fix pass `wf_8ffea544-16c`; WAVE-6b squads and scheduler `wf_36851995-7f3`; WAVE-7 auth M1-E1-T5 + T13 `wf_d9f147a2-300`.
-- Awaiting the operator: ADR-002 OQ-1..OQ-12, plan Q-25..Q-27, and on `int/w5` Q-28 (OFF-mode knowledge side effects, default applied) and Q-29 (v1.0.18 npm publish recovery).
+- Merged since the last record, all gates green: WAVE-5 and the WAVE-7 auth lane B1 (`int/w5`, merge 5656abc; pytest 8418 passed, Postgres 275, web 1104 tests, pnpm audits clean). 37 plan tasks are done.
+- Integration batch 2 on `int/b2` (M2-E2-T4 + M2-E5-T1 data, M7-E1-T1/T2/T4 + M7-E2-T4 reliability, M6-E1-T2/T9/T10 + M6-E3-T5/T6 honest labels): the first gate run found the shared venv behind the wave-5 lock (fixed with `uv sync --locked`) and `/ready` missing from OpenAPI and the pinned anonymous routes (fixed in a908497). The full gates run again before the merge.
+- Approved and waiting for batch 3: M1-E4-T2/T5/T12 (tool output framing, unknown tools are writes, plugin paths), M4-E1-T1/T10/T14 (dead core helpers, webhook tools, missing-table writes), M3-E1-T3/T6/T7/T8 (routines; the routine-editor footer fix runs as a follow-up, `wf_12853b9d-e40`).
+- Lean lanes running: M1-E4-T3/T11 `wf_86f447cd-1f9` (fix pass, hash skipped `__pycache__` sources); M2-E3-T1/T2/T4 `wf_4e92c024-9b5`; M4-E1-T2/T3/T8 `wf_1b87f931-6b8`; M1-E1-T5/T13 fix pass `wf_88c09b69-231` (recovery timing, floor rule, web guide); M0-E2-T4/T5 + D-265 test isolation `wf_71da1b06-bb8`; M5-E3-T8 one redactor `wf_472e2c70-deb`.
+- Old-format runs on their last round: WAVE-6 web M8-E1-T1..T3 `wf_8ffea544-16c`; WAVE-6b squads and scheduler `wf_36851995-7f3` (a lean pass with a labelled PT-BR/EN corpus follows for the memory scanner).
+- Awaiting the operator: ADR-002 OQ-1..OQ-12 and plan Q-25..Q-29; the web Docker image build (no Docker daemon here); shellcheck on `scripts/install.sh` (not available in this environment; CI has no shellcheck step yet).
 
 ## Pending findings for the plan (verified by the orchestrator)
 
