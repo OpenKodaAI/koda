@@ -236,7 +236,7 @@ uv run mypy koda/ --ignore-missing-imports
 PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=python uv run python -m pytest --cov=koda --cov-report=term-missing
 ```
 
-On an Intel Mac or 32-bit Windows, `uv sync` builds `cryptography` from source, which needs Rust and OpenSSL; see [CONTRIBUTING.md](https://github.com/OpenKodaAI/koda/blob/main/CONTRIBUTING.md#development-setup).
+On Intel (x86_64) macOS, 32-bit Windows or Windows on ARM, `uv sync` builds `cryptography` from source, which needs Rust, OpenSSL and a C compiler; see [CONTRIBUTING.md](https://github.com/OpenKodaAI/koda/blob/main/CONTRIBUTING.md#development-setup).
 
 Web:
 
