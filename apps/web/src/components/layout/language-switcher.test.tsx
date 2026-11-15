@@ -119,6 +119,8 @@ describe("LanguageSwitcher keyboard support (M8-E1-T2)", () => {
     expect(frame).toHaveAttribute("aria-hidden", "true");
     expect(frame).toHaveAttribute("inert");
     expect(frame?.style.pointerEvents).toBe("none");
+    // Radix sets pointer-events: auto inline on the list; the copy drops it.
+    expect(ghost?.style.pointerEvents).toBe("none");
     await waitFor(() =>
       expect(document.querySelector(".language-switcher__menu")).not.toBeInTheDocument(),
     );

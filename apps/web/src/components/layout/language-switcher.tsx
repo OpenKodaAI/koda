@@ -45,13 +45,15 @@ function fadeOutCopy(content: HTMLElement | null): (() => void) | undefined {
   const copy = frame.cloneNode(true) as HTMLElement;
   copy.setAttribute("aria-hidden", "true");
   copy.setAttribute("inert", "");
-  copy.style.pointerEvents = "none";
   for (const node of [copy, ...copy.querySelectorAll("[id], [data-tour-anchor]")]) {
     node.removeAttribute("id");
     node.removeAttribute("data-tour-anchor");
   }
-  copy.firstElementChild?.classList.remove(...MENU_ENTER);
-  copy.firstElementChild?.classList.add(...MENU_EXIT);
+  const menu = copy.firstElementChild as HTMLElement | null;
+  // Radix sets pointer-events: auto inline on the list, so both drop it.
+  for (const node of [copy, menu]) node?.style.setProperty("pointer-events", "none");
+  menu?.classList.remove(...MENU_ENTER);
+  menu?.classList.add(...MENU_EXIT);
   document.body.append(copy);
   const timer = window.setTimeout(() => copy.remove(), MENU_EXIT_MS);
   return () => {
