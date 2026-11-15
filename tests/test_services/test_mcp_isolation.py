@@ -317,7 +317,7 @@ async def test_server_without_env_does_not_see_koda_secrets(profile, system, mon
     monkeypatch.setenv("CONTROL_PLANE_API_TOKEN", "planted-control-plane-token")
     monkeypatch.setenv("KODA_DATABASE_URL", "postgresql://koda:planted-password@db/koda")
     monkeypatch.setenv("PATH", "/usr/local/bin:/usr/bin")
-    monkeypatch.setenv("HOME", "/home/koda")
+    monkeypatch.setenv("HOME", "/srv/koda-home")
     monkeypatch.setenv("LANG", "C.UTF-8")
 
     spawned = await _spawn_env(profile, system)
@@ -325,7 +325,8 @@ async def test_server_without_env_does_not_see_koda_secrets(profile, system, mon
     joined = " ".join(spawned["argv"])
     assert "planted" not in joined
     if profile == "docker":
-        # The container only receives the names passed with ``-e``; it has none.
+        # Regression guard, not part of D-300: docker already gave the container only
+        # the names passed with ``-e``, so this case passes before the fix too.
         assert "-e" not in spawned["argv"]
         return
     env = spawned["env"]
@@ -334,7 +335,7 @@ async def test_server_without_env_does_not_see_koda_secrets(profile, system, mon
     assert "KODA_DATABASE_URL" not in env
     assert not any("planted" in value for value in env.values())
     assert set(env) <= set(_BASIC_ENV_NAMES)
-    assert (env["PATH"], env["HOME"], env["LANG"]) == ("/usr/local/bin:/usr/bin", "/home/koda", "C.UTF-8")
+    assert (env["PATH"], env["HOME"], env["LANG"]) == ("/usr/local/bin:/usr/bin", "/srv/koda-home", "C.UTF-8")
 
 
 @pytest.mark.asyncio
@@ -344,13 +345,13 @@ async def test_server_env_is_the_basics_plus_its_own_env(profile, system, monkey
     for name in _BASIC_ENV_NAMES:
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("CONTROL_PLANE_API_TOKEN", "planted-control-plane-token")
-    monkeypatch.setenv("HOME", "/home/koda")
+    monkeypatch.setenv("HOME", "/srv/koda-home")
 
     with_env = await _spawn_env(profile, system, env={"API_TOKEN": "server-token"})
     without_env = await _spawn_env(profile, system)
 
-    assert with_env["env"] == {"HOME": "/home/koda", "API_TOKEN": "server-token"}
-    assert without_env["env"] == {"HOME": "/home/koda"}
+    assert with_env["env"] == {"HOME": "/srv/koda-home", "API_TOKEN": "server-token"}
+    assert without_env["env"] == {"HOME": "/srv/koda-home"}
 
 
 @pytest.mark.asyncio

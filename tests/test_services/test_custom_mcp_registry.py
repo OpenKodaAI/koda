@@ -186,6 +186,10 @@ def _mount_payload(host: str, *, read_only: bool) -> CustomServerPayload:
         ("/var/run/docker.sock", False),
         ("/run", False),  # a parent of the Docker socket
         ("~/.ssh", False),
+        # The kernel, bwrap and docker read a doubled leading slash as one.
+        ("//etc", False),
+        ("//var/run/docker.sock", False),
+        ("/{state}", False),
     ],
 )
 def test_upsert_refuses_mounts_of_sensitive_host_paths(host, read_only, koda_secret_paths, tmp_path):
@@ -201,6 +205,19 @@ def test_upsert_refuses_mounts_of_sensitive_host_paths(host, read_only, koda_sec
     ):
         upsert_custom_server(_mount_payload(host, read_only=read_only))
     assert host in str(excinfo.value)
+    execute.assert_not_called()
+
+
+@pytest.mark.parametrize("target", ["/etc", "/var/run/docker.sock", "{state}", "{key}"])
+def test_upsert_refuses_symlinks_to_sensitive_host_paths(target, koda_secret_paths, tmp_path):
+    target = target.format(state=koda_secret_paths["state"], key=koda_secret_paths["key"])
+    link = tmp_path / "innocent"
+    link.symlink_to(target)
+    with (
+        patch("koda.integrations.custom_mcp_registry.execute") as execute,
+        pytest.raises(ValidationError, match="mount"),
+    ):
+        upsert_custom_server(_mount_payload(str(link), read_only=False))
     execute.assert_not_called()
 
 

@@ -172,6 +172,24 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   share the network), the start logs `mcp_isolation_egress_allowlist_unenforced` and the
   server reports `egress: unrestricted` in its isolation status. (M1-E4-T6, D-028,
   D-133)
+- Stdio MCP servers no longer inherit Koda's environment. Under native, bubblewrap
+  and sandbox-exec isolation, a server with no env of its own used to receive all of
+  it: the control-plane token, the database DSN and provider keys. Every server now
+  gets only `PATH`, `HOME`, `USER`, `LOGNAME`, `LANG`, `LC_ALL`, `LC_CTYPE`, `TERM`
+  and `TZ` from Koda's environment, plus its own env. Docker already passed only the
+  server's own names. Behaviour change: proxy and CA variables such as `HTTPS_PROXY`,
+  `HTTP_PROXY`, `NO_PROXY`, `NODE_EXTRA_CA_CERTS`, `SSL_CERT_FILE` and
+  `REQUESTS_CA_BUNDLE` are no longer passed through. A server that needs them must
+  set them in its own env. (D-300)
+- Saving a custom MCP server refuses isolation constraints the runtime cannot parse,
+  a `network_mode` other than `none`, `egress_allowlist` or `any`, and mounts of
+  sensitive host paths, read-only or not. These are Koda's state directory and master
+  key files, `/etc`, `/root`, `/proc`, `/sys`, `/dev`, the Docker socket, credential
+  directories such as `~/.ssh`, and any mount on, inside or above them. The check
+  follows symlinks and reads `//etc` as `/etc`, and the sandbox doctor applies the
+  same rule. A server already saved with an unknown `network_mode` fails to start
+  with that error until the value is corrected; before, it shared the host network.
+  (D-301)
 - Channel gateway pairing: codes are 8 letters and digits, one message tries at most
   one code (the whole message, or `/start CODE`) and other messages are not attempts,
   and a sender (one user across all its chats) with 5 failed attempts in 15 minutes is
