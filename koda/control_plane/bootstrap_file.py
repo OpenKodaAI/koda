@@ -22,7 +22,7 @@ supported (in priority order):
    also shown once, in a banner on stderr; the structured log (`bootstrap_file_written`)
    never carries it. The code expires `CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS` after
    the file is written; while no owner exists, the next status request replaces an
-   expired file with a new code.
+   expired file, or one without a code line and a readable expiry, with a new code.
 
 The file is deleted automatically after the owner registers.
 """
@@ -155,6 +155,16 @@ def _read_file_fields() -> tuple[str, datetime | None] | None:
     return code, expires_at
 
 
+def _valid_code(fields: tuple[str, datetime | None] | None, now: datetime) -> str | None:
+    """The code of a file that holds a code line and an ``expires_at`` after ``now``; None for any other."""
+    if fields is None:
+        return None
+    code, expires_at = fields
+    if not code or expires_at is None or expires_at <= now:
+        return None
+    return code
+
+
 def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> str | None:
     """Write a bootstrap code to disk if one is needed and no valid one exists.
 
@@ -166,9 +176,14 @@ def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> st
 
     Does nothing when:
     - The owner account already exists (and removes a file left over).
-    - The file already exists and has not expired (we never overwrite a valid code).
-      An expired file is replaced by a new code (D-195); with an env seed the new
-      file holds the same seed with a fresh expiry.
+    - The file already holds a valid code: a code line and an ``expires_at`` that has
+      not passed (we never overwrite a valid code). Any other file is replaced by a new
+      code (D-195): an expired one, or one without a code line or a readable expiry, such
+      as an empty file a crash left. With an env seed the new file holds the same seed
+      with a fresh expiry.
+
+    A write that fails, or writes only part of the file, removes the file and raises,
+    so no code is announced that the file does not hold.
     """
     if has_owner:
         if _BOOTSTRAP_FILE_PATH.exists():
@@ -181,15 +196,21 @@ def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> st
     now = now or datetime.now(UTC)
     if _BOOTSTRAP_FILE_PATH.exists():
         fields = _read_file_fields()
-        expired_at = fields[1] if fields is not None else None
-        if expired_at is None or expired_at > now:
+        if _valid_code(fields, now) is not None:
             return None
         try:
             _BOOTSTRAP_FILE_PATH.unlink(missing_ok=True)
         except OSError as exc:
             log.warning("bootstrap_file_unlink_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
             return None
-        log.info("bootstrap_file_expired_replaced", path=str(_BOOTSTRAP_FILE_PATH), expired_at=expired_at.isoformat())
+        expired_at = fields[1] if fields is not None and fields[0] else None
+        if expired_at is not None:
+            log.info(
+                "bootstrap_file_expired_replaced", path=str(_BOOTSTRAP_FILE_PATH), expired_at=expired_at.isoformat()
+            )
+        else:
+            # No code line or no readable expires_at: the file never matches a setup code.
+            log.warning("bootstrap_file_invalid_replaced", path=str(_BOOTSTRAP_FILE_PATH))
     _BOOTSTRAP_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
     code = CONTROL_PLANE_BOOTSTRAP_CODE_SEED or _generate_code()
     expires_at = now + timedelta(seconds=CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)
@@ -201,10 +222,20 @@ def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> st
         )
     except FileExistsError:
         return None
+    content = _render_bootstrap_file(code, expires_at).encode()
     try:
-        os.write(fd, _render_bootstrap_file(code, expires_at).encode())
-    finally:
-        os.close(fd)
+        try:
+            written = os.write(fd, content)
+        finally:
+            os.close(fd)
+        if written != len(content):
+            raise OSError(f"wrote {written} of {len(content)} bytes to {_BOOTSTRAP_FILE_PATH}")
+    except BaseException:
+        # The file does not hold the code whole (a full disk, an I/O error): remove it, so the
+        # next status request writes a new one instead of keeping a file that never matches.
+        with contextlib.suppress(OSError):
+            _BOOTSTRAP_FILE_PATH.unlink()
+        raise
     with contextlib.suppress(OSError):
         os.chmod(str(_BOOTSTRAP_FILE_PATH), 0o600)
     if CONTROL_PLANE_BOOTSTRAP_CODE_SEED:
@@ -247,15 +278,17 @@ def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> st
 
 
 def read_bootstrap_file(*, now: datetime | None = None) -> str | None:
-    """Return the bootstrap code stored on disk, if any and not expired by ``now``."""
+    """Return the bootstrap code stored on disk, if the file holds one that has not expired by ``now``.
+
+    A file without a code line or a readable ``expires_at`` holds no usable code;
+    ``ensure_bootstrap_file`` replaces it at the next status request.
+    """
+    now = now or datetime.now(UTC)
     fields = _read_file_fields()
-    if fields is None:
-        return None
-    code, expires_at = fields
-    if expires_at is not None and expires_at <= (now or datetime.now(UTC)):
-        log.info("bootstrap_file_expired", path=str(_BOOTSTRAP_FILE_PATH), expires_at=expires_at.isoformat())
-        return None
-    return code or None
+    code = _valid_code(fields, now)
+    if code is None and fields is not None and fields[1] is not None and fields[1] <= now:
+        log.info("bootstrap_file_expired", path=str(_BOOTSTRAP_FILE_PATH), expires_at=fields[1].isoformat())
+    return code
 
 
 def consume_bootstrap_file() -> None:

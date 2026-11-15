@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 from datetime import UTC, datetime, timedelta
@@ -259,9 +260,12 @@ def test_the_docs_say_an_expired_setup_code_is_replaced() -> None:
     assert (
         "The code expires `CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS` (default 900, so 15 minutes) after the file"
         " is written. The next status request after that, such as reloading `/setup`, replaces the expired file"
-        " with a new code and a new banner (a seed is written again, with a fresh expiry), so an expired code never"
-        " locks setup. An install with an owner never writes the file." in guide
+        " with a new code and a new banner (a seed is written again, with a fresh expiry). A file without both a"
+        " code line and a readable `expires_at`, such as an empty one left by a crash, never matches and is"
+        " replaced the same way, and a write that fails removes the file it started, so an expired or damaged"
+        " file does not lock setup. An install with an owner never writes the file." in guide
     )
+    assert "so an expired code never locks setup" not in guide
 
 
 def test_the_seed_setting_is_documented_where_operators_look() -> None:
@@ -284,10 +288,11 @@ def test_the_seed_setting_is_documented_where_operators_look() -> None:
 
 def test_ensure_does_not_overwrite_existing(isolated_bootstrap: Path) -> None:
     isolated_bootstrap.parent.mkdir(parents=True, exist_ok=True)
-    isolated_bootstrap.write_text("EXISTING-CODE-HERE\n", encoding="utf-8")
+    valid = "EXISTING-CODE-HERE\nexpires_at=2999-01-01T00:00:00+00:00\n"
+    isolated_bootstrap.write_text(valid, encoding="utf-8")
     code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False)
     assert code is None
-    assert isolated_bootstrap.read_text(encoding="utf-8").strip() == "EXISTING-CODE-HERE"
+    assert isolated_bootstrap.read_text(encoding="utf-8") == valid
 
 
 def test_read_bootstrap_file_returns_content(isolated_bootstrap: Path) -> None:
@@ -334,7 +339,7 @@ def test_a_file_within_its_ttl_is_kept(isolated_bootstrap: Path, capsys: pytest.
 
 
 @pytest.mark.parametrize("elapsed", [_TTL, _TTL + timedelta(seconds=1), timedelta(days=30)])
-def test_an_expired_file_is_replaced_by_a_new_code_at_the_next_start(
+def test_an_expired_file_is_replaced_by_a_new_code_at_the_next_status_request(
     isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], elapsed: timedelta
 ) -> None:
     """Setup is no longer locked once the TTL passes: the next status request writes a fresh code."""
@@ -380,6 +385,73 @@ def test_an_expired_file_left_by_an_earlier_start_is_replaced(
     assert code is not None and code != "EXPI-REDC-ODEX"
     assert bootstrap_file_mod.read_bootstrap_file() == code
     assert capsys.readouterr().err.count(code) == 1
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "",  # a write that never happened: the process died, or the disk was full
+        "\n\n",
+        "expires_at=2999-01-01T00:00:00+00:00\nsetup_url=/setup\n",  # no code line
+        "LEGA-CYCO-DEXX\n",  # no expires_at, as written before v1.0.11
+        "LEGA-CYCO-DEXX\nexpires_at=not-a-date\nsetup_url=/setup\n",
+        "LEGA-CYCO-DEXX\nexpires_at=\n",
+    ],
+)
+def test_a_file_without_a_code_and_a_readable_expiry_is_replaced(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], content: str
+) -> None:
+    """D-195: no file left on disk may lock setup, whatever state a crash or an old version left it in."""
+    isolated_bootstrap.parent.mkdir(parents=True, exist_ok=True)
+    isolated_bootstrap.write_text(content, encoding="utf-8")
+    log = MagicMock()
+    monkeypatch.setattr(bootstrap_file_mod, "log", log)
+    # Such a file never matches a setup code: it has no code or no expiry to check.
+    assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT) is None
+
+    code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+
+    assert code is not None and code != "LEGA-CYCO-DEXX"
+    assert isolated_bootstrap.read_text(encoding="utf-8").splitlines()[0] == code
+    assert _file_expires_at(isolated_bootstrap) == (_WRITTEN_AT + _TTL).isoformat()
+    assert os.stat(isolated_bootstrap).st_mode & 0o777 == 0o600
+    assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT) == code
+    assert capsys.readouterr().err.count(code) == 1
+    (replaced,) = [call for call in log.warning.call_args_list if call.args == ("bootstrap_file_invalid_replaced",)]
+    assert replaced.kwargs["path"] == str(isolated_bootstrap)
+    assert "LEGA-CYCO-DEXX" not in repr(_logged(log))
+    assert bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT) is None
+
+
+def _short_write(fd: int, data: bytes) -> int:
+    """os.write on a nearly full disk: part of the data reaches the file, without an error."""
+    return _REAL_WRITE(fd, data[: len(data) // 3])
+
+
+def _failed_write(fd: int, data: bytes) -> int:
+    raise OSError(errno.ENOSPC, "No space left on device")
+
+
+_REAL_WRITE = os.write
+
+
+@pytest.mark.parametrize("write", [_failed_write, _short_write], ids=["ENOSPC", "short write"])
+def test_a_failed_write_leaves_no_file_behind(
+    isolated_bootstrap: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], write: Any
+) -> None:
+    """A code that did not reach the disk whole is never announced, and its file is removed."""
+    monkeypatch.setattr(bootstrap_file_mod.os, "write", write)
+
+    with pytest.raises(OSError):
+        bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+
+    monkeypatch.setattr(bootstrap_file_mod.os, "write", _REAL_WRITE)
+    assert not isolated_bootstrap.exists()
+    assert "Koda setup code" not in capsys.readouterr().err
+    # Once the disk has room again, the next status request writes a usable code.
+    code = bootstrap_file_mod.ensure_bootstrap_file(has_owner=False, now=_WRITTEN_AT)
+    assert code is not None
+    assert bootstrap_file_mod.read_bootstrap_file(now=_WRITTEN_AT) == code
 
 
 def test_an_expired_seed_file_is_written_again_with_a_fresh_ttl(

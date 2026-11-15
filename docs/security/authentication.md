@@ -23,8 +23,10 @@ mechanisms, checked in priority order:
    registration. The code expires `CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS` (default 900, so
    15 minutes) after the file is written. The next status request after that, such as reloading
    `/setup`, replaces the expired file with a new code and a new banner (a seed is written again,
-   with a fresh expiry), so an expired code never locks setup. An install with an owner never
-   writes the file.
+   with a fresh expiry). A file without both a code line and a readable `expires_at`, such as an
+   empty one left by a crash, never matches and is replaced the same way, and a write that fails
+   removes the file it started, so an expired or damaged file does not lock setup. An install with
+   an owner never writes the file.
 3. **Loopback trust (dev only)** — when `ALLOW_LOOPBACK_BOOTSTRAP=true` and the request comes
    from `127.0.0.1` / `::1` with no `X-Forwarded-For` hop, no code is required. This mode is
    refused at boot when `KODA_ENV=production`.
