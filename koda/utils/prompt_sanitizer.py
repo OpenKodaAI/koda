@@ -61,3 +61,26 @@ def sanitize_user_system_prompt(raw: str, *, max_length: int = 8000) -> str:
     text = _HEADING_RE.sub(r"**", text)
 
     return f"<user_instructions>\n{text}\n</user_instructions>"
+
+
+# Runtime protocol tags: tool calls, tool results and their frames, and the
+# prompt sections and wrappers the runtime itself writes (Gemini wraps every
+# turn in ``<system_instructions>`` and ``<user_request>``).  Tool output and
+# third-party text must not open or close any of them, so their ``<`` is
+# escaped.  Whitespace after ``<`` or ``/`` is matched too, and case is ignored.
+_PROTOCOL_DELIMITER_RE = re.compile(
+    r"<(?=\s*/?\s*(?:agent_cmd|agent_\w+|tool_result|untrusted_data|structured_data|action_plan"
+    r"|system|system_instructions|assistant|human|user_instructions|user_request)\b)",
+    re.IGNORECASE,
+)
+
+
+def escape_protocol_delimiters(text: str) -> str:
+    """Return *text* with the ``<`` of every runtime protocol tag escaped as ``&lt;``.
+
+    Everything else stays verbatim, so code, HTML and prose in tool output keep
+    their meaning; only the delimiters the runtime parses or frames with are
+    neutralised.
+    """
+
+    return _PROTOCOL_DELIMITER_RE.sub("&lt;", text)
