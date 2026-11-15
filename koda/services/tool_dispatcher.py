@@ -34,7 +34,6 @@ from koda.config import (
     SHELL_TIMEOUT,
     SNAPSHOT_ENABLED,
     STRUCTURED_DATA_OUTPUT_ENABLED,
-    WEBHOOK_ENABLED,
     WORKFLOW_ENABLED,
 )
 from koda.knowledge.types import EffectiveExecutionPolicy
@@ -133,8 +132,6 @@ _WRITE_TOOLS = frozenset(
         "cache_clear",
         "snapshot_save",
         "snapshot_delete",
-        "webhook_register",
-        "webhook_unregister",
         "file_write",
         "file_edit",
         "file_delete",
@@ -193,8 +190,6 @@ _READ_TOOLS = frozenset(
         "snapshot_restore",
         "snapshot_list",
         "snapshot_diff",
-        "webhook_list",
-        "event_wait",
         "request_skill",
         "file_read",
         "file_list",
@@ -5347,86 +5342,6 @@ async def _handle_squad_task_list(params: dict, ctx: ToolContext) -> AgentToolRe
     )
 
 
-# Webhook handlers
-
-
-async def _check_webhook_available(tool: str) -> AgentToolResult | None:
-    if not WEBHOOK_ENABLED:
-        return AgentToolResult(tool=tool, success=False, output="Webhooks not enabled. Set WEBHOOK_ENABLED=true.")
-    return None
-
-
-async def _handle_webhook_register(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_webhook_available("webhook_register")
-    if err:
-        return err
-    name = params.get("name", "")
-    path = params.get("path", "")
-    if not name or not path:
-        return AgentToolResult(tool="webhook_register", success=False, output="Missing 'name' and 'path'.")
-    secret = params.get("secret")
-    from koda.services.webhook_manager import webhook_manager
-
-    error = webhook_manager.register(name, path, secret)
-    if error:
-        return AgentToolResult(tool="webhook_register", success=False, output=error)
-    return AgentToolResult(tool="webhook_register", success=True, output=f"Webhook '{name}' registered at {path}")
-
-
-async def _handle_webhook_unregister(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_webhook_available("webhook_unregister")
-    if err:
-        return err
-    name = params.get("name", "")
-    if not name:
-        return AgentToolResult(tool="webhook_unregister", success=False, output="Missing 'name'.")
-    from koda.services.webhook_manager import webhook_manager
-
-    error = webhook_manager.unregister(name)
-    if error:
-        return AgentToolResult(tool="webhook_unregister", success=False, output=error)
-    return AgentToolResult(tool="webhook_unregister", success=True, output=f"Webhook '{name}' removed.")
-
-
-async def _handle_webhook_list(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_webhook_available("webhook_list")
-    if err:
-        return err
-    from koda.services.webhook_manager import webhook_manager
-
-    hooks = webhook_manager.list_webhooks()
-    if not hooks:
-        return AgentToolResult(tool="webhook_list", success=True, output="No webhooks registered.")
-    lines = [f"Registered webhooks ({len(hooks)}):"]
-    for h in hooks:
-        secret_info = " (secured)" if h["has_secret"] else ""
-        lines.append(f"  {h['name']}: {h['path']}{secret_info} — {h['call_count']} calls")
-    return AgentToolResult(tool="webhook_list", success=True, output="\n".join(lines), data=hooks, data_format="json")
-
-
-async def _handle_event_wait(params: dict, ctx: ToolContext) -> AgentToolResult:
-    err = await _check_webhook_available("event_wait")
-    if err:
-        return err
-    event_type = params.get("event_type", "")
-    if not event_type:
-        return AgentToolResult(tool="event_wait", success=False, output="Missing 'event_type'.")
-    timeout = min(int(params.get("timeout", 60)), 300)
-    from koda.services.webhook_manager import webhook_manager
-
-    event = await webhook_manager.wait_for_event(event_type, timeout=timeout)
-    if event is None:
-        return AgentToolResult(tool="event_wait", success=False, output=f"Timeout ({timeout}s): no event received.")
-    payload_str = json.dumps(event.payload, default=str)[:4000]
-    return AgentToolResult(
-        tool="event_wait",
-        success=True,
-        output=f"Event received: {event_type}\nPayload: {payload_str}",
-        data={"event_type": event_type, "payload": event.payload},
-        data_format="json",
-    )
-
-
 # Browser network interception handlers
 
 
@@ -5657,10 +5572,6 @@ _TOOL_HANDLERS: dict[str, _ToolHandler] = {
     "squad_dashboard_overview": _handle_squad_dashboard_overview,
     "squad_thread_overview": _handle_squad_thread_overview,
     "squad_artifact_list": _handle_squad_artifact_list,
-    "webhook_register": _handle_webhook_register,
-    "webhook_unregister": _handle_webhook_unregister,
-    "webhook_list": _handle_webhook_list,
-    "event_wait": _handle_event_wait,
     "browser_network_capture_start": _handle_browser_network_capture_start,
     "browser_network_capture_stop": _handle_browser_network_capture_stop,
     "browser_network_requests": _handle_browser_network_requests,

@@ -425,36 +425,6 @@ _CORE_TOOL_DEFINITIONS: tuple[CoreToolDefinition, ...] = (
         feature_flag="snapshots",
     ),
     CoreToolDefinition(
-        "webhook_register",
-        "Webhook register",
-        "webhook",
-        "Register a webhook endpoint.",
-        feature_flag="webhooks",
-    ),
-    CoreToolDefinition(
-        "webhook_unregister",
-        "Webhook unregister",
-        "webhook",
-        "Remove a webhook.",
-        feature_flag="webhooks",
-    ),
-    CoreToolDefinition(
-        "webhook_list",
-        "Webhook list",
-        "webhook",
-        "List registered webhooks.",
-        read_only=True,
-        feature_flag="webhooks",
-    ),
-    CoreToolDefinition(
-        "event_wait",
-        "Event wait",
-        "webhook",
-        "Wait for an event.",
-        read_only=True,
-        feature_flag="webhooks",
-    ),
-    CoreToolDefinition(
         "file_read", "File read", "fileops", "Read file contents.", read_only=True, feature_flag="fileops"
     ),
     CoreToolDefinition("file_write", "File write", "fileops", "Create or overwrite a file.", feature_flag="fileops"),

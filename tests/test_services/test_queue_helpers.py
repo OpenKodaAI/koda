@@ -211,7 +211,6 @@ class TestPhase1NativeToolHelpers:
         monkeypatch.setattr(config_module, "WORKFLOW_ENABLED", False)
         monkeypatch.setattr(config_module, "INTER_AGENT_ENABLED", False)
         monkeypatch.setattr(config_module, "SNAPSHOT_ENABLED", False)
-        monkeypatch.setattr(config_module, "WEBHOOK_ENABLED", False)
 
         schemas = _native_tool_schemas_for_runtime()
         schema_by_name = {item["function"]["name"]: item for item in schemas}

@@ -3947,7 +3947,6 @@ def _native_tool_schemas_for_runtime() -> list[dict[str, Any]]:
             "workflows": bool(getattr(_config, "WORKFLOW_ENABLED", False)),
             "inter_agent": bool(getattr(_config, "INTER_AGENT_ENABLED", False)),
             "snapshots": bool(getattr(_config, "SNAPSHOT_ENABLED", False)),
-            "webhooks": bool(getattr(_config, "WEBHOOK_ENABLED", False)),
         }
         agent_spec = get_runtime_agent_spec()
         tool_policy = agent_spec.get("tool_policy") if isinstance(agent_spec.get("tool_policy"), dict) else {}

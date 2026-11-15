@@ -1247,11 +1247,6 @@ WORKFLOW_ENABLED: bool = _env("WORKFLOW_ENABLED", "false").lower() == "true"
 WORKFLOW_MAX_STEPS: int = int(_env("WORKFLOW_MAX_STEPS", "50"))
 WORKFLOW_MAX_PARALLEL: int = int(_env("WORKFLOW_MAX_PARALLEL", "5"))
 
-# --- Webhooks ---
-WEBHOOK_ENABLED: bool = _env("WEBHOOK_ENABLED", "false").lower() == "true"
-WEBHOOK_MAX_REGISTRATIONS: int = int(_env("WEBHOOK_MAX_REGISTRATIONS", "10"))
-WEBHOOK_TIMEOUT_MAX: int = int(_env("WEBHOOK_TIMEOUT_MAX", "300"))
-
 # --- Channel integrations ---
 CHANNEL_WEBHOOK_BASE_URL: str = _env("CHANNEL_WEBHOOK_BASE_URL", "")
 CHANNEL_ADAPTERS_ENABLED: bool = _env("CHANNEL_ADAPTERS_ENABLED", "true").lower() == "true"
