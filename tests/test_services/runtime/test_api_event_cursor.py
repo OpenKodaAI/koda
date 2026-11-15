@@ -8,6 +8,7 @@ more than a thousand events. Streams and the polling endpoint must accept it.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
@@ -70,8 +71,8 @@ _EVENTS = [
 
 
 @pytest.fixture
-def controller() -> Iterator[SimpleNamespace]:
-    stub = SimpleNamespace(store=_StubStore(_EVENTS), events=_StubBroker(_EVENTS))
+def controller(tmp_path: Path) -> Iterator[SimpleNamespace]:
+    stub = SimpleNamespace(store=_StubStore(_EVENTS), events=_StubBroker(_EVENTS), runtime_root=tmp_path / "runtime")
     with (
         patch("koda.services.runtime.api.get_runtime_controller", return_value=stub),
         patch("koda.services.runtime.api.RuntimeAccessService", _StubRuntimeAccessService),

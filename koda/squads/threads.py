@@ -442,6 +442,20 @@ class SquadThreadStore:
             rows = await conn.fetch(sql, thread_id)
         return [_row_to_participant(r) for r in rows]
 
+    async def get_message_sender(self, *, thread_id: str, message_ref: int | str) -> str | None:
+        """The ``from_agent`` of message ``message_ref`` (``msg-<id>`` or an id) of this thread, or None."""
+        message_id = _message_ref_to_id(message_ref)
+        if message_id is None:
+            return None
+        pool = await self._ensure_pool()
+        async with pool.acquire() as conn:
+            sender = await conn.fetchval(
+                f'SELECT from_agent FROM "{self._schema}"."squad_messages" WHERE thread_id = $1 AND id = $2',
+                thread_id,
+                message_id,
+            )
+        return str(sender) if sender is not None else None
+
     async def post_thread_message(
         self,
         *,

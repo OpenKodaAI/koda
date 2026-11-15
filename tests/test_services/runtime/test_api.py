@@ -653,7 +653,10 @@ async def test_runtime_task_detail_skips_legacy_local_knowledge_in_postgres_prim
     ],
 )
 async def test_runtime_task_detail_environment_runtime_dir_is_task_relative(tmp_path, runtime_dir, expected):
-    """The environment's runtime_dir is relative to the task's runtime directory, or null (M3-E8-T4)."""
+    """The environment's runtime_dir is relative to the task's runtime directory, or null (M3-E8-T4).
+
+    A workspace outside it is named, not located (D-358).
+    """
     env = {"id": 3, "task_id": 12, "runtime_dir": str(tmp_path / runtime_dir), "workspace_path": "/work/repo"}
     controller = _ControllerStub(runtime_root=tmp_path / "runtime", env=env)
     request = _request(task_id=12, headers={"X-Runtime-Token": "secret"})
@@ -674,9 +677,48 @@ async def test_runtime_task_detail_environment_runtime_dir_is_task_relative(tmp_
     assert str(tmp_path) not in response.text
     environment = json.loads(response.text)["environment"]
     assert environment["runtime_dir"] == expected
-    assert environment["workspace_path"] == "/work/repo"
+    assert environment["workspace_path"] == "repo"
     # The store's row is not changed.
     assert env["runtime_dir"] == str(tmp_path / runtime_dir)
+
+
+@pytest.mark.asyncio
+async def test_runtime_task_detail_names_a_missing_source_root(tmp_path):
+    """A deleted source root still reaches the task room, which warns on it, without its path (D-358)."""
+    source_root = tmp_path / "agents" / "A" / "project"
+    env = {
+        "id": 3,
+        "task_id": 12,
+        "runtime_dir": str(tmp_path / "runtime" / "tasks" / "12"),
+        "base_work_dir": str(source_root),
+        "source_root_path": str(source_root),
+        # As _with_source_root_exists reads a base_work_dir that is gone.
+        "source_root_exists": False,
+    }
+    controller = _ControllerStub(runtime_root=tmp_path / "runtime", env=env)
+    request = _request(task_id=12, headers={"X-Runtime-Token": "secret"})
+
+    with (
+        patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
+        patch("koda.services.runtime.api.RUNTIME_LOCAL_UI_TOKEN", "secret"),
+        patch("koda.state.knowledge_governance_store.get_latest_execution_episode", return_value=None),
+        _patch_knowledge_modules(
+            repository_cls=MagicMock(),
+            storage_cls=MagicMock(return_value=_KnowledgeStorageStub()),
+        ),
+        _patch_agent_asset_registry(SimpleNamespace(search=AsyncMock(return_value=[]))),
+    ):
+        response = await _runtime_task_detail(request)
+
+    assert response.status == 200
+    assert str(tmp_path) not in response.text
+    environment = json.loads(response.text)["environment"]
+    # runtime-task-room shows sourceRootMissing when source_root_path is set and the root is gone.
+    assert (environment["source_root_path"], environment["base_work_dir"], environment["source_root_exists"]) == (
+        "project",
+        "project",
+        False,
+    )
 
 
 @pytest.mark.asyncio
@@ -1333,13 +1375,29 @@ _THREAD_ID = "6f0c1a52-0d3e-4c55-9a43-7a1f2c0d5e40"
 
 
 class _SquadThreadStoreStub:
-    def __init__(self, thread: object | None) -> None:
+    def __init__(
+        self,
+        thread: object | None,
+        *,
+        participants: tuple[str, ...] = ("PM", "WORKER"),
+        messages: dict[str, str] | None = None,
+    ) -> None:
         self.thread = thread
         self.calls: list[str] = []
+        self.participants = participants
+        # message id -> from_agent
+        self.messages = messages or {}
 
     async def get_thread(self, thread_id: str) -> object | None:
         self.calls.append(thread_id)
         return self.thread
+
+    async def list_participants(self, *, thread_id: str, active_only: bool = True) -> list[object]:
+        assert active_only
+        return [SimpleNamespace(agent_id=agent_id) for agent_id in self.participants]
+
+    async def get_message_sender(self, *, thread_id: str, message_ref: str) -> str | None:
+        return self.messages.get(message_ref)
 
 
 def _squad_message_request(squad: dict[str, object]):
@@ -1348,11 +1406,19 @@ def _squad_message_request(squad: dict[str, object]):
     return request
 
 
-async def _send_squad_message(squad: dict[str, object], *, thread: object | None):
+async def _send_squad_message(
+    squad: dict[str, object],
+    *,
+    thread: object | None,
+    participants: tuple[str, ...] = ("PM", "WORKER"),
+    messages: dict[str, str] | None = None,
+):
     from koda.services.runtime.api import _runtime_send_session_message
 
+    if thread is not None and not hasattr(thread, "coordinator_agent_id"):
+        thread.coordinator_agent_id = "PM"  # type: ignore[attr-defined]
     controller = SimpleNamespace(_application=object())
-    store = _SquadThreadStoreStub(thread)
+    store = _SquadThreadStoreStub(thread, participants=participants, messages=messages)
     enqueue = AsyncMock(return_value=11)
     with (
         patch("koda.services.runtime.api.get_runtime_controller", return_value=controller),
@@ -1453,13 +1519,292 @@ async def test_squad_message_with_a_malformed_thread_id_is_a_client_error():
 
 
 @pytest.mark.asyncio
+async def test_squad_message_for_an_agent_outside_the_thread_is_refused():
+    """A mutate token cannot pick a thread, and so an identity, the executing agent is not in (D-355)."""
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, enqueue, _store = await _send_squad_message(
+            {"thread_id": _THREAD_ID, "target_agent_id": "OUTSIDER"},
+            thread=thread,
+            participants=("PM", "WORKER"),
+        )
+
+    assert response.status == 403
+    assert json.loads(response.text) == {"error": f"agent OUTSIDER is not a participant of thread {_THREAD_ID}"}
+    enqueue.assert_not_awaited()
+    log.warning.assert_called_once_with(
+        "squad_message_non_participant_refused", thread_id=_THREAD_ID, agent_id="OUTSIDER"
+    )
+
+
+@pytest.mark.asyncio
+async def test_squad_message_ignores_a_forged_delegation_chain_and_origin():
+    """The chain and origin come from the thread and its parent message, not the caller (D-355)."""
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, enqueue, _store = await _send_squad_message(
+            {
+                "thread_id": _THREAD_ID,
+                "target_agent_id": "WORKER",
+                "parent_message_id": "msg-41",
+                # A reset chain would lift the depth and cycle limits; the origin names an outsider.
+                "delegation_chain": [],
+                "delegation_origin_agent_id": "MALLORY",
+            },
+            thread=thread,
+            messages={"msg-41": "PM"},
+        )
+
+    assert response.status == 202
+    kwargs = enqueue.await_args.kwargs
+    assert (kwargs["delegation_chain"], kwargs["delegation_origin_agent_id"]) == (["PM"], "PM")
+    assert kwargs["parent_message_id"] == "msg-41"
+    ignored = ["squad.delegation_chain", "squad.delegation_origin_agent_id"]
+    assert json.loads(response.text)["ignored"] == ignored
+    log.warning.assert_called_once_with(
+        "squad_message_identity_ignored", thread_id=_THREAD_ID, session_id="squad-session", ignored=ignored
+    )
+
+
+@pytest.mark.asyncio
+async def test_squad_message_keeps_a_chain_that_extends_the_record():
+    """Earlier hops the record does not hold are kept; the recorded hop cannot be dropped (D-355)."""
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    response, enqueue, _store = await _send_squad_message(
+        {
+            "thread_id": _THREAD_ID,
+            "target_agent_id": "WORKER",
+            "parent_message_id": "msg-41",
+            "delegation_chain": ["BE", "PM"],
+            "delegation_origin_agent_id": "PM",
+        },
+        thread=thread,
+        participants=("PM", "WORKER", "BE"),
+        messages={"msg-41": "PM"},
+    )
+
+    assert response.status == 202
+    kwargs = enqueue.await_args.kwargs
+    assert (kwargs["delegation_chain"], kwargs["delegation_origin_agent_id"]) == (["BE", "PM"], "PM")
+    assert json.loads(response.text)["ignored"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "parent_message_id",
+    [
+        pytest.param("msg-999999999", id="unknown"),
+        # get_message_sender reads within the thread, so another thread's message is not found.
+        pytest.param("msg-77", id="another-thread"),
+    ],
+)
+async def test_squad_message_answering_a_message_the_thread_does_not_hold_is_refused(parent_message_id):
+    """A bogus parent cannot reset the chain: the turn answers a message of this thread or none (D-355)."""
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, enqueue, _store = await _send_squad_message(
+            {
+                "thread_id": _THREAD_ID,
+                "target_agent_id": "WORKER",
+                "parent_message_id": parent_message_id,
+                "delegation_chain": [],
+            },
+            thread=thread,
+            messages={"msg-41": "PM"},
+        )
+
+    assert response.status == 404
+    assert json.loads(response.text) == {"error": f"message {parent_message_id} not found in thread {_THREAD_ID}"}
+    enqueue.assert_not_awaited()
+    log.warning.assert_called_once_with(
+        "squad_message_unknown_parent_refused", thread_id=_THREAD_ID, parent_message_id=parent_message_id
+    )
+
+
+@pytest.mark.asyncio
+async def test_squad_message_without_a_parent_continues_no_delegation():
+    """With no parent message there is no record to continue, so a sent chain or origin is ignored (D-355)."""
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, enqueue, _store = await _send_squad_message(
+            {
+                "thread_id": _THREAD_ID,
+                "target_agent_id": "WORKER",
+                "delegation_chain": ["MALLORY"],
+                "delegation_origin_agent_id": "MALLORY",
+            },
+            thread=thread,
+        )
+
+    assert response.status == 202
+    kwargs = enqueue.await_args.kwargs
+    assert (kwargs["parent_message_id"], kwargs["delegation_chain"], kwargs["delegation_origin_agent_id"]) == (
+        None,
+        [],
+        None,
+    )
+    ignored = ["squad.delegation_chain", "squad.delegation_origin_agent_id"]
+    assert json.loads(response.text)["ignored"] == ignored
+    log.warning.assert_called_once_with(
+        "squad_message_identity_ignored", thread_id=_THREAD_ID, session_id="squad-session", ignored=ignored
+    )
+
+
+@pytest.mark.asyncio
+async def test_squad_router_dispatch_of_a_participant_message_keeps_the_recorded_hop_quietly():
+    """The router's chain gets the recorded hop added; nothing is reported as forged (D-355)."""
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, enqueue, _store = await _send_squad_message(
+            {
+                "thread_id": _THREAD_ID,
+                "target_agent_id": "WORKER",
+                "parent_message_id": "msg-41",
+                "delegation_chain": ["squad_router"],
+            },
+            thread=thread,
+            messages={"msg-41": "PM"},
+        )
+
+    assert response.status == 202
+    kwargs = enqueue.await_args.kwargs
+    assert (kwargs["delegation_chain"], kwargs["delegation_origin_agent_id"]) == (["squad_router", "PM"], "PM")
+    assert json.loads(response.text)["ignored"] == []
+    log.warning.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_control_plane_squad_dispatch_is_accepted_as_sent(monkeypatch):
+    """The payload the control plane posts for a web reply passes the record checks unchanged (D-355)."""
+    import urllib.request
+
+    from koda.control_plane.manager import ControlPlaneManager
+
+    manager = object.__new__(ControlPlaneManager)
+    monkeypatch.setattr(manager, "_require_dashboard_agent", lambda _agent_id: ("WORKER", {"status": "active"}))
+    monkeypatch.setattr(
+        manager,
+        "get_runtime_access",
+        lambda *_args, **_kwargs: {"runtime_base_url": "http://runtime.local", "runtime_request_token": "t"},
+    )
+    posted: dict[str, object] = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"accepted": true}'
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float, **_kwargs: object) -> _Response:
+        posted.update(json.loads((request.data or b"{}").decode()))
+        return _Response()
+
+    monkeypatch.setattr("koda.control_plane.manager.guarded_urlopen", fake_urlopen)
+    # As the web reply route dispatches a reply that a user posted in the room.
+    manager.send_dashboard_squad_message(
+        "WORKER",
+        text="please review",
+        session_id="squad-session",
+        squad_thread_id=_THREAD_ID,
+        parent_message_id="msg-41",
+        delegation_chain=["squad_router"],
+        delegation_request_id="reply:thread:41:WORKER",
+        delegation_origin_agent_id="operator",
+    )
+    squad = posted["squad"]
+    assert isinstance(squad, dict)
+
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, enqueue, _store = await _send_squad_message(squad, thread=thread, messages={"msg-41": "operator"})
+
+    assert response.status == 202
+    assert json.loads(response.text)["ignored"] == []
+    log.warning.assert_not_called()
+    kwargs = enqueue.await_args.kwargs
+    assert kwargs["executing_agent_id"] == "WORKER"
+    assert (kwargs["delegation_chain"], kwargs["delegation_origin_agent_id"]) == (["squad_router"], "operator")
+    assert kwargs["delegation_request_id"] == "reply:thread:41:WORKER"
+
+
+@pytest.mark.asyncio
+async def test_control_plane_delivery_watcher_dispatch_is_accepted_without_a_warning(monkeypatch):
+    """The delivery watcher's own origin and chain name no agent, so they pass unlogged (D-355)."""
+    import urllib.request
+
+    from koda.control_plane.manager import ControlPlaneManager
+
+    manager = object.__new__(ControlPlaneManager)
+    monkeypatch.setattr(manager, "_require_dashboard_agent", lambda _agent_id: ("PM", {"status": "active"}))
+    monkeypatch.setattr(
+        manager,
+        "get_runtime_access",
+        lambda *_args, **_kwargs: {"runtime_base_url": "http://runtime.local", "runtime_request_token": "t"},
+    )
+    posted: dict[str, object] = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"accepted": true}'
+
+    def fake_urlopen(request: urllib.request.Request, timeout: float, **_kwargs: object) -> _Response:
+        posted.update(json.loads((request.data or b"{}").decode()))
+        return _Response()
+
+    monkeypatch.setattr("koda.control_plane.manager.guarded_urlopen", fake_urlopen)
+    # As _watch_dashboard_squad_delivery_synthesis dispatches the coordinator's synthesis.
+    manager.send_dashboard_squad_message(
+        "PM",
+        text="synthesise",
+        session_id="squad-session",
+        squad_thread_id=_THREAD_ID,
+        parent_message_id="msg-41",
+        delegation_chain=["squad_delivery_watcher"],
+        delegation_request_id="squad_synthesis:thread:msg-41:PM",
+        delegation_origin_agent_id="squad_delivery_watcher",
+    )
+    squad = posted["squad"]
+    assert isinstance(squad, dict)
+
+    thread = SimpleNamespace(id=_THREAD_ID, owner_user_id=777, telegram_chat_id=-100555)
+    with patch("koda.services.runtime.api.log") as log:
+        response, enqueue, _store = await _send_squad_message(
+            squad, thread=thread, messages={"msg-41": "operator:alice"}
+        )
+
+    assert response.status == 202
+    assert json.loads(response.text)["ignored"] == []
+    log.warning.assert_not_called()
+    kwargs = enqueue.await_args.kwargs
+    assert (kwargs["delegation_chain"], kwargs["delegation_origin_agent_id"]) == (
+        ["squad_delivery_watcher"],
+        "squad_delivery_watcher",
+    )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("thread", "expected_status", "expected_error"),
     [
         (None, 404, f"thread {_THREAD_ID} not found"),
         (
             SimpleNamespace(
-                status="paused", budget_usd_cap=None, cost_usd_accum=0, owner_user_id=777, telegram_chat_id=-100555
+                status="paused",
+                budget_usd_cap=None,
+                cost_usd_accum=0,
+                owner_user_id=777,
+                telegram_chat_id=-100555,
+                coordinator_agent_id="PM",
             ),
             409,
             "thread is paused",
@@ -1478,6 +1823,7 @@ async def test_runtime_squad_message_to_a_missing_thread_is_not_found_and_to_a_p
     controller._application = SimpleNamespace(user_data=defaultdict(dict), bot=None)  # type: ignore[attr-defined]
     thread_store = AsyncMock()
     thread_store.get_thread = AsyncMock(return_value=thread)
+    thread_store.list_participants = AsyncMock(return_value=[SimpleNamespace(agent_id="FE")])
     request = _json_request(
         task_id=0,
         payload={"text": "Build the UI", "squad": {"thread_id": _THREAD_ID, "target_agent_id": "FE"}},

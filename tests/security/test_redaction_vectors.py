@@ -351,7 +351,11 @@ def _runtime_api(text: str) -> str:
         request = SimpleNamespace(match_info={"task_id": "1"}, headers={}, query={})
         with (
             patch.object(api, "_authorize_runtime_access", return_value=None),
-            patch.object(api, "get_runtime_controller", return_value=SimpleNamespace(store=store)),
+            patch.object(
+                api,
+                "get_runtime_controller",
+                return_value=SimpleNamespace(store=store, runtime_root=Path(tmp) / "runtime"),
+            ),
         ):
             response = asyncio.run(api._runtime_task_terminals(request))
     return str(json.loads(response.text)["items"][0]["preview"])
