@@ -13,6 +13,7 @@ on one pool and no call sets anything on the connection.
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import Any
@@ -331,3 +332,44 @@ async def test_a_failed_codec_install_discards_the_connection(
         "SELECT count(*) FROM query_history WHERE user_id = ?", (_USER_ID,), agent_id=_AGENT
     )
     assert count == 1
+
+
+async def test_the_startup_search_path_keeps_the_default_search_path_after_the_schema(
+    migrated_postgres: str,
+) -> None:
+    """A startup ``search_path`` overrides the database or role default
+    (``ALTER DATABASE/ROLE ... SET search_path``), which can list the schema of
+    an extension type such as ``vector`` (Supabase installs pgvector in
+    ``extensions``). The backend keeps that default after its schema, so
+    unqualified extension types still resolve on its connections."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    from koda.knowledge.v2.postgres_backend import KnowledgeV2PostgresBackend
+
+    role, ext = "koda_search_path_probe", "koda_search_path_ext"
+    default_path = f'"$user", public, {ext}'
+    admin = await asyncpg.connect(migrated_postgres)
+    await admin.execute(f"DROP SCHEMA IF EXISTS {ext} CASCADE")
+    await admin.execute(f"DROP ROLE IF EXISTS {role}")
+    await admin.execute(f"CREATE ROLE {role} LOGIN SUPERUSER PASSWORD 'probe'")
+    await admin.execute(f"ALTER ROLE {role} SET search_path = {default_path}")
+    await admin.execute(f"CREATE SCHEMA {ext}")
+    await admin.execute(f"CREATE DOMAIN {ext}.probe_type AS integer")
+    parts = urlsplit(migrated_postgres)
+    netloc = f"{role}:probe@{parts.hostname}" + (f":{parts.port}" if parts.port else "")
+    schema = os.environ.get("KNOWLEDGE_V2_POSTGRES_SCHEMA") or "knowledge_v2"
+    backend = KnowledgeV2PostgresBackend(
+        agent_id=_AGENT, dsn=urlunsplit(parts._replace(netloc=netloc)), schema=schema, embedding_dimension=1024
+    )
+    try:
+        async with backend._connection() as conn:
+            value = await conn.fetchval("SELECT 7::probe_type")
+            path = await conn.fetchval("SHOW search_path")
+    finally:
+        await backend.close()
+        await admin.execute(f"DROP SCHEMA IF EXISTS {ext} CASCADE")
+        await admin.execute(f"DROP ROLE IF EXISTS {role}")
+        await admin.close()
+
+    assert value == 7
+    assert path == f'"{schema}", {default_path}'

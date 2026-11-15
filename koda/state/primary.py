@@ -146,8 +146,11 @@ def require_primary_state_backend(*, agent_id: str | None = None, error: str) ->
     return backend
 
 
-def run_coro_sync(coro: Any) -> Any:
+def run_coro_sync(coro: Any, *, timeout: float | None = None) -> Any:
     """Run an async primary-backend operation from sync callers.
+
+    ``timeout`` replaces ``PRIMARY_STATE_BRIDGE_TIMEOUT_SECONDS`` as the bridge
+    wait for an operation of several steps.
 
     Two dispatch modes:
 
@@ -170,12 +173,13 @@ def run_coro_sync(coro: Any) -> Any:
     """
 
     def _run_on_bridge(loop: asyncio.AbstractEventLoop) -> Any:
+        wait = _BRIDGE_TIMEOUT_SECONDS if timeout is None else timeout
         future = asyncio.run_coroutine_threadsafe(coro, loop)
         try:
-            return future.result(timeout=_BRIDGE_TIMEOUT_SECONDS)
+            return future.result(timeout=wait)
         except concurrent.futures.TimeoutError as exc:
             future.cancel()
-            raise TimeoutError(f"primary_state_bridge_timeout_after_{_BRIDGE_TIMEOUT_SECONDS:g}s") from exc
+            raise TimeoutError(f"primary_state_bridge_timeout_after_{wait:g}s") from exc
 
     try:
         asyncio.get_running_loop()

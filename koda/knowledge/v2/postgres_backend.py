@@ -183,6 +183,8 @@ class KnowledgeV2PostgresBackend:
         self._start_retries = max(0, int(start_retries))
         self._retry_base_seconds = max(0.05, float(retry_base_seconds))
         self._ready = False
+        # The database or role default search_path, read at bootstrap.
+        self._default_search_path = ""
         self._vector_enabled = False
         self._ensure_lock = asyncio.Lock()
         self._pool: Any | None = None
@@ -312,6 +314,8 @@ class KnowledgeV2PostgresBackend:
             try:
                 conn = await self._open_direct_connection()
                 try:
+                    # This connection has no startup search_path, so it reports the default.
+                    self._default_search_path = str(await conn.fetchval("SHOW search_path") or "")
                     await conn.execute(f'CREATE SCHEMA IF NOT EXISTS "{self._schema}"')
                     await conn.execute(
                         f"""CREATE TABLE IF NOT EXISTS "{self._schema}"."schema_migrations" (
@@ -400,8 +404,10 @@ class KnowledgeV2PostgresBackend:
         """Startup settings for the connections ``_connection()`` hands out.
 
         ``search_path`` resolves the unqualified names in the
-        ``koda.state.primary`` helpers' SQL to the backend schema, with
-        ``public`` after it for the ``vector`` extension type. A startup
+        ``koda.state.primary`` helpers' SQL to the backend schema. A startup
+        setting overrides the database or role default search_path, so that
+        default, read at bootstrap, follows the schema: it can list the schema
+        of the ``vector`` extension type (Supabase's ``extensions``). A startup
         setting survives the ``RESET ALL`` asyncpg runs when a pooled
         connection is released, so no query sets it first (D-076).
 
@@ -410,7 +416,8 @@ class KnowledgeV2PostgresBackend:
         ``track_extra_parameters``, and drops the setting if it is listed in
         ``ignore_startup_parameters`` (docs/config/reference.md, Postgres).
         """
-        return {"search_path": f'"{self._schema}", public'}
+        parts = (f'"{self._schema}"', self._default_search_path)
+        return {"search_path": ", ".join(part for part in parts if part)}
 
     async def _init_connection(self, conn: Any) -> None:
         """Set a connection up once, when it opens (the pool ``init`` hook, ADR-012).
@@ -3682,6 +3689,16 @@ class KnowledgeV2PostgresBackend:
                             created_at TEXT NOT NULL,
                             updated_at TEXT NOT NULL
                         )""",
+                ),
+            ),
+            _Migration(
+                "049_audit_events_type_lookup",
+                (
+                    # The deployment-wide lookup of the last retention.report
+                    # filters on event_type alone; idx_audit_events_lookup
+                    # leads with agent_id, so it would scan the whole table.
+                    f"""CREATE INDEX IF NOT EXISTS idx_audit_events_type_time
+                           ON "{schema}"."audit_events" (event_type, timestamp DESC)""",
                 ),
             ),
         )

@@ -129,7 +129,8 @@ Claude, Codex, Gemini, ElevenLabs and Ollama Cloud.
 - `KODA_ARTIFACT_POSTGRES_POOL_MAX_SIZE`
 
 The Python workers open each Postgres connection with `search_path` set to
-`KNOWLEDGE_V2_POSTGRES_SCHEMA` (then `public`) as a startup parameter, and their state
+`KNOWLEDGE_V2_POSTGRES_SCHEMA` as a startup parameter, followed by the database or role
+default `search_path` (where extension types such as `vector` are found), and their state
 queries rely on it to find their tables. A connection pooler between the workers and
 Postgres must forward that parameter. With PgBouncer, list `search_path` in
 `track_extra_parameters` (PgBouncer 1.20 or later; use 1.25.1 or later, which fixes a
