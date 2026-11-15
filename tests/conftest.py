@@ -15,10 +15,9 @@ from tests import _security_guard
 # Pull in real-Postgres fixtures so any test marked
 # ``@pytest.mark.postgres`` resolves the ``postgres_url`` /
 # ``db_connection`` fixtures. The module also auto-skips marked
-# tests when no DSN is configured and testcontainers/Docker is
-# unreachable, so a contributor without Docker still gets a clean
-# pytest run.
-pytest_plugins = ["tests.postgres_fixtures", "tests._provider_plugin"]
+# tests when POSTGRES_TEST_DSN is not set, so a contributor without
+# Postgres still gets a clean pytest run.
+pytest_plugins = ["tests.postgres_fixtures"]
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 

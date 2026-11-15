@@ -1,7 +1,7 @@
 """End-to-end DBManager tests against a real PostgreSQL container.
 
-These tests build a DBManager pointing at the testcontainers-managed pgvector/pg16
-instance from tests.postgres_fixtures.postgres_url, then exercise the read-only
+These tests build a DBManager pointing at the POSTGRES_TEST_DSN instance from
+tests.postgres_fixtures.postgres_url, then exercise the read-only
 guarantees, formatting, timeouts, pool behavior, multi-env routing, and
 isolation properties against an actual server.
 
