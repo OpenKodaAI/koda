@@ -19,7 +19,14 @@ supported (in priority order):
    seed itself is never logged: the operator chose it.
 3. **Disk file** — `state/control_plane/bootstrap.txt` (mode 0600) written on first
    boot if no owner exists. The operator SSHs in and reads it. A generated code is
-   also logged once, in `bootstrap_file_written`.
+   also shown once, in a banner on stderr; the structured log (`bootstrap_file_written`)
+   never carries it. The code expires `CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS` after
+   the file is written; while no owner exists, the next status request replaces an
+   expired file, or one without a code line and a readable expiry, with a new code.
+   The code is the file's first line (a seed may contain ``=``), and the file is
+   published whole, through a temp file and ``os.link``, so no replica reads it half written.
+   Writers check and replace the file under an ``flock`` on ``.bootstrap.lock`` beside it,
+   so replicas racing at expiry announce one code, the one on disk.
 
 The file is deleted automatically after the owner registers.
 """
@@ -27,10 +34,14 @@ The file is deleted automatically after the owner registers.
 from __future__ import annotations
 
 import contextlib
+import fcntl
 import os
 import secrets
+import sys
+import tempfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from koda.logging_config import get_logger
 
@@ -40,9 +51,14 @@ from .settings import (
     STATE_ROOT_DIR,
 )
 
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
 log = get_logger(__name__)
 
 _BOOTSTRAP_FILE_PATH: Path = STATE_ROOT_DIR / "control_plane" / "bootstrap.txt"
+# Writers hold an flock on this file, beside bootstrap.txt, while they read, check, replace and publish.
+_BOOTSTRAP_LOCK_NAME = ".bootstrap.lock"
 _BOOTSTRAP_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 # The /setup screen's code field (apps/web/src/components/setup/bootstrap-code-input.tsx)
 # keeps at most this many characters, from _BOOTSTRAP_ALPHABET only, dropping any other.
@@ -111,17 +127,117 @@ def _render_bootstrap_file(code: str, expires_at: datetime) -> str:
     )
 
 
-def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
-    """Write a bootstrap code to disk if one is needed and none exists.
+def _show_setup_code_banner(code: str, expires_at: datetime) -> None:
+    """Show a generated setup code once, on stderr, outside the structured log on stdout."""
+    rule = "=" * 72
+    sys.stderr.write(
+        "\n".join(
+            (
+                rule,
+                f"Koda setup code: {code}",
+                f"Paste it into /setup before {expires_at.isoformat()}. It is also in {_BOOTSTRAP_FILE_PATH}.",
+                "This code is shown once and is not written to the structured log.",
+                rule,
+                "",
+            )
+        )
+    )
+    sys.stderr.flush()
 
-    Returns the plaintext code if a *new* one was written (so callers can echo
-    it to the log once), or None if nothing was written.
+
+def _read_file_fields() -> tuple[str, datetime | None] | None:
+    """Return the code and ``expires_at`` stored on disk; None when there is no readable code file."""
+    if not _BOOTSTRAP_FILE_PATH.exists():
+        return None
+    try:
+        content = _BOOTSTRAP_FILE_PATH.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        # A file that is not UTF-8 holds no code we wrote: it is invalid and gets replaced.
+        log.warning("bootstrap_file_read_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
+        return None
+    if not content:
+        return None
+    # _render_bootstrap_file puts the code on the first line, whatever it holds (a seed may
+    # contain "=", as base64 padding does), and the key=value fields on the lines after it.
+    code, *field_lines = [line.strip() for line in content.splitlines() if line.strip()]
+    expires_at: datetime | None = None
+    for line in field_lines:
+        key, separator, value = line.partition("=")
+        if separator and key == "expires_at":
+            expires_at = _parse_expires_at(value)
+    return code, expires_at
+
+
+def _valid_code(fields: tuple[str, datetime | None] | None, now: datetime) -> str | None:
+    """The code of a file that holds a code line and an ``expires_at`` after ``now``; None for any other."""
+    if fields is None:
+        return None
+    code, expires_at = fields
+    if not code or expires_at is None or expires_at <= now:
+        return None
+    return code
+
+
+def _publish_bootstrap_file(content: bytes) -> bool:
+    """Put ``content`` at the bootstrap path in one step; False when another writer published a file first.
+
+    The content goes to a 0600 temp file in the same directory and is fsynced, then
+    hard-linked to the bootstrap path: ``os.link`` fails when that path exists, as
+    ``O_EXCL`` would, and a reader never sees a partly written file. A failed or short
+    write raises; the temp file is always removed.
+    """
+    fd, temp_path = tempfile.mkstemp(dir=_BOOTSTRAP_FILE_PATH.parent, prefix=".bootstrap.", suffix=".tmp")
+    try:
+        try:
+            written = os.write(fd, content)
+            if written != len(content):
+                raise OSError(f"wrote {written} of {len(content)} bytes to {temp_path}")
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        try:
+            os.link(temp_path, _BOOTSTRAP_FILE_PATH)
+        except FileExistsError:
+            return False
+    finally:
+        with contextlib.suppress(OSError):
+            os.unlink(temp_path)
+    return True
+
+
+@contextlib.contextmanager
+def _writer_lock() -> Iterator[None]:
+    """Hold an exclusive ``flock`` on the lock file beside the bootstrap file (one writer at a time)."""
+    fd = os.open(_BOOTSTRAP_FILE_PATH.parent / _BOOTSTRAP_LOCK_NAME, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)
+
+
+def ensure_bootstrap_file(*, has_owner: bool, now: datetime | None = None) -> str | None:
+    """Write a bootstrap code to disk if one is needed and no valid one exists.
+
+    Returns the plaintext code if a *new* one was written, or None if nothing was
+    written. A new generated code is shown once, in a banner on stderr; the
+    structured log never carries it. The code expires
+    ``CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS`` after the file is written
+    (``now``, the current time unless a test injects one).
 
     Does nothing when:
-    - The owner account already exists.
-    - The file already exists (we never overwrite an existing code).
-    - Both the env seed and the file path point to a code — env takes priority
-      but we still don't overwrite the file.
+    - The owner account already exists (and removes a file left over).
+    - The file already holds a valid code: a code line and an ``expires_at`` that has
+      not passed (we never overwrite a valid code). Any other file is replaced by a new
+      code (D-195): an expired one, or one without a code line or a readable expiry, such
+      as an empty file a crash left. With an env seed the new file holds the same seed
+      with a fresh expiry.
+
+    The file is published whole (``_publish_bootstrap_file``): another replica never sees
+    it partly written. Writers read, check, replace and publish under ``_writer_lock``, so
+    when replicas race at expiry one replaces the file, the others find it valid, and a code
+    is announced only when this call's file is the one on disk. A write that fails, or
+    writes only part of the content, leaves no file and raises.
     """
     if has_owner:
         if _BOOTSTRAP_FILE_PATH.exists():
@@ -131,23 +247,37 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
             except OSError as exc:
                 log.warning("bootstrap_file_unlink_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
         return None
-    if _BOOTSTRAP_FILE_PATH.exists():
-        return None
+    now = now or datetime.now(UTC)
     _BOOTSTRAP_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with _writer_lock():
+        return _replace_bootstrap_file_unless_valid(now)
+
+
+def _replace_bootstrap_file_unless_valid(now: datetime) -> str | None:
+    """``ensure_bootstrap_file`` with no owner; the caller holds ``_writer_lock``."""
+    if _BOOTSTRAP_FILE_PATH.exists():
+        fields = _read_file_fields()
+        if _valid_code(fields, now) is not None:
+            return None
+        try:
+            _BOOTSTRAP_FILE_PATH.unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning("bootstrap_file_unlink_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
+            return None
+        expired_at = fields[1] if fields is not None and fields[0] else None
+        if expired_at is not None:
+            log.info(
+                "bootstrap_file_expired_replaced", path=str(_BOOTSTRAP_FILE_PATH), expired_at=expired_at.isoformat()
+            )
+        else:
+            # No code line or no readable expires_at: the file never matches a setup code.
+            log.warning("bootstrap_file_invalid_replaced", path=str(_BOOTSTRAP_FILE_PATH))
     code = CONTROL_PLANE_BOOTSTRAP_CODE_SEED or _generate_code()
-    expires_at = datetime.now(UTC) + timedelta(seconds=CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)
-    try:
-        fd = os.open(
-            str(_BOOTSTRAP_FILE_PATH),
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            0o600,
-        )
-    except FileExistsError:
+    expires_at = now + timedelta(seconds=CONTROL_PLANE_BOOTSTRAP_CODE_TTL_SECONDS)
+    # Encode first: a seed that cannot be encoded raises before any file is created.
+    content = _render_bootstrap_file(code, expires_at).encode()
+    if not _publish_bootstrap_file(content):
         return None
-    try:
-        os.write(fd, _render_bootstrap_file(code, expires_at).encode())
-    finally:
-        os.close(fd)
     with contextlib.suppress(OSError):
         os.chmod(str(_BOOTSTRAP_FILE_PATH), 0o600)
     if CONTROL_PLANE_BOOTSTRAP_CODE_SEED:
@@ -162,10 +292,10 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
         log.info(
             "bootstrap_file_written",
             path=str(_BOOTSTRAP_FILE_PATH),
-            code=code,
             code_source="generated",
             expires_at=expires_at.isoformat(),
         )
+        _show_setup_code_banner(code, expires_at)
     if CONTROL_PLANE_BOOTSTRAP_CODE_SEED:
         significant = _seed_significant_characters(CONTROL_PLANE_BOOTSTRAP_CODE_SEED)
         if significant < _SEED_MIN_SIGNIFICANT_CHARACTERS:
@@ -189,29 +319,18 @@ def ensure_bootstrap_file(*, has_owner: bool) -> str | None:
     return code
 
 
-def read_bootstrap_file() -> str | None:
-    """Return the bootstrap code stored on disk, if any."""
-    if not _BOOTSTRAP_FILE_PATH.exists():
-        return None
-    try:
-        content = _BOOTSTRAP_FILE_PATH.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        log.warning("bootstrap_file_read_failed", path=str(_BOOTSTRAP_FILE_PATH), error=str(exc))
-        return None
-    if not content:
-        return None
-    lines = [line.strip() for line in content.splitlines() if line.strip()]
-    code = ""
-    expires_at: datetime | None = None
-    for line in lines:
-        if line.startswith("expires_at="):
-            expires_at = _parse_expires_at(line.split("=", 1)[1])
-        elif not code and "=" not in line:
-            code = line
-    if expires_at is not None and expires_at <= datetime.now(UTC):
-        log.info("bootstrap_file_expired", path=str(_BOOTSTRAP_FILE_PATH), expires_at=expires_at.isoformat())
-        return None
-    return code or None
+def read_bootstrap_file(*, now: datetime | None = None) -> str | None:
+    """Return the bootstrap code stored on disk, if the file holds one that has not expired by ``now``.
+
+    A file without a code line or a readable ``expires_at`` holds no usable code;
+    ``ensure_bootstrap_file`` replaces it at the next status request.
+    """
+    now = now or datetime.now(UTC)
+    fields = _read_file_fields()
+    code = _valid_code(fields, now)
+    if code is None and fields is not None and fields[1] is not None and fields[1] <= now:
+        log.info("bootstrap_file_expired", path=str(_BOOTSTRAP_FILE_PATH), expires_at=fields[1].isoformat())
+    return code
 
 
 def consume_bootstrap_file() -> None:

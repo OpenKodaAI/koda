@@ -15,9 +15,9 @@ the records that must agree with it:
 
 A new route that answers without credentials therefore fails here until the OpenAPI
 document marks it public. HEAD routes have no OpenAPI operation of their own; each must
-answer exactly like its GET twin. Outside /api/control-plane/ the middleware checks nothing,
-and one line of OpenAPI would be enough, so the routes there that answer without
-credentials are also pinned in ``ANONYMOUS_ROOT_ROUTES``.
+answer exactly like its GET twin. Outside /api/control-plane/ the middleware checks only
+``/cluster/drain`` and ``/cluster/undrain``, and one line of OpenAPI would be enough, so the
+routes there that answer without credentials are also pinned in ``ANONYMOUS_ROOT_ROUTES``.
 
 The auth middleware skips the bearer check only when the router resolved the request to a
 public route, with a method the table names for it. One request per route cannot show that
@@ -77,18 +77,18 @@ SUPERVISOR_INTERNAL_ROUTES = frozenset(
 )
 
 # The routes outside /api/control-plane/ that answer without a session, besides the HEAD twin
-# aiohttp adds to each GET. The auth middleware never checks these paths, so nothing in the
-# code limits them, and an OpenAPI entry alone does not make one acceptable: a new root route
-# that answers without a session fails the matrix until it is listed here on purpose (and in
-# docs/security/authentication.md). Once D-033 puts /cluster/drain and /cluster/undrain behind
-# a bearer token, they leave this set.
+# aiohttp adds to each GET. The auth middleware checks only the root routes that change state
+# (/cluster/drain and /cluster/undrain, D-033), so nothing in the code limits the others, and an
+# OpenAPI entry alone does not make one acceptable: a new root route that answers without a
+# session fails the matrix until it is listed here on purpose (and in
+# docs/security/authentication.md).
 ANONYMOUS_ROOT_ROUTES = frozenset(
     {
         ("GET", "/"),
         ("GET", "/setup"),
         ("GET", "/health"),
         ("GET", "/openapi/control-plane.json"),
-        *SUPERVISOR_INTERNAL_ROUTES,
+        ("GET", "/cluster/status"),
     }
 )
 
@@ -426,13 +426,17 @@ def test_dashboard_public_list_equals_the_paths_answering_without_credentials(ro
         assert "isPublicControlPlaneApiPath(" in text, f"{gate.relative_to(ROOT)} does not gate on the shared list"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="D-033: /cluster/* sit outside /api/control-plane/, so the auth middleware skips them",
-)
 def test_cluster_drain_endpoints_require_an_operator_session(route_matrix: RouteMatrix) -> None:
-    assert not route_matrix.probes[("POST", "/cluster/drain")].public
-    assert not route_matrix.probes[("POST", "/cluster/undrain")].public
+    """D-033: drain and undrain change state, so they take an operator credential like the API."""
+    cluster = {key: probe for key, probe in route_matrix.probes.items() if probe.path.startswith("/cluster/")}
+    assert set(cluster) == _with_head_twins(SUPERVISOR_INTERNAL_ROUTES)
+    for key in (("POST", "/cluster/drain"), ("POST", "/cluster/undrain")):
+        probe = cluster[key]
+        assert not probe.public
+        assert (probe.anonymous_status, probe.unknown_token_status) == (401, 401)
+        assert probe.anonymous_body == UNAUTHORIZED_BODY
+        assert probe.operator_reached == probe.identity
+    assert cluster[("GET", "/cluster/status")].public
 
 
 async def _unreachable_handler(_request: web.Request) -> web.Response:
