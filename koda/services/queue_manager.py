@@ -14,6 +14,7 @@ Features:
 
 import asyncio
 import contextlib
+import functools
 import hashlib
 import inspect
 import json
@@ -24,7 +25,7 @@ import subprocess
 import time
 import unicodedata
 import uuid
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -7195,6 +7196,42 @@ async def _maybe_enqueue_squad_reply_synthesis(
         log.exception("squad_reply_synthesis_enqueue_failed", thread_id=ctx.squad_thread_id)
 
 
+async def _dispatch_squad_follow_ups(
+    *,
+    user_id: int,
+    context: BotContext,
+    ctx: QueryContext,
+    response_text: str,
+    squad_message_id: str | None,
+    artifact_ids: list[str],
+) -> None:
+    """Queue the squad turns a finished squad turn leads to: unblocked tasks and the coordinator synthesis.
+
+    Queueing a turn takes the per-user worker lock, so this must run after the
+    caller of ``_post_process`` has released it (D-019).
+    """
+    await _maybe_enqueue_unblocked_squad_tasks(
+        user_id=user_id,
+        context=context,
+        ctx=ctx,
+    )
+    await _maybe_enqueue_squad_coordinator_synthesis(
+        user_id=user_id,
+        context=context,
+        ctx=ctx,
+        response_text=response_text,
+        squad_message_id=squad_message_id,
+        artifact_ids=artifact_ids,
+    )
+    await _maybe_enqueue_squad_reply_synthesis(
+        user_id=user_id,
+        context=context,
+        ctx=ctx,
+        response_text=response_text,
+        squad_message_id=squad_message_id,
+    )
+
+
 async def _post_process(
     user_id: int,
     context: BotContext,
@@ -7210,8 +7247,14 @@ async def _post_process(
     final_status: str = "completed",
     response_text_override: str | None = None,
     delivery_outcome: DeliveryOutcome | None = None,
-) -> None:
-    """Update session, stats, log query, extract memories."""
+) -> Callable[[], Awaitable[None]] | None:
+    """Update session, stats, log query, extract memories.
+
+    For a squad turn, return its follow-ups (``_dispatch_squad_follow_ups``)
+    instead of queueing them: the caller holds the per-user worker lock, and
+    queueing a turn takes that lock again (D-019). The caller runs them once
+    it has released the lock.
+    """
     effective_model = run_result.model or model
 
     # Update session and stats
@@ -7255,6 +7298,7 @@ async def _post_process(
     squad_message_id: str | None = None
     response_text = response_text_override if response_text_override is not None else run_result.result
     squad_artifact_ids: list[str] = []
+    squad_follow_ups: Callable[[], Awaitable[None]] | None = None
     if not dry_run and ctx is not None and ctx.squad_thread_id:
         try:
             from koda.squads import get_squad_thread_store
@@ -7321,25 +7365,14 @@ async def _post_process(
                 )
         except Exception:
             log.exception("squad_post_process_message_persist_failed", thread_id=ctx.squad_thread_id)
-        await _maybe_enqueue_unblocked_squad_tasks(
-            user_id=user_id,
-            context=context,
-            ctx=ctx,
-        )
-        await _maybe_enqueue_squad_coordinator_synthesis(
+        squad_follow_ups = functools.partial(
+            _dispatch_squad_follow_ups,
             user_id=user_id,
             context=context,
             ctx=ctx,
             response_text=response_text,
             squad_message_id=squad_message_id,
             artifact_ids=squad_artifact_ids,
-        )
-        await _maybe_enqueue_squad_reply_synthesis(
-            user_id=user_id,
-            context=context,
-            ctx=ctx,
-            response_text=response_text,
-            squad_message_id=squad_message_id,
         )
         if ctx.delegation_request_id and ctx.delegation_origin_agent_id:
             try:
@@ -7546,6 +7579,7 @@ async def _post_process(
         dry_run=dry_run,
         final_status=final_status,
     )
+    return squad_follow_ups
 
 
 # Main queue processor (orchestrator) — parallel dispatcher
@@ -8227,7 +8261,7 @@ async def _execute_single_task(
                     # Lock user_data writes to avoid races with concurrent tasks
                     lock = _get_worker_lock(user_id)
                     async with lock:
-                        await _post_process(
+                        squad_follow_ups = await _post_process(
                             user_id,
                             context,
                             run_result,
@@ -8242,6 +8276,11 @@ async def _execute_single_task(
                             response_text_override=delivered_response_text,
                             delivery_outcome=delivery_outcome,
                         )
+                    if squad_follow_ups is not None:
+                        # Only after the lock is released, since queueing a follow-up turn takes it (D-019).
+                        # Awaited, not a background task, so the next turn in this queue starts after the
+                        # synthesis check has read the thread, as when it ran under the lock.
+                        await squad_follow_ups()
 
                     if not item.silent_response:
                         await _send_response(

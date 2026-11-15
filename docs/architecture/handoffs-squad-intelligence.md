@@ -32,7 +32,10 @@ a task. A task-less handoff gives each selected participant a task first. The
 post-turn task-cycle check (`_maybe_enqueue_squad_coordinator_synthesis`) then
 derives the outcome of a `requested` or `accepted` handoff once every
 destination has answered, through a visible task result for the cycle or a
-reply obligation it answered on the cycle's source message:
+reply obligation it answered on the cycle's source message. The queue worker
+runs this check, like the other squad follow-ups, after it releases the
+per-user lock it holds for post-processing, because queueing the synthesis
+turn takes that lock again (D-019):
 
 - `returned` when every answer succeeded;
 - `failed` when a destination's task result has `payload.status = failed`. The

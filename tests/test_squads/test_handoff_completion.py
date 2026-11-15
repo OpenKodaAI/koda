@@ -174,7 +174,7 @@ async def _start_handoff(threads: SquadThreadStore, tasks: SquadTaskStore) -> tu
 async def _finish_turn(*, thread_id: str, parent: str, task_id: str, agent_id: str, error: bool = False) -> None:
     context = MagicMock(application=None, bot=None)
     context.user_data = {"total_cost": 0.0, "query_count": 0}
-    await _post_process(
+    follow_ups = await _post_process(
         42,
         context,
         RunResult(
@@ -192,6 +192,9 @@ async def _finish_turn(*, thread_id: str, parent: str, task_id: str, agent_id: s
         "stub",
         ctx=_ctx(thread_id=thread_id, task_id=task_id, agent_id=agent_id, parent=parent),
     )
+    # The queue worker runs these once it releases the per-user lock (D-019).
+    assert follow_ups is not None
+    await follow_ups()
 
 
 def _final_syntheses(dispatch: AsyncMock) -> list[dict[str, Any]]:
