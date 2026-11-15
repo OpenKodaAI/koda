@@ -492,10 +492,12 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   browser payload (`GET .../browser`, `POST .../attach/browser`, the browser WebSocket's
   snapshots and the browser session rows of `GET .../sessions`) carries only named fields:
   the kernel's and the session's free-form `metadata`, with its `*_log` file paths, and any
-  key the kernel adds later are no longer sent. Its `runtime_dir`, like the task
-  environment's `runtime_dir`, is relative to the task's runtime directory (`browser`, or
-  `.` for the directory itself) or `null` outside it, never an absolute host path. A page
-  title or error that starts with `/` is kept. (M3-E8-T4)
+  key the kernel adds later are no longer sent in these payloads. Its `runtime_dir`, like
+  the task environment's `runtime_dir`, is relative to the task's runtime directory
+  (`browser`, or `.` for the directory itself) or `null` outside it, never an absolute host
+  path. A page title or error that starts with `/` is kept. Runtime events are not
+  projected: a `browser.started` event on the event routes still carries the whole
+  session, including its `metadata` log paths and absolute `runtime_dir`. (M3-E8-T4)
 - Automatic and web-created scheduled jobs run. Every reminder, interval and cron run
   used to be blocked as "policy snapshot is missing". Migration 047 adds the scheduler
   events table and the dispatch and validation columns that a real Postgres database
