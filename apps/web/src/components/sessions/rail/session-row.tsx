@@ -91,7 +91,7 @@ function SessionRowImpl({
             </span>
             <span
               className={cn(
-                "shrink-0 font-mono text-[0.6875rem] text-[var(--text-quaternary)] transition-opacity duration-[120ms]",
+                "shrink-0 font-mono text-xs text-[var(--text-quaternary)] transition-opacity duration-[120ms]",
                 onRequestDelete && "group-hover:opacity-0",
               )}
             >

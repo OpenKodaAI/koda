@@ -182,3 +182,30 @@ describe("CommandBar listbox structure (D-282)", () => {
   });
 });
 
+
+// M8-E5-T3: text in the palette stays on the type scale (12 / 13 / 14 …),
+// through Tailwind's text-xs or a --font-size-* token, with no arbitrary px
+// or rem size and nothing under the 12px floor. The global .eyebrow class
+// sets 10.5px outside any layer, so it beats every size utility: it is off
+// the scale too.
+const OFF_SCALE = /^(?:text-\[(?:\d|\.)[\d.]*(?:px|rem)\]|eyebrow)$/;
+
+describe("CommandBar type scale (M8-E5-T3)", () => {
+  it("sets no arbitrary font size on the group headings, options or descriptions", async () => {
+    render(
+      <CommandBar
+        ctx={{ ...ctx, agents: [{ id: "ATLAS", label: "Atlas", color: "#D97757", colorRgb: "217, 119, 87" }] }}
+        mode="modal"
+        placeholder="Search commands"
+        emptyState="Nothing found"
+      />,
+    );
+    const listbox = await screen.findByRole("listbox");
+    const option = within(listbox).getByRole("option", { name: /Atlas/ });
+    expect(option.textContent).toContain("commandBar.agent.description");
+    const sized = [listbox, ...listbox.querySelectorAll<HTMLElement>("*")].flatMap((element) =>
+      [...element.classList].filter((name) => OFF_SCALE.test(name)).map((name) => `${element.tagName.toLowerCase()} ${name}`),
+    );
+    expect(sized).toEqual([]);
+  });
+});

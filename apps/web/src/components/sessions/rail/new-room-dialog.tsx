@@ -272,7 +272,7 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                       onClick={() => toggleAgent(agent.id)}
                       aria-pressed={checked}
                       className={cn(
-                        "flex w-full items-center gap-3 rounded-[var(--radius-panel-sm)] p-2 text-left",
+                        "group flex w-full items-center gap-3 rounded-[var(--radius-panel-sm)] p-2 text-left",
                         "transition-colors duration-[120ms] ease-[cubic-bezier(0.22,1,0.36,1)]",
                         checked
                           ? "bg-[var(--panel-strong)] text-[var(--text-primary)]"
@@ -290,13 +290,13 @@ export function NewRoomDialog({ open, onClose, onCreated }: NewRoomDialogProps) 
                           {agent.label || agent.id}
                         </span>
                         {agent.label && agent.label !== agent.id ? (
-                          <span className="truncate font-mono text-[0.6875rem] text-[var(--text-quaternary)]">
+                          <span className="truncate font-mono text-xs text-[var(--text-quaternary)] group-hover:text-[var(--text-tertiary)]">
                             {agent.id}
                           </span>
                         ) : null}
                       </div>
                       {isPaused ? (
-                        <span className="shrink-0 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-[0.625rem] uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
+                        <span className="shrink-0 rounded-[var(--radius-chip)] bg-[var(--tone-warning-bg)] px-1.5 py-0.5 font-mono text-xs uppercase tracking-[var(--tracking-mono)] text-[var(--tone-warning-text)]">
                           <span className="sr-only">{t("sessions.room.create.pausedLabel", undefined)}</span>
                           <span aria-hidden="true">{t("sessions.room.create.pausedBadge", undefined)}</span>
                         </span>

@@ -5,6 +5,8 @@ import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import ts from "typescript";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CommandBar } from "@/components/command-bar/command-bar";
+import type { CommandBarContext } from "@/components/command-bar/command-registry";
 import { AgentCatalogProvider } from "@/components/providers/agent-catalog-provider";
 import { I18nProvider } from "@/components/providers/i18n-provider";
 import { EffortPicker, type EffortCapability } from "@/components/control-plane/shared/effort-picker";
@@ -600,8 +602,9 @@ describe("focus ring contract (M8-E1-T1)", () => {
 // recurrence hints, cron labels, the Schedule step's next runs, metric
 // labels), so it keeps WCAG AA 4.5:1 on every surface text sits on, the
 // modal glass over its scrim and the floating glass included. The
-// hover-strong and tint-strong fills are pressed and selected states: text on
-// them uses --text-tertiary or stronger.
+// hover-strong and tint-strong fills are pressed and selected states, and a
+// --hover-tint highlight on the light modal glass takes --text-quaternary to
+// 4.37:1: text on them uses --text-tertiary or stronger.
 const TEXT_SURFACES = [
   ...SURFACES.filter((surface) => surface !== "--surface-hover-strong" && surface !== "--surface-tint-strong"),
   "--field-bg",
@@ -629,6 +632,60 @@ describe("text contrast (D-267)", () => {
       expect(contrast(tokens["--text-tertiary"], canvas)).toBeGreaterThan(contrast(text, canvas));
     });
   }
+
+  // The palette's active option paints --hover-tint over its glass: the modal
+  // glass over the scrim on Ctrl+K, the floating glass inline on Home. Every
+  // text the active option carries is checked on both, in every theme.
+  it("the command palette's active option keeps 4.5:1 for its text on --hover-tint over the glass", async () => {
+    const ctx: CommandBarContext = {
+      agents: [{ id: "ATLAS", label: "Atlas", color: "#D97757", colorRgb: "217, 119, 87" }],
+      stats: [],
+      router: { push: vi.fn() },
+      t: (key) => (key === "commandBar.agent.description" ? "Open agent detail" : key),
+      openAgentDetail: vi.fn(),
+    };
+    render(<CommandBar ctx={ctx} mode="modal" placeholder="Search commands" emptyState="Nothing found" />);
+    const listbox = await screen.findByRole("listbox");
+    const option = within(listbox).getByRole("option", { name: /Atlas/ });
+    fireEvent.mouseEnter(option);
+    expect(option).toHaveAttribute("aria-selected", "true");
+
+    // The text token of each text node: the nearest text colour class from
+    // the node up to the option.
+    const painted: [string, string][] = [];
+    const walker = document.createTreeWalker(option, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent?.trim();
+      if (!text) continue;
+      let token: string | undefined;
+      for (let element = node.parentElement; element && !token; element = element.parentElement) {
+        token = [...element.classList].map((name) => name.match(/^text-\[var\((--text-[\w-]+)\)\]$/)?.[1]).find(Boolean);
+        if (element === option) break;
+      }
+      painted.push([text, token ?? "no text colour"]);
+    }
+    expect(painted.map(([text]) => text)).toEqual(["Atlas", "Open agent detail"]);
+
+    for (const [theme, { tokens }] of Object.entries(THEMES)) {
+      const canvas = parseColor(tokens["--canvas"]);
+      const highlights: [string, Rgba][] = [
+        [
+          "--hover-tint over the modal glass",
+          over(tokens["--hover-tint"], over(tokens["--overlay-modal-bg"], over(tokens["--overlay-backdrop-bg"], canvas))),
+        ],
+        ["--hover-tint over the floating glass", over(tokens["--hover-tint"], over(tokens["--overlay-floating-bg"], canvas))],
+      ];
+      for (const [text, token] of painted) {
+        expect(tokens[token], `${theme} defines ${token}`).toBeDefined();
+        for (const [name, background] of highlights) {
+          expect(
+            contrast(resolveToken(tokens, tokens[token]), background),
+            `${theme}: "${text}" in ${token} on ${name}`,
+          ).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    }
+  });
 });
 
 // D-281: the session surfaces that dim a wrapper around something that can

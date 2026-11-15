@@ -41,12 +41,23 @@ function definitions(text: string): Set<string> {
   return names;
 }
 
-/** Every var() reference in the text; a ${...} in a template literal is a wildcard. */
+/**
+ * Every var() reference in the text, and every Tailwind v4 shorthand that
+ * compiles to one (bg-(--x), border-(color:--x), text-(length:--x)); a ${...}
+ * in a template literal is a wildcard.
+ */
 function references(text: string): { name: string; line: number }[] {
-  return [...text.matchAll(/var\(\s*(--[\w-]*(?:\$\{[^}]*\}[\w-]*)*)/g)].map((match) => ({
-    name: match[1],
-    line: text.slice(0, match.index).split("\n").length,
-  }));
+  const patterns = [
+    /var\(\s*(--[\w-]*(?:\$\{[^}]*\}[\w-]*)*)/g,
+    /(?<=[a-z\d]-)\((?:[a-z-]+:)?(--[\w-]*(?:\$\{[^}]*\}[\w-]*)*)\)/g,
+  ];
+  return patterns
+    .flatMap((pattern) => [...text.matchAll(pattern)])
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .map((match) => ({
+      name: match[1],
+      line: text.slice(0, match.index).split("\n").length,
+    }));
 }
 
 function matcher(reference: string): RegExp {
@@ -80,7 +91,7 @@ describe("design token references (M8-E5-T3)", () => {
     expect(undefinedReferences(files)).toEqual([]);
   });
 
-  it("the scan flags undefined names, dead fallback hooks and unmatched template names", () => {
+  it("the scan flags undefined names, dead fallback hooks, unmatched template names and the (--x) shorthand", () => {
     const css = [
       ":root { --panel: #fff; --tone-info-bg: #eef; }",
       ".a { background: var(--panel); color: var(--panel-muted); }",
@@ -93,6 +104,7 @@ describe("design token references (M8-E5-T3)", () => {
       "export const tint = (name: string) => `var(--tone-${name}-tint)`;",
       'export const style = { "--set-inline": "1px", width: "var(--set-inline)" };',
       'export const radix = "w-[var(--radix-popover-trigger-width)]";',
+      'export const B = () => <div className="bg-(--surface-base) border-(color:--panel) text-(length:--font-size-tiny)" />;',
     ].join("\n");
     expect(
       undefinedReferences([
@@ -104,6 +116,8 @@ describe("design token references (M8-E5-T3)", () => {
       "app/probe.css:3 --sticky-bg",
       "components/probe.tsx:1 --surface-canvas",
       "components/probe.tsx:3 --tone-${name}-tint",
+      "components/probe.tsx:6 --surface-base",
+      "components/probe.tsx:6 --font-size-tiny",
     ]);
   });
 });
