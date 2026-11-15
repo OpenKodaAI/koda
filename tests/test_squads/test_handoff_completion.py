@@ -588,11 +588,11 @@ async def test_a_pause_between_the_sweep_and_the_redispatch_never_counts_an_expi
     thread_id, _parent, task_ids = await _start_handoff(threads, tasks)
 
     async def dispatch(**kwargs: Any) -> SquadTurnDispatchResult:
-        # As the queue does when it takes the turn: a room that cannot run now gets no turn.
-        refusal = squad_thread_turn_refusal(await threads.get_thread(kwargs["thread"].id))
+        # As dispatch_squad_turn does: a room that cannot run now gets no turn.
+        refusal = squad_thread_turn_refusal(kwargs["thread"])
         return SquadTurnDispatchResult(
             target_agent_id=kwargs["target_agent_id"],
-            transport="local_queue",
+            transport="none" if refusal else "local_queue",
             dispatched=refusal is None,
             error=refusal,
         )
@@ -625,6 +625,54 @@ async def test_a_pause_between_the_sweep_and_the_redispatch_never_counts_an_expi
     # Only the silent worker's expiry counts, not the pause.
     assert qa_task.metadata["claim_expiry_count"] == 1
     assert "claim_refused" not in qa_task.metadata
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_refused_redispatch_releases_its_claim_when_the_room_reopens_at_once(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """The refusal itself releases the claim, not a read of the room after it (D-338)."""
+    from koda.squads import SquadTurnDispatchResult, squad_thread_turn_refusal
+
+    threads, tasks = stores
+    thread_id, _parent, task_ids = await _start_handoff(threads, tasks)
+
+    async def refuse_then_reopen(**kwargs: Any) -> SquadTurnDispatchResult:
+        refusal = squad_thread_turn_refusal(kwargs["thread"])
+        if refusal:
+            # The operator resumes the room right after dispatch_squad_turn refused the turn.
+            await threads.update_thread_status(thread_id, "open")
+        return SquadTurnDispatchResult(
+            target_agent_id=kwargs["target_agent_id"],
+            transport="none" if refusal else "local_queue",
+            dispatched=refusal is None,
+            error=refusal,
+        )
+
+    turn_stubs.side_effect = refuse_then_reopen
+    sweep = tasks.sweep_expired_claims
+
+    async def sweep_then_pause(**kwargs: Any) -> Any:
+        expired = await sweep(**kwargs)
+        if expired:
+            await threads.update_thread_status(thread_id, "paused")
+        return expired
+
+    router = _router(threads, tasks)
+    await _expire_claim(tasks, task_ids["QA"])
+    with patch.object(tasks, "sweep_expired_claims", sweep_then_pause):
+        [claim] = (await router.sweep_once()).expired_claims
+    assert claim.task_id == task_ids["QA"]
+
+    # The refused claim is due at once: the next sweep dispatches QA again, and only the silent
+    # worker's expiry counts.
+    [again] = (await router.sweep_once()).expired_claims
+    assert again.task_id == task_ids["QA"] and again.refused is True
+    assert [call.kwargs["target_agent_id"] for call in turn_stubs.await_args_list] == ["QA", "QA"]
+    qa_task = await tasks.get_task(task_ids["QA"])
+    assert qa_task is not None and qa_task.status == "claimed"
+    assert qa_task.metadata["claim_expiry_count"] == 1
 
 
 async def _leave_a_stale_task_of_an_earlier_cycle(tasks: SquadTaskStore, thread_id: str) -> str:

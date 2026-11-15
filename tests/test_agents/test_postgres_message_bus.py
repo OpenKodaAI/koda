@@ -319,6 +319,29 @@ async def test_a_resolved_delegation_is_persisted_for_a_delegator_in_another_pro
 
 
 @pytest.mark.asyncio
+async def test_a_delegation_result_write_is_held_until_it_is_done(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The bus holds the write task until it is done, so it is not collected before it runs (D-354)."""
+    bus = PostgresMessageBus(dsn="postgresql://example.invalid/koda")
+    release = asyncio.Event()
+
+    async def slow_persist(request_id: str, result: DelegationResult) -> None:
+        await release.wait()
+
+    monkeypatch.setattr(bus, "_persist_delegation_result", slow_persist)
+
+    bus.resolve_delegation(
+        "req-1", DelegationResult(request_id="req-1", from_agent="worker", to_agent="caller", success=True)
+    )
+
+    [held] = bus._persist_tasks
+    assert not held.done()
+    release.set()
+    await asyncio.wait_for(held, timeout=1)
+    await asyncio.sleep(0)
+    assert bus._persist_tasks == set()
+
+
+@pytest.mark.asyncio
 async def test_a_failed_delegation_result_write_is_logged(monkeypatch: pytest.MonkeyPatch) -> None:
     """A delegator in another process reads only the persisted row, so a failed write is not silent (D-354)."""
     from unittest.mock import AsyncMock, Mock

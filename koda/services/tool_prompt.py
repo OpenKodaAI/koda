@@ -742,6 +742,7 @@ Decompose squad work into tracked tasks. Single-owner-per-task via optimistic lo
             "kind": "research|design|backend|frontend|copy|review",
             "assigned_agent_id": "BACKEND", "depends_on": ["<uuid>"],
             "acceptance_criteria": ["..."], "idempotency_key": "..."}`
+  Optional `"metadata"` may set only `notes` and `progress`; other task metadata is the server's.
 - `squad_task_claim` — Atomically claim a pending task. Params: `{"task_id": "<uuid>", "ttl_seconds": 300}`
 - `squad_task_update` — Transition status (e.g., to `in_progress`, `blocked`).
   Params: `{"task_id": "<uuid>", "new_status": "in_progress", "expected_version": 2}`

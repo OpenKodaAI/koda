@@ -515,3 +515,50 @@ async def test_the_router_still_counts_and_clears_claim_bookkeeping(
     after = await tasks.get_task(task.id)
     assert after is not None
     assert after.metadata["claim_expiry_count"] == 1 and "claim_refused" not in after.metadata
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "key",
+    ["claim_expiry_count", "claim_refused", "coordination_parent_message_id", "handoff_correlation_id"],
+)
+async def test_an_agent_cannot_create_a_task_with_server_owned_metadata(
+    stores: tuple[SquadThreadStore, SquadTaskStore], monkeypatch: pytest.MonkeyPatch, key: str
+) -> None:
+    """squad_task_create applies the same allowlist to ``metadata`` as the update tools (D-339)."""
+    from unittest.mock import AsyncMock, Mock, patch
+
+    from koda.services.tool_dispatcher import ToolContext, _handle_squad_task_create
+
+    threads, tasks = stores
+    thread_id = await _seed_thread(threads)
+    monkeypatch.setattr("koda.services.tool_dispatcher.INTER_AGENT_ENABLED", True)
+    ctx = ToolContext(
+        user_id=42,
+        chat_id=-42,
+        work_dir="/tmp",
+        user_data={},
+        agent=None,
+        agent_mode="normal",
+        executing_agent_id="FE",
+    )
+
+    with (
+        patch("koda.squads.get_squad_task_store", return_value=tasks),
+        patch("koda.squads.get_squad_access_service", return_value=Mock(require_thread_access=AsyncMock())),
+    ):
+        refused = await _handle_squad_task_create(
+            {"thread_id": thread_id, "title": "t", "assigned_agent_id": "FE", "metadata": {"notes": "x", key: -1000}},
+            ctx,
+        )
+        allowed = await _handle_squad_task_create(
+            {"thread_id": thread_id, "title": "u", "metadata": {"notes": "x", "progress": 0}}, ctx
+        )
+
+    assert not refused.success
+    assert key in refused.output and "cannot be set by an agent" in refused.output
+    assert allowed.success, allowed.output
+    [created] = await tasks.list_tasks(thread_id=thread_id)
+    assert created.title == "u"
+    assert created.metadata == {"notes": "x", "progress": 0}

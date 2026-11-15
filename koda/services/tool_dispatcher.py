@@ -4348,6 +4348,28 @@ def _string_list(value: Any) -> list[str]:
     return [str(item) for item in value if item is not None]
 
 
+def _refuse_server_task_metadata(tool_name: str, param_name: str, metadata: Any) -> AgentToolResult | None:
+    """Refuse task metadata outside AGENT_TASK_METADATA_KEYS from an agent's squad task tool (D-339).
+
+    The claim bookkeeping and the coordination fields are the server's.
+    """
+    if not isinstance(metadata, dict):
+        return None
+    from koda.squads.tasks import AGENT_TASK_METADATA_KEYS
+
+    server_keys = sorted(str(key) for key in metadata if str(key) not in AGENT_TASK_METADATA_KEYS)
+    if not server_keys:
+        return None
+    return AgentToolResult(
+        tool=tool_name,
+        success=False,
+        output=(
+            f"Task metadata cannot be set by an agent: {', '.join(server_keys)}. "
+            f"{param_name} may set only: {', '.join(sorted(AGENT_TASK_METADATA_KEYS))}."
+        ),
+    )
+
+
 async def _handle_squad_task_create(params: dict, ctx: ToolContext) -> AgentToolResult:
     err = await _check_inter_agent_available("squad_task_create")
     if err:
@@ -4360,6 +4382,9 @@ async def _handle_squad_task_create(params: dict, ctx: ToolContext) -> AgentTool
             success=False,
             output="Missing 'thread_id' or 'title'.",
         )
+    metadata_refusal = _refuse_server_task_metadata("squad_task_create", "metadata", params.get("metadata"))
+    if metadata_refusal:
+        return metadata_refusal
     access_err = await _require_squad_thread_access(
         tool="squad_task_create",
         ctx=ctx,
@@ -4465,20 +4490,9 @@ async def _run_status_update(
     if not task_id or not target_status:
         return AgentToolResult(tool=tool_name, success=False, output="Missing 'task_id' or 'new_status'.")
     metadata_patch = params.get("metadata_patch")
-    if isinstance(metadata_patch, dict):
-        from koda.squads.tasks import AGENT_TASK_METADATA_KEYS
-
-        # The claim bookkeeping and the coordination fields are the server's (D-339).
-        server_keys = sorted(str(key) for key in metadata_patch if str(key) not in AGENT_TASK_METADATA_KEYS)
-        if server_keys:
-            return AgentToolResult(
-                tool=tool_name,
-                success=False,
-                output=(
-                    f"Task metadata cannot be set by an agent: {', '.join(server_keys)}. "
-                    f"metadata_patch may set only: {', '.join(sorted(AGENT_TASK_METADATA_KEYS))}."
-                ),
-            )
+    metadata_refusal = _refuse_server_task_metadata(tool_name, "metadata_patch", metadata_patch)
+    if metadata_refusal:
+        return metadata_refusal
     coordinator_override = bool(params.get("coordinator_override", False))
     access_err = await _require_squad_task_access(
         tool=tool_name,

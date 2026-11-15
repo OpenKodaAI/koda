@@ -7856,7 +7856,6 @@ async def redispatch_expired_squad_claim(*, task_id: str) -> str:
         dispatch_squad_turn,
         get_squad_task_store,
         get_squad_thread_store,
-        squad_thread_turn_refusal,
     )
 
     thread_store = get_squad_thread_store()
@@ -7905,15 +7904,11 @@ async def redispatch_expired_squad_claim(*, task_id: str) -> str:
         )
         if result.dispatched:
             return "redispatched"
-        # A room paused or spent after the sweep refused the turn: the fresh claim is released
-        # without counting an expiry, as the other refusal paths release theirs, and the first
-        # sweep after the room can run again dispatches the task again (D-338).
-        try:
-            current = await thread_store.get_thread(thread.id)
-        except Exception:
-            log.exception("squad_claim_redispatch_thread_read_failed", thread_id=thread.id, squad_task_id=claimed.id)
-            current = None
-        if current is None or squad_thread_turn_refusal(current) is not None:
+        if result.transport == "none":
+            # The room, paused or spent after the sweep, refused the turn (dispatch_squad_turn
+            # sends nothing then): the fresh claim is released without counting an expiry, as the
+            # other refusal paths release theirs, and the first sweep after the room can run again
+            # dispatches the task again (D-338).
             await _release_refused_squad_task_claim(squad_task_id=claimed.id, agent_id=assignee)
         return "skipped"
     reason = (
