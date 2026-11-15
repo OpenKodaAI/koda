@@ -31,7 +31,7 @@ import shutil
 import socket
 import subprocess
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -296,6 +296,13 @@ def dashboard_app(stack: Stack) -> web.Application:
 
     async def relay(request: web.Request) -> web.Response:
         stack.remember("dashboard", request)
+        connection = {token.strip().lower() for token in request.headers.get("Connection", "").split(",")}
+        if request.headers.get("Upgrade", "").lower() != "websocket" or "upgrade" not in connection:
+            # server.mjs refuses only in its "upgrade" event; a plain GET goes to Next.js, where
+            # proxy.ts answers 401 without a session (the smoke sends none to the relay).
+            response = _json({"error": "Operator session is required."}, 401)
+            response.headers["Cache-Control"] = "no-store"
+            return response
         # authorizeRelayUpgrade and refuseUpgrade in apps/web/src/lib/runtime-relay-server.mjs, before
         # any WebSocket work: 403 unless the Origin is the page's, then 404 for an unknown relay id
         # (no relay is attached here), each with no body and `Connection: close`.
@@ -493,6 +500,39 @@ async def test_the_relay_check_tells_the_dashboard_relay_from_the_api() -> None:
         assert headers["Connection"] == "Upgrade"
         assert headers["Sec-WebSocket-Version"] == "13"
         assert len(base64.b64decode(headers["Sec-WebSocket-Key"])) == 16
+
+
+class _DropsTheUpgrade(proxy_smoke.Proxy):
+    """Sends what a proxy location without the Upgrade headers forwards: no Upgrade, `Connection: close`."""
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        headers: Mapping[str, str] | None = None,
+        body: object | None = None,
+    ) -> proxy_smoke.Response:
+        kept = {name: value for name, value in (headers or {}).items() if name not in ("Upgrade", "Connection")}
+        return super().request(method, path, headers={**kept, "Connection": "close"}, body=body)
+
+
+async def test_the_relay_check_fails_when_the_upgrade_headers_are_dropped() -> None:
+    """Without the Upgrade headers a relay path is a plain request, so proxy.ts answers it, not the relay.
+
+    server.mjs refuses only upgrades; a plain GET goes to Next.js, where proxy.ts answers 401 without a
+    session. A proxy location that forwards no Upgrade (the bundled `/api/runtime/` one) fails the check.
+    """
+    stack = Stack()
+    async with serve(dashboard_app(stack)) as dashboard:
+        plain = await asyncio.to_thread(
+            proxy_smoke.Proxy(f"http://{dashboard}").request, "GET", f"{proxy_smoke.RELAY_PATH_PREFIX}unknown"
+        )
+        with pytest.raises(proxy_smoke.CheckFailed, match="got HTTP 401 .*Operator session is required"):
+            await asyncio.to_thread(proxy_smoke._relay_websocket, _DropsTheUpgrade(f"http://{dashboard}"))
+
+    assert (plain.status, plain.json()) == (401, {"error": "Operator session is required."})
+    assert plain.headers.get("Cache-Control") == "no-store"
 
 
 async def test_the_bundled_proxy_passes_the_smoke_in_a_real_nginx(nginx_binary: str, tmp_path: Path) -> None:
