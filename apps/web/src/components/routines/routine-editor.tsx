@@ -4,6 +4,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type FormEvent,
 } from "react";
@@ -318,6 +319,7 @@ export function RoutineEditor({
   const [validationKey, setValidationKey] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<SettingsTab>("connectors");
   const [step, setStep] = useState<WizardStep>(1);
+  const nextButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -394,14 +396,15 @@ export function RoutineEditor({
   if (!presence.shouldRender) return null;
   if (typeof document === "undefined") return null;
 
-  function goNext() {
+  function goNext(): boolean {
     const error = validateStep(state, step, preview);
     if (error) {
       setValidationKey(error);
-      return;
+      return false;
     }
     setValidationKey(null);
     setStep((current) => (current < 3 ? ((current + 1) as WizardStep) : current));
+    return true;
   }
 
   function goBack() {
@@ -412,6 +415,13 @@ export function RoutineEditor({
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (disabled) return;
+    // Basics and Schedule have no submit button, so Enter in one of their fields submits the
+    // form implicitly. Only the Refine step submits; earlier steps advance like Next, and focus
+    // moves to Next so it stays in the dialog when the step's fields unmount.
+    if (step < 3) {
+      if (goNext()) nextButtonRef.current?.focus();
+      return;
+    }
     const error = validateAll(state, preview);
     if (error) {
       setValidationKey(error);
@@ -585,6 +595,7 @@ export function RoutineEditor({
                   {step < 3 ? (
                     <Button
                       key="next"
+                      ref={nextButtonRef}
                       type="button"
                       variant="accent"
                       size="md"

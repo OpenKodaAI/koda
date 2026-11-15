@@ -112,3 +112,45 @@ test("edit: Next on the Schedule step reaches Refine and the Delete button witho
   await expect(dialog.getByRole("button", { name: "Save changes" })).toBeFocused();
   expect(writes).toEqual([]);
 });
+
+// Basics and Schedule have no submit button, so Enter in the name field triggers the form's
+// implicit submission. It must only advance to Schedule and keep focus inside the dialog;
+// a submission would create the routine early or save and close the editor.
+async function enterInNameAdvancesToSchedule(page: Page, dialog: Locator, writes: string[]) {
+  await dialog.getByPlaceholder("e.g., Daily code review").press("Enter");
+  await expectStep(dialog, "Schedule");
+  await page.waitForTimeout(750);
+  expect(writes).toEqual([]);
+  await expect(dialog).toBeVisible();
+  await expectStep(dialog, "Schedule");
+  await expect(dialog.getByRole("button", { name: "Next" })).toBeFocused();
+}
+
+test("create: Enter in the name field on Basics moves to Schedule without creating the routine", async ({
+  page,
+}) => {
+  const writes = await openRoutines(page);
+
+  await page.getByRole("button", { name: "New routine" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expectStep(dialog, "Basics");
+  await dialog.getByPlaceholder("Describe what the agent should do on each run").fill("Summarize the day");
+  await dialog.getByPlaceholder("e.g., Daily code review").fill("Nightly digest");
+
+  await enterInNameAdvancesToSchedule(page, dialog, writes);
+});
+
+test("edit: Enter in the name field on Basics moves to Schedule without saving", async ({ page }) => {
+  const writes = await openRoutines(page);
+
+  await page.getByRole("button", { name: "Edit" }).first().click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog.getByText("Edit routine #7")).toBeVisible();
+  await expectStep(dialog, "Basics");
+
+  await enterInNameAdvancesToSchedule(page, dialog, writes);
+  await dialog.getByRole("button", { name: "Next" }).click();
+  await expectStep(dialog, "Refine");
+  await expect(dialog.getByRole("button", { name: "Delete routine" })).toBeVisible();
+  expect(writes).toEqual([]);
+});
