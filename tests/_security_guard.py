@@ -9,7 +9,8 @@ agents) can never reach each other's guard, and an ambient
 that guard is not reachable.
 
 The session's own guard runs under :func:`tests._owned_process.spawn_owned`, so it
-exits soon after the session's process dies, even when teardown never runs.
+exits soon after the session's process dies, even when teardown never runs, and its
+watchdog then removes the guard's socket directory.
 
 This module must not import ``koda`` at import time: ``conftest.py`` calls
 :func:`select_guard_target` before ``koda.config`` reads the environment.
@@ -54,12 +55,19 @@ def guard_disabled(environ: MutableMapping[str, str] = os.environ) -> bool:
     return environ.get(SKIP_ENV, "").strip() == "1"
 
 
+# The directory own_target created for each target it returned: run_own_guard has the
+# guard's watchdog remove only these.
+_OWN_SOCKET_DIRS: dict[str, str] = {}
+
+
 def own_target() -> str:
-    """Return a Unix-socket target in a new private directory, removed at exit."""
+    """Return a Unix-socket target in a new private directory, removed at exit or once its guard is gone."""
     # /tmp keeps the socket path short (sun_path is ~104 bytes on macOS).
     socket_dir = tempfile.mkdtemp(prefix="koda-guard-", dir="/tmp" if os.path.isdir("/tmp") else None)
     atexit.register(shutil.rmtree, socket_dir, ignore_errors=True)
-    return f"unix://{socket_dir}/guard.sock"
+    target = f"unix://{socket_dir}/guard.sock"
+    _OWN_SOCKET_DIRS[target] = socket_dir
+    return target
 
 
 def select_guard_target(environ: MutableMapping[str, str] = os.environ) -> GuardTarget:
@@ -121,8 +129,12 @@ def run_own_guard(root: Path, target: str, timeout: float) -> Iterator[None]:
     """Run a guard owned by this session on ``target`` until the context exits."""
     command = guard_command(root)
     env = {**os.environ, "SECURITY_GRPC_TARGET": target}
+    # The watchdog removes the socket directory too: a killed session never runs its atexit handlers.
+    cleanup_dir = _OWN_SOCKET_DIRS.get(target)
     with tempfile.NamedTemporaryFile(mode="w+", encoding="utf-8") as log_file:
-        proc = spawn_owned(command, cwd=root, env=env, stdout=log_file, stderr=log_file, text=True)
+        proc = spawn_owned(
+            command, cleanup_dir=cleanup_dir, cwd=root, env=env, stdout=log_file, stderr=log_file, text=True
+        )
         try:
             try:
                 wait_until_ready(target, timeout, proc)

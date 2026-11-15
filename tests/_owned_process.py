@@ -10,14 +10,31 @@ script (standard library only, under ``python -I``). The watchdog:
 
 * runs in its own session, so a signal sent to the owner's process group (a harness
   killing the group, Ctrl-C) cannot take the watchdog down before it has acted;
-* starts the command as the leader of a new process group, so stopping the command
-  also stops what it started (``cargo run`` runs rustc and build scripts before it
-  execs the guard);
-* stops that group, SIGTERM and then SIGKILL after a grace period, once its parent is
-  no longer the owner pid it was given (the owner died, whatever the signal) or when
-  it receives SIGTERM, SIGINT or SIGHUP itself (:func:`stop_owned`);
-* otherwise exits with the command's status, and dies by the same signal when the
-  command did, so the owner sees the returncode it would see without the watchdog.
+* starts the command in a new process group, so stopping the command also stops what it
+  started (``cargo run`` runs rustc and build scripts before it execs the guard);
+* stops that group once its parent is no longer the owner pid it was given (the owner
+  died, whatever the signal) or when it receives SIGTERM, SIGINT or SIGHUP itself
+  (:func:`stop_owned`): SIGTERM to the group, up to a grace period for the command to
+  exit, then SIGKILL to the group, which also ends members that ignore SIGTERM. A
+  command that has left the group gets SIGKILL alone, after the grace period;
+* sends the group that SIGKILL as well when the command exits by itself, so nothing it
+  started is left behind;
+* then removes ``cleanup_dir`` if one was given (a killed owner's atexit handlers never
+  run), and exits with the command's status, dying by the same signal when the command
+  did, so the owner sees the returncode it would see without the watchdog.
+
+The group's leader is an *anchor*: a ``/bin/sh`` that ignores SIGHUP, SIGINT and SIGTERM
+and blocks reading a pipe that only the watchdog holds. It does two things:
+
+* It keeps the group id from being reused. The watchdog reaps the anchor only after its
+  last signal to the group, so until then the id is the pid of a process that still
+  exists, alive or a zombie, and no other group can have it.
+* It ends the group if the watchdog dies first. Its read returns once the watchdog is
+  gone, whatever the signal, and it then sends SIGKILL to its whole group, itself
+  included. This works the same on Linux and macOS, also for what the command started,
+  and it covers ``pkill -9 python``, which kills the watchdog with pytest but leaves the
+  shell. The command keeps running only after a kill that picks out both the watchdog
+  and the anchor, or the anchor alone just before the watchdog dies.
 
 The parent check cannot be fooled by pid reuse: while the owner lives it is the
 watchdog's parent, and once it dies the watchdog is reparented to init or a subreaper,
@@ -30,24 +47,18 @@ the parent *thread* exits, so a server started from a worker thread would die ea
 it is cleared by credential changes; and it reaches only the direct child, not the
 processes cargo starts. The watchdog is one mechanism for both systems, and every
 normal teardown runs the same stop path that an owner's death does.
-
-The watchdog itself can still be killed together with its owner (``pkill -9 python``,
-say). On Linux the kernel then kills the command: the watchdog sets ``PR_SET_PDEATHSIG``
-for it, and the watchdog is single-threaded, so the thread caveat does not apply. On
-macOS that one case leaves the command running.
 """
 
 from __future__ import annotations
 
 import contextlib
-import ctypes
 import os
-import resource
+import shutil
 import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from pathlib import Path
 from typing import Any, NoReturn
 
@@ -55,17 +66,23 @@ _WATCHDOG = Path(__file__).resolve()
 _POLL_SECONDS = 0.1
 # How long the command gets to exit on SIGTERM before the watchdog sends SIGKILL.
 _GRACE_SECONDS = 5.0
-_PR_SET_PDEATHSIG = 1  # <linux/prctl.h>
+# The leader of the command's process group (see the module docstring). Its stdin is a pipe
+# whose only writer is the watchdog: the command does not inherit it (close_fds).
+_ANCHOR = ("/bin/sh", "-c", "trap '' HUP INT TERM; read -r line; kill -s KILL 0")
 
 
-def spawn_owned(command: Sequence[str], **popen_kwargs: Any) -> subprocess.Popen[Any]:
+def spawn_owned(
+    command: Sequence[str], *, cleanup_dir: str | None = None, **popen_kwargs: Any
+) -> subprocess.Popen[Any]:
     """Start ``command`` so that it exits soon after this process dies; stop it with :func:`stop_owned`.
 
     The keyword arguments go to :class:`subprocess.Popen` for the watchdog, and the
     command inherits its working directory, environment and standard streams. The
     returned process is the watchdog: it exits when the command does, with its status.
+    ``cleanup_dir`` is removed, with its contents, once the command and every process in
+    its group are gone; pass only a directory this process created for the command.
     """
-    watchdog = [sys.executable, "-I", str(_WATCHDOG), str(os.getpid()), *command]
+    watchdog = [sys.executable, "-I", str(_WATCHDOG), str(os.getpid()), cleanup_dir or "", *command]
     return subprocess.Popen(watchdog, start_new_session=True, **popen_kwargs)
 
 
@@ -81,25 +98,18 @@ def stop_owned(proc: subprocess.Popen[Any]) -> None:
         proc.wait(timeout=5)
 
 
-def _signal_group(child: subprocess.Popen[bytes], signum: int) -> None:
-    # The child is not reaped until wait() returns, so its pid still names its group.
-    try:
-        os.killpg(child.pid, signum)
-    except ProcessLookupError:  # the command left its group; it can still be reached directly
-        child.send_signal(signum)
-
-
-def _stop(child: subprocess.Popen[bytes]) -> int:
-    _signal_group(child, signal.SIGTERM)
-    try:
-        return child.wait(timeout=_GRACE_SECONDS)
-    except subprocess.TimeoutExpired:
-        _signal_group(child, signal.SIGKILL)
-        return child.wait()
+def _signal_group(group: int, signum: int) -> None:
+    # The anchor is not reaped yet, so ``group`` cannot name another group. ESRCH means no
+    # member is alive (a system may not count the anchor once it is a zombie).
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(group, signum)
 
 
 def _exit_with(status: int) -> NoReturn:
     if status < 0:
+        # POSIX-only, so imported here: tests/conftest.py imports this module on every platform.
+        import resource
+
         signum = -status
         # The command has already dumped core if it was going to; the watchdog must not.
         resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
@@ -109,23 +119,7 @@ def _exit_with(status: int) -> NoReturn:
     sys.exit(status if status >= 0 else 128 - status)
 
 
-def _killed_with_watchdog() -> Callable[[], None] | None:
-    """On Linux, a ``preexec_fn`` that makes the kernel SIGKILL the command if the watchdog dies first."""
-    if not sys.platform.startswith("linux"):
-        return None
-    prctl = ctypes.CDLL(None, use_errno=True).prctl
-    watchdog = os.getpid()
-
-    def preexec() -> None:
-        if prctl(_PR_SET_PDEATHSIG, ctypes.c_ulong(signal.SIGKILL)) != 0:
-            raise OSError(ctypes.get_errno(), "prctl(PR_SET_PDEATHSIG)")
-        if os.getppid() != watchdog:  # the watchdog died before the setting took effect
-            os._exit(1)
-
-    return preexec
-
-
-def _watch(owner: int, command: list[str]) -> NoReturn:
+def _watch(owner: int, cleanup_dir: str, command: list[str]) -> NoReturn:
     stop_requested = False
 
     def request_stop(signum: int, frame: object) -> None:
@@ -135,14 +129,25 @@ def _watch(owner: int, command: list[str]) -> NoReturn:
     # Handlers, not SIG_IGN: the command must start with the default dispositions.
     for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
         signal.signal(signum, request_stop)
-    child = subprocess.Popen(command, process_group=0, preexec_fn=_killed_with_watchdog())
-    while (status := child.poll()) is None:
-        if stop_requested or os.getppid() != owner:
-            status = _stop(child)
-            break
-        time.sleep(_POLL_SECONDS)
+    anchor = subprocess.Popen(_ANCHOR, stdin=subprocess.PIPE, process_group=0)
+    try:
+        child = subprocess.Popen(command, process_group=anchor.pid)
+        while child.poll() is None:
+            if stop_requested or os.getppid() != owner:
+                _signal_group(anchor.pid, signal.SIGTERM)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    child.wait(timeout=_GRACE_SECONDS)
+                break
+            time.sleep(_POLL_SECONDS)
+    finally:
+        _signal_group(anchor.pid, signal.SIGKILL)
+        anchor.wait()
+    child.kill()  # only if it left the group and outlived the grace period
+    status = child.wait()
+    if cleanup_dir:
+        shutil.rmtree(cleanup_dir, ignore_errors=True)
     _exit_with(status)
 
 
 if __name__ == "__main__":
-    _watch(int(sys.argv[1]), sys.argv[2:])
+    _watch(int(sys.argv[1]), sys.argv[2], sys.argv[3:])

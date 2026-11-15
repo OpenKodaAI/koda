@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import select
-import shutil
 import signal
 import socket
 import subprocess
@@ -95,13 +94,17 @@ def test_guard_process_is_stopped_when_startup_is_interrupted(monkeypatch: pytes
     monkeypatch.setattr(_security_guard, "guard_command", lambda root: sleeper)
     monkeypatch.setattr(_security_guard, "spawn_owned", spawn)
     monkeypatch.setattr(_security_guard, "wait_until_ready", interrupt)
+    socket_dir = tmp_path / "not-from-own-target"
+    socket_dir.mkdir()
+    target = f"unix://{socket_dir}/guard.sock"
 
-    with pytest.raises(KeyboardInterrupt), _security_guard.run_own_guard(tmp_path, "unix:///x", 1):
+    with pytest.raises(KeyboardInterrupt), _security_guard.run_own_guard(tmp_path, target, 1):
         pass
 
     assert started and started[0].poll() is not None
     # The watchdog dies by SIGTERM only after the guard did: stopped and reaped, not left behind.
     assert started[0].returncode == -signal.SIGTERM
+    assert socket_dir.is_dir(), "only a directory that own_target created may be removed"
 
 
 # A stand-in for the Rust guard: a gRPC server on SECURITY_GRPC_TARGET, so the real
@@ -143,6 +146,15 @@ def _fake_guard(stop_file: Path) -> list[str]:
     return [sys.executable, "-c", _FAKE_GUARD, str(stop_file), "120"]
 
 
+def _eventually(condition: Callable[[], bool], seconds: float = 10) -> bool:
+    deadline = time.monotonic() + seconds
+    while not condition():
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.1)
+    return True
+
+
 def _answers(target: str) -> bool:
     """Whether a process still listens on the guard's socket (a dead guard's socket refuses)."""
     with socket.socket(socket.AF_UNIX) as probe:
@@ -173,28 +185,25 @@ def test_guard_does_not_outlive_a_killed_session(
         text=True,
         start_new_session=True,  # its own process group, so killpg reaches the session and nothing else
     )
-    target = ""
     try:
         assert session.stdout is not None
         ready, _, _ = select.select([session.stdout], [], [], 90)
         target = session.stdout.readline().strip() if ready else ""
         assert target.startswith("unix://"), f"the session did not start its guard (exit {session.poll()})"
+        socket_dir = Path(target.removeprefix("unix://")).parent
         assert _answers(target)
 
         kill(session.pid, signum)
         session.wait(timeout=10)
 
-        deadline = time.monotonic() + 10
-        while _answers(target):
-            assert time.monotonic() < deadline, "the guard was still running 10s after its session was killed"
-            time.sleep(0.1)
+        # This test removes nothing itself: the session's own cleanup must, without its atexit handlers.
+        assert _eventually(lambda: not _answers(target)), "the guard was still running 10s after its session died"
+        assert _eventually(lambda: not socket_dir.exists()), "the guard's socket directory outlived its session"
     finally:
         stop_file.touch()
         if session.poll() is None:
             session.kill()
             session.wait(timeout=10)
-        if target:
-            shutil.rmtree(Path(target.removeprefix("unix://")).parent, ignore_errors=True)
 
 
 def test_guard_answers_until_teardown_and_stops_with_it(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -205,6 +214,7 @@ def test_guard_answers_until_teardown_and_stops_with_it(monkeypatch: pytest.Monk
         assert _answers(target)
 
     assert not _answers(target)
+    assert not Path(target.removeprefix("unix://")).parent.exists(), "teardown left the socket directory behind"
 
 
 def test_readiness_wait_reports_a_guard_that_exits_with_its_code_and_log(
