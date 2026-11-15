@@ -45,10 +45,9 @@ export function SaveBar({ dirty, saving, onSave, onDiscard }: SaveBarProps) {
           exit={{ y: 60, opacity: 0 }}
           transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
           className="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex items-end justify-center px-4 pb-4 sm:px-5 sm:pb-5 lg:pl-[calc(var(--shell-sidebar-width)+1.5rem)] lg:pr-6"
-          style={{ bottom: "var(--editor-footer-offset, 0px)" }}
         >
           <div
-            className="pointer-events-auto flex w-full max-w-[680px] items-center gap-4 rounded-2xl border px-5 py-3.5 transition-colors duration-500"
+            className="pointer-events-auto flex w-full max-w-[680px] items-center gap-4 rounded-[var(--radius-shell)] border px-5 py-3.5 transition-colors duration-500"
             style={{
               borderColor: showSuccess
                 ? "var(--tone-success-border)"

@@ -208,12 +208,12 @@ function EditorHeader({
   const lifecycleDescription = t(lifecycle.descriptionKey, lifecycle.descriptionOptions);
 
   return (
-    <header className="border-b border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-4 py-2 lg:px-5 lg:py-2" {...tourAnchor("editor.header")}>
+    <header className="border-b border-[var(--border-subtle)] bg-[var(--canvas)] px-4 py-2 lg:px-5 lg:py-2" {...tourAnchor("editor.header")}>
       <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/control-plane"
-            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)] hover:bg-[var(--surface-tint)]"
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[var(--radius-chip)] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)] hover:bg-[var(--surface-tint)]"
             aria-label={t("generated.controlPlane.voltar_ao_catalogo_9b2761dd")}
           >
             <ArrowLeft size={16} />
@@ -232,18 +232,18 @@ function EditorHeader({
             <div className="flex min-w-0 items-center gap-2">
               <Link
                 href="/control-plane"
-                className="shrink-0 text-[11px] uppercase tracking-[0.18em] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)]"
+                className="shrink-0 text-xs uppercase tracking-[0.18em] text-[var(--text-quaternary)] transition-colors hover:text-[var(--text-secondary)]"
                 {...tourAnchor("editor.back-link")}
               >
                 {t("generated.controlPlane.agentes_8ecacbc4")}
               </Link>
-              <span className="text-[11px] text-[var(--text-quaternary)]">/</span>
-              <span className="truncate text-[11px] uppercase tracking-[0.16em] text-[var(--text-quaternary)]">
+              <span className="text-xs text-[var(--text-quaternary)]">/</span>
+              <span className="truncate text-xs uppercase tracking-[0.16em] text-[var(--text-quaternary)]">
                 {agentId}
               </span>
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-2.5">
-              <h2 className="truncate text-[1.28rem] font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
+              <h2 className="truncate text-xl font-semibold tracking-[-0.04em] text-[var(--text-primary)]">
                 {state.displayName || agentId}
               </h2>
             </div>
@@ -257,7 +257,7 @@ function EditorHeader({
                 type="button"
                 onClick={onPrevious}
                 disabled={!previousStep}
-                className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-transparent px-3.5 py-2 text-sm text-[var(--text-secondary)] shadow-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
+                className="inline-flex items-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-transparent px-3.5 py-2 text-sm text-[var(--text-secondary)] shadow-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)] disabled:cursor-not-allowed disabled:opacity-40"
                 {...tourAnchor("editor.previous-step")}
               >
                 <ArrowLeft size={15} />
@@ -267,7 +267,7 @@ function EditorHeader({
                 type="button"
                 onClick={onNext}
                 className={cn(
-                  "inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm shadow-none transition-colors",
+                  "inline-flex items-center gap-2 rounded-[var(--radius-panel)] px-3.5 py-2 text-sm shadow-none transition-colors",
                   nextStep
                     ? "border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] text-[var(--text-primary)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-elevated)]"
                     : "font-semibold text-[color:var(--interactive-active-text)]",
@@ -310,7 +310,7 @@ function EditorHeader({
                   <button
                     type="button"
                     onClick={onDiscard}
-                    className="inline-flex items-center gap-2 rounded-xl border border-[var(--border-subtle)] bg-transparent px-3.5 py-2 text-sm text-[var(--text-secondary)] shadow-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
+                    className="inline-flex items-center gap-2 rounded-[var(--radius-panel)] border border-[var(--border-subtle)] bg-transparent px-3.5 py-2 text-sm text-[var(--text-secondary)] shadow-none transition-colors hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
                     {...tourAnchor("editor.discard")}
                   >
                     {t("generated.controlPlane.descartar_8c52be0d")}
@@ -467,7 +467,7 @@ function InnerShell() {
       className="h-full min-h-0 w-full overflow-hidden"
       {...tourRoute("control-plane.editor")}
     >
-      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--surface-canvas)]">
+      <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--canvas)]">
         <EditorHeader
           previousStep={previousStep}
           nextStep={nextStep}
@@ -484,10 +484,10 @@ function InnerShell() {
         />
 
         <div className="grid h-full min-h-0 flex-1 overflow-hidden lg:grid-cols-[auto_minmax(0,1fr)]">
-          <aside className="h-full min-h-0 border-b border-[var(--border-subtle)] bg-[var(--surface-canvas)] lg:border-b-0 lg:border-r" {...tourAnchor("editor.step-rail")}>
+          <aside className="h-full min-h-0 border-b border-[var(--border-subtle)] bg-[var(--canvas)] lg:border-b-0 lg:border-r" {...tourAnchor("editor.step-rail")}>
             <div className="flex h-full flex-col px-2 py-3 lg:px-2.5 lg:py-4">
               <div className="mb-2 px-1.5">
-                <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-[var(--text-quaternary)]">
+                <span className="text-xs font-medium uppercase tracking-[0.2em] text-[var(--text-quaternary)]">
                   {t("generated.controlPlane.fluxo_16a7913a")}
                 </span>
               </div>
@@ -506,7 +506,7 @@ function InnerShell() {
                       data-state={isActive ? "active" : isCompleted ? "completed" : "idle"}
                       {...tourAnchor(`editor.step.${step.key}`)}
                       className={cn(
-                        "group relative flex shrink-0 items-center gap-2.5 rounded-lg px-2 py-2 text-left transition-colors duration-200",
+                        "group relative flex shrink-0 items-center gap-2.5 rounded-[var(--radius-chip)] px-2 py-2 text-left transition-colors duration-200",
                         isActive
                           ? "bg-[var(--surface-tint)]"
                           : "bg-transparent hover:bg-[var(--surface-tint)]",
@@ -542,7 +542,7 @@ function InnerShell() {
 
                       {step.dirty ? (
                         <span
-                          className="inline-block h-1.5 w-1.5 shrink-0 rounded-full animate-pulse"
+                          className="inline-block h-1.5 w-1.5 shrink-0 rounded-[var(--radius-pill)] animate-pulse"
                           style={{ backgroundColor: "var(--tone-warning-dot)" }}
                           aria-label={t("generated.controlPlane.alteracoes_nao_salvas_c5136366")}
                         />

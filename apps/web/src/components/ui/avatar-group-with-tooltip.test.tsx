@@ -28,6 +28,17 @@ describe("AvatarGroupWithTooltips", () => {
     expect(screen.getByLabelText("1 more participants")).toHaveTextContent("+1");
   });
 
+  it("names the group and each avatar through roles that allow a name (D-282)", () => {
+    // aria-label on a span or div with no role is prohibited (axe
+    // aria-prohibited-attr on the /sessions room header).
+    render(<AvatarGroupWithTooltips avatars={avatars} maxVisible={2} ariaLabel="Room participants" />);
+
+    expect(screen.getByRole("group", { name: "Room participants" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Atlas" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "Forge" })).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "1 more participants" })).toHaveTextContent("+1");
+  });
+
   it("can render header avatars without visible initials", () => {
     render(
       <AvatarGroupWithTooltips

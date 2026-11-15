@@ -153,8 +153,8 @@ export default function OAuthCallbackPage() {
     );
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[var(--surface-base)] px-6 text-[var(--text-primary)]">
-      <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-[1.25rem] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-8 py-10 text-center">
+    <div className="flex min-h-screen items-center justify-center bg-[var(--canvas)] px-6 text-[var(--text-primary)]">
+      <div className="flex w-full max-w-md flex-col items-center gap-4 rounded-[var(--radius-shell)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-8 py-10 text-center">
         {icon}
         <p className="text-lg font-semibold">{callbackState.message}</p>
         {serverKey ? (
@@ -171,7 +171,7 @@ export default function OAuthCallbackPage() {
         <button
           type="button"
           onClick={() => window.close()}
-          className="mt-4 rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
+          className="mt-4 rounded-[var(--radius-chip)] border border-[var(--border-subtle)] bg-[var(--surface-panel-soft)] px-4 py-2 text-sm text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]"
         >
           {translate("generated.routes.fechar_a2a3b736")}</button>
       </div>

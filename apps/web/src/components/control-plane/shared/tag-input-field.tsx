@@ -75,9 +75,9 @@ export function TagInputField({
 
   return (
     <FormField label={label} description={description}>
-      <div className="rounded-[22px] border border-[var(--border-subtle)] bg-[var(--surface-canvas)] p-4 shadow-[0_12px_32px_rgba(0,0,0,0.06)]">
+      <div className="rounded-[var(--radius-shell)] border border-[var(--border-subtle)] bg-[var(--canvas)] p-4">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
+          <span className="text-xs font-medium uppercase tracking-[0.18em] text-[var(--text-quaternary)]">
             {t("generated.controlPlane.etiquetas_curtas_d7969da7")}
           </span>
           <button
@@ -92,7 +92,7 @@ export function TagInputField({
         </div>
 
         <div
-          className="field-shell flex min-h-[56px] flex-wrap items-center gap-2 rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-3 cursor-text focus-within:border-[color:var(--focus-ring)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]"
+          className="field-shell flex min-h-[56px] flex-wrap items-center gap-2 rounded-[var(--radius-input)] border border-[var(--border-subtle)] bg-[var(--surface-elevated)] px-3 py-3 cursor-text focus-within:border-[color:var(--focus-ring)] focus-within:outline focus-within:outline-[color:var(--focus-ring)]"
           onClick={(event) => {
             const inputElement = (event.currentTarget as HTMLElement).querySelector("input");
             inputElement?.focus();
@@ -106,7 +106,7 @@ export function TagInputField({
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.8, opacity: 0 }}
                 transition={{ duration: 0.15 }}
-                className="inline-flex items-center gap-1 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-tint-strong)] pl-3 pr-1.5 py-1 text-xs text-[var(--text-secondary)]"
+                className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--border-subtle)] bg-[var(--surface-tint-strong)] pl-3 pr-1.5 py-1 text-xs text-[var(--text-secondary)]"
               >
                 {tag}
                 <button
@@ -115,7 +115,7 @@ export function TagInputField({
                     event.stopPropagation();
                     removeTag(index);
                   }}
-                  className="rounded-full p-1 transition-colors hover:bg-[var(--surface-hover-strong)] hover:text-[var(--tone-danger-text)]"
+                  className="rounded-[var(--radius-pill)] p-1 transition-colors hover:bg-[var(--surface-hover-strong)] hover:text-[var(--tone-danger-text)]"
                   aria-label={`${t("generated.controlPlane.remover_5465770e")} ${tag}`}
                 >
                   <X size={10} />
@@ -136,7 +136,7 @@ export function TagInputField({
           ) : null}
         </div>
 
-        <span className="mt-3 block text-[11px] text-[var(--text-quaternary)]">
+        <span className="mt-3 block text-xs text-[var(--text-quaternary)]">
           {isFull
             ? t("generated.controlPlane.limite_de_count_itens_atingido_5489a1a8", { count: maxTags ?? 0 })
             : t("generated.controlPlane.pressione_enter_para_adicionar_ou_cole_vario_e2accc2a")}

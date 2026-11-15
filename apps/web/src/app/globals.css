@@ -26,7 +26,7 @@
   --text-primary: #101010;
   --text-secondary: #45403b;
   --text-tertiary: #615b54;
-  --text-quaternary: #7a736c;
+  --text-quaternary: #655e57;
   --icon-primary: #101010;
   --icon-secondary: #45403b;
   --icon-tertiary: #615b54;
@@ -248,7 +248,7 @@
     --text-primary: #F5F5F5;
     --text-secondary: #B8B8B8;
     --text-tertiary: #9A9A9A;
-    --text-quaternary: #6A6A6A;
+    --text-quaternary: #8A8A8A;
     --icon-primary: #F5F5F5;
     --icon-secondary: #B8B8B8;
     --icon-tertiary: #9A9A9A;
@@ -395,7 +395,7 @@ html.dark {
   --text-primary: #F5F5F5;
   --text-secondary: #B8B8B8;
   --text-tertiary: #9A9A9A;
-  --text-quaternary: #6A6A6A;
+  --text-quaternary: #8A8A8A;
   --icon-primary: #F5F5F5;
   --icon-secondary: #B8B8B8;
   --icon-tertiary: #9A9A9A;
@@ -1014,7 +1014,7 @@ button[aria-label="Open Next Dev Tools"] {
 
 .session-agent-chip {
   border-color: var(--border-subtle);
-  background: color-mix(in srgb, var(--surface-panel-soft) 82%, var(--surface-canvas));
+  background: color-mix(in srgb, var(--surface-panel-soft) 82%, var(--canvas));
   color: var(--text-primary);
 }
 
@@ -1029,7 +1029,7 @@ button[aria-label="Open Next Dev Tools"] {
 
 .session-agent-chip--static:hover {
   border-color: var(--border-subtle);
-  background: color-mix(in srgb, var(--surface-panel-soft) 88%, var(--surface-canvas));
+  background: color-mix(in srgb, var(--surface-panel-soft) 88%, var(--canvas));
 }
 
 .session-agent-chip__icon {
@@ -1041,7 +1041,7 @@ button[aria-label="Open Next Dev Tools"] {
   justify-content: center;
   border: 1px solid var(--border-subtle);
   border-radius: 0.72rem;
-  background: color-mix(in srgb, var(--surface-canvas) 82%, var(--surface-panel-soft));
+  background: color-mix(in srgb, var(--canvas) 82%, var(--surface-panel-soft));
   color: var(--text-secondary);
 }
 
@@ -1062,7 +1062,7 @@ button[aria-label="Open Next Dev Tools"] {
   align-items: center;
   justify-content: center;
   border: 1px solid color-mix(in srgb, var(--border-subtle) 88%, transparent);
-  background: color-mix(in srgb, var(--surface-panel-soft) 74%, var(--surface-canvas));
+  background: color-mix(in srgb, var(--surface-panel-soft) 74%, var(--canvas));
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.02),
     inset 0 -1px 0 rgba(0, 0, 0, 0.16) !important;
@@ -2434,7 +2434,7 @@ button[aria-label="Open Next Dev Tools"] {
   right: 0;
   z-index: 2;
   border-left: 1px solid var(--divider-hair);
-  background: var(--sticky-table-bg, var(--surface-elevated));
+  background: var(--surface-elevated);
   background-clip: padding-box;
   box-shadow: -18px 0 24px -22px rgba(0, 0, 0, 0.7);
 }
@@ -2470,7 +2470,7 @@ button[aria-label="Open Next Dev Tools"] {
 
 .glass-table--sticky-last tbody td:last-child:not([colspan]) {
   z-index: 2;
-  background: var(--sticky-table-bg, var(--surface-elevated));
+  background: var(--surface-elevated);
 }
 
 .glass-table--sticky-last tbody tr:hover td:last-child:not([colspan]) {
@@ -2896,20 +2896,20 @@ button[aria-label="Open Next Dev Tools"] {
 .button-pill.is-active {
   border-color: color-mix(
     in srgb,
-    var(--segment-accent, var(--tone-neutral-border)) 54%,
+    var(--tone-neutral-border) 54%,
     white 8%
   );
   color: var(--interactive-active-text);
   box-shadow: 0 0 0 1px
     color-mix(
       in srgb,
-      var(--segment-accent, var(--tone-neutral-border)) 20%,
+      var(--tone-neutral-border) 20%,
       transparent
     );
 }
 
 .button-pill.is-active::before {
-  background: color-mix(in srgb, var(--segment-accent, #6a717c) 22%, var(--surface-elevated));
+  background: color-mix(in srgb, #6a717c 22%, var(--surface-elevated));
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 }
 
@@ -3558,10 +3558,10 @@ button[aria-label="Open Next Dev Tools"] {
 .segmented-control__option.is-active {
   border-color: color-mix(
     in srgb,
-    var(--segment-accent, var(--tone-neutral-border)) 56%,
+    var(--tone-neutral-border) 56%,
     white 8%
   );
-  background: color-mix(in srgb, var(--segment-accent, #6a717c) 24%, var(--surface-elevated));
+  background: color-mix(in srgb, #6a717c 24%, var(--surface-elevated));
   color: var(--interactive-active-text);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.1),
@@ -3569,7 +3569,7 @@ button[aria-label="Open Next Dev Tools"] {
     0 0 0 1px
       color-mix(
         in srgb,
-        var(--segment-accent, var(--tone-neutral-border)) 24%,
+        var(--tone-neutral-border) 24%,
         transparent
       );
   -webkit-backdrop-filter: blur(18px) saturate(122%);
@@ -4104,8 +4104,8 @@ input[type="range"]::-moz-range-thumb {
 .agent-sigil-outer,
 .agent-sigil-inner {
   animation-name: agent-sigil-shape-morph;
-  animation-duration: var(--sigil-morph-duration, 14s);
-  animation-delay: var(--sigil-morph-delay, 0s);
+  animation-duration: 14s;
+  animation-delay: 0s;
   animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1);
   animation-iteration-count: infinite;
   will-change: border-radius;
@@ -4942,13 +4942,7 @@ input[type="range"]::-moz-range-thumb {
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--text-secondary);
-  font-family: var(
-    --font-geist-mono,
-    ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace
-  );
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.92rem;
   line-height: 1.85;
 }
@@ -6701,7 +6695,7 @@ input[type="range"]::-moz-range-thumb {
   color: var(--syn-plain);
   font-family:
     var(--font-jetbrains),
-    var(--font-geist-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+    ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.75rem;
   line-height: 1.85;
   white-space: pre-wrap;
@@ -8782,10 +8776,10 @@ input[type="range"]::-moz-range-thumb {
   align-items: center;
   justify-content: space-between;
   gap: 0.55rem;
-  border-bottom: 1px solid var(--lane-header-border, rgba(255, 255, 255, 0.05));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   padding: 0.35rem 0.75rem;
-  background-color: var(--lane-header-bg, #1d1d20);
-  color: var(--lane-header-fg, rgba(255, 255, 255, 0.96));
+  background-color: #1d1d20;
+  color: rgba(255, 255, 255, 0.96);
 }
 
 .agent-board-lane__header--plain {
@@ -8857,13 +8851,13 @@ input[type="range"]::-moz-range-thumb {
 .agent-board-lane__action.action-button:hover:not(:disabled),
 .agent-board-lane__action.action-button:focus-visible {
   border-color: transparent;
-  background: var(--lane-header-action-hover, rgba(255, 255, 255, 0.12));
+  background: rgba(255, 255, 255, 0.12);
   color: inherit;
 }
 
 .agent-board-lane__action--danger.action-button:hover:not(:disabled),
 .agent-board-lane__action--danger.action-button:focus-visible {
-  background: var(--lane-header-action-hover, rgba(255, 255, 255, 0.12));
+  background: rgba(255, 255, 255, 0.12);
   color: inherit;
 }
 
@@ -10015,8 +10009,8 @@ html body [contenteditable="true"]:focus-visible {
 
 :where(html[data-theme="light"]) .agent-board-lane__header {
   border-bottom-color: var(--border-subtle);
-  background: var(--lane-header-bg, var(--surface-hover));
-  color: var(--lane-header-fg, var(--text-primary));
+  background: var(--surface-hover);
+  color: var(--text-primary);
 }
 
 :where(html[data-theme="light"]) .agent-board-lane__header--plain {
@@ -10039,7 +10033,7 @@ html body [contenteditable="true"]:focus-visible {
 
 :where(html[data-theme="light"]) .agent-board-lane__action.action-button:hover:not(:disabled),
 :where(html[data-theme="light"]) .agent-board-lane__action.action-button:focus-visible {
-  background: var(--lane-header-action-hover, var(--surface-hover-strong));
+  background: var(--surface-hover-strong);
 }
 
 :where(html[data-theme="light"]) .agent-board-lane-nav.action-button {

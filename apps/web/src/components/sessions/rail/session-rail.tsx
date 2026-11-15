@@ -407,6 +407,7 @@ function SessionRailImpl({
                     {isInitialAgentLoading ? (
                       <div
                         className="flex h-32 items-center justify-center"
+                        role="status"
                         aria-label={t("chat.rail.loadingAgents", undefined)}
                       >
                         <LoaderCircle className="h-4 w-4 animate-spin text-[var(--text-tertiary)]" strokeWidth={1.75} />
@@ -456,6 +457,7 @@ function SessionRailImpl({
                         {isFetchingNextPage ? (
                           <div
                             className="flex justify-center border-t border-[color:var(--divider-hair)] py-2"
+                            role="status"
                             aria-label={t("chat.rail.loadingAgents", undefined)}
                           >
                             <LoaderCircle className="h-3.5 w-3.5 animate-spin text-[var(--text-quaternary)]" strokeWidth={1.75} />

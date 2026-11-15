@@ -1007,11 +1007,11 @@ export function ControlPlaneSystemLoading() {
 export function AgentEditorRouteLoading() {
   return (
     <div
-      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--surface-canvas)]"
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[var(--canvas)]"
       data-testid="agent-editor-route-loading"
     >
       {/* Topbar — mirrors EditorHeader: back link, sigil, breadcrumb, title, action buttons */}
-      <header className="border-b border-[var(--border-subtle)] bg-[var(--surface-canvas)] px-4 py-2 lg:px-5 lg:py-2">
+      <header className="border-b border-[var(--border-subtle)] bg-[var(--canvas)] px-4 py-2 lg:px-5 lg:py-2">
         <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
           <div className="flex min-w-0 items-center gap-3">
             <SkeletonLine className="h-7 w-7 rounded-lg" />
@@ -1030,7 +1030,7 @@ export function AgentEditorRouteLoading() {
 
       <div className="grid h-full min-h-0 flex-1 overflow-hidden lg:grid-cols-[auto_minmax(0,1fr)]">
         {/* Step rail — mirrors the left FLUXO nav */}
-        <aside className="h-full min-h-0 border-b border-[var(--border-subtle)] bg-[var(--surface-canvas)] lg:border-b-0 lg:border-r">
+        <aside className="h-full min-h-0 border-b border-[var(--border-subtle)] bg-[var(--canvas)] lg:border-b-0 lg:border-r">
           <div className="flex h-full flex-col px-2 py-3 lg:px-2.5 lg:py-4">
             <div className="mb-2 px-1.5">
               <SkeletonLine className="h-2.5 w-12 rounded" />

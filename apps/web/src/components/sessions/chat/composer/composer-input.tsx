@@ -88,7 +88,7 @@ export const ComposerInput = forwardRef<ComposerInputHandle, ComposerInputProps>
     );
 
     return (
-      <div className="flex items-start gap-2 px-3 pt-3">
+      <div className={cn("flex items-start gap-2 px-3 pt-3", disabled && "opacity-70")}>
         <textarea
           ref={setRefs}
           value={value}

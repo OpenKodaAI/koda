@@ -339,3 +339,22 @@ describe("SessionRail new conversation agent picker", () => {
     });
   });
 });
+
+// M8-E5-T3: the rows' last-activity times stay on the type scale, with no
+// arbitrary px or rem size under the 12px floor.
+describe("SessionRail type scale (M8-E5-T3)", () => {
+  it("sets the room and conversation timestamps on the scale", () => {
+    renderRail({
+      agents: [makeAgent(0, "Atlas")],
+      sessions: [makeSession()],
+      rooms: [makeRoom("Smoke test room", "DEMO_SMOKE", "ATLAS")],
+    });
+
+    const timestamps = screen.getAllByText(/last activity/i).map((label) => label.parentElement as HTMLElement);
+    expect(timestamps).toHaveLength(2);
+    for (const timestamp of timestamps) {
+      expect([...timestamp.classList].filter((name) => /^text-\[[\d.]+(?:px|rem)\]$/.test(name))).toEqual([]);
+      expect(timestamp.classList).toContain("text-xs");
+    }
+  });
+});
