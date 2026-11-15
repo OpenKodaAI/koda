@@ -7313,7 +7313,8 @@ async def _record_failed_squad_task_turn(
         )
         return
     if task is None or task.status in {"done", "failed", "cancelled", "escalated"}:
-        # Already recorded, for example by _post_process before a later step of the turn failed.
+        # Already recorded, for example by _post_process before a later step of the turn failed; the
+        # worker ran that turn's follow-ups when it released the lock.
         return
     failed_run = RunResult(
         provider=run_result.provider if run_result else ctx.provider,
@@ -7395,13 +7396,15 @@ async def _post_process(
     final_status: str = "completed",
     response_text_override: str | None = None,
     delivery_outcome: DeliveryOutcome | None = None,
-) -> Callable[[], Awaitable[None]] | None:
+    squad_follow_ups: list[Callable[[], Awaitable[None]]] | None = None,
+) -> None:
     """Update session, stats, log query, extract memories.
 
-    For a squad turn, return its follow-ups (``_dispatch_squad_follow_ups``)
-    instead of queueing them: the caller holds the per-user worker lock, and
-    queueing a turn takes that lock again (D-019). The caller runs them once
-    it has released the lock.
+    For a squad turn, add its follow-ups (``_dispatch_squad_follow_ups``) to
+    ``squad_follow_ups`` instead of queueing them: the caller holds the
+    per-user worker lock, and queueing a turn takes that lock again (D-019).
+    They are added as soon as the squad turn is recorded, so the caller runs
+    them once it has released the lock, even if a later step here fails.
     """
     effective_model = run_result.model or model
 
@@ -7446,7 +7449,6 @@ async def _post_process(
     squad_message_id: str | None = None
     response_text = response_text_override if response_text_override is not None else run_result.result
     squad_artifact_ids: list[str] = []
-    squad_follow_ups: Callable[[], Awaitable[None]] | None = None
     if not dry_run and ctx is not None and ctx.squad_thread_id:
         squad_message_id, squad_artifact_ids = await _persist_squad_turn_result(
             ctx=ctx,
@@ -7457,15 +7459,18 @@ async def _post_process(
             cost=cost,
             log_model=log_model,
         )
-        squad_follow_ups = functools.partial(
-            _dispatch_squad_follow_ups,
-            user_id=user_id,
-            context=context,
-            ctx=ctx,
-            response_text=response_text,
-            squad_message_id=squad_message_id,
-            artifact_ids=squad_artifact_ids,
-        )
+        if squad_follow_ups is not None:
+            squad_follow_ups.append(
+                functools.partial(
+                    _dispatch_squad_follow_ups,
+                    user_id=user_id,
+                    context=context,
+                    ctx=ctx,
+                    response_text=response_text,
+                    squad_message_id=squad_message_id,
+                    artifact_ids=squad_artifact_ids,
+                )
+            )
         if ctx.delegation_request_id and ctx.delegation_origin_agent_id:
             try:
                 from koda.agents import get_message_bus
@@ -7671,7 +7676,6 @@ async def _post_process(
         dry_run=dry_run,
         final_status=final_status,
     )
-    return squad_follow_ups
 
 
 # Main queue processor (orchestrator) — parallel dispatcher
@@ -8352,27 +8356,33 @@ async def _execute_single_task(
 
                     # Lock user_data writes to avoid races with concurrent tasks
                     lock = _get_worker_lock(user_id)
-                    async with lock:
-                        squad_follow_ups = await _post_process(
-                            user_id,
-                            context,
-                            run_result,
-                            item.query_text,
-                            ctx.work_dir,
-                            ctx.model,
-                            task_id=task_id,
-                            ctx=ctx,
-                            dry_run=ctx.dry_run,
-                            cacheable=not ctx.artifact_dossiers,
-                            final_status=final_status,
-                            response_text_override=delivered_response_text,
-                            delivery_outcome=delivery_outcome,
-                        )
-                    if squad_follow_ups is not None:
+                    squad_follow_ups: list[Callable[[], Awaitable[None]]] = []
+                    try:
+                        async with lock:
+                            await _post_process(
+                                user_id,
+                                context,
+                                run_result,
+                                item.query_text,
+                                ctx.work_dir,
+                                ctx.model,
+                                task_id=task_id,
+                                ctx=ctx,
+                                dry_run=ctx.dry_run,
+                                cacheable=not ctx.artifact_dossiers,
+                                final_status=final_status,
+                                response_text_override=delivered_response_text,
+                                delivery_outcome=delivery_outcome,
+                                squad_follow_ups=squad_follow_ups,
+                            )
+                    finally:
                         # Only after the lock is released, since queueing a follow-up turn takes it (D-019).
-                        # Awaited, not a background task, so the next turn in this queue starts after the
-                        # synthesis check has read the thread, as when it ran under the lock.
-                        await squad_follow_ups()
+                        # Also when a later step of _post_process failed: the squad turn is recorded by then,
+                        # and no other path runs its follow-ups. Awaited, not a background task, so the next
+                        # turn in this queue starts after the synthesis check has read the thread, as when it
+                        # ran under the lock.
+                        for follow_up in squad_follow_ups:
+                            await follow_up()
 
                     if not item.silent_response:
                         await _send_response(

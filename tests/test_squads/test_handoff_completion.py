@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import ExitStack, suppress
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -174,7 +174,8 @@ async def _start_handoff(threads: SquadThreadStore, tasks: SquadTaskStore) -> tu
 async def _finish_turn(*, thread_id: str, parent: str, task_id: str, agent_id: str, error: bool = False) -> None:
     context = MagicMock(application=None, bot=None)
     context.user_data = {"total_cost": 0.0, "query_count": 0}
-    follow_ups = await _post_process(
+    follow_ups: list[Callable[[], Awaitable[None]]] = []
+    await _post_process(
         42,
         context,
         RunResult(
@@ -191,10 +192,11 @@ async def _finish_turn(*, thread_id: str, parent: str, task_id: str, agent_id: s
         "/tmp",
         "stub",
         ctx=_ctx(thread_id=thread_id, task_id=task_id, agent_id=agent_id, parent=parent),
+        squad_follow_ups=follow_ups,
     )
     # The queue worker runs these once it releases the per-user lock (D-019).
-    assert follow_ups is not None
-    await follow_ups()
+    [follow_up] = follow_ups
+    await follow_up()
 
 
 def _final_syntheses(dispatch: AsyncMock) -> list[dict[str, Any]]:

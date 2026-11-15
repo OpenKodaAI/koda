@@ -15,9 +15,15 @@ real ``_get_worker_lock``, and the coordinator synthesis goes through the real
 The thread, task and runtime stores are real, on Postgres. Only the edges are
 replaced: the ``claude`` provider adapter answers from a script, the bot
 records what it is sent, and the routing inputs that need a control plane or
-an embedding model are fixed. The web route gets the runtime application, as in
-a single-process deployment; under the supervisor each destination runtime
-queues the synthesis with its own application, through the same post-turn code.
+an embedding model are fixed.
+
+The web cases set ``request.app["telegram_application"]``, which production
+never sets: the supervisor's control plane has no runtime application, so it
+sends each turn over runtime HTTP to the destination agent's own runtime. Here
+every turn runs in this process's one queue, so the web cases cover the
+post-turn code each runtime runs, not destinations finishing at the same time
+in separate runtimes. That race can queue two syntheses (D-058, owned by
+M2-E4-T3) and is not tested here.
 """
 
 from __future__ import annotations
@@ -502,6 +508,14 @@ def _summary(history: list[dict[str, Any]]) -> list[tuple[Any, Any, str]]:
     return [(row.get("from"), row.get("type"), str(row.get("content"))[:80]) for row in reversed(history)]
 
 
+def _assert_one_final_answer(history: list[dict[str, Any]], delivered: list[str] | None = None) -> None:
+    """The coordinator's final answer is posted to the room once and, given Telegram's messages, sent once."""
+    answers = [row for row in history if row.get("from") == "PM" and FINAL_ANSWER in str(row.get("content"))]
+    assert len(answers) == 1, _summary(history)
+    if delivered is not None:
+        assert len([message for message in delivered if message.startswith(FINAL_ANSWER)]) == 1, delivered
+
+
 def _handoff_statuses(history: list[dict[str, Any]]) -> list[str]:
     return [
         str(((row.get("metadata") or {}).get("payload") or {}).get("status"))
@@ -557,8 +571,11 @@ async def test_handoff_synthesis_is_queued_after_the_last_destination_releases_t
     assert SYNTHESIS_MARKER in statuses[-1][1]
     if channel == "telegram":
         delivered = application.bot.texts(GROUP_CHAT_ID)
-        for text in ("FE: launch page built.", "QA: launch page reviewed.", FINAL_ANSWER):
+        for text in ("FE: launch page built.", "QA: launch page reviewed."):
             assert any(message.startswith(text) for message in delivered), delivered
+        _assert_one_final_answer(history, delivered)
+    else:
+        _assert_one_final_answer(history)
 
 
 FAILURES = [
@@ -609,7 +626,7 @@ async def test_a_destination_whose_run_fails_fails_the_handoff_and_the_coordinat
     }
     delivered = application.bot.texts(GROUP_CHAT_ID)
     assert any("falhou" in message for message in delivered), delivered
-    assert any(message.startswith(FINAL_ANSWER) for message in delivered), delivered
+    _assert_one_final_answer(history, delivered)
 
 
 @pytest.mark.parametrize("channel", ["telegram", "web"])
@@ -643,5 +660,53 @@ async def test_a_task_less_handoff_is_answered_by_the_destination_and_then_the_c
     assert [status for status, _query in await _runtime_task_statuses(agent_db)] == ["completed", "completed"]
     if channel == "telegram":
         delivered = application.bot.texts(GROUP_CHAT_ID)
-        for text in ("FE: launch page drafted.", FINAL_ANSWER):
-            assert any(message.startswith(text) for message in delivered), delivered
+        assert any(message.startswith("FE: launch page drafted.") for message in delivered), delivered
+        _assert_one_final_answer(history, delivered)
+    else:
+        _assert_one_final_answer(history)
+
+
+async def test_follow_ups_still_run_when_post_processing_fails_after_the_squad_turn_is_recorded(
+    agent_db: str,
+    squad_stores: tuple[Any, Any],
+    queue_state: None,
+    application: Any,
+    routing_inputs: ExitStack,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """QA's answer is posted and its task done, then a later post-processing step fails."""
+    from koda.services import queue_manager as qm
+
+    thread_store, task_store = squad_stores
+    provider = _ScriptedClaude(_answers).install(monkeypatch)
+    _use_planner(routing_inputs, HANDOFF_TO_FE_AND_QA)
+    log_query = qm.log_query
+
+    def failing_for_qa(**kwargs: Any) -> int | None:
+        if "Task request [review]" in str(kwargs.get("query_text")):
+            raise RuntimeError("primary_query_insert_missing_row_id")
+        return log_query(**kwargs)
+
+    monkeypatch.setattr(qm, "log_query", failing_for_qa)
+
+    thread = await _post_telegram_message(thread_store, application)
+    answer = await _wait_for_coordinator_answer(thread_store, thread.id)
+
+    # QA's runtime task failed, but its squad turn was recorded, so the handoff completes.
+    [synthesis_query] = [query for query in provider.queries if SYNTHESIS_MARKER in query]
+    assert "FE / " in synthesis_query and "QA / " in synthesis_query
+    assert answer["content"].startswith(FINAL_ANSWER)
+    history = await thread_store.thread_history(thread_id=thread.id, limit=200)
+    assert _handoff_statuses(history) == ["requested", "returned"]
+    assert {task.assigned_agent_id: task.status for task in await task_store.list_tasks(thread_id=thread.id)} == {
+        "FE": "done",
+        "QA": "done",
+    }
+    assert [status for status, _query in await _runtime_task_statuses(agent_db)] == [
+        "completed",
+        "failed",
+        "completed",
+    ]
+    delivered = application.bot.texts(GROUP_CHAT_ID)
+    assert any("falhou" in message for message in delivered), delivered
+    _assert_one_final_answer(history, delivered)

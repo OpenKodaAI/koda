@@ -35,7 +35,8 @@ destination has answered, through a visible task result for the cycle or a
 reply obligation it answered on the cycle's source message. The queue worker
 runs this check, like the other squad follow-ups, after it releases the
 per-user lock it holds for post-processing, because queueing the synthesis
-turn takes that lock again (D-019):
+turn takes that lock again (D-019). It runs them once the turn's answer is
+recorded in the thread, even if a later post-processing step fails:
 
 - `returned` when every answer succeeded;
 - `failed` when a destination's task result has `payload.status = failed`. A
