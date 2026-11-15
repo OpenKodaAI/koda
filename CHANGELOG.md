@@ -137,12 +137,14 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   `name: value`, env-style lines and command-line flags under a sensitive name
   (`HEROKU_API_KEY=…`, `AWS_SECRET_ACCESS_KEY=…`, `senha=…`, `"apiKey": "…"`,
   `--password=…`, `--api-key=…`, `-token=…`), with an unquoted value masked whole up to
-  whitespace, a comma or a closing quote (`password=Tr0ub4dor&3`, `password=[x]`,
-  `"--password=…"`), credentials in any URL scheme, query-string secrets (including an
+  whitespace, a comma or, inside a quoted command, the quote that closes it
+  (`password=Tr0ub4dor&3`, `password=[x]`, `password=ab"};cd`, `"--password=…"`),
+  credentials in any URL scheme, query-string secrets (including an
   OAuth `code`), whole cookie headers and provider keys (`sk-`, AWS key IDs,
   `ghp_`/`gho_`/`github_pat_`, Slack `xox*-`, Google `AIza`), each only where it starts a
   word. Token counts under a count key (`prompt_tokens: 1200`, `max_tokens=4096`,
-  `inputTokens: 512`) stay readable; digits under any other `tokens` key
+  `inputTokens: 512`, `OPENAI_MAX_TOKENS=4096`, `cache_read_input_tokens: 10`,
+  `maxOutputTokens: 8192`) stay readable; digits under any other `tokens` key
   (`access_tokens=…`) are masked. Any other run of 24 or more letters, digits, `-` and `_`
   that mixes letters and digits is masked, except Koda's own identifiers: UUIDs,
   `session-`, `squad-` and operator-shell session ids, prefixed ids, collision-suffixed

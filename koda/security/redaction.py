@@ -62,16 +62,29 @@ def is_sensitive_key(key: str) -> bool:
     return _key_is_sensitive(key, exact=True)
 
 
-# A value after "key:" or "key=": quoted, or the whole run up to whitespace, a comma or a
-# closing quote (one followed by whitespace, , ; ) ] } or the end, as in "--password=x").
+# A value after "key:" or "key=": quoted, or the whole run up to whitespace or a comma.
+# Inside a quote opened before the key ("--password=x", "mysql --password=x"), the value
+# also ends at that quote when it closes (followed by whitespace, , ; ) ] } or the end);
+# an escaped quote (\") stays in the value. Any other quote is part of the value.
 # A value an earlier rule already masked is left alone (token=[REDACTED]&x=1 keeps &x=1).
 # An auth scheme is kept in front of the masked value (Authorization: Bearer [REDACTED]);
 # the group is atomic, so after a scheme only the token may be masked.
-_VALUE_RE = re.compile(
-    r"(?>(?P<scheme>(?i:bearer|basic|digest|token)\s++)?)"
-    r"(?:\"(?P<dq>[^\"\n]*+)\"|'(?P<sq>[^'\n]*+)'"
-    r"|(?P<bare>(?!\[REDACTED\])(?:[^\s,\"']++|[\"'](?=[^\s,;)\]}]))++))"
-)
+def _value_re(open_quote: str) -> re.Pattern[str]:
+    bare = (
+        r"[^\s,]++"
+        if not open_quote
+        else r"(?:[^\s,\\" + open_quote + r"]++|\\[\\\"']?+|" + open_quote + r"(?=[^\s,;)\]}]))++"
+    )
+    return re.compile(
+        r"(?>(?P<scheme>(?i:bearer|basic|digest|token)\s++)?)"
+        r"(?:\"(?P<dq>[^\"\n]*+)\"|'(?P<sq>[^'\n]*+)'|(?P<bare>(?!\[REDACTED\])" + bare + r"))"
+    )
+
+
+_VALUE_RES = {quote: _value_re(quote) for quote in ("", '"', "'")}
+# Quotes, escaped quotes and line ends, to know which quote is open where a key starts.
+# An apostrophe inside a word (don't) opens nothing.
+_QUOTE_SCAN_RE = re.compile(r"\\[\\\"']|[\"\n]|(?<![A-Za-z0-9])'|'(?![A-Za-z])")
 _SEP = r"(?P<sep>\s*+[:=]\s*+)"
 # The key may be quoted ("key": value) or a command-line flag (--password=, -token=).
 _KEY_RE = re.compile(r"(?<![A-Za-z0-9_.\-])(?P<q>[\"']?)-{0,2}(?P<key>[A-Za-z_][A-Za-z0-9_.\-]*+)(?P=q)" + _SEP)
@@ -82,13 +95,14 @@ _PHRASE_RE = re.compile(
 )
 _QUERY_RE = re.compile(r"(?P<lead>[?&])(?P<key>[A-Za-z0-9_.\-]++)=(?P<value>[^&\s#\"']++)")
 
-# In free text, a number under a count key is a usage count (prompt_tokens: 1200).
-_TOKEN_COUNT_KEYS = frozenset(f"{kind}_tokens" for kind in ("max", "input", "output", "total", "prompt", "completion"))
+# In free text, a number under a count key is a usage count (prompt_tokens: 1200,
+# OPENAI_MAX_TOKENS=4096, cache_read_input_tokens: 10), not under access_tokens.
+_TOKEN_COUNT_KEY_RE = re.compile(r"(?:^|_)(?:max|input|output|total|prompt|completion|cached|reasoning)_tokens$")
 
 
 def _masked_value(key: str, value: re.Match[str]) -> str | None:
     text = next(group for group in value.group("dq", "sq", "bare") if group is not None)
-    if _key_words(key) in _TOKEN_COUNT_KEYS and not _HAS_LETTER.search(text):
+    if _TOKEN_COUNT_KEY_RE.search(_key_words(key)) and not _HAS_LETTER.search(text):
         return None
     quote = '"' if value.group("dq") is not None else "'" if value.group("sq") is not None else ""
     return f"{value.group('scheme') or ''}{quote}{REDACTED}{quote}"
@@ -97,18 +111,28 @@ def _masked_value(key: str, value: re.Match[str]) -> str | None:
 def _sub_key_values(text: str, key_re: re.Pattern[str]) -> str:
     # The search matches only "key=", so a non-secret key gives up just that part and a
     # secret inside its value is still found (user=admin;password=hunter2). Only a secret
-    # key's value is read, once, and masked whole.
+    # key's value is read, once, and masked whole. The open quote is tracked as the search
+    # moves forward, so no text is scanned twice.
     parts: list[str] = []
-    position = 0
+    position = scanned = 0
+    open_quote = ""
     while match := key_re.search(text, position):
-        end = match.end()
+        start, end = match.span()
+        for mark in _QUOTE_SCAN_RE.finditer(text, scanned, start):
+            char = mark.group()
+            if char == "\n" or char == open_quote:
+                open_quote = ""
+            elif len(char) == 1 and not open_quote:
+                open_quote = char
+        scanned = start
         key = match.group("key")
         if _key_is_sensitive(key, exact=False):
-            value = _VALUE_RE.match(text, end)
+            value = _VALUE_RES[open_quote].match(text, end)
             masked = None if value is None else _masked_value(key, value)
             if value is not None and masked is not None:
                 parts.append(text[position:end] + masked)
-                position = value.end()
+                # Quotes inside a masked value belong to the value.
+                position = scanned = value.end()
                 continue
         parts.append(text[position:end])
         position = end

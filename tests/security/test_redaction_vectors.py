@@ -183,6 +183,11 @@ MASKED_TEXT: list[tuple[str, str, str]] = [
     ),
     ("flag inside single quotes", "mysql '--password=hunter2' db", f"mysql '--password={R}' db"),
     ("quote inside a bare value", 'password=ab"cd ok', f"password={R} ok"),
+    # A quote closes the value only when it closes a quote opened before the key.
+    ("quote and } inside a bare value", 'password=Xy7"}Qz9!secretTail', f"password={R}"),
+    ("quote and ; inside a bare value", "password=ab';cdefghij", f"password={R}"),
+    ("quote and ) inside a bare value", "password=p@ss')word123 ok", f"password={R} ok"),
+    ("escaped quote inside a flag in a JSON string", '{"cmd":"--password=ab\\"}x"}', f'{{"cmd":"--password={R}"}}'),
 ]
 
 # (label, text): identifiers and plain text that hold no secret, unchanged.
@@ -223,6 +228,11 @@ KEPT_TEXT: list[tuple[str, str]] = [
     ("token count in JSON text", '{"prompt_tokens": 1200}'),
     ("more token count keys", "input_tokens=512 output_tokens=128 total_tokens=640"),
     ("camelCase token count keys", 'maxTokens: 4096, {"completionTokens": 300, "totalTokens": 640}'),
+    ("prefixed env count key", "OPENAI_MAX_TOKENS=4096"),
+    ("compound count keys", "max_completion_tokens=4096, max_output_tokens: 8192, reasoning_tokens: 12"),
+    ("cache count key", "cache_read_input_tokens: 1200"),
+    ("dotted count key", "usage.prompt_tokens: 10"),
+    ("camelCase compound count key", '{"maxOutputTokens": 8192}'),
     # Names made of Title-Case words.
     ("Title-Case file name", "Quarterly_Financial_Report_2026.pdf"),
     ("Title-Case kebab name with K8s", "Deploy-K8s-Production-Cluster"),
@@ -455,6 +465,8 @@ ADVERSARIAL: dict[str, Callable[[int], str]] = {
     "k=v run": lambda size: _repeat("a=1&b=2;c=3;", size),
     "token run": lambda size: _repeat("aB3", size),
     "flag chain": lambda size: _repeat("--opt=v1", size),
+    # Secret flags inside quoted commands, with escaped quotes the value must step over.
+    "quoted secret flags": lambda size: _repeat('"--password=a\\"b"\'--token=c\'', size),
     "repeated separators": lambda size: "a1" + "-_" * (size // 4) + "aB" + " " * (size // 2) + "=x",
 }
 GUARD_PATHS: dict[str, Callable[[str], Any]] = {
