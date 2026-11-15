@@ -87,6 +87,8 @@ class _Turn:
     error: str | None = None
     error_kind: str = "provider_runtime"
     retryable: bool = False
+    # The provider call does not return until the turn is cancelled.
+    hang: bool = False
 
 
 class _ScriptedClaude:
@@ -123,6 +125,8 @@ class _ScriptedClaude:
     ) -> AsyncIterator[str]:
         turn = self._turn(query)
         collector = metadata_collector if metadata_collector is not None else {}
+        if turn.hang:
+            await asyncio.sleep(_TURN_TIMEOUT_S * 10)
         if turn.text:
             yield turn.text
         if turn.error is not None:
@@ -132,6 +136,8 @@ class _ScriptedClaude:
 
     async def run(self, *, query: str, session_id: str | None = None, **_kwargs: Any) -> dict[str, Any]:
         turn = self._turn(query)
+        if turn.hang:
+            await asyncio.sleep(_TURN_TIMEOUT_S * 10)
         if turn.error is not None:
             return {
                 "result": turn.error,
@@ -298,6 +304,16 @@ HANDOFF_TO_FE_AND_QA = _HandoffPlanner(
 )
 # The planner names a destination but gives it no task; the engine gives it one (D-015).
 TASK_LESS_HANDOFF_TO_FE = _HandoffPlanner([], ["FE"])
+# QA's review waits for FE's build.
+REVIEW_AFTER_BUILD = _HandoffPlanner(
+    [
+        CoordinationTask(key="build", title="Build", agent_id="FE", kind="frontend", objective="Build the page"),
+        CoordinationTask(
+            key="review", title="Review", agent_id="QA", kind="review", objective="Review it", depends_on=["build"]
+        ),
+    ],
+    ["FE", "QA"],
+)
 
 
 def _semantic_result() -> SemanticRoutingResult:
@@ -535,6 +551,47 @@ async def _runtime_task_statuses(dsn: str) -> list[tuple[str, str]]:
     return [(str(row["status"]), str(row["query_text"])) for row in rows]
 
 
+async def _wait_for_running_turn(dsn: str, provider: _ScriptedClaude, marker: str) -> int:
+    """The runtime task id of the turn whose provider call, for a query with ``marker``, has started."""
+    deadline = asyncio.get_running_loop().time() + _TURN_TIMEOUT_S
+    while not any(marker in query for query in provider.queries):
+        assert asyncio.get_running_loop().time() < deadline, f"no provider call for {marker!r}"
+        await asyncio.sleep(0.05)
+    conn = await asyncpg.connect(dsn)
+    try:
+        task_id = await conn.fetchval(
+            f'SELECT id FROM "{_schema()}"."tasks" WHERE user_id = $1 AND strpos(query_text, $2) > 0',
+            USER_ID,
+            marker,
+        )
+    finally:
+        await conn.close()
+    return int(task_id)
+
+
+async def _wait_for_queue_worker_to_finish() -> None:
+    from koda.services import queue_manager as qm
+
+    deadline = asyncio.get_running_loop().time() + _TURN_TIMEOUT_S
+    while (worker := qm._queue_workers.get(USER_ID)) is not None and not worker.done():
+        if asyncio.get_running_loop().time() > deadline:
+            _assert_no_turn_waits_on_its_own_lock()
+            raise AssertionError("the queue worker did not finish")
+        await asyncio.sleep(0.05)
+
+
+def _results_from(history: list[dict[str, Any]], agent_id: str) -> list[dict[str, Any]]:
+    return [row for row in history if row.get("from") == agent_id and row.get("type") == "task_result"]
+
+
+def _dispatch_unavailable_events(history: list[dict[str, Any]]) -> list[str]:
+    return [
+        str(row.get("content"))
+        for row in history
+        if ((row.get("metadata") or {}).get("event_type")) == "agent_dispatch_unavailable"
+    ]
+
+
 @pytest.mark.parametrize("channel", ["telegram", "web"])
 async def test_handoff_synthesis_is_queued_after_the_last_destination_releases_the_worker_lock(
     agent_db: str,
@@ -627,6 +684,227 @@ async def test_a_destination_whose_run_fails_fails_the_handoff_and_the_coordinat
     delivered = application.bot.texts(GROUP_CHAT_ID)
     assert any("falhou" in message for message in delivered), delivered
     _assert_one_final_answer(history, delivered)
+
+
+def _budget_exceeded() -> Exception:
+    from koda.services.queue_manager import BudgetExceeded
+
+    return BudgetExceeded("Prompt budget exceeded for QA's turn.")
+
+
+PRE_TURN_FAILURES = [
+    pytest.param(_budget_exceeded, "telegram", id="budget_exceeded-telegram"),
+    pytest.param(_budget_exceeded, "web", id="budget_exceeded-web"),
+    pytest.param(
+        lambda: PermissionError("unable to prepare squad context for thread 't': QA is not a participant"),
+        "telegram",
+        id="squad_context-telegram",
+    ),
+]
+
+
+@pytest.mark.parametrize(("make_error", "channel"), PRE_TURN_FAILURES)
+async def test_a_destination_that_fails_before_its_run_starts_fails_the_handoff(
+    agent_db: str,
+    squad_stores: tuple[Any, Any],
+    queue_state: None,
+    application: Any,
+    routing_inputs: ExitStack,
+    monkeypatch: pytest.MonkeyPatch,
+    make_error: Any,
+    channel: str,
+) -> None:
+    """QA's turn fails while its query context is prepared, so the queue never builds one."""
+    from koda.services import queue_manager as qm
+
+    thread_store, task_store = squad_stores
+    provider = _ScriptedClaude(_answers).install(monkeypatch)
+    _use_planner(routing_inputs, HANDOFF_TO_FE_AND_QA)
+    error = make_error()
+    prepare = qm._prepare_query_context
+
+    async def prepare_failing_for_qa(context: Any, item: Any, user_id: int, **kwargs: Any) -> Any:
+        if item.executing_agent_id == "QA":
+            raise error
+        return await prepare(context, item, user_id, **kwargs)
+
+    monkeypatch.setattr(qm, "_prepare_query_context", prepare_failing_for_qa)
+
+    if channel == "telegram":
+        thread = await _post_telegram_message(thread_store, application)
+    else:
+        thread = await _post_web_message(thread_store, application, routing_inputs)
+    answer = await _wait_for_coordinator_answer(thread_store, thread.id)
+
+    [synthesis_query] = [query for query in provider.queries if SYNTHESIS_MARKER in query]
+    assert "Timeouts/bloqueios declarados:\n- QA: failed" in synthesis_query
+    assert answer["content"].startswith(FINAL_ANSWER)
+    history = await thread_store.thread_history(thread_id=thread.id, limit=200)
+    assert _handoff_statuses(history) == ["requested", "failed"]
+    [qa_result] = _results_from(history, "QA")
+    assert qa_result["metadata"]["payload"]["status"] == "failed"
+    assert str(error) in qa_result["content"]
+    assert {task.assigned_agent_id: task.status for task in await task_store.list_tasks(thread_id=thread.id)} == {
+        "FE": "done",
+        "QA": "failed",
+    }
+    assert not any("Task request [review]" in query for query in provider.queries)
+    assert [status for status, _query in await _runtime_task_statuses(agent_db)] == [
+        "completed",
+        "failed",
+        "completed",
+    ]
+    if channel == "telegram":
+        delivered = application.bot.texts(GROUP_CHAT_ID)
+        assert any(str(error) in message for message in delivered), delivered
+        _assert_one_final_answer(history, delivered)
+    else:
+        _assert_one_final_answer(history)
+
+
+async def test_a_cancelled_destination_run_fails_the_handoff_and_the_coordinator_discloses_it(
+    agent_db: str,
+    squad_stores: tuple[Any, Any],
+    queue_state: None,
+    application: Any,
+    routing_inputs: ExitStack,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from koda.services import queue_manager as qm
+
+    thread_store, task_store = squad_stores
+    provider = _ScriptedClaude(lambda query: _Turn(hang=True) if "Task request [review]" in query else _answers(query))
+    provider.install(monkeypatch)
+    _use_planner(routing_inputs, HANDOFF_TO_FE_AND_QA)
+
+    thread = await _post_telegram_message(thread_store, application)
+    qa_turn_id = await _wait_for_running_turn(agent_db, provider, "Task request [review]")
+    assert await qm.cancel_active_task_execution(qa_turn_id, reason="Cancelled by the user.")
+    answer = await _wait_for_coordinator_answer(thread_store, thread.id)
+
+    [synthesis_query] = [query for query in provider.queries if SYNTHESIS_MARKER in query]
+    assert "Timeouts/bloqueios declarados:\n- QA: failed" in synthesis_query
+    assert answer["content"].startswith(FINAL_ANSWER)
+    history = await thread_store.thread_history(thread_id=thread.id, limit=200)
+    assert _handoff_statuses(history) == ["requested", "failed"]
+    [qa_result] = _results_from(history, "QA")
+    assert qa_result["metadata"]["payload"]["status"] == "cancelled"
+    assert "Cancelled by the user." in qa_result["content"]
+    assert {task.assigned_agent_id: task.status for task in await task_store.list_tasks(thread_id=thread.id)} == {
+        "FE": "done",
+        "QA": "cancelled",
+    }
+    assert [status for status, _query in await _runtime_task_statuses(agent_db)] == [
+        "completed",
+        "cancelled",
+        "completed",
+    ]
+    _assert_one_final_answer(history, application.bot.texts(GROUP_CHAT_ID))
+
+
+async def test_a_task_that_depends_on_a_failed_task_is_cancelled_and_the_handoff_fails(
+    agent_db: str,
+    squad_stores: tuple[Any, Any],
+    queue_state: None,
+    application: Any,
+    routing_inputs: ExitStack,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    thread_store, task_store = squad_stores
+    build_fails = _Turn(error="FE could not build the page")
+    provider = _ScriptedClaude(lambda query: build_fails if "Task request [frontend]" in query else _answers(query))
+    provider.install(monkeypatch)
+    _use_planner(routing_inputs, REVIEW_AFTER_BUILD)
+
+    thread = await _post_telegram_message(thread_store, application)
+    answer = await _wait_for_coordinator_answer(thread_store, thread.id)
+
+    # QA's review can never run, so it is cancelled with a result that says why, and the
+    # coordinator synthesis names both agents.
+    [synthesis_query] = [query for query in provider.queries if SYNTHESIS_MARKER in query]
+    assert "Timeouts/bloqueios declarados:\n- FE, QA: failed" in synthesis_query
+    assert answer["content"].startswith(FINAL_ANSWER)
+    history = await thread_store.thread_history(thread_id=thread.id, limit=200)
+    assert _handoff_statuses(history) == ["requested", "failed"]
+    tasks = {task.assigned_agent_id: task for task in await task_store.list_tasks(thread_id=thread.id)}
+    assert {agent: task.status for agent, task in tasks.items()} == {"FE": "failed", "QA": "cancelled"}
+    [qa_result] = _results_from(history, "QA")
+    assert qa_result["metadata"]["payload"]["status"] == "cancelled"
+    assert tasks["FE"].id in qa_result["content"]
+    assert not any("Task request [review]" in query for query in provider.queries)
+    assert [status for status, _query in await _runtime_task_statuses(agent_db)] == ["failed", "completed"]
+    delivered = application.bot.texts(GROUP_CHAT_ID)
+    assert any("falhou" in message for message in delivered), delivered
+    _assert_one_final_answer(history, delivered)
+
+
+def _create_task_failing_for_the_synthesis(times: int | None) -> Any:
+    """``create_task`` that rejects the coordinator synthesis turn ``times`` times (``None``: always)."""
+    from koda.services import queue_manager as qm
+
+    create_task = qm.create_task
+    failures = {"left": times}
+
+    def create(*args: Any, **kwargs: Any) -> int:
+        left = failures["left"]
+        if SYNTHESIS_MARKER in str(kwargs.get("query_text")) and (left is None or left > 0):
+            if left is not None:
+                failures["left"] = left - 1
+            raise RuntimeError("tasks insert rejected")
+        return cast(int, create_task(*args, **kwargs))
+
+    return create
+
+
+async def test_a_synthesis_that_fails_to_queue_is_retried(
+    agent_db: str,
+    squad_stores: tuple[Any, Any],
+    queue_state: None,
+    application: Any,
+    routing_inputs: ExitStack,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from koda.services import queue_manager as qm
+
+    thread_store, _task_store = squad_stores
+    _ScriptedClaude(_answers).install(monkeypatch)
+    _use_planner(routing_inputs, HANDOFF_TO_FE_AND_QA)
+    monkeypatch.setattr(qm, "create_task", _create_task_failing_for_the_synthesis(1))
+
+    thread = await _post_telegram_message(thread_store, application)
+    await _wait_for_coordinator_answer(thread_store, thread.id)
+
+    history = await thread_store.thread_history(thread_id=thread.id, limit=200)
+    assert _handoff_statuses(history) == ["requested", "returned"]
+    [unavailable] = _dispatch_unavailable_events(history)
+    assert unavailable.startswith("[agent_dispatch_unavailable] PM:")
+    _assert_one_final_answer(history, application.bot.texts(GROUP_CHAT_ID))
+
+
+async def test_a_synthesis_that_cannot_be_queued_leaves_the_handoff_open(
+    agent_db: str,
+    squad_stores: tuple[Any, Any],
+    queue_state: None,
+    application: Any,
+    routing_inputs: ExitStack,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from koda.services import queue_manager as qm
+
+    thread_store, _task_store = squad_stores
+    _ScriptedClaude(_answers).install(monkeypatch)
+    _use_planner(routing_inputs, HANDOFF_TO_FE_AND_QA)
+    monkeypatch.setattr(qm, "create_task", _create_task_failing_for_the_synthesis(None))
+
+    thread = await _post_telegram_message(thread_store, application)
+    await _wait_for_queue_worker_to_finish()
+
+    # The room must not say the handoff returned when the coordinator never ran.
+    history = await thread_store.thread_history(thread_id=thread.id, limit=200)
+    assert _handoff_statuses(history) == ["requested"]
+    unavailable = _dispatch_unavailable_events(history)
+    assert len(unavailable) > 1 and all(event.startswith("[agent_dispatch_unavailable] PM:") for event in unavailable)
+    assert not [row for row in history if row.get("from") == "PM" and FINAL_ANSWER in str(row.get("content"))]
 
 
 @pytest.mark.parametrize("channel", ["telegram", "web"])

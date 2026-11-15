@@ -6658,6 +6658,7 @@ async def _advance_squad_task_from_run(
     run_result: RunResult,
     response_text: str,
     artifact_ids: list[str],
+    cancelled: bool = False,
 ) -> None:
     if not ctx.squad_thread_id or not ctx.squad_task_id:
         return
@@ -6671,16 +6672,17 @@ async def _advance_squad_task_from_run(
         task = await store.get_task(ctx.squad_task_id)
         if task is None or task.status in {"done", "failed", "cancelled", "escalated"}:
             return
-        if task.status == "pending":
+        # A task that ran is claimed and started first; a cancelled one ends from any open status.
+        if task.status == "pending" and not cancelled:
             task = await store.claim_task(task_id=task.id, agent_id=agent_id)
-        if task.status == "claimed":
+        if task.status == "claimed" and not cancelled:
             task = await store.update_task_status(
                 task_id=task.id,
                 new_status="in_progress",
                 agent_id=agent_id,
                 expected_version=task.version,
             )
-        terminal_status = "failed" if run_result.error else "done"
+        terminal_status = "cancelled" if cancelled else "failed" if run_result.error else "done"
         await store.update_task_status(
             task_id=task.id,
             new_status=terminal_status,
@@ -6733,7 +6735,12 @@ async def _maybe_enqueue_unblocked_squad_tasks(
     context: BotContext,
     ctx: QueryContext,
 ) -> int:
-    """Dispatch pending squad tasks whose dependencies just became satisfied."""
+    """Dispatch pending squad tasks whose dependencies just became satisfied.
+
+    A pending task that depends on a task that failed, was cancelled or escalated can never
+    run, so it is cancelled with a task result that says why. Its dependents follow it in the
+    same pass, since a task is created after the tasks it depends on.
+    """
     if not ctx.squad_thread_id:
         return 0
     try:
@@ -6757,13 +6764,17 @@ async def _maybe_enqueue_unblocked_squad_tasks(
             assignee = str(task.assigned_agent_id or "").strip()
             if not assignee or assignee == thread.coordinator_agent_id:
                 continue
-            ready = True
-            for dependency_id in task.depends_on:
-                dependency = await task_store.get_task(dependency_id)
-                if dependency is None or dependency.status != "done":
-                    ready = False
-                    break
-            if not ready:
+            dependencies = [await task_store.get_task(dependency_id) for dependency_id in task.depends_on]
+            ended = next(
+                (dep for dep in dependencies if dep is not None and dep.status in {"failed", "cancelled", "escalated"}),
+                None,
+            )
+            if ended is not None:
+                await _cancel_squad_task_after_its_dependency_ended(
+                    ctx=ctx, task=task, dependency=ended, assignee=assignee, coordinator=thread.coordinator_agent_id
+                )
+                continue
+            if any(dependency is None or dependency.status != "done" for dependency in dependencies):
                 continue
 
             try:
@@ -6867,6 +6878,10 @@ async def _maybe_enqueue_unblocked_squad_tasks(
             squad_task_id=ctx.squad_task_id,
         )
         return 0
+
+
+# Waits before each retry of a coordinator synthesis dispatch that failed.
+_SQUAD_SYNTHESIS_DISPATCH_RETRY_DELAYS_S = (1.0, 2.0)
 
 
 async def _maybe_enqueue_squad_coordinator_synthesis(
@@ -6998,6 +7013,80 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
         if not readiness.ready:
             return
+        visible_results_block = "\n\n".join(visible_results)
+        confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
+        timeout_block = ""
+        # Declared timeouts plus the handoff failures the gate found in the results.
+        if readiness.timeout_disclosures:
+            timeout_lines = [
+                "- " + ", ".join(str(agent) for agent in item.get("agent_ids") or []) + f": {item.get('status')}"
+                for item in readiness.timeout_disclosures
+            ]
+            timeout_block = "\n\nTimeouts/bloqueios declarados:\n" + "\n".join(timeout_lines)
+        synthesis_query = (
+            "Todos os task_result abertos deste ciclo já foram recebidos. "
+            "Sintetize a entrega final para o usuário usando obrigatoriamente todos os resultados visíveis abaixo. "
+            "Não use apenas o último resultado e declare divergências ou lacunas se houver. "
+            "Se houver handoff recusado, falho ou expirado, declare explicitamente os agentes afetados. "
+            "Preserve literalmente marcadores, IDs, labels de aceite e tokens de verificação presentes nos resultados; "
+            "não os traduza, normalize ou parafraseie. "
+            "Formato obrigatório da resposta final: comece com a seção 'Resultados confirmados:' e copie "
+            "literalmente cada linha confirmada abaixo antes da síntese profissional.\n\n"
+            f"Resultados confirmados:\n{confirmed_results_block}\n\n"
+            f"Resultados visíveis deste ciclo:\n{visible_results_block}"
+            f"{timeout_block}"
+        )
+        # Queue the synthesis before recording the handoff outcome, so a dispatch that fails does
+        # not leave the room saying the handoff returned while the coordinator never runs. A
+        # refused dispatch, such as a rejected tasks insert, is tried again.
+        dispatched = False
+        for delay in (0.0, *_SQUAD_SYNTHESIS_DISPATCH_RETRY_DELAYS_S):
+            if delay:
+                await asyncio.sleep(delay)
+            result = await dispatch_squad_turn(
+                target_agent_id=thread.coordinator_agent_id,
+                thread=thread,
+                thread_store=thread_store,
+                query_text=synthesis_query,
+                parent_message_id=squad_message_id or ctx.parent_message_id,
+                metadata={
+                    "kind": "task_result",
+                    "from_agent": executing_agent,
+                    "thread_id": ctx.squad_thread_id,
+                    "squad_id": thread.squad_id,
+                    "parent_message_id": squad_message_id or ctx.parent_message_id,
+                    "telegram_chat_id": thread.telegram_chat_id,
+                    "telegram_message_thread_id": ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+                    "user_id": user_id or thread.owner_user_id,
+                    "chat_id": thread.telegram_chat_id or 0,
+                    "delivery_intent": "final_synthesis",
+                    "idempotency_key": synthesis_idempotency_key,
+                    "payload": {
+                        "task_id": ctx.squad_task_id,
+                        "status": "ok",
+                        "output_md": response_text,
+                        "artifact_ids": artifact_ids,
+                    },
+                },
+                application=getattr(context, "application", None),
+                user_id=user_id or int(thread.owner_user_id or 0),
+                chat_id=int(thread.telegram_chat_id or 0),
+                delegation_chain=[executing_agent],
+                delegation_request_id=synthesis_idempotency_key,
+                delegation_origin_agent_id=executing_agent,
+                telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
+                bot_override=getattr(context, "bot", None),
+            )
+            if result.dispatched:
+                dispatched = True
+                break
+        if not dispatched:
+            log.warning(
+                "squad_coordinator_synthesis_not_dispatched",
+                thread_id=ctx.squad_thread_id,
+                squad_task_id=ctx.squad_task_id,
+            )
+            return
         # Record the outcome of each handoff whose destinations have all answered (D-074).
         handoff_outcomes = {
             ref.get("id"): ref.get("status")
@@ -7030,63 +7119,6 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                 correlation_id=handoff.get("correlation_id"),
                 handoff_id=str(handoff_id),
             )
-        visible_results_block = "\n\n".join(visible_results)
-        confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
-        timeout_block = ""
-        # Declared timeouts plus the handoff failures the gate found in the results.
-        if readiness.timeout_disclosures:
-            timeout_lines = [
-                "- " + ", ".join(str(agent) for agent in item.get("agent_ids") or []) + f": {item.get('status')}"
-                for item in readiness.timeout_disclosures
-            ]
-            timeout_block = "\n\nTimeouts/bloqueios declarados:\n" + "\n".join(timeout_lines)
-        synthesis_query = (
-            "Todos os task_result abertos deste ciclo já foram recebidos. "
-            "Sintetize a entrega final para o usuário usando obrigatoriamente todos os resultados visíveis abaixo. "
-            "Não use apenas o último resultado e declare divergências ou lacunas se houver. "
-            "Se houver handoff recusado, falho ou expirado, declare explicitamente os agentes afetados. "
-            "Preserve literalmente marcadores, IDs, labels de aceite e tokens de verificação presentes nos resultados; "
-            "não os traduza, normalize ou parafraseie. "
-            "Formato obrigatório da resposta final: comece com a seção 'Resultados confirmados:' e copie "
-            "literalmente cada linha confirmada abaixo antes da síntese profissional.\n\n"
-            f"Resultados confirmados:\n{confirmed_results_block}\n\n"
-            f"Resultados visíveis deste ciclo:\n{visible_results_block}"
-            f"{timeout_block}"
-        )
-        await dispatch_squad_turn(
-            target_agent_id=thread.coordinator_agent_id,
-            thread=thread,
-            thread_store=thread_store,
-            query_text=synthesis_query,
-            parent_message_id=squad_message_id or ctx.parent_message_id,
-            metadata={
-                "kind": "task_result",
-                "from_agent": executing_agent,
-                "thread_id": ctx.squad_thread_id,
-                "squad_id": thread.squad_id,
-                "parent_message_id": squad_message_id or ctx.parent_message_id,
-                "telegram_chat_id": thread.telegram_chat_id,
-                "telegram_message_thread_id": ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
-                "user_id": user_id or thread.owner_user_id,
-                "chat_id": thread.telegram_chat_id or 0,
-                "delivery_intent": "final_synthesis",
-                "idempotency_key": synthesis_idempotency_key,
-                "payload": {
-                    "task_id": ctx.squad_task_id,
-                    "status": "ok",
-                    "output_md": response_text,
-                    "artifact_ids": artifact_ids,
-                },
-            },
-            application=getattr(context, "application", None),
-            user_id=user_id or int(thread.owner_user_id or 0),
-            chat_id=int(thread.telegram_chat_id or 0),
-            delegation_chain=[executing_agent],
-            delegation_request_id=synthesis_idempotency_key,
-            delegation_origin_agent_id=executing_agent,
-            telegram_message_thread_id=ctx.telegram_message_thread_id or thread.telegram_message_thread_id,
-            bot_override=getattr(context, "bot", None),
-        )
     except Exception:
         log.exception(
             "squad_coordinator_synthesis_enqueue_failed",
@@ -7205,9 +7237,11 @@ async def _persist_squad_turn_result(
     created_artifacts: list[str],
     cost: float,
     log_model: str,
+    cancelled: bool = False,
 ) -> tuple[str | None, list[str]]:
     """Post a squad turn's answer to its thread, resolve the obligations it answers and advance its task.
 
+    With ``cancelled`` the task result says ``cancelled`` and the task is cancelled.
     Returns the posted message ref (``msg-<id>``) and the ids of the registered artifacts.
     """
     squad_message_id: str | None = None
@@ -7246,7 +7280,7 @@ async def _persist_squad_turn_result(
                     "correlation_id": correlation_id,
                     "payload": {
                         "task_id": ctx.squad_task_id,
-                        "status": "failed" if run_result.error else "ok",
+                        "status": "cancelled" if cancelled else "failed" if run_result.error else "ok",
                         "output_md": response_text,
                         "artifact_ids": squad_artifact_ids,
                         "cost_usd": cost,
@@ -7277,10 +7311,73 @@ async def _persist_squad_turn_result(
                 run_result=run_result,
                 response_text=response_text,
                 artifact_ids=squad_artifact_ids,
+                cancelled=cancelled,
             )
     except Exception:
         log.exception("squad_post_process_message_persist_failed", thread_id=ctx.squad_thread_id)
     return squad_message_id, squad_artifact_ids
+
+
+async def _cancel_squad_task_after_its_dependency_ended(
+    *,
+    ctx: QueryContext,
+    task: Any,
+    dependency: Any,
+    assignee: str,
+    coordinator: str,
+) -> None:
+    """Cancel a pending squad task that can never run, with a task result from its assignee that says why."""
+    reason = f"Not run: this task depends on task {dependency.id} ({dependency.title}), which {dependency.status}."
+    await _persist_squad_turn_result(
+        ctx=replace(
+            ctx,
+            executing_agent_id=assignee,
+            squad_task_id=task.id,
+            parent_message_id=str(task.metadata.get("coordination_parent_message_id") or "") or ctx.parent_message_id,
+            delegation_request_id=f"coord-{task.id}",
+            delegation_origin_agent_id=coordinator,
+        ),
+        run_result=RunResult(
+            provider="",
+            model="",
+            result=reason,
+            session_id="",
+            provider_session_id=None,
+            cost_usd=0.0,
+            error=True,
+            stop_reason="error",
+        ),
+        response_text=reason,
+        runtime_task_id=None,
+        created_artifacts=[],
+        cost=0.0,
+        log_model="",
+        cancelled=True,
+    )
+
+
+def _squad_turn_context_from_item(item: QueueItem) -> QueryContext:
+    """The squad identity of a turn that ended before its query context was built."""
+    return QueryContext(
+        provider="",
+        work_dir="",
+        model="",
+        session_id="",
+        provider_session_id=None,
+        system_prompt="",
+        agent_mode="",
+        permission_mode="",
+        max_turns=0,
+        dry_run=item.scheduled_dry_run,
+        executing_agent_id=item.executing_agent_id,
+        squad_thread_id=item.squad_thread_id,
+        squad_task_id=item.squad_task_id,
+        parent_message_id=item.parent_message_id,
+        delegation_chain=list(item.delegation_chain),
+        delegation_request_id=item.delegation_request_id,
+        delegation_origin_agent_id=item.delegation_origin_agent_id,
+        telegram_message_thread_id=item.telegram_message_thread_id,
+    )
 
 
 async def _record_failed_squad_task_turn(
@@ -7288,16 +7385,22 @@ async def _record_failed_squad_task_turn(
     user_id: int,
     context: BotContext,
     ctx: QueryContext | None,
+    item: QueueItem | None,
     run_result: RunResult | None,
     error_message: str,
     task_id: int,
+    cancelled: bool = False,
 ) -> None:
     """Record a squad task turn that a queue failure handler ends, as ``_post_process`` records a failed run.
 
-    Its failure is posted as a failed task_result and its squad task fails, then its follow-ups
-    run, so a handoff waiting on this destination completes as failed and the coordinator
-    synthesis, which discloses the failure, is queued (D-074). No worker lock is held here.
+    Its failure is posted as a failed task_result and its squad task fails (with ``cancelled``,
+    both say cancelled), then its follow-ups run, so a handoff waiting on this destination
+    completes as failed and the coordinator synthesis, which discloses the failure, is queued
+    (D-074). A turn that failed before its query context was built is recorded from its queue
+    item. No worker lock is held here.
     """
+    if ctx is None and item is not None:
+        ctx = _squad_turn_context_from_item(item)
     if ctx is None or ctx.dry_run or not ctx.squad_thread_id or not ctx.squad_task_id:
         return
     try:
@@ -7334,6 +7437,7 @@ async def _record_failed_squad_task_turn(
         created_artifacts=[],
         cost=failed_run.cost_usd,
         log_model=failed_run.model,
+        cancelled=cancelled,
     )
     await _dispatch_squad_follow_ups(
         user_id=user_id,
@@ -8140,6 +8244,15 @@ async def _execute_single_task(
                     context=context,
                     error_message=str(e),
                 )
+                await _record_failed_squad_task_turn(
+                    user_id=user_id,
+                    context=context,
+                    ctx=None,
+                    item=item,
+                    run_result=None,
+                    error_message=str(e),
+                    task_id=task_id,
+                )
                 return
 
             task_info.model = ctx.model
@@ -8842,6 +8955,7 @@ async def _execute_single_task(
                 user_id=user_id,
                 context=context,
                 ctx=ctx,
+                item=item,
                 run_result=run_result,
                 error_message=last_error or "unknown error",
                 task_id=task_id,
@@ -8874,7 +8988,13 @@ async def _execute_single_task(
             await runtime.finalize_task(task_id=task_id, success=False, error_message=error_str)
         await _send_task_error(task_info, error_str, context, item)
         await _record_failed_squad_task_turn(
-            user_id=user_id, context=context, ctx=ctx, run_result=run_result, error_message=error_str, task_id=task_id
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+            item=item,
+            run_result=run_result,
+            error_message=error_str,
+            task_id=task_id,
         )
     except asyncio.CancelledError:
         cancellation_reason = task_info.error_message or "Cancelled by scheduler control."
@@ -8906,6 +9026,18 @@ async def _execute_single_task(
                 context=context,
                 error_message=cancellation_reason,
             )
+        # A cancelled destination of a handoff did not return, so its handoff fails and the
+        # coordinator synthesis discloses it (D-074).
+        await _record_failed_squad_task_turn(
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+            item=item,
+            run_result=run_result,
+            error_message=cancellation_reason,
+            task_id=task_id,
+            cancelled=True,
+        )
         raise
     except Exception as e:
         error_str = str(e)
@@ -9017,7 +9149,13 @@ async def _execute_single_task(
             await runtime.finalize_task(task_id=task_id, success=False, error_message=error_str)
         await _send_task_error(task_info, error_str, context, item)
         await _record_failed_squad_task_turn(
-            user_id=user_id, context=context, ctx=ctx, run_result=run_result, error_message=error_str, task_id=task_id
+            user_id=user_id,
+            context=context,
+            ctx=ctx,
+            item=item,
+            run_result=run_result,
+            error_message=error_str,
+            task_id=task_id,
         )
     finally:
         if heartbeat_task:

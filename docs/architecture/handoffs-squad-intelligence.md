@@ -36,28 +36,54 @@ reply obligation it answered on the cycle's source message. The queue worker
 runs this check, like the other squad follow-ups, after it releases the
 per-user lock it holds for post-processing, because queueing the synthesis
 turn takes that lock again (D-019). It runs them once the turn's answer is
-recorded in the thread, even if a later post-processing step fails:
+recorded in the thread, even if a later post-processing step fails. The
+outcome is:
 
 - `returned` when every answer succeeded;
-- `failed` when a destination's task result has `payload.status = failed`. A
-  destination whose run fails in the queue (a provider error, exhausted
-  retries or a runtime guardrail) gets such a task result and a failed task
-  from the queue's failure handling, which then runs the same check. An
-  answered reply obligation does not turn a failed result into `returned`.
-  The failure is added to the synthesis disclosures, so the synthesis prompt
-  names the agents that failed.
+- `failed` when a destination's task result has `payload.status` `failed` or
+  `cancelled`. Every way the queue ends a destination's turn without an
+  answer records one, and then runs the same check:
+  - a run that fails (a provider error, exhausted retries, a runtime
+    guardrail or an unexpected exception) and a turn that fails before its
+    run starts (a budget overrun, or an error while its query context is
+    prepared, such as a failed squad access check) get a failed task result
+    with the error and a failed task;
+  - a cancelled run (`/cancel` or scheduler control) gets a cancelled task
+    result with the cancellation reason and a cancelled task;
+  - a pending task that depends on a task that failed, was cancelled or was
+    escalated can never run, so it is cancelled with a task result from its
+    assignee that names that task.
 
-When synthesis then runs, an event with that status and the same `handoff_id`
-is recorded once, and it supersedes the open event. Its idempotency key is the
-handoff id and status, and the handoff writer asks the thread store to
-deduplicate on it (`post_thread_message(..., dedupe=True)`); other posts store
-their idempotency key without deduplicating. A status-change event has a delivery status that
-matches it (`completed`, `failed`, `timed_out`, or `blocked`) and is not
-addressed to the destinations again. On the web, the dashboard delivery
-watcher leaves handoff cycles to this post-turn check, so it does not add a
-second synthesis. The check itself is not atomic yet: two destinations that
-finish at the same moment can each dispatch a synthesis. Nothing times a
-handoff out yet. The reply-cycle path has no handoffs.
+  An answered reply obligation does not turn a failed result into
+  `returned`. The failure is added to the synthesis disclosures, so the
+  synthesis prompt names the agents that failed.
+
+The check queues the coordinator synthesis before it records the outcome. A
+dispatch that fails (for example a rejected tasks insert) is tried twice more,
+after 1 s and 2 s. When every attempt fails, as while the runtime shuts down,
+the outcome is not recorded: the handoff stays open and the room shows the
+`[agent_dispatch_unavailable]` events, rather than a `returned` handoff with no
+answer. Nothing runs the check for that cycle again later yet.
+
+Once the synthesis is queued, an event with that status and the same
+`handoff_id` is recorded once, and it supersedes the open event. Its
+idempotency key is the handoff id and status, and the handoff writer asks the
+thread store to deduplicate on it (`post_thread_message(..., dedupe=True)`);
+other posts store their idempotency key without deduplicating. A status-change
+event has a delivery status that matches it (`completed`, `failed`,
+`timed_out`, or `blocked`) and is not addressed to the destinations again. On
+the web, the dashboard delivery watcher leaves handoff cycles to this post-turn
+check, so it does not add a second synthesis.
+
+The check is not atomic yet (D-058, M2-E4-T3), and nothing stops a second
+dispatch of the synthesis, only a second outcome event. It reads the cycle's
+open tasks up to four times, 0.5 s apart, so a destination that finishes while
+another is still open keeps checking for about 1.5 s. In one runtime the queue
+worker awaits the check before it starts the next turn, so one user's turns do
+not race. Under the supervisor, where each destination runs in its own runtime,
+two destinations that finish within about 1.5 s of each other can each queue a
+synthesis, and the room then gets two final answers. Nothing times a handoff
+out yet. The reply-cycle path has no handoffs.
 
 ## Route Quality
 

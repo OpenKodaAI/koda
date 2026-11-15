@@ -113,3 +113,19 @@ def test_an_answered_reply_obligation_does_not_hide_a_failed_task_result() -> No
     assert result.timeout_disclosures == [
         {"kind": "handoff_event", "id": "handoff-1", "status": "failed", "agent_ids": ["QA"]}
     ]
+
+
+def test_handoff_with_a_cancelled_destination_is_failed_and_disclosed() -> None:
+    # A destination whose run was cancelled, or whose task could not run, did not return.
+    result = evaluate_synthesis_readiness(
+        handoff_events=[_handoff()],
+        result_messages=[
+            {"type": "task_result", "id": "msg-1", "from": "FE", "payload": {"status": "ok"}},
+            {"type": "task_result", "id": "msg-2", "from": "QA", "metadata": {"payload": {"status": "cancelled"}}},
+        ],
+    )
+
+    assert {"kind": "handoff_event", "id": "handoff-1", "status": "failed"} in result.evidence_refs
+    assert result.timeout_disclosures == [
+        {"kind": "handoff_event", "id": "handoff-1", "status": "failed", "agent_ids": ["QA"]}
+    ]
