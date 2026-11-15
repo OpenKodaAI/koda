@@ -569,7 +569,6 @@ def hierarchy_manager(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(manager_mod, "execute", db.execute)
     monkeypatch.setattr(manager_mod, "now_iso", lambda: "2026-04-01T00:00:00Z")
     monkeypatch.setattr(manager_mod, "json_dump", json.dumps)
-    monkeypatch.setattr(manager_mod, "CONTROL_PLANE_AUTO_IMPORT", False)
     mgr = object.__new__(manager_mod.ControlPlaneManager)
     mgr._seeding_legacy_state = False
     mgr._elevenlabs_voice_cache = {}

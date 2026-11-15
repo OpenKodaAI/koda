@@ -167,9 +167,9 @@ normal dashboard flow is unaffected.
 Outside `/api/control-plane/*` the middleware checks only the two cluster-mode deploy hooks that
 change state, `POST /cluster/drain` and `POST /cluster/undrain`
 ([Cluster mode](../operations/cluster-mode.md)), with the same bearer check: without a valid
-token they answer `401` and change nothing. The supervisor's other routes (`/`, `/setup`,
-`/health`, `/openapi/control-plane.json` and `GET /cluster/status`) answer without a
-session. `tests/test_control_plane_auth_matrix.py` sends a request to every route the supervisor
+token they answer `401` and change nothing. The supervisor's other routes (`/health`,
+`/openapi/control-plane.json` and `GET /cluster/status`) answer without a session. The API
+serves no page at `/` or `/setup`; the setup screen is the dashboard's `/setup`. `tests/test_control_plane_auth_matrix.py` sends a request to every route the supervisor
 registers, through its own middleware stack, without a session and with one. It fails when a
 route answers without a session and the OpenAPI document does not let that operation through
 without a token. It also fails when the routes that answer without a session differ, by path or

@@ -84,8 +84,6 @@ SUPERVISOR_INTERNAL_ROUTES = frozenset(
 # docs/security/authentication.md).
 ANONYMOUS_ROOT_ROUTES = frozenset(
     {
-        ("GET", "/"),
-        ("GET", "/setup"),
         ("GET", "/health"),
         ("GET", "/openapi/control-plane.json"),
         ("GET", "/cluster/status"),
@@ -385,6 +383,25 @@ def test_root_routes_answering_without_credentials_are_the_pinned_set(route_matr
     assert missing == [], f"in ANONYMOUS_ROOT_ROUTES but not registered: {missing}"
     problems = _anonymous_root_drift(route_matrix.probes)
     assert problems == [], "\n".join(problems)
+
+
+# M4-E1-T8: the 410 stub for the old combined onboarding call and the HTML page that pointed
+# operators to the dashboard's /setup (with the / redirect to it) are gone.
+REMOVED_ROUTES = frozenset(
+    {
+        ("POST", "/api/control-plane/onboarding/bootstrap"),
+        ("GET", "/setup"),
+        ("GET", "/"),
+    }
+)
+
+
+def test_removed_routes_are_not_registered_or_documented(route_matrix: RouteMatrix) -> None:
+    registered = sorted(_with_head_twins(REMOVED_ROUTES) & set(route_matrix.probes))
+    assert registered == []
+    spec = json.loads(OPENAPI_PATH.read_text(encoding="utf-8"))
+    documented = sorted(path for _method, path in REMOVED_ROUTES if path in spec["paths"])
+    assert documented == []
 
 
 def test_supervisor_internal_routes_are_registered_and_left_out_of_openapi(route_matrix: RouteMatrix) -> None:

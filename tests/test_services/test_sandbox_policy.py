@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
 from koda.services.mcp_isolation import IsolationConstraints, Mount
 from koda.services.sandbox_policy import (
     SANDBOX_POLICY_SCHEMA_VERSION,
     SandboxEffectivePolicy,
     SandboxMount,
-    SandboxPolicyDenied,
-    ensure_sandbox_policy_allows_execution,
     evaluate_sandbox_effective_policy,
 )
 
@@ -94,7 +90,7 @@ def test_remote_group_unsafe_allows_with_explicit_policy_and_safe_sandbox() -> N
         explicit_remote_policy=True,
     )
 
-    evaluation = ensure_sandbox_policy_allows_execution(policy)
+    evaluation = evaluate_sandbox_effective_policy(policy)
 
     assert evaluation.allowed is True
     assert evaluation.reason_codes == ()
@@ -202,18 +198,20 @@ def test_from_runtime_accepts_existing_isolation_constraints() -> None:
     assert evaluate_sandbox_effective_policy(policy).allowed is True
 
 
-def test_ensure_sandbox_policy_allows_execution_raises_on_denied() -> None:
+def test_native_high_risk_policy_is_denied() -> None:
     policy = SandboxEffectivePolicy(
         isolation_kind="native",
         risk_class="secret_access",
         network_mode="none",
     )
 
-    with pytest.raises(SandboxPolicyDenied, match="sandbox_native_high_risk"):
-        ensure_sandbox_policy_allows_execution(policy)
+    evaluation = evaluate_sandbox_effective_policy(policy)
+
+    assert evaluation.allowed is False
+    assert "sandbox_native_high_risk" in evaluation.reason_codes
 
 
-def test_ensure_sandbox_policy_denies_remote_unsafe_before_execute() -> None:
+def test_remote_unsafe_policy_is_denied() -> None:
     policy = SandboxEffectivePolicy(
         isolation_kind="docker",
         risk_class="network_write",
@@ -224,5 +222,7 @@ def test_ensure_sandbox_policy_denies_remote_unsafe_before_execute() -> None:
         identity_status="allowed",
     )
 
-    with pytest.raises(SandboxPolicyDenied, match="sandbox_remote_unsafe_default"):
-        ensure_sandbox_policy_allows_execution(policy)
+    evaluation = evaluate_sandbox_effective_policy(policy)
+
+    assert evaluation.allowed is False
+    assert "sandbox_remote_unsafe_default" in evaluation.reason_codes

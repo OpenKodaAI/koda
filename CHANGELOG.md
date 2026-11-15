@@ -204,6 +204,19 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   benchmark" panel of the bundled Grafana dashboard, which could never show data.
   `scripts/ops_benchmark.py` is unchanged. `/health` reports the same fields and
   breakers. (M4-E1-T3, TD-057, TD-058)
+- `POST /api/control-plane/onboarding/bootstrap` is gone: it has answered `410
+  onboarding_bootstrap_removed` since the setup wizard stopped using it, and now answers
+  `404`. Create the owner with `POST /api/control-plane/auth/register-owner`. The control
+  plane (`:8090`) no longer serves the HTML page at `/setup` that pointed to the
+  dashboard, or the `/` redirect to it; the setup screen is the dashboard's `/setup`.
+  `scripts/doctor.py` drops `legacy_setup_url` from its payload and `koda doctor` its
+  "Bridge" line. (M4-E1-T8, TD-071)
+- `CONTROL_PLANE_AUTO_IMPORT` is gone with the import it switched on, which read agents
+  from a root `.env` and a sibling `koda-dashboard` checkout and was off by default.
+  (M4-E1-T8, TD-070)
+- Custom MCP servers no longer carry `validation_signature`: the HMAC was stored and
+  returned but never checked. New and updated servers store no signature, and the
+  server list no longer returns the field. (M4-E1-T8, TD-038)
 
 ### Fixed
 

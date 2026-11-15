@@ -206,11 +206,8 @@ from .execution_policy import (
 )
 from .settings import (
     AGENT_SECTIONS,
-    CONTROL_PLANE_AUTO_IMPORT,
     CONTROL_PLANE_RUNTIME_DIR,
-    DASHBOARD_AGENT_CONSTANTS_PATH,
     DOCUMENT_KINDS,
-    ROOT_DIR,
     looks_like_secret_key,
 )
 from .workspace_import import (
@@ -232,7 +229,6 @@ def _embedding_catalog_keys() -> set[str]:
 
 
 _AGENT_PREFIX_RE = re.compile(r"^([A-Z0-9_]+)_(.+)$")
-_TELEGRAM_AGENT_TOKEN_RE = re.compile(r"^([A-Z0-9_]+)_AGENT_TOKEN$")
 _LOWERCASE_FILE_SAFE_RE = re.compile(r"[^a-z0-9_-]+")
 _STATUS_VALUES = frozenset({"active", "paused", "archived"})
 _SCOPE_VALUES = frozenset({"agent", "global"})
@@ -1613,24 +1609,6 @@ def _render_knowledge_pack(agent_id: str, assets: list[dict[str, Any]], knowledg
     return "\n".join(header + blocks).strip() + "\n"
 
 
-def _parse_dashboard_appearance() -> dict[str, dict[str, str]]:
-    if not DASHBOARD_AGENT_CONSTANTS_PATH.exists():
-        return {}
-    content = DASHBOARD_AGENT_CONSTANTS_PATH.read_text(encoding="utf-8")
-    matches = re.findall(
-        r'\{ id: "([^"]+)", label: "([^"]+)", color: "([^"]+)", colorRgb: "([^"]+)" \}',
-        content,
-    )
-    appearance: dict[str, dict[str, str]] = {}
-    for agent_id, label, color, color_rgb in matches:
-        appearance[_normalize_agent_id(agent_id)] = {
-            "label": label,
-            "color": color,
-            "color_rgb": color_rgb,
-        }
-    return appearance
-
-
 # Where each provider CLI stores its sign-ins, relative to its config folder. Checked against
 # the pinned CLIs (packages/provider-clis): Claude Code ``.credentials.json``; Codex
 # ``auth.json``, ``.credentials.json``, ``secrets/gateway_oauth.json``, ``secrets/codex_auth.age``,
@@ -1666,10 +1644,6 @@ class ControlPlaneManager:
     def ensure_seeded(self) -> None:
         if not self._auto_seed_enabled():
             return
-        if self._seeding_legacy_state:
-            return
-        if CONTROL_PLANE_AUTO_IMPORT:
-            self.import_legacy_state()
         self._repair_legacy_default_agent_id()
         self._reconcile_global_secret_classification()
         self._cleanup_provider_login_sessions()
@@ -13110,114 +13084,6 @@ class ControlPlaneManager:
                 (version, now_iso(), normalized),
             )
 
-    def import_legacy_state(self) -> None:
-        if not self._auto_seed_enabled():
-            return
-        if self._seeding_legacy_state:
-            return
-        self._seeding_legacy_state = True
-        log.info("control_plane_import_started")
-        try:
-            env_values = self._load_legacy_env()
-            agent_ids = self._discover_legacy_agent_ids(env_values)
-            existing_rows = fetch_all("SELECT id FROM cp_agent_definitions ORDER BY id ASC")
-            existing_agent_ids = {str(row["id"]) for row in existing_rows}
-            target_agent_ids = [agent_id for agent_id in agent_ids if agent_id not in existing_agent_ids]
-            has_global_sections = bool(fetch_one("SELECT 1 FROM cp_global_sections LIMIT 1"))
-            appearance_map = _parse_dashboard_appearance()
-
-            shared_sections: dict[str, dict[str, Any]] = {section: {} for section in AGENT_SECTIONS}
-            shared_secrets: dict[str, str] = {}
-            agent_sections: dict[str, dict[str, dict[str, Any]]] = {
-                agent_id: {section: {} for section in AGENT_SECTIONS} for agent_id in agent_ids
-            }
-            agent_secrets: dict[str, dict[str, str]] = {agent_id: {} for agent_id in agent_ids}
-
-            for key, value in env_values.items():
-                matched_agent: str | None = None
-                remainder = key
-                for candidate in sorted(agent_ids, key=len, reverse=True):
-                    prefix = f"{candidate}_"
-                    if key.startswith(prefix):
-                        matched_agent = candidate
-                        remainder = key[len(prefix) :]
-                        break
-                if matched_agent:
-                    self._assign_env_value(
-                        agent_sections[matched_agent], agent_secrets[matched_agent], remainder, value
-                    )
-                else:
-                    self._assign_env_value(shared_sections, shared_secrets, key, value)
-
-            if target_agent_ids and not has_global_sections:
-                self.patch_global_defaults({"sections": shared_sections})
-
-            for agent_id in target_agent_ids:
-                general_env = _section_env(agent_sections[agent_id]["general"])
-                display_name = str(
-                    general_env.get("AGENT_NAME")
-                    or appearance_map.get(agent_id, {}).get("label")
-                    or agent_id.replace("_", " ")
-                )
-                storage_namespace = _slug(agent_id)
-                health_port = int(general_env.get("HEALTH_PORT") or 8080)
-                appearance = {
-                    "label": appearance_map.get(agent_id, {}).get("label") or display_name,
-                    "color": appearance_map.get(agent_id, {}).get("color") or "#A7ADB4",
-                    "color_rgb": appearance_map.get(agent_id, {}).get("color_rgb") or "167, 173, 180",
-                }
-                runtime_endpoint = {
-                    "health_port": health_port,
-                    "health_url": f"http://127.0.0.1:{health_port}/health",
-                    "runtime_base_url": f"http://127.0.0.1:{health_port}",
-                }
-                runtime_endpoint = self._normalize_runtime_endpoint_for_agent(agent_id, runtime_endpoint)
-                self.create_agent(
-                    {
-                        "id": agent_id,
-                        "display_name": display_name,
-                        "appearance": appearance,
-                        "storage_namespace": storage_namespace,
-                        "runtime_endpoint": runtime_endpoint,
-                        "status": "active",
-                    }
-                )
-                for section, data in agent_sections[agent_id].items():
-                    if data:
-                        self.put_section(agent_id, section, {"data": data})
-                for secret_key, value in agent_secrets[agent_id].items():
-                    if not str(value).strip():
-                        continue
-                    self.upsert_secret_asset(agent_id, secret_key, {"value": value})
-
-            global_secret_carrier = next(iter(existing_agent_ids or target_agent_ids), None)
-            if global_secret_carrier:
-                for secret_key, value in shared_secrets.items():
-                    if not str(value).strip():
-                        continue
-                    self.upsert_global_secret_asset(secret_key, {"value": value})
-
-            if target_agent_ids:
-                self._import_legacy_templates(target_agent_ids)
-
-            for agent_id in target_agent_ids:
-                publish = self.publish_agent(agent_id)
-                execute(
-                    """
-                    UPDATE cp_agent_definitions
-                    SET applied_version = ?, desired_version = ?, updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (publish["version"], publish["version"], now_iso(), agent_id),
-                )
-            log.info(
-                "control_plane_import_finished",
-                discovered_agent_count=len(agent_ids),
-                imported_agent_count=len(target_agent_ids),
-            )
-        finally:
-            self._seeding_legacy_state = False
-
     def _serialize_agent_summary(
         self,
         row: Any,
@@ -13502,46 +13368,6 @@ class ControlPlaneManager:
     def _scoped_env(self, agent_id: str, env: dict[str, str]) -> dict[str, str]:
         return _agent_scoped_env(agent_id, env)
 
-    def _load_legacy_env(self) -> dict[str, str]:
-        env_path = ROOT_DIR / ".env"
-        if not env_path.exists():
-            return {}
-        values: dict[str, str] = {}
-        for raw_line in env_path.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key, value = line.split("=", 1)
-            values[key.strip()] = value.strip().strip('"').strip("'")
-        return values
-
-    def _discover_legacy_agent_ids(self, env_values: dict[str, str]) -> list[str]:
-        discovered: set[str] = set()
-        for key in env_values:
-            match = _TELEGRAM_AGENT_TOKEN_RE.match(key)
-            if match:
-                legacy_id = _normalize_agent_id(match.group(1))
-                discovered.add(legacy_id)
-        if not discovered and os.environ.get("AGENT_ID"):
-            discovered.add(_normalize_agent_id(os.environ["AGENT_ID"]))
-        return sorted(discovered)
-
-    def _assign_env_value(
-        self,
-        sections: dict[str, dict[str, Any]],
-        secrets: dict[str, str],
-        key: str,
-        value: str,
-    ) -> None:
-        target = self._infer_section_from_env_key(key)
-        if looks_like_secret_key(key):
-            secrets[key] = value
-            return
-        section_payload = sections[target]
-        env_map = _safe_json_object(section_payload.get("env"))
-        env_map[key] = value
-        section_payload["env"] = env_map
-
     def _infer_section_from_env_key(self, key: str) -> str:
         if key.startswith("MEMORY_"):
             return "memory"
@@ -13614,20 +13440,6 @@ class ControlPlaneManager:
         }:
             return "general"
         return "general"
-
-    def _import_legacy_templates(self, agent_ids: list[str]) -> None:
-        global_templates = ROOT_DIR / "templates.json"
-        if global_templates.exists() and agent_ids:
-            data = json.loads(global_templates.read_text(encoding="utf-8"))
-            for name, content in data.items():
-                self.upsert_template_asset(agent_ids[0], {"scope": "global", "name": name, "content": content})
-        for agent_id in agent_ids:
-            path = ROOT_DIR / f"templates_{_slug(agent_id)}.json"
-            if not path.exists():
-                continue
-            data = json.loads(path.read_text(encoding="utf-8"))
-            for name, content in data.items():
-                self.upsert_template_asset(agent_id, {"name": name, "content": content})
 
     # ------------------------------------------------------------------ #
     #  MCP Server Catalog                                                  #
@@ -15070,7 +14882,6 @@ class ControlPlaneManager:
         agent_id: str | None = None,
         owner_user_id: str | None = None,
     ) -> dict[str, Any]:
-        from koda.control_plane.crypto import get_signing_key
         from koda.integrations.custom_mcp_registry import (
             CustomServerPayload,
             normalize_server_key,
@@ -15078,10 +14889,6 @@ class ControlPlaneManager:
         )
 
         normalized_agent = _normalize_agent_id(agent_id) if agent_id else None
-        try:
-            secret_key = get_signing_key()
-        except Exception:
-            secret_key = None
 
         # Detect Claude Desktop import shape and route accordingly.
         if isinstance(payload, dict) and "mcpServers" in payload:
@@ -15115,7 +14922,6 @@ class ControlPlaneManager:
             normalized_payload,
             agent_id=normalized_agent,
             owner_user_id=owner_user_id,
-            secret_key=secret_key,
         )
 
     def import_claude_desktop_mcp(
@@ -15125,19 +14931,13 @@ class ControlPlaneManager:
         agent_id: str | None = None,
         owner_user_id: str | None = None,
     ) -> dict[str, Any]:
-        from koda.control_plane.crypto import get_signing_key
         from koda.integrations.custom_mcp_registry import import_claude_desktop_json
 
         normalized_agent = _normalize_agent_id(agent_id) if agent_id else None
-        try:
-            secret_key = get_signing_key()
-        except Exception:
-            secret_key = None
         result = import_claude_desktop_json(
             raw,
             agent_id=normalized_agent,
             owner_user_id=owner_user_id,
-            secret_key=secret_key,
         )
         return {
             "created": list(result.created),

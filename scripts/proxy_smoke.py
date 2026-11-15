@@ -250,7 +250,7 @@ def _expect(condition: bool, message: str) -> None:
 def _dashboard_page(proxy: Proxy, path: str) -> str:
     response = proxy.request("GET", path, headers={"Accept": "text/html"})
     _expect(response.status == 200, f"expected 200, got {response.summary()}")
-    # Next.js pages load their bundles from /_next/; the API's legacy /setup page does not.
+    # Next.js pages load their bundles from /_next/; an error page from elsewhere does not.
     _expect(b"/_next/" in response.body, f"not a dashboard page: {response.summary()}")
     return "dashboard page"
 
