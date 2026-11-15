@@ -38,6 +38,7 @@ import pytest
 from aiohttp import HttpVersion11, web
 
 import scripts.proxy_smoke as proxy_smoke
+from tests._owned_process import spawn_owned, stop_owned
 
 Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 
@@ -418,7 +419,7 @@ http {{
     syntax = subprocess.run([*command, "-t"], capture_output=True, text=True, check=False)
     assert syntax.returncode == 0, syntax.stderr
 
-    process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    process = spawn_owned(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         deadline = time.monotonic() + 15
         while True:
@@ -431,12 +432,7 @@ http {{
                 time.sleep(0.05)
         yield f"http://127.0.0.1:{port}"
     finally:
-        process.terminate()
-        try:
-            process.wait(timeout=10)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+        stop_owned(process)
 
 
 @asynccontextmanager

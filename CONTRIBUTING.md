@@ -75,6 +75,12 @@ unreachable. A shared guard runs whatever build it was started from, so do not s
 validating changes to `rust/koda-security-*`. `KODA_SECURITY_GUARD_STARTUP_TIMEOUT` (seconds)
 raises the startup wait for cold builds.
 
+The session's guard, the Rust binaries the integration tests start and the nginx of the proxy
+smoke test each run under a small watchdog (`tests/_owned_process.py`). It checks ten times a
+second whether the pytest process is gone and then stops them, even when pytest was killed before
+its teardown could run. Start any new long-lived test process with `spawn_owned` and stop it with
+`stop_owned`, not with a bare `subprocess.Popen`.
+
 Each test also gets its own empty `HOME` (with `CLAUDE_CONFIG_DIR` and `CODEX_HOME` unset), so a
 test never reads or deletes your files. Provider disconnect tests remove CLI login files under
 `~/.claude`, `~/.codex` and `~/.gemini`. Write tests against `os.environ["HOME"]`, never against
