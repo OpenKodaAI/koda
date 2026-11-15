@@ -12,8 +12,8 @@ import inspect
 from pathlib import Path
 
 from koda.control_plane import api as control_plane_api
+from koda.control_plane import crypto, onboarding, settings
 from koda.control_plane import manager as manager_module
-from koda.control_plane import onboarding, settings
 from koda.integrations import custom_mcp_registry
 from koda.services import sandbox_policy
 
@@ -54,6 +54,23 @@ def test_custom_mcp_servers_carry_no_unverified_signature() -> None:
     )
     custom_mcp_registry.validate_payload(payload)
     assert "validation_signature" not in payload.metadata
+    # The HMAC's only key source went with it: nothing else reads the raw master key.
+    assert not hasattr(crypto, "get_signing_key")
+
+
+def test_rows_signed_before_the_removal_return_no_signature() -> None:
+    """Old writes stamped the signature into metadata_json too; the list must not return it."""
+    metadata_json = '{"validation_signature": "abc123", "runtime_constraints": ["network"]}'
+    system = custom_mcp_registry._serialize_system_row({"metadata_json": metadata_json})
+    user = custom_mcp_registry._serialize_user_row({"metadata_json": metadata_json})
+    # System-scope custom servers are catalog rows, which the MCP catalog list also returns.
+    catalog = manager_module.ControlPlaneManager.__new__(manager_module.ControlPlaneManager)._serialize_mcp_catalog_row(
+        {"server_key": "custom_my_server", "metadata_json": metadata_json}
+    )
+    for row in (system, user, catalog):
+        assert "validation_signature" not in row
+        assert row["metadata"] == {"runtime_constraints": ["network"]}
+    assert system["runtime_constraints"] == ["network"]
 
 
 def test_sandbox_policy_keeps_only_the_evaluation_doctor_uses() -> None:

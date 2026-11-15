@@ -31,7 +31,7 @@ from koda.services.runtime.events import RuntimeEventBroker
 
 
 class _FakeStore:
-    """In-memory RuntimeStore stand-in for event-broker tests."""
+    """In-memory PostgresRuntimeStore stand-in for event-broker tests."""
 
     def __init__(self) -> None:
         self.events: list[dict[str, Any]] = []

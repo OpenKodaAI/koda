@@ -431,41 +431,25 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     full = bool(args.full or os.getenv("KODA_OPS_BENCH_FULL") == "1")
-    mode = "full" if full else "quick"
-    started = time.perf_counter()
     try:
         result = asyncio.run(run_ops_benchmark(full=full))
         failures = evaluate_ops_benchmark(result)
     except OpsBenchmarkError as exc:
         print(f"ops benchmark input error: {exc}", file=sys.stderr)
-        _emit_ops_benchmark_metric(mode=mode, status="input_error", duration_seconds=time.perf_counter() - started)
         return 2
     except Exception as exc:
         print(f"ops benchmark failed unexpectedly: {exc}", file=sys.stderr)
-        _emit_ops_benchmark_metric(mode=mode, status="error", duration_seconds=time.perf_counter() - started)
         return 2
     if failures:
         print("ops benchmark failed:", file=sys.stderr)
         for failure in failures:
             print(f"- {failure}", file=sys.stderr)
-        _emit_ops_benchmark_metric(mode=mode, status="failed", duration_seconds=time.perf_counter() - started)
         return 1
-    _emit_ops_benchmark_metric(mode=mode, status="passed", duration_seconds=time.perf_counter() - started)
     if args.json:
         print(json.dumps(result, indent=2, sort_keys=True))
     else:
         print(f"ops benchmark passed ({result['mode']})")
     return 0
-
-
-def _emit_ops_benchmark_metric(*, mode: str, status: str, duration_seconds: float) -> None:
-    try:
-        from koda.services.metrics import OPS_BENCHMARK_DURATION, OPS_BENCHMARK_RUNS
-
-        OPS_BENCHMARK_RUNS.labels(mode=mode or "unknown", status=status or "unknown").inc()
-        OPS_BENCHMARK_DURATION.labels(mode=mode or "unknown").observe(max(0.0, duration_seconds))
-    except Exception:
-        return
 
 
 if __name__ == "__main__":

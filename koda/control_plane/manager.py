@@ -13568,6 +13568,8 @@ class ControlPlaneManager:
 
     def _serialize_mcp_catalog_row(self, row: Any) -> dict[str, Any]:
         metadata = json_load(str(row.get("metadata_json") or "{}"), {})
+        # Custom servers saved before TD-038 also carry the unverified HMAC here; it is not returned.
+        metadata.pop("validation_signature", None)
         auth_capabilities = _safe_json_object(metadata.get("auth_capabilities"))
         auth_flow_kind = str(auth_capabilities.get("auth_flow_kind") or metadata.get("auth_flow_kind") or "")
         if not auth_flow_kind:

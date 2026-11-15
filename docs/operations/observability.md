@@ -9,7 +9,7 @@ alongside koda.
 
 | Signal | Source | How to consume |
 |---|---|---|
-| Prometheus metrics | `koda/services/metrics.py` — runtime, queue, cost, tools, memory, RunGraph, proposals, skills, channels, quality cockpit, ops benchmark | Scrape `app:8090/metrics` inside the stack (the observability overlay does this); from the host use `127.0.0.1:${CONTROL_PLANE_PORT}` — the API is not published beyond loopback |
+| Prometheus metrics | `koda/services/metrics.py` — runtime, queue, cost, tools, memory, RunGraph, proposals, skills, channels, quality cockpit | Scrape `app:8090/metrics` inside the stack (the observability overlay does this); from the host use `127.0.0.1:${CONTROL_PLANE_PORT}` — the API is not published beyond loopback |
 | Structured logs | `structlog` → stdout / `~/.koda-local/var/log/` | Tail with `docker compose logs -f` or ship to Loki |
 | Audit events | `audit_events` table | Query via `koda` UI or directly in Postgres |
 | OpenTelemetry traces | Workers/supervisor when `OTEL_EXPORTER_OTLP_ENDPOINT` is set | Send to Tempo, Jaeger, Honeycomb, Datadog |
@@ -112,7 +112,7 @@ scrape_configs:
 
 ## Recommended alerts
 
-Eight alerts that catch most incidents:
+Seven alerts that catch most incidents:
 
 | Alert | Condition | Severity |
 |---|---|---|

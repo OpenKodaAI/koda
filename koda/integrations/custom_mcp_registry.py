@@ -650,8 +650,16 @@ def _upsert_user_row(
     return _serialize_user_row(row)
 
 
-def _serialize_system_row(row: dict[str, Any]) -> dict[str, Any]:
+def _row_metadata(row: dict[str, Any]) -> Any:
     metadata = json_load(str(row.get("metadata_json") or "{}"), {})
+    # Rows written before TD-038 also carry the unverified HMAC here; it is not returned.
+    if isinstance(metadata, dict):
+        metadata.pop("validation_signature", None)
+    return metadata
+
+
+def _serialize_system_row(row: dict[str, Any]) -> dict[str, Any]:
+    metadata = _row_metadata(row)
     return {
         "server_key": str(row.get("server_key") or ""),
         "display_name": str(row.get("display_name") or ""),
@@ -696,7 +704,7 @@ def _serialize_user_row(row: dict[str, Any]) -> dict[str, Any]:
         "scope": "agent",
         "source": str(row.get("source") or "manual"),
         "owner_user_id": row.get("owner_user_id"),
-        "metadata": json_load(str(row.get("metadata_json") or "{}"), {}),
+        "metadata": _row_metadata(row),
         "created_at": str(row.get("created_at") or ""),
         "updated_at": str(row.get("updated_at") or ""),
     }

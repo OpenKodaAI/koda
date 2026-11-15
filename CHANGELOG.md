@@ -198,12 +198,14 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   until M1-E4-T4. (M4-E1-T2, TD-003, D-194)
 - `DASHBOARD_ENABLED` is gone with the in-process stats aggregator it switched on, which
   recorded tool runs that nothing read; the dashboard reads its data from Postgres.
-  Three Prometheus metrics that were never set are gone: `koda_ops_benchmark_runs_total`,
-  `koda_ops_benchmark_duration_seconds` and `koda_runtime_worktree_disk_bytes`. So are
-  the `KodaOpsBenchmarkFailed` alert in `docs/operations/alerts.yml` and the "Ops
-  benchmark" panel of the bundled Grafana dashboard, which could never show data.
-  `scripts/ops_benchmark.py` is unchanged. `/health` reports the same fields and
-  breakers. (M4-E1-T3, TD-057, TD-058)
+  Three Prometheus metrics that were never exported are gone. `scripts/ops_benchmark.py`
+  recorded `koda_ops_benchmark_runs_total` and `koda_ops_benchmark_duration_seconds`
+  only inside its own process, which serves no `/metrics` and pushes nowhere; it no
+  longer records them, and its output and exit codes are unchanged. Nothing set
+  `koda_runtime_worktree_disk_bytes`. The `KodaOpsBenchmarkFailed` alert in
+  `docs/operations/alerts.yml` and the "Ops benchmark" panel of the bundled Grafana
+  dashboard, which could never show data, are gone with them. `/health` reports the
+  same fields and breakers. (M4-E1-T3, TD-057, TD-058)
 - `POST /api/control-plane/onboarding/bootstrap` is gone: it has answered `410
   onboarding_bootstrap_removed` since the setup wizard stopped using it, and now answers
   `404`. Create the owner with `POST /api/control-plane/auth/register-owner`. The control
@@ -215,8 +217,10 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   from a root `.env` and a sibling `koda-dashboard` checkout and was off by default.
   (M4-E1-T8, TD-070)
 - Custom MCP servers no longer carry `validation_signature`: the HMAC was stored and
-  returned but never checked. New and updated servers store no signature, and the
-  server list no longer returns the field. (M4-E1-T8, TD-038)
+  returned but never checked. New and updated servers store no signature. The custom
+  server list and the MCP catalog no longer return it, neither as a field nor inside
+  `metadata`, where servers saved before this change still hold a copy until they are
+  next updated. (M4-E1-T8, TD-038)
 
 ### Fixed
 
