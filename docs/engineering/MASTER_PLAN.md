@@ -66,7 +66,7 @@ jump ahead of high-severity items in a later milestone just because of their mil
 | `TD-NNN` | Debt item in TECHNICAL_DEBT.md Part 2 |
 | `SM-NN` | Runtime-smoke defect FEATURE_MATRIX.md §3.4 `D-NN` (renamed here to avoid a clash with `D-NNN`) |
 | `J-NN` | Journey in FEATURE_MATRIX.md §3.2 |
-| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-31 are added in section 5. |
+| `Q-n` | Open decision `D-n` in ARCHITECTURE_AUDIT.md §11 (renamed here). Q-21 to Q-32 are added in section 5. |
 | `P<n>` | Design principle in REFERENCE_RESEARCH.md §6 |
 | `ADR-NNN` | Entry in DECISIONS.md |
 | `R-NN` | Entry in REMAINING_RISKS.md |
@@ -288,6 +288,7 @@ in `koda/knowledge`). Both are cheap to leave; revisit only if the code is touch
 | Q-29 | Release v1.0.18 stopped at `publish-npm` (run 26138278216): the GitHub release is a draft and the seven GHCR images are published, but npm still serves the previous version | Ship the next version normally and keep the CHANGELOG note; republishing 1.0.18 needs the npm credentials and a release run | open (§13: production release and credentials) | none |
 | Q-30 | `MEMORY_SIMILARITY_DEDUP_THRESHOLD` is an operator-visible per-agent memory-policy field (editor, agent spec, memory profiles, system settings) that nothing reads | Remove the field with a changelog entry: it never had an effect | open (§13: removes an operator-visible setting) | M4-E1-T2 follow-up |
 | Q-31 | `/jobs`, the job tools, the `/cron` wrappers and the runtime schedule API act only on the bot's own agent's jobs (D-259); jobs with `agent_id` NULL are no longer listed under every agent | Keep the per-agent scope: it is the isolation D-259 requires; `docs/operations/upgrade.md` explains how to assign old jobs | default applied (rollback: revert the scoping of `_get_job` / `list_jobs`) | M3-E4-T6 lane |
+| Q-32 | Stdio MCP servers no longer inherit Koda's environment (D-300), including proxy and CA variables (`HTTP(S)_PROXY`, `NO_PROXY`, `SSL_CERT_FILE`, `NODE_EXTRA_CA_CERTS`, `REQUESTS_CA_BUNDLE`) and `TMPDIR` | Keep the minimal environment (the MCP SDK's default); a server behind a proxy sets these in its own connection env, as the changelog says | default applied (rollback: add the names to the inherited set in `koda/services/mcp_isolation.py`) | SEC-D300 lane |
 
 ### 5.2 Approvals required
 
@@ -946,12 +947,12 @@ Owner SEC · Risk med · Gate none · **pending** · Deps M1-E3-T1
 - **Tests:** unit matrix; G · **Evidence:** —
 
 #### M1-E3-T6 · No redirect to a query-supplied frontend callback
-Owner SEC (FE) · Risk low · Gate none · **ready** · Deps —
+Owner SEC (FE) · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-030 (open-redirect part), F-SKL-28
 - **Files:** `koda/control_plane/api.py` (~4969-4977)
 - **Do:** on an OAuth callback failure, redirect only to the configured web origin with an error code, and ignore `frontend_callback_uri` from the query.
 - **Done when:** a callback with `frontend_callback_uri=https://evil.example` redirects to the configured origin.
-- **Tests:** route test; G · **Evidence:** —
+- **Tests:** route test; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": a failed OAuth callback with `frontend_callback_uri=https://evil.example` redirects to the configured origin's `/oauth/callback?status=error`, and answers JSON when no origin is configured
 
 #### M1-E3-T7 · One localhost policy for MCP registration and transport
 Owner SEC · Risk low · Gate none · **pending** · Deps M1-E3-T1
@@ -1028,12 +1029,12 @@ Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Tests:** unit tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 3": uncatalogued non-skill-package tools are write tools, so the dry-run, supervised, confidence and skip-after-blocked-write gates apply to them
 
 #### M1-E4-T6 · Apply stored MCP isolation settings
-Owner SEC (BE) · Risk med · Gate none · **ready** · Deps —
+Owner SEC (BE) · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-028, D-133, F-GOV-13, TD-039 (prerequisite)
 - **Files:** `koda/services/mcp_bootstrap.py` (~84), `koda/services/mcp_isolation.py` (~392), `koda/services/mcp_bridge.py`
 - **Do:** pass `isolation_profile` and the constraints from the catalog into `ensure_started` and `McpServerInstance`. In Docker mode, pass env with `-e NAME` instead of temp files. When bubblewrap cannot enforce `egress_allowlist`, log a warning and report `egress: unrestricted` in the server status.
 - **Done when:** the stored constraints appear in the spawned command, no env files are left behind, and the status is truthful.
-- **Tests:** unit tests with a fake process runner; G · **Evidence:** —
+- **Tests:** unit tests with a fake process runner; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": the stored isolation profile and constraints appear in the spawned command (fake runner: `--memory 512m`, `--cpus 1.5`, `--network none`, the mount); Docker passes env by name with no env file; the status reports `egress: unrestricted` where the allowlist cannot be enforced
 
 #### M1-E4-T7 · Fail closed on unsupported MCP egress
 Owner SEC · Risk med · Gate needs-approval (§13: security policy; some servers stop starting) · **blocked** · Deps M1-E4-T6
@@ -1088,12 +1089,12 @@ Owner SEC · Risk med · Gate none · **done** · Deps —
 #### M1-E5 — Multi-agent authorization
 
 #### M1-E5-T1 · Squad administration category and caller authorization
-Owner SEC (AIM) · Risk med · Gate none · **ready** · Deps —
+Owner SEC (AIM) · Risk med · Gate none · **done** · Deps —
 - **Addresses:** D-038, D-041, TD-111, F-SQD-14, F-SQD-23, F-SQD-29
 - **Files:** `koda/services/tool_dispatcher.py` (~354-357, ~4689, ~4900), `koda/squads/access.py`, the control-plane squad routes
 - **Do:** add a `squad_admin` category. Elect, demote, bind, unbind and router_tick require an operator principal, or the current coordinator within the workspace. Drop `force_replace` and `force` from the agent tools. The Telegram bind tools apply the same admin and forum checks as `/squad_bind`.
 - **Done when:** a non-coordinator agent cannot elect itself, and a messaging grant no longer grants admin.
-- **Tests:** unit tests; G-PG squad tests · **Evidence:** —
+- **Tests:** unit tests; G-PG squad tests · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": elect, demote, Telegram bind and unbind, router_tick and thread create are a `squad_admin` category that only the squad's current coordinator or a workspace-scoped operator passes; a non-coordinator cannot elect itself and a messaging grant no longer grants admin; the agent tools have no force flags; Telegram bind runs the /squad_bind checks through the Bot API
 
 #### M1-E5-T2 · Scope broadcast, squad identity and recall users
 Owner SEC · Risk low · Gate none · **ready** · Deps —
@@ -1104,20 +1105,20 @@ Owner SEC · Risk low · Gate none · **ready** · Deps —
 - **Tests:** unit tests; G-PG; G-RS · **Evidence:** —
 
 #### M1-E5-T3 · Channel gateway pairing limits and persistence
-Owner SEC · Risk low · Gate none · **ready** · Deps —
+Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-182, F-CHN-03, P4 (pairing expiry and failure lockout)
 - **Files:** `koda/channels/gateway.py` (~580)
 - **Do:** rate-limit pairing attempts per sender and lock out after repeated failures. Pairing codes expire. Persist identity only on state transitions, in the primary backend, instead of a whole-file JSON rewrite on every message. Drop the file fallback.
 - **Done when:** brute-forcing pairing codes is throttled, and concurrent agent and control-plane writes no longer overwrite each other.
-- **Tests:** unit tests; G-PG · **Evidence:** —
+- **Tests:** unit tests; G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": 5 failed pairing attempts per sender in 15 minutes lock pairing for 15 minutes; codes expire; identities persist only on state transitions in Postgres, and the JSON file fallback is gone
 
 #### M1-E5-T4 · Coordinators stay inside thread access rules; break-glass audits fail closed
-Owner SEC (AIM) · Risk med · Gate none · **ready** · Deps —
+Owner SEC (AIM) · Risk med · Gate none · **done** · Deps —
 - **Addresses:** F-SQD-02 (coordinator bypass and suppressed audit failures), R-42
 - **Files:** `koda/squads/access.py` (~200-238, ~377)
 - **Do:** the coordinator role grants coordination actions only on threads where the coordinator is a participant, and never grants access to a private thread it is not party to. If the break-glass audit write fails, the break-glass action is refused instead of proceeding silently.
 - **Done when:** an elected coordinator cannot read a private thread it is not in, and an injected audit-write failure blocks the break-glass action with an error.
-- **Tests:** G-PG squad access tests · **Evidence:** —
+- **Tests:** G-PG squad access tests · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": an agent needs a participant row for any thread access, so an elected coordinator cannot open a private thread it is not in; an injected break-glass audit-write failure refuses the access (403)
 
 #### M1-E6 — Internal service boundary and keys
 
@@ -2348,12 +2349,12 @@ Owner SEC (BE, review REV) · Risk med · Gate none · **pending** · Deps M1-E4
 - **Tests:** guardrail suite; G; G-RS · **Evidence:** —
 
 #### M5-E3-T8 · One redaction implementation
-Owner SEC · Risk low · Gate none · **ready** · Deps —
+Owner SEC · Risk low · Gate none · **done** · Deps —
 - **Addresses:** TD-056
 - **Files:** `koda/services/audit.py` (~25-90), `koda/services/runtime/redaction.py`, `koda/services/evals.py` (~65-85), new `koda/security/redaction.py`
 - **Do:** one redactor, built from the union of today's patterns, used by audit, runtime and evals.
 - **Done when:** a shared vector set produces the same output on every path.
-- **Tests:** unit tests; G · **Evidence:** —
+- **Tests:** unit tests; G · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": one redactor (`koda/security/redaction.py`) serves every path, the Rust RedactValue RPC and the workspace-import redactor are gone, and the attach token is no longer a session id; a labelled corpus runs on 9 text and 6 key paths, and a timing guard shows every pattern runs in linear time (it fails on 36 of 75 cases before round 3)
 
 #### M5-E3-T9 · One MCP server start path
 Owner BE (SEC) · Risk med · Gate none · **pending** · Deps M1-E4-T6, M4-E1-T9
@@ -2711,12 +2712,12 @@ Owner PROD (AIM, ARCH) · Risk low · Gate decision Q-6 (approval batch 3) · **
 - **Tests:** none (decision) · **Evidence:** —
 
 #### M6-E1-T5 · Grounding gate with an empty corpus
-Owner AIM · Risk low · Gate none · **ready** · Deps —
+Owner AIM · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-014 (side effect), F-MEM-28, ARCHITECTURE_AUDIT §8.1, R-25
 - **Files:** the grounding gate in `queue_manager.py`, `koda/knowledge/*judge*`
 - **Do:** skip the gate when the agent's knowledge corpus is empty or knowledge is disabled.
 - **Done when:** no `needs_review` is forced because the knowledge tables are empty.
-- **Tests:** unit test; G-PG · **Evidence:** —
+- **Tests:** unit test; G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": with knowledge disabled or an empty corpus no `needs_review` is forced (reproduced on Postgres before the fix); `grounding_gate_skipped` is logged
 
 #### M6-E1-T6 · Document squad enablement
 Owner PROD · Risk low · Gate none · **ready** · Deps —
@@ -2735,12 +2736,12 @@ Owner AIM · Risk med · Gate decision Q-9 · **blocked** · Deps M3-E6-T1, M5-E
 - **Tests:** G-PG journey; G-CI · **Evidence:** —
 
 #### M6-E1-T8 · Runtime-environment terminal check only when an environment exists
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-064, F-ORC-15; TD-063 (keyword classifier kept by decision)
 - **Files:** `koda/services/queue_manager.py` (~7929)
 - **Do:** require the `kernel://` terminal path only when `task_info.runtime_env_id` is set, and register terminals in `_run_fallback`.
 - **Done when:** with the flag on, light tasks and cache hits complete.
-- **Tests:** G-PG with `RUNTIME_ENVIRONMENTS_ENABLED=true` · **Evidence:** —
+- **Tests:** G-PG with `RUNTIME_ENVIRONMENTS_ENABLED=true` · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": with `RUNTIME_ENVIRONMENTS_ENABLED=true`, a light task and a cache hit complete (Postgres); the kernel terminal is required only for provider runs in an environment, and provider errors are no longer masked
 
 #### M6-E1-T9 · Improvement proposals say what they do
 Owner PROD (FE) · Risk low · Gate none (Q-16 default) · **done** · Deps —
@@ -2827,12 +2828,12 @@ Owner AIM · Risk med · Gate none · **ready** · Deps —
 - **Tests:** unit tests; G · **Evidence:** —
 
 #### M6-E3-T2 · Provider ids validated; model changes take effect
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-157, D-068 (reproduce first), F-AGT-13
 - **Files:** `koda/utils/command_helpers.py` (~91), `llm_runner.py`, `koda/services/agent_settings.py` (~437)
 - **Do:** reject unknown provider ids at publish and log loudly at runtime. Reproduce D-068; if it is real, publish on every setter.
 - **Done when:** an unknown provider fails publish, and a model change applies without a restart.
-- **Tests:** unit tests; G-PG · **Evidence:** —
+- **Tests:** unit tests; G-PG · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": an unknown provider id in the model policy fails publish (Postgres test) and logs `unknown_provider_id` at runtime; D-068 reproduced, and model and provider changes now publish, so they apply without a restart; a failed publish is reported
 
 #### M6-E3-T3 · Speculative UI decisions
 Owner PROD (FE) · Risk low · Gate needs-approval (§13: removing user-facing functionality; Q-14) · **blocked** · Deps M3-E5-T2
@@ -2843,12 +2844,12 @@ Owner PROD (FE) · Risk low · Gate needs-approval (§13: removing user-facing f
 - **Tests:** G; changelog entry · **Evidence:** —
 
 #### M6-E3-T4 · `/curl` becomes an alias of `/fetch`
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** F-SKL-13 (two fetch commands); moved out of M4-E1-T10
 - **Files:** `koda/handlers/automation.py` (~195-248), the help text
 - **Do:** add a characterisation test of both commands' current output first. Then route `/curl` to the `/fetch` handler, and record any output difference in the changelog.
 - **Done when:** both commands give the `/fetch` result for the same URL, and the help text lists `/curl` as an alias.
-- **Tests:** handler tests; G; changelog entry · **Evidence:** —
+- **Tests:** handler tests; G; changelog entry · **Evidence:** VALIDATION_REPORT.md "Integration batch 6": `/curl` is the `/fetch` handler, with a characterisation test of the old output first and the three differences in the changelog; help and the catalog list it as an alias
 
 #### M6-E3-T5 · Label the video and music slots "Not available yet"
 Owner FE (PROD) · Risk low · Gate none · **done** · Deps —

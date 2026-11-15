@@ -245,6 +245,23 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   A terminal attach no longer sends its attach token to the runtime kernel as the kernel
   session id. Structured logs write `[REDACTED]` instead of `***`, also for an empty
   value, under every key the redactor treats as sensitive. (M5-E3-T8)
+- Setup codes, registration tokens and recovery codes can be used only once, even when two
+  requests arrive at the same moment: the second changes nothing and fails like any invalid
+  code. Only one owner account can be created, also when two first-run registrations arrive
+  with different valid codes. (D-283, D-294)
+- Skill package code runs from the exact bytes the integrity check hashed: a file rewritten
+  or added after the check, or a compiled module in a package directory, does not run, and a
+  package re-registers only through its lock. Unregistering a package removes all its handler
+  modules. (D-292, D-291)
+- Squad administration (electing or demoting the coordinator, Telegram bind and unbind, the
+  router tick and opening threads) needs the squad's current coordinator or an operator of its
+  workspace; a messaging grant no longer covers it and the agent tools have no force flags.
+  Operators elect and demote through `PUT` and `DELETE
+  /api/control-plane/workspaces/{workspace_id}/squads/{squad_id}/coordinator`. A coordinator
+  can no longer open a private thread it is not in, squad sync never adds members to a
+  private thread, and break-glass access is refused when its audit event cannot be written.
+  (M1-E5-T1, M1-E5-T4, D-038, D-041, D-304, D-306)
+
 
 ### Added
 
@@ -504,6 +521,11 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   or `whispercpp`) without the feature, such as "switch to kokoro", no longer changes the
   agent's general provider to the default one. Nothing changes, and the reply names the
   feature to use, for example "switch audio to kokoro". (D-296)
+- Regenerating recovery codes and changing the password are each one transaction, and a
+  double-submitted regenerate answers 400 instead of storing a second batch. Startup
+  migrations are no longer cancelled by the query timeout. (D-284, D-295, D-285)
+- `/cancel <id>` and `/cancel` stop a running task on Postgres; before, the runtime looked
+  tasks up with an agent id casing the writer never uses. (D-293)
 
 
 ## [1.0.18] - 2026-05-20
