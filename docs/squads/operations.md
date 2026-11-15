@@ -115,7 +115,8 @@ Before broad rollout, run these in canary:
   is recorded as one `synthesis_refused` system event, and the first router
   sweep after the room can run again runs it, with the same idempotency key,
   at most once; a handoff cycle's synthesis is retried by the open-handoff
-  sweep.
+  sweep. A finished task unblocks only the pending tasks of its own
+  coordination cycle; a pending task of an earlier cycle is not dispatched.
   A dashboard post or Telegram topic message to such a thread is not routed;
   the sender is told why. A dashboard room update may set only `photo_url` in
   `metadata`; keys the server keeps, such as the budget flags, are refused.

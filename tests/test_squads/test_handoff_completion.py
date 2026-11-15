@@ -1049,3 +1049,63 @@ async def test_a_delegate_synthesis_refused_by_a_paused_room_runs_once_after_the
     assert rerun["metadata"]["idempotency_key"] == refused["metadata"]["idempotency_key"]
     assert rerun["delegation_request_id"] == refused["delegation_request_id"]
     assert "FE / " in rerun["query_text"]
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
+async def test_a_pending_task_of_an_earlier_cycle_is_not_enqueued_when_a_later_cycles_dependency_completes(
+    stores: tuple[SquadThreadStore, SquadTaskStore], turn_stubs: AsyncMock
+) -> None:
+    """The unblocked-task follow-up reads the finished task's cycle only (D-337)."""
+    from koda.services.queue_manager import _maybe_enqueue_unblocked_squad_tasks
+
+    threads, tasks = stores
+    thread = await threads.create_thread(
+        workspace_id="acme",
+        squad_id="build",
+        title="room",
+        owner_user_id=42,
+        coordinator_agent_id="PM",
+        participants=[("PM", "coordinator"), ("FE", "worker"), ("QA", "worker"), ("UX", "worker")],
+    )
+    earlier = await tasks.create_task(
+        thread_id=thread.id,
+        title="Old work",
+        assigner_agent_id="PM",
+        assigned_agent_id="UX",
+        metadata={"coordination_parent_message_id": "msg-earlier"},
+    )
+    build = await tasks.create_task(
+        thread_id=thread.id,
+        title="Build",
+        assigner_agent_id="PM",
+        assigned_agent_id="FE",
+        metadata={"coordination_parent_message_id": "msg-later"},
+    )
+    review = await tasks.create_task(
+        thread_id=thread.id,
+        title="Review",
+        assigner_agent_id="PM",
+        assigned_agent_id="QA",
+        depends_on=[build.id],
+        metadata={"coordination_parent_message_id": "msg-later"},
+    )
+    await tasks.claim_task(task_id=build.id, agent_id="FE")
+    await tasks.update_task_status(task_id=build.id, new_status="in_progress", agent_id="FE")
+    await tasks.update_task_status(task_id=build.id, new_status="done", agent_id="FE")
+    bus = AsyncMock()
+    bus.send = AsyncMock(return_value="msg-9")
+
+    with patch("koda.agents.get_message_bus", return_value=bus):
+        dispatched = await _maybe_enqueue_unblocked_squad_tasks(
+            user_id=42,
+            context=MagicMock(application=None, bot=None),
+            ctx=_ctx(thread_id=thread.id, task_id=build.id, agent_id="FE", parent="msg-later"),
+        )
+
+    assert dispatched == 1
+    assert [call.kwargs["to_agent"] for call in bus.send.await_args_list] == ["QA"]
+    left = await tasks.get_task(earlier.id)
+    assert left is not None and left.status == "pending"
+    claimed = await tasks.get_task(review.id)
+    assert claimed is not None and claimed.status == "claimed"

@@ -406,7 +406,8 @@ class TestSquadTaskDependencyDispatch:
         thread_store.post_thread_message = AsyncMock(return_value=88)
         task_store = AsyncMock()
         task_store.list_tasks = AsyncMock(return_value=[frontend, review])
-        task_store.get_task = AsyncMock(side_effect=[copy_done, frontend_pending])
+        # The finished task (its cycle, D-337), then each pending task's dependencies.
+        task_store.get_task = AsyncMock(side_effect=[copy_done, copy_done, frontend_pending])
         task_store.claim_task = AsyncMock(return_value=claimed_frontend)
         enqueue = AsyncMock(return_value=123)
 

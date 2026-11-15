@@ -6988,6 +6988,10 @@ async def _maybe_enqueue_unblocked_squad_tasks(
     A pending task that depends on a task that failed, was cancelled or escalated can never
     run, so it is cancelled with a task result that says why. Its dependents follow it in the
     same pass, since a task is created after the tasks it depends on.
+
+    Only the finished task's coordination cycle is read: a pending task of another cycle of the
+    thread is not dispatched by it (D-337), as open tasks of other cycles do not hold a cycle's
+    synthesis (D-287). A finished task outside any coordinator cycle reads the whole thread.
     """
     if not ctx.squad_thread_id:
         return 0
@@ -7002,9 +7006,14 @@ async def _maybe_enqueue_unblocked_squad_tasks(
         thread = await thread_store.get_thread(ctx.squad_thread_id)
         if thread is None or not thread.coordinator_agent_id:
             return 0
+        finished = await task_store.get_task(ctx.squad_task_id) if ctx.squad_task_id else None
+        cycle_parent_message_id = (
+            str(finished.metadata.get("coordination_parent_message_id") or "") or None if finished else None
+        )
         pending = await task_store.list_tasks(
             thread_id=ctx.squad_thread_id,
             status="pending",
+            coordination_parent_message_id=cycle_parent_message_id,
             limit=50,
         )
         dispatched = 0
