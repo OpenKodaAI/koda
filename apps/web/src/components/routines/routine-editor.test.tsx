@@ -235,6 +235,47 @@ describe("RoutineEditor", () => {
     expect(payload.verificationMode).toBe("post_write_if_any");
   });
 
+  // Next and the submit button are distinct elements (D-268), so Next unmounts on Schedule ->
+  // Refine. Focus must land on the submit button inside the dialog, not fall to the page body.
+  it.each(["create", "edit"] as const)(
+    "keeps keyboard focus inside the dialog when Next reaches Refine (%s)",
+    async (mode) => {
+      const job: CronJob = {
+        id: 7,
+        bot_id: "alpha",
+        user_id: 1,
+        chat_id: null,
+        cron_expression: "0 9 * * *",
+        trigger_type: "cron",
+        schedule_expr: "0 9 * * *",
+        timezone: "UTC",
+        command: "Check deploy health",
+        description: "",
+        created_at: null,
+        enabled: 1,
+        status: "active",
+        work_dir: "/repo",
+        payload: { name: "Deploy health", query: "Check deploy health" },
+      };
+      renderEditor(mode === "edit" ? { mode, job, onDelete: vi.fn() } : { mode });
+      if (mode === "create") fillBasics();
+      const dialog = await screen.findByRole("dialog");
+
+      const next = screen.getByRole("button", { name: /next/i });
+      next.focus();
+      fireEvent.click(next);
+      expect(await screen.findByText(/^schedule$/i)).toBeInTheDocument();
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: /next/i }));
+
+      fireEvent.click(screen.getByRole("button", { name: /next/i }));
+      const submit = await screen.findByRole("button", {
+        name: mode === "create" ? /create routine/i : /save changes/i,
+      });
+      expect(document.activeElement).toBe(submit);
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    },
+  );
+
   // D-063: the name lives in `payload.name`. Runtime responses put the query text in
   // `summary`, so the editor must not read the name from there.
   it("prefills Basics step in edit mode from an existing job", async () => {

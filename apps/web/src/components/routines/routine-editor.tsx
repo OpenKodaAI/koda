@@ -578,7 +578,9 @@ export function RoutineEditor({
                 </div>
 
                 {/* Distinct keys keep Next and the submit button separate DOM elements; a reused
-                    button switches to type=submit during the click and submits the form (D-268). */}
+                    button switches to type=submit during the click and submits the form (D-268).
+                    Next unmounts on Schedule -> Refine, so the submit button takes focus on mount
+                    to keep it inside the dialog. */}
                 <div className="flex items-center gap-2">
                   {step < 3 ? (
                     <Button
@@ -593,7 +595,14 @@ export function RoutineEditor({
                       <ArrowRight className="icon-sm" strokeWidth={1.75} aria-hidden />
                     </Button>
                   ) : (
-                    <Button key="submit" type="submit" variant="accent" size="md" disabled={disabled}>
+                    <Button
+                      key="submit"
+                      type="submit"
+                      variant="accent"
+                      size="md"
+                      disabled={disabled}
+                      autoFocus
+                    >
                       {submitting ? (
                         <Loader2 className="icon-sm animate-spin" strokeWidth={1.75} aria-hidden />
                       ) : null}

@@ -69,6 +69,7 @@ async function expectStep(dialog: Locator, label: "Basics" | "Schedule" | "Refin
 
 // Clicking Next on the Schedule step must only move to Refine. A form submission would send
 // a request and, once it succeeds, close the editor, so both are checked after a short settle.
+// Next unmounts there, so the submit button must take focus instead of the page body.
 async function nextFromScheduleReachesRefine(page: Page, dialog: Locator, writes: string[]) {
   await expectStep(dialog, "Schedule");
   await dialog.getByRole("button", { name: "Next" }).click();
@@ -91,6 +92,7 @@ test("create: Next on the Schedule step reaches Refine without creating the rout
 
   await nextFromScheduleReachesRefine(page, dialog, writes);
   await expect(dialog.getByRole("button", { name: "Create routine" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Create routine" })).toBeFocused();
   await expect(dialog.getByRole("button", { name: "Next" })).toHaveCount(0);
   expect(writes).toEqual([]);
 });
@@ -107,5 +109,6 @@ test("edit: Next on the Schedule step reaches Refine and the Delete button witho
   await nextFromScheduleReachesRefine(page, dialog, writes);
   await expect(dialog.getByRole("button", { name: "Delete routine" })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Save changes" })).toBeVisible();
+  await expect(dialog.getByRole("button", { name: "Save changes" })).toBeFocused();
   expect(writes).toEqual([]);
 });
