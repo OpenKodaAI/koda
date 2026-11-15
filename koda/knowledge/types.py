@@ -1063,6 +1063,8 @@ class KnowledgeResolution:
     citation_coverage: float = 0.0
     backend_unavailable: bool = False
     backend_failure_reason: str = ""
+    # True when the query found nothing because the agent has no knowledge at all (M6-E1-T5).
+    corpus_empty: bool = False
     answer_evaluation: KnowledgeAnswerEvaluation | None = None
     grounded_answer: GroundedAnswer | None = None
     answer_judgement: AnswerJudgement | None = None

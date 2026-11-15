@@ -166,6 +166,12 @@ class KnowledgeStorageV2:
             },
         }
 
+    async def knowledge_corpus_is_empty_async(self) -> bool:
+        """Whether the agent has no knowledge chunks; False when that cannot be known."""
+        if not self.external_read_enabled():
+            return False
+        return not await self._postgres.has_knowledge_chunks()
+
     async def list_artifact_evidence_rows_async(
         self,
         *,

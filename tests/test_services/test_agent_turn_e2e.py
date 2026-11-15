@@ -53,7 +53,7 @@ _TABLES = (
     "scheduled_jobs",
 )
 _TURN_TIMEOUT_S = 30.0
-_USER_IDS = frozenset({910001, 910002, 910003, 910004, 910005, 910006, 910007})
+_USER_IDS = frozenset({910001, 910002, 910003, 910004, 910005, 910006, 910007, 910008})
 
 
 async def _drain_background_work() -> None:
@@ -465,6 +465,43 @@ async def test_read_tool_called_through_agent_cmd_feeds_its_result_back_to_the_p
     [step] = (await _execution_trace(agent_db, task_id))["tools"]
     assert (step["tool"], step["success"], step["metadata"]["write"]) == ("job_list", True, False)
     assert "Stretch break" in step["output"]
+
+
+async def test_write_task_completes_when_knowledge_is_disabled(
+    agent_db: str, queue_state: None, application: FakeApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M6-E1-T5 (F-MEM-28): without knowledge no answer can cite a source, so the grounding gate is skipped.
+
+    The gate judges every task with a write step. Here the step is a ``file_write`` that the default
+    integration policy blocks; the gate counts it all the same. Before, the task was finalised as
+    ``needs_review`` and its answer replaced by "Nao posso confirmar a conclusao operacional com
+    seguranca...", because there was no knowledge resolution to ground it.
+    """
+    from koda.knowledge import config as knowledge_config
+
+    monkeypatch.setattr(knowledge_config, "KNOWLEDGE_ENABLED", False)
+    user_id = chat_id = 910008
+    provider = StubProvider(
+        [
+            ProviderTurn(
+                text='Writing it. <agent_cmd tool="file_write">{"path": "notes.txt", "content": "hello"}</agent_cmd>',
+                session_id="prov-sess-write",
+            ),
+            ProviderTurn(text="I could not save the note: writing files is not allowed here."),
+        ]
+    ).install(monkeypatch)
+
+    task_id = await _send(application, user_id=user_id, chat_id=chat_id, text="Save a note saying hello")
+    await _wait_for_worker(user_id)
+
+    assert len(provider.calls) >= 2
+    [step] = (await _execution_trace(agent_db, task_id))["tools"]
+    assert (step["tool"], step["metadata"]["write"]) == ("file_write", True)
+    row = await _task_row(agent_db, task_id)
+    assert (row["status"], row["error_message"]) == ("completed", None)
+    bot: FakeBot = application.bot
+    answer = bot.visible(chat_id)[-1]
+    assert (answer.text or "").startswith("I could not save the note: writing files is not allowed here.")
 
 
 _CANCEL_REASON = "Cancelled by /cancel command."

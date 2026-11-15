@@ -574,6 +574,69 @@ async def test_knowledge_manager_resolve_uses_remote_bundle_inputs():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("selected", "has_chunks", "corpus_empty"),
+    [([], False, True), ([], True, False), (["policy-1"], False, False)],
+)
+async def test_knowledge_manager_resolve_marks_an_empty_corpus(selected, has_chunks, corpus_empty):
+    # M6-E1-T5: a resolution with no hits says whether the agent has any knowledge at all, so the
+    # grounding gate can tell an empty corpus from a query that found nothing.
+    class _RetrievalService:
+        engine_name = "rust_grpc"
+
+        def query(self, **_kwargs: object) -> RetrievalBundle:
+            hits = [
+                _hit(
+                    entry_id=entry_id,
+                    title="Deploy Policy",
+                    layer=KnowledgeLayer.CANONICAL_POLICY,
+                    source_label="policy:deploy",
+                    content="Canonical deploy policy.",
+                    similarity=0.96,
+                )
+                for entry_id in selected
+            ]
+            return RetrievalBundle(
+                normalized_query="deploy drift",
+                query_intent="operational_execution",
+                route="grpc",
+                strategy=RetrievalStrategy.LANGGRAPH_CURRENT,
+                selected_hits=hits,
+                candidate_hits=hits,
+                effective_engine="rust_grpc",
+                fallback_used=False,
+            )
+
+    manager = KnowledgeManager("AGENT_A", retrieval_service=_RetrievalService())  # type: ignore[arg-type]
+    manager._initialized = True
+    has_knowledge_chunks = AsyncMock(return_value=has_chunks)
+    manager._storage_v2._postgres = SimpleNamespace(  # type: ignore[attr-defined]
+        enabled=True, has_knowledge_chunks=has_knowledge_chunks
+    )
+    experiment_plan = KnowledgeExperimentPlan(
+        experiment_key="",
+        primary_strategy=RetrievalStrategy.LANGGRAPH_CURRENT,
+        persist_primary_trace=False,
+    )
+
+    with (
+        patch.object(manager._experiment_service, "plan", return_value=experiment_plan),
+        patch.object(manager._storage_v2, "primary_read_enabled", return_value=True),
+        patch.object(manager, "_load_guardrails", return_value=[]),
+        patch.object(manager, "_finalize_trace_persistence", return_value=None),
+    ):
+        resolution = await manager.resolve(
+            KnowledgeQueryContext(query="deploy drift", agent_id="AGENT_A", task_kind="deploy"), max_results=3
+        )
+
+    assert resolution.corpus_empty is corpus_empty
+    if selected:
+        has_knowledge_chunks.assert_not_awaited()
+    else:
+        has_knowledge_chunks.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 @pytest.mark.asyncio
 async def test_knowledge_manager_initialize_starts_retrieval_service():
     class _RetrievalService:

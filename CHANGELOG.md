@@ -346,6 +346,11 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   a kernel-backed terminal path" after the provider had answered. The kernel terminal is
   now required only for a task with a runtime environment, and the non-streaming
   provider run registers one as the streaming run does. (M6-E1-T8, D-064)
+- A task with a write step is no longer sent to review, with its answer replaced by "Nao
+  posso confirmar a conclusao operacional com seguranca...", only because there is no
+  knowledge to ground it. The grounding gate is skipped when knowledge is disabled
+  (`KNOWLEDGE_ENABLED=false`) or the agent's knowledge corpus is empty, and the runtime
+  logs `grounding_gate_skipped`. (M6-E1-T5, F-MEM-28)
 
 
 ## [1.0.18] - 2026-05-20

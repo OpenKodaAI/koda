@@ -3977,6 +3977,21 @@ def _agent_turn_output_audit_payload(result: RunResult) -> dict[str, Any]:
         }
 
 
+def _grounding_gate_skip_reason(knowledge_resolution: Any | None) -> str:
+    """Why the grounding gate does not judge this answer, or "" when it does (M6-E1-T5).
+
+    With knowledge disabled, or an agent whose knowledge corpus is empty, no answer can cite
+    an authoritative source, so the gate would send every task with a write to review.
+    """
+    from koda.knowledge.config import KNOWLEDGE_ENABLED
+
+    if not KNOWLEDGE_ENABLED:
+        return "knowledge_disabled"
+    if bool(getattr(knowledge_resolution, "corpus_empty", False)):
+        return "knowledge_corpus_empty"
+    return ""
+
+
 def _requires_kernel_terminal(runtime_env_id: int | None, run_result: RunResult) -> bool:
     """Whether a run must carry a kernel-backed terminal path (D-064).
 
@@ -7983,79 +7998,84 @@ async def _execute_single_task(
                     final_status = "completed"
                     runtime_final_phase: str | None = None
                     response_override: str | None = None
-                    try:
-                        orchestration_service = _get_knowledge_orchestration_service()
-                        (
-                            ctx.grounded_answer,
-                            ctx.answer_judgement,
-                            ctx.answer_evaluation,
-                            ctx.grounding_gate_decision,
-                        ) = orchestration_service.evaluate_response(
-                            response=final_response_text,
-                            resolution=getattr(ctx, "knowledge_resolution", None),
-                            had_write=had_write,
-                            verified_before_finalize=ctx.verified_before_finalize,
-                            required_verifications=tuple(
-                                getattr(getattr(ctx, "effective_policy", None), "required_verifications", ())
-                            ),
-                            task_id=task_id,
-                        )
-                        ctx.last_action_plan = orchestration_service.build_plan_payload(
-                            existing_plan=ctx.last_action_plan,
-                            resolution=getattr(ctx, "knowledge_resolution", None),
-                            grounded_answer=ctx.grounded_answer,
-                            judgement=ctx.answer_judgement,
-                        )
-                        resolution = getattr(ctx, "knowledge_resolution", None)
-                        if resolution is not None:
-                            resolution.grounded_answer = ctx.grounded_answer
-                            resolution.answer_judgement = ctx.answer_judgement
-                            resolution.answer_evaluation = ctx.answer_evaluation
-                        strategy_label = getattr(
-                            getattr(getattr(ctx, "knowledge_resolution", None), "retrieval_strategy", None),
-                            "value",
-                            str(
-                                getattr(getattr(ctx, "knowledge_resolution", None), "retrieval_strategy", "")
-                                or "unknown"
-                            ),
-                        )
-                        metrics.KNOWLEDGE_CITATION_COVERAGE.labels(
-                            agent_id=(AGENT_ID or "default").lower(),
-                            strategy=strategy_label,
-                        ).observe(float(_answer_eval_value(ctx.answer_evaluation, "citation_coverage", 0.0) or 0.0))
-                        if getattr(ctx, "answer_judgement", None) is not None:
-                            metrics.KNOWLEDGE_CITATION_SPAN_PRECISION.labels(
-                                agent_id=(AGENT_ID or "default").lower(),
-                                strategy=strategy_label,
-                            ).observe(float(getattr(ctx.answer_judgement, "citation_span_precision", 0.0) or 0.0))
-                            metrics.KNOWLEDGE_CONTRADICTION_ESCAPE.labels(
-                                agent_id=(AGENT_ID or "default").lower(),
-                                strategy=strategy_label,
-                                status=(
-                                    "escaped"
-                                    if float(getattr(ctx.answer_judgement, "contradiction_escape_rate", 0.0) or 0.0) > 0
-                                    else "contained"
+                    grounding_gate_skip = _grounding_gate_skip_reason(getattr(ctx, "knowledge_resolution", None))
+                    if grounding_gate_skip:
+                        log.info("grounding_gate_skipped", task_id=task_id, reason=grounding_gate_skip)
+                    else:
+                        try:
+                            orchestration_service = _get_knowledge_orchestration_service()
+                            (
+                                ctx.grounded_answer,
+                                ctx.answer_judgement,
+                                ctx.answer_evaluation,
+                                ctx.grounding_gate_decision,
+                            ) = orchestration_service.evaluate_response(
+                                response=final_response_text,
+                                resolution=getattr(ctx, "knowledge_resolution", None),
+                                had_write=had_write,
+                                verified_before_finalize=ctx.verified_before_finalize,
+                                required_verifications=tuple(
+                                    getattr(getattr(ctx, "effective_policy", None), "required_verifications", ())
                                 ),
-                            ).inc()
-                            metrics.KNOWLEDGE_JUDGE_OUTCOMES.labels(
-                                agent_id=(AGENT_ID or "default").lower(),
-                                status=str(getattr(ctx.answer_judgement, "status", "passed") or "passed"),
-                            ).inc()
-                        for warning in list(_answer_eval_value(ctx.answer_evaluation, "warnings", []) or []):
-                            if warning not in run_result.warnings:
-                                run_result.warnings.append(str(warning))
-                        if getattr(ctx.grounding_gate_decision, "status", "passed") != "passed":
-                            final_status = "needs_review"
-                            runtime_final_phase = "needs_review_retained"
-                            response_override = str(
-                                getattr(ctx.grounding_gate_decision, "safe_response", "") or final_response_text
+                                task_id=task_id,
                             )
-                            for reason in list(getattr(ctx.grounding_gate_decision, "reasons", []) or []):
-                                warning = f"grounding_gate:{reason}"
+                            ctx.last_action_plan = orchestration_service.build_plan_payload(
+                                existing_plan=ctx.last_action_plan,
+                                resolution=getattr(ctx, "knowledge_resolution", None),
+                                grounded_answer=ctx.grounded_answer,
+                                judgement=ctx.answer_judgement,
+                            )
+                            resolution = getattr(ctx, "knowledge_resolution", None)
+                            if resolution is not None:
+                                resolution.grounded_answer = ctx.grounded_answer
+                                resolution.answer_judgement = ctx.answer_judgement
+                                resolution.answer_evaluation = ctx.answer_evaluation
+                            strategy_label = getattr(
+                                getattr(getattr(ctx, "knowledge_resolution", None), "retrieval_strategy", None),
+                                "value",
+                                str(
+                                    getattr(getattr(ctx, "knowledge_resolution", None), "retrieval_strategy", "")
+                                    or "unknown"
+                                ),
+                            )
+                            metrics.KNOWLEDGE_CITATION_COVERAGE.labels(
+                                agent_id=(AGENT_ID or "default").lower(),
+                                strategy=strategy_label,
+                            ).observe(float(_answer_eval_value(ctx.answer_evaluation, "citation_coverage", 0.0) or 0.0))
+                            if getattr(ctx, "answer_judgement", None) is not None:
+                                metrics.KNOWLEDGE_CITATION_SPAN_PRECISION.labels(
+                                    agent_id=(AGENT_ID or "default").lower(),
+                                    strategy=strategy_label,
+                                ).observe(float(getattr(ctx.answer_judgement, "citation_span_precision", 0.0) or 0.0))
+                                metrics.KNOWLEDGE_CONTRADICTION_ESCAPE.labels(
+                                    agent_id=(AGENT_ID or "default").lower(),
+                                    strategy=strategy_label,
+                                    status=(
+                                        "escaped"
+                                        if float(getattr(ctx.answer_judgement, "contradiction_escape_rate", 0.0) or 0.0)
+                                        > 0
+                                        else "contained"
+                                    ),
+                                ).inc()
+                                metrics.KNOWLEDGE_JUDGE_OUTCOMES.labels(
+                                    agent_id=(AGENT_ID or "default").lower(),
+                                    status=str(getattr(ctx.answer_judgement, "status", "passed") or "passed"),
+                                ).inc()
+                            for warning in list(_answer_eval_value(ctx.answer_evaluation, "warnings", []) or []):
                                 if warning not in run_result.warnings:
-                                    run_result.warnings.append(warning)
-                    except Exception:
-                        log.exception("knowledge_answer_evaluation_error")
+                                    run_result.warnings.append(str(warning))
+                            if getattr(ctx.grounding_gate_decision, "status", "passed") != "passed":
+                                final_status = "needs_review"
+                                runtime_final_phase = "needs_review_retained"
+                                response_override = str(
+                                    getattr(ctx.grounding_gate_decision, "safe_response", "") or final_response_text
+                                )
+                                for reason in list(getattr(ctx.grounding_gate_decision, "reasons", []) or []):
+                                    warning = f"grounding_gate:{reason}"
+                                    if warning not in run_result.warnings:
+                                        run_result.warnings.append(warning)
+                        except Exception:
+                            log.exception("knowledge_answer_evaluation_error")
 
                     if ctx.squad_thread_id:
                         integrity_override = await _squad_coordination_integrity_override(

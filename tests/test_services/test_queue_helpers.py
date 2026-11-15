@@ -5,6 +5,7 @@ import contextlib
 import re
 from decimal import Decimal
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -27,6 +28,7 @@ from koda.services.queue_manager import (
     _control_plane_prompt_for_agent,
     _detect_audio_response_request,
     _get_throttle_interval,
+    _grounding_gate_skip_reason,
     _maybe_enqueue_squad_coordinator_synthesis,
     _maybe_enqueue_squad_reply_synthesis,
     _maybe_enqueue_unblocked_squad_tasks,
@@ -895,6 +897,21 @@ class TestRuntimeTerminalCutover:
         runtime.register_terminal.assert_awaited_once()
         assert runtime.register_terminal.await_args.kwargs["path"] == "kernel-stream://stdout"
         assert runtime.register_terminal.await_args.kwargs["stream_path"] == "kernel-stream://stdout"
+
+    @pytest.mark.parametrize(
+        ("knowledge_enabled", "resolution", "reason"),
+        [
+            (False, None, "knowledge_disabled"),
+            (True, SimpleNamespace(corpus_empty=True), "knowledge_corpus_empty"),
+            (True, SimpleNamespace(corpus_empty=False), ""),
+            # Knowledge on but no resolution (recall failed or timed out): the gate still judges.
+            (True, None, ""),
+        ],
+    )
+    def test_grounding_gate_is_skipped_without_knowledge_or_corpus(self, knowledge_enabled, resolution, reason):
+        # M6-E1-T5 (F-MEM-28): with no knowledge to cite, the gate would send every write to review.
+        with patch("koda.knowledge.config.KNOWLEDGE_ENABLED", knowledge_enabled):
+            assert _grounding_gate_skip_reason(resolution) == reason
 
     @pytest.mark.parametrize(
         ("enabled", "runtime_env_id", "stop_reason", "required"),
