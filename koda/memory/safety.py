@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from collections.abc import Mapping
@@ -16,26 +17,69 @@ _CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 # A `.env` file name (`.env`, `.env.local`, `.envrc`), not an identifier member such as `process.env`
 # nor a template that holds no secrets (`.env.example`, `docs/.env.md`).
 _DOTENV_FILE = r"(?<!\w)\.env(?:rc)?(?!\.(?:example|sample|template|dist|md)\b)(?:\.\w+)?(?!\w)"
-# Up to 80 characters that do not cross a clause break (`, `, `; `, `. ` and so on).
-_SAME_CLAUSE = r"(?:(?![.!?;,](?:\s|$)).){0,80}?"
-# Shell commands that print a file: only their own arguments (at most two) may sit before `.env`.
-_DOTENV_SHELL_READ = r"\b(?:cat|less|more|head|tail|grep|source|type)\b(?:\s+\S+){0,2}?\s+"
+# A short aside between commas ("Read, please, the .env"), which does not end the clause. Its first
+# comma is followed by whitespace, which the single-character branch of _SAME_CLAUSE never takes, so
+# the two branches cannot both match a comma (no exponential backtracking on ",a,a,a").
+_ASIDE = r",\s+\w+(?:\s+\w+){0,2},"
+# A clause break: `, `, `; `, `. ` and so on, or a subordinate clause ("Show a banner when .env is missing").
+_CLAUSE_BREAK = r"[.!?;,](?:\s|$)|\b(?:when|whenever|if|unless|quando)\b"
+# Up to 80 characters of one clause; an aside does not break it.
+_SAME_CLAUSE = r"(?:" + _ASIDE + r"|(?!" + _CLAUSE_BREAK + r").){0,80}?"
+# Up to 80 characters of one sentence: commas do not break it.
+_SAME_SENTENCE = r"(?:(?![.!?;](?:\s|$)).){0,80}?"
+# Shell commands that print a file, then any flags (each with an optional value) and at most two
+# other arguments before `.env`. `source`, `type` and `more` are also English words, so they count
+# only where a command starts ("The source .env file" is prose).
+_DOTENV_SHELL_READ = (
+    r"(?:\b(?:cat|less|head|tail|grep)|(?:^|(?<=[\n;&|`($:]))[ \t]*(?:source|type|more))\b"
+    r"(?:\s+-\S+(?:\s+[^\s-]\S*)?)*(?:\s+[^\s-]\S*){0,2}?\s+"
+)
+# A negation right before the verb: "Never share .env", "Não envie o .env" are hygiene notes.
+_NOT_NEGATED = r"(?<!\bnever )(?<!\bnot )(?<!n't )(?<!n\u2019t )(?<!\bnunca )(?<!\bjamais )(?<!\bnão )(?<!\bnao )"
 # Verbs that read or send a file, in English and PT-BR imperative forms.
 _DOTENV_READ_OR_SEND_VERBS = (
-    r"\b(?:open|read|print|show|display|dump|share|email|include|paste|send|post|upload|exfiltrate|leak|reveal"
+    _NOT_NEGATED
+    + r"\b(?:open|read|print|show|display|dump|share|email|include|paste|send|post|upload|exfiltrate|leak|reveal"
     r"|expose|leiam?|abram?|mostrem?|exibam?|imprimam?|envie|enviem|mandem?|compartilhem?|incluam?|colem?"
     r"|postem?|revelem?|exponham?)\b"
 )
+# `.env` named as an entry of an ignore file ("include .env in .gitignore") is not being read or sent.
+_NOT_INTO_IGNORE_FILE = r"(?!\s+(?:in|to|into|no|na|ao|em)\s+(?:(?:the|your|our|o|a|seu|sua)\s+)?\S*\.\w*ignore\b)"
 # A secret-ish word, also inside an identifier such as `SECRET_TOKEN`.
 _SECRET_WORD = r"(?<![^\W_])(?:secret|token|credential|ssh key|api key)(?![^\W_])"
-# PT-BR instruction targets: instructions on their own only after "todas as" / "suas", and rules or
-# policies only with a qualifier that points at the agent's own instructions.
+# PT-BR instruction targets that point at the agent's own instructions: instructions after "todas as"
+# / "suas", and instructions, rules or policies with a qualifier ("anteriores", "do sistema"...).
 _PT_INSTRUCTIONS = r"(?:instru[cç](?:[oõ]es|[aã]o)|orienta[cç][oõ]es|diretrizes)"
+_PT_RULES = r"(?:regras?|pol[ií]ticas?|normas?|restri[cç][oõ]es)"
 _PT_INSTRUCTION_TARGET = (
     r"(?:\b(?:todas as|suas|tuas)\s+" + _PT_INSTRUCTIONS + r"\b"
     r"|\b(?:" + _PT_INSTRUCTIONS + r"|regras?|pol[ií]ticas?)\s+"
     r"(?:anteriores|acima|originais|iniciais|ocultas|d[oe] sistema|do desenvolvedor)\b"
     r"|\b(?:prompt|mensagem) d[oe] (?:sistema|desenvolvedor)\b|\bsystem prompt\b)"
+)
+# Broader targets, only after a formal imperative ("Ignore as instruções", "Ignore todas as regras",
+# "Desconsidere as regras de segurança"); "Desconsidere as regras de lint" stays a note.
+_PT_GENERIC_TARGET = (
+    r"(?:\b(?:as|essas|estas)\s+" + _PT_INSTRUCTIONS + r"\b"
+    r"|\btodas as\s+" + _PT_RULES + r"\b"
+    r"|\b" + _PT_RULES + r"\s+de\s+seguran[cç]a\b)"
+)
+# Formal (você) and informal Brazilian (tu, "ignora as instruções anteriores") imperatives.
+_PT_OVERRIDE_FORMAL = r"\b(?:ignorem?|desconsiderem?|desprezem?|esque[cç]am?|sobrescrevam?|anulem?)\b"
+_PT_OVERRIDE_INFORMAL = r"\b(?:ignora|desconsidera|despreza|esquece|sobrescreve|anula)\b"
+# PT-BR imperative ignore/override, reveal, and role takeover, within one sentence. Infinitives
+# ("ignorar linhas") are notes, and an informal imperative needs an instruction target, so
+# "o linter ignora as regras desativadas" stays a note.
+_PT_INJECTION = "|".join(
+    (
+        _PT_OVERRIDE_FORMAL + _SAME_SENTENCE + r"(?:" + _PT_INSTRUCTION_TARGET + r"|" + _PT_GENERIC_TARGET + r")",
+        _PT_OVERRIDE_INFORMAL + _SAME_SENTENCE + _PT_INSTRUCTION_TARGET,
+        r"\b(?:revelem?|mostrem?|exibam?|revela|mostra|exibe)\b"
+        + _SAME_SENTENCE
+        + r"\b(?:prompt d[oe] sistema|system prompt|mensagem do desenvolvedor|instru[cç](?:[oõ]es|[aã]o) ocultas?)\b",
+        r"\b(?:voc[eê] agora [eé]|agora voc[eê] [eé]|(?:a partir de agora|de agora em diante),? voc[eê] [eé])"
+        r"\s+(?:(?:o|a|um|uma|seu|sua)\s+)?(?:administrador|admin|desenvolvedor|sistema|root)\b",
+    )
 )
 
 _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
@@ -45,14 +89,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
             r"\b(ignore|disregard|override|forget)\b.{0,80}\b(previous|prior|system|developer|instruction|policy|rules?)\b"
             r"|\breveal\b.{0,80}\b(system prompt|developer message|hidden instructions?)\b"
             r"|\byou are now\b.{0,80}\b(system|developer|admin)\b"
-            # PT-BR: imperative ignore/override, reveal, and role takeover. Descriptive or infinitive
-            # forms ("o linter ignora", "ignorar linhas") are ordinary notes, not instructions.
-            r"|\b(?:ignorem?|desconsiderem?|desprezem?|esque[cç]am?|sobrescrevam?|anulem?)\b.{0,80}?"
-            + _PT_INSTRUCTION_TARGET
-            + r"|\b(?:revelem?|mostrem?|exibam?)\b.{0,80}?"
-            r"\b(?:prompt d[oe] sistema|system prompt|mensagem do desenvolvedor|instru[cç](?:[oõ]es|[aã]o) ocultas?)\b"
-            r"|\b(?:voc[eê] agora [eé]|agora voc[eê] [eé]|(?:a partir de agora|de agora em diante),? voc[eê] [eé])"
-            r"\s+(?:(?:o|a|um|uma|seu|sua)\s+)?(?:administrador|admin|desenvolvedor|sistema|root)\b",
+            r"|" + _PT_INJECTION,
             re.IGNORECASE | re.DOTALL,
         ),
     ),
@@ -74,7 +111,7 @@ _PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
                     # clause, or before "paste" ("copie o .env e cole aqui"), so `process.env.X` stays allowed.
                     r"[/\\]" + _DOTENV_FILE,
                     _DOTENV_SHELL_READ + _DOTENV_FILE,
-                    _DOTENV_READ_OR_SEND_VERBS + _SAME_CLAUSE + _DOTENV_FILE,
+                    _DOTENV_READ_OR_SEND_VERBS + _SAME_CLAUSE + _DOTENV_FILE + _NOT_INTO_IGNORE_FILE,
                     _DOTENV_FILE + _SAME_CLAUSE + r"\b(?:paste|colem?)\b",
                 )
             ),
@@ -157,20 +194,54 @@ class MemorySafetyError(ValueError):
         return self.result.error_envelope()
 
 
-def _stringify(value: Any) -> str:
-    """Join a payload's keys and text with real newlines.
+def _texts(value: Any) -> list[str]:
+    """Every key and text of a payload, each on its own.
 
-    JSON would turn a newline into the two characters backslash-n, so the word before a line-initial
-    `.env` or verb would end in `n` and every word-boundary anchor would miss it.
+    A pattern is matched inside one field only: joined fields would let a verb in one field reach a
+    `.env` in a field that only the store puts next to it (the query preview in the metadata).
+    """
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, Mapping):
+        texts: list[str] = []
+        for key, item in sorted(value.items(), key=lambda pair: str(pair[0])):
+            texts.append(str(key))
+            texts.extend(_texts(item))
+        return texts
+    if isinstance(value, (list, tuple)):
+        return [text for item in value for text in _texts(item)]
+    return [] if value is None else [str(value)]
+
+
+def _invisible_probe(value: Any) -> str:
+    """The text the invisible-character check reads.
+
+    A structured payload is read in its JSON form, as the scanner always read it: JSON escapes C0
+    controls, so ANSI colour codes in tool output (a diff, an error message) are not flagged, while
+    zero-width and bidi characters still are. A plain string is read as is.
     """
     if isinstance(value, str):
         return value
-    if isinstance(value, Mapping):
-        items = sorted(value.items(), key=lambda pair: str(pair[0]))
-        return "\n".join(f"{key}\n{_stringify(item)}" for key, item in items)
-    if isinstance(value, (list, tuple)):
-        return "\n".join(_stringify(item) for item in value)
-    return "" if value is None else str(value)
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except TypeError:
+        return str(value)
+
+
+def memory_safety_payload(memory: Any) -> dict[str, Any]:
+    """The fields of a memory that the store scans before it persists the memory.
+
+    The extractor scans the same payload per item, so the store never rejects a batch that the
+    extractor accepted.
+    """
+    return {
+        "content": memory.content,
+        "subject": memory.subject,
+        "claim_kind": memory.claim_kind,
+        "decision_source": memory.decision_source,
+        "retention_reason": memory.retention_reason,
+        "metadata": memory.metadata,
+    }
 
 
 def _redacted_preview(text: str, *, limit: int = 240) -> str:
@@ -195,9 +266,11 @@ def scan_memory_text(value: Any, *, surface: str = "memory") -> MemorySafetyResu
     """Scan user/model-authored durable text before persistence."""
 
     # NFC, so a decomposed accent (`e` + U+0301) matches the precomposed letters in the patterns.
-    text = unicodedata.normalize("NFC", _stringify(value))
+    texts = [unicodedata.normalize("NFC", text) for text in _texts(value)]
+    text = "\n".join(texts)
     findings: list[MemorySafetyFinding] = []
-    if _ZERO_WIDTH_OR_BIDI.search(text) or _CONTROL_CHARS.search(text):
+    invisible_probe = _invisible_probe(value)
+    if _ZERO_WIDTH_OR_BIDI.search(invisible_probe) or _CONTROL_CHARS.search(invisible_probe):
         findings.append(
             MemorySafetyFinding(
                 category="invisible_unicode",
@@ -205,7 +278,7 @@ def scan_memory_text(value: Any, *, surface: str = "memory") -> MemorySafetyResu
             )
         )
     for category, pattern in _PATTERNS:
-        match = pattern.search(text)
+        match = next((found for field_text in texts if (found := pattern.search(field_text))), None)
         if match:
             findings.append(
                 MemorySafetyFinding(

@@ -44,7 +44,7 @@ from koda.memory.napkin import (
 from koda.memory.napkin import batch_deactivate as napkin_batch_deactivate
 from koda.memory.napkin import batch_update_access as napkin_batch_update_access
 from koda.memory.quality import record_dedup_decision, record_memory_quality_counter
-from koda.memory.safety import MemorySafetyError, assert_memory_text_safe
+from koda.memory.safety import MemorySafetyError, assert_memory_text_safe, memory_safety_payload
 from koda.memory.types import (
     LEXICAL_READY_EMBEDDING_STATUS,
     Memory,
@@ -135,17 +135,7 @@ class MemoryStore:
     def _assert_memories_safe(self, memories: list[Memory], *, surface: str) -> None:
         for memory in memories:
             try:
-                assert_memory_text_safe(
-                    {
-                        "content": memory.content,
-                        "subject": memory.subject,
-                        "claim_kind": memory.claim_kind,
-                        "decision_source": memory.decision_source,
-                        "retention_reason": memory.retention_reason,
-                        "metadata": memory.metadata,
-                    },
-                    surface=surface,
-                )
+                assert_memory_text_safe(memory_safety_payload(memory), surface=surface)
             except MemorySafetyError as exc:
                 self._record_safety_blocked(exc.result)
                 raise

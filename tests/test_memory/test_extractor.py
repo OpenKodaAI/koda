@@ -173,6 +173,54 @@ def test_ordinary_pt_br_query_keeps_the_extracted_batch_through_the_store():
     store._assert_memories_safe([store._hydrate_memory(memory) for memory in memories], surface="memory.batch_write")
 
 
+def test_store_keeps_the_batch_the_extractor_kept_when_the_query_has_a_read_verb():
+    # A read verb in the query preview (metadata) and a `.env` in an item's subject are separate fields.
+    raw = json.dumps(
+        [
+            {
+                "type": "fact",
+                "content": "Koda loads .env before .env.local at startup.",
+                "subject": ".env precedence",
+                "retention_reason": "config precedence",
+                "importance": 0.8,
+            },
+            {
+                "type": "fact",
+                "content": "Staging uses Postgres 16 with pgvector enabled.",
+                "subject": "staging database",
+                "retention_reason": "infra fact",
+                "importance": 0.8,
+            },
+        ]
+    )
+
+    memories = _parse_extraction_result(
+        raw, user_id=111, session_id=None, source_query_preview="what does koda read first"
+    )
+
+    assert [memory.subject for memory in memories] == [".env precedence", "staging database"]
+    store = MemoryStore("AGENT_A")
+    store._assert_memories_safe([store._hydrate_memory(memory) for memory in memories], surface="memory.batch_write")
+
+
+def test_extractor_drops_an_item_whose_stored_fields_are_unsafe_and_the_store_keeps_the_rest():
+    # The raw subject names a template (`.env.example`); the stored subject is cut at 120 characters,
+    # right after `read .env`. The extractor scans what the store will scan, so it drops that item alone.
+    subject = "n" * 110 + " read .env.example"
+    raw = json.dumps(
+        [
+            {"type": "fact", "content": "The setup guide covers env templates.", "subject": subject, "importance": 0.8},
+            {"type": "decision", "content": "Use PostgreSQL for the scheduler store.", "importance": 0.8},
+        ]
+    )
+
+    memories = _parse_extraction_result(raw, user_id=111, session_id=None)
+
+    assert [memory.content for memory in memories] == ["Use PostgreSQL for the scheduler store."]
+    store = MemoryStore("AGENT_A")
+    store._assert_memories_safe([store._hydrate_memory(memory) for memory in memories], surface="memory.batch_write")
+
+
 def test_parse_sets_expiry():
     """All memories get an expiry date."""
     raw = '[{"type": "task", "content": "Fix bug", "importance": 0.7}]'

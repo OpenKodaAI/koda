@@ -10,7 +10,7 @@ from koda.logging_config import get_logger
 from koda.memory.config import MEMORY_EXTRACTION_MODEL, MEMORY_EXTRACTION_PROVIDER, MEMORY_MAX_EXTRACTION_ITEMS
 from koda.memory.profile import MemoryProfile
 from koda.memory.prompts import get_extraction_prompt
-from koda.memory.safety import MemorySafetyError, assert_memory_text_safe
+from koda.memory.safety import MemorySafetyError, assert_memory_text_safe, memory_safety_payload
 from koda.memory.types import Memory, MemoryStatus, MemoryType, build_conflict_key
 from koda.services.llm_runner import get_provider_fallback_chain, resolve_provider_model, run_llm
 
@@ -281,21 +281,6 @@ def _parse_extraction_result(
             continue
         if resolved_profile.should_ignore(content):
             continue
-        try:
-            assert_memory_text_safe(
-                {
-                    "content": content,
-                    "subject": item.get("subject"),
-                    "claim_kind": item.get("claim_kind"),
-                    "decision_source": item.get("decision_source"),
-                    "retention_reason": item.get("retention_reason"),
-                    "evidence_refs": item.get("evidence_refs"),
-                },
-                surface="memory.extraction",
-            )
-        except MemorySafetyError as exc:
-            log.warning("memory_extraction_safety_blocked", categories=exc.result.blocked_categories)
-            continue
 
         type_str = str(item.get("type", "fact")).lower()
         try:
@@ -351,42 +336,51 @@ def _parse_extraction_result(
         if retention_reason:
             metadata["retention_reason"] = retention_reason
 
-        memories.append(
-            Memory(
-                user_id=user_id,
-                memory_type=memory_type,
-                content=content,
-                importance=importance,
-                source_query_id=source_query_id,
-                session_id=session_id,
-                agent_id=agent_id,
-                origin_kind=origin_kind,
-                source_task_id=source_task_id,
-                source_episode_id=source_episode_id,
-                project_key=project_key,
-                environment=environment,
-                team=team,
-                quality_score=quality_score,
-                extraction_confidence=confidence,
-                embedding_status="pending",
-                claim_kind=claim_kind,
-                subject=subject,
-                decision_source=decision_source,
-                evidence_refs=evidence_refs,
-                applicability_scope={
-                    "project_key": project_key,
-                    "environment": environment,
-                    "team": team,
-                    "origin_kind": origin_kind,
-                },
-                valid_until=valid_until,
-                conflict_key=conflict_key,
-                memory_status=MemoryStatus.ACTIVE.value,
-                retention_reason=retention_reason,
-                created_at=now,
-                expires_at=expires_at,
-                metadata=metadata,
-            )
+        memory = Memory(
+            user_id=user_id,
+            memory_type=memory_type,
+            content=content,
+            importance=importance,
+            source_query_id=source_query_id,
+            session_id=session_id,
+            agent_id=agent_id,
+            origin_kind=origin_kind,
+            source_task_id=source_task_id,
+            source_episode_id=source_episode_id,
+            project_key=project_key,
+            environment=environment,
+            team=team,
+            quality_score=quality_score,
+            extraction_confidence=confidence,
+            embedding_status="pending",
+            claim_kind=claim_kind,
+            subject=subject,
+            decision_source=decision_source,
+            evidence_refs=evidence_refs,
+            applicability_scope={
+                "project_key": project_key,
+                "environment": environment,
+                "team": team,
+                "origin_kind": origin_kind,
+            },
+            valid_until=valid_until,
+            conflict_key=conflict_key,
+            memory_status=MemoryStatus.ACTIVE.value,
+            retention_reason=retention_reason,
+            created_at=now,
+            expires_at=expires_at,
+            metadata=metadata,
         )
+        # The payload the store scans, plus the evidence refs: an unsafe item is dropped here, alone,
+        # and the store cannot reject the rest of the batch.
+        try:
+            assert_memory_text_safe(
+                {**memory_safety_payload(memory), "evidence_refs": memory.evidence_refs},
+                surface="memory.extraction",
+            )
+        except MemorySafetyError as exc:
+            log.warning("memory_extraction_safety_blocked", categories=exc.result.blocked_categories)
+            continue
+        memories.append(memory)
 
     return _enforce_profile_limits(memories, resolved_profile)
