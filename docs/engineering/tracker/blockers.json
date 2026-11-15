@@ -2,9 +2,9 @@
  "rows": [
   {
    "id": "B1",
-   "item": "Decisões do operador: ADR-002 (OQ-1 a OQ-12) e plano (Q-25 a Q-27)",
+   "item": "Decisões do operador: ADR-002 (OQ-1 a OQ-12) e plano (Q-25 a Q-29)",
    "kind": "approval",
-   "detail": "Cada uma com recomendação e impacto: governança dos agentes, failover que pergunta antes, perguntas estruturadas, configs MCP de projeto"
+   "detail": "Cada uma com recomendação e impacto: governança dos agentes, failover que pergunta antes, perguntas estruturadas, configs MCP de projeto, efeitos colaterais do modo OFF do knowledge (padrão aplicado, reversível) e republicação da v1.0.18 no npm (recomendação: publicar a próxima versão)"
   },
   {
    "id": "B2",

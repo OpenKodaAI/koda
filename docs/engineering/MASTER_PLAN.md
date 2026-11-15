@@ -1184,12 +1184,12 @@ Owner SEC · Risk med · Gate none · **done** · Deps M0-E4-T1
 - **Tests:** G, G-PG; `pip-audit` · **Evidence:** VALIDATION_REPORT.md "WAVE-5": batches P1–P5 applied; a fresh `pip-audit --strict` on the lock and on the `--no-dev` export shows no advisory; the dev overlay builds its own locked dev image
 
 #### M1-E7-T3 · Remediate Node advisories
-Owner SEC (FE) · Risk med · Gate none · **ready** · Deps M0-E4-T1
+Owner SEC (FE) · Risk med · Gate none · **done** · Deps M0-E4-T1
 - **Addresses:** R-03
 - **Files:** `package.json` (`pnpm.overrides`), `apps/web/package.json`, `pnpm-lock.yaml`
 - **Do:** same approach as M1-E7-T2. Apply SUPPLY_CHAIN_TRIAGE.md §5 batches N1–N4 in order, one commit per batch, each with its listed gates and regression checks.
 - **Done when:** no reachable critical or high Node advisory remains, or each remaining one is risk-accepted.
-- **Tests:** G; `pnpm audit` · **Evidence:** —
+- **Tests:** G; `pnpm audit` · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": batches N1–N4 applied; `pnpm audit --audit-level=moderate` and `--prod` find no known vulnerabilities at 937f20b; the Dockerfile image rebuild waits for a host with Docker (needs operator)
 
 #### M1-E7-T4 · Remediate Rust advisories
 Owner SEC · Risk med · Gate none · **ready** · Deps M0-E4-T1
@@ -1253,12 +1253,12 @@ Owner SEC (BE) · Risk med · Gate none · **pending** · Deps M1-E7-T2 batch P2
 - **Tests:** unit tests per item; G · **Evidence:** —
 
 #### M1-E7-T11 · Dashboard WebSocket relay limits
-Owner FE (SEC) · Risk low · Gate none · **pending** · Deps M1-E7-T3 batch N1
+Owner FE (SEC) · Risk low · Gate none · **done** · Deps M1-E7-T3 batch N1
 - **Addresses:** SUPPLY_CHAIN_TRIAGE.md §5.2 code-level items (ws GHSA-96hv defence in depth)
 - **Files:** `apps/web/server.mjs` (~78, ~125), `apps/web/next.config.ts`
 - **Do:** set `maxPayload` on both WebSocket servers, validate the relay descriptor and token before `handleUpgrade`, and set `images.unoptimized: true` until M1-E7-T3 batch N2 lands.
 - **Done when:** an oversized frame and an unauthenticated upgrade are rejected before any relay work, and `/_next/image` is not served.
-- **Tests:** server tests; G · **Evidence:** —
+- **Tests:** server tests; G · **Evidence:** VALIDATION_REPORT.md "Lane merges 2026-11-15": the relay checks the attaching session and the dashboard Origin before the handshake, bounds client frames to 4 MiB and refuses unrouted upgrades; the bundled-proxy smoke check expects those refusals (fc42e6d, 3a7d7e4, e13dcce, de14210, 33c4357)
 
 #### M1-E7-T12 · Postgres transport security in cluster mode
 Owner OPS (SEC) · Risk med · Gate none · **pending** · Deps M1-E7-T4 batch R3

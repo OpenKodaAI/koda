@@ -1,6 +1,11 @@
 {
  "rows": [
   {
+   "id": "L22",
+   "at": "2026-11-15 02:05",
+   "event": "Onda 5 mesclada (5656abc) com todos os gates verdes: 8418 testes Python, 275 Postgres, 1104 web, build e auditorias de dependências sem vulnerabilidades. Junto entraram autenticação (logs com redação, arquivo de bootstrap atômico, drain do cluster autenticado). 35 tarefas do plano concluídas. Aprovadas e na fila da próxima integração: dados (M2-E2-T4, M2-E5-T1) e confiabilidade (M7)"
+  },
+  {
    "id": "L21",
    "at": "2026-11-15 01:40",
    "event": "Mesclados no branch com todos os gates verdes (8196 testes Python, 274 Postgres, 1081 web): estado de erro único e saída do /sessions no celular (M8), e remoção de código morto do knowledge e catálogo MCP duplicado (M4, cerca de 4.100 linhas a menos). Onda 5 inteira e autenticação (M1-E1-T4/T14/T15) integradas num branch de integração, com gates completos rodando. No formato novo as lanes levaram de 8 a 18 minutos. 5 lanes novas iniciadas: 2 de segurança (M1-E4), dados (M2-E3) e 2 de código morto (M4-E1)"

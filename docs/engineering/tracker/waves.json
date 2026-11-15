@@ -46,8 +46,8 @@
    "wave": "W5",
    "name": "Onda 5",
    "scope": "Dependências Python e Node, limites do WebSocket, changelog, processos órfãos (M1-E7-T2, T3, T11, T6, D-254)",
-   "status": "in_review",
-   "ref": "int/w5"
+   "status": "merged",
+   "ref": "5656abc"
   },
   {
    "wave": "W6",
@@ -73,8 +73,8 @@
   {
    "wave": "W7",
    "name": "Onda 7",
-   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), retenção e codecs do Postgres (M2-E5-T1, M2-E2-T4), código morto do knowledge e catálogo MCP duplicado (M4-E1-T6, T9). Código morto mesclado; autenticação M1-E1-T4/T14/T15 no branch de integração; dados na passada de correção; M1-E1-T5/T13 na última rodada",
-   "status": "implementing",
+   "scope": "Autenticação (M1-E1-T4, T5, T13, T14, T15), retenção e codecs do Postgres (M2-E5-T1, M2-E2-T4), código morto do knowledge e catálogo MCP duplicado (M4-E1-T6, T9). Mesclados: código morto e M1-E1-T4/T14/T15. Dados aprovados (próxima integração); M1-E1-T5/T13 na passada de correção",
+   "status": "in_review",
    "ref": "task/M1-E1-*, task/M2-*, task/M4-*"
   },
   {
