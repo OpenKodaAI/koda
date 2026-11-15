@@ -148,6 +148,22 @@ MASKED_TEXT: list[tuple[str, str, str]] = [
     ("GitHub fine-grained PAT", "github_pat_11AB_cd34_EF56_gh78_IJ90_kl12_MN34", R),
     ("guard: OpenAI project key", "use sk-proj-AbC1_dEf2-GhI3_jKl4-MnO5_pQr6", f"use {R}"),
     ("guard: old Rust core vector", "token abcdefghijklmnopqrstuvwxyz123456", f"token {R}"),
+    # Secrets passed as command-line flags.
+    ("flag --password=", "mysql -u root --password=hunter2 db", f"mysql -u root --password={R} db"),
+    ("flag --token=", "deploy --token=abc123def", f"deploy --token={R}"),
+    (
+        "kebab flags and a one-dash flag",
+        "run --api-key=k1 --db-password=p2 --auth-token=t3 -token=t4",
+        f"run --api-key={R} --db-password={R} --auth-token={R} -token={R}",
+    ),
+    # An unquoted value is masked whole, up to whitespace or a comma.
+    ("value with &", "password=Tr0ub4dor&3", f"password={R}"),
+    ("value with ;", "password=abc;def", f"password={R}"),
+    ("value with parentheses", "secret: p@ss(w0rd)", f"secret: {R}"),
+    ("value in brackets", "password=[hunter2]", f"password={R}"),
+    ("value in braces", "password={hunter2}", f"password={R}"),
+    ("guard: secret after a non-secret value", "user=admin;password=hunter2 ok", f"user=admin;password={R} ok"),
+    ("guard: key-<base36> secret", "key-k3j5h2m9q8w7e6r5t4y3u2i1o0p9a8", R),
 ]
 
 # (label, text): identifiers and plain text that hold no secret, unchanged.
@@ -169,6 +185,23 @@ KEPT_TEXT: list[tuple[str, str]] = [
     ("guard: the word basic", "a basic example of basic usage"),
     ("guard: exit and status codes", "exit code: 1, status code: 200"),
     ("guard: non-secret auth keys in text", "author: Ana, auth_mode: oauth"),
+    # Names with short mixed segments (k8s, i18n, e2e, b2b, a11y, 2026q3).
+    ("tool name with k8s", "mcp__kubernetes__list_k8s_namespaces"),
+    ("kebab name with k8s", "deploy-k8s-production-cluster"),
+    ("kebab name with i18n", "i18n-translations-pt-br-update"),
+    ("kebab name with e2e", "e2e-tests-for-runtime-kernel"),
+    ("snake name with b2b", "koda_b2b_onboarding_flow_2026"),
+    ("file name with e2e", "test_streaming_e2e_regression.py"),
+    ("kebab name with a11y and v2", "a11y-audit-for-dashboard-v2"),
+    ("kebab name with 2026q3", "report-2026q3-final-version"),
+    ("artifact collision suffix", "screenshot-final-a1b2c3d4.png"),
+    # camelCase names with a digit.
+    ("class name in exception text", "KnowledgeV2PostgresBackend failed"),
+    ("camelCase MCP tool name with a digit", "mcp__aws__describeEc2Instances"),
+    # Token usage counts.
+    ("token counts in text", "prompt_tokens: 1200, completion_tokens: 300"),
+    ("max_tokens in text", "max_tokens=4096"),
+    ("token count in JSON text", '{"prompt_tokens": 1200}'),
 ]
 
 # (label, payload, expected): keys whose whole value is masked, or kept.
