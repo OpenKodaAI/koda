@@ -328,6 +328,20 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
   claim bookkeeping and other server-owned keys are refused. (D-339)
 - A child run (Delegate Task) can use only the tools its parent run has, and cannot act as
   another agent. (M6-E2-T6)
+- A read-only run denies every write, whatever the execution-policy rule decides and
+  whatever approval grant the run holds; before, a `require_approval` or
+  `allow_with_preview` rule sent it to the approval flow, and a parent's grant let a read-
+  only child write. A child of a scheduled dry-run parent is a dry run, and every tool call
+  of a child run, workflow steps included, is held to the parent's capability envelope.
+  (D-371, D-372, D-373)
+- A worker loads, expires and removes only its own agent's approval rows and never adopts
+  one with no agent. An edited tool call uses an existing grant only when the grant covers
+  the edited call and the policy accepts it. (D-366, D-367, D-370)
+- The runtime API returns runtime events, environment rows and terminal rows as explicit
+  projections: no kernel record, free-form metadata or absolute host path is sent, and one
+  contract test calls every runtime GET route and WebSocket. A runtime squad message runs
+  only as an active participant of the thread, and its delegation origin and chain come from
+  the thread's record; a foreign or unknown parent message gets 404. (D-357, D-358, D-355)
 
 
 ### Added
@@ -664,6 +678,21 @@ release adds schema migrations `047_scheduler_events_and_dispatch_columns` and
 - Web: the agent editor step rail shows translated step names; Escape in the agent catalog's
   popovers and the model selector closes only that popover; Tailwind no longer emits rules
   for classes that appear only in tests. (D-334, D-320, D-351)
+- Approvals: pressing a button on an approval request left by a worker restart no longer
+  fails. On start a worker deletes the pending approvals its previous process left, with one
+  `approval.pending_expired` audit event each; the button runs nothing and asks to request
+  again. A denied request is removed when it is denied. Grants keep working across the
+  restart. (D-163, D-368, D-381)
+- Squads: every refusal of a redispatched turn releases its claim without counting an
+  expiry; a delegate-cycle synthesis refused by a paused room runs once after the reopen; a
+  finished task unblocks only its own cycle's tasks; one room whose alert cannot be posted
+  no longer holds back the budget sweep, and a raised cap gets its 80% alert; `/dlq retry`
+  refuses the turn of a finished squad task; squad replies keep their correlation ids on
+  every dispatch path. (D-361, D-336, D-337, D-340, D-341, D-342, D-363)
+- Child runs inherit their parent turn's settings, their cost is added to the parent's
+  total, and finished ones no longer stay in the worker's map. (D-374)
+- The task room shows the kernel's reason when the live browser is unavailable, and the
+  workspace and source-root fields show the directory name. (D-359, D-358)
 
 
 ## [1.0.18] - 2026-05-20

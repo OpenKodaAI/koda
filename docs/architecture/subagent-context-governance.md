@@ -51,7 +51,8 @@ from task lineage and RunGraph data.
 Idempotency is keyed by parent task, parent attempt, tool-call signature, and
 child index. The database enforces `(agent_id, parent_task_id,
 idempotency_key)` and the in-process tool handler also prevents duplicate child
-task creation during a retry.
+task creation during a retry. The in-process map holds a child only while it
+runs: it is dropped when the child finishes, times out or is cancelled.
 
 ## Limits And Policy
 
@@ -71,10 +72,31 @@ the parent's capability envelope: the parent's agent, its core tool allowlist
 workspace, inbox, squad access, approval grants and memory scope are the
 parent's. A core tool outside the envelope is denied before the policy gate
 (`child_run_capability_denied`), and a child run without an envelope gets no
-tools. The child is judged by the parent's task kind, so execution-policy rules
+tools. The dispatcher's `execute_tool` applies the same check to every tool
+call of a child, so a `workflow_run` step inside a child is held to the
+envelope too. The child is judged by the parent's task kind, so execution-policy rules
 keyed on it bind the child too. Memory writes and sensitive recall are never
 granted: the normalized context policy carries neither, whatever the request
 asks for.
+Every allowed child toolset runs the child read-only, and read-only denies
+every write (`read_only_policy`) whatever execution-policy rule matches and
+whatever approval grant the run holds, so a grant given to the parent never
+lets its child write.
+A child of a scheduled dry-run parent is a dry run too: the envelope carries
+the parent's dry-run flag and scheduled job and run ids, the child gets the
+dry-run prompt rules, a fresh provider turn and dry-run tools (writes are
+blocked), and its result lists the `dry_run` warning. The child never
+finalizes the parent's scheduled run.
+A child starts from a copy of its parent turn's context, so it inherits the
+parent's per-turn settings (such as `agent_mode`) and its total spend. When a
+child finishes, its cost is added to the parent's total. The budget check
+(`MAX_TOTAL_BUDGET_USD`) is the same pre-check the parent's own turn gets: it
+runs when each child starts, against the parent's total at that moment, and
+refuses a child once that total reaches the budget. It reserves nothing, so
+the children that start before any of them finishes (up to the 2 concurrent
+child-runs per parent) all pass the check against the same total and together
+can take the parent's total past the budget. Only a child that starts after
+the total reaches the budget is refused.
 Phase 3 fails closed for write, network-write, destructive, unknown, or
 unrecognized child toolsets until a stricter approval path is implemented.
 

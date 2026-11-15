@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from koda.services.child_runs import (
+    _IN_PROCESS_CHILD_TASKS,
     MAX_CHILD_RUNS_PER_CALL,
     child_run_tool_denial,
     delegate_child_task_tool,
@@ -123,11 +124,89 @@ async def test_child_run_starts_with_the_parent_capability_envelope() -> None:
         "agent_id": "KODA",
         "allowed_tool_ids": ["file_list", "web_search"],
         "task_kind": "investigation",
+        "dry_run": False,
+        "scheduled_job_id": None,
+        "scheduled_run_id": None,
     }
     # Memory rights: recall only on request, never writes or sensitive recall.
     assert started["context_policy"]["include_memory"] is True
     assert "allow_memory_writes" not in started["context_policy"]
     assert "include_sensitive" not in started["context_policy"]
+
+
+@pytest.mark.asyncio
+async def test_a_child_of_a_dry_run_parent_is_spawned_as_a_dry_run() -> None:
+    """D-372: a scheduled dry-run parent passes dry-run to its child, and the child run reports it."""
+    started: dict[str, Any] = {}
+
+    async def _start(**kwargs: Any) -> tuple[int, asyncio.Task[None]]:
+        started.update(kwargs)
+        return 501, asyncio.ensure_future(asyncio.sleep(0))
+
+    with (
+        patch("koda.services.child_runs.list_child_runs_for_parent", AsyncMock(return_value=[])),
+        patch("koda.services.child_runs._fetch_child_run_by_idempotency", AsyncMock(return_value=None)),
+        patch("koda.services.child_runs.upsert_child_run", AsyncMock()),
+        patch("koda.services.child_runs.update_child_run_result", AsyncMock()),
+        patch(
+            "koda.services.child_runs._summarize_child_task",
+            side_effect=lambda _agent, run_id, task_id, warnings: {
+                "child_run_id": run_id,
+                "child_task_id": task_id,
+                "status": "completed",
+                "summary": "ok",
+                "warnings": warnings,
+            },
+        ),
+        patch("koda.services.execution_policy.resolve_execution_policy_allowed_tool_ids", return_value=["file_list"]),
+        patch("koda.services.queue_manager.start_child_run_task", side_effect=_start),
+    ):
+        result = await delegate_child_task_tool(
+            {"prompt": "Inspect X"},
+            _parent_ctx(dry_run=True, scheduled_job_id=5, scheduled_run_id=9),
+        )
+
+    assert result.success is True
+    assert started["capabilities"]["dry_run"] is True
+    assert (started["capabilities"]["scheduled_job_id"], started["capabilities"]["scheduled_run_id"]) == (5, 9)
+    assert "dry_run" in result.data["warnings"]
+
+
+@pytest.mark.asyncio
+async def test_a_finished_child_is_pruned_and_its_cost_counted_against_the_parent() -> None:
+    """D-374: the child spends against its parent's total, and a finished child leaves the in-process map."""
+    started: dict[str, Any] = {}
+
+    async def _start(**kwargs: Any) -> tuple[int, asyncio.Task[None]]:
+        started.update(kwargs)
+        return 501, asyncio.ensure_future(asyncio.sleep(0))
+
+    parent = _parent_ctx(task_id=4242, user_data={"provider": "claude", "session_id": "sess-1", "total_cost": 1.0})
+    with (
+        patch("koda.services.child_runs.list_child_runs_for_parent", AsyncMock(return_value=[])),
+        patch("koda.services.child_runs._fetch_child_run_by_idempotency", AsyncMock(return_value=None)),
+        patch("koda.services.child_runs.upsert_child_run", AsyncMock()),
+        patch("koda.services.child_runs.update_child_run_result", AsyncMock()),
+        patch(
+            "koda.services.child_runs._summarize_child_task",
+            return_value={
+                "child_run_id": "childrun_x",
+                "child_task_id": 501,
+                "status": "completed",
+                "summary": "ok",
+                "cost_usd": 0.25,
+            },
+        ),
+        patch("koda.services.execution_policy.resolve_execution_policy_allowed_tool_ids", return_value=["file_list"]),
+        patch("koda.services.queue_manager.start_child_run_task", side_effect=_start),
+    ):
+        result = await delegate_child_task_tool({"prompt": "Inspect X"}, parent)
+
+    assert result.success is True
+    # The child starts from the parent's own turn context, so it sees the parent's settings and budget.
+    assert started["parent_user_data"] is parent.user_data
+    assert parent.user_data["total_cost"] == pytest.approx(1.25)
+    assert [key for key in _IN_PROCESS_CHILD_TASKS if key[0] == 4242] == []
 
 
 def test_child_run_denied_task_because_child_runs_do_not_nest() -> None:

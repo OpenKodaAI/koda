@@ -25,13 +25,16 @@ import subprocess
 import time
 import unicodedata
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+
+if TYPE_CHECKING:
+    from koda.squads import SquadTurnDispatchResult
 
 from koda.agent_contract import normalize_integration_grants
 from koda.config import (
@@ -2321,6 +2324,7 @@ async def start_child_run_task(
     toolset: str,
     target_agent_id: str | None = None,
     capabilities: dict[str, Any] | None = None,
+    parent_user_data: Mapping[str, Any] | None = None,
     bot_override: Any | None = None,
     user_data_overlay: dict[str, Any] | None = None,
 ) -> tuple[int, asyncio.Task[None]]:
@@ -2329,6 +2333,11 @@ async def start_child_run_task(
     This uses normal task persistence and execution machinery, but does not
     enqueue behind the parent user's FIFO worker. Parent tasks wait for child
     results; putting children behind the same per-user FIFO would deadlock.
+
+    The child's context is a copy of ``parent_user_data``, the parent turn's own
+    context, so the child inherits the parent's per-turn settings and is checked
+    against the parent's spend; the parent adds the child's cost to its total
+    when the child finishes.
     """
 
     if _shutting_down:
@@ -2360,7 +2369,8 @@ async def start_child_run_task(
         child_run_id=child_run_id,
     )
     context = build_runtime_context(application, user_id, bot_override=bot_override)
-    context.user_data = dict(getattr(context, "user_data", {}) or {})
+    base_user_data = parent_user_data if parent_user_data is not None else getattr(context, "user_data", {})
+    context.user_data = dict(base_user_data or {})
     if provider:
         context.user_data["provider"] = provider
     if model:
@@ -2389,6 +2399,10 @@ async def start_child_run_task(
         "child_context_policy": dict(context_policy or {}),
         "child_toolset": toolset,
         "child_capabilities": dict(capabilities) if capabilities else None,
+        # A child of a scheduled dry-run parent is a dry run too (D-372).
+        "dry_run": bool((capabilities or {}).get("dry_run")),
+        "scheduled_job_id": (capabilities or {}).get("scheduled_job_id"),
+        "scheduled_run_id": (capabilities or {}).get("scheduled_run_id"),
     }
     task_info = TaskInfo(
         task_id=task_id,
@@ -2732,6 +2746,13 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
                 if msg.from_agent and (not chain or chain[-1] != msg.from_agent):
                     chain.append(msg.from_agent)
                 request_id = metadata.get("request_id") if kind in {"task_request", "delegation_request"} else None
+                # A squad_reply or synthesis turn the bus delivers carries its correlation as the
+                # local queue and the runtime API pass it: the obligation or synthesis key, and
+                # who asked (D-363).
+                delegation_request_id = request_id or metadata.get("delegation_request_id")
+                delegation_origin_agent_id = (
+                    (metadata.get("delegation_origin_agent_id") or msg.from_agent) if delegation_request_id else None
+                )
                 # A delegation past a cycle or the depth cap, or an agent_send past the hop limit,
                 # runs no turn, whichever runtime sent it (D-095, D-096).
                 limit = None
@@ -2766,8 +2787,8 @@ async def start_squad_inbox_dispatcher(application: Any) -> None:
                     squad_task_id=metadata.get("squad_task_id") or metadata.get("task_id"),
                     parent_message_id=metadata.get("parent_message_id") or msg.causation_id or msg.message_id,
                     delegation_chain=chain,
-                    delegation_request_id=str(request_id) if request_id else None,
-                    delegation_origin_agent_id=msg.from_agent if request_id else None,
+                    delegation_request_id=str(delegation_request_id) if delegation_request_id else None,
+                    delegation_origin_agent_id=str(delegation_origin_agent_id) if delegation_origin_agent_id else None,
                     telegram_message_thread_id=_coerce_int_or_zero(metadata.get("telegram_message_thread_id")) or None,
                     bot_override=getattr(application, "bot", None),
                 )
@@ -2877,6 +2898,10 @@ def _parse_queue_item(item: Any) -> QueueItem:
             "child_toolset": raw.get("child_toolset"),
             "child_capabilities": dict(capabilities) if isinstance(capabilities, dict) else None,
             "silent_response": bool(raw.get("silent_response")),
+            # A child of a dry-run parent is a dry run; it never finalizes the parent's scheduled run.
+            "scheduled_dry_run": bool(raw.get("_child_run") and raw.get("dry_run")),
+            "scheduled_job_id": raw.get("scheduled_job_id") if raw.get("_child_run") else None,
+            "scheduled_run_id": raw.get("scheduled_run_id") if raw.get("_child_run") else None,
         }
 
     if isinstance(item, dict) and (item.get("_user_message") or item.get("_recovered_task")):
@@ -3156,7 +3181,7 @@ async def _prepare_query_context(
                 drop_policy="hard_floor",
             )
 
-    if item.is_scheduled_run and item.scheduled_dry_run:
+    if item.scheduled_dry_run:
         _append_prompt_segment(
             prompt_segments,
             segment_id="scheduled_dry_run_rules",
@@ -3369,7 +3394,7 @@ async def _prepare_query_context(
         context.user_data["session_id"] = session_id
 
     agent_mode = context.user_data.get("agent_mode", "autonomous")
-    permission_mode = "plan" if item.is_scheduled_run and item.scheduled_dry_run else "bypassPermissions"
+    permission_mode = "plan" if item.scheduled_dry_run else "bypassPermissions"
     max_turns = 1 if agent_mode == "supervised" else MAX_TURNS
     _query_warnings: list[str] = []
     visual_paths = _filter_visual_paths(item.image_paths)
@@ -3394,7 +3419,7 @@ async def _prepare_query_context(
             has_images=bool(visual_paths),
         )
 
-    if item.is_scheduled_run and item.scheduled_dry_run:
+    if item.scheduled_dry_run:
         provider_session_id = None
         _query_warnings.append("dry-run forced fresh provider turn")
     else:
@@ -3990,9 +4015,9 @@ async def _prepare_query_context(
         stale_sources_present=stale_sources_present,
         turn_mode=cast(
             TurnMode,
-            "new_turn" if item.is_scheduled_run and item.scheduled_dry_run else infer_turn_mode(provider_session_id),
+            "new_turn" if item.scheduled_dry_run else infer_turn_mode(provider_session_id),
         ),
-        resume_requested=provider_session_id is not None and not (item.is_scheduled_run and item.scheduled_dry_run),
+        resume_requested=provider_session_id is not None and not item.scheduled_dry_run,
         dry_run=item.scheduled_dry_run,
         scheduled_job_id=item.scheduled_job_id,
         scheduled_run_id=item.scheduled_run_id,
@@ -5092,6 +5117,8 @@ async def _run_agent_loop(
             context_governance=ctx.context_governance,
             source_root_path=ctx.source_root_path or context.user_data.get("source_root_path"),
             runtime_workspace_path=ctx.work_dir if ctx.runtime_env_id is not None else None,
+            is_child_run=ctx.is_child_run,
+            child_capabilities=ctx.child_capabilities,
         )
 
         from koda.services import audit, metrics
@@ -5169,7 +5196,10 @@ async def _run_agent_loop(
         executed_pairs: list[tuple[AgentToolCall, AgentToolResult]] = []
         skip_following_reads = False
 
-        for call in tool_calls:
+        # A call goes back to the front when an edit sends it through approval again (D-370).
+        calls_to_run = list(tool_calls)
+        while calls_to_run:
+            call = calls_to_run.pop(0)
             if skip_following_reads:
                 executed_pairs.append(
                     (
@@ -5334,6 +5364,17 @@ async def _run_agent_loop(
                                 if _is_write_tool(call.tool, call.params):
                                     skip_following_reads = True
                                 continue
+                            if approval_grant is not None and policy_evaluation.requires_confirmation:
+                                # D-370: the grant peeked for the original call did not lift its
+                                # confirmation, so it approves nothing for the edited call. The
+                                # edited call goes through approval again: a grant is consumed for it
+                                # only within its scope and policy; otherwise the operator is asked
+                                # again, about the edited call.
+                                metrics.HUMAN_OVERRIDE.labels(agent_id=_agent_id_label, decision="edited").inc()
+                                calls_to_run.insert(0, call)
+                                continue
+                            # An edited call that needs no approval runs without consuming that grant.
+                            approval_grant = None
                             if policy_evaluation.requires_confirmation:
                                 policy_evaluation = evaluate_execution_policy(
                                     call.tool,
@@ -7026,6 +7067,11 @@ def _render_existing_squad_task_request(task: Any) -> str:
     return "\n".join(lines)
 
 
+def _squad_task_cycle(task: Any) -> str | None:
+    """The coordination cycle of a squad task: its ``coordination_parent_message_id``, or None."""
+    return str(task.metadata.get("coordination_parent_message_id") or "") or None
+
+
 async def _maybe_enqueue_unblocked_squad_tasks(
     *,
     user_id: int,
@@ -7037,6 +7083,12 @@ async def _maybe_enqueue_unblocked_squad_tasks(
     A pending task that depends on a task that failed, was cancelled or escalated can never
     run, so it is cancelled with a task result that says why. Its dependents follow it in the
     same pass, since a task is created after the tasks it depends on.
+
+    Only the finished task's coordination cycle is read, with the tasks outside any cycle: a
+    pending task of another cycle of the thread is not dispatched by it (D-337), as open tasks of
+    other cycles do not hold a cycle's synthesis (D-287). A task an agent created has no cycle id
+    (agents cannot set one), so it is read whichever cycle's task it depends on, and its own finish
+    reads only the tasks outside any cycle. A turn with no squad task reads the whole thread.
     """
     if not ctx.squad_thread_id:
         return 0
@@ -7051,6 +7103,8 @@ async def _maybe_enqueue_unblocked_squad_tasks(
         thread = await thread_store.get_thread(ctx.squad_thread_id)
         if thread is None or not thread.coordinator_agent_id:
             return 0
+        finished = await task_store.get_task(ctx.squad_task_id) if ctx.squad_task_id else None
+        scope = {_squad_task_cycle(finished), None} if finished is not None else None
         pending = await task_store.list_tasks(
             thread_id=ctx.squad_thread_id,
             status="pending",
@@ -7058,6 +7112,9 @@ async def _maybe_enqueue_unblocked_squad_tasks(
         )
         dispatched = 0
         for task in pending:
+            if scope is not None and _squad_task_cycle(task) not in scope:
+                # Another cycle's task (D-337).
+                continue
             assignee = str(task.assigned_agent_id or "").strip()
             if not assignee or assignee == thread.coordinator_agent_id:
                 continue
@@ -7199,7 +7256,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
     squad_message_id: str | None,
     artifact_ids: list[str],
     swept_handoff_id: str | None = None,
-) -> None:
+) -> "SquadTurnDispatchResult | None":
     """Queue the coordinator synthesis once the cycle's tasks have ended, then record each handoff's outcome.
 
     The cycle's tasks are those whose ``coordination_parent_message_id`` is the turn's parent
@@ -7208,9 +7265,14 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
     With ``swept_handoff_id`` the squad router's sweep runs the check for that handoff: it queues
     nothing unless the handoff is open in the cycle it reads, and it adds no result for the swept
     task, whose turn did not run here.
+
+    A synthesis the room refuses (paused or spent) in a cycle with no handoff is recorded as a
+    ``synthesis_refused`` system event, and the squad router runs this check again once the room
+    can run (D-336); a handoff's own sweep retries the others. Returns the synthesis dispatch's
+    result, or None when none was dispatched.
     """
     if not ctx.squad_thread_id or not ctx.squad_task_id:
-        return
+        return None
     try:
         from koda.squads import (
             dispatch_squad_turn,
@@ -7225,13 +7287,13 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         thread_store = get_squad_thread_store()
         task_store = get_squad_task_store()
         if thread_store is None or task_store is None:
-            return
+            return None
         thread = await thread_store.get_thread(ctx.squad_thread_id)
         if thread is None or not thread.coordinator_agent_id:
-            return
+            return None
         executing_agent = ctx.executing_agent_id or AGENT_ID or "default"
         if thread.coordinator_agent_id == executing_agent:
-            return
+            return None
         open_tasks = []
         for attempt in range(4):
             # This cycle's tasks only: an open task of an earlier cycle does not hold this one (D-287).
@@ -7248,7 +7310,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         if open_tasks:
             readiness = evaluate_synthesis_readiness(tasks=open_tasks)
             synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
-            return
+            return None
         synthesis_parent_id = ctx.parent_message_id
         synthesis_idempotency_key = (
             f"squad_synthesis:{ctx.squad_thread_id}:{synthesis_parent_id}:{thread.coordinator_agent_id}"
@@ -7274,7 +7336,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                 raw_metadata = message.get("metadata")
                 metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
                 if metadata.get("idempotency_key") == synthesis_idempotency_key:
-                    return
+                    return None
                 if source_message_id is not None and message.get("id") == source_message_id:
                     # A reply obligation on the cycle's source message that a destination answered
                     # also counts as its reply to a handoff (D-074).
@@ -7326,9 +7388,9 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         if handoff_events and handoff_ids <= closed_ids:
             # Every handoff of the cycle has its outcome, which is recorded only once the synthesis
             # is queued, so running the check again queues nothing.
-            return
+            return None
         if swept_handoff_id is not None and (swept_handoff_id not in handoff_ids or swept_handoff_id in closed_ids):
-            return
+            return None
         if swept_handoff_id is None and not any(
             ctx.squad_task_id and f"/ {ctx.squad_task_id}:" in item for item in visible_results
         ):
@@ -7353,7 +7415,7 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
         )
         synthesis_gate_metric(gate="coordinator_task_cycle", result=readiness)
         if not readiness.ready:
-            return
+            return None
         visible_results_block = "\n\n".join(visible_results)
         confirmed_results_block = "\n".join(confirmed_results) or "- Nenhum resultado textual confirmado."
         timeout_block = ""
@@ -7416,12 +7478,36 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
             bot_override=getattr(context, "bot", None),
         )
         if not result.dispatched:
+            if result.refused and not handoff_events:
+                # No sweep runs this check again for a cycle with no handoff, so the refusal is
+                # recorded, once per synthesis, and the squad router runs the synthesis, with the
+                # same idempotency key, once the room can run again (D-336).
+                with contextlib.suppress(Exception):
+                    await thread_store.post_thread_message(
+                        thread_id=ctx.squad_thread_id,
+                        from_agent="system",
+                        content=f"[synthesis_refused] coordinator synthesis waits for the room: {result.error}",
+                        message_type="system_event",
+                        metadata={
+                            "event_type": "synthesis_refused",
+                            "squad_task_id": ctx.squad_task_id,
+                            "executing_agent_id": executing_agent,
+                            "parent_message_id": ctx.parent_message_id,
+                            "squad_message_id": squad_message_id,
+                            "artifact_ids": list(artifact_ids),
+                            "synthesis_idempotency_key": synthesis_idempotency_key,
+                            "reason": result.error,
+                            "retry_status": "pending",
+                        },
+                        idempotency_key=f"synthesis_refused:{synthesis_idempotency_key}",
+                        dedupe=True,
+                    )
             log.warning(
                 "squad_coordinator_synthesis_not_dispatched",
                 thread_id=ctx.squad_thread_id,
                 squad_task_id=ctx.squad_task_id,
             )
-            return
+            return result
         # Record the outcome of each handoff whose destinations have all answered (D-074).
         handoff_outcomes = {
             ref.get("id"): ref.get("status")
@@ -7449,12 +7535,14 @@ async def _maybe_enqueue_squad_coordinator_synthesis(
                 correlation_id=handoff.get("correlation_id"),
                 handoff_id=str(handoff_id),
             )
+        return result
     except Exception:
         log.exception(
             "squad_coordinator_synthesis_enqueue_failed",
             thread_id=ctx.squad_thread_id,
             squad_task_id=ctx.squad_task_id,
         )
+        return None
 
 
 async def _maybe_enqueue_squad_reply_synthesis(
@@ -7884,14 +7972,71 @@ async def complete_open_squad_handoff(*, thread_id: str, squad_task_id: str, han
     )
 
 
+async def retry_refused_squad_synthesis(
+    *,
+    thread_id: str,
+    squad_task_id: str,
+    executing_agent_id: str,
+    parent_message_id: str | None,
+    squad_message_id: str | None,
+    artifact_ids: list[str],
+) -> str:
+    """Run the coordinator synthesis check again for a synthesis the room refused (D-336).
+
+    The squad router's sweep calls this for a ``synthesis_refused`` event of a room that can run
+    again. The check runs as the follow-up of ``squad_task_id``, the turn whose synthesis was
+    refused, would, with the same synthesis idempotency key. Returns ``refused`` when the room
+    refused it again, so the sweep keeps it, and ``done`` otherwise.
+    """
+    if _shutting_down:
+        return "refused"
+    from types import SimpleNamespace
+
+    from koda.squads import get_squad_thread_store
+
+    thread_store = get_squad_thread_store()
+    if thread_store is None:
+        return "refused"
+    thread = await thread_store.get_thread(thread_id)
+    if thread is None:
+        return "done"
+    ctx = QueryContext(
+        provider="",
+        work_dir="",
+        model="",
+        session_id="",
+        provider_session_id=None,
+        system_prompt="",
+        agent_mode="",
+        permission_mode="",
+        max_turns=0,
+        executing_agent_id=executing_agent_id,
+        squad_thread_id=thread_id,
+        squad_task_id=squad_task_id,
+        parent_message_id=parent_message_id,
+        telegram_message_thread_id=thread.telegram_message_thread_id,
+    )
+    # No turn context: the dispatch uses this runtime's application and bot.
+    result = await _maybe_enqueue_squad_coordinator_synthesis(
+        user_id=int(thread.owner_user_id or 0),
+        context=cast(BotContext, SimpleNamespace(application=None, bot=None)),
+        ctx=ctx,
+        response_text="",
+        squad_message_id=squad_message_id,
+        artifact_ids=artifact_ids,
+    )
+    return "refused" if result is not None and result.refused else "done"
+
+
 async def redispatch_expired_squad_claim(*, task_id: str) -> str:
     """Dispatch a squad task whose claim expired to its planned assignee once, then escalate it (D-097).
 
     The squad router's sweep calls this after it reverted the claim to ``pending``, with the
     assignee kept. On the first expiry the assignee claims the task again and its task request is
     dispatched to it again. A dispatch the room refuses because it was paused or spent after the
-    sweep releases that claim without counting an expiry (D-338); another failed dispatch leaves
-    the claim to expire, and that expiry counts. On a later expiry the task is escalated to the
+    sweep, a ``refused`` result whichever read found it so, releases that claim without counting
+    an expiry (D-338, D-361); another failed dispatch leaves the claim to expire, and that expiry
+    counts. On a later expiry the task is escalated to the
     coordinator: the system posts a failed task result for the assignee that says so, the task
     ends ``escalated``, and its follow-ups run, so its dependents are cancelled and the
     coordinator synthesis, which discloses the escalation, is queued once the cycle's tasks have
@@ -7956,11 +8101,12 @@ async def redispatch_expired_squad_claim(*, task_id: str) -> str:
         )
         if result.dispatched:
             return "redispatched"
-        if result.transport == "none":
-            # The room, paused or spent after the sweep, refused the turn (dispatch_squad_turn
-            # sends nothing then): the fresh claim is released without counting an expiry, as the
-            # other refusal paths release theirs, and the first sweep after the room can run again
-            # dispatches the task again (D-338).
+        if result.refused:
+            # The room, paused or spent after the sweep, refused the turn, whichever read found it
+            # so: the dispatch's, the queue's or the runtime's. Nothing was sent, so the fresh
+            # claim is released without counting an expiry, as the other refusal paths release
+            # theirs, and the first sweep after the room can run again dispatches the task again
+            # (D-338, D-361).
             await _release_refused_squad_task_claim(squad_task_id=claimed.id, agent_id=assignee)
         return "skipped"
     reason = (
@@ -10051,6 +10197,13 @@ async def recover_pending_tasks(application: Any) -> dict[str, int]:
     return summary
 
 
+class DLQRequeueRefusedError(ValueError):
+    """A DLQ entry that is not requeued; the message says why, for the operator (D-342)."""
+
+
+_SQUAD_TASK_TERMINAL_STATUSES = frozenset({"done", "failed", "cancelled", "escalated"})
+
+
 async def requeue_dlq_entry(
     entry: dict[str, Any],
     *,
@@ -10058,7 +10211,12 @@ async def requeue_dlq_entry(
     actor: str | int,
     bot_override: Any | None = None,
 ) -> int:
-    """Create a fresh task from a DLQ entry and enqueue it with retry history."""
+    """Create a fresh task from a DLQ entry and enqueue it with retry history.
+
+    The turn of a squad task that already ended (done, failed, cancelled or escalated) is not
+    requeued: it would run in its room again and post a second task result. That raises
+    ``DLQRequeueRefusedError`` and leaves the entry as it was (D-342).
+    """
     from koda.services import audit
     from koda.utils.command_helpers import init_user_data
 
@@ -10066,6 +10224,16 @@ async def requeue_dlq_entry(
     payload = metadata.get("queue_payload")
     if not isinstance(payload, dict):
         payload = None
+    squad_task_id = str((payload or {}).get("squad_task_id") or "").strip()
+    if squad_task_id:
+        from koda.squads import get_squad_task_store
+
+        task_store = get_squad_task_store()
+        squad_task = await task_store.get_task(squad_task_id) if task_store is not None else None
+        if squad_task is not None and squad_task.status in _SQUAD_TASK_TERMINAL_STATUSES:
+            raise DLQRequeueRefusedError(
+                f"squad task {squad_task_id} is already {squad_task.status}; its turn is not run again"
+            )
 
     user_id = int(entry["user_id"])
     chat_id = int(entry["chat_id"])

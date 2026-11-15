@@ -1257,7 +1257,9 @@ def _apply_overlays(
             legacy_compiled=evaluation.legacy_compiled,
         )
 
-    if evaluation.decision == "allow" and effective_policy.read_only and envelope.access_level != "read":
+    # Read-only means read-only: a write is denied whatever the base decision, and before an
+    # approval grant could turn a confirmation into an allow (D-371).
+    if evaluation.decision != "deny" and effective_policy.read_only and envelope.access_level != "read":
         return PolicyEvaluation(
             decision="deny",
             reason_code="read_only_policy",

@@ -1208,3 +1208,31 @@ class TestApprovalEdgeCases:
 
         assert event.is_set()
         assert "timeout_agent_1" not in _PENDING_AGENT_CMD_OPS
+
+
+@pytest.mark.asyncio
+async def test_a_failed_approval_load_is_tried_again_by_the_next_request(monkeypatch):
+    """A failed startup load raises to the worker, which reports it, and the next approval request tries again."""
+    from koda.utils import approval
+
+    monkeypatch.setattr(approval, "_persistence_loaded", False)
+    calls: list[str] = []
+
+    async def load(*, agent_id):
+        calls.append(agent_id)
+        if len(calls) <= 2:
+            raise RuntimeError("approval_grants_primary_backend_unavailable")
+        return {"grant-a": {"grant_id": "grant-a"}}
+
+    monkeypatch.setattr(approval, "load_approval_grants", load)
+    with pytest.raises(RuntimeError):
+        await approval._ensure_persistence_loaded()
+
+    telegram_bot = AsyncMock()
+    # The load fails again, and the request is still shown; then it succeeds, once.
+    for description in ("first", "second", "third"):
+        await request_agent_cmd_approval(telegram_bot, chat_id=111, user_id=222, description=description)
+
+    assert telegram_bot.send_message.await_count == 3
+    assert len(calls) == 3
+    assert "grant-a" in approval._APPROVAL_GRANTS

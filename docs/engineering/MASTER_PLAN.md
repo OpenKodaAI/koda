@@ -1569,12 +1569,12 @@ Owner SEC (BE) · Risk med · Gate none · **pending** · Deps M3-E1-T1
 - **Tests:** G-PG with the stub provider issuing a write · **Evidence:** —
 
 #### M3-E1-T5 · Scheduler lease recovery every cycle
-Owner BE · Risk low · Gate none · **ready** · Deps —
+Owner BE · Risk low · Gate none · **done** · Deps —
 - **Addresses:** D-090, F-SCH-02
 - **Files:** `koda/services/scheduled_job_dispatcher.py` (~301)
 - **Do:** call `recover_expired_leases` in each dispatch cycle.
 - **Done when:** a run whose callback was lost is recovered without a restart.
-- **Tests:** G-PG · **Evidence:** —
+- **Tests:** G-PG · **Evidence:** commit 08bd0f4 (recorded in VALIDATION_REPORT.md "Integration batch 9"): `run_dispatch_cycle` calls `recover_expired_leases()` every cycle; G-PG `tests/integration/test_scheduler_dispatch_postgres.py::test_run_with_lost_callback_is_recovered_by_a_later_cycle_without_restart` recovers a run whose callback was lost without a restart, and fails without the per-cycle call
 
 #### M3-E1-T6 · Routine page action feedback
 Owner FE · Risk low · Gate none · **done** · Deps —

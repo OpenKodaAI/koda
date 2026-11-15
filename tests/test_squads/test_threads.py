@@ -171,6 +171,20 @@ async def test_post_and_history_roundtrip(store: SquadThreadStore) -> None:
 
 @pytest.mark.postgres
 @pytest.mark.asyncio
+async def test_message_sender_is_read_within_its_thread(store: SquadThreadStore) -> None:
+    """The runtime takes a squad turn's delegation origin from this record (D-355)."""
+    thread = await store.create_thread(workspace_id="acme", squad_id="build", title="t")
+    other = await store.create_thread(workspace_id="acme", squad_id="build", title="other")
+    message_id = await store.post_thread_message(thread_id=thread.id, from_agent="PM", content="hello")
+
+    assert await store.get_message_sender(thread_id=thread.id, message_ref=f"msg-{message_id}") == "PM"
+    assert await store.get_message_sender(thread_id=thread.id, message_ref=str(message_id)) == "PM"
+    assert await store.get_message_sender(thread_id=other.id, message_ref=f"msg-{message_id}") is None
+    assert await store.get_message_sender(thread_id=thread.id, message_ref="not-a-message") is None
+
+
+@pytest.mark.postgres
+@pytest.mark.asyncio
 async def test_thread_reply_obligation_roundtrip(store: SquadThreadStore) -> None:
     thread = await store.create_thread(
         workspace_id="acme",

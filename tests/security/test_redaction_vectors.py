@@ -351,7 +351,11 @@ def _runtime_api(text: str) -> str:
         request = SimpleNamespace(match_info={"task_id": "1"}, headers={}, query={})
         with (
             patch.object(api, "_authorize_runtime_access", return_value=None),
-            patch.object(api, "get_runtime_controller", return_value=SimpleNamespace(store=store)),
+            patch.object(
+                api,
+                "get_runtime_controller",
+                return_value=SimpleNamespace(store=store, runtime_root=Path(tmp) / "runtime"),
+            ),
         ):
             response = asyncio.run(api._runtime_task_terminals(request))
     return str(json.loads(response.text)["items"][0]["preview"])
@@ -475,7 +479,10 @@ GUARD_PATHS: dict[str, Callable[[str], Any]] = {
 }
 _GUARD_SIZE = 50_000
 _GUARD_CAP_SECONDS = 0.5  # the median for 100 KB, generous on a loaded machine
-_GUARD_HARD_LIMIT_SECONDS = 2.0  # one call; stops a catastrophic backtrack
+# One call, in wall-clock time: it only stops a catastrophic backtrack, so it is set well above
+# what a machine loaded by other work adds to a linear call (D-399). The CPU-time checks below
+# are what hold the patterns to linear time.
+_GUARD_HARD_LIMIT_SECONDS = 10.0
 
 
 def _timed(redact: Callable[[str], Any], text: str) -> float:
