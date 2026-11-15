@@ -588,3 +588,38 @@ describe("focus ring contract (M8-E1-T1)", () => {
     });
   });
 });
+
+// D-267: --text-quaternary is text, not decoration (form-field descriptions,
+// recurrence hints, cron labels, the Schedule step's next runs, metric
+// labels), so it keeps WCAG AA 4.5:1 on every surface text sits on, the
+// modal glass over its scrim and the floating glass included. The
+// hover-strong and tint-strong fills are pressed and selected states: text on
+// them uses --text-tertiary or stronger.
+const TEXT_SURFACES = [
+  ...SURFACES.filter((surface) => surface !== "--surface-hover-strong" && surface !== "--surface-tint-strong"),
+  "--field-bg",
+  "--table-header-bg",
+];
+
+describe("text contrast (D-267)", () => {
+  for (const [theme, { tokens }] of Object.entries(THEMES)) {
+    it(`--text-quaternary keeps 4.5:1 on every ${theme} text surface and glass panel`, () => {
+      const text = tokens["--text-quaternary"];
+      const canvas = parseColor(tokens["--canvas"]);
+      const backgrounds: [string, string | Rgba][] = [
+        ...TEXT_SURFACES.map((surface): [string, string] => [surface, tokens[surface]]),
+        [
+          "--overlay-modal-bg over the scrim",
+          over(tokens["--overlay-modal-bg"], over(tokens["--overlay-backdrop-bg"], canvas)),
+        ],
+        ["--overlay-floating-bg", over(tokens["--overlay-floating-bg"], canvas)],
+      ];
+      for (const [name, background] of backgrounds) {
+        expect(background, `${theme} defines ${name}`).toBeDefined();
+        expect(contrast(text, background), `${theme}: ${text} on ${name}`).toBeGreaterThanOrEqual(4.5);
+      }
+      // It stays the quietest text step.
+      expect(contrast(tokens["--text-tertiary"], canvas)).toBeGreaterThan(contrast(text, canvas));
+    });
+  }
+});

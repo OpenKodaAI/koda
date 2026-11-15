@@ -26,7 +26,7 @@
   --text-primary: #101010;
   --text-secondary: #45403b;
   --text-tertiary: #615b54;
-  --text-quaternary: #7a736c;
+  --text-quaternary: #655e57;
   --icon-primary: #101010;
   --icon-secondary: #45403b;
   --icon-tertiary: #615b54;
@@ -248,7 +248,7 @@
     --text-primary: #F5F5F5;
     --text-secondary: #B8B8B8;
     --text-tertiary: #9A9A9A;
-    --text-quaternary: #6A6A6A;
+    --text-quaternary: #8A8A8A;
     --icon-primary: #F5F5F5;
     --icon-secondary: #B8B8B8;
     --icon-tertiary: #9A9A9A;
@@ -395,7 +395,7 @@ html.dark {
   --text-primary: #F5F5F5;
   --text-secondary: #B8B8B8;
   --text-tertiary: #9A9A9A;
-  --text-quaternary: #6A6A6A;
+  --text-quaternary: #8A8A8A;
   --icon-primary: #F5F5F5;
   --icon-secondary: #B8B8B8;
   --icon-tertiary: #9A9A9A;
